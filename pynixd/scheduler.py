@@ -507,7 +507,7 @@ class Scheduler:
         - Partially transferred closures still leave useful paths on the store
         """
         try:
-            sorted_paths, infos = await self._compute_missing_for_worker(
+            sorted_paths, infos = await self._compute_transfer_plan(
                 store,
                 build.required_paths,
             )
@@ -559,16 +559,20 @@ class Scheduler:
 
     # ── Path transfer helpers ───────────────────────────────────────
 
-    async def _compute_missing_for_worker(
+    async def _compute_transfer_plan(
         self,
         store: Store,
         required_inputs: set[str],
     ) -> tuple[list[str], dict[str, PathInfo]]:
         """Compute which paths a worker is missing and return them topo-sorted.
 
-        Expands required_inputs to a full reference closure, queries the
-        worker for what it already has, collects PathInfo for missing paths,
-        and returns them in dependency order.
+        1. Expands required_inputs to a full reference closure
+        2. Queries the worker for what it already has
+        3. Batch-collects PathInfo for missing paths
+        4. Returns them in dependency order
+
+        Fast path: uses SQLite recursive CTE + batch queries when available.
+        Slow path: sequential query_path_info walks via daemon protocol.
 
         Returns:
             (sorted_paths, infos) — sorted_paths in topo order (deps first),
@@ -577,20 +581,27 @@ class Scheduler:
         if not required_inputs:
             return [], {}
 
-        # Expand to full closure by walking references and derivers
-        closure = set(required_inputs)
-        queue = list(required_inputs)
-        while queue:
-            path = queue.pop()
-            try:
-                path_info = await self._local_store.query_path_info(path)
-                if path_info:
-                    for ref in path_info.references:
-                        if ref not in closure:
-                            closure.add(ref)
-                            queue.append(ref)
-            except Exception:
-                pass
+        # Step 1: Expand to full closure
+        db = self._local_store.db
+        closure: set[str] | None = None
+        if db is not None:
+            closure = await db.compute_closure(required_inputs)
+
+        if closure is None:
+            # Slow path: walk references sequentially
+            closure = set(required_inputs)
+            queue = list(required_inputs)
+            while queue:
+                path = queue.pop()
+                try:
+                    path_info = await self._local_store.query_path_info(path)
+                    if path_info:
+                        for ref in path_info.references:
+                            if ref not in closure:
+                                closure.add(ref)
+                                queue.append(ref)
+                except Exception:
+                    pass
 
         log.debug(
             "Closure expanded from %d to %d paths",
@@ -598,6 +609,7 @@ class Scheduler:
             len(closure),
         )
 
+        # Step 2: Diff against worker
         try:
             worker_has = await store.query_valid_paths(closure)
             log.debug(
@@ -616,20 +628,8 @@ class Scheduler:
 
         log.info("Worker %s missing %d paths", store.id, len(missing))
 
-        # Collect PathInfo for missing paths (needed for topo sort and transfer)
-        infos: dict[str, PathInfo] = {}
-        for path in missing:
-            try:
-                path_info = await self._local_store.query_path_info(path)
-                if not path_info:
-                    log.debug(
-                        "Path %s not in local store (may exist on host), skipping",
-                        path,
-                    )
-                    continue
-                infos[path] = path_info
-            except Exception:
-                log.exception("Failed to query PathInfo for %s", path)
+        # Step 3: Batch PathInfo for missing paths
+        infos = await self._local_store.query_path_infos(missing)
 
         if not infos:
             log.debug(
@@ -637,111 +637,39 @@ class Scheduler:
             )
             return [], {}
 
-        # Topological sort: dependencies before dependents
+        # Step 4: Topological sort — dependencies before dependents
+        return self._topo_sort(infos), infos
+
+    @staticmethod
+    def _topo_sort(infos: dict[str, PathInfo]) -> list[str]:
+        """Topological sort: dependencies before dependents."""
         sorted_paths: list[str] = []
         visited: set[str] = set()
 
-        def _topo_visit(path: str) -> None:
+        def visit(path: str) -> None:
             if path in visited or path not in infos:
                 return
             visited.add(path)
             for ref in infos[path].references:
-                _topo_visit(ref)
+                visit(ref)
             sorted_paths.append(path)
 
         for path in infos:
-            _topo_visit(path)
+            visit(path)
 
-        return sorted_paths, infos
+        return sorted_paths
 
     async def _ensure_worker_has_inputs(
         self,
         store: Store,
         required_inputs: set[str],
     ) -> None:
-        """Send missing paths from local store to a store connection.
-
-        Expands required_inputs to a full reference closure, queries the
-        worker for what it already has, collects PathInfo for missing paths,
-        and returns them in dependency order.
-        """
-        if not required_inputs:
-            return
-
-        # Expand to full closure by walking references and derivers
-        closure = set(required_inputs)
-        queue = list(required_inputs)
-        while queue:
-            path = queue.pop()
-            try:
-                path_info = await self._local_store.query_path_info(path)
-                if path_info:
-                    for ref in path_info.references:
-                        if ref not in closure:
-                            closure.add(ref)
-                            queue.append(ref)
-            except Exception:
-                pass
-
-        log.debug(
-            "Closure expanded from %d to %d paths",
-            len(required_inputs),
-            len(closure),
+        """Send missing paths from local store to a worker."""
+        sorted_paths, infos = await self._compute_transfer_plan(
+            store, required_inputs
         )
-
-        try:
-            worker_has = await store.query_valid_paths(closure)
-            log.debug(
-                "Worker %s has %d/%d paths",
-                store.id,
-                len(worker_has),
-                len(closure),
-            )
-        except Exception:
-            log.exception("Failed to query worker %s for valid paths", store.id)
-            worker_has = set()
-
-        missing = closure - worker_has
-        if not missing:
+        if not sorted_paths:
             return
-
-        log.info("Worker %s missing %d paths", store.id, len(missing))
-
-        # Collect PathInfo for missing paths (needed for topo sort and transfer)
-        infos: dict[str, PathInfo] = {}
-        for path in missing:
-            try:
-                path_info = await self._local_store.query_path_info(path)
-                if not path_info:
-                    log.debug(
-                        "Path %s not in local store (may exist on host), skipping",
-                        path,
-                    )
-                    continue
-                infos[path] = path_info
-            except Exception:
-                log.exception("Failed to query PathInfo for %s", path)
-
-        if not infos:
-            log.debug(
-                "No transferable paths for missing inputs (paths may exist on host)",
-            )
-            return
-
-        # Topological sort: dependencies before dependents
-        sorted_paths: list[str] = []
-        visited: set[str] = set()
-
-        def _topo_visit(path: str) -> None:
-            if path in visited or path not in infos:
-                return
-            visited.add(path)
-            for ref in infos[path].references:
-                _topo_visit(ref)
-            sorted_paths.append(path)
-
-        for path in infos:
-            _topo_visit(path)
 
         to_send = [(p, infos[p]) for p in sorted_paths]
         await store.stream_paths_store_to_store(
