@@ -610,19 +610,42 @@ class Scheduler:
         )
 
         # Step 2: Diff against worker
+        # Fast path: trust known_paths (we control all transfers)
+        predicted_has = store.known_paths & closure
+        predicted_missing = closure - predicted_has
+
+        # Validate against reality
         try:
             worker_has = await store.query_valid_paths(closure)
+        except Exception:
+            log.exception("Failed to query worker %s for valid paths", store.id)
+            worker_has = predicted_has  # fall back to prediction
+
+        missing = closure - worker_has
+
+        # Log divergence so we can validate known_paths tracking
+        false_positives = predicted_has - worker_has  # we thought they had it, they don't
+        false_negatives = worker_has - predicted_has  # they have it, we didn't know
+        if false_positives or false_negatives:
+            log.warning(
+                "Worker %s known_paths diverged: "
+                "%d false positives (would under-transfer), "
+                "%d false negatives (would over-transfer), "
+                "examples: +%s -%s",
+                store.id,
+                len(false_positives),
+                len(false_negatives),
+                sorted(false_positives)[:3],
+                sorted(false_negatives)[:3],
+            )
+        else:
             log.debug(
-                "Worker %s has %d/%d paths",
+                "Worker %s known_paths matches reality (%d/%d paths)",
                 store.id,
                 len(worker_has),
                 len(closure),
             )
-        except Exception:
-            log.exception("Failed to query worker %s for valid paths", store.id)
-            worker_has = set()
 
-        missing = closure - worker_has
         if not missing:
             return [], {}
 
