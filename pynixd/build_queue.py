@@ -55,6 +55,7 @@ class QueuedBuild:
     build_task: asyncio.Task | None = field(default=None, repr=False)
     transfer_task: asyncio.Task | None = field(default=None, repr=False)
     transfer_cancel: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    closure: set[str] | None = field(default=None, repr=False)  # cached runtime closure
 
     # For heap ordering
     def __lt__(self, other: Self) -> bool:

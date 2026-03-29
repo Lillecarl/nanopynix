@@ -380,10 +380,7 @@ class Scheduler:
 
             log.debug("Build %d: sending inputs to %s", build.id, store.id)
             # Transfer required inputs
-            await self._ensure_worker_has_inputs(
-                store,
-                build.required_paths,
-            )
+            await self._ensure_worker_has_inputs(build, store)
 
             log.debug("Build %d: executing on %s", build.id, store.id)
             assert isinstance(build.request, BuildDerivationRequest), (
@@ -510,8 +507,8 @@ class Scheduler:
         """
         try:
             sorted_paths, infos = await self._compute_transfer_plan(
+                build,
                 store,
-                build.required_paths,
             )
             if not sorted_paths:
                 return
@@ -562,38 +559,25 @@ class Scheduler:
 
     # ── Path transfer helpers ───────────────────────────────────────
 
-    async def _compute_transfer_plan(
-        self,
-        store: Store,
-        required_inputs: set[str],
-    ) -> tuple[list[str], dict[str, PathInfo]]:
-        """Compute which paths a worker is missing and return them topo-sorted.
+    async def _ensure_closure(self, build: QueuedBuild) -> set[str]:
+        """Return the cached runtime closure, computing it on first call.
 
-        1. Expands required_inputs to a full reference closure
-        2. Queries the worker for what it already has
-        3. Batch-collects PathInfo for missing paths
-        4. Returns them in dependency order
-
-        Fast path: uses SQLite recursive CTE + batch queries when available.
-        Slow path: sequential query_path_info walks via daemon protocol.
-
-        Returns:
-            (sorted_paths, infos) — sorted_paths in topo order (deps first),
-            infos maps path -> PathInfo. Both empty if nothing is missing.
+        The closure only depends on required_paths and the local store's
+        reference graph — both stable once the build is schedulable.
         """
-        if not required_inputs:
-            return [], {}
+        if build.closure is not None:
+            return build.closure
 
-        # Step 1: Expand to full closure
+        seeds = build.required_paths
         db = self._local_store.db
         closure: set[str] | None = None
         if db is not None:
-            closure = await db.compute_closure(required_inputs)
+            closure = await db.compute_closure(seeds)
 
         if closure is None:
             # Slow path: walk references sequentially
-            closure = set(required_inputs)
-            queue = list(required_inputs)
+            closure = set(seeds)
+            queue = list(seeds)
             while queue:
                 path = queue.pop()
                 try:
@@ -608,11 +592,31 @@ class Scheduler:
 
         log.debug(
             "Closure expanded from %d to %d paths",
-            len(required_inputs),
+            len(seeds),
             len(closure),
         )
+        build.closure = closure
+        return closure
 
-        # Step 2: Diff against worker using known_paths (we control all transfers)
+    async def _compute_transfer_plan(
+        self,
+        build: QueuedBuild,
+        store: Store,
+    ) -> tuple[list[str], dict[str, PathInfo]]:
+        """Compute which paths a worker is missing and return them topo-sorted.
+
+        Uses the build's cached closure (computed once, reused across workers).
+
+        Returns:
+            (sorted_paths, infos) — sorted_paths in topo order (deps first),
+            infos maps path -> PathInfo. Both empty if nothing is missing.
+        """
+        if not build.required_paths:
+            return [], {}
+
+        closure = await self._ensure_closure(build)
+
+        # Diff against worker using known_paths (we control all transfers)
         missing = closure - store.known_paths
         if not missing:
             return [], {}
@@ -624,7 +628,7 @@ class Scheduler:
             len(closure),
         )
 
-        # Step 3: Batch PathInfo for missing paths
+        # Batch PathInfo for missing paths
         infos = await self._local_store.query_path_infos(missing)
 
         if not infos:
@@ -633,7 +637,6 @@ class Scheduler:
             )
             return [], {}
 
-        # Step 4: Topological sort — dependencies before dependents
         return self._topo_sort(infos), infos
 
     @staticmethod
@@ -657,13 +660,11 @@ class Scheduler:
 
     async def _ensure_worker_has_inputs(
         self,
+        build: QueuedBuild,
         store: Store,
-        required_inputs: set[str],
     ) -> None:
         """Send missing paths from local store to a worker."""
-        sorted_paths, infos = await self._compute_transfer_plan(
-            store, required_inputs
-        )
+        sorted_paths, infos = await self._compute_transfer_plan(build, store)
         if not sorted_paths:
             return
 
