@@ -2,6 +2,7 @@
   pkgs ? import <nixpkgs> { },
 }:
 let
+  inherit (pkgs) lib;
   default = import ./. { inherit pkgs; };
   python = pkgs.python3.withPackages (
     ps:
@@ -24,5 +25,7 @@ pkgs.mkShell {
   shellHook = ''
     export PYNIXD_TEST_NIX=${./test.nix}
     export PYTHONPATH="$PWD:${python}/${python.sitePackages}:$PYTHONPATH"
+    export LIX_BIN=${lib.getExe pkgs.lix}
+    export NIX_BIN=${lib.getExe pkgs.nix}
   '';
 }
