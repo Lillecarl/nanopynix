@@ -347,12 +347,14 @@ class Scheduler:
             return True  # infrastructure failure — always retry
         return status in _RETRYABLE_STATUSES
 
-    def _retry_build(self, build: QueuedBuild, store: Store) -> None:
+    async def _retry_build(self, build: QueuedBuild, store: Store) -> None:
         """Reset build state for retry on next scheduling pass."""
+        await build.stop_transfer()
         build.retries += 1
         build.failed_backends.append(store.id)
         build.build_task = None
         build.started_at = None
+        build.transfer_task = None
         build.transfer_cancel = asyncio.Event()
         log.info(
             "Build %d: retry %d/%d (failed on %s)",
@@ -407,7 +409,7 @@ class Scheduler:
             ):
                 if response.result.status in _RETRYABLE_STATUSES:
                     store.record_failure()
-                self._retry_build(build, store)
+                await self._retry_build(build, store)
                 return
 
             if response.result.status == 0:
@@ -428,7 +430,7 @@ class Scheduler:
         ) as e:
             store.record_failure()
             if self._should_retry(build, None, store):
-                self._retry_build(build, store)
+                await self._retry_build(build, store)
             else:
                 log.exception(
                     "Build %d failed on %s (no retries left)", build.id, store.id
@@ -556,6 +558,7 @@ class Scheduler:
                 store.id,
                 build.id,
             )
+            self.trigger()
 
     # ── Path transfer helpers ───────────────────────────────────────
 
@@ -609,47 +612,17 @@ class Scheduler:
             len(closure),
         )
 
-        # Step 2: Diff against worker
-        # Fast path: trust known_paths (we control all transfers)
-        predicted_has = store.known_paths & closure
-        predicted_missing = closure - predicted_has
-
-        # Validate against reality
-        try:
-            worker_has = await store.query_valid_paths(closure)
-        except Exception:
-            log.exception("Failed to query worker %s for valid paths", store.id)
-            worker_has = predicted_has  # fall back to prediction
-
-        missing = closure - worker_has
-
-        # Log divergence so we can validate known_paths tracking
-        false_positives = predicted_has - worker_has  # we thought they had it, they don't
-        false_negatives = worker_has - predicted_has  # they have it, we didn't know
-        if false_positives or false_negatives:
-            log.warning(
-                "Worker %s known_paths diverged: "
-                "%d false positives (would under-transfer), "
-                "%d false negatives (would over-transfer), "
-                "examples: +%s -%s",
-                store.id,
-                len(false_positives),
-                len(false_negatives),
-                sorted(false_positives)[:3],
-                sorted(false_negatives)[:3],
-            )
-        else:
-            log.debug(
-                "Worker %s known_paths matches reality (%d/%d paths)",
-                store.id,
-                len(worker_has),
-                len(closure),
-            )
-
+        # Step 2: Diff against worker using known_paths (we control all transfers)
+        missing = closure - store.known_paths
         if not missing:
             return [], {}
 
-        log.info("Worker %s missing %d paths", store.id, len(missing))
+        log.info(
+            "Worker %s missing %d/%d paths",
+            store.id,
+            len(missing),
+            len(closure),
+        )
 
         # Step 3: Batch PathInfo for missing paths
         infos = await self._local_store.query_path_infos(missing)
