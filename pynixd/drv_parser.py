@@ -596,21 +596,36 @@ def to_basic_derivation(
     # Start with the explicit input sources
     input_srcs: set[str] = set(parsed.input_srcs)
 
-    # Resolve inputDrvs: for each input drv, look up its output paths
-    # and add them to input_srcs (this is what nix does before sending
-    # BuildDerivation over the wire)
-    for drv_path, output_names in parsed.input_drvs.items():
+    # Recursively resolve all inputDrvs: walk the full derivation graph
+    # and add every output path to input_srcs.  This ensures the builder
+    # knows about all transitive runtime dependencies — not just the
+    # direct inputs — so that required_paths (computed later as the
+    # closure of input_srcs) is complete even when intermediate outputs
+    # have not been built yet.
+    visited_drvs: set[str] = set()
+    queue = list(parsed.input_drvs.keys())
+
+    while queue:
+        drv_path = queue.pop()
+        if drv_path in visited_drvs:
+            continue
+        visited_drvs.add(drv_path)
+
         try:
             input_parsed = read_drv_file(store_path, drv_path)
         except FileNotFoundError:
-            # Can't resolve — add the drv itself as a dependency
             input_srcs.add(drv_path)
             continue
-        all_outputs = input_parsed.output_paths()
-        for name in output_names:
-            p = all_outputs.get(name, "")
+
+        # Add all output paths of this derivation
+        for p in input_parsed.output_paths().values():
             if p:
                 input_srcs.add(p)
+
+        # Continue walking into this drv's own input_drvs
+        for sub_drv in input_parsed.input_drvs:
+            if sub_drv not in visited_drvs:
+                queue.append(sub_drv)
 
     return BasicDerivation(
         outputs=outputs,

@@ -35,6 +35,7 @@ for _op in (
 logging.getLogger("asyncssh").setLevel(logging.WARNING)
 logging.getLogger("pynixd.store.pool").setLevel(logging.WARNING)
 logging.getLogger("pynixd.scheduler.pass").setLevel(logging.WARNING)
+logging.getLogger("pynixd.stderr").setLevel(logging.INFO)
 
 log = logging.getLogger(__name__)
 

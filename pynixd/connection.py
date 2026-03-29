@@ -33,6 +33,7 @@ from .wire import (
 )
 
 log: logging.Logger = logging.getLogger(__name__)
+stderr_log: logging.Logger = logging.getLogger("pynixd.stderr")
 
 
 # ── Shared types ────────────────────────────────────────────────────
@@ -170,9 +171,14 @@ class Connection:
             if client is not None:
                 err = await stderr.collect(self.r, client.queue)
                 if err is not None:
-                    raise BackendError(f"Backend error: {err.msg}")
+                    stderr_log.error(
+                        "store=%s daemon error: [%s] %s",
+                        self.id,
+                        err.error_type,
+                        err.msg,
+                    )
             else:
-                await stderr.drain(self.r)
+                await stderr.drain(self.r, raise_on_error=False, conn_id=self.id)
 
             response = await response_type.from_reader(self.r, self.version)
         except Exception:

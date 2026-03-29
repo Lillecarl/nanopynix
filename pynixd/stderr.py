@@ -250,13 +250,19 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
         yield msg
 
 
-async def drain(r: NixReader, raise_on_error: bool = True) -> None:
-    """Read and discard all stderr messages until STDERR_LAST."""
+async def drain(r: NixReader, raise_on_error: bool = True, conn_id: str = "unknown") -> StderrError | None:
+    """Read and discard all stderr messages until STDERR_LAST.
+
+    Returns the last StderrError if found, None otherwise.
+    """
+    last_error: StderrError | None = None
     async for msg in read_stream(r):
         if isinstance(msg, StderrError):
-            log.warning("Daemon error during drain: [%s] %s", msg.error_type, msg.msg)
+            log.warning("store=%s daemon error: [%s] %s", conn_id, msg.error_type, msg.msg)
+            last_error = msg
             if raise_on_error:
-                raise BackendError(f"Daemon error: {msg.msg}")
+                raise BackendError(f"Backend error: {msg.msg}")
+    return last_error
 
 
 async def collect(

@@ -571,6 +571,13 @@ class Scheduler:
             return [], {}
 
         missing = required_inputs - store.known_paths
+        log.info(
+            "Worker %s: required=%d known=%d missing=%d",
+            store.id,
+            len(required_inputs),
+            len(store.known_paths),
+            len(missing),
+        )
         if not missing:
             return [], {}
 
