@@ -97,13 +97,13 @@ let
       text = ''
         src=${toString ./pynixd}
         echo "=== ruff fmt ==="
-        ruff format "$src" || true
+        ruff format "$src" ./tests || true
         echo "=== ruff check ==="
-        ruff check --fix "$src" || true
+        ruff check --fix "$src" ./tests || true
         echo "=== pyright ==="
-        pyright --pythonpath ${pyinstance}/bin/python "$src" || true
+        pyright --pythonpath ${pyinstance}/bin/python "$src" ./tests || true
         echo "=== ty ==="
-        ty check --python ${pyinstance}/bin/python "$src" || true
+        ty check --python ${pyinstance}/bin/python "$src" ./tests || true
         # echo "=== zuban ==="
         # zuban check --follow-untyped-imports --python-executable ${pyinstance}/bin/python "$src" || true
       '';
