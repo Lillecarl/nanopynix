@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Self
 
 from .connection import ClientConn
-from .operations.base import BuildResult, OpResponse
+from .operations.base import BuildResult, BuildResultStatus, OpResponse
 from .operations.builds import BuildDerivationRequest, BuildDerivationResponse
 from .protocol import Op
 
@@ -221,7 +221,7 @@ class BuildQueue:
                 if b.id == build_id:
                     b.finished_at = time.monotonic()
                     response: OpResponse = BuildDerivationResponse(
-                        result=BuildResult(status=9, error_msg=error_msg),
+                        result=BuildResult(status=BuildResultStatus.MISC_FAILURE, error_msg=error_msg),
                     )
                     b.future.set_result(response)
                     log.info("Build %d failed: %s", build_id, error_msg)

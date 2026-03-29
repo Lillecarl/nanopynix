@@ -16,13 +16,47 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import IntEnum, Enum, auto
 from typing import Any, ClassVar, Generic, Self, TypeVar
 
 from .. import wire
 from ..wire import NixReader, NixWriter
 
 log = logging.getLogger(__name__)
+
+
+class BuildResultStatus(IntEnum):
+    """Build result status codes from nix daemon protocol.
+
+    Values match the wire protocol (see common-protocol.cc):
+    - 0-2 and 13 are success statuses
+    - 3-12 and 14 are failure statuses
+    - HashMismatch (not in wire protocol) is converted to OutputRejected
+    """
+
+    # Success statuses
+    BUILT = 0
+    SUBSTITUTED = 1
+    ALREADY_VALID = 2
+    RESOLVES_TO_ALREADY_VALID = 13
+
+    # Failure statuses
+    PERMANENT_FAILURE = 3
+    INPUT_REJECTED = 4
+    OUTPUT_REJECTED = 5
+    TRANSIENT_FAILURE = 6
+    CACHED_FAILURE = 7
+    TIMED_OUT = 8
+    MISC_FAILURE = 9
+    DEPENDENCY_FAILED = 10
+    LOG_LIMIT_EXCEEDED = 11
+    NOT_DETERMINISTIC = 12
+    NO_SUBSTITUTERS = 14
+
+    # HashMismatch is not in the wire protocol; it's converted to OutputRejected
+    # before serialization. Included here for completeness.
+    HASH_MISMATCH = 101  # Internal only, not a wire value
+
 
 # ── Base classes ─────────────────────────────────────────────────────
 
@@ -560,7 +594,7 @@ class BuiltOutput:
 @dataclass
 class BuildResult:
     _log: ClassVar[logging.Logger] = logging.getLogger("pynixd.operations.BuildResult")
-    status: int = 0
+    status: BuildResultStatus = BuildResultStatus.BUILT
     error_msg: str = ""
     times_built: int = 0
     is_non_deterministic: int = 0
@@ -573,7 +607,7 @@ class BuildResult:
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> BuildResult:
-        status = await reader.read_uint64()
+        status = BuildResultStatus(await reader.read_uint64())
         error_msg = await reader.read_string()
 
         times_built = 0
