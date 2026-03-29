@@ -76,7 +76,7 @@ async def test_narinfo(cache_with_paths):
     db = server._local_store.db
 
     # Find a path in the local store
-    result = db.query_all_valid_paths()
+    result = await db.query_all_valid_paths()
     assert result is not None and result.paths, "no paths in local store"
     path = next(iter(result.paths))
     hash_part = path.split("/")[3].split("-")[0]  # /nix/store/<hash>-name
@@ -112,12 +112,12 @@ async def test_nar_download(cache_with_paths):
     db = server._local_store.db
 
     # Find a small path
-    result = db.query_all_valid_paths()
+    result = await db.query_all_valid_paths()
     assert result is not None and result.paths
 
     # Pick a path and get its expected size
     path = next(iter(result.paths))
-    info = db.query_path_info(path)
+    info = await db.query_path_info(path)
     assert info is not None and info.valid
     expected_size = info.info.nar_size
     hash_part = path.split("/")[3].split("-")[0]
@@ -152,7 +152,7 @@ async def test_nix_substituter(cache_with_paths, nix_env: dict[str, str]):
     db = server._local_store.db
 
     # Find the build output path
-    result = db.query_all_valid_paths()
+    result = await db.query_all_valid_paths()
     assert result is not None and result.paths
     # Pick a path that looks like a build output (not a .drv)
     path = next(p for p in result.paths if not p.endswith(".drv"))
@@ -195,7 +195,7 @@ async def test_basic_auth():
         nix_bin=NIX_BIN,
     )
     await local.probe_version()
-    local.db = LocalStoreDB(local.store_path)
+    local.db = await LocalStoreDB.open(local.store_path)
 
     cache = BinaryCacheServer(local, username="testuser", password="testpass")
     runner, port = await cache.start(host="127.0.0.1", port=0)

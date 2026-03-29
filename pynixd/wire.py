@@ -446,12 +446,12 @@ async def discard_framed(src: NixReader) -> None:
         await src.readexactly(size)
 
 
-class FramedReader:
+class FramedReader(NixReader):
     """Reassembles framed chunks into a logical byte stream.
 
     Reads [uint64 size][data]... [uint64 0] from a DaemonReader and
-    presents a readexactly() interface. Wrap in DaemonReader to get
-    wire protocol methods (read_uint64, read_string, etc.).
+    presents a readexactly() interface. Inherits from NixReader so it
+    can be passed directly to code expecting a NixReader.
 
     This allows parsing structured data (PathInfo, NAR tokens, etc.)
     from inside framed payloads without buffering the entire payload.
@@ -486,6 +486,11 @@ class FramedReader:
         result = bytes(self._buf[:n])
         self._buf = self._buf[n:]
         return result
+
+    async def is_dirty(self) -> bool:
+        if self._buf:
+            return True
+        return await self._src.is_dirty()
 
     @property
     def at_eof(self) -> bool:
