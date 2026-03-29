@@ -232,6 +232,7 @@ class BinaryCacheServer:
             async with self._store.transfer_conn() as conn:
                 resp = await conn.call(
                     QueryPathFromHashPartRequest(path=hash_part),
+                    raise_on_error=True,
                 )
                 return resp.value if resp.value else None
         except Exception:

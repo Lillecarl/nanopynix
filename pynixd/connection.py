@@ -136,6 +136,7 @@ class Connection:
         request: OpRequest[Resp],
         client: ClientConn | None = None,
         suppress_last: bool = False,
+        raise_on_error: bool = False,
     ) -> Resp:
         """Send an operation on the established connection.
 
@@ -144,6 +145,7 @@ class Connection:
             client: If provided, queue stderr to this client's drain task
             suppress_last: If True, consume STDERR_LAST
                 but don't write it to client
+            raise_on_error: If True, raise BackendError on stderr errors
         """
         if not self.connected:
             raise RuntimeError(f"Connection {self.id!r} not connected")
@@ -178,7 +180,7 @@ class Connection:
                         err.msg,
                     )
             else:
-                await stderr.drain(self.r, raise_on_error=False, conn_id=self.id)
+                await stderr.drain(self.r, raise_on_error=raise_on_error, conn_id=self.id)
 
             response = await response_type.from_reader(self.r, self.version)
         except Exception:
