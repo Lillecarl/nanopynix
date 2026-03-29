@@ -354,6 +354,8 @@ class DaemonProxy:
     async def _query_missing(self, request: OpRequest, conn: Connection) -> OpResponse:
         assert isinstance(request, StringSetRequest)
 
+        op_log("QueryMissing").debug("QueryMissing len(targets)=%d", len(request.paths))
+
         drv_paths = {dp.split("!")[0] if "!" in dp else dp for dp in request.paths}
 
         try:
@@ -486,6 +488,7 @@ class DaemonProxy:
         return results
 
     async def _build_paths(self, request: BuildPathsRequest) -> OpResponse:
+        op_log("BuildPaths").debug("BuildPaths len(paths)=%d", len(request.derived_paths))
         decomposed = await self._decompose_build_paths(request)
 
         if not decomposed:
@@ -506,6 +509,7 @@ class DaemonProxy:
     async def _build_paths_with_results(
         self, request: BuildPathsWithResultsRequest
     ) -> OpResponse:
+        op_log("BuildPathsWithResults").debug("BuildPathsWithResults len(drvs)=%d", len(request.derived_paths))
         decomposed = await self._decompose_build_paths(request)
 
         if not decomposed:
@@ -525,6 +529,12 @@ class DaemonProxy:
                         result=resp.result,
                     )
                 )
+                if resp.result.status not in (0, 1, 2):
+                    log.warning(
+                        "Unexpected BuildPathsWithResults status=%d: %s",
+                        resp.result.status,
+                        resp.result.error_msg,
+                    )
                 if resp.result.status != 0 and resp.result.error_msg:
                     self._client.queue.put_nowait(
                         StderrNext(text=f"pynixd: {resp.result.error_msg}\n")
@@ -536,6 +546,12 @@ class DaemonProxy:
         future = await self._enqueue_build_derivation(request)
         response = await future
         if isinstance(response, BuildDerivationResponse):
+            if response.result.status not in (0, 1, 2):
+                log.warning(
+                    "Unexpected BuildDerivation status=%d: %s",
+                    response.result.status,
+                    response.result.error_msg,
+                )
             if response.result.status != 0 and response.result.error_msg:
                 self._client.queue.put_nowait(
                     StderrNext(text=f"pynixd: {response.result.error_msg}\n")

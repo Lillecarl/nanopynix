@@ -393,6 +393,13 @@ class Scheduler:
                 store,
             )
 
+            if response.result.status not in (0, 1, 2):
+                log.warning(
+                    "Unexpected build status=%d: %s",
+                    response.result.status,
+                    response.result.error_msg,
+                )
+
             if response.result.status != 0 and self._should_retry(
                 build,
                 response.result.status,

@@ -30,11 +30,13 @@ for _op in (
     "NarFromPath",
     "SetOptions",
     "QueryAllValidPaths",
+    "AddToStore",
 ):
     logging.getLogger(f"pynixd.op.{_op}").setLevel(logging.INFO)
 logging.getLogger("asyncssh").setLevel(logging.WARNING)
 logging.getLogger("pynixd.store.pool").setLevel(logging.WARNING)
 logging.getLogger("pynixd.scheduler.pass").setLevel(logging.WARNING)
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 logging.getLogger("pynixd.stderr").setLevel(logging.INFO)
 
 log = logging.getLogger(__name__)
