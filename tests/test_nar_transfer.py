@@ -131,7 +131,7 @@ async def test_add_multiple_to_store_single(
     async with dst_store.build_conn() as dst:
         # Build the framed payload: count + (ValidPathInfo + raw NAR)
         payload = ByteCollector()
-        w = NixWriter(payload)
+        w = payload  # ByteCollector IS a NixWriter
         w.write_uint64(1)  # count
         w.write_string(info.path)
         w.write_string(info.deriver)
@@ -188,7 +188,7 @@ async def test_add_multiple_to_store_two_paths(
 
         # Build payload with count=2
         payload = ByteCollector()
-        w = NixWriter(payload)
+        w = payload  # ByteCollector IS a NixWriter
         w.write_uint64(2)  # count
 
         for _path, info, nar_data in picked:

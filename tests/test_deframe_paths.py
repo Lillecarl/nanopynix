@@ -17,7 +17,9 @@ from conftest import NIX_BIN
 from pynixd import wire
 from pynixd.store import LocalSocketStore, LocalSubprocessStore, Store
 from pynixd.operations.base import PathInfo
-from pynixd.wire import NixReader, NixWriter, FramedReader, FramedWriter
+from pynixd.wire import (
+    FramedReader, FramedWriter, UnixNixReader, UnixNixWriter,
+)
 
 log = logging.getLogger(__name__)
 
@@ -70,8 +72,8 @@ async def test_framed_reader_roundtrip() -> None:
     """FramedReader can read wire protocol values written by FramedWriter."""
     # Create an in-memory pipe via asyncio streams
     rd, wr = await _make_pipe()
-    daemon_rd = NixReader(rd)
-    daemon_wr = NixWriter(wr)
+    daemon_rd = UnixNixReader(rd)
+    daemon_wr = UnixNixWriter(wr)
 
     # Write framed data: a uint64 count + two strings
     fw = FramedWriter(daemon_wr, chunk_size=32)  # small chunks to test reassembly
@@ -80,17 +82,16 @@ async def test_framed_reader_roundtrip() -> None:
     fw.write_string("/nix/store/bbbb-world")
     await fw.finalize()
 
-    # Read it back via FramedReader
+    # Read it back via FramedReader (FramedReader is-a NixReader)
     fr = FramedReader(daemon_rd)
-    fr_reader = NixReader(fr)
 
-    count = await fr_reader.read_uint64()
+    count = await fr.read_uint64()
     assert count == 2
 
-    s1 = await fr_reader.read_string()
+    s1 = await fr.read_string()
     assert s1 == "/nix/store/aaaa-hello"
 
-    s2 = await fr_reader.read_string()
+    s2 = await fr.read_string()
     assert s2 == "/nix/store/bbbb-world"
 
     await fr.drain_remaining()
@@ -110,8 +111,8 @@ async def test_framed_reader_with_pathinfo_and_nar(
 
     # Build framed payload matching AddMultipleToStore inner format
     rd, wr = await _make_pipe()
-    daemon_rd = NixReader(rd)
-    daemon_wr = NixWriter(wr)
+    daemon_rd = UnixNixReader(rd)
+    daemon_wr = UnixNixWriter(wr)
 
     fw = FramedWriter(daemon_wr, chunk_size=4096)
     fw.write_uint64(len(picked))  # count
@@ -131,17 +132,16 @@ async def test_framed_reader_with_pathinfo_and_nar(
 
     # Now deframe and parse — this is what AddMultipleToStoreRequest.forward does
     fr = FramedReader(daemon_rd)
-    fr_reader = NixReader(fr)
 
-    count = await fr_reader.read_uint64()
+    count = await fr.read_uint64()
     assert count == 2
 
     extracted_paths: list[str] = []
     for _ in range(count):
-        info = await PathInfo.from_reader_keyed(fr_reader)
+        info = await PathInfo.from_reader_keyed(fr)
         extracted_paths.append(info.path)
         # Stream NAR to /dev/null (discard)
-        await wire.discard_nar(fr_reader)
+        await wire.discard_nar(fr)
 
     assert extracted_paths == [p for p, _, _ in picked]
     await fr.drain_remaining()
@@ -164,10 +164,10 @@ async def test_add_multiple_streaming_returns_paths(
 
     # Build framed payload matching what a nix client sends
     payload_rd, payload_wr = await _make_pipe()
-    daemon_payload_rd = NixReader(payload_rd)
+    daemon_payload_rd = UnixNixReader(payload_rd)
 
     async def _write_payload() -> None:
-        daemon_wr = NixWriter(payload_wr)
+        daemon_wr = UnixNixWriter(payload_wr)
         # Write the AddMultipleToStore request prefix
         daemon_wr.write_uint64(0)  # repair
         daemon_wr.write_uint64(1)  # dont_check_sigs
