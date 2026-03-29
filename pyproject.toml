@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pynixd"
+version = "0.1.0"
+description = "Python Nix daemon protocol proxy over SSH"
+requires-python = ">=3.12"
+dependencies = [
+    "asyncssh",
+    "aiohttp",
+    "aiosqlite",
+]
+
+[project.scripts]
+pynixd = "pynixd.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pynixd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+asyncio_mode = "auto"
+markers = [
+    "nixbuild: tests that require eu.nixbuild.net access",
+    "store: tests using --store (pynixd as eval store)",
+    "builders: tests using --builders (pynixd as remote builder)",
+    "dag: tests building multi-layer DAG derivations",
+    "slow: tests that are slow and should be excluded by default",
+]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["UP046"]
+
+[tool.pyright]
+pythonVersion = "3.13"

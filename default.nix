@@ -1,0 +1,120 @@
+{
+  pkgs ? import <nixpkgs> { },
+  lib ? pkgs.lib,
+}:
+let
+  python = pkgs.python3;
+
+  commonAttrs = {
+    pname = "pynixd";
+    version = "0.1.0";
+    pyproject = true;
+
+    src = ./.;
+
+    build-system = [
+      python.pkgs.hatchling
+    ];
+
+    dependencies = [
+      # python.pkgs.asyncssh
+      (python.pkgs.asyncssh.overrideAttrs {
+        src = /home/lillecarl/Code/asyncssh;
+        doCheck = false;
+        doInstallCheck = false;
+      })
+      python.pkgs.aiohttp
+      python.pkgs.pyinstrument
+      python.pkgs.aiosqlite
+    ];
+
+    nativeCheckInputs = [
+      python.pkgs.pytest
+      python.pkgs.pytest-asyncio
+      python.pkgs.pytest-timeout
+    ];
+
+    meta = {
+      description = "Python Nix daemon protocol proxy over SSH";
+      mainProgram = "pynixd";
+    };
+  };
+
+  package = python.pkgs.buildPythonApplication commonAttrs;
+  library = python.pkgs.buildPythonPackage commonAttrs;
+
+  mkTests =
+    {
+      name,
+      testArgs,
+    }:
+    pkgs.writeShellApplication {
+      inherit name;
+      runtimeInputs = [
+        (python.withPackages (ps: [
+          library
+          ps.pytest
+          ps.pytest-asyncio
+          ps.pytest-timeout
+          ps.pyinstrument
+        ]))
+      ];
+      text = ''
+        export PYNIXD_TEST_NIX=${./test.nix}
+        export LIX_BIN=${lib.getExe pkgs.lix}
+        export NIX_BIN=${lib.getExe pkgs.nix}
+        exec pytest -p no:cacheprovider --timeout=60 ${testArgs} "$@"
+      '';
+    };
+
+  specifictest = mkTests {
+    name = "pynixd-specifictest";
+    testArgs = "";
+  };
+  lint =
+    let
+      pyinstance = python.withPackages (
+        ps:
+        [ library ]
+        ++ library.dependencies
+        ++ [
+          ps.pytest
+          ps.pytest-asyncio
+          ps.pytest-timeout
+
+        ]
+      );
+    in
+    pkgs.writeShellApplication {
+      name = "pynixd-lint";
+      runtimeInputs = [
+        pyinstance
+        pkgs.pyright
+        pkgs.ruff
+        pkgs.ty
+        # pkgs.zuban
+      ];
+      text = ''
+        src=${toString ./pynixd}
+        echo "=== ruff fmt ==="
+        ruff format "$src" || true
+        echo "=== ruff check ==="
+        ruff check --fix "$src" || true
+        echo "=== pyright ==="
+        pyright --pythonpath ${pyinstance}/bin/python "$src" || true
+        echo "=== ty ==="
+        ty check --python ${pyinstance}/bin/python "$src" || true
+        # echo "=== zuban ==="
+        # zuban check --follow-untyped-imports --python-executable ${pyinstance}/bin/python "$src" || true
+      '';
+    };
+in
+package
+// {
+  inherit
+    package
+    library
+    specifictest
+    lint
+    ;
+}
