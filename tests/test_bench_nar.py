@@ -33,8 +33,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-
 from conftest import NIX_BIN
+
 from pynixd import wire
 from pynixd.operations.base import PathInfo
 from pynixd.store import (
@@ -54,8 +54,7 @@ BENCH_DST = "/tmp/pynixd-bench-dst"
 _SSH_USER = os.environ.get("USER", "root")
 
 _CHUNK_SIZES_KB = [
-    int(s)
-    for s in os.environ.get("PYNIXD_BENCH_CHUNKS", "64,256,1024,4096").split(",")
+    int(s) for s in os.environ.get("PYNIXD_BENCH_CHUNKS", "64,256,1024,4096").split(",")
 ]
 
 # Store types that can read from the system store (used as NAR source).
@@ -242,9 +241,7 @@ async def test_big_nar_copy_paths(
     old = _set_chunk_size(chunk_kb)
     try:
         start = time.monotonic()
-        await dst_store.stream_paths_store_to_store(
-            bench_store, [(store_path, info)]
-        )
+        await dst_store.stream_paths_store_to_store(bench_store, [(store_path, info)])
         elapsed = time.monotonic() - start
     finally:
         wire._CHUNK_SIZE = old

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from conftest import (
     make_local_stores,
     nix_build,
@@ -27,8 +26,12 @@ async def test_builders(
 
     async with run_pynixd(stores) as server:
         returncode, stdout, stderr = await nix_build(
-            server.builder_uri(), server.client_store_path, nix_env,
-            "--file", test_nix, "dag",
+            server.builder_uri(),
+            server.client_store_path,
+            nix_env,
+            "--file",
+            test_nix,
+            "dag",
         )
         assert returncode == 0, f"DAG build failed:\n{stderr}"
 
@@ -46,7 +49,10 @@ async def test_store(
 
     async with run_pynixd(stores) as server:
         returncode, stdout, stderr = await nix_build_store_only(
-            server.uri, nix_env,
-            "--file", test_nix, "dag",
+            server.uri,
+            nix_env,
+            "--file",
+            test_nix,
+            "dag",
         )
         assert returncode == 0, f"DAG build failed:\n{stderr}"

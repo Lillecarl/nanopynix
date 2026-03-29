@@ -24,19 +24,15 @@ from dataclasses import dataclass
 import aiohttp
 import pyinstrument
 import pytest
-
 from conftest import (
     NIX_BIN,
     _run_subprocess_with_timeout,
     make_local_stores,
     run_pynixd,
 )
+
 from pynixd.http_cache import BinaryCacheServer
 from pynixd.operations.base import PathInfo
-from pynixd.operations.profiling import (
-    StartProfilingRequest,
-    StopProfilingRequest,
-)
 from pynixd.store import LocalSocketStore, SSHSubprocessStore, Store
 
 log = logging.getLogger(__name__)
@@ -97,7 +93,9 @@ class PynixdBenchResult:
     def mb_per_s(self) -> float:
         if self.total_bytes == 0:
             return 0
-        return (self.total_bytes / (1024 * 1024)) / self.elapsed if self.elapsed > 0 else 0
+        return (
+            (self.total_bytes / (1024 * 1024)) / self.elapsed if self.elapsed > 0 else 0
+        )
 
 
 def _record(
@@ -430,9 +428,7 @@ async def test_http_narinfo(
             async def _fetch_narinfo(path: str) -> None:
                 hash_part = _hash_part(path)
                 async with sem:
-                    async with session.get(
-                        f"{base_url}/{hash_part}.narinfo"
-                    ) as resp:
+                    async with session.get(f"{base_url}/{hash_part}.narinfo") as resp:
                         assert resp.status == 200, f"HTTP {resp.status} for {path}"
                         await resp.read()
 
@@ -521,8 +517,7 @@ async def test_build_throughput(
         n_drvs,
     )
     log.info(
-        "Build bench: %d drvs, %d clients, %.1fs wall, "
-        "client times: %s",
+        "Build bench: %d drvs, %d clients, %.1fs wall, client times: %s",
         n_drvs,
         n_clients,
         total_elapsed,

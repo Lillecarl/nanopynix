@@ -12,13 +12,16 @@ import logging
 import os
 
 import pytest
-
 from conftest import NIX_BIN
+
 from pynixd import wire
-from pynixd.store import LocalSocketStore, LocalSubprocessStore, Store
 from pynixd.operations.base import PathInfo
+from pynixd.store import LocalSocketStore, LocalSubprocessStore, Store
 from pynixd.wire import (
-    FramedReader, FramedWriter, UnixNixReader, UnixNixWriter,
+    FramedReader,
+    FramedWriter,
+    UnixNixReader,
+    UnixNixWriter,
 )
 
 log = logging.getLogger(__name__)
@@ -42,7 +45,8 @@ async def dst_store() -> LocalSubprocessStore:
 
 
 async def _pick_self_contained_paths(
-    store: Store, count: int,
+    store: Store,
+    count: int,
 ) -> list[tuple[str, PathInfo, bytes]]:
     """Pick `count` small self-contained paths from the store."""
     all_paths = await store.query_all_valid_paths()
@@ -228,7 +232,8 @@ async def _make_pipe() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     conns: list[tuple[asyncio.StreamReader, asyncio.StreamWriter]] = []
 
     async def _on_connect(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
     ) -> None:
         conns.append((reader, writer))
         server_ready.set()

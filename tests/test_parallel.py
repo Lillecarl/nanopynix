@@ -19,14 +19,12 @@ import os
 import time
 
 import pytest
-
 from conftest import (
+    NIX_BIN,
     _run_subprocess_with_timeout,
     make_local_stores,
-    nix_build,
     nix_build_store_only,
     run_pynixd,
-    NIX_BIN,
 )
 
 log = logging.getLogger(__name__)
@@ -49,7 +47,8 @@ async def test_multi_client(
     stores = make_local_stores(n=4, prefix="mc")
 
     async with run_pynixd(
-        stores, njobs=100,
+        stores,
+        njobs=100,
         client_store_path="/tmp/pynixd-test-multiclient",
     ) as server:
 
@@ -60,16 +59,24 @@ async def test_multi_client(
             client_env["PYNIXD_PAR_COUNT"] = str(drvs_per_client)
             client_env["PYNIXD_PAR_ID"] = f"c{client_id}"
             cmd = [
-                NIX_BIN, "build",
-                "--store", client_store,
-                "--builders", server.builder_uri(),
-                "--max-jobs", "0",
+                NIX_BIN,
+                "build",
+                "--store",
+                client_store,
+                "--builders",
+                server.builder_uri(),
+                "--max-jobs",
+                "0",
                 "--no-link",
-                "--file", test_nix, "parallel",
+                "--file",
+                test_nix,
+                "parallel",
             ]
             t0 = time.monotonic()
             rc, stdout, stderr = await _run_subprocess_with_timeout(
-                cmd, client_env, timeout=300,
+                cmd,
+                client_env,
+                timeout=300,
             )
             elapsed = time.monotonic() - t0
             if rc != 0:
@@ -77,9 +84,7 @@ async def test_multi_client(
             return rc, elapsed
 
         start = time.monotonic()
-        results = await asyncio.gather(
-            *[_run_client(i) for i in range(n_clients)]
-        )
+        results = await asyncio.gather(*[_run_client(i) for i in range(n_clients)])
         total_elapsed = time.monotonic() - start
 
         failed = [(i, rc) for i, (rc, _) in enumerate(results) if rc != 0]
@@ -88,9 +93,9 @@ async def test_multi_client(
         print(
             f"\n  Total wall-clock: {total_elapsed:.1f}s"
             f"\n  Client times: min={min(client_times):.1f}s "
-            f"max={max(client_times):.1f}s avg={sum(client_times)/len(client_times):.1f}s"
+            f"max={max(client_times):.1f}s avg={sum(client_times) / len(client_times):.1f}s"
             f"\n  Sum of client times: {sum(client_times):.1f}s"
-            f"\n  Effective concurrency: {sum(client_times)/total_elapsed:.1f}x"
+            f"\n  Effective concurrency: {sum(client_times) / total_elapsed:.1f}x"
         )
 
         assert not failed, f"{len(failed)} clients failed: {failed}"
@@ -118,7 +123,8 @@ async def test_store_parallel(
     stores = make_local_stores(n=4, prefix="sp")
 
     async with run_pynixd(
-        stores, njobs=100,
+        stores,
+        njobs=100,
         client_store_path="/tmp/pynixd-test-store-parallel",
     ) as server:
         client_env = nix_env.copy()
@@ -126,8 +132,11 @@ async def test_store_parallel(
 
         start = time.monotonic()
         rc, stdout, stderr = await nix_build_store_only(
-            server.uri, client_env,
-            "--file", test_nix, "parallel",
+            server.uri,
+            client_env,
+            "--file",
+            test_nix,
+            "parallel",
             timeout=300,
         )
         elapsed = time.monotonic() - start

@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from pynixd.store import Store, LocalSocketStore, LocalSubprocessStore
 from pynixd.ssh_server import run_server as run_ssh_server
+from pynixd.store import LocalSocketStore, Store
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -23,8 +23,14 @@ logging.basicConfig(
 )
 # Silence high-frequency per-op loggers while keeping the rest at DEBUG.
 # Use pynixd.op.{OpName} to tune individual ops.
-for _op in ("QueryPathInfo", "QueryValidPaths", "IsValidPath", "NarFromPath",
-            "SetOptions", "QueryAllValidPaths"):
+for _op in (
+    "QueryPathInfo",
+    "QueryValidPaths",
+    "IsValidPath",
+    "NarFromPath",
+    "SetOptions",
+    "QueryAllValidPaths",
+):
     logging.getLogger(f"pynixd.op.{_op}").setLevel(logging.INFO)
 logging.getLogger("asyncssh").setLevel(logging.WARNING)
 logging.getLogger("pynixd.store.pool").setLevel(logging.WARNING)
@@ -43,14 +49,25 @@ NIX_BIN = os.environ.get("NIX_BIN", "nix")
 def get_current_system() -> str:
     """Get the current system via nix."""
     result = subprocess.run(
-        [NIX_BIN, "eval", "--store", "dummy://", "--impure", "--raw", "--expr",
-         "builtins.currentSystem"],
-        capture_output=True, text=True, timeout=10,
+        [
+            NIX_BIN,
+            "eval",
+            "--store",
+            "dummy://",
+            "--impure",
+            "--raw",
+            "--expr",
+            "builtins.currentSystem",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     return result.stdout.strip()
 
 
 CURRENT_SYSTEM = None
+
 
 def _get_system() -> str:
     global CURRENT_SYSTEM
@@ -62,6 +79,7 @@ def _get_system() -> str:
 @dataclass
 class PynixdServer:
     """A running pynixd server with its stores and client store."""
+
     host: str
     port: int
     username: str
@@ -202,6 +220,7 @@ async def run_pynixd(
 
 # ── Helper functions for common server configurations ──────────────────────────
 
+
 def make_local_stores(
     n: int = 2,
     *,
@@ -234,12 +253,23 @@ def make_local_stores(
 
 # ── Pytest helpers ────────────────────────────────────────────────────────────
 
+
 def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line("markers", "nixbuild: tests that require eu.nixbuild.net access")
-    config.addinivalue_line("markers", "store: tests using --store (pynixd as eval store)")
-    config.addinivalue_line("markers", "builders: tests using --builders (pynixd as remote builder)")
-    config.addinivalue_line("markers", "dag: tests building multi-layer DAG derivations")
-    config.addinivalue_line("markers", "benchmark: NAR streaming performance benchmarks")
+    config.addinivalue_line(
+        "markers", "nixbuild: tests that require eu.nixbuild.net access"
+    )
+    config.addinivalue_line(
+        "markers", "store: tests using --store (pynixd as eval store)"
+    )
+    config.addinivalue_line(
+        "markers", "builders: tests using --builders (pynixd as remote builder)"
+    )
+    config.addinivalue_line(
+        "markers", "dag: tests building multi-layer DAG derivations"
+    )
+    config.addinivalue_line(
+        "markers", "benchmark: NAR streaming performance benchmarks"
+    )
     config.addinivalue_line("markers", "parallel: build parallelism pressure tests")
     config.addinivalue_line("markers", "matrix: store compatibility matrix tests")
 
@@ -297,8 +327,7 @@ def _print_nar_bench_summary(
         terminalreporter.write_line("")
         for r in non_chunked:
             terminalreporter.write_line(
-                f"{r.label:<28s}  {r.mb_per_s:.1f} MB/s, "
-                f"{r.paths_per_s:.0f} paths/s"
+                f"{r.label:<28s}  {r.mb_per_s:.1f} MB/s, {r.paths_per_s:.0f} paths/s"
             )
 
     terminalreporter.write_line("")
@@ -354,9 +383,7 @@ def _print_build_bench_summary(
                 stack_lines = [l for l in lines[7:] if l.startswith("   │")]
                 for line in stack_lines[:40]:
                     terminalreporter.write_line(f"    {line.rstrip()}")
-                terminalreporter.write_line(
-                    f"    (full profile: {r.profile_path})"
-                )
+                terminalreporter.write_line(f"    (full profile: {r.profile_path})")
             except Exception as e:
                 terminalreporter.write_line(f"    (Could not read profile: {e})")
     terminalreporter.write_line("")
@@ -364,7 +391,8 @@ def _print_build_bench_summary(
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
-        "--nix", default=TEST_NIX,
+        "--nix",
+        default=TEST_NIX,
         help="Path to test.nix (default: test.nix or PYNIXD_TEST_NIX env)",
     )
 
@@ -378,6 +406,7 @@ def nix_env() -> dict[str, str]:
 
 
 # ── Subprocess helpers ────────────────────────────────────────────────────────
+
 
 def _sync_kill_process_group(pid: int) -> None:
     """Kill a process group synchronously."""
@@ -411,7 +440,7 @@ async def _run_subprocess_with_timeout(
         stdout_data, stderr_data = await asyncio.wait_for(
             proc.communicate(), timeout=timeout
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _sync_kill_process_group(proc.pid)
         pytest.fail(f"subprocess timed out after {timeout}s")
     except asyncio.CancelledError:
@@ -430,10 +459,14 @@ async def nix_build(
 ) -> tuple[int, str, str]:
     """Run a nix build via --builders flag."""
     cmd = [
-        NIX_BIN, "build",
-        "--store", client_store_path,
-        "--builders", builder_uri,
-        "--max-jobs", "0",
+        NIX_BIN,
+        "build",
+        "--store",
+        client_store_path,
+        "--builders",
+        builder_uri,
+        "--max-jobs",
+        "0",
         "--no-link",
         *extra_args,
     ]
@@ -446,7 +479,9 @@ async def nix_build(
 
     log.info(
         "nix_build rc=%d\n  stdout: %s\n  stderr: %s",
-        returncode, stdout_s[:500], stderr_s[:2000],
+        returncode,
+        stdout_s[:500],
+        stderr_s[:2000],
     )
     return returncode, stdout_s, stderr_s
 
@@ -459,8 +494,10 @@ async def nix_build_store_only(
 ) -> tuple[int, str, str]:
     """Run a nix build using pynixd as the store directly."""
     cmd = [
-        NIX_BIN, "build",
-        "--store", store_uri,
+        NIX_BIN,
+        "build",
+        "--store",
+        store_uri,
         "--no-link",
         *extra_args,
     ]
@@ -472,6 +509,8 @@ async def nix_build_store_only(
 
     log.info(
         "nix_build_store_only rc=%d\n  stdout: %s\n  stderr: %s",
-        returncode, stdout_s[:500], stderr_s[:2000],
+        returncode,
+        stdout_s[:500],
+        stderr_s[:2000],
     )
     return returncode, stdout_s, stderr_s

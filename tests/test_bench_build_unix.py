@@ -61,8 +61,8 @@ def _run_pynixd_thread(
     socket_path = "/tmp/pynixd-bench-unix.sock"
 
     async def _async_run() -> None:
-        from pynixd.unix_server import run_unix_server
         from pynixd.store import LocalSocketStore
+        from pynixd.unix_server import run_unix_server
 
         local_store = LocalSocketStore(
             id="local", store_path="/", max_builds=0, max_transfers=64
@@ -124,7 +124,9 @@ def _build_in_thread(
 
     log.info("Starting build: %s", " ".join(cmd))
     start = time.monotonic()
-    result = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result = subprocess.run(
+        cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
     elapsed = time.monotonic() - start
 
     for line in result.stdout.decode().splitlines():
@@ -166,9 +168,7 @@ def test_build_throughput(request: pytest.FixtureRequest) -> None:
     socket_path = socket_path_holder[0]
     log.info("pynixd ready on socket %s", socket_path)
 
-    elapsed = _build_in_thread(
-        socket_path, client_store, nix_file, "parallel"
-    )
+    elapsed = _build_in_thread(socket_path, client_store, nix_file, "parallel")
 
     # Signal pynixd to stop so profiler output is printed
     stop_event.set()

@@ -38,7 +38,9 @@ DRV_SAMPLE = _rng.sample(DRV_FILES, min(JSON_SAMPLE_SIZE, len(DRV_FILES)))
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("drv_path", DRV_FILES, ids=[f.split("/")[-1] for f in DRV_FILES])
+@pytest.mark.parametrize(
+    "drv_path", DRV_FILES, ids=[f.split("/")[-1] for f in DRV_FILES]
+)
 def test_parse_drv(drv_path: str) -> None:
     """Parse a single .drv file and sanity-check the result."""
     with open(drv_path) as f:
@@ -60,16 +62,16 @@ def test_parse_drv(drv_path: str) -> None:
         )
 
     for src in parsed.input_srcs:
-        assert src.startswith("/nix/store/"), (
-            f"input_src not a store path: {src}"
-        )
+        assert src.startswith("/nix/store/"), f"input_src not a store path: {src}"
 
 
 def _nix_derivation_show(paths: list[str]) -> dict:
     """Call `nix derivation show` on a batch of paths."""
     result = subprocess.run(
         ["nix", "derivation", "show", *paths],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if result.returncode != 0:
         pytest.fail(f"nix derivation show failed: {result.stderr[:500]}")
@@ -77,7 +79,9 @@ def _nix_derivation_show(paths: list[str]) -> dict:
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("drv_path", DRV_SAMPLE, ids=[f.split("/")[-1] for f in DRV_SAMPLE])
+@pytest.mark.parametrize(
+    "drv_path", DRV_SAMPLE, ids=[f.split("/")[-1] for f in DRV_SAMPLE]
+)
 def test_json_vs_nix(drv_path: str) -> None:
     """Compare our parser JSON output against `nix derivation show`."""
     with open(drv_path) as f:
@@ -90,8 +94,16 @@ def test_json_vs_nix(drv_path: str) -> None:
     ours_inner = ours[drv_path]
     ref_inner = reference[drv_path]
 
-    for field in ("system", "builder", "args", "name",
-                  "inputSrcs", "outputs", "env", "inputDrvs"):
+    for field in (
+        "system",
+        "builder",
+        "args",
+        "name",
+        "inputSrcs",
+        "outputs",
+        "env",
+        "inputDrvs",
+    ):
         assert ours_inner[field] == ref_inner[field], (
             f"{field} mismatch:\n"
             f"  ours: {json.dumps(ours_inner[field])[:300]}\n"

@@ -19,13 +19,12 @@ import shlex
 import time
 
 import pytest
-
 from conftest import (
     NIX_BIN,
     _get_system,
     _run_subprocess_with_timeout,
-    make_local_stores,
 )
+
 from pynixd.store import LocalSocketStore, Store
 from pynixd.unix_server import run_unix_server
 
@@ -87,7 +86,8 @@ async def _nix_build_direct(
         "--store",
         store_path,
         "--no-link",
-        "--max-jobs", "150",
+        "--max-jobs",
+        "150",
         *extra_args,
     ]
     log.info("nix_build_direct: %s", " ".join(shlex.quote(a) for a in cmd))

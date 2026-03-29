@@ -74,6 +74,7 @@ def _run_pynixd_thread(
     # Stop profiling and write output after event loop ends
     profiler.stop()
     import tempfile
+
     profile_path = tempfile.mktemp(prefix="/tmp/pynixd-profile-")
     with open(profile_path, "w") as f:
         f.write(profiler.output_text(unicode=True, color=False, show_all=True))
@@ -149,9 +150,7 @@ def test_build_throughput() -> None:
     port = port_holder[0]
     log.info("pynixd ready on port %d", port)
 
-    elapsed = _build_in_thread(
-        port, client_store, nix_file, "parallel", stop_event
-    )
+    elapsed = _build_in_thread(port, client_store, nix_file, "parallel", stop_event)
 
     # Signal pynixd to stop so profiler output is printed
     stop_event.set()

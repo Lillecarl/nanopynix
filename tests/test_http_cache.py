@@ -2,16 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-
 from aiohttp import BasicAuth, ClientSession
-
-from pynixd.store import LocalSocketStore
-from pynixd.http_cache import BinaryCacheServer
-from pynixd.local_store_db import LocalStoreDB
-
 from conftest import (
     NIX_BIN,
     _run_subprocess_with_timeout,
@@ -19,6 +11,10 @@ from conftest import (
     nix_build,
     run_pynixd,
 )
+
+from pynixd.http_cache import BinaryCacheServer
+from pynixd.local_store_db import LocalStoreDB
+from pynixd.store import LocalSocketStore
 
 
 @pytest.fixture
@@ -36,8 +32,12 @@ async def cache_with_paths(
     ) as server:
         # Build something so the local store has real paths
         rc, _, stderr = await nix_build(
-            server.builder_uri(), server.client_store_path, nix_env,
-            "--file", test_nix, "simple",
+            server.builder_uri(),
+            server.client_store_path,
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
         )
         assert rc == 0, f"setup build failed:\n{stderr}"
 
@@ -99,7 +99,9 @@ async def test_narinfo_404(cache_with_paths):
     base_url, _ = cache_with_paths
 
     async with ClientSession() as session:
-        async with session.get(f"{base_url}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo") as resp:
+        async with session.get(
+            f"{base_url}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo"
+        ) as resp:
             assert resp.status == 404
 
 
@@ -139,7 +141,9 @@ async def test_nar_404(cache_with_paths):
     base_url, _ = cache_with_paths
 
     async with ClientSession() as session:
-        async with session.get(f"{base_url}/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar") as resp:
+        async with session.get(
+            f"{base_url}/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar"
+        ) as resp:
             assert resp.status == 404
 
 
@@ -161,8 +165,12 @@ async def test_nix_substituter(cache_with_paths, nix_env: dict[str, str]):
     dst_store = "/tmp/pynixd-test-http-nix-client"
     rc, stdout, stderr = await _run_subprocess_with_timeout(
         [
-            NIX_BIN, "copy", "--from", base_url,
-            "--to", dst_store,
+            NIX_BIN,
+            "copy",
+            "--from",
+            base_url,
+            "--to",
+            dst_store,
             "--no-check-sigs",
             path,
         ],
@@ -174,7 +182,11 @@ async def test_nix_substituter(cache_with_paths, nix_env: dict[str, str]):
     # Verify the path exists in the destination store
     rc2, stdout2, stderr2 = await _run_subprocess_with_timeout(
         [
-            NIX_BIN, "path-info", "--store", dst_store, path,
+            NIX_BIN,
+            "path-info",
+            "--store",
+            dst_store,
+            path,
         ],
         env=nix_env,
         timeout=10,
@@ -225,5 +237,5 @@ async def test_basic_auth():
     finally:
         await runner.cleanup()
         if local.db is not None:
-            local.db.close()
+            await local.db.close()
         await local.close()

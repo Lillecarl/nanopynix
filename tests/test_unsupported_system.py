@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from conftest import (
     get_current_system,
     make_local_stores,
@@ -33,14 +32,17 @@ async def test_builders(
 
     async with run_pynixd(stores) as server:
         returncode, stdout, stderr = await nix_build(
-            server.builder_uri(), server.client_store_path, nix_env,
-            "--file", test_nix, "simple",
+            server.builder_uri(),
+            server.client_store_path,
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
             timeout=30,
         )
         assert returncode != 0, "Build should have failed"
         assert wrong in stderr, (
-            f"Expected stderr to mention available system {wrong!r}.\n"
-            f"stderr: {stderr}"
+            f"Expected stderr to mention available system {wrong!r}.\nstderr: {stderr}"
         )
 
 
@@ -58,12 +60,14 @@ async def test_store(
 
     async with run_pynixd(stores) as server:
         returncode, stdout, stderr = await nix_build_store_only(
-            server.uri, nix_env,
-            "--file", test_nix, "simple",
+            server.uri,
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
             timeout=30,
         )
         assert returncode != 0, "Build should have failed"
         assert wrong in stderr, (
-            f"Expected stderr to mention available system {wrong!r}.\n"
-            f"stderr: {stderr}"
+            f"Expected stderr to mention available system {wrong!r}.\nstderr: {stderr}"
         )

@@ -11,25 +11,22 @@ Each test builds a single simple derivation (test.nix .simple).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import shlex
 
 import pytest
-
 from conftest import (
     LIX_BIN,
     NIX_BIN,
-    _get_system,
     _run_subprocess_with_timeout,
-    make_local_stores,
     run_pynixd,
 )
+
 from pynixd.store import (
-    Store,
     LocalSocketStore,
     SSHSubprocessStore,
+    Store,
 )
 
 log = logging.getLogger(__name__)
@@ -109,10 +106,14 @@ async def _nix_build_builders(
 ) -> tuple[int, str, str]:
     os.makedirs(client_store_path, exist_ok=True)
     cmd = [
-        client_bin, "build",
-        "--store", client_store_path,
-        "--builders", builder_uri,
-        "--max-jobs", "0",
+        client_bin,
+        "build",
+        "--store",
+        client_store_path,
+        "--builders",
+        builder_uri,
+        "--max-jobs",
+        "0",
         "--no-link",
         *extra_args,
     ]
@@ -130,8 +131,10 @@ async def _nix_build_store(
     timeout: int = 120,
 ) -> tuple[int, str, str]:
     cmd = [
-        client_bin, "build",
-        "--store", store_uri,
+        client_bin,
+        "build",
+        "--store",
+        store_uri,
         "--no-link",
         *extra_args,
     ]
@@ -188,11 +191,17 @@ async def test_builders_local(
     local = _local_store(local_bin)
     client_store = f"/tmp/pynixd-test-matrix-client-{_next_id()}"
 
-    async with run_pynixd(stores, local_store=local, client_store_path=client_store) as server:
+    async with run_pynixd(
+        stores, local_store=local, client_store_path=client_store
+    ) as server:
         rc, stdout, stderr = await _nix_build_builders(
             client_bin,
-            server.builder_uri(uri_format=uri_fmt), server.client_store_path, nix_env,
-            "--file", test_nix, "simple",
+            server.builder_uri(uri_format=uri_fmt),
+            server.client_store_path,
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
         )
         assert rc == 0, f"build failed:\n{stderr}"
 
@@ -222,8 +231,11 @@ async def test_store_local(
     async with run_pynixd(stores, local_store=local) as server:
         rc, stdout, stderr = await _nix_build_store(
             client_bin,
-            server.uri_for(uri_fmt), nix_env,
-            "--file", test_nix, "simple",
+            server.uri_for(uri_fmt),
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
         )
         assert rc == 0, f"build failed:\n{stderr}"
 
@@ -250,11 +262,17 @@ async def test_builders_nixbuild(
     local = _local_store(local_bin)
     client_store = f"/tmp/pynixd-test-matrix-client-{_next_id()}"
 
-    async with run_pynixd(stores, local_store=local, client_store_path=client_store) as server:
+    async with run_pynixd(
+        stores, local_store=local, client_store_path=client_store
+    ) as server:
         rc, stdout, stderr = await _nix_build_builders(
             client_bin,
-            server.builder_uri(uri_format=uri_fmt), server.client_store_path, nix_env,
-            "--file", test_nix, "simple",
+            server.builder_uri(uri_format=uri_fmt),
+            server.client_store_path,
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
         )
         assert rc == 0, f"build failed:\n{stderr}"
 
@@ -283,7 +301,10 @@ async def test_store_nixbuild(
     async with run_pynixd(stores, local_store=local) as server:
         rc, stdout, stderr = await _nix_build_store(
             client_bin,
-            server.uri_for(uri_fmt), nix_env,
-            "--file", test_nix, "simple",
+            server.uri_for(uri_fmt),
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
         )
         assert rc == 0, f"build failed:\n{stderr}"

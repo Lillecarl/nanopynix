@@ -5,14 +5,13 @@ from __future__ import annotations
 import os
 
 import pytest
-
-from pynixd.store import SSHSubprocessStore
-
 from conftest import (
     nix_build,
     nix_build_store_only,
     run_pynixd,
 )
+
+from pynixd.store import SSHSubprocessStore
 
 pytestmark = pytest.mark.nixbuild
 
@@ -41,8 +40,12 @@ async def test_simple_builders(
 
     async with run_pynixd(stores) as server:
         returncode, stdout, stderr = await nix_build(
-            server.builder_uri(), server.client_store_path, nix_env,
-            "--file", test_nix, "simple",
+            server.builder_uri(),
+            server.client_store_path,
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
         )
         assert returncode == 0, f"nix build failed:\n{stderr}"
 
@@ -60,8 +63,11 @@ async def test_simple_store(
 
     async with run_pynixd(stores) as server:
         returncode, stdout, stderr = await nix_build_store_only(
-            server.uri, nix_env,
-            "--file", test_nix, "simple",
+            server.uri,
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
         )
         assert returncode == 0, f"nix build --store failed:\n{stderr}"
 
@@ -80,8 +86,12 @@ async def test_dag_builders(
 
     async with run_pynixd(stores) as server:
         returncode, stdout, stderr = await nix_build(
-            server.builder_uri(), server.client_store_path, nix_env,
-            "--file", test_nix, "dag",
+            server.builder_uri(),
+            server.client_store_path,
+            nix_env,
+            "--file",
+            test_nix,
+            "dag",
         )
         assert returncode == 0, f"DAG build failed:\n{stderr}"
 
@@ -100,7 +110,10 @@ async def test_dag_store(
 
     async with run_pynixd(stores) as server:
         returncode, stdout, stderr = await nix_build_store_only(
-            server.uri, nix_env,
-            "--file", test_nix, "dag",
+            server.uri,
+            nix_env,
+            "--file",
+            test_nix,
+            "dag",
         )
         assert returncode == 0, f"DAG build --store failed:\n{stderr}"
