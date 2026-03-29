@@ -275,10 +275,6 @@ class Scheduler:
                             transferring.append(build.id)
                             break
 
-        # Re-trigger if builds are waiting for paths — they may arrive later
-        if waiting_dag:
-            asyncio.get_event_loop().call_later(1.0, self.trigger)
-
         unhealthy = [s.id for s in self._stores.values() if not s.is_healthy]
 
         log.info(
