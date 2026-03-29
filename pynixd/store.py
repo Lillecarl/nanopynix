@@ -945,10 +945,6 @@ class _SSHStoreMixin:
                     port=self._port,
                     username=self._username,
                     known_hosts=None,
-                    encryption_algs=[
-                        "aes256-gcm@openssh.com",
-                        "aes128-gcm@openssh.com",
-                    ],
                 )
                 # Reset backoff on success
                 self._backoff = self._INITIAL_BACKOFF

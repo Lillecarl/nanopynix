@@ -136,10 +136,6 @@ async def run_server(
         server_factory=_NixSSHServer,
         process_factory=handle_client,
         encoding=None,
-        encryption_algs=[
-            "aes256-gcm@openssh.com",
-            "aes128-gcm@openssh.com",
-        ],
     ) as server:
         log.info("asyncssh.listen __aenter__ complete, server: %s", server)
         log.info("server.get_addresses(): %s", server.get_addresses())
