@@ -572,6 +572,7 @@ def collect_output_paths(derived_paths: set[str], store_path: str) -> list[str]:
 def to_basic_derivation(
     parsed: ParsedDerivation,
     store_path: str,
+    building_drvs: set[str] | None = None,
 ) -> BasicDerivation:
     """Convert a ParsedDerivation to a BasicDerivation (wire protocol format).
 
@@ -579,9 +580,18 @@ def to_basic_derivation(
     input_srcs, matching what nix does when sending BuildDerivation over
     the wire.
 
+    When *building_drvs* is provided (the set of drv paths pynixd will
+    build itself), the walk recurses into those drvs to collect their
+    transitive output paths.  Drvs NOT in this set already have their
+    outputs in the store, so _compute_closure can discover their runtime
+    references — no need to recurse into them.
+
     Args:
         parsed: The parsed .drv file
         store_path: Store root for reading referenced .drv files
+        building_drvs: Drv paths that pynixd is building (from will_build).
+            When set, limits recursion depth to avoid walking the entire
+            stdenv graph.
     """
     outputs = [
         DerivationOutput(
@@ -596,12 +606,11 @@ def to_basic_derivation(
     # Start with the explicit input sources
     input_srcs: set[str] = set(parsed.input_srcs)
 
-    # Recursively resolve all inputDrvs: walk the full derivation graph
-    # and add every output path to input_srcs.  This ensures the builder
-    # knows about all transitive runtime dependencies — not just the
-    # direct inputs — so that required_paths (computed later as the
-    # closure of input_srcs) is complete even when intermediate outputs
-    # have not been built yet.
+    # Resolve inputDrvs: for each input drv, add its output paths to
+    # input_srcs.  Recurse into drvs that are in building_drvs (their
+    # outputs don't exist yet, so we must track them explicitly for DAG
+    # ordering).  Stop at drvs whose outputs already exist — their
+    # runtime closures are discovered later by _compute_closure.
     visited_drvs: set[str] = set()
     queue = list(parsed.input_drvs.keys())
 
@@ -622,7 +631,11 @@ def to_basic_derivation(
             if p:
                 input_srcs.add(p)
 
-        # Continue walking into this drv's own input_drvs
+        # Only recurse into drvs we're building — their outputs don't
+        # exist yet and won't be found by _compute_closure.
+        if building_drvs is not None and drv_path not in building_drvs:
+            continue
+
         for sub_drv in input_parsed.input_drvs:
             if sub_drv not in visited_drvs:
                 queue.append(sub_drv)

@@ -463,6 +463,14 @@ class DaemonProxy:
                 valid = valid_resp.paths
                 self.local_store.add_known_paths(valid)
 
+        # Collect the set of drv paths we'll be building so
+        # to_basic_derivation can recurse through them for transitive
+        # output paths without walking the entire stdenv graph.
+        building_drvs = {
+            dp.split("!")[0] if "!" in dp else dp
+            for dp in missing_resp.will_build
+        }
+
         results: list[tuple[str, set[str], asyncio.Future[OpResponse]]] = []
 
         for dp in missing_resp.will_build:
@@ -475,7 +483,7 @@ class DaemonProxy:
                 log.warning("Cannot read drv %s for decomposition", drv_path)
                 continue
 
-            basic = to_basic_derivation(parsed, store_path)
+            basic = to_basic_derivation(parsed, store_path, building_drvs)
             drv_request = BuildDerivationRequest(
                 drv_path=drv_path,
                 derivation=basic,
@@ -576,7 +584,11 @@ class DaemonProxy:
         if db is not None:
             closure = await db.compute_closure(seeds)
             if closure is not None:
-                return closure
+                # The CTE only returns paths in ValidPaths — seeds for
+                # not-yet-built outputs would be silently dropped.  Always
+                # preserve the original seeds so _is_schedulable blocks
+                # until those outputs actually exist in the local store.
+                return closure | seeds
 
         # Slow path: walk references via daemon protocol
         closure = set(seeds)
