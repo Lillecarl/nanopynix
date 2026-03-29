@@ -58,6 +58,14 @@ class BuildResultStatus(IntEnum):
     HASH_MISMATCH = 101  # Internal only, not a wire value
 
 
+class BuildMode(IntEnum):
+    """Build mode flags from nix daemon protocol (see worker-protocol.cc)."""
+
+    NORMAL = 0
+    REPAIR = 1
+    CHECK = 2
+
+
 # ── Base classes ─────────────────────────────────────────────────────
 
 Resp = TypeVar("Resp", bound="OpResponse")
