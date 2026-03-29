@@ -45,7 +45,7 @@ TEST_NIX = os.environ.get("PYNIXD_TEST_NIX", "test.nix")
 
 # LIX_BIN / NIX_BIN: paths to lix and nix binaries for LocalSubprocessStore.
 # Default to "nix" if neither is set.
-LIX_BIN = os.environ.get("LIX_BIN", "lix")
+LIX_BIN = os.environ.get("LIX_BIN", "nix")
 NIX_BIN = os.environ.get("NIX_BIN", "nix")
 
 
