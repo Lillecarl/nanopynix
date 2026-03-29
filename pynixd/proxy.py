@@ -395,15 +395,11 @@ class DaemonProxy:
         # Enrich with .drv metadata (e.g. _is_dynamic) if not already set
         self._enrich_derivation(request)
 
-        # Compute full runtime closure at enqueue time so ranking/transfer
-        # never need to recompute it.
-        required_paths = await self._compute_closure(set(request.derivation.input_srcs))
-
         build_id, future = await self._build_queue.enqueue(
             Op.BuildDerivation,
             request,
             self._client,
-            required_paths,
+            set(request.derivation.input_srcs),
             platform=request.derivation.platform,
         )
         log.info("Build %d enqueued (BuildDerivation %s)", build_id, request.drv_path)
@@ -463,14 +459,6 @@ class DaemonProxy:
                 valid = valid_resp.paths
                 self.local_store.add_known_paths(valid)
 
-        # Collect the set of drv paths we'll be building so
-        # to_basic_derivation can recurse through them for transitive
-        # output paths without walking the entire stdenv graph.
-        building_drvs = {
-            dp.split("!")[0] if "!" in dp else dp
-            for dp in missing_resp.will_build
-        }
-
         results: list[tuple[str, set[str], asyncio.Future[OpResponse]]] = []
 
         for dp in missing_resp.will_build:
@@ -483,7 +471,7 @@ class DaemonProxy:
                 log.warning("Cannot read drv %s for decomposition", drv_path)
                 continue
 
-            basic = to_basic_derivation(parsed, store_path, building_drvs)
+            basic = to_basic_derivation(parsed, store_path)
             drv_request = BuildDerivationRequest(
                 drv_path=drv_path,
                 derivation=basic,
@@ -573,38 +561,6 @@ class DaemonProxy:
         return response
 
     # ── Helpers ───────────────────────────────────────────────────────
-
-    async def _compute_closure(self, seeds: set[str]) -> set[str]:
-        """Expand seeds to full runtime reference closure.
-
-        Fast path: single SQLite recursive CTE.
-        Slow path: sequential query_path_info walks.
-        """
-        db = self.local_store.db
-        if db is not None:
-            closure = await db.compute_closure(seeds)
-            if closure is not None:
-                # The CTE only returns paths in ValidPaths — seeds for
-                # not-yet-built outputs would be silently dropped.  Always
-                # preserve the original seeds so _is_schedulable blocks
-                # until those outputs actually exist in the local store.
-                return closure | seeds
-
-        # Slow path: walk references via daemon protocol
-        closure = set(seeds)
-        queue = list(seeds)
-        while queue:
-            path = queue.pop()
-            try:
-                path_info = await self.local_store.query_path_info(path)
-                if path_info:
-                    for ref in path_info.references:
-                        if ref not in closure:
-                            closure.add(ref)
-                            queue.append(ref)
-            except Exception:
-                pass
-        return closure
 
     async def _send_error(self, msg: str) -> None:
         """Send a STDERR_ERROR to the client."""
