@@ -484,7 +484,9 @@ class DaemonProxy:
         return results
 
     async def _build_paths(self, request: BuildPathsRequest) -> OpResponse:
-        op_log("BuildPaths").debug("BuildPaths len(paths)=%d", len(request.derived_paths))
+        op_log("BuildPaths").debug(
+            "BuildPaths len(paths)=%d", len(request.derived_paths)
+        )
         decomposed = await self._decompose_build_paths(request)
 
         if not decomposed:
@@ -505,7 +507,9 @@ class DaemonProxy:
     async def _build_paths_with_results(
         self, request: BuildPathsWithResultsRequest
     ) -> OpResponse:
-        op_log("BuildPathsWithResults").debug("BuildPathsWithResults len(drvs)=%d", len(request.derived_paths))
+        op_log("BuildPathsWithResults").debug(
+            "BuildPathsWithResults len(drvs)=%d", len(request.derived_paths)
+        )
         decomposed = await self._decompose_build_paths(request)
 
         if not decomposed:

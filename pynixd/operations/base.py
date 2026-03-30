@@ -16,7 +16,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import IntEnum, Enum, auto
+from enum import Enum, IntEnum, auto
 from typing import Any, ClassVar, Generic, Self, TypeVar
 
 from .. import wire

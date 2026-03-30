@@ -17,12 +17,13 @@ import asyncio
 import logging
 import os
 import time
+from dataclasses import dataclass
 
 import asyncssh
 
 from .build_queue import BuildQueue, QueuedBuild
 from .exceptions import BackendError, InfrastructureError
-from .operations.base import PathInfo, BuildResultStatus
+from .operations.base import BuildResultStatus, PathInfo
 from .operations.builds import (
     BuildDerivationRequest,
     BuildDerivationResponse,
@@ -47,6 +48,17 @@ _RETRYABLE_STATUSES: frozenset[int] = frozenset(
         BuildResultStatus.LOG_LIMIT_EXCEEDED,
     }
 )
+
+
+@dataclass(frozen=True)
+class CandidateStore:
+    """A candidate store for scheduling a build, with all ranking metadata."""
+
+    store_id: str
+    score: int
+    is_high_pressure: bool
+    in_failed: bool
+    pressure: float
 
 
 class Scheduler:
@@ -102,7 +114,7 @@ class Scheduler:
         """A build is schedulable when all required_paths exist on local."""
         return self._local_store.has_all_paths(build.required_paths)
 
-    def _compute_ranking(self, build: QueuedBuild) -> list[tuple[str, int]]:
+    def _compute_ranking(self, build: QueuedBuild) -> list[CandidateStore]:
         """Rank stores by locality (common paths with required_paths).
 
         Filters out stores that don't support the build's platform,
@@ -114,21 +126,32 @@ class Scheduler:
         """
         needs_nix = build.request.derivation.requires_nix
         failed = set(build.failed_backends)
-        return sorted(
-            [
-                (s.id, s.count_common_paths(build.required_paths))
-                for s in self._stores.values()
-                if s.supports_system(build.platform)
-                and (not needs_nix or not s.is_lix)
-                and s.is_healthy
-            ],
-            key=lambda x: (
-                (self._stores[x[0]].pressure or 0) >= _PSI_PRESSURE_THRESHOLD,
-                -x[1],
-                x[0] in failed,
-                self._stores[x[0]].pressure or 0.0,
-            ),
+
+        candidates: list[CandidateStore] = []
+        for s in self._stores.values():
+            if not s.supports_system(build.platform):
+                continue
+            if needs_nix and s.is_lix:
+                continue
+            if not s.is_healthy:
+                continue
+            score = s.count_common_paths(build.required_paths)
+            pressure = s.pressure or 0.0
+            candidates.append(
+                CandidateStore(
+                    store_id=s.id,
+                    score=score,
+                    is_high_pressure=pressure >= _PSI_PRESSURE_THRESHOLD,
+                    in_failed=s.id in failed,
+                    pressure=pressure,
+                )
+            )
+
+        # Sort: high pressure first, then locality, then not failed, then lower pressure
+        candidates.sort(
+            key=lambda c: (c.is_high_pressure, -c.score, c.in_failed, c.pressure)
         )
+        return candidates
 
     def _effective_slots(
         self,
@@ -243,37 +266,42 @@ class Scheduler:
             if not ranking:
                 continue  # already failed above
 
-            top_score = ranking[0][1]
+            top_score = ranking[0].score
             tied_top_with_slot = [
-                (sid, score)
-                for sid, score in ranking
-                if score == top_score
-                and self._effective_slots(sid, assigned_this_pass) > 0
+                c
+                for c in ranking
+                if c.score == top_score
+                and self._effective_slots(c.store_id, assigned_this_pass) > 0
             ]
 
             if tied_top_with_slot:
                 # Pick least-loaded among tied-top
                 best = min(
                     tied_top_with_slot,
-                    key=lambda x: self._stores[x[0]].in_flight,
+                    key=lambda c: self._stores[c.store_id].in_flight,
                 )
                 log.info(
                     "Build %d -> %s (score=%d, slots=%d)",
                     build.id,
-                    best[0],
-                    best[1],
-                    self._effective_slots(best[0], assigned_this_pass),
+                    best.store_id,
+                    best.score,
+                    self._effective_slots(best.store_id, assigned_this_pass),
                 )
-                self._start_build(build, self._stores[best[0]])
-                assigned_this_pass[best[0]] = assigned_this_pass.get(best[0], 0) + 1
+                self._start_build(build, self._stores[best.store_id])
+                assigned_this_pass[best.store_id] = (
+                    assigned_this_pass.get(best.store_id, 0) + 1
+                )
             else:
                 waiting_slot.append(build.id)
                 # Start proactive transfer to best store WITH a slot
                 if not build.is_transferring:
-                    for sid, _score in ranking:
-                        store = self._stores[sid]
+                    for candidate in ranking:
+                        store = self._stores[candidate.store_id]
                         if (
-                            self._effective_slots(sid, assigned_this_pass) > 0
+                            self._effective_slots(
+                                candidate.store_id, assigned_this_pass
+                            )
+                            > 0
                             and store.available_transfer_slots > 0
                         ):
                             self._start_transfer(build, store)

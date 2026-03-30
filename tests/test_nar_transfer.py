@@ -82,7 +82,9 @@ async def _get_path_info_and_nar(
 # ── AddToStoreNar ────────────────────────────────────────────────────
 
 
-@pytest.mark.skip(reason="test calls non-existent Connection.add_to_store_nar() - needs rewrite")
+@pytest.mark.skip(
+    reason="test calls non-existent Connection.add_to_store_nar() - needs rewrite"
+)
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_add_to_store_nar(

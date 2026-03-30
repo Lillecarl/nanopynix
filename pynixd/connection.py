@@ -20,7 +20,6 @@ import logging
 from typing import cast
 
 from . import stderr, wire
-from .exceptions import BackendError
 from .operations.base import (
     ByteCollector,
     OpRequest,
@@ -180,7 +179,9 @@ class Connection:
                         err.msg,
                     )
             else:
-                await stderr.drain(self.r, raise_on_error=raise_on_error, conn_id=self.id)
+                await stderr.drain(
+                    self.r, raise_on_error=raise_on_error, conn_id=self.id
+                )
 
             response = await response_type.from_reader(self.r, self.version)
         except Exception:
