@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
 from .. import wire
+from ..derived_path import DerivedPath
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -285,7 +286,15 @@ class QueryMissingResponse(OpResponse):
 
 
 @dataclass
-class QueryMissingRequest(StringSetRequest[QueryMissingResponse]):
+class QueryMissingRequest(OpRequest[QueryMissingResponse]):
     op: ClassVar[int] = Op.QueryMissing
     response_type: ClassVar[type[OpResponse]] = QueryMissingResponse
     is_query: ClassVar[bool] = True
+    derived_paths: set[DerivedPath] = field(default_factory=set)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(derived_paths=await reader.read_string_set(DerivedPath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string_set(set(self.derived_paths))
