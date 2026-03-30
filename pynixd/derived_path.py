@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .drv_parser import ParsedDerivation, read_drv_file
+    from .drv_parser import ParsedDerivation
 
 
 class DerivedPath(str):
@@ -55,7 +55,7 @@ class DerivedPath(str):
         Returns:
             ParsedDerivation for the .drv file.
         """
-        from .drv_parser import read_drv_file  # noqa: F401
+        from .drv_parser import read_drv_file
 
         return read_drv_file(store_path, self.drv_path)
 

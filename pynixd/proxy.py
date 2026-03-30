@@ -22,7 +22,7 @@ import asyncssh
 
 from . import wire
 from .build_queue import BuildQueue
-from .connection import ClientConn, Connection
+from .connection import ClientConn
 from .drv_parser import (
     read_drv_file,
     to_basic_derivation,
@@ -35,7 +35,6 @@ from .operations.base import (
     OpRequest,
     OpResponse,
     SingleStringRequest,
-    StringSetRequest,
     StringSetResponse,
     Uint64Response,
 )
@@ -54,9 +53,7 @@ from .operations.profiling import (
 from .operations.queries import (
     IsValidPathRequest,
     NarFromPathResponse,
-    QueryAllValidPathsRequest,
     QueryMissingRequest,
-    QueryMissingResponse,
     QueryPathInfoRequest,
     QueryValidPathsRequest,
 )
@@ -341,10 +338,16 @@ class DaemonProxy:
                     return response
 
                 case Op.QueryAllValidPaths:
-                    return await self._query_all_valid_paths(conn)
+                    return StringSetResponse(
+                        paths=await self.local_store.query_all_valid_paths()
+                    )
 
                 case Op.QueryMissing:
-                    return await self._query_missing(request, conn)
+                    return await self.local_store.query_missing(
+                        cast(QueryMissingRequest, request),
+                        client=self._client,
+                        suppress_last=True,
+                    )
 
                 # ── Maintenance ────────────────────────────────────
                 case Op.SetOptions:
@@ -366,51 +369,6 @@ class DaemonProxy:
                     return await conn.call(
                         request, client=self._client, suppress_last=True
                     )
-
-    async def _query_all_valid_paths(self, conn: Connection) -> OpResponse:
-        all_paths: set[str] = set()
-        try:
-            resp = await conn.call(
-                QueryAllValidPathsRequest(),
-                client=self._client,
-                suppress_last=True,
-            )
-            all_paths.update(resp.paths)
-        except Exception:
-            log.debug("Local QueryAllValidPaths failed")
-        self.local_store.add_known_paths(all_paths, update_regtime=False)
-        return StringSetResponse(paths=all_paths)
-
-    async def _query_missing(self, request: OpRequest, conn: Connection) -> OpResponse:
-        assert isinstance(request, StringSetRequest)
-
-        op_log("QueryMissing").debug("QueryMissing len(targets)=%d", len(request.paths))
-
-        drv_paths = {dp.split("!")[0] if "!" in dp else dp for dp in request.paths}
-
-        try:
-            resp = await conn.call(
-                QueryValidPathsRequest(paths=drv_paths, substitute=0),
-                client=self._client,
-                suppress_last=True,
-            )
-            known_paths = resp.paths
-        except Exception:
-            log.exception("Local query_valid_paths failed")
-            known_paths = set()
-
-        will_build = {
-            dp
-            for dp in request.paths
-            if (dp.split("!")[0] if "!" in dp else dp) not in known_paths
-        }
-        return QueryMissingResponse(
-            will_build=will_build,
-            will_substitute=set(),
-            unknown=set(),
-            download_size=0,
-            nar_size=0,
-        )
 
     # ── Builds ───────────────────────────────────────────────────────
 
@@ -473,27 +431,15 @@ class DaemonProxy:
             drv_map.setdefault(dp.drv_path, set()).update(dp.output_names)
 
         # Query which drvs actually need building
-        async with self.local_store.transfer_conn() as conn:
-            missing_resp = await conn.call(
-                QueryMissingRequest(paths=set(request.derived_paths))
-            )
-
-            # Substitute missing paths to local store
-            if missing_resp.will_substitute:
-                log.info(
-                    "Substituting %d paths to local store",
-                    len(missing_resp.will_substitute),
-                )
-                valid_resp = await conn.call(
-                    QueryValidPathsRequest(
-                        paths=missing_resp.will_substitute,
-                        substitute=1,
-                    )
-                )
-                valid = valid_resp.paths
-                self.local_store.add_known_paths(valid)
+        missing_resp = await self.local_store.query_missing(
+            QueryMissingRequest(derived_paths=request.derived_paths)
+        )
 
         results: list[tuple[str, set[str], asyncio.Future[OpResponse]]] = []
+
+        # Resolve all builds first so we can batch-discover input paths
+        resolved: list[tuple[str, set[str], BuildDerivationRequest]] = []
+        all_input_srcs: set[str] = set()
 
         for dp in missing_resp.will_build:
             drv_path = dp.split("!")[0] if "!" in dp else dp
@@ -511,7 +457,19 @@ class DaemonProxy:
                 derivation=basic,
                 build_mode=request.build_mode,
             )
+            resolved.append((dp, output_names, drv_request))
+            all_input_srcs.update(basic.input_srcs)
 
+        # Discover paths that exist on the local store but aren't tracked.
+        # This is needed for Unix socket stores where nix writes paths
+        # directly to the store filesystem, bypassing the daemon protocol
+        # (so pynixd never sees AddToStore for them).
+        unknown = all_input_srcs - self.local_store.known_paths
+        if unknown:
+            valid = await self.local_store.query_valid_paths(unknown)
+            self.local_store.add_known_paths(valid, update_regtime=False)
+
+        for dp, output_names, drv_request in resolved:
             future = await self._enqueue_build_derivation(drv_request)
             results.append((dp, output_names, future))
 

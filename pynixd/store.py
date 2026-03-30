@@ -38,6 +38,8 @@ from .operations.queries import (
     IsValidPathRequest,
     NarFromPathRequest,
     QueryAllValidPathsRequest,
+    QueryMissingRequest,
+    QueryMissingResponse,
     QueryPathInfoRequest,
     QueryValidPathsRequest,
 )
@@ -243,10 +245,37 @@ class Store(ABC):
             return resp.paths
 
     async def query_all_valid_paths(self) -> set[str]:
-        """Query all valid paths on this store."""
+        """Query all valid paths on this store and update known paths."""
         async with self.transfer_conn() as conn:
             resp = await conn.call(QueryAllValidPathsRequest())
+            self._known_paths.update(resp.paths)
             return resp.paths
+
+    async def query_missing(
+        self,
+        request: QueryMissingRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> QueryMissingResponse:
+        """Query which paths are missing from this store."""
+        async with self.transfer_conn() as conn:
+            resp = await conn.call(
+                request,
+                client=client,
+                suppress_last=suppress_last,
+            )
+
+        # Add outputs from all derived paths to known paths
+        if self.store_path:
+            for dp in request.derived_paths:
+                self._known_paths.update(dp.to_outputs(self.store_path))
+
+        # Query valid paths for substitutes and add to known paths
+        if resp.will_substitute:
+            valid = await self.query_valid_paths(resp.will_substitute, substitute=True)
+            self._known_paths.update(valid)
+
+        return resp
 
     async def stream_paths_store_to_store(
         self,
