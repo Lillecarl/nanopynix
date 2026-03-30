@@ -84,6 +84,26 @@ class QueuedBuild:
             assert self.transfer_task is not None
             await self.transfer_task
 
+    def reset_for_retry(
+        self, failed_store_id: str, old_transfer_task: asyncio.Task | None
+    ) -> None:
+        """Reset state for retry on next scheduling pass.
+
+        Called after a build or infrastructure failure. The build will
+        be re-scheduled to a different store if available.
+
+        old_transfer_task: the task that stop_transfer() was awaiting.
+        Only clears transfer_task if no new transfer was started in the gap.
+        """
+        self.retries += 1
+        self.failed_backends.append(failed_store_id)
+        self.build_task = None
+        self.started_at = None
+        # Don't kill a new transfer that started while stop_transfer() was awaiting
+        if self.transfer_task is old_transfer_task:
+            self.transfer_task = None
+        self.transfer_cancel = asyncio.Event()
+
     @property
     def wait_time(self) -> float | None:
         """Seconds between enqueue and build start."""

@@ -382,14 +382,7 @@ class Scheduler:
         # started a different transfer while stop_transfer() was awaiting.
         old_transfer_task = build.transfer_task
         await build.stop_transfer()
-        build.retries += 1
-        build.failed_backends.append(store.id)
-        build.build_task = None
-        build.started_at = None
-        # Only clear transfer_task if no new transfer was started in the gap
-        if build.transfer_task is old_transfer_task:
-            build.transfer_task = None
-        build.transfer_cancel = asyncio.Event()
+        build.reset_for_retry(store.id, old_transfer_task)
         log.info(
             "Build %d: retry %d/%d (failed on %s)",
             build.id,
