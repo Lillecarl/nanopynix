@@ -164,14 +164,14 @@ class Store(ABC):
     def count_common_paths(self, paths: set[str]) -> int:
         return len(paths & self._known_paths)
 
-    def add_known_path(self, path: str) -> None:
+    def add_known_path(self, path: str, *, update_regtime: bool = True) -> None:
         self._known_paths.add(path)
-        if self.db is not None:
+        if update_regtime and self.db is not None:
             self.db.mark_path(path)
 
-    def add_known_paths(self, paths: set[str]) -> None:
+    def add_known_paths(self, paths: set[str], *, update_regtime: bool = True) -> None:
         self._known_paths.update(paths)
-        if self.db is not None:
+        if update_regtime and self.db is not None:
             self.db.mark_paths(paths)
 
     async def query_path_info(self, path: str) -> PathInfo | None:

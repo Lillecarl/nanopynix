@@ -308,9 +308,11 @@ class DaemonProxy:
                         self.local_store.add_known_paths(result.paths)
                         return result
                 case Op.QueryAllValidPaths:
-                    # No regtime update — bulk query would mark everything as recent
                     result = await db.query_all_valid_paths()
                     if result is not None:
+                        self.local_store.add_known_paths(
+                            result.paths, update_regtime=False
+                        )
                         return result
 
         # Everything else acquires a conn for the duration of the op
@@ -378,6 +380,7 @@ class DaemonProxy:
             all_paths.update(resp.paths)
         except Exception:
             log.debug("Local QueryAllValidPaths failed")
+        self.local_store.add_known_paths(all_paths, update_regtime=False)
         return StringSetResponse(paths=all_paths)
 
     async def _query_missing(self, request: OpRequest, conn: Connection) -> OpResponse:
