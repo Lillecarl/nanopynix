@@ -164,7 +164,11 @@ class Scheduler:
                     sorted(unknown - valid)[:5],
                 )
         except Exception:
-            log.exception("Failed to sync %d local paths", len(unknown))
+            log.warning(
+                "sync_local_paths: failed to query %d unknown paths: %s",
+                len(unknown),
+                sorted(unknown)[:10],
+            )
 
     def _total_available_slots(self) -> int:
         """Total free build slots across all healthy stores."""
