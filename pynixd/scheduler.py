@@ -190,34 +190,6 @@ class Scheduler:
         """True when all build slots are spoken for (in-use + assigned this pass)."""
         return self._total_available_slots() <= sum(assigned_this_pass.values())
 
-    async def _sync_local_paths(self, builds: list[QueuedBuild]) -> None:
-        """Ensure local_store knows about client-uploaded paths."""
-        unknown: set[str] = set()
-        for build in builds:
-            if build.is_building or build.is_done:
-                continue
-            for path in build.required_paths:
-                if not self._local_store.has_path(path):
-                    unknown.add(path)
-        if not unknown:
-            return
-        try:
-            valid = await self._local_store.query_valid_paths(unknown)
-            self._local_store.add_known_paths(valid)
-            if unknown - valid:
-                log.warning(
-                    "sync_local_paths: %d/%d still missing: %s",
-                    len(unknown - valid),
-                    len(unknown),
-                    sorted(unknown - valid)[:5],
-                )
-        except Exception:
-            log.warning(
-                "sync_local_paths: failed to query %d unknown paths: %s",
-                len(unknown),
-                sorted(unknown)[:10],
-            )
-
     def _total_available_slots(self) -> int:
         """Total free build slots across all healthy stores."""
         return sum(s.available_slots for s in self._stores.values() if s.is_healthy)
@@ -233,9 +205,6 @@ class Scheduler:
         has_pending = any(b.is_pending for b in builds)
         if has_pending and self._slots_exhausted({}):
             return
-
-        # Sync local paths so we know about client-uploaded paths
-        await self._sync_local_paths(builds)
 
         # Categorize builds for logging
         building: list[int] = []
