@@ -242,7 +242,11 @@ class Store(ABC):
         if self.db is not None:
             result = await self.db.query_valid_paths(paths)
             if result is not None:
-                return result.paths
+                # When substitution is requested, DB hits alone aren't
+                # sufficient — missing paths might be obtainable via
+                # substituters that only the daemon knows about.
+                if not substitute or result.paths >= paths:
+                    return result.paths
         async with self.transfer_conn() as conn:
             resp = await conn.call(
                 QueryValidPathsRequest(
