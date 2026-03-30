@@ -706,10 +706,26 @@ class Scheduler:
                 return None
 
         results = await asyncio.gather(*[query_one(path) for path in paths])
-        to_pull: list[tuple[str, PathInfo]] = [r for r in results if r is not None]
+        to_pull: list[tuple[str, PathInfo]] = []
+        missing: list[str] = []
+        for path, result in zip(paths, results):
+            if result is not None:
+                to_pull.append(result)
+            else:
+                missing.append(path)
 
-        if not to_pull:
-            return
+        if missing:
+            log.warning(
+                "Pull failed: %d/%d paths missing from %s: %s",
+                len(missing),
+                len(paths),
+                store.id,
+                missing[:10],
+            )
+            raise RuntimeError(
+                f"Failed to query PathInfo for {len(missing)} output path(s) "
+                f"from {store.id}: {missing[:3]}"
+            )
 
         try:
             await self._local_store.stream_paths_store_to_store(
