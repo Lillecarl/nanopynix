@@ -52,9 +52,11 @@ from .operations.profiling import (
 )
 from .operations.queries import (
     IsValidPathRequest,
+    IsValidPathResponse,
     NarFromPathResponse,
     QueryMissingRequest,
     QueryPathInfoRequest,
+    QueryPathInfoResponse,
     QueryValidPathsRequest,
 )
 from .protocol import Op, OptTrusted, op_log
@@ -273,99 +275,54 @@ class DaemonProxy:
                 assert isinstance(request, BuildDerivationRequest)
                 return await self._build_derivation(request)
 
-        # Try fast-path SQLite reads before acquiring a daemon connection
-        db = self.local_store.db
-        if db is not None:
-            match op:
-                case Op.IsValidPath:
-                    result = await db.is_valid_path(
-                        cast(IsValidPathRequest, request).path
-                    )
-                    if result is not None:
-                        self.local_store.add_known_path(
-                            cast(IsValidPathRequest, request).path
-                        )
-                        return result
-                case Op.QueryPathInfo:
-                    result = await db.query_path_info(
-                        cast(QueryPathInfoRequest, request).path
-                    )
-                    if result is not None:
-                        self.local_store.add_known_path(
-                            cast(QueryPathInfoRequest, request).path
-                        )
-                        return result
-                case Op.QueryValidPaths:
-                    result = await db.query_valid_paths(
-                        cast(QueryValidPathsRequest, request).paths
-                    )
-                    if result is not None:
-                        self.local_store.add_known_paths(result.paths)
-                        return result
-                case Op.QueryAllValidPaths:
-                    result = await db.query_all_valid_paths()
-                    if result is not None:
-                        self.local_store.add_known_paths(
-                            result.paths, update_regtime=False
-                        )
-                        return result
+        # Use Store methods — they handle DB fast-path and daemon fallback internally
+        match op:
+            case Op.IsValidPath:
+                request = cast(IsValidPathRequest, request)
+                valid = await self.local_store.is_valid_path(request.path)
+                return IsValidPathResponse(valid=valid)
 
-        # Everything else acquires a conn for the duration of the op
-        async with self.local_store.transfer_conn() as conn:
-            match op:
-                # ── Queries (local store) — fallback if DB unavailable
-                case Op.IsValidPath:
-                    request = cast(IsValidPathRequest, request)
-                    response = await conn.call(
-                        request, client=self._client, suppress_last=True
-                    )
-                    if response.valid:
-                        self.local_store.add_known_path(request.path)
-                    return response
-                case Op.QueryPathInfo:
-                    request = cast(QueryPathInfoRequest, request)
-                    response = await conn.call(
-                        request, client=self._client, suppress_last=True
-                    )
-                    if response.valid and response.info is not None:
-                        self.local_store.add_known_path(response.info.path)
-                    return response
-                case Op.QueryValidPaths:
-                    response = await conn.call(
-                        request, client=self._client, suppress_last=True
-                    )
-                    self.local_store.add_known_paths(response.paths)
-                    return response
+            case Op.QueryPathInfo:
+                request = cast(QueryPathInfoRequest, request)
+                info = await self.local_store.query_path_info(request.path)
+                return QueryPathInfoResponse(valid=info is not None, info=info)
 
-                case Op.QueryAllValidPaths:
-                    return StringSetResponse(
-                        paths=await self.local_store.query_all_valid_paths()
-                    )
+            case Op.QueryValidPaths:
+                request = cast(QueryValidPathsRequest, request)
+                paths = await self.local_store.query_valid_paths(
+                    request.paths, substitute=bool(request.substitute)
+                )
+                return StringSetResponse(paths=paths)
 
-                case Op.QueryMissing:
-                    return await self.local_store.query_missing(
-                        cast(QueryMissingRequest, request),
-                        client=self._client,
-                        suppress_last=True,
-                    )
+            case Op.QueryAllValidPaths:
+                paths = await self.local_store.query_all_valid_paths()
+                return StringSetResponse(paths=paths)
 
-                # ── Maintenance ────────────────────────────────────
-                case Op.SetOptions:
-                    return EmptyResponse()
+            case Op.QueryMissing:
+                return await self.local_store.query_missing(
+                    cast(QueryMissingRequest, request),
+                    client=self._client,
+                    suppress_last=True,
+                )
 
-                case (
-                    Op.OptimiseStore
-                    | Op.VerifyStore
-                    | Op.AddTempRoot
-                    | Op.AddIndirectRoot
-                    | Op.CollectGarbage
-                    | Op.AddSignatures
-                    | Op.AddPermRoot
-                ):
-                    return await self._unimplemented(request)
+            # ── Maintenance ────────────────────────────────────
+            case Op.SetOptions:
+                return EmptyResponse()
 
-                # ── Fallback: forward to local store ──────────────
-                case _:
+            case (
+                Op.OptimiseStore
+                | Op.VerifyStore
+                | Op.AddTempRoot
+                | Op.AddIndirectRoot
+                | Op.CollectGarbage
+                | Op.AddSignatures
+                | Op.AddPermRoot
+            ):
+                return await self._unimplemented(request)
+
+            # ── Fallback: forward to local store ──────────────
+            case _:
+                async with self.local_store.transfer_conn() as conn:
                     return await conn.call(
                         request, client=self._client, suppress_last=True
                     )

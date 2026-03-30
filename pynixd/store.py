@@ -218,9 +218,13 @@ class Store(ABC):
         return infos
 
     async def is_valid_path(self, path: str) -> bool:
-        """Check if a path is valid on this store."""
+        """Check if a path is valid on this store. DB first, daemon fallback."""
         if self.has_path(path):
             return True
+        if self.db is not None:
+            result = await self.db.is_valid_path(path)
+            if result is not None:
+                return result.valid
         try:
             async with self.transfer_conn() as conn:
                 resp = await conn.call(IsValidPathRequest(path=path))
@@ -234,7 +238,11 @@ class Store(ABC):
         paths: set[str],
         substitute: bool = False,
     ) -> set[str]:
-        """Query which paths are valid on this store."""
+        """Query which paths are valid on this store. DB first, daemon fallback."""
+        if self.db is not None:
+            result = await self.db.query_valid_paths(paths)
+            if result is not None:
+                return result.paths
         async with self.transfer_conn() as conn:
             resp = await conn.call(
                 QueryValidPathsRequest(
@@ -245,7 +253,12 @@ class Store(ABC):
             return resp.paths
 
     async def query_all_valid_paths(self) -> set[str]:
-        """Query all valid paths on this store and update known paths."""
+        """Query all valid paths on this store. DB first, daemon fallback."""
+        if self.db is not None:
+            result = await self.db.query_all_valid_paths()
+            if result is not None:
+                self._known_paths.update(result.paths)
+                return result.paths
         async with self.transfer_conn() as conn:
             resp = await conn.call(QueryAllValidPathsRequest())
             self._known_paths.update(resp.paths)
