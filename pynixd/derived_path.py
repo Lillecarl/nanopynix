@@ -2,10 +2,11 @@
 DerivedPath: a str subclass for Nix derived path strings with .drv resolution helpers.
 
 Format:
-    /nix/store/xxx.drv              → all outputs (implicit "*")
     /nix/store/xxx.drv!out          → specific output
     /nix/store/xxx.drv!out,lib      → multiple specific outputs
-    /nix/store/xxx.drv!*            → all outputs (explicit wildcard)
+    /nix/store/xxx.drv!*            → all outputs (wildcard)
+
+Bare .drv paths (without !) are normalized to !* on construction.
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ class DerivedPath(str):
     __slots__ = ()
 
     def __new__(cls, s: str) -> DerivedPath:
+        # Normalize bare .drv paths to explicit wildcard form
+        if s.endswith(".drv"):
+            s = f"{s}!*"
         return super().__new__(cls, s)
 
     @property
@@ -37,10 +41,8 @@ class DerivedPath(str):
     def output_names(self) -> set[str]:
         """The set of output names requested.
 
-        Returns {"*"} when no specific outputs are named (i.e. all outputs).
+        Returns {"*"} for wildcard (all outputs).
         """
-        if "!" not in self:
-            return {"*"}
         outputs_str = self.split("!", 1)[1]
         if outputs_str == "*":
             return {"*"}

@@ -23,6 +23,7 @@ import asyncssh
 from . import wire
 from .build_queue import BuildQueue
 from .connection import ClientConn
+from .derived_path import DerivedPath
 from .drv_parser import (
     read_drv_file,
     to_basic_derivation,
@@ -380,11 +381,6 @@ class DaemonProxy:
         """
         store_path = self.local_store.store_path or ""
 
-        # Build {drv_path: {output_names}} directly from DerivedPath objects
-        drv_map: dict[str, set[str]] = {}
-        for dp in request.derived_paths:
-            drv_map.setdefault(dp.drv_path, set()).update(dp.output_names)
-
         # Query which drvs actually need building
         missing_resp = await self.local_store.query_missing(
             QueryMissingRequest(derived_paths=request.derived_paths)
@@ -396,23 +392,20 @@ class DaemonProxy:
         resolved: list[tuple[str, set[str], BuildDerivationRequest]] = []
         all_input_srcs: set[str] = set()
 
-        for dp in missing_resp.will_build:
-            drv_path = dp.split("!")[0] if "!" in dp else dp
-            output_names = drv_map.get(drv_path, {"*"})
-
+        for dp in (DerivedPath(p) for p in missing_resp.will_build):
             try:
-                parsed = read_drv_file(store_path, drv_path)
+                parsed = dp.to_derivation(store_path)
             except FileNotFoundError:
-                log.warning("Cannot read drv %s for decomposition", drv_path)
+                log.warning("Cannot read drv %s for decomposition", dp.drv_path)
                 continue
 
             basic = to_basic_derivation(parsed, store_path)
             drv_request = BuildDerivationRequest(
-                drv_path=drv_path,
+                drv_path=dp.drv_path,
                 derivation=basic,
                 build_mode=request.build_mode,
             )
-            resolved.append((dp, output_names, drv_request))
+            resolved.append((str(dp), dp.output_names, drv_request))
             all_input_srcs.update(basic.input_srcs)
 
         # Discover paths that exist on the local store but aren't tracked.
