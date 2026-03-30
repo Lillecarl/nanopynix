@@ -116,5 +116,6 @@ package
     library
     specifictest
     lint
+    pkgs
     ;
 }
