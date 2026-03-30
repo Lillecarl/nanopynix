@@ -346,12 +346,17 @@ class Scheduler:
 
     async def _retry_build(self, build: QueuedBuild, store: Store) -> None:
         """Reset build state for retry on next scheduling pass."""
+        # Capture the task we're stopping — a new scheduling pass may have
+        # started a different transfer while stop_transfer() was awaiting.
+        old_transfer_task = build.transfer_task
         await build.stop_transfer()
         build.retries += 1
         build.failed_backends.append(store.id)
         build.build_task = None
         build.started_at = None
-        build.transfer_task = None
+        # Only clear transfer_task if no new transfer was started in the gap
+        if build.transfer_task is old_transfer_task:
+            build.transfer_task = None
         build.transfer_cancel = asyncio.Event()
         log.info(
             "Build %d: retry %d/%d (failed on %s)",
