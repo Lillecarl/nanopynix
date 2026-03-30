@@ -78,7 +78,13 @@ class QueuedBuild:
         return not self.is_building and not self.is_done
 
     async def stop_transfer(self) -> None:
-        """Signal proactive transfer to stop after current path and wait."""
+        """Signal proactive transfer to stop after current path and wait.
+
+        Uses an Event rather than task.cancel() so we finish the in-flight
+        NAR transfer before stopping. Cancelling mid-stream would leave the
+        worker store in an inconsistent state — the store would have a partial
+        path that it thinks is valid but isn't complete.
+        """
         if self.is_transferring:
             self.transfer_cancel.set()
             assert self.transfer_task is not None
