@@ -18,6 +18,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from enum import Enum, auto
 
 import asyncssh
 
@@ -59,6 +60,16 @@ class CandidateStore:
     is_high_pressure: bool
     in_failed: bool
     pressure: float
+
+
+class BuildReadiness(Enum):
+    """Why a build cannot be scheduled yet."""
+
+    BUILDING = auto()  # build task already running
+    DONE = auto()  # already complete
+    NO_STORE = auto()  # no compatible store
+    WAITING_DAG = auto()  # missing required_paths in local store
+    SCHEDULABLE = auto()  # ready to assign
 
 
 class Scheduler:
@@ -153,6 +164,20 @@ class Scheduler:
         )
         return candidates
 
+    # ── Build readiness classification ─────────────────────────────────
+
+    def _classify_build(self, build: QueuedBuild) -> BuildReadiness:
+        """Classify why a build cannot be scheduled yet."""
+        if build.is_building:
+            return BuildReadiness.BUILDING
+        if build.is_done:
+            return BuildReadiness.DONE
+        if not self._compute_ranking(build):
+            return BuildReadiness.NO_STORE
+        if not self._is_schedulable(build):
+            return BuildReadiness.WAITING_DAG
+        return BuildReadiness.SCHEDULABLE
+
     def _effective_slots(
         self,
         store_id: str,
@@ -219,35 +244,37 @@ class Scheduler:
         waiting_slot: list[int] = []  # filled during assignment loop
 
         for b in builds:
-            if b.is_building:
-                building.append(b.id)
-            elif not b.is_pending:
-                pass  # done, shouldn't be here
-            elif not self._compute_ranking(b):
-                # No compatible store — fail immediately
-                needs_nix = b.request.derivation.requires_nix
-                all_systems = sorted(
-                    {s for s in self._stores.values() for s in s.supported_systems}
-                )
-                reason = (
-                    f"No compatible store for {b.description} "
-                    f"(platform={b.platform}, requires_nix={needs_nix}, "
-                    f"stores: {', '.join(all_systems) or 'any (unconstrained)'})"
-                )
-                await self._queue.fail(b.id, reason)
-            elif not self._is_schedulable(b):
-                waiting_dag.append(b.id)
-            # else: schedulable pending — will be waiting_slot if not assigned
+            readiness = self._classify_build(b)
+            match readiness:
+                case BuildReadiness.BUILDING:
+                    building.append(b.id)
+                case BuildReadiness.DONE:
+                    pass  # shouldn't be here
+                case BuildReadiness.NO_STORE:
+                    # Fail immediately — no compatible store
+                    needs_nix = b.request.derivation.requires_nix
+                    all_systems = sorted(
+                        {s for s in self._stores.values() for s in s.supported_systems}
+                    )
+                    reason = (
+                        f"No compatible store for {b.description} "
+                        f"(platform={b.platform}, requires_nix={needs_nix}, "
+                        f"stores: {', '.join(all_systems) or 'any (unconstrained)'})"
+                    )
+                    await self._queue.fail(b.id, reason)
+                case BuildReadiness.WAITING_DAG:
+                    waiting_dag.append(b.id)
+                case BuildReadiness.SCHEDULABLE:
+                    # will be waiting_slot if not assigned
+                    pass
 
         slots = {s.id: s.available_slots for s in self._stores.values()}
         assigned_this_pass: dict[str, int] = {}
 
         for build in builds:
-            if build.is_building or build.is_done:
-                continue
-
-            if not self._is_schedulable(build):
-                continue  # already categorized as waiting_dag
+            readiness = self._classify_build(build)
+            if readiness is not BuildReadiness.SCHEDULABLE:
+                continue  # BUILDING, DONE, NO_STORE, or WAITING_DAG already handled
 
             # No slots left anywhere — stop trying to assign
             if self._slots_exhausted(assigned_this_pass):
