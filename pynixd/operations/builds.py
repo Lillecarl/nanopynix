@@ -77,7 +77,7 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
-            derived_paths={DerivedPath(dp) for dp in await reader.read_string_set()},
+            derived_paths=await reader.read_string_set(DerivedPath),
             build_mode=BuildMode(await reader.read_uint64()),
         )
 
@@ -97,7 +97,7 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
-            derived_paths={DerivedPath(dp) for dp in await reader.read_string_set()},
+            derived_paths=await reader.read_string_set(DerivedPath),
             build_mode=BuildMode(await reader.read_uint64()),
         )
 

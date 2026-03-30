@@ -19,6 +19,7 @@ from typing import Final
 import asyncssh
 
 _CHUNK_SIZE = int(os.environ.get("PYNIXD_CHUNK_SIZE", 1024 * 1024))
+
 _SSH_WINDOW_SIZE = int(os.environ.get("PYNIXD_SSH_WINDOW", 16 * 1024 * 1024))
 
 
@@ -58,16 +59,16 @@ class NixReader:
             await self.readexactly(pad)
         return data
 
-    async def read_string(self) -> str:
-        return (await self.read_bytes()).decode("utf-8")
+    async def read_string[T: str = str](self, tp: type[T] = str) -> T:
+        return tp((await self.read_bytes()).decode("utf-8"))
 
-    async def read_string_list(self) -> list[str]:
+    async def read_string_list[T: str = str](self, tp: type[T] = str) -> list[T]:
         count: int = await self.read_uint64()
-        return [await self.read_string() for _ in range(count)]
+        return [await self.read_string(tp) for _ in range(count)]
 
-    async def read_string_set(self) -> set[str]:
+    async def read_string_set[T: str = str](self, tp: type[T] = str) -> set[T]:
         count: int = await self.read_uint64()
-        return {await self.read_string() for _ in range(count)}
+        return {await self.read_string(tp) for _ in range(count)}
 
     @abstractmethod
     async def is_dirty(self) -> bool:
