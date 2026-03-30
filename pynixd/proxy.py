@@ -282,19 +282,19 @@ class DaemonProxy:
                     assert isinstance(request, SingleStringRequest)
                     result = await db.is_valid_path(request.path)
                     if result is not None:
-                        db.mark_path(request.path)
+                        self.local_store.add_known_path(request.path)
                         return result
                 case Op.QueryPathInfo:
                     assert isinstance(request, SingleStringRequest)
                     result = await db.query_path_info(request.path)
                     if result is not None:
-                        db.mark_path(request.path)
+                        self.local_store.add_known_path(request.path)
                         return result
                 case Op.QueryValidPaths:
                     assert isinstance(request, QueryValidPathsRequest)
                     result = await db.query_valid_paths(request.paths)
                     if result is not None:
-                        db.mark_paths(result.paths)
+                        self.local_store.add_known_paths(result.paths)
                         return result
                 case Op.QueryAllValidPaths:
                     # No regtime update — bulk query would mark everything as recent
