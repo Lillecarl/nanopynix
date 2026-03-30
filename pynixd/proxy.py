@@ -492,6 +492,17 @@ class DaemonProxy:
         return KeyedBuildResultsResponse(results=keyed_results)
 
     async def _build_derivation(self, request: BuildDerivationRequest) -> OpResponse:
+        # Discover paths that exist on the local store but aren't tracked.
+        # When clients connect via Unix domain sockets, nix writes paths
+        # directly to the store filesystem, bypassing the daemon protocol
+        # (so pynixd never sees AddToStore for them).
+        unknown = (
+            set(request.derivation.input_srcs) | {request.drv_path}
+        ) - self.local_store.known_paths
+        if unknown:
+            valid = await self.local_store.query_valid_paths(unknown)
+            self.local_store.add_known_paths(valid, update_regtime=False)
+
         future = await self._enqueue_build_derivation(request)
         response = await future
         if isinstance(response, BuildDerivationResponse):
