@@ -22,7 +22,7 @@ import asyncssh
 
 from .build_queue import BuildQueue, QueuedBuild
 from .exceptions import BackendError, InfrastructureError
-from .operations.base import PathInfo
+from .operations.base import PathInfo, BuildResultStatus
 from .operations.builds import (
     BuildDerivationRequest,
     BuildDerivationResponse,
@@ -40,10 +40,11 @@ _PSI_PRESSURE_THRESHOLD: float = float(os.environ.get("PYNIXD_PSI_THRESHOLD", "7
 # are NOT retried — the build itself is broken.
 _RETRYABLE_STATUSES: frozenset[int] = frozenset(
     {
-        6,  # TransientFailure
-        10,  # TimedOut
-        11,  # MiscFailure
-        13,  # LogLimitExceeded
+        # BuildResultStatus.DEPENDENCY_FAILED,
+        BuildResultStatus.TRANSIENT_FAILURE,
+        BuildResultStatus.TIMED_OUT,
+        BuildResultStatus.MISC_FAILURE,
+        BuildResultStatus.LOG_LIMIT_EXCEEDED,
     }
 )
 
