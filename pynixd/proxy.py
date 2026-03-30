@@ -13,6 +13,8 @@ Routing rules:
 
 from __future__ import annotations
 
+from typing import cast
+
 import asyncio
 import logging
 from collections.abc import Callable
@@ -52,10 +54,12 @@ from .operations.profiling import (
     StopProfilingResponse,
 )
 from .operations.queries import (
+    IsValidPathRequest,
     NarFromPathResponse,
     QueryAllValidPathsRequest,
     QueryMissingRequest,
     QueryMissingResponse,
+    QueryPathInfoRequest,
     QueryValidPathsRequest,
 )
 from .protocol import Op, OptTrusted, op_log
@@ -279,20 +283,27 @@ class DaemonProxy:
         if db is not None:
             match op:
                 case Op.IsValidPath:
-                    assert isinstance(request, SingleStringRequest)
-                    result = await db.is_valid_path(request.path)
+                    result = await db.is_valid_path(
+                        cast(IsValidPathRequest, request).path
+                    )
                     if result is not None:
-                        self.local_store.add_known_path(request.path)
+                        self.local_store.add_known_path(
+                            cast(IsValidPathRequest, request).path
+                        )
                         return result
                 case Op.QueryPathInfo:
-                    assert isinstance(request, SingleStringRequest)
-                    result = await db.query_path_info(request.path)
+                    result = await db.query_path_info(
+                        cast(QueryPathInfoRequest, request).path
+                    )
                     if result is not None:
-                        self.local_store.add_known_path(request.path)
+                        self.local_store.add_known_path(
+                            cast(QueryPathInfoRequest, request).path
+                        )
                         return result
                 case Op.QueryValidPaths:
-                    assert isinstance(request, QueryValidPathsRequest)
-                    result = await db.query_valid_paths(request.paths)
+                    result = await db.query_valid_paths(
+                        cast(QueryValidPathsRequest, request).paths
+                    )
                     if result is not None:
                         self.local_store.add_known_paths(result.paths)
                         return result
@@ -306,10 +317,28 @@ class DaemonProxy:
         async with self.local_store.transfer_conn() as conn:
             match op:
                 # ── Queries (local store) — fallback if DB unavailable
-                case Op.IsValidPath | Op.QueryPathInfo | Op.QueryValidPaths:
-                    return await conn.call(
+                case Op.IsValidPath:
+                    request = cast(IsValidPathRequest, request)
+                    response = await conn.call(
                         request, client=self._client, suppress_last=True
                     )
+                    if response.valid:
+                        self.local_store.add_known_path(request.path)
+                    return response
+                case Op.QueryPathInfo:
+                    request = cast(QueryPathInfoRequest, request)
+                    response = await conn.call(
+                        request, client=self._client, suppress_last=True
+                    )
+                    if response.valid and response.info is not None:
+                        self.local_store.add_known_path(response.info.path)
+                    return response
+                case Op.QueryValidPaths:
+                    response = await conn.call(
+                        request, client=self._client, suppress_last=True
+                    )
+                    self.local_store.add_known_paths(response.paths)
+                    return response
 
                 case Op.QueryAllValidPaths:
                     return await self._query_all_valid_paths(conn)
