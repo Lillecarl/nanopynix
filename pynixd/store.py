@@ -271,16 +271,10 @@ class Store(ABC):
     async def query_missing(
         self,
         request: QueryMissingRequest,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
     ) -> QueryMissingResponse:
         """Query which paths are missing from this store."""
         async with self.transfer_conn() as conn:
-            resp = await conn.call(
-                request,
-                client=client,
-                suppress_last=suppress_last,
-            )
+            resp = await conn.call(request)
 
         # Add outputs from all derived paths to known paths
         if self.store_path:

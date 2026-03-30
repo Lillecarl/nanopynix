@@ -301,8 +301,6 @@ class DaemonProxy:
             case Op.QueryMissing:
                 return await self.local_store.query_missing(
                     cast(QueryMissingRequest, request),
-                    client=self._client,
-                    suppress_last=True,
                 )
 
             # ── Maintenance ────────────────────────────────────
