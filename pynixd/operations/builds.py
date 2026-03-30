@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
+from ..derived_path import DerivedPath
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -70,18 +71,18 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
     op: ClassVar[int] = Op.BuildPaths
     response_type: ClassVar[type[OpResponse]] = Uint64Response
     is_build: ClassVar[bool] = True
-    derived_paths: set[str] = field(default_factory=set)
+    derived_paths: set[DerivedPath] = field(default_factory=set)
     build_mode: BuildMode = BuildMode.NORMAL
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
-            derived_paths=await reader.read_string_set(),
+            derived_paths={DerivedPath(dp) for dp in await reader.read_string_set()},
             build_mode=BuildMode(await reader.read_uint64()),
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string_set(self.derived_paths)
+        writer.write_string_set(set(self.derived_paths))
         writer.write_uint64(self.build_mode)
 
 
@@ -90,18 +91,18 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
     op: ClassVar[int] = Op.BuildPathsWithResults
     response_type: ClassVar[type[OpResponse]] = KeyedBuildResultsResponse
     is_build: ClassVar[bool] = True
-    derived_paths: set[str] = field(default_factory=set)
+    derived_paths: set[DerivedPath] = field(default_factory=set)
     build_mode: BuildMode = BuildMode.NORMAL
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
-            derived_paths=await reader.read_string_set(),
+            derived_paths={DerivedPath(dp) for dp in await reader.read_string_set()},
             build_mode=BuildMode(await reader.read_uint64()),
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string_set(self.derived_paths)
+        writer.write_string_set(set(self.derived_paths))
         writer.write_uint64(self.build_mode)
 
 

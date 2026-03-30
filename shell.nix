@@ -18,9 +18,9 @@ pkgs.mkShell {
   packages = [
     python
     pkgs.just
-    pkgs.nix
     pkgs.pyright
     pkgs.ruff
+    pkgs.ty
   ];
   shellHook = ''
     export PYNIXD_TEST_NIX=${./test.nix}

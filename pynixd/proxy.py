@@ -13,11 +13,10 @@ Routing rules:
 
 from __future__ import annotations
 
-from typing import cast
-
 import asyncio
 import logging
 from collections.abc import Callable
+from typing import cast
 
 import asyncssh
 
@@ -25,7 +24,6 @@ from . import wire
 from .build_queue import BuildQueue
 from .connection import ClientConn, Connection
 from .drv_parser import (
-    parse_derived_paths,
     read_drv_file,
     to_basic_derivation,
 )
@@ -468,12 +466,16 @@ class DaemonProxy:
         Returns list of (derived_path, output_names, future) tuples.
         """
         store_path = self.local_store.store_path or ""
-        drv_map = parse_derived_paths(request.derived_paths)
+
+        # Build {drv_path: {output_names}} directly from DerivedPath objects
+        drv_map: dict[str, set[str]] = {}
+        for dp in request.derived_paths:
+            drv_map.setdefault(dp.drv_path, set()).update(dp.output_names)
 
         # Query which drvs actually need building
         async with self.local_store.transfer_conn() as conn:
             missing_resp = await conn.call(
-                QueryMissingRequest(paths=request.derived_paths)
+                QueryMissingRequest(paths=set(request.derived_paths))
             )
 
             # Substitute missing paths to local store

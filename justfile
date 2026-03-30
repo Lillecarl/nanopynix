@@ -6,6 +6,7 @@ default:
 # Run type checker
 lint:
     pyright pynixd
+    ty check pynixd
 
 # Run linter/formatter check
 check:

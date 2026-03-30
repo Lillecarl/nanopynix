@@ -448,35 +448,6 @@ class _Parser:
         )
 
 
-def parse_derived_paths(derived_paths: set[str]) -> dict[str, set[str]]:
-    """Parse derived paths into {drv_path: {output_name, ...}}.
-
-    Derived paths look like:
-        "/nix/store/xxx.drv!out"     -> specific output
-        "/nix/store/xxx.drv!out,lib" -> multiple outputs
-        "/nix/store/xxx.drv!*"       -> all outputs
-        "/nix/store/xxx.drv"         -> all outputs (implicit)
-    """
-    result: dict[str, set[str]] = {}
-    for dp in derived_paths:
-        if "!" in dp:
-            drv_path, outputs_str = dp.split("!", 1)
-            if outputs_str == "*":
-                outputs = {"*"}
-            else:
-                outputs = set(outputs_str.split(","))
-        else:
-            drv_path = dp
-            outputs = {"*"}
-
-        if drv_path in result:
-            result[drv_path].update(outputs)
-        else:
-            result[drv_path] = outputs
-
-    return result
-
-
 def extract_platforms(derived_paths: set[str], store_path: str) -> set[str]:
     """Extract the set of platforms from derived paths by peeking at .drv files."""
     platforms: set[str] = set()
@@ -551,7 +522,23 @@ def collect_output_paths(derived_paths: set[str], store_path: str) -> list[str]:
 
     Used after a BuildPaths completes to know which outputs to pull.
     """
-    drv_map = parse_derived_paths(derived_paths)
+    # Parse derived paths into {drv_path: {output_name, ...}}
+    drv_map: dict[str, set[str]] = {}
+    for dp in derived_paths:
+        if "!" in dp:
+            drv_path, outputs_str = dp.split("!", 1)
+            if outputs_str == "*":
+                outputs = {"*"}
+            else:
+                outputs = set(outputs_str.split(","))
+        else:
+            drv_path = dp
+            outputs = {"*"}
+        if drv_path in drv_map:
+            drv_map[drv_path].update(outputs)
+        else:
+            drv_map[drv_path] = outputs
+
     output_paths: list[str] = []
     for drv_path, wanted_outputs in drv_map.items():
         try:
