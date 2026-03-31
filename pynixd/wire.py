@@ -122,12 +122,18 @@ class SSHNixReader(NixReader):
     async def is_dirty(self) -> bool:
         if self._buf:
             return True
-        # Check internal buffer without consuming data
+        if hasattr(self.reader, "get_read_buffer_size"):
+            return self.reader.get_read_buffer_size() > 0  # type: ignore[reportAttributeAccessIssue]
+        # Fallback to private access if API changed or is missing
+        # _recv_buf is a dict of list of bytes
         buf = self.reader._session._recv_buf.get(  # type: ignore[attr-defined]
             self.reader._datatype,
-            [],  # type: ignore[attr-defined]
+            [],
         )
-        return len(buf) > 0
+        for chunk in buf:
+            if isinstance(chunk, (bytes, bytearray)) and len(chunk) > 0:
+                return True
+        return False
 
 
 _UNIX_READ_AHEAD = 16 * 1024  # read-ahead size to amortize syscall overhead
@@ -188,6 +194,11 @@ class NixWriter:
     @abstractmethod
     async def drain(self) -> None:
         """Flush writer."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def is_dirty(self) -> bool:
+        """Check if writer has un-drained data."""
         raise NotImplementedError
 
     async def close(self) -> None:
@@ -254,6 +265,11 @@ class SSHNixWriter(NixWriter):
             self._buf.clear()
         await self.writer.drain()
 
+    async def is_dirty(self) -> bool:
+        if self._buf:
+            return True
+        return self.writer._channel.get_write_buffer_size() > 0  # type: ignore[reportAttributeAccessIssue]
+
     async def close(self) -> None:
         if self._buf:
             self.writer.write(bytes(self._buf))
@@ -283,6 +299,11 @@ class UnixNixWriter(NixWriter):
             self.writer.write(bytes(self._buf))
             self._buf.clear()
         await self.writer.drain()
+
+    async def is_dirty(self) -> bool:
+        if self._buf:
+            return True
+        return self.writer.transport.get_write_buffer_size() > 0
 
     async def close(self) -> None:
         if self._buf:

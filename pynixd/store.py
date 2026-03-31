@@ -191,16 +191,12 @@ class Store(ABC):
             pool = self.transfer_conn
 
         async with pool() as conn:
-            try:
-                return await conn.call(
-                    request,
-                    client=client,
-                    suppress_last=suppress_last,
-                    raise_on_error=raise_on_error,
-                )
-            except Exception:
-                conn.dirty = True
-                raise
+            return await conn.call(
+                request,
+                client=client,
+                suppress_last=suppress_last,
+                raise_on_error=raise_on_error,
+            )
 
     async def execute(
         self,
@@ -300,96 +296,75 @@ class Store(ABC):
             self.transfer_conn() as dst_conn,
             src.transfer_conn() as src_conn,
         ):
-            try:
-                dst_conn.w.write_uint64(Op.AddMultipleToStore)
-                req = AddMultipleToStoreRequest(
-                    repair=0,
-                    dont_check_sigs=1,
+            dst_conn.w.write_uint64(Op.AddMultipleToStore)
+            req = AddMultipleToStoreRequest(
+                repair=0,
+                dont_check_sigs=1,
+            )
+            await req.to_writer(dst_conn.w, dst_conn.version)
+
+            fw = dst_conn.w.framed()
+            fw.write_uint64(len(paths_with_info))
+
+            for path, info in paths_with_info:
+                await info.to_writer_keyed(fw)
+
+                src_conn.w.write_uint64(Op.NarFromPath)
+                await SingleStringRequest(
+                    path=path,
+                ).to_writer(src_conn.w, src_conn.version)
+                await src_conn.w.drain()
+                await stderr.drain(src_conn.r)
+
+                await wire.pipe_raw_to_framed_writer(
+                    src_conn.r,
+                    fw,
+                    info.nar_size,
                 )
-                await req.to_writer(dst_conn.w, dst_conn.version)
 
-                fw = dst_conn.w.framed()
-                fw.write_uint64(len(paths_with_info))
+            await fw.finalize()
 
-                for path, info in paths_with_info:
-                    await info.to_writer_keyed(fw)
-
-                    src_conn.w.write_uint64(Op.NarFromPath)
-                    await SingleStringRequest(
-                        path=path,
-                    ).to_writer(src_conn.w, src_conn.version)
-                    await src_conn.w.drain()
-                    await stderr.drain(src_conn.r)
-
-                    await wire.pipe_raw_to_framed_writer(
-                        src_conn.r,
-                        fw,
-                        info.nar_size,
-                    )
-
-                await fw.finalize()
-
-                await stderr.drain(dst_conn.r)
-                await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
-            except Exception:
-                dst_conn.dirty = True
-                src_conn.dirty = True
-                raise
+            await stderr.drain(dst_conn.r)
+            await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
 
     async def add_to_store_nar_streaming(self, src: NixReader) -> str:
         """Stream AddToStoreNar from src to this store."""
         async with self.transfer_conn() as conn:
-            try:
-                path = await AddToStoreNarRequest.forward(src, conn.w)
-                await conn.w.drain()
-                await stderr.drain(conn.r)
-                await EmptyResponse.from_reader(conn.r, conn.version)
-                return path
-            except Exception:
-                conn.dirty = True
-                raise
+            path = await AddToStoreNarRequest.forward(src, conn.w)
+            await conn.w.drain()
+            await stderr.drain(conn.r)
+            await EmptyResponse.from_reader(conn.r, conn.version)
+            return path
 
     async def add_to_store_streaming(self, src: NixReader) -> AddToStoreResponse:
         """Stream AddToStore from src to this store."""
         async with self.transfer_conn() as conn:
-            try:
-                await AddToStoreRequest.forward(src, conn.w)
-                await conn.w.drain()
-                await stderr.drain(conn.r)
-                return await AddToStoreResponse.from_reader(conn.r, conn.version)
-            except Exception:
-                conn.dirty = True
-                raise
+            await AddToStoreRequest.forward(src, conn.w)
+            await conn.w.drain()
+            await stderr.drain(conn.r)
+            return await AddToStoreResponse.from_reader(conn.r, conn.version)
 
     async def add_multiple_to_store_streaming(self, src: NixReader) -> list[str]:
         """Stream AddMultipleToStore from src to this store."""
         async with self.transfer_conn() as conn:
-            try:
-                paths = await AddMultipleToStoreRequest.forward(src, conn.w)
-                await conn.w.drain()
-                await stderr.drain(conn.r)
-                await EmptyResponse.from_reader(conn.r, conn.version)
-                return paths
-            except Exception:
-                conn.dirty = True
-                raise
+            paths = await AddMultipleToStoreRequest.forward(src, conn.w)
+            await conn.w.drain()
+            await stderr.drain(conn.r)
+            await EmptyResponse.from_reader(conn.r, conn.version)
+            return paths
 
     async def buffer_nar_from_path(self, path: str, nar_size: int = 0) -> bytes:
         """Read NAR into memory."""
         async with self.transfer_conn() as conn:
-            try:
-                if nar_size > 0:
-                    conn.w.write_uint64(Op.NarFromPath)
-                    await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
-                    await conn.w.drain()
-                    await stderr.drain(conn.r)
-                    return await conn.r.readexactly(nar_size)
-                else:
-                    resp = await conn.call(NarFromPathRequest(path=path))
-                    return resp.nar_data
-            except Exception:
-                conn.dirty = True
-                raise
+            if nar_size > 0:
+                conn.w.write_uint64(Op.NarFromPath)
+                await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
+                await conn.w.drain()
+                await stderr.drain(conn.r)
+                return await conn.r.readexactly(nar_size)
+            else:
+                resp = await conn.call(NarFromPathRequest(path=path))
+                return resp.nar_data
 
     async def stream_nar_from_path(
         self,
@@ -406,23 +381,19 @@ class Store(ABC):
                 nar_size = path_info.nar_size
 
         async with self.transfer_conn() as conn:
-            try:
-                conn.w.write_uint64(Op.NarFromPath)
-                await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
-                await conn.w.drain()
-                await stderr.drain(conn.r)
-                if nar_size > 0:
-                    remaining = nar_size
-                    while remaining > 0:
-                        to_read = min(remaining, chunk_size)
-                        chunk = await conn.r.readexactly(to_read)
-                        dst.write(chunk)
-                        remaining -= to_read
-                else:
-                    await wire.stream_parse_nar(conn.r, dst)
-            except Exception:
-                conn.dirty = True
-                raise
+            conn.w.write_uint64(Op.NarFromPath)
+            await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
+            await conn.w.drain()
+            await stderr.drain(conn.r)
+            if nar_size > 0:
+                remaining = nar_size
+                while remaining > 0:
+                    to_read = min(remaining, chunk_size)
+                    chunk = await conn.r.readexactly(to_read)
+                    dst.write(chunk)
+                    remaining -= to_read
+            else:
+                await wire.stream_parse_nar(conn.r, dst)
 
     async def nar_from_path_chunked(
         self,
@@ -433,20 +404,16 @@ class Store(ABC):
     ) -> None:
         """Stream NAR to an async callback in fixed-size chunks."""
         async with self.transfer_conn() as conn:
-            try:
-                conn.w.write_uint64(Op.NarFromPath)
-                await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
-                await conn.w.drain()
-                await stderr.drain(conn.r)
-                remaining = nar_size
-                while remaining > 0:
-                    to_read = min(remaining, chunk_size)
-                    chunk = await conn.r.readexactly(to_read)
-                    await write_chunk(chunk)
-                    remaining -= to_read
-            except Exception:
-                conn.dirty = True
-                raise
+            conn.w.write_uint64(Op.NarFromPath)
+            await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
+            await conn.w.drain()
+            await stderr.drain(conn.r)
+            remaining = nar_size
+            while remaining > 0:
+                to_read = min(remaining, chunk_size)
+                chunk = await conn.r.readexactly(to_read)
+                await write_chunk(chunk)
+                remaining -= to_read
 
     async def pipe_nar_from(
         self,
@@ -456,34 +423,29 @@ class Store(ABC):
     ) -> None:
         """Stream NAR from src store to this store."""
         async with self.transfer_conn() as dst_conn, src.transfer_conn() as src_conn:
-            try:
-                src_conn.w.write_uint64(Op.NarFromPath)
-                await SingleStringRequest(
-                    path=path,
-                ).to_writer(src_conn.w, src_conn.version)
-                await src_conn.w.drain()
-                await stderr.drain(src_conn.r)
+            src_conn.w.write_uint64(Op.NarFromPath)
+            await SingleStringRequest(
+                path=path,
+            ).to_writer(src_conn.w, src_conn.version)
+            await src_conn.w.drain()
+            await stderr.drain(src_conn.r)
 
-                dst_conn.w.write_uint64(Op.AddToStoreNar)
-                nar_request = AddToStoreNarRequest(
-                    info=info,
-                    repair=0,
-                    dont_check_sigs=1,
-                )
-                await nar_request.to_writer(dst_conn.w, dst_conn.version)
+            dst_conn.w.write_uint64(Op.AddToStoreNar)
+            nar_request = AddToStoreNarRequest(
+                info=info,
+                repair=0,
+                dont_check_sigs=1,
+            )
+            await nar_request.to_writer(dst_conn.w, dst_conn.version)
 
-                await wire.pipe_raw_to_framed(
-                    src_conn.r,
-                    dst_conn.w,
-                    info.nar_size,
-                )
+            await wire.pipe_raw_to_framed(
+                src_conn.r,
+                dst_conn.w,
+                info.nar_size,
+            )
 
-                await stderr.drain(dst_conn.r)
-                await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
-            except Exception:
-                dst_conn.dirty = True
-                src_conn.dirty = True
-                raise
+            await stderr.drain(dst_conn.r)
+            await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
 
     async def collect_garbage(self, paths: set[str]) -> CollectGarbageResponse:
         """Delete specific paths via CollectGarbage (action=3)."""
@@ -684,7 +646,8 @@ class Store(ABC):
         conn: Connection | None = None
         try:
             conn = await self._get_or_create_conn()
-            yield conn
+            async with conn:
+                yield conn
         finally:
             if conn is not None:
                 if conn.dirty:
