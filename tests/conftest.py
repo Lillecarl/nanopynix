@@ -49,6 +49,31 @@ LIX_BIN = os.environ.get("LIX_BIN", "nix")
 NIX_BIN = os.environ.get("NIX_BIN", "nix")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_bench_paths():
+    """Ensure large benchmark artifacts are deleted before tests run."""
+    log.info("Cleaning up old benchmark paths...")
+    try:
+        # The `-S` flag to path-info gives us the size, but we don't use it here.
+        # We just need the paths.
+        result = subprocess.run(
+            f"{NIX_BIN} path-info -rS /nix/store | grep bench-100mb | cut -f1",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+        if result.stdout:
+            paths = result.stdout.strip().split("\n")
+            log.info(f"Deleting {len(paths)} benchmark paths...")
+            # Using nix store delete instead of nix-store --delete
+            subprocess.run(
+                [NIX_BIN, "store", "delete", *paths],
+                capture_output=True,
+            )
+    except Exception as e:
+        log.warning(f"Failed to clean up benchmark paths: {e}")
+
+
 def get_current_system() -> str:
     """Get the current system via nix."""
     result = subprocess.run(
