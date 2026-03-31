@@ -1,72 +1,49 @@
-# pynixd Architecture
+# pynixd Development Mandates
 
-**Version control: jujutsu (jj), NOT git**
+This document defines the foundational architectural patterns and engineering standards for `pynixd`. These instructions take precedence over general defaults.
 
-## Stores
+## 1. Version Control: Jujutsu (jj)
+- **Tool**: Use `jj` (Jujutsu), NOT `git`.
+- **Committing**: Prefer `jj commit -m "..."` to finish a task. It creates a new revision and provides a clean working copy.
+- **Paging**: Always include `--no-pager` in all `jj` commands to ensure non-interactive execution.
 
-1. **Client store**: The machine's local store. Client connects to pynixd. pynixd can ONLY reply to requests - it cannot initiate anything to the client.
+## 2. Core Architectural Pattern: Request-Driven Execution
+`pynixd` follows a strict three-tier execution pattern to separate protocol IO from business logic.
 
-2. **pynixd local store**: pynixd's local store that it routes queries to. Where pynixd collects all store paths - both sent from clients and fetched from builders. This is the "source of truth" for pynixd.
+1. **Server Dispatch** (`OpRequest.handle(proxy)`): 
+   - Entry point for the `DaemonProxy`.
+   - Decodes the request from the client wire.
+   - Delegates logic to the store: `return await proxy.local_store.execute(request)`.
+   - *Streaming operations* (like `NarFromPath` or `AddToStore`) override this to handle raw byte piping.
 
-3. **Builder stores**: Stores that pynixd connects to for actual builds. pynixd sends required input paths to builders and collects results/NARs from them.
+2. **Logic Hook** (`OpRequest.execute(store, client=None, suppress_last=False)`):
+   - Where the "recipe" for an operation lives.
+   - Implements optimizations (SQLite fast-paths, memory caches).
+   - If no optimization exists, falls back to the wire: `return await store.call(self, client=client, suppress_last=suppress_last)`.
 
-## Protocol Flow
+3. **Store Executor** (`Store.execute(request, ...)`):
+   - Simple polymorphic dispatcher that calls `request.execute(self, ...)`.
 
-When using `--builders unix://...`:
+4. **Transport** (`Store.call(request, ...)`):
+   - Low-level wire protocol implementation.
+   - Handles connection pooling, protocol magic, and handshake.
 
-1. Client's nix spawns a daemon connecting to the unix socket (pynixd)
-2. Client sends daemon protocol operations to pynixd:
-   - SetOptions (with builders config)
-   - QueryValidPaths / QueryPathInfo (check what's needed)
-   - AddMultipleToStore (upload drv files)
-   - BuildDerivation (request build)
-3. pynixd executes build on backend, pulls outputs to its local store
-4. pynixd returns BuildResult with output paths to client
+## 3. Stderr & Logging
+- **`StderrBuffer`**: All buffered responses MUST include a `StderrBuffer` in their `stderr` field.
+- **Real-time Forwarding**: If a `ClientConn` is provided to `execute()`, logs MUST be forwarded to `client.queue` in real-time while also being buffered in the response.
+- **`suppress_last`**: When executing sub-operations (e.g., builds within a `BuildPaths` request), intermediate `STDERR_LAST` messages MUST be suppressed to avoid confusing the client.
+- **Transparency**: No-op or cached operations MUST inject a `StderrNext` message (e.g., `"pynixd: IsValidPath (SQLite hit)"`) into the buffer for transparency.
 
-## Store Type Differences (Research from lix source)
+## 4. Engineering Standards
+- **Validation**: ALWAYS run `just check` before committing. This runs `ruff` (formatting/linting) and `pyright` (type checking).
+- **Type Safety**:
+  - Use `from __future__ import annotations`.
+  - NEVER use string type hints (e.g., `"Store"`). 
+  - Use `if TYPE_CHECKING:` blocks for cross-module imports.
+- **No-ops**: Restricted operations (like `SetOptions`, `AddPermRoot`, `AddIndirectRoot`) must be implemented as no-ops that return success (`0` or `EmptyResponse`) and log their status to stderr.
 
-Nix does NOT treat unix socket stores differently from other remote stores in terms of validity checking. Both UDSRemoteStore and RemoteStore use the same mechanism:
-
-- `RemoteStore::isValidPathUncached` sends `WorkerProto::Op::IsValidPath` to daemon (remote-store.cc line 222)
-- `UDSRemoteStore` inherits this behavior - it queries the daemon via socket protocol
-- No special "local optimization" for unix stores
-
-**Critical findings about UDSRemoteStore and NarFromPath are documented in `ai/minimax/`** - see `debug_notes.md` and `nix_remote_build_research.md` for details on why Unix socket stores don't work with remote builds.
-
-## SetOptions We Send
-
-All the standard options are sent correctly:
-- keepFailed (Bool)
-- keepGoing (Bool)
-- tryFallback (Bool)
-- verbosity (Verbosity)
-- maxBuildJobs (Int)
-- maxSilentTime (Time)
-- verboseBuild (Verbosity)
-- buildCores (Int)
-- useSubstitutes (Bool)
-
-The `builders` override tells nix WHERE to build, but doesn't tell the spawned daemon to use that store for post-build queries.
-
-## Key Issue
-
-After BuildDerivation returns status=0, the client's daemon should:
-1. Call `worker.store.isValidPath(outputPath)` to verify outputs exist
-2. Call `NarFromPath` to fetch the NAR data
-3. Import to its local store
-
-But the client disconnects from pynixd and queries binary caches instead. The spawned daemon seems to use its default local store rather than pynixd for these queries.
-
-## Testing
-
-**IMPORTANT**: Unix socket stores (--builders unix://...) do NOT work with pynixd for builds. See `ai/minimax/debug_notes.md` for detailed explanation.
-
-**Use SSH stores instead**: When testing with `nix build --builders ssh-ng://... --max-jobs 0`:
-- The SSH store uses RemoteStore which properly uses the daemon protocol for all operations
-- Use a local tmp store for the nix build invocation so the client runs as local user
-- SSH credentials should be configured for passwordless authentication
-
-Example:
-```bash
-nix build --builders "ssh-ng://localhost?store=/tmp/pynixd-test-0" --max-jobs 0
-```
+## 5. Build Logic
+Builds are the only "complex" operations in `pynixd`. They are handled via a global `BuildQueue` and a DAG-aware `Scheduler`. 
+- `BuildPaths` and `BuildPathsWithResults` are decomposed into individual `BuildDerivation` requests.
+- Each build executes in a spawned task, surviving client disconnects.
+- Outputs are automatically pulled into the `LocalStore` upon successful completion.
