@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Self
 
 from .connection import ClientConn
-from .operations.base import BuildResult, BuildResultStatus, OpResponse
+from .operations.base import BuildResult, BuildResultStatus
 from .operations.builds import BuildDerivationRequest, BuildDerivationResponse
 from .protocol import Op
 
@@ -41,11 +41,11 @@ class QueuedBuild:
     id: int  # Global incrementing ID
     op: Op  # Always BuildDerivation
     request: BuildDerivationRequest  # The request to forward to the backend
-    client: ClientConn  # Client connection for stderr forwarding
+    client: ClientConn | None  # Client connection for stderr forwarding
     required_paths: set[
         str
     ]  # All paths the backend needs (input_srcs for BuildDerivation)
-    future: asyncio.Future[OpResponse]  # Resolved when done
+    future: asyncio.Future[BuildDerivationResponse]  # Resolved when done
     platform: str = ""  # Derivation platform (for backend filtering)
     enqueued_at: float = field(default_factory=time.monotonic)
     started_at: float | None = field(default=None, repr=False)
@@ -165,10 +165,10 @@ class BuildQueue:
         self,
         op: Op,
         request: BuildDerivationRequest,
-        client: ClientConn,
+        client: ClientConn | None,
         required_paths: set[str],
         platform: str = "",
-    ) -> tuple[int, asyncio.Future[OpResponse]]:
+    ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue (deduplicates if already present).
 
         Returns (build_id, future) - caller awaits the future for the response.
@@ -190,7 +190,7 @@ class BuildQueue:
 
             # Create new build with future
             loop = asyncio.get_event_loop()
-            future: asyncio.Future[OpResponse] = loop.create_future()
+            future: asyncio.Future[BuildDerivationResponse] = loop.create_future()
             build = QueuedBuild(
                 id=self._next_id,
                 op=op,
@@ -223,8 +223,8 @@ class BuildQueue:
     async def complete(
         self,
         build_id: int,
-        response: OpResponse,
-    ) -> ClientConn:
+        response: BuildDerivationResponse,
+    ) -> ClientConn | None:
         """Mark build as completed, resolve the future.
 
         Returns the client connection for the caller to use.
@@ -238,7 +238,7 @@ class BuildQueue:
                     return b.client
         raise ValueError(f"Build {build_id} not found")
 
-    async def fail(self, build_id: int, error_msg: str) -> ClientConn:
+    async def fail(self, build_id: int, error_msg: str) -> ClientConn | None:
         """Mark build as failed, resolve future with an error response.
 
         Returns the client connection for the caller to use.
@@ -247,7 +247,7 @@ class BuildQueue:
             for b in self._queue:
                 if b.id == build_id:
                     b.finished_at = time.monotonic()
-                    response: OpResponse = BuildDerivationResponse(
+                    response = BuildDerivationResponse(
                         result=BuildResult(
                             status=BuildResultStatus.MISC_FAILURE, error_msg=error_msg
                         ),
