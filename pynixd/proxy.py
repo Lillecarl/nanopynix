@@ -385,5 +385,3 @@ class DaemonProxy:
             )
         )
         await self._client.flush()
-
-

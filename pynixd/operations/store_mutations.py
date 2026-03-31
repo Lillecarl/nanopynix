@@ -48,7 +48,6 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
 
     op: ClassVar[int] = Op.AddToStore
     response_type: ClassVar[type[OpResponse]] = AddToStoreResponse
-    streaming: ClassVar[bool] = True
     name: str = ""
     cam: str = ""  # ContentAddressMethodWithAlgo
     references: set[str] = field(default_factory=set)
@@ -109,7 +108,6 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
 
     op: ClassVar[int] = Op.AddToStoreNar
     response_type: ClassVar[type[OpResponse]] = EmptyResponse
-    streaming: ClassVar[bool] = True
     info: PathInfo = field(default_factory=PathInfo)
     repair: int = 0
     dont_check_sigs: int = 0
@@ -202,7 +200,6 @@ class AddMultipleToStoreRequest(OpRequest[EmptyResponse]):
 
     op: ClassVar[int] = Op.AddMultipleToStore
     response_type: ClassVar[type[OpResponse]] = EmptyResponse
-    streaming: ClassVar[bool] = True
     repair: int = 0
     dont_check_sigs: int = 0
 

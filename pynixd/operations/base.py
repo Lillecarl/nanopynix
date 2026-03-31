@@ -89,7 +89,6 @@ class OpRequest(ABC, Generic[Resp]):
     response_type: ClassVar[type[OpResponse]]
     is_query: ClassVar[bool] = False
     is_build: ClassVar[bool] = False
-    streaming: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
