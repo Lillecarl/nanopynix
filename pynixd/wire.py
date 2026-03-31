@@ -268,7 +268,7 @@ class SSHNixWriter(NixWriter):
     async def is_dirty(self) -> bool:
         if self._buf:
             return True
-        return self.writer._channel.get_write_buffer_size() > 0  # type: ignore[reportAttributeAccessIssue]
+        return self.writer.channel.get_write_buffer_size() > 0  # type: ignore[reportAttributeAccessIssue]
 
     async def close(self) -> None:
         if self._buf:

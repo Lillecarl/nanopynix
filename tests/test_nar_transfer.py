@@ -82,9 +82,9 @@ async def _get_path_info_and_nar(
 # ── AddToStoreNar ────────────────────────────────────────────────────
 
 
-@pytest.mark.skip(
-    reason="test calls non-existent Connection.add_to_store_nar() - needs rewrite"
-)
+# @pytest.mark.skip(
+#     reason="test calls non-existent Connection.add_to_store_nar() - needs rewrite"
+# )
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_add_to_store_nar(
@@ -103,14 +103,31 @@ async def test_add_to_store_nar(
         info.references,
     )
 
-    async with dst_store.build_conn() as dst:
-        # Send via AddToStoreNar (raw data method on Connection)
+    async with dst_store.transfer_conn() as dst:
+        # Send via AddToStoreNar (manual protocol exchange)
+        from pynixd.operations.base import EmptyResponse
+        from pynixd.protocol import Op
+
+        dst.w.write_uint64(Op.AddToStoreNar)
         request = AddToStoreNarRequest(
             info=info,
             repair=0,
             dont_check_sigs=1,
         )
-        await dst.add_to_store_nar(request, nar_data)
+        await request.to_writer(dst.w, dst.version)
+
+        # Write nar_data as framed
+        from pynixd.wire import FramedWriter
+
+        fw = FramedWriter(dst.w)
+        fw.write(nar_data)
+        await fw.finalize()
+
+        # Read stderr and response
+        from pynixd import stderr as nix_stderr
+
+        await nix_stderr.drain(dst.r)
+        await EmptyResponse.from_reader(dst.r, dst.version)
 
     # Verify it arrived
     valid_after = await dst_store.query_valid_paths({path})
@@ -126,7 +143,6 @@ async def test_add_to_store_nar(
 # ── AddMultipleToStore ───────────────────────────────────────────────
 
 
-@pytest.mark.skip(reason="broken pipe setup - needs rewrite")
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_add_multiple_to_store_single(
@@ -159,28 +175,47 @@ async def test_add_multiple_to_store_single(
     addr = srv.sockets[0].getsockname()
     client_rd, client_wr = await asyncio.open_connection(addr[0], addr[1])
     await server_ready.wait()
+    srv_rd, srv_wr = conns[0]
     srv.close()
     daemon_payload_rd = UnixNixReader(client_rd)
 
+    reader_done = asyncio.Event()
+
     async def _write_payload() -> None:
-        daemon_wr = UnixNixWriter(client_wr)
+        daemon_wr = UnixNixWriter(srv_wr)
         w = daemon_wr
-        w.write_uint64(1)  # count
-        w.write_string(info.path)
-        w.write_string(info.deriver)
-        w.write_string(info.nar_hash)
-        w.write_string_set(info.references)
-        w.write_uint64(info.registration_time)
-        w.write_uint64(info.nar_size)
-        w.write_uint64(info.ultimate)
-        w.write_string_set(info.sigs)
-        w.write_string(info.ca)
-        w.write(nar_data)  # raw NAR, no length prefix
+        w.write_uint64(0)  # repair
+        w.write_uint64(1)  # dont_check_sigs
+        await w.drain()
+
+        # The rest is framed
+        fw = w.framed()
+        fw.write_uint64(1)  # count
+        fw.write_string(info.path)
+        fw.write_string(info.deriver)
+        fw.write_string(info.nar_hash)
+        fw.write_string_set(info.references)
+        fw.write_uint64(info.registration_time)
+        fw.write_uint64(info.nar_size)
+        fw.write_uint64(info.ultimate)
+        fw.write_string_set(info.sigs)
+        fw.write_string(info.ca)
+        fw.write(nar_data)  # raw NAR, no length prefix
+        await fw.finalize()
         await daemon_wr.drain()
+
+        # Wait for reader to finish before closing
+        await reader_done.wait()
+        srv_wr.close()
+        await srv_wr.wait_closed()
         client_wr.close()
+        await client_wr.wait_closed()
 
     write_task = asyncio.create_task(_write_payload())
-    paths = await dst_store.add_multiple_to_store_streaming(daemon_payload_rd)
+    try:
+        paths = await dst_store.add_multiple_to_store_streaming(daemon_payload_rd)
+    finally:
+        reader_done.set()
     await write_task
 
     # Verify it arrived
@@ -193,7 +228,6 @@ async def test_add_multiple_to_store_single(
     assert dst_info.nar_hash == info.nar_hash
 
 
-@pytest.mark.skip(reason="broken pipe setup - needs rewrite")
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_add_multiple_to_store_two_paths(
@@ -235,35 +269,54 @@ async def test_add_multiple_to_store_two_paths(
     addr = srv.sockets[0].getsockname()
     client_rd, client_wr = await asyncio.open_connection(addr[0], addr[1])
     await server_ready.wait()
+    srv_rd, srv_wr = conns[0]
     srv.close()
     daemon_payload_rd = UnixNixReader(client_rd)
 
+    reader_done = asyncio.Event()
+
     async def _write_payload() -> None:
-        daemon_wr = UnixNixWriter(client_wr)
+        daemon_wr = UnixNixWriter(srv_wr)
         w = daemon_wr
-        w.write_uint64(2)  # count
+        w.write_uint64(0)  # repair
+        w.write_uint64(1)  # dont_check_sigs
+        await w.drain()
+
+        # The rest is framed
+        fw = w.framed()
+        fw.write_uint64(2)  # count
 
         for _path, info, nar_data in picked:
-            w.write_string(info.path)
-            w.write_string(info.deriver)
-            w.write_string(info.nar_hash)
-            w.write_string_set(info.references)
-            w.write_uint64(info.registration_time)
-            w.write_uint64(info.nar_size)
-            w.write_uint64(info.ultimate)
-            w.write_string_set(info.sigs)
-            w.write_string(info.ca)
-            w.write(nar_data)
+            fw.write_string(info.path)
+            fw.write_string(info.deriver)
+            fw.write_string(info.nar_hash)
+            fw.write_string_set(info.references)
+            fw.write_uint64(info.registration_time)
+            fw.write_uint64(info.nar_size)
+            fw.write_uint64(info.ultimate)
+            fw.write_string_set(info.sigs)
+            fw.write_string(info.ca)
+            fw.write(nar_data)
+        await fw.finalize()
         await daemon_wr.drain()
+
+        # Wait for reader to finish before closing
+        await reader_done.wait()
+        srv_wr.close()
+        await srv_wr.wait_closed()
         client_wr.close()
+        await client_wr.wait_closed()
 
     write_task = asyncio.create_task(_write_payload())
-    paths = await dst_store.add_multiple_to_store_streaming(daemon_payload_rd)
+    try:
+        paths = await dst_store.add_multiple_to_store_streaming(daemon_payload_rd)
+    finally:
+        reader_done.set()
     await write_task
 
     # Verify both arrived
     extracted = {p for p, _, _ in picked}
-    assert paths == extracted, f"Paths mismatch: got {paths}, expected {extracted}"
+    assert set(paths) == extracted, f"Paths mismatch: got {paths}, expected {extracted}"
     valid_after = await dst_store.query_valid_paths(extracted)
     for p, _, _ in picked:
         assert p in valid_after, f"Path {p} not in dest after AddMultipleToStore"
