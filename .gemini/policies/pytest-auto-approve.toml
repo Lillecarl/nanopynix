@@ -1,5 +1,0 @@
-[[rule]]
-toolName = 'run_shell_command'
-commandRegex = '^(direnv exec \. )?pytest.*'
-decision = 'allow'
-priority = 100

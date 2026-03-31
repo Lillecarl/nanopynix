@@ -753,28 +753,42 @@ class LocalSubprocessStore(Store):
             path,
             conn_id,
         )
-        proc = await asyncio.create_subprocess_exec(
-            self._nix_bin,
-            "daemon",
-            "--store",
-            path,
-            "--stdio",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        assert proc.stdout is not None
-        assert proc.stdin is not None
-        self._processes.append(proc)
 
-        conn = Connection(
-            UnixNixReader(proc.stdout),
-            UnixNixWriter(proc.stdin),
-            conn_id,
-            store_path=path,
-        )
-        await conn.connect()
-        return conn
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    self._nix_bin,
+                    "daemon",
+                    "--store",
+                    path,
+                    "--stdio",
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                assert proc.stdout is not None
+                assert proc.stdin is not None
+                self._processes.append(proc)
+
+                conn = Connection(
+                    UnixNixReader(proc.stdout),
+                    UnixNixWriter(proc.stdin),
+                    conn_id,
+                    store_path=path,
+                )
+                await conn.connect()
+                return conn
+            except (EOFError, FileNotFoundError) as e:
+                log.warning(
+                    "Spawning daemon %s failed (attempt %d/3): %s",
+                    conn_id,
+                    attempt + 1,
+                    e,
+                )
+                last_err = e
+                await asyncio.sleep(0.05)
+        raise ConnectionError(f"Daemon {conn_id} failed after 3 attempts") from last_err
 
     async def close(self) -> None:
         """Close stores and terminate subprocesses."""
