@@ -267,6 +267,14 @@ class AddSignaturesRequest(OpRequest[Uint64Response]):
             sigs=await reader.read_string_set(),
         )
 
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> Uint64Response:
+        return await store.call(self, client=client, suppress_last=suppress_last)
+
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.path)
         writer.write_string_set(self.sigs)
@@ -295,14 +303,8 @@ class AddBuildLogRequest(SingleStringRequest[Uint64Response]):
         # but pynixd proxy loop handles the framing if it's marked as subframe.
         # However, Op.AddBuildLog is NOT a subframe op in the protocol sense
         # that it has a framed body following the request.
-        from ..stderr import StderrNext
-
-        resp = Uint64Response(value=0)
-        msg = StderrNext(text=f"pynixd: AddBuildLog for {self.path} ignored (no-op)")
-        resp.stderr.add(msg)
-        if client is not None:
-            client.queue.put_nowait(msg)
-        return resp
+        # TODO: Inform client about ignoring this if relevant.
+        return Uint64Response(value=0)
 
 
 @dataclass
@@ -317,14 +319,8 @@ class AddTempRootRequest(SingleStringRequest[Uint64Response]):
         suppress_last: bool = False,
     ) -> Uint64Response:
         # We don't want clients creating temp roots on our host.
-        from ..stderr import StderrNext
-
-        resp = Uint64Response(value=0)
-        msg = StderrNext(text=f"pynixd: AddTempRoot for {self.path} ignored (no-op)")
-        resp.stderr.add(msg)
-        if client is not None:
-            client.queue.put_nowait(msg)
-        return resp
+        # TODO: Inform client about ignoring this if relevant.
+        return Uint64Response(value=0)
 
 
 @dataclass
@@ -339,22 +335,22 @@ class AddIndirectRootRequest(SingleStringRequest[Uint64Response]):
         suppress_last: bool = False,
     ) -> Uint64Response:
         # No-op: return success (0).
-        from ..stderr import StderrNext
-
-        resp = Uint64Response(value=0)
-        msg = StderrNext(
-            text=f"pynixd: AddIndirectRoot for {self.path} ignored (no-op)"
-        )
-        resp.stderr.add(msg)
-        if client is not None:
-            client.queue.put_nowait(msg)
-        return resp
+        # TODO: Inform client about ignoring this if relevant.
+        return Uint64Response(value=0)
 
 
 @dataclass
 class EnsurePathRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.EnsurePath
     response_type: ClassVar[type[OpResponse]] = Uint64Response
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> Uint64Response:
+        return await store.call(self, client=client, suppress_last=suppress_last)
 
 
 # ── Forwarding helpers ─────────────────────────────────────────────

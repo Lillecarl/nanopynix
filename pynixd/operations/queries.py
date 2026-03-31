@@ -60,27 +60,16 @@ class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> IsValidPathResponse:
-        from ..stderr import StderrNext
-
         # 1. Memory cache
         if store.has_path(self.path):
-            resp = IsValidPathResponse(valid=True)
-            resp.stderr.add(
-                StderrNext(text=f"pynixd: IsValidPath {self.path} (memory hit)")
-            )
-            if client is not None:
-                resp.stderr.to_writer(client.w, suppress_last=True)
-            return resp
+            return IsValidPathResponse(valid=True)
 
         # 2. SQLite fast path
         if store.db:
             result = await store.db.is_valid_path(self.path)
             if result is not None:
-                result.stderr.add(
-                    StderrNext(text=f"pynixd: IsValidPath {self.path} (SQLite hit)")
-                )
-                if client is not None:
-                    result.stderr.to_writer(client.w, suppress_last=True)
+                # TODO: We might want to send some information about where
+                # this path was found if it's relevant for the client
                 return result
 
         # 3. Daemon fallback
@@ -125,17 +114,12 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfoResponse:
-        from ..stderr import StderrNext
-
         # 1. SQLite fast path
         if store.db:
             result = await store.db.query_path_info(self.path)
             if result is not None:
-                result.stderr.add(
-                    StderrNext(text=f"pynixd: QueryPathInfo {self.path} (SQLite hit)")
-                )
-                if client is not None:
-                    result.stderr.to_writer(client.w, suppress_last=True)
+                # TODO: We might want to send some information about where
+                # this path was found if it's relevant for the client
                 return result
 
         # 2. Daemon fallback
