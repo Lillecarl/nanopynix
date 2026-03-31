@@ -208,8 +208,11 @@ class BinaryCacheServer:
         except Exception:
             log.exception("nar_from_path streaming failed for %s", path)
             # Response already started — can't change status code.
-            # Client will see a truncated response.
-            return response
+            # We close the connection abruptly to signal failure.
+            # aiohttp: force-close the underlying transport.
+            if request.protocol and request.protocol.transport:
+                request.protocol.transport.close()
+            raise
 
         if self.db is not None:
             self.db.mark_path(path)

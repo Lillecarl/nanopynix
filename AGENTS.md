@@ -41,6 +41,7 @@ This document defines the foundational architectural patterns and engineering st
   - NEVER use string type hints (e.g., `"Store"`). 
   - Use `if TYPE_CHECKING:` blocks for cross-module imports.
 - **No-ops**: Restricted operations (like `SetOptions`, `AddPermRoot`, `AddIndirectRoot`) must be implemented as no-ops that return success (`0` or `EmptyResponse`) and log their status to stderr.
+- **HTTP Cache Streaming**: If a NAR transfer fails after the `200 OK` header is sent, the server MUST abruptly close the connection to signal failure to the client. Full buffering to avoid this is not supported due to memory constraints.
 
 ## 5. Build Logic
 Builds are the only "complex" operations in `pynixd`. They are handled via a global `BuildQueue` and a DAG-aware `Scheduler`. 
