@@ -267,14 +267,6 @@ class AddSignaturesRequest(OpRequest[Uint64Response]):
             sigs=await reader.read_string_set(),
         )
 
-    async def execute(
-        self,
-        store: Store,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-    ) -> Uint64Response:
-        return await store.call(self, client=client, suppress_last=suppress_last)
-
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.path)
         writer.write_string_set(self.sigs)
@@ -343,14 +335,6 @@ class AddIndirectRootRequest(SingleStringRequest[Uint64Response]):
 class EnsurePathRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.EnsurePath
     response_type: ClassVar[type[OpResponse]] = Uint64Response
-
-    async def execute(
-        self,
-        store: Store,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-    ) -> Uint64Response:
-        return await store.call(self, client=client, suppress_last=suppress_last)
 
 
 # ── Forwarding helpers ─────────────────────────────────────────────

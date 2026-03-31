@@ -10,9 +10,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..derived_path import DerivedPath
 
 if TYPE_CHECKING:
-    from ..connection import ClientConn
     from ..proxy import DaemonProxy
-    from ..store import Store
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -201,16 +199,3 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
                     StderrNext(text=f"pynixd: {response.result.error_msg}\n")
                 )
         return response
-
-    async def execute(
-        self,
-        store: Store,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-    ) -> BuildDerivationResponse:
-        """Execute a single build on a backend store."""
-        return await store.call(
-            self,
-            client=client,
-            suppress_last=suppress_last,
-        )
