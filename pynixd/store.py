@@ -44,8 +44,6 @@ from .operations.queries import (
     IsValidPathRequest,
     NarFromPathRequest,
     QueryAllValidPathsRequest,
-    QueryMissingRequest,
-    QueryMissingResponse,
     QueryPathInfoRequest,
     QueryValidPathsRequest,
 )
@@ -205,6 +203,14 @@ class Store(ABC):
                 conn.dirty = True
                 raise
 
+    async def execute(self, request: OpRequest[Resp]) -> Resp:
+        """Execute a buffered operation on this store.
+
+        Delegates logic to the request object, which may use fast-paths
+        (SQLite, memory) or fallback to this store's 'call' method.
+        """
+        return await request.execute(self)
+
     def add_known_path(self, path: str, *, update_regtime: bool = True) -> None:
         self._known_paths.add(path)
         if update_regtime and self.db is not None:
@@ -270,28 +276,8 @@ class Store(ABC):
         """Query all valid paths on this store."""
         from .operations.queries import QueryAllValidPathsRequest
 
-        resp = await self.call(QueryAllValidPathsRequest())
-        self._known_paths.update(resp.paths)
+        resp = await self.execute(QueryAllValidPathsRequest())
         return resp.paths
-
-    async def query_missing(
-        self,
-        request: QueryMissingRequest,
-    ) -> QueryMissingResponse:
-        """Query which paths are missing from this store."""
-        resp = await self.call(request)
-
-        # Update known paths: outputs of all derived paths are now expected
-        if self.store_path:
-            for dp in request.derived_paths:
-                self.add_known_paths(dp.to_outputs(self.store_path))
-
-        # Any path being substituted is also "known" to be available
-        if resp.will_substitute:
-            valid = await self.query_valid_paths(resp.will_substitute, substitute=True)
-            self.add_known_paths(valid)
-
-        return resp
 
     async def stream_paths_store_to_store(
         self,

@@ -25,6 +25,9 @@ from .base import (
     Uint64Response,
 )
 
+if TYPE_CHECKING:
+    from ..store import Store
+
 # ── AddToStore (subframe) ────────────────────────────────────────────
 
 
@@ -70,6 +73,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> AddToStoreResponse:
+        """Override handle because this is a streaming operation."""
         resp = await proxy.local_store.add_to_store_streaming(proxy._r)
         proxy.local_store.add_known_path(resp.info.path)
         return resp
@@ -146,6 +150,7 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
+        """Override handle because this is a streaming operation."""
         path = await proxy.local_store.add_to_store_nar_streaming(proxy._r)
         proxy.local_store.add_known_path(path)
         return EmptyResponse()
@@ -216,6 +221,7 @@ class AddMultipleToStoreRequest(OpRequest[EmptyResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
+        """Override handle because this is a streaming operation."""
         paths = await proxy.local_store.add_multiple_to_store_streaming(proxy._r)
         proxy.local_store.add_known_paths(set(paths))
         return EmptyResponse()
@@ -262,14 +268,12 @@ class AddSignaturesRequest(OpRequest[Uint64Response]):
             sigs=await reader.read_string_set(),
         )
 
+    async def execute(self, store: Store) -> Uint64Response:
+        return await store.call(self)
+
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.path)
         writer.write_string_set(self.sigs)
-
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
-        request = await cls.from_reader(proxy._r, proxy._version)
-        return await proxy.local_store.call(request, client=proxy._client)
 
 
 # ── Thin request subclasses for SingleStringRequest-based ops ──────────
@@ -285,9 +289,7 @@ class AddBuildLogRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.AddBuildLog
     response_type: ClassVar[type[OpResponse]] = Uint64Response
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
-        await cls.from_reader(proxy._r, proxy._version)
+    async def execute(self, store: Store) -> Uint64Response:
         # Consumes framed data that follows if it was a real daemon,
         # but pynixd proxy loop handles the framing if it's marked as subframe.
         # However, Op.AddBuildLog is NOT a subframe op in the protocol sense
@@ -301,9 +303,7 @@ class AddTempRootRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.AddTempRoot
     response_type: ClassVar[type[OpResponse]] = Uint64Response
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
-        await cls.from_reader(proxy._r, proxy._version)
+    async def execute(self, store: Store) -> Uint64Response:
         # We don't want clients creating temp roots on our host.
         return Uint64Response(value=0)
 
@@ -313,9 +313,7 @@ class AddIndirectRootRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.AddIndirectRoot
     response_type: ClassVar[type[OpResponse]] = Uint64Response
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
-        await cls.from_reader(proxy._r, proxy._version)
+    async def execute(self, store: Store) -> Uint64Response:
         # No-op: return success (0).
         return Uint64Response(value=0)
 
@@ -325,10 +323,8 @@ class EnsurePathRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.EnsurePath
     response_type: ClassVar[type[OpResponse]] = Uint64Response
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
-        request = await cls.from_reader(proxy._r, proxy._version)
-        return await proxy.local_store.call(request, client=proxy._client)
+    async def execute(self, store: Store) -> Uint64Response:
+        return await store.call(self)
 
 
 # ── Forwarding helpers ─────────────────────────────────────────────

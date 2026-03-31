@@ -237,7 +237,7 @@ class DaemonProxy:
         store_path = self.local_store.store_path or ""
 
         # Query which drvs actually need building
-        missing_resp = await self.local_store.query_missing(
+        missing_resp = await self.local_store.execute(
             QueryMissingRequest(derived_paths=request.derived_paths)
         )
 

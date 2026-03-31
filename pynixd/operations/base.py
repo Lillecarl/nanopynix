@@ -24,6 +24,7 @@ from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
+    from ..store import Store
 
 log = logging.getLogger(__name__)
 
@@ -103,12 +104,19 @@ class OpRequest(ABC, Generic[Resp]):
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
         """Handle this operation from a client.
 
-        Default: decode the request via from_reader, forward to local store.
-        Override in subclasses for custom behavior.
+        Decodes the request and delegates buffered execution to the local store.
+        Streaming operations should override this method.
         """
         request = await cls.from_reader(proxy._r, proxy._version)
-        async with proxy.local_store.transfer_conn() as conn:
-            return await conn.call(request)
+        return await proxy.local_store.execute(request)
+
+    async def execute(self, store: Store) -> Resp:
+        """Execute this operation on a store and return a buffered response.
+
+        Default implementation just calls the wire protocol.
+        Override in subclasses to add fast-paths (SQLite, memory, etc.).
+        """
+        return await store.call(self)
 
     @classmethod
     @abstractmethod

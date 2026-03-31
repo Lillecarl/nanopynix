@@ -14,6 +14,7 @@ from ..derived_path import DerivedPath
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
+    from ..store import Store
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -52,22 +53,19 @@ class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
     response_type: ClassVar[type[OpResponse]] = IsValidPathResponse
     is_query: ClassVar[bool] = True
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> IsValidPathResponse:
-        request = await cls.from_reader(proxy._r, proxy._version)
-
+    async def execute(self, store: Store) -> IsValidPathResponse:
         # 1. Memory cache
-        if proxy.local_store.has_path(request.path):
+        if store.has_path(self.path):
             return IsValidPathResponse(valid=True)
 
         # 2. SQLite fast path
-        if proxy.local_store.db:
-            result = await proxy.local_store.db.is_valid_path(request.path)
+        if store.db:
+            result = await store.db.is_valid_path(self.path)
             if result is not None:
                 return result
 
         # 3. Daemon fallback
-        return await proxy.local_store.call(request, client=proxy._client)
+        return await store.call(self)
 
 
 # ── QueryPathInfo ────────────────────────────────────────────────────
@@ -98,21 +96,18 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
     response_type: ClassVar[type[OpResponse]] = QueryPathInfoResponse
     is_query: ClassVar[bool] = True
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> QueryPathInfoResponse:
-        request = await cls.from_reader(proxy._r, proxy._version)
-
+    async def execute(self, store: Store) -> QueryPathInfoResponse:
         # 1. SQLite fast path
-        if proxy.local_store.db:
-            result = await proxy.local_store.db.query_path_info(request.path)
+        if store.db:
+            result = await store.db.query_path_info(self.path)
             if result is not None:
                 return result
 
         # 2. Daemon fallback
-        resp = await proxy.local_store.call(request, client=proxy._client)
+        resp = await store.call(self)
         if resp.valid and resp.info is not None:
-            # Protocol sends path-less info, we restore it for the proxy
-            resp.info.path = request.path
+            # Protocol sends path-less info, we restore it
+            resp.info.path = self.path
         return resp
 
 
@@ -140,21 +135,18 @@ class QueryValidPathsRequest(OpRequest[StringSetResponse]):
         if version >= wire.proto(1, 27):
             writer.write_uint64(self.substitute)
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> StringSetResponse:
-        request = await cls.from_reader(proxy._r, proxy._version)
-
+    async def execute(self, store: Store) -> StringSetResponse:
         # 1. SQLite fast path
-        if proxy.local_store.db:
-            result = await proxy.local_store.db.query_valid_paths(request.paths)
+        if store.db:
+            result = await store.db.query_valid_paths(self.paths)
             if result is not None:
                 # If substitution is requested, DB hits alone aren't sufficient
                 # unless all paths were found in SQLite.
-                if not request.substitute or result.paths >= request.paths:
+                if not self.substitute or result.paths >= self.paths:
                     return result
 
         # 2. Daemon fallback
-        return await proxy.local_store.call(request, client=proxy._client)
+        return await store.call(self)
 
 
 # ── QueryPathFromHashPart ────────────────────────────────────────────
@@ -166,18 +158,15 @@ class QueryPathFromHashPartRequest(SingleStringRequest[SingleStringResponse]):
     response_type: ClassVar[type[OpResponse]] = SingleStringResponse
     is_query: ClassVar[bool] = True
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> SingleStringResponse:
-        request = await cls.from_reader(proxy._r, proxy._version)
-
+    async def execute(self, store: Store) -> SingleStringResponse:
         # 1. SQLite fast path
-        if proxy.local_store.db:
-            path = await proxy.local_store.db.query_path_from_hash_part(request.path)
+        if store.db:
+            path = await store.db.query_path_from_hash_part(self.path)
             if path is not None:
                 return SingleStringResponse(value=path)
 
         # 2. Daemon fallback
-        return await proxy.local_store.call(request, client=proxy._client)
+        return await store.call(self)
 
 
 # ── QueryReferrers ────────────────────────────────────────────────────
@@ -319,19 +308,17 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
     response_type: ClassVar[type[OpResponse]] = StringSetResponse
     is_query: ClassVar[bool] = True
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> StringSetResponse:
+    async def execute(self, store: Store) -> StringSetResponse:
         # 1. SQLite fast path
-        if proxy.local_store.db:
-            result = await proxy.local_store.db.query_all_valid_paths()
+        if store.db:
+            result = await store.db.query_all_valid_paths()
             if result is not None:
-                proxy.local_store.add_known_paths(result.paths)
+                store.add_known_paths(result.paths)
                 return result
 
         # 2. Daemon fallback
-        # No reader needed, it's an EmptyRequest
-        resp = await proxy.local_store.call(cls(), client=proxy._client)
-        proxy.local_store.add_known_paths(resp.paths)
+        resp = await store.call(self)
+        store.add_known_paths(resp.paths)
         return resp
 
 
@@ -435,7 +422,18 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(set(self.derived_paths))
 
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> QueryMissingResponse:
-        request = await cls.from_reader(proxy._r, proxy._version)
-        return await proxy.local_store.query_missing(request)
+    async def execute(self, store: Store) -> QueryMissingResponse:
+        """Query which paths are missing from this store."""
+        resp = await store.call(self)
+
+        # Update known paths: outputs of all derived paths are now expected
+        if store.store_path:
+            for dp in self.derived_paths:
+                store.add_known_paths(dp.to_outputs(store.store_path))
+
+        # Any path being substituted is also "known" to be available
+        if resp.will_substitute:
+            valid = await store.query_valid_paths(resp.will_substitute, substitute=True)
+            store.add_known_paths(valid)
+
+        return resp
