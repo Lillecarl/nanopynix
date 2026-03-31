@@ -14,6 +14,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import ClassVar
 
 from . import wire
 from .exceptions import BackendError
@@ -56,6 +57,7 @@ def _write_fields(w: NixWriter, fields: list[Field]) -> None:
 class StderrNext:
     """STDERR_NEXT — a log line from the daemon."""
 
+    code: ClassVar[int] = wire.STDERR_NEXT
     text: str
 
     @classmethod
@@ -63,7 +65,7 @@ class StderrNext:
         return cls(text=await r.read_string())
 
     def to_writer(self, w: NixWriter) -> None:
-        w.write_uint64(wire.STDERR_NEXT)
+        w.write_uint64(self.code)
         w.write_string(self.text)
 
 
@@ -71,6 +73,7 @@ class StderrNext:
 class StderrStartActivity:
     """STDERR_START_ACTIVITY — begin a tracked activity."""
 
+    code: ClassVar[int] = wire.STDERR_START_ACTIVITY
     act_id: int
     level: int
     type: int
@@ -90,7 +93,7 @@ class StderrStartActivity:
         )
 
     def to_writer(self, w: NixWriter) -> None:
-        w.write_uint64(wire.STDERR_START_ACTIVITY)
+        w.write_uint64(self.code)
         w.write_uint64(self.act_id)
         w.write_uint64(self.level)
         w.write_uint64(self.type)
@@ -103,6 +106,7 @@ class StderrStartActivity:
 class StderrStopActivity:
     """STDERR_STOP_ACTIVITY — end a tracked activity."""
 
+    code: ClassVar[int] = wire.STDERR_STOP_ACTIVITY
     act_id: int
 
     @classmethod
@@ -110,7 +114,7 @@ class StderrStopActivity:
         return cls(act_id=await r.read_uint64())
 
     def to_writer(self, w: NixWriter) -> None:
-        w.write_uint64(wire.STDERR_STOP_ACTIVITY)
+        w.write_uint64(self.code)
         w.write_uint64(self.act_id)
 
 
@@ -118,6 +122,7 @@ class StderrStopActivity:
 class StderrResult:
     """STDERR_RESULT — result data for an activity."""
 
+    code: ClassVar[int] = wire.STDERR_RESULT
     act_id: int
     result_type: int
     fields: list[Field]
@@ -131,7 +136,7 @@ class StderrResult:
         )
 
     def to_writer(self, w: NixWriter) -> None:
-        w.write_uint64(wire.STDERR_RESULT)
+        w.write_uint64(self.code)
         w.write_uint64(self.act_id)
         w.write_uint64(self.result_type)
         _write_fields(w, self.fields)
@@ -141,6 +146,7 @@ class StderrResult:
 class StderrError:
     """STDERR_ERROR — the daemon is reporting an error."""
 
+    code: ClassVar[int] = wire.STDERR_ERROR
     error_type: str
     level: int
     name: str
@@ -171,7 +177,7 @@ class StderrError:
         )
 
     def to_writer(self, w: NixWriter) -> None:
-        w.write_uint64(wire.STDERR_ERROR)
+        w.write_uint64(self.code)
         w.write_string(self.error_type)
         w.write_uint64(self.level)
         w.write_string(self.name)

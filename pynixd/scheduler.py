@@ -475,7 +475,7 @@ class Scheduler:
     ) -> BuildDerivationResponse:
         """Execute a BuildDerivation on a store."""
         assert isinstance(build.request, BuildDerivationRequest)
-        response = await store.build_derivation(
+        response = await store.execute(
             build.request,
             client=build.client,
             suppress_last=True,

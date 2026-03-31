@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..protocol import Op
 
 if TYPE_CHECKING:
+    from ..connection import ClientConn
     from ..proxy import DaemonProxy
+    from ..store import Store
 from ..wire import NixReader, NixWriter, _nar_pad, forward_framed
 from .base import (
     EmptyResponse,
@@ -24,9 +26,6 @@ from .base import (
     SingleStringRequest,
     Uint64Response,
 )
-
-if TYPE_CHECKING:
-    from ..store import Store
 
 # ── AddToStore (subframe) ────────────────────────────────────────────
 
@@ -268,9 +267,6 @@ class AddSignaturesRequest(OpRequest[Uint64Response]):
             sigs=await reader.read_string_set(),
         )
 
-    async def execute(self, store: Store) -> Uint64Response:
-        return await store.call(self)
-
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.path)
         writer.write_string_set(self.sigs)
@@ -289,7 +285,12 @@ class AddBuildLogRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.AddBuildLog
     response_type: ClassVar[type[OpResponse]] = Uint64Response
 
-    async def execute(self, store: Store) -> Uint64Response:
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> Uint64Response:
         # Consumes framed data that follows if it was a real daemon,
         # but pynixd proxy loop handles the framing if it's marked as subframe.
         # However, Op.AddBuildLog is NOT a subframe op in the protocol sense
@@ -297,9 +298,10 @@ class AddBuildLogRequest(SingleStringRequest[Uint64Response]):
         from ..stderr import StderrNext
 
         resp = Uint64Response(value=0)
-        resp.stderr_msgs.append(
-            StderrNext(text=f"pynixd: AddBuildLog for {self.path} ignored (no-op)")
-        )
+        msg = StderrNext(text=f"pynixd: AddBuildLog for {self.path} ignored (no-op)")
+        resp.stderr.add(msg)
+        if client is not None:
+            client.queue.put_nowait(msg)
         return resp
 
 
@@ -308,14 +310,20 @@ class AddTempRootRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.AddTempRoot
     response_type: ClassVar[type[OpResponse]] = Uint64Response
 
-    async def execute(self, store: Store) -> Uint64Response:
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> Uint64Response:
         # We don't want clients creating temp roots on our host.
         from ..stderr import StderrNext
 
         resp = Uint64Response(value=0)
-        resp.stderr_msgs.append(
-            StderrNext(text=f"pynixd: AddTempRoot for {self.path} ignored (no-op)")
-        )
+        msg = StderrNext(text=f"pynixd: AddTempRoot for {self.path} ignored (no-op)")
+        resp.stderr.add(msg)
+        if client is not None:
+            client.queue.put_nowait(msg)
         return resp
 
 
@@ -324,14 +332,22 @@ class AddIndirectRootRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.AddIndirectRoot
     response_type: ClassVar[type[OpResponse]] = Uint64Response
 
-    async def execute(self, store: Store) -> Uint64Response:
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> Uint64Response:
         # No-op: return success (0).
         from ..stderr import StderrNext
 
         resp = Uint64Response(value=0)
-        resp.stderr_msgs.append(
-            StderrNext(text=f"pynixd: AddIndirectRoot for {self.path} ignored (no-op)")
+        msg = StderrNext(
+            text=f"pynixd: AddIndirectRoot for {self.path} ignored (no-op)"
         )
+        resp.stderr.add(msg)
+        if client is not None:
+            client.queue.put_nowait(msg)
         return resp
 
 
@@ -339,9 +355,6 @@ class AddIndirectRootRequest(SingleStringRequest[Uint64Response]):
 class EnsurePathRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.EnsurePath
     response_type: ClassVar[type[OpResponse]] = Uint64Response
-
-    async def execute(self, store: Store) -> Uint64Response:
-        return await store.call(self)
 
 
 # ── Forwarding helpers ─────────────────────────────────────────────

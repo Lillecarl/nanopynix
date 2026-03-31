@@ -14,7 +14,8 @@ from .. import wire
 from ..protocol import Op
 
 if TYPE_CHECKING:
-    pass
+    from ..connection import ClientConn
+    from ..store import Store
 from ..wire import NixReader, NixWriter
 from .base import (
     EmptyRequest,
@@ -23,9 +24,6 @@ from .base import (
     OpResponse,
     Uint64Response,
 )
-
-if TYPE_CHECKING:
-    from ..store import Store
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -109,14 +107,22 @@ class SetOptionsRequest(OpRequest[EmptyResponse]):
         )
         return result
 
-    async def execute(self, store: Store) -> EmptyResponse:
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> EmptyResponse:
         # We don't forward SetOptions to the local store daemon as it would
         # mess with our own proxy's session state if it was a real daemon.
         # We just return EmptyResponse.
         from ..stderr import StderrNext
 
         resp = EmptyResponse()
-        resp.stderr_msgs.append(StderrNext(text="pynixd: SetOptions ignored (no-op)"))
+        msg = StderrNext(text="pynixd: SetOptions ignored (no-op)")
+        resp.stderr.add(msg)
+        if client is not None:
+            client.queue.put_nowait(msg)
         return resp
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -186,9 +192,6 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
             _obsolete3=await reader.read_uint64(),
         )
 
-    async def execute(self, store: Store) -> CollectGarbageResponse:
-        return await store.call(self)
-
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.action)
         writer.write_string_set(self.paths_to_delete)
@@ -216,9 +219,6 @@ class VerifyStoreRequest(OpRequest[Uint64Response]):
             repair=await reader.read_uint64(),
         )
 
-    async def execute(self, store: Store) -> Uint64Response:
-        return await store.call(self)
-
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.check_contents)
         writer.write_uint64(self.repair)
@@ -231,9 +231,6 @@ class VerifyStoreRequest(OpRequest[Uint64Response]):
 class OptimiseStoreRequest(EmptyRequest[Uint64Response]):
     op: ClassVar[int] = Op.OptimiseStore
     response_type: ClassVar[type[OpResponse]] = Uint64Response
-
-    async def execute(self, store: Store) -> Uint64Response:
-        return await store.call(self)
 
 
 # ── FindRoots ────────────────────────────────────────────────────────
@@ -271,9 +268,6 @@ class FindRootsRequest(EmptyRequest[FindRootsResponse]):
     op: ClassVar[int] = Op.FindRoots
     response_type: ClassVar[type[OpResponse]] = FindRootsResponse
 
-    async def execute(self, store: Store) -> FindRootsResponse:
-        return await store.call(self)
-
 
 # ── AddPermRoot ─────────────────────────────────────────────────────
 # Nix 1.38+. Request: store path + gcRoot path. Response: gcRoot path.
@@ -306,15 +300,21 @@ class AddPermRootRequest(OpRequest[AddPermRootResponse]):
             gc_root=await reader.read_string(),
         )
 
-    async def execute(self, store: Store) -> AddPermRootResponse:
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> AddPermRootResponse:
         # No-op: don't create permanent roots on the host.
         # Just return the requested root path as "success".
         from ..stderr import StderrNext
 
         resp = AddPermRootResponse(gc_root=self.gc_root)
-        resp.stderr_msgs.append(
-            StderrNext(text=f"pynixd: AddPermRoot for {self.gc_root} ignored (no-op)")
-        )
+        msg = StderrNext(text=f"pynixd: AddPermRoot for {self.gc_root} ignored (no-op)")
+        resp.stderr.add(msg)
+        if client is not None:
+            client.queue.put_nowait(msg)
         return resp
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

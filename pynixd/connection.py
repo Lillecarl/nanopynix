@@ -24,6 +24,7 @@ from .operations.base import (
     ByteCollector,
     OpRequest,
     Resp,
+    StderrBuffer,
 )
 from .protocol import Op, op_log
 from .wire import (
@@ -169,33 +170,41 @@ class Connection:
             self.w.write(buf.getvalue())
             await self.w.drain()
 
-            msgs: list[stderr.StderrMsg] = []
-            if client is not None:
-                err = await stderr.collect(self.r, client.queue)
-                if err is not None:
-                    stderr_log.error(
+            msgs = StderrBuffer()
+            async for msg in stderr.read_stream(self.r):
+                msgs.add(msg)
+
+                # Real-time forwarding if client is provided
+                if client is not None:
+                    # Logic for suppress_last: don't forward STDERR_LAST to client
+                    # (but it's already filtered out by read_stream, which only
+                    # yields messages BEFORE the last one).
+                    # Actually, read_stream yields until LAST but doesn't yield LAST.
+                    # We need to decide if we inject a LAST into the queue.
+                    # Nix protocol: stderr.read_stream stops BEFORE LAST.
+                    # We usually want to forward everything EXCEPT the final LAST
+                    # if we are doing a sub-operation.
+                    client.queue.put_nowait(msg)
+
+                if isinstance(msg, stderr.StderrError):
+                    stderr_log.warning(
                         "store=%s daemon error: [%s] %s",
                         self.id,
-                        err.error_type,
-                        err.msg,
+                        msg.error_type,
+                        msg.msg,
                     )
-            else:
-                async for msg in stderr.read_stream(self.r):
-                    msgs.append(msg)
-                    if isinstance(msg, stderr.StderrError):
-                        stderr_log.warning(
-                            "store=%s daemon error: [%s] %s",
-                            self.id,
-                            msg.error_type,
-                            msg.msg,
-                        )
-                        if raise_on_error:
-                            from .exceptions import BackendError
+                    if raise_on_error:
+                        from .exceptions import BackendError
 
-                            raise BackendError(f"Backend error: {msg.msg}")
+                        raise BackendError(f"Backend error: {msg.msg}")
+
+            # If we are NOT suppressing last, and we have a client, we should
+            # arguably put a LAST in the client queue?
+            # Actually, the proxy loop writes its own LAST after the response payload.
+            # So Connection.call should usually NOT forward the remote's LAST.
 
             response = await response_type.from_reader(self.r, self.version)
-            response.stderr_msgs = msgs
+            response.stderr = msgs
         except Exception:
             self.dirty = True
             raise

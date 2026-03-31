@@ -35,7 +35,6 @@ from .operations.base import (
     Resp,
     SingleStringRequest,
 )
-from .operations.builds import BuildDerivationRequest, BuildDerivationResponse
 from .operations.maintenance import (
     CollectGarbageRequest,
     CollectGarbageResponse,
@@ -203,13 +202,22 @@ class Store(ABC):
                 conn.dirty = True
                 raise
 
-    async def execute(self, request: OpRequest[Resp]) -> Resp:
-        """Execute a buffered operation on this store.
+    async def execute(
+        self,
+        request: OpRequest[Resp],
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> Resp:
+        """Execute an operation on this store.
 
         Delegates logic to the request object, which may use fast-paths
         (SQLite, memory) or fallback to this store's 'call' method.
         """
-        return await request.execute(self)
+        return await request.execute(
+            self,
+            client=client,
+            suppress_last=suppress_last,
+        )
 
     def add_known_path(self, path: str, *, update_regtime: bool = True) -> None:
         self._known_paths.add(path)
@@ -476,20 +484,6 @@ class Store(ABC):
                 dst_conn.dirty = True
                 src_conn.dirty = True
                 raise
-
-    async def build_derivation(
-        self,
-        request: BuildDerivationRequest,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-    ) -> BuildDerivationResponse:
-        """Execute a BuildDerivation on this store."""
-        async with self.build_conn() as conn:
-            return await conn.call(
-                request,
-                client=client,
-                suppress_last=suppress_last,
-            )
 
     async def collect_garbage(self, paths: set[str]) -> CollectGarbageResponse:
         """Delete specific paths via CollectGarbage (action=3)."""

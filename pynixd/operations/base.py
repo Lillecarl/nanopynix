@@ -23,6 +23,7 @@ from .. import wire
 from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
+    from ..connection import ClientConn
     from ..proxy import DaemonProxy
     from ..stderr import StderrMsg
     from ..store import Store
@@ -105,26 +106,28 @@ class OpRequest(ABC, Generic[Resp]):
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
         """Handle this operation from a client.
 
-        Decodes the request and delegates buffered execution to the local store.
+        Decodes the request and delegates execution to the local store.
         Streaming operations should override this method.
         """
         request = await cls.from_reader(proxy._r, proxy._version)
-        response = await proxy.local_store.execute(request)
+        return await proxy.local_store.execute(request, client=proxy._client)
 
-        # Forward any buffered stderr collected during execution
-        if response is not None:
-            for msg in response.stderr_msgs:
-                proxy._client.queue.put_nowait(msg)
-
-        return response
-
-    async def execute(self, store: Store) -> Resp:
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> Resp:
         """Execute this operation on a store and return a buffered response.
 
         Default implementation just calls the wire protocol.
         Override in subclasses to add fast-paths (SQLite, memory, etc.).
         """
-        return await store.call(self)
+        return await store.call(
+            self,
+            client=client,
+            suppress_last=suppress_last,
+        )
 
     @classmethod
     @abstractmethod
@@ -135,11 +138,28 @@ class OpRequest(ABC, Generic[Resp]):
 
 
 @dataclass
+class StderrBuffer:
+    """Buffer for collected stderr messages."""
+
+    msgs: list[StderrMsg] = field(default_factory=list)
+
+    def add(self, msg: StderrMsg) -> None:
+        self.msgs.append(msg)
+
+    def to_writer(self, writer: NixWriter, suppress_last: bool = False) -> None:
+        """Write all buffered messages to the wire."""
+        for msg in self.msgs:
+            if suppress_last and msg.code == wire.STDERR_LAST:
+                continue
+            msg.to_writer(writer)
+
+
+@dataclass
 class OpResponse(ABC):
     """Base class for operation responses."""
 
     _log: ClassVar[logging.Logger] = logging.getLogger(__name__)
-    stderr_msgs: list[StderrMsg] = field(default_factory=list)
+    stderr: StderrBuffer = field(default_factory=StderrBuffer)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

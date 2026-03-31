@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..derived_path import DerivedPath
 
 if TYPE_CHECKING:
+    from ..connection import ClientConn
     from ..proxy import DaemonProxy
+    from ..store import Store
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -90,6 +92,7 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        """Builds are special: handled by the proxy's BuildQueue/Scheduler logic."""
         request = await cls.from_reader(proxy._r, proxy._version)
         return await proxy._build_paths(request)
 
@@ -115,6 +118,7 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        """Builds are special: handled by the proxy's BuildQueue/Scheduler logic."""
         request = await cls.from_reader(proxy._r, proxy._version)
         return await proxy._build_paths_with_results(request)
 
@@ -146,5 +150,19 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        """Builds are special: handled by the proxy's BuildQueue/Scheduler logic."""
         request = await cls.from_reader(proxy._r, proxy._version)
         return await proxy._build_derivation(request)
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> BuildDerivationResponse:
+        """Execute a single build on a backend store."""
+        return await store.call(
+            self,
+            client=client,
+            suppress_last=suppress_last,
+        )
