@@ -553,7 +553,8 @@ class Store(ABC):
                         self.id,
                         conn.id,
                     )
-                    self._all.remove(conn)
+                    if conn in self._all:
+                        self._all.remove(conn)
                     try:
                         await conn.close()
                     except Exception:
@@ -578,7 +579,8 @@ class Store(ABC):
                     self.id,
                     candidate.id,
                 )
-                self._all.remove(candidate)
+                if candidate in self._all:
+                    self._all.remove(candidate)
                 try:
                     await candidate.close()
                 except Exception:
@@ -591,7 +593,8 @@ class Store(ABC):
                     candidate.id,
                     " -> ".join(candidate._op_log[-10:]) or "(empty)",
                 )
-                self._all.remove(candidate)
+                if candidate in self._all:
+                    self._all.remove(candidate)
                 try:
                     await candidate.close()
                 except Exception:
@@ -657,7 +660,8 @@ class Store(ABC):
                         conn.id,
                         " -> ".join(conn._op_log[-10:]) or "(empty)",
                     )
-                    self._all.remove(conn)
+                    if conn in self._all:
+                        self._all.remove(conn)
                     try:
                         await conn.close()
                     except Exception:

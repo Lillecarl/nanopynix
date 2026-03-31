@@ -54,6 +54,10 @@ def _format_narinfo(
 ) -> str:
     """Format a .narinfo file from path info fields."""
     store_hash = _hash_part(path)
+    # Ensure NarHash has sha256: prefix (expected by Nix)
+    if not nar_hash.startswith("sha256:"):
+        nar_hash = f"sha256:{nar_hash}"
+
     lines = [
         f"StorePath: {path}",
         f"URL: nar/{store_hash}.nar",
