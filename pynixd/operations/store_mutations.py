@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, field
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..protocol import Op
+
+if TYPE_CHECKING:
+    from ..proxy import DaemonProxy
 from ..wire import NixReader, NixWriter, _nar_pad, forward_framed
 from .base import (
     EmptyResponse,
@@ -45,6 +48,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
 
     op: ClassVar[int] = Op.AddToStore
     response_type: ClassVar[type[OpResponse]] = AddToStoreResponse
+    streaming: ClassVar[bool] = True
     name: str = ""
     cam: str = ""  # ContentAddressMethodWithAlgo
     references: set[str] = field(default_factory=set)
@@ -64,6 +68,12 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         writer.write_string(self.cam)
         writer.write_string_set(self.references)
         writer.write_uint64(self.repair)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> AddToStoreResponse:
+        resp = await proxy.local_store.add_to_store_streaming(proxy._r)
+        proxy.local_store.add_known_path(resp.info.path)
+        return resp
 
     @classmethod
     async def forward(cls, src: NixReader, dst: NixWriter) -> None:
@@ -99,6 +109,7 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
 
     op: ClassVar[int] = Op.AddToStoreNar
     response_type: ClassVar[type[OpResponse]] = EmptyResponse
+    streaming: ClassVar[bool] = True
     info: PathInfo = field(default_factory=PathInfo)
     repair: int = 0
     dont_check_sigs: int = 0
@@ -134,6 +145,12 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
         writer.write_string(self.info.ca)
         writer.write_uint64(self.repair)
         writer.write_uint64(self.dont_check_sigs)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
+        path = await proxy.local_store.add_to_store_nar_streaming(proxy._r)
+        proxy.local_store.add_known_path(path)
+        return EmptyResponse()
 
     @classmethod
     async def forward(cls, src: NixReader, dst: NixWriter) -> str:
@@ -185,6 +202,7 @@ class AddMultipleToStoreRequest(OpRequest[EmptyResponse]):
 
     op: ClassVar[int] = Op.AddMultipleToStore
     response_type: ClassVar[type[OpResponse]] = EmptyResponse
+    streaming: ClassVar[bool] = True
     repair: int = 0
     dont_check_sigs: int = 0
 
@@ -198,6 +216,12 @@ class AddMultipleToStoreRequest(OpRequest[EmptyResponse]):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.repair)
         writer.write_uint64(self.dont_check_sigs)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
+        paths = await proxy.local_store.add_multiple_to_store_streaming(proxy._r)
+        proxy.local_store.add_known_paths(set(paths))
+        return EmptyResponse()
 
     @classmethod
     async def forward(cls, src: NixReader, dst: NixWriter) -> list[str]:

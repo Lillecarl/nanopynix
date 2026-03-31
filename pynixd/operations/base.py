@@ -17,10 +17,13 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum, auto
-from typing import Any, ClassVar, Generic, Self, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 
 from .. import wire
 from ..wire import NixReader, NixWriter
+
+if TYPE_CHECKING:
+    from ..proxy import DaemonProxy
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +89,7 @@ class OpRequest(ABC, Generic[Resp]):
     response_type: ClassVar[type[OpResponse]]
     is_query: ClassVar[bool] = False
     is_build: ClassVar[bool] = False
+    streaming: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -95,6 +99,17 @@ class OpRequest(ABC, Generic[Resp]):
             cls._log: logging.Logger = logging.getLogger(
                 f"pynixd.operations.{cls.__name__}"
             )
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        """Handle this operation from a client.
+
+        Default: decode the request via from_reader, forward to local store.
+        Override in subclasses for custom behavior.
+        """
+        request = await cls.from_reader(proxy._r, proxy._version)
+        async with proxy.local_store.transfer_conn() as conn:
+            return await conn.call(request)
 
     @classmethod
     @abstractmethod

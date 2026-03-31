@@ -9,9 +9,12 @@ trigger pyinstrument profiling of pynixd's execution.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import pyinstrument
+
+if TYPE_CHECKING:
+    from ..proxy import DaemonProxy
 
 from ..protocol import Op
 from .base import (
@@ -41,11 +44,11 @@ class StartProfilingRequest(EmptyRequest[StartProfilingResponse]):
     response_type: ClassVar[type[OpResponse]] = StartProfilingResponse
 
     @classmethod
-    async def from_reader(cls, reader, version):
+    async def handle(cls, proxy: DaemonProxy) -> StartProfilingResponse:
         global _profiler
         _profiler = pyinstrument.Profiler(async_mode="enabled")
         _profiler.start()
-        return cls()
+        return StartProfilingResponse()
 
 
 # ── StopProfiling ──────────────────────────────────────────────────
@@ -70,3 +73,7 @@ class StopProfilingResponse(SingleStringResponse):
 class StopProfilingRequest(EmptyRequest[StopProfilingResponse]):
     op: ClassVar[int] = Op.PynixdStopProfiling
     response_type: ClassVar[type[OpResponse]] = StopProfilingResponse
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> StopProfilingResponse:  # noqa: ARG003
+        return StopProfilingResponse()

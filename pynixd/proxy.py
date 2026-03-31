@@ -2,13 +2,7 @@
 Nix daemon protocol session handler.
 
 Accepts a client connection, performs the handshake, decodes operations,
-routes them, and encodes responses.
-
-Routing rules:
-- Queries: answered from the local store (per-op pool connection)
-- Mutations (AddToStore*): streamed to the local store (per-op pool connection)
-- Builds: enqueued to the build queue, scheduler picks a backend
-- Maintenance (SetOptions, GC): handled locally
+and dispatches them to request type handle() classmethods.
 """
 
 from __future__ import annotations
@@ -16,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from typing import cast
 
 import asyncssh
 
@@ -32,11 +25,7 @@ from .exceptions import BackendError
 from .operations import OP_REGISTRY
 from .operations.base import (
     ByteCollector,
-    EmptyResponse,
-    OpRequest,
     OpResponse,
-    SingleStringRequest,
-    StringSetResponse,
     Uint64Response,
 )
 from .operations.builds import (
@@ -47,19 +36,7 @@ from .operations.builds import (
     KeyedBuildResult,
     KeyedBuildResultsResponse,
 )
-from .operations.profiling import (
-    StartProfilingResponse,
-    StopProfilingResponse,
-)
-from .operations.queries import (
-    IsValidPathRequest,
-    IsValidPathResponse,
-    NarFromPathResponse,
-    QueryMissingRequest,
-    QueryPathInfoRequest,
-    QueryPathInfoResponse,
-    QueryValidPathsRequest,
-)
+from .operations.queries import QueryMissingRequest
 from .protocol import Op, OptTrusted, op_log
 from .stderr import StderrError, StderrNext
 from .store import Store
@@ -192,139 +169,17 @@ class DaemonProxy:
     # ── Dispatch ─────────────────────────────────────────────────────
 
     async def _dispatch(self, op: Op) -> OpResponse | None:
-        """Route an operation. Returns None if already handled."""
-        # Streaming mutations — delegated to Store
-        match op:
-            case Op.AddToStoreNar:
-                path = await self.local_store.add_to_store_nar_streaming(self._r)
-                self.local_store.add_known_path(path)
-                return EmptyResponse()
-            case Op.AddToStore:
-                resp = await self.local_store.add_to_store_streaming(self._r)
-                self.local_store.add_known_path(resp.info.path)
-                return resp
-            case Op.AddMultipleToStore:
-                paths = await self.local_store.add_multiple_to_store_streaming(self._r)
-                self.local_store.add_known_paths(set(paths))
-                return EmptyResponse()
-
-        # NarFromPath — handled via Store methods, no conn needed
-        if op == Op.NarFromPath:
-            req_cls = OP_REGISTRY.get(op.value)
-            assert req_cls is not None
-            request = await req_cls.from_reader(self._r, self._version)
-            assert isinstance(request, SingleStringRequest)
-            if await self.local_store.is_valid_path(request.path):
-                op_log("NarFromPath").debug(
-                    "NarFromPath %s -> streaming to client",
-                    request.path,
-                )
-                nar_size = 0
-                path_info = await self.local_store.query_path_info(request.path)
-                if path_info is not None:
-                    nar_size = path_info.nar_size
-                else:
-                    raise BackendError("getting status of %s", request.path)
-                await self._client.flush()
-                self._w.write_uint64(wire.STDERR_LAST)
-                await self.local_store.stream_nar_from_path(
-                    path=request.path,
-                    dst=self._w,
-                    nar_size=nar_size,
-                )
-                await self._w.drain()
-                return None
-            log.warning("NarFromPath %s not in local store", request.path)
-            return NarFromPathResponse(nar_data=b"")
-
-        # Decode request
+        """Route an operation to its request type's handle method."""
         req_cls = OP_REGISTRY.get(op.value)
         if req_cls is None:
             log.warning("Unhandled op: %s (%d)", op.name, op.value)
             await self._send_error(f"Unhandled operation: {op.name}")
             return None
 
-        request = await req_cls.from_reader(self._r, self._version)
-
         try:
-            return await self._handle(op, request)
+            return await req_cls.handle(self)
         except BackendError:
             return None
-
-    async def _handle(
-        self,
-        op: Op,
-        request: OpRequest,
-    ) -> OpResponse | None:
-        """Handle a decoded operation.
-
-        Returns None if the response was already sent (streaming, etc.).
-        """
-        # Build ops don't need a local store — scheduler manages its own
-        match op:
-            case Op.PynixdStartProfiling:
-                return StartProfilingResponse()
-            case Op.PynixdStopProfiling:
-                return StopProfilingResponse()
-            case Op.BuildPaths:
-                assert isinstance(request, BuildPathsRequest)
-                return await self._build_paths(request)
-            case Op.BuildPathsWithResults:
-                assert isinstance(request, BuildPathsWithResultsRequest)
-                return await self._build_paths_with_results(request)
-            case Op.BuildDerivation:
-                assert isinstance(request, BuildDerivationRequest)
-                return await self._build_derivation(request)
-
-        # Use Store methods — they handle DB fast-path and daemon fallback internally
-        match op:
-            case Op.IsValidPath:
-                request = cast(IsValidPathRequest, request)
-                valid = await self.local_store.is_valid_path(request.path)
-                return IsValidPathResponse(valid=valid)
-
-            case Op.QueryPathInfo:
-                request = cast(QueryPathInfoRequest, request)
-                info = await self.local_store.query_path_info(request.path)
-                return QueryPathInfoResponse(valid=info is not None, info=info)
-
-            case Op.QueryValidPaths:
-                request = cast(QueryValidPathsRequest, request)
-                paths = await self.local_store.query_valid_paths(
-                    request.paths, substitute=bool(request.substitute)
-                )
-                return StringSetResponse(paths=paths)
-
-            case Op.QueryAllValidPaths:
-                paths = await self.local_store.query_all_valid_paths()
-                return StringSetResponse(paths=paths)
-
-            case Op.QueryMissing:
-                return await self.local_store.query_missing(
-                    cast(QueryMissingRequest, request),
-                )
-
-            # ── Maintenance ────────────────────────────────────
-            case Op.SetOptions:
-                return EmptyResponse()
-
-            case (
-                Op.OptimiseStore
-                | Op.VerifyStore
-                | Op.AddTempRoot
-                | Op.AddIndirectRoot
-                | Op.CollectGarbage
-                | Op.AddSignatures
-                | Op.AddPermRoot
-            ):
-                return await self._unimplemented(request)
-
-            # ── Fallback: forward to local store ──────────────
-            case _:
-                async with self.local_store.transfer_conn() as conn:
-                    return await conn.call(
-                        request, client=self._client, suppress_last=True
-                    )
 
     # ── Builds ───────────────────────────────────────────────────────
 
@@ -531,13 +386,4 @@ class DaemonProxy:
         )
         await self._client.flush()
 
-    async def _unimplemented(
-        self,
-        request: OpRequest,
-    ) -> OpResponse:
-        """Warn the client and return a default response for unimplemented ops."""
-        req_cls = type(request)
-        self._client.queue.put_nowait(
-            StderrNext(text=f"pynixd: {req_cls.op} is not implemented\n")
-        )
-        return req_cls.response_type()
+

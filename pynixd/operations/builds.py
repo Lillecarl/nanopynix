@@ -5,9 +5,12 @@ Build operation request/response types.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import DerivedPath
+
+if TYPE_CHECKING:
+    from ..proxy import DaemonProxy
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -85,6 +88,11 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
         writer.write_string_set(set(self.derived_paths))
         writer.write_uint64(self.build_mode)
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        return await proxy._build_paths(request)
+
 
 @dataclass
 class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
@@ -104,6 +112,11 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(set(self.derived_paths))
         writer.write_uint64(self.build_mode)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        return await proxy._build_paths_with_results(request)
 
 
 # ── BuildDerivation ──────────────────────────────────────────────────
@@ -130,3 +143,8 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         writer.write_string(self.drv_path)
         await self.derivation.to_writer(writer, version)
         writer.write_uint64(self.build_mode)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        return await proxy._build_derivation(request)

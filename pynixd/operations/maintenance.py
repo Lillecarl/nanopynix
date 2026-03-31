@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from .. import wire
 from ..protocol import Op
+
+if TYPE_CHECKING:
+    from ..proxy import DaemonProxy
 from ..wire import NixReader, NixWriter
 from .base import (
     EmptyRequest,
@@ -102,6 +105,11 @@ class SetOptionsRequest(OpRequest[EmptyResponse]):
             use_substitutes,
         )
         return result
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
+        await cls.from_reader(proxy._r, proxy._version)
+        return EmptyResponse()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.keep_failed)

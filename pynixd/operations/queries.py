@@ -7,10 +7,13 @@ These operations query information from the store without mutating it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from .. import wire
 from ..derived_path import DerivedPath
+
+if TYPE_CHECKING:
+    from ..proxy import DaemonProxy
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -49,6 +52,12 @@ class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
     response_type: ClassVar[type[OpResponse]] = IsValidPathResponse
     is_query: ClassVar[bool] = True
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> IsValidPathResponse:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        valid = await proxy.local_store.is_valid_path(request.path)
+        return IsValidPathResponse(valid=valid)
+
 
 # ── QueryPathInfo ────────────────────────────────────────────────────
 
@@ -78,6 +87,12 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
     response_type: ClassVar[type[OpResponse]] = QueryPathInfoResponse
     is_query: ClassVar[bool] = True
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> QueryPathInfoResponse:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        info = await proxy.local_store.query_path_info(request.path)
+        return QueryPathInfoResponse(valid=info is not None, info=info)
+
 
 # ── QueryValidPaths ──────────────────────────────────────────────────
 
@@ -102,6 +117,14 @@ class QueryValidPathsRequest(OpRequest[StringSetResponse]):
         writer.write_string_set(self.paths)
         if version >= wire.proto(1, 27):
             writer.write_uint64(self.substitute)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> StringSetResponse:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        paths = await proxy.local_store.query_valid_paths(
+            request.paths, substitute=bool(request.substitute)
+        )
+        return StringSetResponse(paths=paths)
 
 
 # ── QueryPathFromHashPart ────────────────────────────────────────────
@@ -198,6 +221,32 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
     response_type: ClassVar[type[OpResponse]] = NarFromPathResponse
     is_query: ClassVar[bool] = True
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        from ..exceptions import BackendError
+        from ..protocol import op_log
+
+        request = await cls.from_reader(proxy._r, proxy._version)
+        if await proxy.local_store.is_valid_path(request.path):
+            op_log("NarFromPath").debug(
+                "NarFromPath %s -> streaming to client",
+                request.path,
+            )
+            path_info = await proxy.local_store.query_path_info(request.path)
+            if path_info is None:
+                raise BackendError("getting status of %s", request.path)
+            await proxy._client.flush()
+            proxy._w.write_uint64(wire.STDERR_LAST)
+            await proxy.local_store.stream_nar_from_path(
+                path=request.path,
+                dst=proxy._w,
+                nar_size=path_info.nar_size,
+            )
+            await proxy._w.drain()
+            return None
+        cls._log.warning("NarFromPath %s not in local store", request.path)
+        return NarFromPathResponse(nar_data=b"")
+
 
 # ── QueryAllValidPaths ───────────────────────────────────────────────
 
@@ -207,6 +256,11 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
     op: ClassVar[int] = Op.QueryAllValidPaths
     response_type: ClassVar[type[OpResponse]] = StringSetResponse
     is_query: ClassVar[bool] = True
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> StringSetResponse:
+        paths = await proxy.local_store.query_all_valid_paths()
+        return StringSetResponse(paths=paths)
 
 
 # ── QuerySubstitutablePaths ──────────────────────────────────────────
@@ -298,3 +352,8 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(set(self.derived_paths))
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> QueryMissingResponse:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        return await proxy.local_store.query_missing(request)
