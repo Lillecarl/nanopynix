@@ -169,6 +169,7 @@ class Connection:
             self.w.write(buf.getvalue())
             await self.w.drain()
 
+            msgs: list[stderr.StderrMsg] = []
             if client is not None:
                 err = await stderr.collect(self.r, client.queue)
                 if err is not None:
@@ -179,11 +180,22 @@ class Connection:
                         err.msg,
                     )
             else:
-                await stderr.drain(
-                    self.r, raise_on_error=raise_on_error, conn_id=self.id
-                )
+                async for msg in stderr.read_stream(self.r):
+                    msgs.append(msg)
+                    if isinstance(msg, stderr.StderrError):
+                        stderr_log.warning(
+                            "store=%s daemon error: [%s] %s",
+                            self.id,
+                            msg.error_type,
+                            msg.msg,
+                        )
+                        if raise_on_error:
+                            from .exceptions import BackendError
+
+                            raise BackendError(f"Backend error: {msg.msg}")
 
             response = await response_type.from_reader(self.r, self.version)
+            response.stderr_msgs = msgs
         except Exception:
             self.dirty = True
             raise

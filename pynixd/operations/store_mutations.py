@@ -294,8 +294,13 @@ class AddBuildLogRequest(SingleStringRequest[Uint64Response]):
         # but pynixd proxy loop handles the framing if it's marked as subframe.
         # However, Op.AddBuildLog is NOT a subframe op in the protocol sense
         # that it has a framed body following the request.
-        # We just return success.
-        return Uint64Response(value=0)
+        from ..stderr import StderrNext
+
+        resp = Uint64Response(value=0)
+        resp.stderr_msgs.append(
+            StderrNext(text=f"pynixd: AddBuildLog for {self.path} ignored (no-op)")
+        )
+        return resp
 
 
 @dataclass
@@ -305,7 +310,13 @@ class AddTempRootRequest(SingleStringRequest[Uint64Response]):
 
     async def execute(self, store: Store) -> Uint64Response:
         # We don't want clients creating temp roots on our host.
-        return Uint64Response(value=0)
+        from ..stderr import StderrNext
+
+        resp = Uint64Response(value=0)
+        resp.stderr_msgs.append(
+            StderrNext(text=f"pynixd: AddTempRoot for {self.path} ignored (no-op)")
+        )
+        return resp
 
 
 @dataclass
@@ -315,7 +326,13 @@ class AddIndirectRootRequest(SingleStringRequest[Uint64Response]):
 
     async def execute(self, store: Store) -> Uint64Response:
         # No-op: return success (0).
-        return Uint64Response(value=0)
+        from ..stderr import StderrNext
+
+        resp = Uint64Response(value=0)
+        resp.stderr_msgs.append(
+            StderrNext(text=f"pynixd: AddIndirectRoot for {self.path} ignored (no-op)")
+        )
+        return resp
 
 
 @dataclass

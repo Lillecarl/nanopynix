@@ -54,14 +54,23 @@ class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
     is_query: ClassVar[bool] = True
 
     async def execute(self, store: Store) -> IsValidPathResponse:
+        from ..stderr import StderrNext
+
         # 1. Memory cache
         if store.has_path(self.path):
-            return IsValidPathResponse(valid=True)
+            resp = IsValidPathResponse(valid=True)
+            resp.stderr_msgs.append(
+                StderrNext(text=f"pynixd: IsValidPath {self.path} (memory hit)")
+            )
+            return resp
 
         # 2. SQLite fast path
         if store.db:
             result = await store.db.is_valid_path(self.path)
             if result is not None:
+                result.stderr_msgs.append(
+                    StderrNext(text=f"pynixd: IsValidPath {self.path} (SQLite hit)")
+                )
                 return result
 
         # 3. Daemon fallback
@@ -97,10 +106,15 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
     is_query: ClassVar[bool] = True
 
     async def execute(self, store: Store) -> QueryPathInfoResponse:
+        from ..stderr import StderrNext
+
         # 1. SQLite fast path
         if store.db:
             result = await store.db.query_path_info(self.path)
             if result is not None:
+                result.stderr_msgs.append(
+                    StderrNext(text=f"pynixd: QueryPathInfo {self.path} (SQLite hit)")
+                )
                 return result
 
         # 2. Daemon fallback

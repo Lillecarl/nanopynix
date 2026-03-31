@@ -113,7 +113,11 @@ class SetOptionsRequest(OpRequest[EmptyResponse]):
         # We don't forward SetOptions to the local store daemon as it would
         # mess with our own proxy's session state if it was a real daemon.
         # We just return EmptyResponse.
-        return EmptyResponse()
+        from ..stderr import StderrNext
+
+        resp = EmptyResponse()
+        resp.stderr_msgs.append(StderrNext(text="pynixd: SetOptions ignored (no-op)"))
+        return resp
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.keep_failed)
@@ -305,7 +309,13 @@ class AddPermRootRequest(OpRequest[AddPermRootResponse]):
     async def execute(self, store: Store) -> AddPermRootResponse:
         # No-op: don't create permanent roots on the host.
         # Just return the requested root path as "success".
-        return AddPermRootResponse(gc_root=self.gc_root)
+        from ..stderr import StderrNext
+
+        resp = AddPermRootResponse(gc_root=self.gc_root)
+        resp.stderr_msgs.append(
+            StderrNext(text=f"pynixd: AddPermRoot for {self.gc_root} ignored (no-op)")
+        )
+        return resp
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.store_path)
