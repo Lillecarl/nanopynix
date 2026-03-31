@@ -109,6 +109,9 @@ class SetOptionsRequest(OpRequest[EmptyResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
         await cls.from_reader(proxy._r, proxy._version)
+        # We don't forward SetOptions to the local store daemon as it would
+        # mess with our own proxy's session state if it was a real daemon.
+        # We just return EmptyResponse.
         return EmptyResponse()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -178,6 +181,11 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
             _obsolete3=await reader.read_uint64(),
         )
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> CollectGarbageResponse:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        return await proxy.local_store.call(request, client=proxy._client)
+
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.action)
         writer.write_string_set(self.paths_to_delete)
@@ -205,6 +213,11 @@ class VerifyStoreRequest(OpRequest[Uint64Response]):
             repair=await reader.read_uint64(),
         )
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        return await proxy.local_store.call(request, client=proxy._client)
+
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.check_contents)
         writer.write_uint64(self.repair)
@@ -217,6 +230,10 @@ class VerifyStoreRequest(OpRequest[Uint64Response]):
 class OptimiseStoreRequest(EmptyRequest[Uint64Response]):
     op: ClassVar[int] = Op.OptimiseStore
     response_type: ClassVar[type[OpResponse]] = Uint64Response
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
+        return await proxy.local_store.call(cls(), client=proxy._client)
 
 
 # ── FindRoots ────────────────────────────────────────────────────────
@@ -254,6 +271,10 @@ class FindRootsRequest(EmptyRequest[FindRootsResponse]):
     op: ClassVar[int] = Op.FindRoots
     response_type: ClassVar[type[OpResponse]] = FindRootsResponse
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> FindRootsResponse:
+        return await proxy.local_store.call(cls(), client=proxy._client)
+
 
 # ── AddPermRoot ─────────────────────────────────────────────────────
 # Nix 1.38+. Request: store path + gcRoot path. Response: gcRoot path.
@@ -285,6 +306,13 @@ class AddPermRootRequest(OpRequest[AddPermRootResponse]):
             store_path=await reader.read_string(),
             gc_root=await reader.read_string(),
         )
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> AddPermRootResponse:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        # No-op: don't create permanent roots on the host.
+        # Just return the requested root path as "success".
+        return AddPermRootResponse(gc_root=request.gc_root)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.store_path)

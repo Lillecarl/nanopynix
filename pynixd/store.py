@@ -28,7 +28,13 @@ import asyncssh
 from . import stderr, wire
 from .connection import ClientConn, Connection
 from .local_store_db import LocalStoreDB
-from .operations.base import EmptyResponse, PathInfo, SingleStringRequest
+from .operations.base import (
+    EmptyResponse,
+    OpRequest,
+    PathInfo,
+    Resp,
+    SingleStringRequest,
+)
 from .operations.builds import BuildDerivationRequest, BuildDerivationResponse
 from .operations.maintenance import (
     CollectGarbageRequest,
@@ -166,6 +172,39 @@ class Store(ABC):
     def count_common_paths(self, paths: set[str]) -> int:
         return len(paths & self._known_paths)
 
+    async def call(
+        self,
+        request: OpRequest[Resp],
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        raise_on_error: bool = False,
+    ) -> Resp:
+        """Execute any operation on this store. Handles connection lifecycle.
+
+        Args:
+            request: The operation request object.
+            client: Optional client connection for stderr forwarding.
+            suppress_last: If True, consume but don't forward STDERR_LAST.
+            raise_on_error: Whether to raise BackendError on daemon errors.
+        """
+        # Use build_conn for builds, transfer_conn for queries/mutations
+        if request.is_build:
+            pool = self.build_conn
+        else:
+            pool = self.transfer_conn
+
+        async with pool() as conn:
+            try:
+                return await conn.call(
+                    request,
+                    client=client,
+                    suppress_last=suppress_last,
+                    raise_on_error=raise_on_error,
+                )
+            except Exception:
+                conn.dirty = True
+                raise
+
     def add_known_path(self, path: str, *, update_regtime: bool = True) -> None:
         self._known_paths.add(path)
         if update_regtime and self.db is not None:
@@ -177,27 +216,13 @@ class Store(ABC):
             self.db.mark_paths(paths)
 
     async def query_path_info(self, path: str) -> PathInfo | None:
-        """Get PathInfo for a store path. DB first, daemon fallback."""
-        if self.db is not None:
-            result = await self.db.query_path_info(path)
-            if result is not None:
-                if result.valid:
-                    return result.info
-                else:
-                    return None
+        """Get PathInfo for a store path using a QueryPathInfoRequest."""
 
-        try:
-            async with self.transfer_conn() as conn:
-                resp = await conn.call(QueryPathInfoRequest(path=path))
-                if resp.valid and resp.info is not None:
-                    resp.info.path = path
-                    return resp.info
-                return None
-        except Exception:
-            log.debug(
-                "query_path_info failed for %s on %s", path, self.id, exc_info=True
-            )
-            return None
+        resp = await self.call(QueryPathInfoRequest(path=path))
+        if resp.valid and resp.info is not None:
+            resp.info.path = path
+            return resp.info
+        return None
 
     async def query_path_infos(self, paths: set[str]) -> dict[str, PathInfo]:
         """Batch PathInfo for multiple paths. DB fast path, daemon fallback."""
@@ -218,73 +243,53 @@ class Store(ABC):
         return infos
 
     async def is_valid_path(self, path: str) -> bool:
-        """Check if a path is valid on this store. DB first, daemon fallback."""
+        """Check if a path is valid on this store."""
+
         if self.has_path(path):
             return True
-        if self.db is not None:
-            result = await self.db.is_valid_path(path)
-            if result is not None:
-                return result.valid
-        try:
-            async with self.transfer_conn() as conn:
-                resp = await conn.call(IsValidPathRequest(path=path))
-                return resp.valid
-        except Exception:
-            log.debug("is_valid_path failed for %s on %s", path, self.id)
-            return False
+
+        resp = await self.call(IsValidPathRequest(path=path))
+        return resp.valid
 
     async def query_valid_paths(
         self,
         paths: set[str],
         substitute: bool = False,
     ) -> set[str]:
-        """Query which paths are valid on this store. DB first, daemon fallback."""
-        if self.db is not None:
-            result = await self.db.query_valid_paths(paths)
-            if result is not None:
-                # When substitution is requested, DB hits alone aren't
-                # sufficient — missing paths might be obtainable via
-                # substituters that only the daemon knows about.
-                if not substitute or result.paths >= paths:
-                    return result.paths
-        async with self.transfer_conn() as conn:
-            resp = await conn.call(
-                QueryValidPathsRequest(
-                    paths=paths,
-                    substitute=1 if substitute else 0,
-                )
+        """Query which paths are valid on this store."""
+
+        resp = await self.call(
+            QueryValidPathsRequest(
+                paths=paths,
+                substitute=1 if substitute else 0,
             )
-            return resp.paths
+        )
+        return resp.paths
 
     async def query_all_valid_paths(self) -> set[str]:
-        """Query all valid paths on this store. DB first, daemon fallback."""
-        if self.db is not None:
-            result = await self.db.query_all_valid_paths()
-            if result is not None:
-                self._known_paths.update(result.paths)
-                return result.paths
-        async with self.transfer_conn() as conn:
-            resp = await conn.call(QueryAllValidPathsRequest())
-            self._known_paths.update(resp.paths)
-            return resp.paths
+        """Query all valid paths on this store."""
+        from .operations.queries import QueryAllValidPathsRequest
+
+        resp = await self.call(QueryAllValidPathsRequest())
+        self._known_paths.update(resp.paths)
+        return resp.paths
 
     async def query_missing(
         self,
         request: QueryMissingRequest,
     ) -> QueryMissingResponse:
         """Query which paths are missing from this store."""
-        async with self.transfer_conn() as conn:
-            resp = await conn.call(request)
+        resp = await self.call(request)
 
-        # Add outputs from all derived paths to known paths
+        # Update known paths: outputs of all derived paths are now expected
         if self.store_path:
             for dp in request.derived_paths:
-                self._known_paths.update(dp.to_outputs(self.store_path))
+                self.add_known_paths(dp.to_outputs(self.store_path))
 
-        # Query valid paths for substitutes and add to known paths
+        # Any path being substituted is also "known" to be available
         if resp.will_substitute:
             valid = await self.query_valid_paths(resp.will_substitute, substitute=True)
-            self._known_paths.update(valid)
+            self.add_known_paths(valid)
 
         return resp
 

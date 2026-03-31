@@ -266,6 +266,11 @@ class AddSignaturesRequest(OpRequest[Uint64Response]):
         writer.write_string(self.path)
         writer.write_string_set(self.sigs)
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        return await proxy.local_store.call(request, client=proxy._client)
+
 
 # ── Thin request subclasses for SingleStringRequest-based ops ──────────
 
@@ -280,11 +285,27 @@ class AddBuildLogRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.AddBuildLog
     response_type: ClassVar[type[OpResponse]] = Uint64Response
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
+        await cls.from_reader(proxy._r, proxy._version)
+        # Consumes framed data that follows if it was a real daemon,
+        # but pynixd proxy loop handles the framing if it's marked as subframe.
+        # However, Op.AddBuildLog is NOT a subframe op in the protocol sense
+        # that it has a framed body following the request.
+        # We just return success.
+        return Uint64Response(value=0)
+
 
 @dataclass
 class AddTempRootRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.AddTempRoot
     response_type: ClassVar[type[OpResponse]] = Uint64Response
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
+        await cls.from_reader(proxy._r, proxy._version)
+        # We don't want clients creating temp roots on our host.
+        return Uint64Response(value=0)
 
 
 @dataclass
@@ -292,11 +313,22 @@ class AddIndirectRootRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.AddIndirectRoot
     response_type: ClassVar[type[OpResponse]] = Uint64Response
 
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
+        await cls.from_reader(proxy._r, proxy._version)
+        # No-op: return success (0).
+        return Uint64Response(value=0)
+
 
 @dataclass
 class EnsurePathRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.EnsurePath
     response_type: ClassVar[type[OpResponse]] = Uint64Response
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> Uint64Response:
+        request = await cls.from_reader(proxy._r, proxy._version)
+        return await proxy.local_store.call(request, client=proxy._client)
 
 
 # ── Forwarding helpers ─────────────────────────────────────────────
