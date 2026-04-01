@@ -14,8 +14,12 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from pynixd.ssh_server import run_server as run_ssh_server
+from pynixd.ssh_server import start_ssh_server
 from pynixd.store import LocalSocketStore, Store
+from pynixd.build_queue import BuildQueue
+from pynixd.scheduler import Scheduler
+from pynixd.local_store_db import LocalStoreDB
+from pynixd.gc import GarbageCollector
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -207,14 +211,46 @@ async def run_pynixd(
     port_holder: list[int] = []
 
     async def _run() -> None:
-        await run_ssh_server(
+        build_queue = BuildQueue()
+        scheduler = Scheduler(build_queue, stores, local_store)
+        
+        # Initialize local store and backends
+        await local_store.probe_version()
+        local_store.db = await LocalStoreDB.open(local_store.store_path or "/")
+
+        for store in stores.values():
+            try:
+                await store.sync_paths()
+            except Exception:
+                log.exception("Failed to sync paths for store %s", store.id)
+
+        # Start background services
+        scheduler_task = asyncio.create_task(scheduler.start())
+        gc: GarbageCollector | None = None
+        if local_store.db is not None:
+            local_store.db.start()
+            gc = GarbageCollector(local_store.db, stores, local_store)
+            gc.start()
+
+        ssh_server = await start_ssh_server(
             stores=stores,
             local_store=local_store,
+            build_queue=build_queue,
+            scheduler=scheduler,
             host="127.0.0.1",
             port=0,
-            ready_event=ready,
-            port_holder=port_holder,
         )
+        port_holder.append(ssh_server.get_port())
+        ready.set()
+        
+        try:
+            await ssh_server.wait_closed()
+        finally:
+            scheduler_task.cancel()
+            if gc:
+                await gc.stop()
+            if local_store.db:
+                await local_store.db.close()
 
     task = asyncio.create_task(_run())
 

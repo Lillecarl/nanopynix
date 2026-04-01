@@ -61,8 +61,12 @@ def _run_pynixd_thread(
     socket_path = "/tmp/pynixd-bench-unix.sock"
 
     async def _async_run() -> None:
+        from pynixd.unix_server import start_unix_server
         from pynixd.store import LocalSocketStore
-        from pynixd.unix_server import run_unix_server
+        from pynixd.build_queue import BuildQueue
+        from pynixd.scheduler import Scheduler
+        from pynixd.local_store_db import LocalStoreDB
+        from pynixd.gc import GarbageCollector
 
         local_store = LocalSocketStore(
             id="local", store_path="/", max_builds=0, max_transfers=64
@@ -76,13 +80,46 @@ def _run_pynixd_thread(
             )
         }
 
-        await run_unix_server(
+        # Shared resources
+        build_queue = BuildQueue()
+        scheduler = Scheduler(build_queue, stores, local_store)
+
+        # Initialize local store and backends
+        await local_store.probe_version()
+        local_store.db = await LocalStoreDB.open(local_store.store_path or "/")
+
+        for store in stores.values():
+            try:
+                await store.sync_paths()
+            except Exception:
+                log.exception("Failed to sync paths for store %s", store.id)
+
+        # Start background services
+        scheduler_task = asyncio.create_task(scheduler.start())
+        if local_store.db is not None:
+            local_store.db.start()
+
+        unix_server = await start_unix_server(
             stores=stores,
             local_store=local_store,
+            build_queue=build_queue,
+            scheduler=scheduler,
             socket_path=socket_path,
-            ready_event=ready_event,
-            stop_event=stop_event,
         )
+        ready_event.set()
+
+        try:
+            while not stop_event.is_set():
+                await asyncio.sleep(0.1)
+        finally:
+            unix_server.close()
+            await unix_server.wait_closed()
+            scheduler_task.cancel()
+            if local_store.db:
+                await local_store.db.close()
+            await local_store.close()
+            for store in stores.values():
+                await store.close()
 
     asyncio.run(_async_run())
 
