@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -80,7 +81,7 @@ class Scheduler:
     def __init__(
         self,
         build_queue: BuildQueue,
-        stores: dict[str, Store],
+        stores: Mapping[str, Store],
         local_store: Store,
     ) -> None:
         self._queue = build_queue

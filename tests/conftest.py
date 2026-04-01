@@ -6,16 +6,17 @@ import asyncio
 import logging
 import os
 import shlex
-import signal
+import socket
 import subprocess
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 import pytest
 from environs import Env
 
-from pynixd.instance import PynixdConfig, run_pynixd as run_instance
+from pynixd.instance import PynixdConfig
+from pynixd.instance import run_pynixd as run_instance
 from pynixd.store import LocalSocketStore, Store
 
 logging.basicConfig(
@@ -65,114 +66,163 @@ def cleanup_bench_paths():
             capture_output=True,
             text=True,
         )
-        if result.stdout:
-            paths = result.stdout.strip().split("\n")
-            log.info(f"Deleting {len(paths)} benchmark paths...")
-            # Using nix store delete instead of nix-store --delete
-            subprocess.run(
-                [NIX_BIN, "store", "delete", *paths],
-                capture_output=True,
-            )
+        for p in result.stdout.splitlines():
+            if p.strip():
+                log.info("Deleting old benchmark path: %s", p)
+                subprocess.run([NIX_BIN, "store", "delete", p], capture_output=True)
     except Exception as e:
-        log.warning(f"Failed to clean up benchmark paths: {e}")
+        log.warning("Could not cleanup benchmark paths: %s", e)
 
 
 def get_current_system() -> str:
-    """Get the current system via nix."""
-    result = subprocess.run(
-        [
-            NIX_BIN,
-            "eval",
-            "--store",
-            "dummy://",
-            "--impure",
-            "--raw",
-            "--expr",
-            "builtins.currentSystem",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=10,
+    """Return nix system string (e.g. x86_64-linux)."""
+    return subprocess.check_output([NIX_BIN, "--version"]).decode().split()[-1]
+
+
+def _run_subprocess_with_timeout(
+    cmd: list[str], env: dict[str, str], timeout: float = 60.0
+) -> tuple[int, str, str]:
+    """Run subprocess and return (rc, stdout, stderr), raising on timeout."""
+    try:
+        res = subprocess.run(
+            cmd, env=env, capture_output=True, text=True, timeout=timeout
+        )
+        return res.returncode, res.stdout, res.stderr
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+
+
+async def nix_build(
+    uri: str,
+    target: str,
+    env: dict[str, str] | None = None,
+    *args: str,
+    nix_file: str | None = None,
+    jobs: int = 1,
+) -> tuple[int, str, str]:
+    """Run nix build against a pynixd SSH server."""
+    nix_file = nix_file or TEST_NIX
+    cmd = [
+        NIX_BIN,
+        "build",
+        "--builders",
+        f"{uri} {get_current_system()} - {jobs}",
+        "--max-jobs",
+        str(jobs),
+        "--no-link",
+        "--print-out-paths",
+        "--file",
+        nix_file,
+        target,
+    ]
+    # Add any extra args (like --file if the caller passed it as positional)
+    if args:
+        cmd.extend(args)
+
+    build_env = (env or os.environ).copy()
+    build_env["NIX_SSHOPTS"] = (
+        "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
     )
-    return result.stdout.strip()
+
+    log.debug("Building: %s", shlex.join(cmd))
+    res = await asyncio.create_subprocess_exec(
+        *cmd,
+        env=build_env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await res.communicate()
+    return res.returncode or 0, stdout.decode(), stderr.decode()
 
 
-CURRENT_SYSTEM = None
+async def nix_build_store_only(
+    uri: str,
+    target: str,
+    env: dict[str, str] | None = None,
+    *args: str,
+    nix_file: str | None = None,
+) -> tuple[int, str, str]:
+    """Run nix build --store against a pynixd SSH server."""
+    nix_file = nix_file or TEST_NIX
+    cmd = [
+        NIX_BIN,
+        "build",
+        "--store",
+        uri,
+        "--no-link",
+        "--print-out-paths",
+        "--file",
+        nix_file,
+        target,
+    ]
+    if args:
+        cmd.extend(args)
 
+    build_env = (env or os.environ).copy()
+    build_env["NIX_SSHOPTS"] = (
+        "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    )
 
-def _get_system() -> str:
-    global CURRENT_SYSTEM
-    if CURRENT_SYSTEM is None:
-        CURRENT_SYSTEM = get_current_system()
-    return CURRENT_SYSTEM
+    log.debug("Building (store only): %s", shlex.join(cmd))
+    res = await asyncio.create_subprocess_exec(
+        *cmd,
+        env=build_env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await res.communicate()
+    return res.returncode or 0, stdout.decode(), stderr.decode()
 
 
 @dataclass
 class PynixdServer:
-    """A running pynixd server with its stores and client store."""
+    """A running pynixd SSH server."""
 
     host: str
     port: int
     username: str
-    stores: dict[str, Store]
+    stores: Mapping[str, Store]
     client_store_path: str
-    system: str
-    njobs: int
-    _task: asyncio.Task = field(default=None, repr=False)
+    _task: asyncio.Task[None] = field(repr=False)
+    system: str = "x86_64-linux"
+    njobs: int = 4
+    # Stores are assigned during __await__ - store ref for close()
+    _local_store: Store | None = field(default=None, repr=False)
 
     @property
     def uri(self) -> str:
-        """Default URI using nix-style host:port."""
-        return self.uri_for(NIX_BIN)
-
-    def uri_for(self, uri_format: str = "nix") -> str:
-        """Generate ssh-ng:// URI compatible with the given client.
-
-        uri_format="lix": ssh-ng://user@host?port=N
-        uri_format="nix": ssh-ng://user@host:port
-        """
-        if uri_format == "lix":
-            return f"ssh-ng://{self.username}@{self.host}?port={self.port}"
+        """ssh-ng:// URI for --store."""
         return f"ssh-ng://{self.username}@{self.host}:{self.port}"
 
-    def builder_uri(
-        self,
-        *,
-        uri_format: str = "nix",
-        system: str | None = None,
-        max_jobs: int | None = None,
-        speed_factor: int = 1,
-        features: str = "-",
-    ) -> str:
-        """Build a --builders URI string with optional overrides.
+    def builder_uri(self, max_jobs: int | None = None) -> str:
+        """Builder spec for --builders."""
+        jobs = max_jobs if max_jobs is not None else self.njobs
+        return f"{self.uri} {self.system} - {jobs}"
 
-        Format: "URI system features max_jobs speed_factor"
-        """
-        return (
-            f"{self.uri_for(uri_format)} "
-            f"{system or self.system} "
-            f"{features} "
-            f"{max_jobs if max_jobs is not None else self.njobs} "
-            f"{speed_factor}"
-        )
+    def uri_for(self, uri_format: str) -> str:
+        """Return URI in the given format."""
+        if uri_format == "ssh-ng":
+            return self.uri
+        elif uri_format == "unix":
+            # For unix-server tests that use matrix
+            return f"unix:///tmp/pynixd-test.socket?remote-store={self.uri}"
+        return self.uri
 
     async def close(self) -> None:
-        """Stop the server and close all stores."""
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        """Stop pynixd and wait for task."""
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+
+        # Also close the stores (SSH connections)
         for store in self.stores.values():
             await store.close()
-        await self._local_store.close()
 
-    # Stores are assigned during __await__ - store ref for close()
-    _local_store: Store = field(default=None, repr=False)
+        if self._local_store:
+            await self._local_store.close()
 
-
-import socket
 
 def get_free_port() -> int:
     """Get a free port from the OS."""
@@ -183,27 +233,13 @@ def get_free_port() -> int:
 
 @asynccontextmanager
 async def run_pynixd(
-    stores: dict[str, Store],
+    stores: Mapping[str, Store],
     *,
     local_store: Store | None = None,
     client_store_path: str = "/tmp/pynixd-test-client",
     njobs: int = 4,
 ) -> AsyncIterator[PynixdServer]:
-    """Start a pynixd SSH server with the given stores.
-
-    Usage:
-        async with run_pynixd(stores) as server:
-            uri = server.uri                # bare ssh-ng:// URI
-            builder = server.builder_uri()  # "URI system - njobs 1" for --builders
-            ...
-        # server automatically stopped
-
-    Args:
-        stores: Dict of store_id -> Store for build workers
-        local_store: Store for pynixd's local store (default: local subprocess)
-        client_store_path: Local store path for the nix client
-        njobs: Max concurrent jobs for --builders (default 4)
-    """
+    """Start a pynixd SSH server with the given stores."""
     if local_store is None:
         local_store = LocalSocketStore(
             store_path="/tmp/pynixd-test-local",
@@ -233,8 +269,9 @@ async def run_pynixd(
     try:
         try:
             await asyncio.wait_for(ready.wait(), timeout=10)
-        except (TimeoutError, asyncio.TimeoutError):
-            raise RuntimeError("Could not start pynixd SSH server (timed out waiting for ready)") from None
+        except TimeoutError:
+            msg = "Could not start pynixd SSH server (timed out waiting for ready)"
+            raise RuntimeError(msg) from None
 
         username = env.str("USER", "root")
 
@@ -244,9 +281,9 @@ async def run_pynixd(
             username=username,
             stores=stores,
             client_store_path=client_store_path,
-            system=_get_system(),
-            njobs=njobs,
             _task=task,
+            system=get_current_system(),
+            njobs=njobs,
             _local_store=local_store,
         )
         yield server
@@ -261,9 +298,6 @@ async def run_pynixd(
                 pass
 
 
-# ── Helper functions for common server configurations ──────────────────────────
-
-
 def make_local_stores(
     n: int = 2,
     *,
@@ -271,14 +305,7 @@ def make_local_stores(
     prefix: str = "builder",
     max_builds: int = 2,
 ) -> dict[str, Store]:
-    """Create N local socket stores with managed daemons.
-
-    Args:
-        n: Number of stores to create
-        supported_systems: If set, all stores only support these systems
-        prefix: ID prefix for stores
-        max_builds: Max concurrent builds per store
-    """
+    """Create N local socket stores with managed daemons."""
     stores: dict[str, Store] = {}
     for i in range(n):
         store_path = f"/tmp/pynixd-test-{prefix}-{i}"
@@ -292,9 +319,6 @@ def make_local_stores(
         )
         stores[store.id] = store
     return stores
-
-
-# ── Pytest helpers ────────────────────────────────────────────────────────────
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -417,13 +441,13 @@ def _print_build_bench_summary(
             try:
                 with open(r.profile_path) as f:
                     lines = f.readlines()
-                # Print header (first 7 lines) + top 40 lines (most indented call stacks)
+                # Print header (first 7 lines) + top 40 lines (most indented)
                 terminalreporter.write_line("    Profile summary:")
                 for line in lines[:7]:
                     terminalreporter.write_line(f"    {line.rstrip()}")
                 # Find the most detailed stack traces (most indented)
                 # These appear later in the profile
-                stack_lines = [l for l in lines[7:] if l.startswith("   │")]
+                stack_lines = [line for line in lines[7:] if line.startswith("   │")]
                 for line in stack_lines[:40]:
                     terminalreporter.write_line(f"    {line.rstrip()}")
                 terminalreporter.write_line(f"    (full profile: {r.profile_path})")
@@ -446,114 +470,3 @@ def nix_env() -> dict[str, str]:
     env = os.environ.copy()
     env["NIX_SSHOPTS"] = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
     return env
-
-
-# ── Subprocess helpers ────────────────────────────────────────────────────────
-
-
-def _sync_kill_process_group(pid: int) -> None:
-    """Kill a process group synchronously."""
-    try:
-        os.killpg(pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-
-
-async def _run_subprocess_with_timeout(
-    cmd: list[str],
-    env: dict[str, str],
-    timeout: int,
-) -> tuple[int, str, str]:
-    """Run a subprocess with timeout.
-
-    Returns (returncode, stdout, stderr).
-    """
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-        start_new_session=True,
-    )
-
-    try:
-        stdout_data, stderr_data = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
-    except TimeoutError:
-        _sync_kill_process_group(proc.pid)
-        pytest.fail(f"subprocess timed out after {timeout}s")
-    except asyncio.CancelledError:
-        _sync_kill_process_group(proc.pid)
-        raise
-
-    return proc.returncode, stdout_data.decode(), stderr_data.decode()
-
-
-async def nix_build(
-    builder_uri: str,
-    client_store_path: str,
-    env: dict[str, str],
-    *extra_args: str,
-    timeout: int = 120,
-) -> tuple[int, str, str]:
-    """Run a nix build via --builders flag."""
-    cmd = [
-        NIX_BIN,
-        "build",
-        "--store",
-        client_store_path,
-        "--builders",
-        builder_uri,
-        "--max-jobs",
-        "0",
-        "--no-link",
-        *extra_args,
-    ]
-    log.info("nix_build builder_uri=%r", builder_uri)
-    log.info("nix_build cmd=%s", " ".join(shlex.quote(a) for a in cmd))
-
-    returncode, stdout_s, stderr_s = await _run_subprocess_with_timeout(
-        cmd, env, timeout
-    )
-
-    log.info(
-        "nix_build rc=%d\n  stdout: %s\n  stderr: %s",
-        returncode,
-        stdout_s[:500],
-        stderr_s[:2000],
-    )
-    return returncode, stdout_s, stderr_s
-
-
-async def nix_build_store_only(
-    store_uri: str,
-    env: dict[str, str],
-    *extra_args: str,
-    timeout: int = 120,
-) -> tuple[int, str, str]:
-    """Run a nix build using pynixd as the store directly."""
-    cmd = [
-        NIX_BIN,
-        "build",
-        "--store",
-        store_uri,
-        "--no-link",
-        *extra_args,
-    ]
-    log.info("nix_build_store_only: %s", " ".join(shlex.quote(a) for a in cmd))
-
-    returncode, stdout_s, stderr_s = await _run_subprocess_with_timeout(
-        cmd, env, timeout
-    )
-
-    log.info(
-        "nix_build_store_only rc=%d\n  stdout: %s\n  stderr: %s",
-        returncode,
-        stdout_s[:500],
-        stderr_s[:2000],
-    )
-    return returncode, stdout_s, stderr_s

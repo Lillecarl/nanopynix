@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 
 from environs import Env
 
@@ -35,7 +36,7 @@ class GarbageCollector:
     def __init__(
         self,
         db: LocalStoreDB,
-        stores: dict[str, Store],
+        stores: Mapping[str, Store],
         local_store: Store,
         interval: float = _GC_INTERVAL,
         local_max_age: int = _GC_LOCAL_MAX_AGE,

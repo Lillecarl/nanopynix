@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 import asyncssh
@@ -26,7 +26,7 @@ class PynixdConfig:
     """Configuration for a pynixd instance."""
 
     local_store: Store
-    stores: dict[str, Store] = field(default_factory=dict)
+    stores: Mapping[str, Store] = field(default_factory=dict)
 
     # SSH Server
     ssh_host: str = "127.0.0.1"

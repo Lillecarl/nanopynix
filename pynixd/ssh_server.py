@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 
 import asyncssh
 
@@ -41,7 +42,7 @@ class _NixSSHServer(asyncssh.SSHServer):
 
 
 async def start_ssh_server(
-    stores: dict[str, Store],
+    stores: Mapping[str, Store],
     local_store: Store,
     build_queue: BuildQueue,
     scheduler: Scheduler,

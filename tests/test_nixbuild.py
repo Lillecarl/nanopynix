@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+from collections.abc import Mapping
 
 import pytest
 from conftest import (
@@ -12,14 +12,14 @@ from conftest import (
 )
 from environs import Env
 
-from pynixd.store import SSHSubprocessStore
+from pynixd.store import SSHSubprocessStore, Store
 
 pytestmark = pytest.mark.nixbuild
 
 env = Env()
 
 
-def _nixbuild_stores() -> dict[str, SSHSubprocessStore]:
+def _nixbuild_stores() -> Mapping[str, Store]:
     username = env.str("USER", "root")
     store = SSHSubprocessStore(
         host="eu.nixbuild.net",
@@ -42,15 +42,13 @@ async def test_simple_builders(
     stores = _nixbuild_stores()
 
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build(
+        rc, _stdout, stderr = await nix_build(
             server.builder_uri(),
-            server.client_store_path,
-            nix_env,
-            "--file",
-            test_nix,
             "simple",
+            nix_env,
+            nix_file=test_nix,
         )
-        assert returncode == 0, f"nix build failed:\n{stderr}"
+        assert rc == 0, f"nix build failed:\n{stderr}"
 
 
 @pytest.mark.store
@@ -65,14 +63,13 @@ async def test_simple_store(
     stores = _nixbuild_stores()
 
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build_store_only(
+        rc, _stdout, stderr = await nix_build_store_only(
             server.uri,
-            nix_env,
-            "--file",
-            test_nix,
             "simple",
+            nix_env,
+            nix_file=test_nix,
         )
-        assert returncode == 0, f"nix build --store failed:\n{stderr}"
+        assert rc == 0, f"nix build --store failed:\n{stderr}"
 
 
 @pytest.mark.builders
@@ -88,15 +85,13 @@ async def test_dag_builders(
     stores = _nixbuild_stores()
 
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build(
+        rc, _stdout, stderr = await nix_build(
             server.builder_uri(),
-            server.client_store_path,
-            nix_env,
-            "--file",
-            test_nix,
             "dag",
+            nix_env,
+            nix_file=test_nix,
         )
-        assert returncode == 0, f"DAG build failed:\n{stderr}"
+        assert rc == 0, f"DAG build failed:\n{stderr}"
 
 
 @pytest.mark.store
@@ -112,11 +107,10 @@ async def test_dag_store(
     stores = _nixbuild_stores()
 
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build_store_only(
+        rc, _stdout, stderr = await nix_build_store_only(
             server.uri,
-            nix_env,
-            "--file",
-            test_nix,
             "dag",
+            nix_env,
+            nix_file=test_nix,
         )
-        assert returncode == 0, f"DAG build --store failed:\n{stderr}"
+        assert rc == 0, f"DAG build --store failed:\n{stderr}"

@@ -1,4 +1,9 @@
-"""Multi-layer DAG build tests."""
+"""DAG-aware build scheduler tests.
+
+Verifies that pynixd correctly schedules builds based on input availability,
+handling dependencies that must be built or transferred before their
+dependents can start.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +14,6 @@ from conftest import (
     nix_build_store_only,
     run_pynixd,
 )
-
-pytestmark = pytest.mark.dag
 
 
 @pytest.mark.builders
@@ -25,15 +28,13 @@ async def test_builders(
     stores = make_local_stores(n=2)
 
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build(
+        rc, _stdout, stderr = await nix_build(
             server.builder_uri(),
-            server.client_store_path,
-            nix_env,
-            "--file",
-            test_nix,
             "dag",
+            nix_env,
+            nix_file=test_nix,
         )
-        assert returncode == 0, f"DAG build failed:\n{stderr}"
+        assert rc == 0, f"DAG build failed:\n{stderr}"
 
 
 @pytest.mark.store
@@ -48,11 +49,10 @@ async def test_store(
     stores = make_local_stores(n=2)
 
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build_store_only(
+        rc, _stdout, stderr = await nix_build_store_only(
             server.uri,
-            nix_env,
-            "--file",
-            test_nix,
             "dag",
+            nix_env,
+            nix_file=test_nix,
         )
-        assert returncode == 0, f"DAG build failed:\n{stderr}"
+        assert rc == 0, f"DAG build failed:\n{stderr}"

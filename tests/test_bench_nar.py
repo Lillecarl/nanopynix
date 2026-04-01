@@ -29,8 +29,8 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
 
 import pytest
 from conftest import NIX_BIN
@@ -143,7 +143,7 @@ async def _make_store(store_type: str) -> Store:
 
 
 @pytest.fixture(params=_STORE_TYPES)
-async def bench_store(request: pytest.FixtureRequest) -> Any:
+async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
     """Parametrized store fixture — yields one store per type."""
     s = await _make_store(request.param)
     yield s
@@ -151,7 +151,7 @@ async def bench_store(request: pytest.FixtureRequest) -> Any:
 
 
 @pytest.fixture
-async def dst_store() -> LocalSubprocessStore:
+async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
     shutil.rmtree(BENCH_DST, ignore_errors=True)
     os.makedirs(BENCH_DST, exist_ok=True)
     s = LocalSubprocessStore(

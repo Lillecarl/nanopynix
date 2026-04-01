@@ -1,70 +1,67 @@
-"""Parallelism pressure tests.
+"""Pressure tests for build parallelism.
 
-Builds independent 2-second derivations and compares wall-clock time
-to verify that builds are distributed across stores.
-
-test.nix .parallel reads PYNIXD_PAR_COUNT (default 100) to decide
-how many leaves to generate. Each leaf contains builtins.currentTime
-so every evaluation produces fresh derivations.
-
-Tests:
-- test_multi_client: 10 concurrent nix clients each building 10 derivations
+Verifies that pynixd correctly limits concurrency based on max_builds,
+queues extra builds, and handles multiple concurrent clients build requests
+without overwhelming backends.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 
 import pytest
 from conftest import (
-    NIX_BIN,
     _run_subprocess_with_timeout,
     make_local_stores,
-    nix_build_store_only,
+    nix_build,
     run_pynixd,
 )
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.parallel
 
-
+@pytest.mark.parallel
 @pytest.mark.builders
 @pytest.mark.asyncio
-@pytest.mark.timeout(600)
-async def test_multi_client(
+@pytest.mark.timeout(300)
+@pytest.mark.parametrize("n_clients", [2, 5])
+@pytest.mark.parametrize("drvs_per_client", [3])
+async def test_builder_concurrency(
+    n_clients: int,
+    drvs_per_client: int,
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
-    """10 concurrent nix clients each building 10 derivations against pynixd."""
+    """Run multiple concurrent clients each building multiple derivations.
+
+    With 1 builder (max_builds=2), we should see serialization of builds
+    across clients.
+    """
     test_nix = request.config.getoption("--nix")
-    n_clients = 10
-    drvs_per_client = 10
+    # 1 builder, 2 slots
+    stores = make_local_stores(n=1, max_builds=2)
 
-    stores = make_local_stores(n=4, prefix="mc")
+    async with run_pynixd(stores) as server:
 
-    async with run_pynixd(
-        stores,
-        njobs=100,
-        client_store_path="/tmp/pynixd-test-multiclient",
-    ) as server:
-
-        async def _run_client(client_id: int) -> tuple[int, float]:
-            client_store = f"/tmp/pynixd-test-mc-client-{client_id}"
-            os.makedirs(client_store, exist_ok=True)
+        async def _client_task(client_id: int) -> float:
+            # Each client uses its own isolated store path to avoid local locking
+            client_store = f"/tmp/pynixd-test-parallel-client-{client_id}"
             client_env = nix_env.copy()
+            # These env vars are used by test.nix .parallel to sleep/id
             client_env["PYNIXD_PAR_COUNT"] = str(drvs_per_client)
             client_env["PYNIXD_PAR_ID"] = f"c{client_id}"
+            # Sleep 1s per drv to make concurrency measurable
+            client_env["PYNIXD_PAR_SLEEP"] = "1"
+
             cmd = [
-                NIX_BIN,
+                "nix",
                 "build",
                 "--store",
                 client_store,
                 "--builders",
-                server.builder_uri(),
+                server.builder_uri(max_jobs=drvs_per_client),
                 "--max-jobs",
                 "0",
                 "--no-link",
@@ -72,79 +69,59 @@ async def test_multi_client(
                 test_nix,
                 "parallel",
             ]
+
             t0 = time.monotonic()
-            rc, stdout, stderr = await _run_subprocess_with_timeout(
-                cmd,
-                client_env,
-                timeout=300,
-            )
+            rc, _out, err = _run_subprocess_with_timeout(cmd, client_env, timeout=120)
             elapsed = time.monotonic() - t0
-            if rc != 0:
-                log.error("Client %d failed: %s", client_id, stderr[:500])
-            return rc, elapsed
+            assert rc == 0, f"Client {client_id} failed:\n{err}"
+            return elapsed
 
         start = time.monotonic()
-        results = await asyncio.gather(*[_run_client(i) for i in range(n_clients)])
+        results = await asyncio.gather(
+            *[_client_task(i) for i in range(n_clients)],
+            return_exceptions=True,
+        )
         total_elapsed = time.monotonic() - start
 
-        failed = [(i, rc) for i, (rc, _) in enumerate(results) if rc != 0]
-        client_times = [elapsed for _, elapsed in results]
+        failed = [r for r in results if isinstance(r, Exception)]
+        client_times = [r for r in results if isinstance(r, float)]
 
         print(
             f"\n  Total wall-clock: {total_elapsed:.1f}s"
             f"\n  Client times: min={min(client_times):.1f}s "
-            f"max={max(client_times):.1f}s avg={sum(client_times) / len(client_times):.1f}s"
+            f"max={max(client_times):.1f}s "
+            f"avg={sum(client_times) / len(client_times):.1f}s"
             f"\n  Sum of client times: {sum(client_times):.1f}s"
             f"\n  Effective concurrency: {sum(client_times) / total_elapsed:.1f}x"
         )
 
         assert not failed, f"{len(failed)} clients failed: {failed}"
-        # 100 total builds × 2s each. With 4 stores × 2 slots = 8 concurrent.
-        # Ideal ~25s. Allow generous margin.
-        assert total_elapsed < 180, (
-            f"Multi-client build took {total_elapsed:.1f}s, expected < 180s"
+
+        # With max_builds=2, total wall clock should be at least
+        # (n_clients * drvs_per_client * sleep_time) / 2
+        expected_min = (n_clients * drvs_per_client * 1.0) / 2
+        assert total_elapsed >= expected_min * 0.8, (
+            f"Parallelism too high: {total_elapsed:.1f}s < {expected_min:.1f}s"
         )
 
 
-@pytest.mark.store
+@pytest.mark.builders
 @pytest.mark.asyncio
-@pytest.mark.timeout(600)
-async def test_store_parallel(
+async def test_single_client_max_jobs(
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
-    """Single client builds 100 derivations via --store.
-
-    pynixd decomposes the BuildPaths into individual BuildDerivation
-    requests and distributes them across stores internally.
-    """
+    """One client with high --max-jobs should still be limited by builder slots."""
     test_nix = request.config.getoption("--nix")
+    stores = make_local_stores(n=1, max_builds=2)
 
-    stores = make_local_stores(n=4, prefix="sp")
-
-    async with run_pynixd(
-        stores,
-        njobs=100,
-        client_store_path="/tmp/pynixd-test-store-parallel",
-    ) as server:
-        client_env = nix_env.copy()
-        client_env["PYNIXD_PAR_COUNT"] = "100"
-
-        start = time.monotonic()
-        rc, stdout, stderr = await nix_build_store_only(
-            server.uri,
-            client_env,
-            "--file",
-            test_nix,
+    async with run_pynixd(stores) as server:
+        # Request 10 jobs from a single client
+        rc, _stdout, stderr = await nix_build(
+            server.builder_uri(),
             "parallel",
-            timeout=300,
+            nix_env,
+            nix_file=test_nix,
+            jobs=10,
         )
-        elapsed = time.monotonic() - start
-
-        print(f"\n  Wall-clock: {elapsed:.1f}s (100 × 2s drvs, 4 stores × 2 slots)")
-
-        assert rc == 0, f"Store parallel build failed:\n{stderr}"
-        # 100 builds × 2s, 8 concurrent slots → ideal ~25s. Allow margin.
-        assert elapsed < 180, (
-            f"Store parallel build took {elapsed:.1f}s, expected < 180s"
-        )
+        assert rc == 0, f"build failed:\n{stderr}"

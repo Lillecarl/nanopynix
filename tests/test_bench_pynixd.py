@@ -497,7 +497,7 @@ async def test_build_throughput(
                 "parallel",
             ]
             t0 = time.monotonic()
-            rc, _stdout, stderr = await _run_subprocess_with_timeout(
+            rc, _stdout, stderr = _run_subprocess_with_timeout(
                 cmd, client_env, timeout=240
             )
             elapsed = time.monotonic() - t0

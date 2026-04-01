@@ -2,7 +2,8 @@
 
 Two test tiers:
 1. test_parse_drv: parse every .drv, sanity-check structure (parametrized)
-2. test_json_vs_nix: compare our JSON output against `nix derivation show` (sampled batch)
+2. test_json_vs_nix: compare our JSON output against `nix derivation show`
+   (sampled batch)
 """
 
 from __future__ import annotations

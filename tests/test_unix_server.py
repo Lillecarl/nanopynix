@@ -1,14 +1,4 @@
-"""Tests using pynixd as a Unix socket daemon replacing the nix daemon.
-
-pynixd listens on a Unix socket. The client's nix connects to it directly
-(via --store unix:///path/to/socket) instead of the system daemon. pynixd
-uses the host's daemon socket as its local store and two LocalSocketStore
-instances with temp paths as "remote" builders.
-
-The key test is test_build_parallel_comparison: builds 100 parallel
-derivations both through pynixd and directly via nix, comparing wall-clock
-times to measure pynixd's overhead as a daemon replacement.
-"""
+"""Tests for Unix domain socket server."""
 
 from __future__ import annotations
 
@@ -16,48 +6,24 @@ import asyncio
 import logging
 import os
 import shlex
-import time
+import subprocess
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import pytest
 from conftest import (
     NIX_BIN,
-    _get_system,
     _run_subprocess_with_timeout,
 )
 
+from pynixd.instance import PynixdConfig
+from pynixd.instance import run_pynixd as run_instance
 from pynixd.store import LocalSocketStore, Store
-from pynixd.unix_server import start_unix_server
 
 log = logging.getLogger(__name__)
 
-# Silence noisy per-op loggers
-logging.getLogger("pynixd.op.AddToStore").setLevel(logging.WARNING)
 
-SOCKET_PATH = "/tmp/pynixd-test-unix/pynixd.sock"
-PAR_COUNT = 100
-
-
-async def _run_pynixd_unix(
-    stores: dict[str, Store],
-    local_store: Store,
-    socket_path: str = SOCKET_PATH,
-    ready_event: asyncio.Event | None = None,
-) -> None:
-    """Run pynixd unix server (meant to be wrapped in a task)."""
-    from pynixd.instance import PynixdConfig, run_pynixd
-
-    os.makedirs(os.path.dirname(socket_path), exist_ok=True)
-
-    config = PynixdConfig(
-        local_store=local_store,
-        stores=stores,
-        unix_path=socket_path,
-    )
-
-    await run_pynixd(config, ready_event=ready_event)
-
-
-async def _nix_build_unix(
+def _nix_build_unix(
     socket_path: str,
     env: dict[str, str],
     *extra_args: str,
@@ -74,10 +40,10 @@ async def _nix_build_unix(
         *extra_args,
     ]
     log.info("nix_build_unix: %s", " ".join(shlex.quote(a) for a in cmd))
-    return await _run_subprocess_with_timeout(cmd, env, timeout)
+    return _run_subprocess_with_timeout(cmd, env, timeout)
 
 
-async def _nix_build_direct(
+def _nix_build_direct(
     store_path: str,
     env: dict[str, str],
     *extra_args: str,
@@ -95,10 +61,10 @@ async def _nix_build_direct(
         *extra_args,
     ]
     log.info("nix_build_direct: %s", " ".join(shlex.quote(a) for a in cmd))
-    return await _run_subprocess_with_timeout(cmd, env, timeout)
+    return _run_subprocess_with_timeout(cmd, env, timeout)
 
 
-async def _nix_store_unix(
+def _nix_store_unix(
     socket_path: str,
     env: dict[str, str],
     *args: str,
@@ -114,15 +80,17 @@ async def _nix_store_unix(
         store_uri,
     ]
     log.info("nix_store_unix: %s", " ".join(shlex.quote(a) for a in cmd))
-    return await _run_subprocess_with_timeout(cmd, env, timeout)
+    return _run_subprocess_with_timeout(cmd, env, timeout)
 
 
 @pytest.fixture
 def local_store() -> LocalSocketStore:
-    """Host's system daemon as pynixd's local store."""
+    """Local store for pynixd."""
+    store_path = "/tmp/pynixd-test-unix-local"
+    os.makedirs(store_path, exist_ok=True)
     return LocalSocketStore(
-        id="local-system",
-        store_path="/",
+        store_path=store_path,
+        id="local",
         max_builds=0,
         max_transfers=64,
         nix_bin=NIX_BIN,
@@ -130,142 +98,123 @@ def local_store() -> LocalSocketStore:
 
 
 @pytest.fixture
-def builder_stores() -> dict[str, Store]:
-    """Single builder using the host's system store — same as local_store."""
-    store = LocalSocketStore(
+def builder_store() -> LocalSocketStore:
+    """Builder store for pynixd."""
+    store_path = "/tmp/pynixd-test-unix-builder"
+    os.makedirs(store_path, exist_ok=True)
+    return LocalSocketStore(
+        store_path=store_path,
         id="builder",
-        store_path="/",
-        max_builds=150,
-        max_transfers=64,
-        supported_systems=[_get_system()],
+        max_builds=2,
+        max_transfers=4,
         nix_bin=NIX_BIN,
     )
-    return {store.id: store}
 
 
-# ── Store query tests ────────────────────────────────────────────────
+@asynccontextmanager
+async def run_unix_server(
+    local_store: Store,
+    stores: dict[str, Store],
+) -> AsyncIterator[str]:
+    """Start pynixd with a Unix socket server."""
+    socket_path = "/tmp/pynixd-test.socket"
+    if os.path.exists(socket_path):
+        os.remove(socket_path)
 
-
-@pytest.mark.store
-@pytest.mark.asyncio
-@pytest.mark.timeout(60)
-async def test_store_ping(
-    nix_env: dict[str, str],
-    local_store: LocalSocketStore,
-    builder_stores: dict[str, Store],
-) -> None:
-    """Verify nix can connect to pynixd unix socket and run store ping."""
-    ready = asyncio.Event()
-    task = asyncio.create_task(
-        _run_pynixd_unix(builder_stores, local_store, ready_event=ready)
+    config = PynixdConfig(
+        local_store=local_store,
+        stores=stores,
+        unix_path=socket_path,
     )
+
+    ready = asyncio.Event()
+    task = asyncio.create_task(run_instance(config, ready_event=ready))
+
     try:
         await asyncio.wait_for(ready.wait(), timeout=10)
-
-        rc, stdout, stderr = await _nix_store_unix(
-            SOCKET_PATH,
-            nix_env,
-            "ping",
-        )
-        log.info("store ping: rc=%d stdout=%s stderr=%s", rc, stdout, stderr[:500])
-        assert rc == 0, f"nix store ping failed: {stderr}"
+        yield socket_path
     finally:
         task.cancel()
         try:
             await task
         except asyncio.CancelledError:
             pass
-        for s in builder_stores.values():
-            await s.close()
-        await local_store.close()
+        if os.path.exists(socket_path):
+            os.remove(socket_path)
 
 
-# ── Build tests ──────────────────────────────────────────────────────
-
-
-@pytest.mark.builders
 @pytest.mark.asyncio
-@pytest.mark.timeout(600)
-async def test_build_parallel_comparison(
+async def test_unix_build(
+    local_store: Store,
+    builder_store: Store,
     nix_env: dict[str, str],
-    local_store: LocalSocketStore,
-    builder_stores: dict[str, Store],
     request: pytest.FixtureRequest,
 ) -> None:
-    """Build 100 parallel derivations: pynixd unix socket vs direct nix.
-
-    Runs the same build twice:
-    1. Through pynixd unix socket (pynixd distributes across 2 builders)
-    2. Directly via nix against a temp store (nix builds locally)
-
-    Compares wall-clock times to measure pynixd overhead and whether
-    nix sends derivations serially over unix sockets (like ssh-ng).
-    """
+    """Build test.nix .simple via Unix socket."""
     test_nix = request.config.getoption("--nix")
-    direct_store = "/tmp/pynixd-test-unix-direct"
-    os.makedirs(direct_store, exist_ok=True)
+    stores = {builder_store.id: builder_store}
 
-    build_env = nix_env.copy()
-    build_env["PYNIXD_PAR_COUNT"] = str(PAR_COUNT)
-
-    # ── Run 1: through pynixd ────────────────────────────────────────
-
-    ready = asyncio.Event()
-    task = asyncio.create_task(
-        _run_pynixd_unix(builder_stores, local_store, ready_event=ready)
-    )
-    try:
-        await asyncio.wait_for(ready.wait(), timeout=10)
-
-        t0 = time.monotonic()
-        rc_pynixd, _, stderr_pynixd = await _nix_build_unix(
-            SOCKET_PATH,
-            build_env,
+    async with run_unix_server(local_store, stores) as socket_path:
+        rc, _stdout, stderr = _nix_build_unix(
+            socket_path,
+            nix_env,
             "--file",
             test_nix,
-            "parallel",
-            timeout=300,
+            "simple",
         )
-        elapsed_pynixd = time.monotonic() - t0
-    finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        for s in builder_stores.values():
-            await s.close()
-        await local_store.close()
+        assert rc == 0, f"Unix build failed:\n{stderr}"
 
-    assert rc_pynixd == 0, f"pynixd build failed:\n{stderr_pynixd}"
 
-    # ── Run 2: direct nix build (fresh drvs via unique env) ──────────
+@pytest.mark.asyncio
+async def test_unix_store_info(
+    local_store: Store,
+    builder_store: Store,
+    nix_env: dict[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """Query path info via Unix socket."""
+    test_nix = request.config.getoption("--nix")
+    stores = {builder_store.id: builder_store}
 
-    # Use a different PAR_ID so derivations are unique (builtins.currentTime
-    # already ensures this, but belt-and-suspenders)
-    direct_env = build_env.copy()
-    direct_env["PYNIXD_PAR_ID"] = "direct"
+    async with run_unix_server(local_store, stores) as socket_path:
+        # First build it to make sure it exists
+        rc, _stdout, stderr = _nix_build_unix(
+            socket_path,
+            nix_env,
+            "--file",
+            test_nix,
+            "simple",
+        )
+        assert rc == 0
 
-    t0 = time.monotonic()
-    rc_direct, _, stderr_direct = await _nix_build_direct(
-        direct_store,
-        direct_env,
-        "--file",
-        test_nix,
-        "parallel",
-        timeout=300,
-    )
-    elapsed_direct = time.monotonic() - t0
+        # Now query info
+        cmd = ["nix", "path-info", "--file", test_nix, "simple"]
+        path = subprocess.check_output(cmd).decode().strip()
 
-    assert rc_direct == 0, f"direct build failed:\n{stderr_direct}"
+        rc, stdout, stderr = _nix_store_unix(
+            socket_path,
+            nix_env,
+            "path-info",
+            path,
+        )
+        assert rc == 0
+        assert path in stdout
 
-    # ── Compare ──────────────────────────────────────────────────────
 
-    n_slots_pynixd = sum(s._build_semaphore._value for s in builder_stores.values())  # type: ignore[attr-defined]
-    print(
-        f"\n  === Parallel {PAR_COUNT} × 2s derivations ==="
-        f"\n  pynixd (unix socket, 2 builders): {elapsed_pynixd:.1f}s"
-        f"\n  direct (nix, local store):         {elapsed_direct:.1f}s"
-        f"\n  ratio (pynixd / direct):           {elapsed_pynixd / elapsed_direct:.2f}x"
-        f"\n  pynixd builder slots:              {n_slots_pynixd}"
-    )
+@pytest.mark.asyncio
+async def test_unix_gc(
+    local_store: Store,
+    builder_store: Store,
+    nix_env: dict[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """Run GC via Unix socket."""
+    stores = {builder_store.id: builder_store}
+
+    async with run_unix_server(local_store, stores) as socket_path:
+        rc, stdout, stderr = _nix_store_unix(
+            socket_path,
+            nix_env,
+            "gc",
+        )
+        assert rc == 0

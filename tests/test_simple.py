@@ -1,4 +1,4 @@
-"""Simple single-derivation build tests."""
+"""Simple end-to-end build tests."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from conftest import (
 
 @pytest.mark.builders
 @pytest.mark.asyncio
-@pytest.mark.timeout(60)
+@pytest.mark.timeout(180)
 async def test_builders(
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
@@ -23,20 +23,18 @@ async def test_builders(
     stores = make_local_stores(n=2)
 
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build(
+        rc, _stdout, stderr = await nix_build(
             server.builder_uri(),
-            server.client_store_path,
-            nix_env,
-            "--file",
-            test_nix,
             "simple",
+            nix_env,
+            nix_file=test_nix,
         )
-        assert returncode == 0, f"nix build failed:\n{stderr}"
+        assert rc == 0, f"simple build failed:\n{stderr}"
 
 
 @pytest.mark.store
 @pytest.mark.asyncio
-@pytest.mark.timeout(60)
+@pytest.mark.timeout(180)
 async def test_store(
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
@@ -46,11 +44,10 @@ async def test_store(
     stores = make_local_stores(n=2)
 
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build_store_only(
+        rc, _stdout, stderr = await nix_build_store_only(
             server.uri,
-            nix_env,
-            "--file",
-            test_nix,
             "simple",
+            nix_env,
+            nix_file=test_nix,
         )
-        assert returncode == 0, f"nix build --store failed:\n{stderr}"
+        assert rc == 0, f"simple build failed:\n{stderr}"

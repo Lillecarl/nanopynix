@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import shutil
+from collections.abc import AsyncIterator
 
 import pytest
 from conftest import NIX_BIN
@@ -32,7 +33,7 @@ DEST_STORE = "/tmp/pynixd-test-nar-dst"
 
 
 @pytest.fixture
-async def src_store() -> LocalSocketStore:
+async def src_store() -> AsyncIterator[LocalSocketStore]:
     """System store as source — has paths already."""
     s = LocalSocketStore(id="system")
     yield s
@@ -40,7 +41,7 @@ async def src_store() -> LocalSocketStore:
 
 
 @pytest.fixture
-async def dst_store() -> LocalSubprocessStore:
+async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
     """Fresh empty store as destination."""
     shutil.rmtree(DEST_STORE, ignore_errors=True)
     os.makedirs(DEST_STORE, exist_ok=True)
@@ -329,7 +330,7 @@ COPY_DEST_STORE = "/tmp/pynixd-test-nar-copy"
 
 
 @pytest.fixture
-async def copy_dst_store() -> LocalSubprocessStore:
+async def copy_dst_store() -> AsyncIterator[LocalSubprocessStore]:
     """Separate dest store for copy_paths tests."""
     shutil.rmtree(COPY_DEST_STORE, ignore_errors=True)
     os.makedirs(COPY_DEST_STORE, exist_ok=True)
@@ -410,7 +411,7 @@ STREAM_DEST_STORE = "/tmp/pynixd-test-nar-stream"
 
 
 @pytest.fixture
-async def stream_dst_store() -> LocalSubprocessStore:
+async def stream_dst_store() -> AsyncIterator[LocalSubprocessStore]:
     """Separate dest store for streaming tests."""
     shutil.rmtree(STREAM_DEST_STORE, ignore_errors=True)
     os.makedirs(STREAM_DEST_STORE, exist_ok=True)
@@ -486,7 +487,7 @@ async def test_pipe_nar_from_multiple(
 
 
 @pytest.fixture
-async def nixbuild_store() -> SSHSubprocessStore:
+async def nixbuild_store() -> AsyncIterator[SSHSubprocessStore]:
     """nixbuild.net store (protocol 1.32)."""
     from environs import Env
 

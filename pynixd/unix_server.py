@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Mapping
 
 from .build_queue import BuildQueue
 from .proxy import DaemonProxy
@@ -21,7 +22,7 @@ log: logging.Logger = logging.getLogger(__name__)
 
 
 async def start_unix_server(
-    stores: dict[str, Store],
+    stores: Mapping[str, Store],
     local_store: Store,
     build_queue: BuildQueue,
     scheduler: Scheduler,

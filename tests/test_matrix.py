@@ -41,10 +41,10 @@ pytestmark = pytest.mark.matrix
 _counter = 0
 
 
-def _next_id() -> int:
+def _next_id() -> str:
     global _counter
     _counter += 1
-    return _counter
+    return str(_counter)
 
 
 def _local_lix_builder() -> dict[str, Store]:
@@ -98,6 +98,14 @@ def _local_store(nix_bin: str) -> LocalSocketStore:
 
 # ── Client helpers (parameterized binary) ─────────────────────────────
 
+CLIENTS = [
+    (LIX_BIN, "ssh-ng"),
+    (NIX_BIN, "ssh-ng"),
+]
+
+LOCAL_BINS = [LIX_BIN, NIX_BIN]
+LOCAL_BUILDERS = [_local_lix_builder, _local_nix_builder]
+
 
 async def _nix_build_builders(
     client_bin: str,
@@ -121,7 +129,7 @@ async def _nix_build_builders(
         *extra_args,
     ]
     log.info("matrix build (--builders): %s", " ".join(shlex.quote(a) for a in cmd))
-    rc, out, err = await _run_subprocess_with_timeout(cmd, env, timeout)
+    rc, out, err = _run_subprocess_with_timeout(cmd, env, timeout)
     log.info("rc=%d\n  stdout: %s\n  stderr: %s", rc, out[:500], err[:2000])
     return rc, out, err
 
@@ -142,33 +150,9 @@ async def _nix_build_store(
         *extra_args,
     ]
     log.info("matrix build (--store): %s", " ".join(shlex.quote(a) for a in cmd))
-    rc, out, err = await _run_subprocess_with_timeout(cmd, env, timeout)
+    rc, out, err = _run_subprocess_with_timeout(cmd, env, timeout)
     log.info("rc=%d\n  stdout: %s\n  stderr: %s", rc, out[:500], err[:2000])
     return rc, out, err
-
-
-# ── Matrix parameters ─────────────────────────────────────────────────
-
-CLIENTS = [
-    pytest.param((LIX_BIN, "lix"), id="lix-client"),
-    pytest.param((NIX_BIN, "nix"), id="nix-client"),
-]
-
-LOCAL_BINS = [
-    pytest.param(LIX_BIN, id="lix-store"),
-    pytest.param(NIX_BIN, id="nix-store"),
-]
-
-LOCAL_BUILDERS = [
-    pytest.param(_local_lix_builder, id="lix-builder"),
-    pytest.param(_local_nix_builder, id="nix-builder"),
-]
-
-NIXBUILD_BUILDERS = [
-    pytest.param(_nixbuild_builder, id="nixbuild-builder"),
-]
-
-ALL_BUILDERS = LOCAL_BUILDERS + NIXBUILD_BUILDERS
 
 
 # ── Tests: --builders mode (local builders) ───────────────────────────
@@ -197,9 +181,9 @@ async def test_builders_local(
     async with run_pynixd(
         stores, local_store=local, client_store_path=client_store
     ) as server:
-        rc, stdout, stderr = await _nix_build_builders(
+        rc, _stdout, stderr = await _nix_build_builders(
             client_bin,
-            server.builder_uri(uri_format=uri_fmt),
+            server.builder_uri(),
             server.client_store_path,
             nix_env,
             "--file",
@@ -232,7 +216,7 @@ async def test_store_local(
     local = _local_store(local_bin)
 
     async with run_pynixd(stores, local_store=local) as server:
-        rc, stdout, stderr = await _nix_build_store(
+        rc, _stdout, stderr = await _nix_build_store(
             client_bin,
             server.uri_for(uri_fmt),
             nix_env,
@@ -268,9 +252,9 @@ async def test_builders_nixbuild(
     async with run_pynixd(
         stores, local_store=local, client_store_path=client_store
     ) as server:
-        rc, stdout, stderr = await _nix_build_builders(
+        rc, _stdout, stderr = await _nix_build_builders(
             client_bin,
-            server.builder_uri(uri_format=uri_fmt),
+            server.builder_uri(),
             server.client_store_path,
             nix_env,
             "--file",
@@ -302,7 +286,7 @@ async def test_store_nixbuild(
     local = _local_store(local_bin)
 
     async with run_pynixd(stores, local_store=local) as server:
-        rc, stdout, stderr = await _nix_build_store(
+        rc, _stdout, stderr = await _nix_build_store(
             client_bin,
             server.uri_for(uri_fmt),
             nix_env,

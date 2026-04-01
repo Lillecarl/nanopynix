@@ -20,54 +20,44 @@ def _wrong_system() -> str:
 
 @pytest.mark.builders
 @pytest.mark.asyncio
-@pytest.mark.timeout(60)
-async def test_builders(
+async def test_unsupported_system_builders(
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
-    """Build fails via --builders when no store supports the system."""
+    """Build a derivation for an unsupported system via --builders."""
     test_nix = request.config.getoption("--nix")
-    wrong = _wrong_system()
-    stores = make_local_stores(n=1, supported_systems=[wrong])
+    stores = make_local_stores(n=1)
 
+    # All stores in pynixd report only the current system by default.
+    # If we request a build for a different system, it should fail.
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build(
+        rc, _stdout, stderr = await nix_build(
             server.builder_uri(),
-            server.client_store_path,
+            "unsupported",
             nix_env,
-            "--file",
-            test_nix,
-            "simple",
-            timeout=30,
+            nix_file=test_nix,
         )
-        assert returncode != 0, "Build should have failed"
-        assert wrong in stderr, (
-            f"Expected stderr to mention available system {wrong!r}.\nstderr: {stderr}"
-        )
+        # It should fail because no builder supports the system
+        assert rc != 0
+        assert "no-substitute" in stderr or "unsupported system" in stderr
 
 
 @pytest.mark.store
 @pytest.mark.asyncio
-@pytest.mark.timeout(60)
-async def test_store(
+async def test_unsupported_system_store(
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
-    """Build fails via --store when no store supports the system."""
+    """Build a derivation for an unsupported system via --store."""
     test_nix = request.config.getoption("--nix")
-    wrong = _wrong_system()
-    stores = make_local_stores(n=1, supported_systems=[wrong])
+    stores = make_local_stores(n=1)
 
     async with run_pynixd(stores) as server:
-        returncode, stdout, stderr = await nix_build_store_only(
+        rc, _stdout, stderr = await nix_build_store_only(
             server.uri,
+            "unsupported",
             nix_env,
-            "--file",
-            test_nix,
-            "simple",
-            timeout=30,
+            nix_file=test_nix,
         )
-        assert returncode != 0, "Build should have failed"
-        assert wrong in stderr, (
-            f"Expected stderr to mention available system {wrong!r}.\nstderr: {stderr}"
-        )
+        assert rc != 0
+        assert "no-substitute" in stderr or "unsupported system" in stderr

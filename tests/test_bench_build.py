@@ -17,7 +17,9 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
+
 from environs import Env
 
 log = logging.getLogger(__name__)
@@ -48,12 +50,12 @@ def _run_pynixd_thread(
 
     async def _async_run() -> None:
         from pynixd.instance import PynixdConfig, run_pynixd
-        from pynixd.store import LocalSocketStore
+        from pynixd.store import LocalSocketStore, Store
 
         local_store = LocalSocketStore(
             id="local", store_path="/tmp/pynixd-local", max_builds=0, max_transfers=64
         )
-        stores = {
+        stores: Mapping[str, Store] = {
             "builder": LocalSocketStore(
                 id="builder",
                 store_path="/tmp/pynixd-builder",
@@ -69,12 +71,20 @@ def _run_pynixd_thread(
             ssh_port=port,
         )
 
+        # Use an internal asyncio.Event and proxy it to the threading.Event
+        async_ready = asyncio.Event()
+
         # Run pynixd until stop_event is set
-        run_task = asyncio.create_task(run_pynixd(config, ready_event=ready_event))
-        
+        run_task = asyncio.create_task(run_pynixd(config, ready_event=async_ready))
+
+        # Wait for pynixd to be ready in the asyncio loop
+        ready_waiter = asyncio.create_task(async_ready.wait())
+
         while not stop_event.is_set():
+            if ready_waiter.done() and not ready_event.is_set():
+                ready_event.set()
             await asyncio.sleep(0.1)
-        
+
         run_task.cancel()
         try:
             await run_task
@@ -105,7 +115,9 @@ def _build_in_thread(
     builder_uri = f"ssh-ng://{username}@127.0.0.1:{port} x86_64-linux - 100"
 
     sub_env = os.environ.copy()
-    sub_env["NIX_SSHOPTS"] = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    sub_env["NIX_SSHOPTS"] = (
+        "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    )
 
     cmd = [
         NIX_BIN,
@@ -136,6 +148,7 @@ def _build_in_thread(
 def test_build_throughput() -> None:
     """Run nix build against pynixd and measure wall time."""
     from conftest import get_free_port
+
     nix_file = env.str("PYNIXD_TEST_NIX", "test.nix")
 
     client_store = tempfile.mkdtemp(prefix="pynixd-bench-client-")
@@ -151,24 +164,24 @@ def test_build_throughput() -> None:
         target=_run_pynixd_thread,
         args=(ready_event, port, stop_event),
         name="pynixd",
-        daemon=True,
     )
     pynixd_thread.start()
 
-    # Wait for pynixd to be ready
-    ready_event.wait(timeout=10)
+    try:
+        # Wait for pynixd to be ready
+        if not ready_event.wait(timeout=30):
+            raise RuntimeError("pynixd thread failed to become ready")
 
-    log.info("pynixd ready on port %d", port)
+        elapsed = _build_in_thread(
+            port,
+            client_store,
+            nix_file,
+            ".bench-100mb",
+            stop_event,
+        )
+        print(f"\n  Build completed in {elapsed:.1f}s")
 
-    elapsed = _build_in_thread(port, client_store, nix_file, "parallel", stop_event)
-
-    # Signal pynixd to stop so profiler output is printed
-    stop_event.set()
-    pynixd_thread.join(timeout=10)
-
-    result = BenchResult(
-        label="build 100drv 1cli",
-        elapsed=elapsed,
-        count=100,
-    )
-    log.info("Result: %s", result)
+    finally:
+        stop_event.set()
+        pynixd_thread.join(timeout=10)
+        subprocess.run(["rm", "-rf", client_store])
