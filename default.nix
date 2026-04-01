@@ -19,7 +19,11 @@ let
     dependencies = [
       # python.pkgs.asyncssh
       (python.pkgs.asyncssh.overrideAttrs {
-        src = /home/lillecarl/Code/asyncssh;
+        src = builtins.fetchTree {
+          type = "github";
+          repo = "asyncssh";
+          owner = "ronf";
+        };
         doCheck = false;
         doInstallCheck = false;
       })
