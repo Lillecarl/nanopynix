@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+
+from environs import Env
 
 from .local_store_db import LocalStoreDB
 from .operations.maintenance import CollectGarbageResponse
@@ -21,9 +22,11 @@ from .store import Store
 
 log: logging.Logger = logging.getLogger(__name__)
 
-_GC_INTERVAL: float = float(os.environ.get("PYNIXD_GC_INTERVAL", "3600"))
-_GC_LOCAL_MAX_AGE: int = int(os.environ.get("PYNIXD_GC_LOCAL_MAX_AGE", "604800"))
-_GC_BUILDER_MAX_AGE: int = int(os.environ.get("PYNIXD_GC_BUILDER_MAX_AGE", "3600"))
+env = Env()
+
+_GC_INTERVAL = env.float("PYNIXD_GC_INTERVAL", 3600.0)
+_GC_LOCAL_MAX_AGE = env.int("PYNIXD_GC_LOCAL_MAX_AGE", 604800)
+_GC_BUILDER_MAX_AGE = env.int("PYNIXD_GC_BUILDER_MAX_AGE", 3600)
 
 
 class GarbageCollector:

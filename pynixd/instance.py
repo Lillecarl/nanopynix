@@ -90,7 +90,7 @@ async def run_pynixd(
         # Start background services
         scheduler_task = asyncio.create_task(scheduler.start())
         background_tasks.append(scheduler_task)
-        
+
         if local_store.db:
             local_store.db.start()
             gc = GarbageCollector(local_store.db, stores, local_store)
@@ -181,13 +181,13 @@ async def run_pynixd(
             await runner.cleanup()
         for s in servers:
             s.close()
-        
+
         # Stop scheduler gracefully (cancels builds etc)
         await scheduler.stop()
-        
+
         for task in background_tasks:
             task.cancel()
-        
+
         if local_store.db:
             await local_store.db.close()
 

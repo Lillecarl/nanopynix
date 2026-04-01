@@ -24,6 +24,7 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 import asyncssh
+from environs import Env
 
 from . import stderr, wire
 from .connection import ClientConn, Connection
@@ -66,6 +67,8 @@ from .wire import (
 
 log: logging.Logger = logging.getLogger(__name__)
 pool_log: logging.Logger = logging.getLogger(f"{__name__}.pool")
+
+env = Env()
 
 _DEFAULT_IDLE_TTL: float = 10.0
 _CB_THRESHOLD: int = 3  # failures before cooldown
@@ -822,7 +825,7 @@ class _SSHStoreMixin:
 
     _INITIAL_BACKOFF: float = 1.0
     _MAX_BACKOFF: float = 60.0
-    _PSI_INTERVAL: float = float(os.environ.get("PYNIXD_PSI_INTERVAL", "5"))
+    _PSI_INTERVAL = env.float("PYNIXD_PSI_INTERVAL", 5.0)
 
     def _init_ssh_state(self, *, monitor: bool = True) -> None:
         self._conn = None

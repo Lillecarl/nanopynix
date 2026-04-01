@@ -30,6 +30,7 @@ let
       python.pkgs.aiohttp
       python.pkgs.pyinstrument
       python.pkgs.aiosqlite
+      python.pkgs.environs
     ];
 
     nativeCheckInputs = [

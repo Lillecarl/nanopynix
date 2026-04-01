@@ -488,7 +488,10 @@ async def test_pipe_nar_from_multiple(
 @pytest.fixture
 async def nixbuild_store() -> SSHSubprocessStore:
     """nixbuild.net store (protocol 1.32)."""
-    username = os.environ.get("USER", "root")
+    from environs import Env
+
+    env = Env()
+    username = env.str("USER", "root")
     s = SSHSubprocessStore(
         host="eu.nixbuild.net",
         username=username,

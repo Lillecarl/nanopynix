@@ -30,6 +30,7 @@ from conftest import (
     make_local_stores,
     run_pynixd,
 )
+from environs import Env
 
 from pynixd.http_cache import BinaryCacheServer
 from pynixd.operations.base import PathInfo
@@ -37,13 +38,15 @@ from pynixd.store import LocalSocketStore, SSHSubprocessStore, Store
 
 log = logging.getLogger(__name__)
 
+env = Env()
+
 pytestmark = pytest.mark.benchmark
 
-_SSH_USER = os.environ.get("USER", "root")
+_SSH_USER = env.str("USER", "root")
 
 _CONCURRENCY_LEVELS = [1, 10, 50]
 
-_PROFILE = os.environ.get("PYNIXD_PROFILE", "")
+_PROFILE = env.str("PYNIXD_PROFILE", "")
 
 
 def _profile_context(test_name: str):

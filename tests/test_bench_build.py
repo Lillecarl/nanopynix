@@ -18,10 +18,13 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass
+from environs import Env
 
 log = logging.getLogger(__name__)
 
-NIX_BIN = os.environ.get("NIX_BIN", "nix")
+env = Env()
+
+NIX_BIN = env.str("NIX_BIN", "nix")
 
 
 @dataclass
@@ -98,11 +101,11 @@ def _build_in_thread(
     stop_event: threading.Event,
 ) -> float:
     """Run nix build in a dedicated thread."""
-    username = os.environ.get("USER", "root")
+    username = env.str("USER", "root")
     builder_uri = f"ssh-ng://{username}@127.0.0.1:{port} x86_64-linux - 100"
 
-    env = os.environ.copy()
-    env["NIX_SSHOPTS"] = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    sub_env = os.environ.copy()
+    sub_env["NIX_SSHOPTS"] = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
     cmd = [
         NIX_BIN,
@@ -121,7 +124,7 @@ def _build_in_thread(
 
     log.info("Starting build: %s", " ".join(cmd))
     start = time.monotonic()
-    result = subprocess.run(cmd, env=env)
+    result = subprocess.run(cmd, env=sub_env)
     elapsed = time.monotonic() - start
 
     if result.returncode != 0:
@@ -133,7 +136,7 @@ def _build_in_thread(
 def test_build_throughput() -> None:
     """Run nix build against pynixd and measure wall time."""
     from conftest import get_free_port
-    nix_file = os.environ.get("PYNIXD_TEST_NIX", "test.nix")
+    nix_file = env.str("PYNIXD_TEST_NIX", "test.nix")
 
     client_store = tempfile.mkdtemp(prefix="pynixd-bench-client-")
     os.makedirs(client_store, exist_ok=True)

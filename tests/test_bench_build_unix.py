@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 
 import pytest
+from environs import Env
 
 log = logging.getLogger(__name__)
 nixclient_log = logging.getLogger("nixclient")
@@ -30,7 +31,9 @@ nixclient_log = logging.getLogger("nixclient")
 aiosqlite_logger = logging.getLogger("aiosqlite")
 aiosqlite_logger.setLevel(logging.WARNING)
 
-NIX_BIN = os.environ.get("NIX_BIN", "nix")
+env = Env()
+
+NIX_BIN = env.str("NIX_BIN", "nix")
 
 
 @dataclass
@@ -150,7 +153,7 @@ def _build_in_thread(
 
 def test_build_throughput(request: pytest.FixtureRequest) -> None:
     """Run nix build against pynixd Unix server and measure wall time."""
-    nix_file = os.environ.get("PYNIXD_TEST_NIX", "test.nix")
+    nix_file = env.str("PYNIXD_TEST_NIX", "test.nix")
 
     client_store = tempfile.mkdtemp(prefix="pynixd-bench-client-")
     os.makedirs(client_store, exist_ok=True)

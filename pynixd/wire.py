@@ -11,16 +11,18 @@ Write functions are sync (writer.write() buffers; callers await drain()).
 from __future__ import annotations
 
 import asyncio
-import os
 import struct
 from abc import abstractmethod
 from typing import Final
 
 import asyncssh
+from environs import Env
 
-_CHUNK_SIZE = int(os.environ.get("PYNIXD_CHUNK_SIZE", 1024 * 1024))
+env = Env()
 
-_SSH_WINDOW_SIZE = int(os.environ.get("PYNIXD_SSH_WINDOW", 16 * 1024 * 1024))
+_CHUNK_SIZE = env.int("PYNIXD_CHUNK_SIZE", 1024 * 1024)
+
+_SSH_WINDOW_SIZE = env.int("PYNIXD_SSH_WINDOW", 16 * 1024 * 1024)
 
 
 def _nar_pad(n: int) -> int:

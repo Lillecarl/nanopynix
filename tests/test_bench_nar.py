@@ -34,6 +34,7 @@ from typing import Any
 
 import pytest
 from conftest import NIX_BIN
+from environs import Env
 
 from pynixd import wire
 from pynixd.operations.base import PathInfo
@@ -47,15 +48,15 @@ from pynixd.store import (
 
 log = logging.getLogger(__name__)
 
+env = Env()
+
 pytestmark = pytest.mark.benchmark
 
 BENCH_DST = "/tmp/pynixd-bench-dst"
 
-_SSH_USER = os.environ.get("USER", "root")
+_SSH_USER = env.str("USER", "root")
 
-_CHUNK_SIZES_KB = [
-    int(s) for s in os.environ.get("PYNIXD_BENCH_CHUNKS", "64,256,1024,4096").split(",")
-]
+_CHUNK_SIZES_KB = env.list("PYNIXD_BENCH_CHUNKS", [64, 256, 1024, 4096], subcast=int)
 
 # Store types that can read from the system store (used as NAR source).
 # local-subprocess is excluded — it has its own isolated store and can't

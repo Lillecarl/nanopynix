@@ -10,14 +10,17 @@ from conftest import (
     nix_build_store_only,
     run_pynixd,
 )
+from environs import Env
 
 from pynixd.store import SSHSubprocessStore
 
 pytestmark = pytest.mark.nixbuild
 
+env = Env()
+
 
 def _nixbuild_stores() -> dict[str, SSHSubprocessStore]:
-    username = os.environ.get("USER", "root")
+    username = env.str("USER", "root")
     store = SSHSubprocessStore(
         host="eu.nixbuild.net",
         username=username,

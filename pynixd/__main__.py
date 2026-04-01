@@ -37,6 +37,8 @@ import json
 import logging
 import os
 
+from environs import Env
+
 from .instance import PynixdConfig, run_pynixd
 from .store import (
     LocalSocketStore,
@@ -45,6 +47,8 @@ from .store import (
     SSHSubprocessStore,
     Store,
 )
+
+env = Env()
 
 
 def _load_backends_from_file(path: str) -> dict[str, Store]:
@@ -108,17 +112,8 @@ def _load_backends_from_file(path: str) -> dict[str, Store]:
     return stores
 
 
-def _env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default)
-
-
-def _env_int(name: str, default: int | None) -> int | None:
-    raw = os.environ.get(name, "")
-    return int(raw) if raw else default
-
-
 async def _async_main() -> None:
-    dev_mode = _env_int("PYNIXD_DEV", 0)
+    dev_mode = env.int("PYNIXD_DEV", 0)
     stores: dict[str, Store] = {}
     log_main: logging.Logger = logging.getLogger("pynixd")
 
@@ -139,7 +134,7 @@ async def _async_main() -> None:
         )
 
     else:
-        backend_file = _env("PYNIXD_BACKEND_FILE")
+        backend_file = env.str("PYNIXD_BACKEND_FILE", "")
         if backend_file:
             if not os.path.exists(backend_file):
                 raise FileNotFoundError(f"Backend file not found: {backend_file}")
@@ -157,25 +152,25 @@ async def _async_main() -> None:
     config = PynixdConfig(
         local_store=local_store,
         stores=stores,
-        ssh_host=_env("PYNIXD_HOST", "127.0.0.1"),
-        ssh_port=_env_int("PYNIXD_SSH_PORT", 2234),
-        ssh_host_key=_env("PYNIXD_HOST_KEY") or None,
-        unix_path=_env("PYNIXD_UNIX_PATH") or None,
-        http_host=_env("PYNIXD_HTTP_HOST", "0.0.0.0"),
-        http_port=_env_int("PYNIXD_HTTP_PORT", None),
-        http_user=_env("PYNIXD_HTTP_USER") or None,
-        http_pass=_env("PYNIXD_HTTP_PASS") or None,
-        http_priority=_env_int("PYNIXD_HTTP_PRIORITY", 30),
-        https_port=_env_int("PYNIXD_HTTPS_PORT", None),
-        https_cert=_env("PYNIXD_HTTPS_CERT") or None,
-        https_key=_env("PYNIXD_HTTPS_KEY") or None,
+        ssh_host=env.str("PYNIXD_HOST", "127.0.0.1"),
+        ssh_port=env.int("PYNIXD_SSH_PORT", 2234),
+        ssh_host_key=env.str("PYNIXD_HOST_KEY", None),
+        unix_path=env.str("PYNIXD_UNIX_PATH", None),
+        http_host=env.str("PYNIXD_HTTP_HOST", "0.0.0.0"),
+        http_port=env.int("PYNIXD_HTTP_PORT", None),
+        http_user=env.str("PYNIXD_HTTP_USER", None),
+        http_pass=env.str("PYNIXD_HTTP_PASS", None),
+        http_priority=env.int("PYNIXD_HTTP_PRIORITY", 30),
+        https_port=env.int("PYNIXD_HTTPS_PORT", None),
+        https_cert=env.str("PYNIXD_HTTPS_CERT", None),
+        https_key=env.str("PYNIXD_HTTPS_KEY", None),
     )
 
     await run_pynixd(config)
 
 
 def main() -> None:
-    log_level_str = _env("PYNIXD_LOG_LEVEL", "WARNING").upper()
+    log_level_str = env.str("PYNIXD_LOG_LEVEL", "WARNING").upper()
     level = getattr(logging, log_level_str, logging.WARNING)
 
     logging.basicConfig(

@@ -22,6 +22,7 @@ from conftest import (
     _run_subprocess_with_timeout,
     run_pynixd,
 )
+from environs import Env
 
 from pynixd.store import (
     LocalSocketStore,
@@ -30,6 +31,8 @@ from pynixd.store import (
 )
 
 log = logging.getLogger(__name__)
+
+env = Env()
 
 pytestmark = pytest.mark.matrix
 
@@ -71,7 +74,7 @@ def _local_nix_builder() -> dict[str, Store]:
 
 
 def _nixbuild_builder() -> dict[str, Store]:
-    username = os.environ.get("USER", "root")
+    username = env.str("USER", "root")
     s = SSHSubprocessStore(
         host="eu.nixbuild.net",
         username=username,

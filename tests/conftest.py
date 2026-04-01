@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 import pytest
+from environs import Env
 
 from pynixd.instance import PynixdConfig, run_pynixd as run_instance
 from pynixd.store import LocalSocketStore, Store
@@ -41,12 +42,14 @@ logging.getLogger("pynixd.stderr").setLevel(logging.INFO)
 
 log = logging.getLogger(__name__)
 
-TEST_NIX = os.environ.get("PYNIXD_TEST_NIX", "test.nix")
+env = Env()
+
+TEST_NIX = env.str("PYNIXD_TEST_NIX", "test.nix")
 
 # LIX_BIN / NIX_BIN: paths to lix and nix binaries for LocalSubprocessStore.
 # Default to "nix" if neither is set.
-LIX_BIN = os.environ.get("LIX_BIN", "nix")
-NIX_BIN = os.environ.get("NIX_BIN", "nix")
+LIX_BIN = env.str("LIX_BIN", "nix")
+NIX_BIN = env.str("NIX_BIN", "nix")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -233,7 +236,7 @@ async def run_pynixd(
         except (TimeoutError, asyncio.TimeoutError):
             raise RuntimeError("Could not start pynixd SSH server (timed out waiting for ready)") from None
 
-        username = os.environ.get("USER", "root")
+        username = env.str("USER", "root")
 
         server = PynixdServer(
             host="127.0.0.1",

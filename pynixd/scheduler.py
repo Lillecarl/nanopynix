@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from dataclasses import dataclass
 from enum import Enum, auto
 
 import asyncssh
+from environs import Env
 
 from .build_queue import BuildQueue, QueuedBuild
 from .exceptions import BackendError, InfrastructureError
@@ -33,8 +33,10 @@ from .store import Store
 
 log: logging.Logger = logging.getLogger(__name__)
 
-MAX_RETRIES: int = int(os.environ.get("PYNIXD_BUILD_RETRIES", "3"))
-_PSI_PRESSURE_THRESHOLD: float = float(os.environ.get("PYNIXD_PSI_THRESHOLD", "70"))
+env = Env()
+
+MAX_RETRIES = env.int("PYNIXD_BUILD_RETRIES", 3)
+_PSI_PRESSURE_THRESHOLD = env.float("PYNIXD_PSI_THRESHOLD", 70.0)
 
 # Build statuses that are worth retrying (possibly transient).
 # PermanentFailure (3), InputRejected (4), OutputRejected (5),
