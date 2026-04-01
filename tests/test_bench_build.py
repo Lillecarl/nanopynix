@@ -33,7 +33,7 @@ class BenchResult:
 
 def _run_pynixd_thread(
     ready_event: threading.Event,
-    port_holder: list[int],
+    port: int,
     stop_event: threading.Event,
 ) -> None:
     """Run pynixd in a dedicated thread with its own event loop."""
@@ -44,12 +44,8 @@ def _run_pynixd_thread(
     profiler.start()
 
     async def _async_run() -> None:
-        from pynixd.ssh_server import start_ssh_server
+        from pynixd.instance import PynixdConfig, run_pynixd
         from pynixd.store import LocalSocketStore
-        from pynixd.build_queue import BuildQueue
-        from pynixd.scheduler import Scheduler
-        from pynixd.local_store_db import LocalStoreDB
-        from pynixd.gc import GarbageCollector
 
         local_store = LocalSocketStore(
             id="local", store_path="/tmp/pynixd-local", max_builds=0, max_transfers=64
@@ -63,53 +59,24 @@ def _run_pynixd_thread(
             )
         }
 
-        # Shared resources
-        build_queue = BuildQueue()
-        scheduler = Scheduler(build_queue, stores, local_store)
-
-        # Initialize local store and backends
-        await local_store.probe_version()
-        local_store.db = await LocalStoreDB.open(local_store.store_path or "/")
-
-        for store in stores.values():
-            try:
-                await store.sync_paths()
-            except Exception:
-                log.exception("Failed to sync paths for store %s", store.id)
-
-        # Start background services
-        scheduler_task = asyncio.create_task(scheduler.start())
-        gc: GarbageCollector | None = None
-        if local_store.db is not None:
-            local_store.db.start()
-            gc = GarbageCollector(local_store.db, stores, local_store)
-            gc.start()
-
-        ssh_server = await start_ssh_server(
-            stores=stores,
+        config = PynixdConfig(
             local_store=local_store,
-            build_queue=build_queue,
-            scheduler=scheduler,
-            host="127.0.0.1",
-            port=0,
+            stores=stores,
+            ssh_host="127.0.0.1",
+            ssh_port=port,
         )
-        port_holder.append(ssh_server.get_port())
-        ready_event.set()
 
+        # Run pynixd until stop_event is set
+        run_task = asyncio.create_task(run_pynixd(config, ready_event=ready_event))
+        
+        while not stop_event.is_set():
+            await asyncio.sleep(0.1)
+        
+        run_task.cancel()
         try:
-            while not stop_event.is_set():
-                await asyncio.sleep(0.1)
-        finally:
-            ssh_server.close()
-            await ssh_server.wait_closed()
-            scheduler_task.cancel()
-            if gc:
-                await gc.stop()
-            if local_store.db:
-                await local_store.db.close()
-            await local_store.close()
-            for store in stores.values():
-                await store.close()
+            await run_task
+        except asyncio.CancelledError:
+            pass
 
     asyncio.run(_async_run())
 
@@ -165,6 +132,7 @@ def _build_in_thread(
 
 def test_build_throughput() -> None:
     """Run nix build against pynixd and measure wall time."""
+    from conftest import get_free_port
     nix_file = os.environ.get("PYNIXD_TEST_NIX", "test.nix")
 
     client_store = tempfile.mkdtemp(prefix="pynixd-bench-client-")
@@ -172,13 +140,13 @@ def test_build_throughput() -> None:
 
     # Communication: pynixd writes port here
     ready_event = threading.Event()
-    port_holder: list[int] = []
+    port = get_free_port()
     stop_event = threading.Event()
 
     # Start pynixd thread
     pynixd_thread = threading.Thread(
         target=_run_pynixd_thread,
-        args=(ready_event, port_holder, stop_event),
+        args=(ready_event, port, stop_event),
         name="pynixd",
         daemon=True,
     )
@@ -186,10 +154,7 @@ def test_build_throughput() -> None:
 
     # Wait for pynixd to be ready
     ready_event.wait(timeout=10)
-    if not port_holder:
-        raise RuntimeError("pynixd did not expose port")
 
-    port = port_holder[0]
     log.info("pynixd ready on port %d", port)
 
     elapsed = _build_in_thread(port, client_store, nix_file, "parallel", stop_event)

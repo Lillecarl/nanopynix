@@ -9,9 +9,7 @@ General:
   PYNIXD_LOG_LEVEL     Log level: DEBUG, INFO, WARNING, ERROR (default: WARNING)
 
 SSH Server:
-  PYNIXD_SSH_PORT      SSH listen port (default: 2234 if PYNIXD_PORT is set,
-                       else 0 to disable)
-  PYNIXD_PORT          Legacy SSH listen port (alias for PYNIXD_SSH_PORT)
+  PYNIXD_SSH_PORT      SSH listen port (default: 2234, 0 to disable)
   PYNIXD_HOST_KEY      Path to SSH host key (generated if absent)
 
 Unix Server:
@@ -39,12 +37,7 @@ import json
 import logging
 import os
 
-from .build_queue import BuildQueue
-from .gc import GarbageCollector
-from .http_cache import BinaryCacheServer
-from .local_store_db import LocalStoreDB
-from .scheduler import Scheduler
-from .ssh_server import start_ssh_server
+from .instance import PynixdConfig, run_pynixd
 from .store import (
     LocalSocketStore,
     LocalSubprocessStore,
@@ -52,7 +45,6 @@ from .store import (
     SSHSubprocessStore,
     Store,
 )
-from .unix_server import start_unix_server
 
 
 def _load_backends_from_file(path: str) -> dict[str, Store]:
@@ -120,7 +112,7 @@ def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
 
-def _env_int(name: str, default: int) -> int:
+def _env_int(name: str, default: int | None) -> int | None:
     raw = os.environ.get(name, "")
     return int(raw) if raw else default
 
@@ -162,114 +154,24 @@ async def _async_main() -> None:
         else:
             local_store = LocalSocketStore(id="local")
 
-    # Shared resources
-    build_queue = BuildQueue()
-    scheduler = Scheduler(build_queue, stores, local_store)
+    config = PynixdConfig(
+        local_store=local_store,
+        stores=stores,
+        ssh_host=_env("PYNIXD_HOST", "127.0.0.1"),
+        ssh_port=_env_int("PYNIXD_SSH_PORT", 2234),
+        ssh_host_key=_env("PYNIXD_HOST_KEY") or None,
+        unix_path=_env("PYNIXD_UNIX_PATH") or None,
+        http_host=_env("PYNIXD_HTTP_HOST", "0.0.0.0"),
+        http_port=_env_int("PYNIXD_HTTP_PORT", None),
+        http_user=_env("PYNIXD_HTTP_USER") or None,
+        http_pass=_env("PYNIXD_HTTP_PASS") or None,
+        http_priority=_env_int("PYNIXD_HTTP_PRIORITY", 30),
+        https_port=_env_int("PYNIXD_HTTPS_PORT", None),
+        https_cert=_env("PYNIXD_HTTPS_CERT") or None,
+        https_key=_env("PYNIXD_HTTPS_KEY") or None,
+    )
 
-    # Initialize local store and backends
-    await local_store.probe_version()
-    local_store.db = await LocalStoreDB.open(local_store.store_path or "/")
-
-    for store in stores.values():
-        try:
-            await store.sync_paths()
-        except Exception:
-            log_main.exception("Failed to sync paths for store %s", store.id)
-
-    background_tasks = []
-    servers = []
-    http_runners = []
-
-    try:
-        # Start background services
-        background_tasks.append(asyncio.create_task(scheduler.start()))
-        if local_store.db:
-            local_store.db.start()
-            gc = GarbageCollector(local_store.db, stores, local_store)
-            background_tasks.append(asyncio.create_task(gc._loop()))
-
-        # Start listeners
-        ssh_port = _env_int("PYNIXD_SSH_PORT", _env_int("PYNIXD_PORT", 0))
-        if ssh_port:
-            ssh_server = await start_ssh_server(
-                stores=stores,
-                local_store=local_store,
-                build_queue=build_queue,
-                scheduler=scheduler,
-                host=_env("PYNIXD_HOST") or "127.0.0.1",
-                port=ssh_port,
-                host_key_path=_env("PYNIXD_HOST_KEY") or None,
-            )
-            servers.append(ssh_server)
-
-        unix_path = _env("PYNIXD_UNIX_PATH")
-        if unix_path:
-            unix_server = await start_unix_server(
-                stores=stores,
-                local_store=local_store,
-                build_queue=build_queue,
-                scheduler=scheduler,
-                socket_path=unix_path,
-            )
-            servers.append(unix_server)
-
-        http_port = _env_int("PYNIXD_HTTP_PORT", 0)
-        https_port = _env_int("PYNIXD_HTTPS_PORT", 0)
-        if http_port or https_port:
-            cache = BinaryCacheServer(
-                local_store,
-                username=_env("PYNIXD_HTTP_USER") or None,
-                password=_env("PYNIXD_HTTP_PASS") or None,
-                priority=_env_int("PYNIXD_HTTP_PRIORITY", 30),
-            )
-            if http_port:
-                runner, _ = await cache.start(
-                    host=_env("PYNIXD_HTTP_HOST") or "0.0.0.0",
-                    port=http_port,
-                )
-                http_runners.append(runner)
-            if https_port:
-                runner, _ = await cache.start(
-                    host=_env("PYNIXD_HTTP_HOST") or "0.0.0.0",
-                    port=https_port,
-                    ssl_cert=_env("PYNIXD_HTTPS_CERT") or None,
-                    ssl_key=_env("PYNIXD_HTTPS_KEY") or None,
-                )
-                http_runners.append(runner)
-
-        if not servers and not http_runners:
-            log_main.warning("No servers started! Check your configuration.")
-            return
-
-        # Wait for all servers to close
-        wait_tasks = []
-        for s in servers:
-            if hasattr(s, "wait_closed"):
-                wait_tasks.append(asyncio.create_task(s.wait_closed()))
-
-        # AppRunners don't have a wait_closed that blocks until the server stops
-        # in the same way as asyncio.Server. They just run until cleaned up.
-        # So we just wait on the asyncio.Servers if any, or a long sleep.
-        if wait_tasks:
-            await asyncio.gather(*wait_tasks)
-        else:
-            # Only HTTP runners, wait forever
-            while True:
-                await asyncio.sleep(3600)
-
-    except asyncio.CancelledError:
-        log_main.info("Shutting down...")
-    finally:
-        for runner in http_runners:
-            await runner.cleanup()
-        for s in servers:
-            s.close()
-        for task in background_tasks:
-            task.cancel()
-
-        await local_store.close()
-        for store in stores.values():
-            await store.close()
+    await run_pynixd(config)
 
 
 def main() -> None:

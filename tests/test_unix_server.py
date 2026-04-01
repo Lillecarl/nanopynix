@@ -44,48 +44,17 @@ async def _run_pynixd_unix(
     ready_event: asyncio.Event | None = None,
 ) -> None:
     """Run pynixd unix server (meant to be wrapped in a task)."""
-    from pynixd.unix_server import start_unix_server
-    from pynixd.build_queue import BuildQueue
-    from pynixd.scheduler import Scheduler
-    from pynixd.local_store_db import LocalStoreDB
+    from pynixd.instance import PynixdConfig, run_pynixd
 
     os.makedirs(os.path.dirname(socket_path), exist_ok=True)
 
-    # Shared resources
-    build_queue = BuildQueue()
-    scheduler = Scheduler(build_queue, stores, local_store)
-
-    # Initialize local store and backends
-    await local_store.probe_version()
-    local_store.db = await LocalStoreDB.open(local_store.store_path or "/")
-
-    for store in stores.values():
-        try:
-            await store.sync_paths()
-        except Exception:
-            log.exception("Failed to sync paths for store %s", store.id)
-
-    # Start background services
-    scheduler_task = asyncio.create_task(scheduler.start())
-    if local_store.db is not None:
-        local_store.db.start()
-
-    unix_server = await start_unix_server(
-        stores=stores,
+    config = PynixdConfig(
         local_store=local_store,
-        build_queue=build_queue,
-        scheduler=scheduler,
-        socket_path=socket_path,
+        stores=stores,
+        unix_path=socket_path,
     )
-    if ready_event:
-        ready_event.set()
 
-    try:
-        await unix_server.wait_closed()
-    finally:
-        scheduler_task.cancel()
-        if local_store.db:
-            await local_store.db.close()
+    await run_pynixd(config, ready_event=ready_event)
 
 
 async def _nix_build_unix(

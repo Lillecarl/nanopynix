@@ -14,12 +14,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from pynixd.ssh_server import start_ssh_server
+from pynixd.instance import PynixdConfig, run_pynixd as run_instance
 from pynixd.store import LocalSocketStore, Store
-from pynixd.build_queue import BuildQueue
-from pynixd.scheduler import Scheduler
-from pynixd.local_store_db import LocalStoreDB
-from pynixd.gc import GarbageCollector
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -173,6 +169,15 @@ class PynixdServer:
     _local_store: Store = field(default=None, repr=False)
 
 
+import socket
+
+def get_free_port() -> int:
+    """Get a free port from the OS."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
 @asynccontextmanager
 async def run_pynixd(
     stores: dict[str, Store],
@@ -208,78 +213,49 @@ async def run_pynixd(
     os.makedirs(client_store_path, exist_ok=True)
 
     ready = asyncio.Event()
-    port_holder: list[int] = []
+    bound_port = get_free_port()
 
     async def _run() -> None:
-        build_queue = BuildQueue()
-        scheduler = Scheduler(build_queue, stores, local_store)
-        
-        # Initialize local store and backends
-        await local_store.probe_version()
-        local_store.db = await LocalStoreDB.open(local_store.store_path or "/")
-
-        for store in stores.values():
-            try:
-                await store.sync_paths()
-            except Exception:
-                log.exception("Failed to sync paths for store %s", store.id)
-
-        # Start background services
-        scheduler_task = asyncio.create_task(scheduler.start())
-        gc: GarbageCollector | None = None
-        if local_store.db is not None:
-            local_store.db.start()
-            gc = GarbageCollector(local_store.db, stores, local_store)
-            gc.start()
-
-        ssh_server = await start_ssh_server(
-            stores=stores,
+        config = PynixdConfig(
             local_store=local_store,
-            build_queue=build_queue,
-            scheduler=scheduler,
-            host="127.0.0.1",
-            port=0,
+            stores=stores,
+            ssh_host="127.0.0.1",
+            ssh_port=bound_port,
         )
-        port_holder.append(ssh_server.get_port())
-        ready.set()
-        
-        try:
-            await ssh_server.wait_closed()
-        finally:
-            scheduler_task.cancel()
-            if gc:
-                await gc.stop()
-            if local_store.db:
-                await local_store.db.close()
+        await run_instance(config, ready_event=ready)
 
     task = asyncio.create_task(_run())
+    server = None
 
     try:
-        await asyncio.wait_for(ready.wait(), timeout=10)
-    except TimeoutError:
-        task.cancel()
         try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        raise RuntimeError("Could not start pynixd SSH server")
+            await asyncio.wait_for(ready.wait(), timeout=10)
+        except (TimeoutError, asyncio.TimeoutError):
+            raise RuntimeError("Could not start pynixd SSH server (timed out waiting for ready)") from None
 
-    bound_port = port_holder[0]
-    username = os.environ.get("USER", "root")
+        username = os.environ.get("USER", "root")
 
-    server = PynixdServer(
-        host="127.0.0.1",
-        port=bound_port,
-        username=username,
-        stores=stores,
-        client_store_path=client_store_path,
-        system=_get_system(),
-        njobs=njobs,
-        _task=task,
-        _local_store=local_store,
-    )
-    yield server
-    await server.close()
+        server = PynixdServer(
+            host="127.0.0.1",
+            port=bound_port,
+            username=username,
+            stores=stores,
+            client_store_path=client_store_path,
+            system=_get_system(),
+            njobs=njobs,
+            _task=task,
+            _local_store=local_store,
+        )
+        yield server
+    finally:
+        if server:
+            await server.close()
+        else:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 # ── Helper functions for common server configurations ──────────────────────────

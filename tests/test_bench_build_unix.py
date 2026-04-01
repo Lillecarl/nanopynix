@@ -47,7 +47,7 @@ _build_bench_key = pytest.StashKey[list[BenchResult]]()
 
 def _run_pynixd_thread(
     ready_event: threading.Event,
-    socket_path_holder: list[str],
+    socket_path: str,
     stop_event: threading.Event,
     profile_holder: list[str],
 ) -> None:
@@ -58,15 +58,9 @@ def _run_pynixd_thread(
     profiler = pyinstrument.Profiler(async_mode="enabled")
     profiler.start()
 
-    socket_path = "/tmp/pynixd-bench-unix.sock"
-
     async def _async_run() -> None:
-        from pynixd.unix_server import start_unix_server
+        from pynixd.instance import PynixdConfig, run_pynixd
         from pynixd.store import LocalSocketStore
-        from pynixd.build_queue import BuildQueue
-        from pynixd.scheduler import Scheduler
-        from pynixd.local_store_db import LocalStoreDB
-        from pynixd.gc import GarbageCollector
 
         local_store = LocalSocketStore(
             id="local", store_path="/", max_builds=0, max_transfers=64
@@ -80,46 +74,23 @@ def _run_pynixd_thread(
             )
         }
 
-        # Shared resources
-        build_queue = BuildQueue()
-        scheduler = Scheduler(build_queue, stores, local_store)
-
-        # Initialize local store and backends
-        await local_store.probe_version()
-        local_store.db = await LocalStoreDB.open(local_store.store_path or "/")
-
-        for store in stores.values():
-            try:
-                await store.sync_paths()
-            except Exception:
-                log.exception("Failed to sync paths for store %s", store.id)
-
-        # Start background services
-        scheduler_task = asyncio.create_task(scheduler.start())
-        if local_store.db is not None:
-            local_store.db.start()
-
-        unix_server = await start_unix_server(
-            stores=stores,
+        config = PynixdConfig(
             local_store=local_store,
-            build_queue=build_queue,
-            scheduler=scheduler,
-            socket_path=socket_path,
+            stores=stores,
+            unix_path=socket_path,
         )
-        ready_event.set()
 
+        # Run pynixd until stop_event is set
+        run_task = asyncio.create_task(run_pynixd(config, ready_event=ready_event))
+        
+        while not stop_event.is_set():
+            await asyncio.sleep(0.1)
+        
+        run_task.cancel()
         try:
-            while not stop_event.is_set():
-                await asyncio.sleep(0.1)
-        finally:
-            unix_server.close()
-            await unix_server.wait_closed()
-            scheduler_task.cancel()
-            if local_store.db:
-                await local_store.db.close()
-            await local_store.close()
-            for store in stores.values():
-                await store.close()
+            await run_task
+        except asyncio.CancelledError:
+            pass
 
     asyncio.run(_async_run())
 
@@ -186,14 +157,14 @@ def test_build_throughput(request: pytest.FixtureRequest) -> None:
 
     # Communication: pynixd writes socket path here
     ready_event = threading.Event()
-    socket_path_holder: list[str] = ["/tmp/pynixd-bench-unix.sock"]
+    socket_path = "/tmp/pynixd-bench-unix.sock"
     stop_event = threading.Event()
     profile_holder: list[str] = []
 
     # Start pynixd thread
     pynixd_thread = threading.Thread(
         target=_run_pynixd_thread,
-        args=(ready_event, socket_path_holder, stop_event, profile_holder),
+        args=(ready_event, socket_path, stop_event, profile_holder),
         name="pynixd",
         daemon=True,
     )
@@ -202,7 +173,6 @@ def test_build_throughput(request: pytest.FixtureRequest) -> None:
     # Wait for pynixd to be ready
     ready_event.wait(timeout=10)
 
-    socket_path = socket_path_holder[0]
     log.info("pynixd ready on socket %s", socket_path)
 
     elapsed = _build_in_thread(socket_path, client_store, nix_file, "parallel")
