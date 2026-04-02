@@ -11,6 +11,7 @@ Bare .drv paths (without !) are normalized to !* on construction.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ class DerivedPath(str):
             return {"*"}
         return set(outputs_str.split(","))
 
-    def to_derivation(self, store_path: str) -> ParsedDerivation:
+    def to_derivation(self, store_path: Path) -> ParsedDerivation:
         """Read and parse the .drv file this derived path refers to.
 
         Args:
@@ -61,7 +62,7 @@ class DerivedPath(str):
 
         return read_drv_file(store_path, self.drv_path)
 
-    def to_outputs(self, store_path: str) -> set[str]:
+    def to_outputs(self, store_path: Path) -> set[str]:
         """Resolve this derived path to actual output store paths.
 
         Args:

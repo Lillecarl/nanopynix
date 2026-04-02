@@ -11,6 +11,7 @@ import logging
 import os
 import shutil
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 from conftest import NIX_BIN
@@ -29,7 +30,7 @@ from pynixd.wire import UnixNixReader, UnixNixWriter
 
 log = logging.getLogger(__name__)
 
-DEST_STORE = "/tmp/pynixd-test-nar-dst"
+DEST_STORE = Path("/tmp/pynixd-test-nar-dst")
 
 
 @pytest.fixture
@@ -45,7 +46,7 @@ async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
     """Fresh empty store as destination."""
     shutil.rmtree(DEST_STORE, ignore_errors=True)
     os.makedirs(DEST_STORE, exist_ok=True)
-    s = LocalSubprocessStore(store_path=DEST_STORE, id="dst", nix_bin=NIX_BIN)
+    s = LocalSubprocessStore(store_path=DEST_STORE, id="dst", nix_bin=str(NIX_BIN))
     yield s
     await s.close()
 
@@ -326,7 +327,7 @@ async def test_add_multiple_to_store_two_paths(
 # ── copy_paths (streaming AddMultipleToStore) ─────────────────────
 
 
-COPY_DEST_STORE = "/tmp/pynixd-test-nar-copy"
+COPY_DEST_STORE = Path("/tmp/pynixd-test-nar-copy")
 
 
 @pytest.fixture
@@ -334,7 +335,9 @@ async def copy_dst_store() -> AsyncIterator[LocalSubprocessStore]:
     """Separate dest store for copy_paths tests."""
     shutil.rmtree(COPY_DEST_STORE, ignore_errors=True)
     os.makedirs(COPY_DEST_STORE, exist_ok=True)
-    s = LocalSubprocessStore(store_path=COPY_DEST_STORE, id="copy-dst", nix_bin=NIX_BIN)
+    s = LocalSubprocessStore(
+        store_path=COPY_DEST_STORE, id="copy-dst", nix_bin=str(NIX_BIN)
+    )
     yield s
     await s.close()
 
@@ -407,7 +410,7 @@ async def test_copy_paths_multiple(
 # ── pipe_nar_from (streaming) ──────────────────────────────────────
 
 
-STREAM_DEST_STORE = "/tmp/pynixd-test-nar-stream"
+STREAM_DEST_STORE = Path("/tmp/pynixd-test-nar-stream")
 
 
 @pytest.fixture
@@ -416,7 +419,7 @@ async def stream_dst_store() -> AsyncIterator[LocalSubprocessStore]:
     shutil.rmtree(STREAM_DEST_STORE, ignore_errors=True)
     os.makedirs(STREAM_DEST_STORE, exist_ok=True)
     s = LocalSubprocessStore(
-        store_path=STREAM_DEST_STORE, id="stream-dst", nix_bin=NIX_BIN
+        store_path=STREAM_DEST_STORE, id="stream-dst", nix_bin=str(NIX_BIN)
     )
     yield s
     await s.close()
@@ -540,13 +543,13 @@ async def test_copy_paths_roundtrip_nixbuild(
     nixbuild_store: SSHSubprocessStore,
 ) -> None:
     """Push paths to nixbuild, then pull them back via copy_paths (proto 1.32)."""
-    roundtrip_store = "/tmp/pynixd-test-nar-roundtrip"
+    roundtrip_store = Path("/tmp/pynixd-test-nar-roundtrip")
     shutil.rmtree(roundtrip_store, ignore_errors=True)
     os.makedirs(roundtrip_store, exist_ok=True)
     roundtrip_store_instance = LocalSubprocessStore(
         store_path=roundtrip_store,
         id="roundtrip",
-        nix_bin=NIX_BIN,
+        nix_bin=str(NIX_BIN),
     )
 
     try:

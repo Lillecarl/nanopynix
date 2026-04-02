@@ -31,6 +31,7 @@ import tempfile
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from conftest import NIX_BIN
@@ -52,7 +53,7 @@ env = Env()
 
 pytestmark = pytest.mark.benchmark
 
-BENCH_DST = "/tmp/pynixd-bench-dst"
+BENCH_DST = Path("/tmp/pynixd-bench-dst")
 
 _SSH_USER = env.str("USER", "root")
 
@@ -157,7 +158,7 @@ async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
     s = LocalSubprocessStore(
         store_path=BENCH_DST,
         id="bench-dst",
-        nix_bin=NIX_BIN,
+        nix_bin=str(NIX_BIN),
         max_transfers=_MAX_TRANSFERS,
     )
     yield s
@@ -174,11 +175,18 @@ def _create_big_path(size_mb: int) -> str:
         for _ in range(size_mb):
             f.write(chunk)
         f.flush()
-        tmp_path = f.name
+        tmp_path = Path(f.name)
 
     try:
         result = subprocess.run(
-            [NIX_BIN, "store", "add", "--name", f"bench-{size_mb}mb", tmp_path],
+            [
+                str(NIX_BIN),
+                "store",
+                "add",
+                "--name",
+                f"bench-{size_mb}mb",
+                str(tmp_path),
+            ],
             capture_output=True,
             text=True,
             timeout=60,
@@ -186,7 +194,8 @@ def _create_big_path(size_mb: int) -> str:
         assert result.returncode == 0, f"nix store add failed: {result.stderr}"
         return result.stdout.strip()
     finally:
-        os.unlink(tmp_path)
+        if tmp_path.exists():
+            tmp_path.unlink()
 
 
 async def _pick_small_paths(

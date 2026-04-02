@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from types import TracebackType
 from typing import cast
 
@@ -108,10 +109,10 @@ class Connection:
         r: NixReader,
         w: NixWriter,
         conn_id: str,
-        store_path: str | None = None,
+        store_path: Path | None = None,
     ) -> None:
         self.id: str = conn_id
-        self.store_path: str | None = store_path
+        self.store_path: str | None = str(store_path) if store_path else None
         self.version: int = wire.PROTOCOL_VERSION
         self.r = r
         self.w = w

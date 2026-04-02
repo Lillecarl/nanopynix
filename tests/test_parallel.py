@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
+from pathlib import Path
 
 import pytest
 from conftest import (
+    NIX_BIN,
     _run_subprocess_with_timeout,
     make_local_stores,
     nix_build,
@@ -39,7 +42,7 @@ async def test_builder_concurrency(
     With 1 builder (max_builds=2), we should see serialization of builds
     across clients.
     """
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     # 1 builder, 2 slots
     stores = make_local_stores(n=1, max_builds=2)
 
@@ -47,7 +50,8 @@ async def test_builder_concurrency(
 
         async def _client_task(client_id: int) -> float:
             # Each client uses its own isolated store path to avoid local locking
-            client_store = f"/tmp/pynixd-test-parallel-client-{client_id}"
+            client_store = Path(f"/tmp/pynixd-test-parallel-client-{client_id}")
+            os.makedirs(client_store, exist_ok=True)
             client_env = nix_env.copy()
             # These env vars are used by test.nix .parallel to sleep/id
             client_env["PYNIXD_PAR_COUNT"] = str(drvs_per_client)
@@ -56,17 +60,17 @@ async def test_builder_concurrency(
             client_env["PYNIXD_PAR_SLEEP"] = "1"
 
             cmd = [
-                "nix",
+                str(NIX_BIN),
                 "build",
                 "--store",
-                client_store,
+                str(client_store),
                 "--builders",
                 server.builder_uri(max_jobs=drvs_per_client),
                 "--max-jobs",
                 "0",
                 "--no-link",
                 "--file",
-                test_nix,
+                str(test_nix),
                 "parallel",
             ]
 
@@ -112,7 +116,7 @@ async def test_single_client_max_jobs(
     request: pytest.FixtureRequest,
 ) -> None:
     """One client with high --max-jobs should still be limited by builder slots."""
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     stores = make_local_stores(n=1, max_builds=2)
 
     async with run_pynixd(stores) as server:

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+from pathlib import Path
 
 import pytest
 from conftest import (
@@ -49,26 +50,26 @@ def _next_id() -> str:
 
 def _local_lix_builder() -> dict[str, Store]:
     n = _next_id()
-    store_path = f"/tmp/pynixd-test-matrix-builder-lix-{n}"
-    os.makedirs(store_path, exist_ok=True)
+    store_path = Path(f"/tmp/pynixd-test-matrix-builder-lix-{n}")
+    store_path.mkdir(exist_ok=True)
     s = LocalSocketStore(
         store_path=store_path,
         id=f"builder-lix-{n}",
         max_builds=2,
-        nix_bin=LIX_BIN,
+        nix_bin=str(LIX_BIN),
     )
     return {s.id: s}
 
 
 def _local_nix_builder() -> dict[str, Store]:
     n = _next_id()
-    store_path = f"/tmp/pynixd-test-matrix-builder-nix-{n}"
-    os.makedirs(store_path, exist_ok=True)
+    store_path = Path(f"/tmp/pynixd-test-matrix-builder-nix-{n}")
+    store_path.mkdir(exist_ok=True)
     s = LocalSocketStore(
         store_path=store_path,
         id=f"builder-nix-{n}",
         max_builds=2,
-        nix_bin=NIX_BIN,
+        nix_bin=str(NIX_BIN),
     )
     return {s.id: s}
 
@@ -84,15 +85,15 @@ def _nixbuild_builder() -> dict[str, Store]:
     return {s.id: s}
 
 
-def _local_store(nix_bin: str) -> LocalSocketStore:
+def _local_store(nix_bin: Path) -> LocalSocketStore:
     n = _next_id()
-    store_path = f"/tmp/pynixd-test-matrix-local-{n}"
+    store_path = Path(f"/tmp/pynixd-test-matrix-local-{n}")
     return LocalSocketStore(
         store_path=store_path,
         id=f"local-{n}",
         max_builds=0,
         max_transfers=64,
-        nix_bin=nix_bin,
+        nix_bin=str(nix_bin),
     )
 
 
@@ -108,19 +109,19 @@ LOCAL_BUILDERS = [_local_lix_builder, _local_nix_builder]
 
 
 async def _nix_build_builders(
-    client_bin: str,
+    client_bin: Path,
     builder_uri: str,
-    client_store_path: str,
+    client_store_path: Path,
     env: dict[str, str],
     *extra_args: str,
     timeout: int = 120,
 ) -> tuple[int, str, str]:
     os.makedirs(client_store_path, exist_ok=True)
     cmd = [
-        client_bin,
+        str(client_bin),
         "build",
         "--store",
-        client_store_path,
+        str(client_store_path),
         "--builders",
         builder_uri,
         "--max-jobs",
@@ -135,14 +136,14 @@ async def _nix_build_builders(
 
 
 async def _nix_build_store(
-    client_bin: str,
+    client_bin: Path,
     store_uri: str,
     env: dict[str, str],
     *extra_args: str,
     timeout: int = 120,
 ) -> tuple[int, str, str]:
     cmd = [
-        client_bin,
+        str(client_bin),
         "build",
         "--store",
         store_uri,
@@ -165,8 +166,8 @@ async def _nix_build_store(
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
 @pytest.mark.parametrize("builder_factory", LOCAL_BUILDERS)
 async def test_builders_local(
-    client: tuple[str, str],
-    local_bin: str,
+    client: tuple[Path, str],
+    local_bin: Path,
     builder_factory,
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
@@ -176,7 +177,7 @@ async def test_builders_local(
     test_nix = request.config.getoption("--nix")
     stores = builder_factory()
     local = _local_store(local_bin)
-    client_store = f"/tmp/pynixd-test-matrix-client-{_next_id()}"
+    client_store = Path(f"/tmp/pynixd-test-matrix-client-{_next_id()}")
 
     async with run_pynixd(
         stores, local_store=local, client_store_path=client_store
@@ -187,7 +188,7 @@ async def test_builders_local(
             server.client_store_path,
             nix_env,
             "--file",
-            test_nix,
+            str(test_nix),
             "simple",
         )
         assert rc == 0, f"build failed:\n{stderr}"
@@ -203,8 +204,8 @@ async def test_builders_local(
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
 @pytest.mark.parametrize("builder_factory", LOCAL_BUILDERS)
 async def test_store_local(
-    client: tuple[str, str],
-    local_bin: str,
+    client: tuple[Path, str],
+    local_bin: Path,
     builder_factory,
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
@@ -221,7 +222,7 @@ async def test_store_local(
             server.uri_for(uri_fmt),
             nix_env,
             "--file",
-            test_nix,
+            str(test_nix),
             "simple",
         )
         assert rc == 0, f"build failed:\n{stderr}"
@@ -237,8 +238,8 @@ async def test_store_local(
 @pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
 async def test_builders_nixbuild(
-    client: tuple[str, str],
-    local_bin: str,
+    client: tuple[Path, str],
+    local_bin: Path,
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
@@ -247,7 +248,7 @@ async def test_builders_nixbuild(
     test_nix = request.config.getoption("--nix")
     stores = _nixbuild_builder()
     local = _local_store(local_bin)
-    client_store = f"/tmp/pynixd-test-matrix-client-{_next_id()}"
+    client_store = Path(f"/tmp/pynixd-test-matrix-client-{_next_id()}")
 
     async with run_pynixd(
         stores, local_store=local, client_store_path=client_store
@@ -258,7 +259,7 @@ async def test_builders_nixbuild(
             server.client_store_path,
             nix_env,
             "--file",
-            test_nix,
+            str(test_nix),
             "simple",
         )
         assert rc == 0, f"build failed:\n{stderr}"
@@ -274,8 +275,8 @@ async def test_builders_nixbuild(
 @pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
 async def test_store_nixbuild(
-    client: tuple[str, str],
-    local_bin: str,
+    client: tuple[Path, str],
+    local_bin: Path,
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
@@ -291,7 +292,7 @@ async def test_store_nixbuild(
             server.uri_for(uri_fmt),
             nix_env,
             "--file",
-            test_nix,
+            str(test_nix),
             "simple",
         )
         assert rc == 0, f"build failed:\n{stderr}"

@@ -32,9 +32,9 @@ Compatibility with DerivationOutput (operations/base.py):
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .operations.base import BasicDerivation, DerivationOutput
@@ -448,7 +448,7 @@ class _Parser:
         )
 
 
-def extract_platforms(derived_paths: set[str], store_path: str) -> set[str]:
+def extract_platforms(derived_paths: set[str], store_path: Path) -> set[str]:
     """Extract the set of platforms from derived paths by peeking at .drv files."""
     platforms: set[str] = set()
     for dp in derived_paths:
@@ -462,7 +462,7 @@ def extract_platforms(derived_paths: set[str], store_path: str) -> set[str]:
     return platforms
 
 
-def collect_required_paths(derived_paths: set[str], store_path: str) -> set[str]:
+def collect_required_paths(derived_paths: set[str], store_path: Path) -> set[str]:
     """Collect the full transitive closure of store paths needed for BuildPaths.
 
     Recursively walks inputDrvs to collect every .drv file and input source
@@ -517,7 +517,7 @@ def collect_required_paths(derived_paths: set[str], store_path: str) -> set[str]
     return paths
 
 
-def collect_output_paths(derived_paths: set[str], store_path: str) -> list[str]:
+def collect_output_paths(derived_paths: set[str], store_path: Path) -> list[str]:
     """Collect expected output paths from derived paths by reading .drv files.
 
     Used after a BuildPaths completes to know which outputs to pull.
@@ -558,7 +558,7 @@ def collect_output_paths(derived_paths: set[str], store_path: str) -> list[str]:
 
 def to_basic_derivation(
     parsed: ParsedDerivation,
-    store_path: str,
+    store_path: Path,
 ) -> BasicDerivation:
     """Convert a ParsedDerivation to a BasicDerivation (wire protocol format).
 
@@ -615,7 +615,7 @@ def parse_drv(content: str) -> ParsedDerivation:
     return _Parser(content).parse_derivation()
 
 
-def read_drv_file(store_path: str, drv_store_path: str) -> ParsedDerivation:
+def read_drv_file(store_path: Path, drv_store_path: str) -> ParsedDerivation:
     """Read and parse a .drv file from a store's filesystem.
 
     Args:
@@ -627,6 +627,6 @@ def read_drv_file(store_path: str, drv_store_path: str) -> ParsedDerivation:
     """
     # drv_store_path is like "/nix/store/xxx.drv"
     # On disk it's at "{store_path}/nix/store/xxx.drv"
-    fs_path = os.path.join(store_path, drv_store_path.lstrip("/"))
+    fs_path = store_path / drv_store_path.lstrip("/")
     with open(fs_path) as f:
         return parse_drv(f.read())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 from conftest import (
@@ -38,7 +39,7 @@ async def test_simple_builders(
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .simple via --builders through nixbuild."""
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     stores = _nixbuild_stores()
 
     async with run_pynixd(stores) as server:
@@ -59,7 +60,7 @@ async def test_simple_store(
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .simple via --store through nixbuild."""
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     stores = _nixbuild_stores()
 
     async with run_pynixd(stores) as server:
@@ -81,7 +82,7 @@ async def test_dag_builders(
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .dag via --builders through nixbuild."""
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     stores = _nixbuild_stores()
 
     async with run_pynixd(stores) as server:
@@ -103,7 +104,7 @@ async def test_dag_store(
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .dag via --store through nixbuild."""
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     stores = _nixbuild_stores()
 
     async with run_pynixd(stores) as server:

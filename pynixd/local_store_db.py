@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 
 import aiosqlite
 
@@ -148,7 +149,7 @@ class LocalStoreDB:
     @classmethod
     async def open(
         cls,
-        store_path: str,
+        store_path: Path,
         regtime_flush_interval: float = _DEFAULT_REGTIME_FLUSH_INTERVAL,
     ) -> LocalStoreDB:
         """Open the Nix store database. Returns an instance (possibly with no DB)."""
@@ -158,7 +159,7 @@ class LocalStoreDB:
                 db=None, read_only=True, regtime_flush_interval=regtime_flush_interval
             )
 
-        db_dir = os.path.dirname(db_path)
+        db_dir = db_path.parent
         can_write = os.access(db_dir, os.W_OK)
         read_only = not can_write
 
@@ -430,14 +431,14 @@ class LocalStoreDB:
                 pass
 
 
-def _resolve_db_path(store_path: str) -> str | None:
+def _resolve_db_path(store_path: Path) -> Path | None:
     """Compute path to db.sqlite for a given store root."""
-    if store_path == "/" or not store_path:
-        db_path = "/nix/var/nix/db/db.sqlite"
+    if store_path == Path("/") or not store_path:
+        db_path = Path("/nix/var/nix/db/db.sqlite")
     else:
-        db_path = os.path.join(store_path, "nix", "var", "nix", "db", "db.sqlite")
+        db_path = store_path / "nix" / "var" / "nix" / "db" / "db.sqlite"
 
-    if not os.path.exists(db_path):
+    if not db_path.exists():
         log.warning("Nix DB not found at %s, direct queries disabled", db_path)
         return None
     return db_path

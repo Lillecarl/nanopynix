@@ -7,6 +7,8 @@ dependents can start.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from conftest import (
     make_local_stores,
@@ -24,7 +26,7 @@ async def test_builders(
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .dag (3-layer dependency DAG) via --builders."""
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     stores = make_local_stores(n=2)
 
     async with run_pynixd(stores) as server:
@@ -45,7 +47,7 @@ async def test_store(
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .dag (3-layer dependency DAG) via --store."""
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     stores = make_local_stores(n=2)
 
     async with run_pynixd(stores) as server:

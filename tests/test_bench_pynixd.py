@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import aiohttp
 import pyinstrument
@@ -126,11 +127,18 @@ def _create_big_path(size_mb: int) -> str:
         for _ in range(size_mb):
             f.write(chunk)
         f.flush()
-        tmp_path = f.name
+        tmp_path = Path(f.name)
 
     try:
         result = subprocess.run(
-            [NIX_BIN, "store", "add", "--name", f"bench-{size_mb}mb", tmp_path],
+            [
+                str(NIX_BIN),
+                "store",
+                "add",
+                "--name",
+                f"bench-{size_mb}mb",
+                str(tmp_path),
+            ],
             capture_output=True,
             text=True,
             timeout=60,
@@ -138,7 +146,8 @@ def _create_big_path(size_mb: int) -> str:
         assert result.returncode == 0, f"nix store add failed: {result.stderr}"
         return result.stdout.strip()
     finally:
-        os.unlink(tmp_path)
+        if tmp_path.exists():
+            tmp_path.unlink()
 
 
 async def _pick_small_paths(
@@ -192,7 +201,7 @@ async def test_ssh_serve_small_nars(
     async with run_pynixd(
         stores={},
         local_store=local_store,
-        client_store_path="/tmp/pynixd-bench-client",
+        client_store_path=Path("/tmp/pynixd-bench-client"),
     ) as server:
         client = SSHSubprocessStore(
             host=server.host,
@@ -250,7 +259,7 @@ async def test_ssh_serve_big_nar(
     async with run_pynixd(
         stores={},
         local_store=local_store,
-        client_store_path="/tmp/pynixd-bench-client",
+        client_store_path=Path("/tmp/pynixd-bench-client"),
     ) as server:
         client = SSHSubprocessStore(
             host=server.host,
@@ -292,7 +301,7 @@ async def test_ssh_query_path_info(
     async with run_pynixd(
         stores={},
         local_store=local_store,
-        client_store_path="/tmp/pynixd-bench-client",
+        client_store_path=Path("/tmp/pynixd-bench-client"),
     ) as server:
         client = SSHSubprocessStore(
             host=server.host,
@@ -471,29 +480,29 @@ async def test_build_throughput(
     async with run_pynixd(
         stores,
         njobs=100,
-        client_store_path="/tmp/pynixd-bench-build-local",
+        client_store_path=Path("/tmp/pynixd-bench-build-local"),
     ) as server:
         drvs_per_client = n_drvs // n_clients
 
         async def _run_client(client_id: int) -> float:
-            client_store = f"/tmp/pynixd-bench-build-client-{client_id}"
+            client_store = Path(f"/tmp/pynixd-bench-build-client-{client_id}")
             os.makedirs(client_store, exist_ok=True)
             client_env = nix_env.copy()
             client_env["PYNIXD_PAR_COUNT"] = str(drvs_per_client)
             client_env["PYNIXD_PAR_ID"] = f"b{client_id}"
             client_env["PYNIXD_PAR_SLEEP"] = "0"
             cmd = [
-                NIX_BIN,
+                str(NIX_BIN),
                 "build",
                 "--store",
-                client_store,
+                str(client_store),
                 "--builders",
                 server.builder_uri(max_jobs=drvs_per_client),
                 "--max-jobs",
                 "0",
                 "--no-link",
                 "--file",
-                test_nix,
+                str(test_nix),
                 "parallel",
             ]
             t0 = time.monotonic()

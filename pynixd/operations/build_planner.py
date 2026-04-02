@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..derived_path import DerivedPath
@@ -119,7 +120,9 @@ async def decompose_build_paths(
 
     Returns list of (derived_path, output_names, future) tuples.
     """
-    store_path = store.store_path or ""
+    store_path = store.store_path
+    if store_path is None:
+        store_path = Path("/")
 
     # Query which drvs actually need building
     missing_resp = await store.execute(
@@ -190,7 +193,7 @@ async def enqueue_build_derivation(
 
 def enrich_derivation(request: BuildDerivationRequest, store: Store) -> None:
     """Set _is_dynamic from the .drv file on disk."""
-    store_path = store.store_path or ""
+    store_path = store.store_path
     if not store_path:
         return
     try:

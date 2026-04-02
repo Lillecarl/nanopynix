@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from collections.abc import Mapping
+from pathlib import Path
 
 from .build_queue import BuildQueue
 from .proxy import DaemonProxy
@@ -26,7 +26,7 @@ async def start_unix_server(
     local_store: Store,
     build_queue: BuildQueue,
     scheduler: Scheduler,
-    socket_path: str,
+    socket_path: Path,
 ) -> asyncio.Server:
     """Start a Unix socket server.
 
@@ -63,9 +63,9 @@ async def start_unix_server(
             writer.close()
 
     # Clean up stale socket
-    if os.path.exists(socket_path):
-        os.unlink(socket_path)
+    if socket_path.exists():
+        socket_path.unlink()
 
-    server = await asyncio.start_unix_server(handle_client, path=socket_path)
+    server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
     log.info("pynixd Unix server listening on %s", socket_path)
     return server

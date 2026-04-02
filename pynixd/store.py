@@ -22,6 +22,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from pathlib import Path
 
 import asyncssh
 from environs import Env
@@ -88,7 +89,7 @@ class Store(ABC):
     def __init__(
         self,
         id: str,
-        store_path: str | None = None,
+        store_path: Path | None = None,
         max_builds: int = 2,
         max_transfers: int = 4,
         idle_ttl: float = _DEFAULT_IDLE_TTL,
@@ -728,7 +729,7 @@ class LocalSubprocessStore(Store):
 
     def __init__(
         self,
-        store_path: str,
+        store_path: Path,
         id: str | None = None,
         max_builds: int = 2,
         max_transfers: int = 4,
@@ -746,7 +747,7 @@ class LocalSubprocessStore(Store):
         self._processes: list[asyncio.subprocess.Process] = []
 
     async def _create_conn(self) -> Connection:
-        path = self.store_path or ""
+        path = self.store_path or Path("/")
         os.makedirs(path, exist_ok=True)
 
         conn_id = f"{self.id}-{self._conn_counter}"
@@ -764,7 +765,7 @@ class LocalSubprocessStore(Store):
                     self._nix_bin,
                     "daemon",
                     "--store",
-                    path,
+                    str(path),
                     "--stdio",
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
@@ -1001,7 +1002,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         id: str | None = None,
         port: int = 22,
         username: str | None = None,
-        store_path: str | None = None,
+        store_path: Path | None = None,
         max_builds: int = 2,
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
@@ -1077,21 +1078,17 @@ class LocalSocketStore(Store):
     def __init__(
         self,
         id: str | None = None,
-        store_path: str = "/",
+        store_path: Path | None = None,
         max_builds: int = 1,
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
         nix_bin: str = "nix",
     ) -> None:
-        managed = store_path != "/"
+        if store_path is None:
+            store_path = Path("/")
+        managed = store_path != Path("/")
         if managed:
-            socket_path = os.path.join(
-                store_path,
-                "var",
-                "nix",
-                "daemon-socket",
-                "socket",
-            )
+            socket_path = store_path / "var" / "nix" / "daemon-socket" / "socket"
         else:
             socket_path = DAEMON_SOCKET_PATH
 
@@ -1124,8 +1121,8 @@ class LocalSocketStore(Store):
 
         self._daemon_ready = asyncio.Event()
 
-        path = self.store_path or ""
-        socket_dir = os.path.dirname(self._socket_path)
+        path = self.store_path or Path("/")
+        socket_dir = self._socket_path.parent
         os.makedirs(socket_dir, exist_ok=True)
 
         log.info(
@@ -1135,12 +1132,12 @@ class LocalSocketStore(Store):
             self._socket_path,
         )
         env = os.environ.copy()
-        env["NIX_DAEMON_SOCKET_PATH"] = self._socket_path
+        env["NIX_DAEMON_SOCKET_PATH"] = str(self._socket_path)
         self._daemon_proc = await asyncio.create_subprocess_exec(
             self._nix_bin,
             "daemon",
             "--store",
-            path,
+            str(path),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
@@ -1149,7 +1146,7 @@ class LocalSocketStore(Store):
 
         # Wait for socket file to appear
         for _ in range(100):
-            if os.path.exists(self._socket_path):
+            if self._socket_path.exists():
                 break
             await asyncio.sleep(0.05)
         else:
@@ -1161,7 +1158,7 @@ class LocalSocketStore(Store):
         # Socket file exists but daemon may not be listening yet — probe
         for attempt in range(50):
             try:
-                r, w = await asyncio.open_unix_connection(self._socket_path)
+                r, w = await asyncio.open_unix_connection(str(self._socket_path))
                 w.close()
                 await w.wait_closed()
                 log.info("Managed daemon socket ready: %s", self._socket_path)
@@ -1179,7 +1176,7 @@ class LocalSocketStore(Store):
         await self._ensure_daemon()
         conn_id = f"{self.id}-{self._conn_counter}"
         log.debug("Connecting to daemon socket %s (%s)", self._socket_path, conn_id)
-        r, w = await asyncio.open_unix_connection(self._socket_path)
+        r, w = await asyncio.open_unix_connection(str(self._socket_path))
         conn = Connection(
             UnixNixReader(r), UnixNixWriter(w), conn_id, store_path=self.store_path
         )
@@ -1198,7 +1195,7 @@ class LocalSocketStore(Store):
             self._daemon_proc = None
 
 
-DAEMON_SOCKET_PATH = "/nix/var/nix/daemon-socket/socket"
+DAEMON_SOCKET_PATH = Path("/nix/var/nix/daemon-socket/socket")
 
 
 class SSHSocketStore(_SSHStoreMixin, Store):
@@ -1210,7 +1207,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         id: str | None = None,
         port: int = 22,
         username: str | None = None,
-        socket_path: str = DAEMON_SOCKET_PATH,
+        socket_path: Path = DAEMON_SOCKET_PATH,
         max_builds: int = 2,
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
@@ -1240,7 +1237,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
             conn_id,
         )
         try:
-            r, w = await ssh_conn.open_unix_connection(self._socket_path)
+            r, w = await ssh_conn.open_unix_connection(str(self._socket_path))
         except Exception:
             self._invalidate_ssh()
             raise

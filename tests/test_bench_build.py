@@ -19,6 +19,7 @@ import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from environs import Env
 
@@ -26,7 +27,7 @@ log = logging.getLogger(__name__)
 
 env = Env()
 
-NIX_BIN = env.str("NIX_BIN", "nix")
+NIX_BIN = env.path("NIX_BIN", Path("nix"))
 
 
 @dataclass
@@ -53,12 +54,15 @@ def _run_pynixd_thread(
         from pynixd.store import LocalSocketStore, Store
 
         local_store = LocalSocketStore(
-            id="local", store_path="/tmp/pynixd-local", max_builds=0, max_transfers=64
+            id="local",
+            store_path=Path("/tmp/pynixd-local"),
+            max_builds=0,
+            max_transfers=64,
         )
         stores: Mapping[str, Store] = {
             "builder": LocalSocketStore(
                 id="builder",
-                store_path="/tmp/pynixd-builder",
+                store_path=Path("/tmp/pynixd-builder"),
                 max_builds=100,
                 max_transfers=100,
             )
@@ -105,8 +109,8 @@ def _run_pynixd_thread(
 
 def _build_in_thread(
     port: int,
-    client_store: str,
-    nix_file: str,
+    client_store: Path,
+    nix_file: Path,
     target: str,
     stop_event: threading.Event,
 ) -> float:
@@ -120,17 +124,17 @@ def _build_in_thread(
     )
 
     cmd = [
-        NIX_BIN,
+        str(NIX_BIN),
         "build",
         "--store",
-        client_store,
+        str(client_store),
         "--builders",
         builder_uri,
         "--max-jobs",
         "0",
         "--no-link",
         "--file",
-        nix_file,
+        str(nix_file),
         target,
     ]
 
@@ -149,9 +153,9 @@ def test_build_throughput() -> None:
     """Run nix build against pynixd and measure wall time."""
     from conftest import get_free_port
 
-    nix_file = env.str("PYNIXD_TEST_NIX", "test.nix")
+    nix_file = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
 
-    client_store = tempfile.mkdtemp(prefix="pynixd-bench-client-")
+    client_store = Path(tempfile.mkdtemp(prefix="pynixd-bench-client-"))
     os.makedirs(client_store, exist_ok=True)
 
     # Communication: pynixd writes port here

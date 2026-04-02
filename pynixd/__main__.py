@@ -35,7 +35,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
+from pathlib import Path
 
 from environs import Env
 
@@ -51,7 +51,7 @@ from .store import (
 env = Env()
 
 
-def _load_backends_from_file(path: str) -> dict[str, Store]:
+def _load_backends_from_file(path: Path) -> dict[str, Store]:
     """Load store definitions from a JSON file."""
     with open(path) as f:
         data = json.load(f)
@@ -70,7 +70,7 @@ def _load_backends_from_file(path: str) -> dict[str, Store]:
                 id=b_id,
                 port=spec.get("port", 22),
                 username=spec.get("username"),
-                store_path=spec.get("store_path"),
+                store_path=Path(spec["store_path"]) if spec.get("store_path") else None,
                 max_builds=max_builds,
                 max_transfers=max_transfers,
                 supported_systems=supported_systems,
@@ -81,8 +81,8 @@ def _load_backends_from_file(path: str) -> dict[str, Store]:
                 id=b_id,
                 port=spec.get("port", 22),
                 username=spec.get("username"),
-                socket_path=spec.get(
-                    "socket_path", "/nix/var/nix/daemon-socket/socket"
+                socket_path=Path(
+                    spec.get("socket_path", "/nix/var/nix/daemon-socket/socket")
                 ),
                 max_builds=max_builds,
                 max_transfers=max_transfers,
@@ -91,14 +91,14 @@ def _load_backends_from_file(path: str) -> dict[str, Store]:
         elif btype == "local-socket":
             store = LocalSocketStore(
                 id=b_id,
-                store_path=spec.get("store_path", "/"),
+                store_path=Path(spec.get("store_path", "/")),
                 max_builds=max_builds,
                 max_transfers=max_transfers,
                 supported_systems=supported_systems,
             )
         elif btype == "local-subprocess":
             store = LocalSubprocessStore(
-                store_path=spec["store_path"],
+                store_path=Path(spec["store_path"]),
                 id=b_id,
                 max_builds=max_builds,
                 max_transfers=max_transfers,
@@ -122,21 +122,21 @@ async def _async_main() -> None:
 
         for i in range(dev_mode):
             store = LocalSubprocessStore(
-                store_path=f"/tmp/pynixd-{i}",
+                store_path=Path(f"/tmp/pynixd-{i}"),
                 id=f"builder{i}",
                 max_builds=2,
             )
             stores[store.id] = store
 
         local_store: Store = LocalSubprocessStore(
-            store_path="/tmp/pynixdlocal",
+            store_path=Path("/tmp/pynixdlocal"),
             id="local",
         )
 
     else:
-        backend_file = env.str("PYNIXD_BACKEND_FILE", "")
+        backend_file = env.path("PYNIXD_BACKEND_FILE", None)
         if backend_file:
-            if not os.path.exists(backend_file):
+            if not backend_file.exists():
                 raise FileNotFoundError(f"Backend file not found: {backend_file}")
             log_main.info("Loading stores from %s", backend_file)
             stores = _load_backends_from_file(backend_file)
@@ -147,23 +147,23 @@ async def _async_main() -> None:
             local_store = stores.pop("local")
             log_main.info("Using 'local' from backend file as local store")
         else:
-            local_store = LocalSocketStore(id="local")
+            local_store = LocalSocketStore(id="local", store_path=Path("/"))
 
     config = PynixdConfig(
         local_store=local_store,
         stores=stores,
         ssh_host=env.str("PYNIXD_HOST", "127.0.0.1"),
         ssh_port=env.int("PYNIXD_SSH_PORT", 2234),
-        ssh_host_key=env.str("PYNIXD_HOST_KEY", None),
-        unix_path=env.str("PYNIXD_UNIX_PATH", None),
+        ssh_host_key=env.path("PYNIXD_HOST_KEY", None),
+        unix_path=env.path("PYNIXD_UNIX_PATH", None),
         http_host=env.str("PYNIXD_HTTP_HOST", "0.0.0.0"),
         http_port=env.int("PYNIXD_HTTP_PORT", None),
         http_user=env.str("PYNIXD_HTTP_USER", None),
         http_pass=env.str("PYNIXD_HTTP_PASS", None),
         http_priority=env.int("PYNIXD_HTTP_PRIORITY", 30),
         https_port=env.int("PYNIXD_HTTPS_PORT", None),
-        https_cert=env.str("PYNIXD_HTTPS_CERT", None),
-        https_key=env.str("PYNIXD_HTTPS_KEY", None),
+        https_cert=env.path("PYNIXD_HTTPS_CERT", None),
+        https_key=env.path("PYNIXD_HTTPS_KEY", None),
     )
 
     await run_pynixd(config)

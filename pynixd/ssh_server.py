@@ -8,8 +8,8 @@ for each `nix-daemon --stdio` exec request.
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Mapping
+from pathlib import Path
 
 import asyncssh
 
@@ -48,7 +48,7 @@ async def start_ssh_server(
     scheduler: Scheduler,
     host: str = "127.0.0.1",
     port: int = 0,
-    host_key_path: str | None = None,
+    host_key_path: Path | None = None,
 ) -> asyncssh.SSHAcceptor:
     """Start the SSH server.
 
@@ -65,13 +65,13 @@ async def start_ssh_server(
         The asyncssh acceptor instance.
     """
     # Load or generate host key
-    if host_key_path and os.path.exists(host_key_path):
-        host_key: asyncssh.SSHKey = asyncssh.read_private_key(host_key_path)
+    if host_key_path and host_key_path.exists():
+        host_key: asyncssh.SSHKey = asyncssh.read_private_key(str(host_key_path))
         log.info("Loaded host key from %s", host_key_path)
     else:
         host_key = asyncssh.generate_private_key("ssh-rsa", key_size=4096)
         if host_key_path:
-            host_key.write_private_key(host_key_path)
+            host_key.write_private_key(str(host_key_path))
             log.info("Generated and saved host key to %s", host_key_path)
         else:
             log.info("Generated ephemeral host key")

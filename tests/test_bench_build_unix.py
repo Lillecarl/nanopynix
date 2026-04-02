@@ -21,6 +21,7 @@ import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from environs import Env
@@ -34,7 +35,7 @@ aiosqlite_logger.setLevel(logging.WARNING)
 
 env = Env()
 
-NIX_BIN = env.str("NIX_BIN", "nix")
+NIX_BIN = env.path("NIX_BIN", Path("nix"))
 
 
 @dataclass
@@ -50,7 +51,7 @@ _build_bench_key = pytest.StashKey[list[BenchResult]]()
 
 def _run_pynixd_thread(
     ready_event: threading.Event,
-    socket_path: str,
+    socket_path: Path,
     stop_event: threading.Event,
 ) -> None:
     """Run pynixd in a dedicated thread with its own event loop."""
@@ -66,14 +67,14 @@ def _run_pynixd_thread(
 
         local_store = LocalSocketStore(
             id="local",
-            store_path="/tmp/pynixd-local-unix",
+            store_path=Path("/tmp/pynixd-local-unix"),
             max_builds=0,
             max_transfers=64,
         )
         stores: Mapping[str, Store] = {
             "builder": LocalSocketStore(
                 id="builder",
-                store_path="/tmp/pynixd-builder-unix",
+                store_path=Path("/tmp/pynixd-builder-unix"),
                 max_builds=100,
                 max_transfers=100,
             )
@@ -116,26 +117,26 @@ def _run_pynixd_thread(
 
 
 def _build_in_thread(
-    socket_path: str,
-    client_store: str,
-    nix_file: str,
+    socket_path: Path,
+    client_store: Path,
+    nix_file: Path,
     target: str,
     stop_event: threading.Event,
 ) -> float:
     """Run nix build in a dedicated thread."""
     env = os.environ.copy()
     cmd = [
-        NIX_BIN,
+        str(NIX_BIN),
         "build",
         "--store",
-        client_store,
+        str(client_store),
         "--builders",
         f"unix://{socket_path}?remote-store={socket_path} x86_64-linux - 100",
         "--max-jobs",
         "0",
         "--no-link",
         "--file",
-        nix_file,
+        str(nix_file),
         target,
     ]
 
@@ -157,16 +158,16 @@ def _build_in_thread(
 
 def test_build_throughput(request: pytest.FixtureRequest) -> None:
     """Run nix build against pynixd Unix server and measure wall time."""
-    nix_file = env.str("PYNIXD_TEST_NIX", "test.nix")
+    nix_file = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
 
-    client_store = tempfile.mkdtemp(prefix="pynixd-bench-client-")
+    client_store = Path(tempfile.mkdtemp(prefix="pynixd-bench-client-"))
     os.makedirs(client_store, exist_ok=True)
 
     # Communication: pynixd writes socket path here
     ready_event = threading.Event()
-    socket_path = f"/tmp/pynixd-bench-{os.getpid()}.socket"
-    if os.path.exists(socket_path):
-        os.remove(socket_path)
+    socket_path = Path(f"/tmp/pynixd-bench-{os.getpid()}.socket")
+    if socket_path.exists():
+        socket_path.unlink()
     stop_event = threading.Event()
 
     # Start pynixd thread
@@ -205,6 +206,6 @@ def test_build_throughput(request: pytest.FixtureRequest) -> None:
     finally:
         stop_event.set()
         pynixd_thread.join(timeout=10)
-        if os.path.exists(socket_path):
-            os.remove(socket_path)
-        subprocess.run(["rm", "-rf", client_store])
+        if socket_path.exists():
+            socket_path.unlink()
+        subprocess.run(["rm", "-rf", str(client_store)])

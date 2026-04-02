@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import asyncssh
 
@@ -31,10 +32,10 @@ class PynixdConfig:
     # SSH Server
     ssh_host: str = "127.0.0.1"
     ssh_port: int | None = None  # None to disable, 0 for random
-    ssh_host_key: str | None = None
+    ssh_host_key: Path | None = None
 
     # Unix Server
-    unix_path: str | None = None
+    unix_path: Path | None = None
 
     # HTTP Binary Cache
     http_host: str = "0.0.0.0"
@@ -45,8 +46,8 @@ class PynixdConfig:
 
     # HTTPS Binary Cache
     https_port: int | None = None
-    https_cert: str | None = None
-    https_key: str | None = None
+    https_cert: Path | None = None
+    https_key: Path | None = None
 
 
 async def run_pynixd(
@@ -74,7 +75,7 @@ async def run_pynixd(
 
     # Initialize local store and backends
     await local_store.probe_version()
-    local_store.db = await LocalStoreDB.open(local_store.store_path or "/")
+    local_store.db = await LocalStoreDB.open(local_store.store_path or Path("/"))
 
     for store in stores.values():
         try:
@@ -139,8 +140,8 @@ async def run_pynixd(
                 runner, _ = await cache.start(
                     host=config.http_host,
                     port=config.https_port,
-                    ssl_cert=config.https_cert,
-                    ssl_key=config.https_key,
+                    ssl_cert=str(config.https_cert) if config.https_cert else None,
+                    ssl_key=str(config.https_key) if config.https_key else None,
                 )
                 http_runners.append(runner)
 

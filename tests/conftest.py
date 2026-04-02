@@ -11,6 +11,7 @@ import subprocess
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from environs import Env
@@ -45,12 +46,12 @@ log = logging.getLogger(__name__)
 
 env = Env()
 
-TEST_NIX = env.str("PYNIXD_TEST_NIX", "test.nix")
+TEST_NIX = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
 
 # LIX_BIN / NIX_BIN: paths to lix and nix binaries for LocalSubprocessStore.
 # Default to "nix" if neither is set.
-LIX_BIN = env.str("LIX_BIN", "nix")
-NIX_BIN = env.str("NIX_BIN", "nix")
+LIX_BIN = env.path("LIX_BIN", Path("nix"))
+NIX_BIN = env.path("NIX_BIN", Path("nix"))
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -69,14 +70,16 @@ def cleanup_bench_paths():
         for p in result.stdout.splitlines():
             if p.strip():
                 log.info("Deleting old benchmark path: %s", p)
-                subprocess.run([NIX_BIN, "store", "delete", p], capture_output=True)
+                subprocess.run(
+                    [str(NIX_BIN), "store", "delete", p], capture_output=True
+                )
     except Exception as e:
         log.warning("Could not cleanup benchmark paths: %s", e)
 
 
 def get_current_system() -> str:
     """Return nix system string (e.g. x86_64-linux)."""
-    return subprocess.check_output([NIX_BIN, "--version"]).decode().split()[-1]
+    return subprocess.check_output([str(NIX_BIN), "--version"]).decode().split()[-1]
 
 
 def _run_subprocess_with_timeout(
@@ -97,13 +100,13 @@ async def nix_build(
     target: str,
     env: dict[str, str] | None = None,
     *args: str,
-    nix_file: str | None = None,
+    nix_file: Path | None = None,
     jobs: int = 1,
 ) -> tuple[int, str, str]:
     """Run nix build against a pynixd SSH server."""
     nix_file = nix_file or TEST_NIX
     cmd = [
-        NIX_BIN,
+        str(NIX_BIN),
         "build",
         "--builders",
         f"{uri} {get_current_system()} - {jobs}",
@@ -112,7 +115,7 @@ async def nix_build(
         "--no-link",
         "--print-out-paths",
         "--file",
-        nix_file,
+        str(nix_file),
         target,
     ]
     # Add any extra args (like --file if the caller passed it as positional)
@@ -140,19 +143,19 @@ async def nix_build_store_only(
     target: str,
     env: dict[str, str] | None = None,
     *args: str,
-    nix_file: str | None = None,
+    nix_file: Path | None = None,
 ) -> tuple[int, str, str]:
     """Run nix build --store against a pynixd SSH server."""
     nix_file = nix_file or TEST_NIX
     cmd = [
-        NIX_BIN,
+        str(NIX_BIN),
         "build",
         "--store",
         uri,
         "--no-link",
         "--print-out-paths",
         "--file",
-        nix_file,
+        str(nix_file),
         target,
     ]
     if args:
@@ -182,7 +185,7 @@ class PynixdServer:
     port: int
     username: str
     stores: Mapping[str, Store]
-    client_store_path: str
+    client_store_path: Path
     _task: asyncio.Task[None] = field(repr=False)
     system: str = "x86_64-linux"
     njobs: int = 4
@@ -236,17 +239,17 @@ async def run_pynixd(
     stores: Mapping[str, Store],
     *,
     local_store: Store | None = None,
-    client_store_path: str = "/tmp/pynixd-test-client",
+    client_store_path: Path = Path("/tmp/pynixd-test-client"),
     njobs: int = 4,
 ) -> AsyncIterator[PynixdServer]:
     """Start a pynixd SSH server with the given stores."""
     if local_store is None:
         local_store = LocalSocketStore(
-            store_path="/tmp/pynixd-test-local",
+            store_path=Path("/tmp/pynixd-test-local"),
             id="local",
             max_builds=0,
             max_transfers=64,
-            nix_bin=NIX_BIN,
+            nix_bin=str(NIX_BIN),
         )
 
     os.makedirs(client_store_path, exist_ok=True)
@@ -308,14 +311,14 @@ def make_local_stores(
     """Create N local socket stores with managed daemons."""
     stores: dict[str, Store] = {}
     for i in range(n):
-        store_path = f"/tmp/pynixd-test-{prefix}-{i}"
+        store_path = Path(f"/tmp/pynixd-test-{prefix}-{i}")
         os.makedirs(store_path, exist_ok=True)
         store = LocalSocketStore(
             store_path=store_path,
             id=f"{prefix}{i}",
             max_builds=max_builds,
             supported_systems=supported_systems,
-            nix_bin=NIX_BIN,
+            nix_bin=str(NIX_BIN),
         )
         stores[store.id] = store
     return stores

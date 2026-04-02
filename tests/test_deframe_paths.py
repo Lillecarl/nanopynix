@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 from conftest import NIX_BIN
@@ -27,7 +28,7 @@ from pynixd.wire import (
 
 log = logging.getLogger(__name__)
 
-DEST_STORE = "/tmp/pynixd-test-deframe-dst"
+DEST_STORE = Path("/tmp/pynixd-test-deframe-dst")
 
 
 @pytest.fixture
@@ -40,7 +41,9 @@ async def src_store() -> AsyncIterator[LocalSocketStore]:
 @pytest.fixture
 async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
     os.makedirs(DEST_STORE, exist_ok=True)
-    s = LocalSubprocessStore(store_path=DEST_STORE, id="deframe-dst", nix_bin=NIX_BIN)
+    s = LocalSubprocessStore(
+        store_path=DEST_STORE, id="deframe-dst", nix_bin=str(NIX_BIN)
+    )
     yield s
     await s.close()
 

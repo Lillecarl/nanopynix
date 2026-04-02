@@ -9,6 +9,7 @@ import shlex
 import subprocess
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pytest
 from conftest import (
@@ -24,7 +25,7 @@ log = logging.getLogger(__name__)
 
 
 def _nix_build_unix(
-    socket_path: str,
+    socket_path: Path,
     env: dict[str, str],
     *extra_args: str,
     timeout: int = 120,
@@ -32,7 +33,7 @@ def _nix_build_unix(
     """Run nix build using pynixd unix socket as the store."""
     store_uri = f"unix://{socket_path}"
     cmd = [
-        NIX_BIN,
+        str(NIX_BIN),
         "build",
         "--store",
         store_uri,
@@ -44,17 +45,17 @@ def _nix_build_unix(
 
 
 def _nix_build_direct(
-    store_path: str,
+    store_path: Path,
     env: dict[str, str],
     *extra_args: str,
     timeout: int = 120,
 ) -> tuple[int, str, str]:
     """Run nix build directly against a local store (no pynixd)."""
     cmd = [
-        NIX_BIN,
+        str(NIX_BIN),
         "build",
         "--store",
-        store_path,
+        str(store_path),
         "--no-link",
         "--max-jobs",
         "150",
@@ -65,7 +66,7 @@ def _nix_build_direct(
 
 
 def _nix_store_unix(
-    socket_path: str,
+    socket_path: Path,
     env: dict[str, str],
     *args: str,
     timeout: int = 30,
@@ -73,7 +74,7 @@ def _nix_store_unix(
     """Run nix store subcommand against pynixd unix socket."""
     store_uri = f"unix://{socket_path}"
     cmd = [
-        NIX_BIN,
+        str(NIX_BIN),
         "store",
         *args,
         "--store",
@@ -86,28 +87,28 @@ def _nix_store_unix(
 @pytest.fixture
 def local_store() -> LocalSocketStore:
     """Local store for pynixd."""
-    store_path = "/tmp/pynixd-test-unix-local"
-    os.makedirs(store_path, exist_ok=True)
+    store_path = Path("/tmp/pynixd-test-unix-local")
+    store_path.mkdir(exist_ok=True)
     return LocalSocketStore(
         store_path=store_path,
         id="local",
         max_builds=0,
         max_transfers=64,
-        nix_bin=NIX_BIN,
+        nix_bin=str(NIX_BIN),
     )
 
 
 @pytest.fixture
 def builder_store() -> LocalSocketStore:
     """Builder store for pynixd."""
-    store_path = "/tmp/pynixd-test-unix-builder"
-    os.makedirs(store_path, exist_ok=True)
+    store_path = Path("/tmp/pynixd-test-unix-builder")
+    store_path.mkdir(exist_ok=True)
     return LocalSocketStore(
         store_path=store_path,
         id="builder",
         max_builds=2,
         max_transfers=4,
-        nix_bin=NIX_BIN,
+        nix_bin=str(NIX_BIN),
     )
 
 
@@ -115,11 +116,11 @@ def builder_store() -> LocalSocketStore:
 async def run_unix_server(
     local_store: Store,
     stores: dict[str, Store],
-) -> AsyncIterator[str]:
+) -> AsyncIterator[Path]:
     """Start pynixd with a Unix socket server."""
-    socket_path = "/tmp/pynixd-test.socket"
-    if os.path.exists(socket_path):
-        os.remove(socket_path)
+    socket_path = Path("/tmp/pynixd-test.socket")
+    if socket_path.exists():
+        socket_path.unlink()
 
     config = PynixdConfig(
         local_store=local_store,
@@ -188,7 +189,7 @@ async def test_unix_store_info(
         assert rc == 0
 
         # Now query info
-        cmd = ["nix", "path-info", "--file", test_nix, "simple"]
+        cmd = ["nix", "path-info", "--file", str(test_nix), "simple"]
         path = subprocess.check_output(cmd).decode().strip()
 
         rc, stdout, stderr = _nix_store_unix(

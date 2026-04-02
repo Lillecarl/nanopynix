@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from conftest import (
     get_current_system,
@@ -25,7 +27,7 @@ async def test_unsupported_system_builders(
     request: pytest.FixtureRequest,
 ) -> None:
     """Build a derivation for an unsupported system via --builders."""
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     stores = make_local_stores(n=1)
 
     # All stores in pynixd report only the current system by default.
@@ -49,7 +51,7 @@ async def test_unsupported_system_store(
     request: pytest.FixtureRequest,
 ) -> None:
     """Build a derivation for an unsupported system via --store."""
-    test_nix = request.config.getoption("--nix")
+    test_nix = Path(request.config.getoption("--nix"))
     stores = make_local_stores(n=1)
 
     async with run_pynixd(stores) as server:
