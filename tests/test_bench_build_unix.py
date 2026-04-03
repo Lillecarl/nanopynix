@@ -142,6 +142,8 @@ async def test_build_throughput(
         "daemon",
         "--store",
         str(nix_store_path),
+        "--max-jobs",
+        "100",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
@@ -203,6 +205,7 @@ async def test_build_throughput(
                 store_path=builder_store_path,
                 max_builds=100,
                 max_transfers=100,
+                extra_args=["--max-jobs", "100"],
             )
         }
 

@@ -1083,6 +1083,8 @@ class LocalSocketStore(Store):
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
         nix_bin: str = "nix",
+        extra_env: dict[str, str] | None = None,
+        extra_args: list[str] | None = None,
     ) -> None:
         if store_path is None:
             store_path = Path("/")
@@ -1104,6 +1106,8 @@ class LocalSocketStore(Store):
         self._nix_bin = nix_bin
         self._daemon_proc: asyncio.subprocess.Process | None = None
         self._daemon_ready: asyncio.Event | None = None
+        self._extra_env = extra_env or {}
+        self._extra_args = extra_args or []
 
     async def _ensure_daemon(self) -> None:
         """Spawn a managed daemon if needed (first call only).
@@ -1132,12 +1136,19 @@ class LocalSocketStore(Store):
             self._socket_path,
         )
         env = os.environ.copy()
+        env.update(self._extra_env)
         env["NIX_DAEMON_SOCKET_PATH"] = str(self._socket_path)
-        self._daemon_proc = await asyncio.create_subprocess_exec(
+
+        cmd = [
             self._nix_bin,
             "daemon",
             "--store",
             str(path),
+        ]
+        cmd.extend(self._extra_args)
+
+        self._daemon_proc = await asyncio.create_subprocess_exec(
+            *cmd,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
