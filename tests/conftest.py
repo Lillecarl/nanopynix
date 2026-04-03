@@ -17,7 +17,6 @@ import pytest
 from environs import Env
 
 from pynixd.instance import PynixdConfig
-from pynixd.instance import run_pynixd as run_instance
 from pynixd.store import LocalSocketStore, Store
 
 logging.basicConfig(
@@ -281,28 +280,21 @@ async def run_pynixd(
 
     os.makedirs(client_store_path, exist_ok=True)
 
-    ready = asyncio.Event()
     bound_port = get_free_port()
 
-    async def _run() -> None:
-        config = PynixdConfig(
-            local_store=local_store,
-            stores=stores,
-            ssh_host="127.0.0.1",
-            ssh_port=bound_port,
-        )
-        await run_instance(config, ready_event=ready)
-
-    task = asyncio.create_task(_run())
+    config = PynixdConfig(
+        local_store=local_store,
+        stores=stores,
+        ssh_host="127.0.0.1",
+        ssh_port=bound_port,
+    )
+    from pynixd.instance import Server
+    server_instance = Server(config)
+    await server_instance.start()
+    
     server = None
 
     try:
-        try:
-            await asyncio.wait_for(ready.wait(), timeout=10)
-        except TimeoutError:
-            msg = "Could not start pynixd SSH server (timed out waiting for ready)"
-            raise RuntimeError(msg) from None
-
         username = env.str("USER", "root")
 
         server = PynixdServer(
@@ -311,21 +303,17 @@ async def run_pynixd(
             username=username,
             stores=stores,
             client_store_path=client_store_path,
-            _task=task,
+            _task=None, # task no longer needed
             system=get_current_system(),
             njobs=njobs,
             _local_store=local_store,
         )
         yield server
     finally:
+        await server_instance.close()
+        await server_instance.wait_finished()
         if server:
             await server.close()
-        else:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
 
 
 def make_local_stores(

@@ -50,7 +50,7 @@ def _run_pynixd_thread(
     profiler.start()
 
     async def _async_run() -> None:
-        from pynixd.instance import PynixdConfig, run_pynixd
+        from pynixd.instance import PynixdConfig, Server
         from pynixd.store import LocalSocketStore, Store
 
         local_store = LocalSocketStore(
@@ -75,25 +75,22 @@ def _run_pynixd_thread(
             ssh_port=port,
         )
 
-        # Use an internal asyncio.Event and proxy it to the threading.Event
-        async_ready = asyncio.Event()
-
-        # Run pynixd until stop_event is set
-        run_task = asyncio.create_task(run_pynixd(config, ready_event=async_ready))
-
-        # Wait for pynixd to be ready in the asyncio loop
-        ready_waiter = asyncio.create_task(async_ready.wait())
-
-        while not stop_event.is_set():
-            if ready_waiter.done() and not ready_event.is_set():
-                ready_event.set()
-            await asyncio.sleep(0.1)
-
-        run_task.cancel()
         try:
-            await run_task
-        except asyncio.CancelledError:
-            pass
+            server = Server(config)
+            await server.start()
+            ready_event.set()
+
+            while not stop_event.is_set():
+                await asyncio.sleep(0.1)
+
+            await server.close()
+            await server.wait_finished()
+        except Exception as e:
+            print(f"Exception in _async_run: {e}")
+            import traceback
+            traceback.print_exc()
+            stop_event.set()
+            ready_event.set()
 
     asyncio.run(_async_run())
 

@@ -39,7 +39,7 @@ from pathlib import Path
 
 from environs import Env
 
-from .instance import PynixdConfig, run_pynixd
+from .instance import PynixdConfig, Server
 from .store import (
     LocalSocketStore,
     LocalSubprocessStore,
@@ -166,7 +166,12 @@ async def _async_main() -> None:
         https_key=env.path("PYNIXD_HTTPS_KEY", None),
     )
 
-    await run_pynixd(config)
+    server = Server(config)
+    try:
+        await server.start()
+        await server.wait_finished()
+    finally:
+        await server.close()
 
 
 def main() -> None:

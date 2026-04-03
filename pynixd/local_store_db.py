@@ -276,13 +276,22 @@ class LocalStoreDB:
             prefix = f"/nix/store/{hash_part}"
             # Upper bound: increment last char for range query
             upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
-            log.debug("DB: query_path_from_hash_part %s (range [%s, %s))", hash_part, prefix, upper)
+            log.debug(
+                "DB: query_path_from_hash_part %s (range [%s, %s))",
+                hash_part,
+                prefix,
+                upper,
+            )
             async with self._db.execute(
                 _QUERY_PATH_FROM_HASH_PART,
                 (prefix, upper),
             ) as cursor:
                 row = await cursor.fetchone()
-            log.debug("DB: query_path_from_hash_part %s -> %s", hash_part, row[0] if row else None)
+            log.debug(
+                "DB: query_path_from_hash_part %s -> %s",
+                hash_part,
+                row[0] if row else None,
+            )
             return row[0] if row else None
         except Exception:
             log.debug(
