@@ -209,7 +209,12 @@ async def test_build_throughput(
 
             print(f"  Running baseline (Nix Daemon, jobs={max_jobs})...")
             elapsed = await run_nix_build(
-                nix_file, target, max_jobs=max_jobs, remote=f"unix://{baseline_socket}", extra_env=test_nix_env
+                nix_file,
+                target,
+                max_jobs=max_jobs,
+                remote=f"unix://{baseline_socket}",
+                store="daemon",
+                extra_env=test_nix_env,
             )
             print(f"  Completed in {elapsed:.1f}s")
             return elapsed
@@ -243,8 +248,8 @@ async def test_build_throughput(
                 "builder": LocalSocketStore(
                     id="builder",
                     store_path=pynixd_builder_path,
-                    max_builds=100,
-                    max_transfers=100,
+                    max_builds=max_jobs,
+                    max_transfers=max_jobs,
                     extra_args=["--max-jobs", str(max_jobs)],
                 )
             }
@@ -264,7 +269,12 @@ async def test_build_throughput(
             try:
                 print(f"  Running pynixd build (jobs={max_jobs})...")
                 elapsed = await run_nix_build(
-                    nix_file, target, max_jobs=max_jobs, remote=f"unix://{socket_path}", extra_env=test_nix_env
+                    nix_file,
+                    target,
+                    max_jobs=max_jobs,
+                    remote=f"unix://{socket_path}",
+                    store="daemon",
+                    extra_env=test_nix_env,
                 )
                 print(f"  Completed in {elapsed:.1f}s")
                 return elapsed
