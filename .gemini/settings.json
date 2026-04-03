@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "run_shell_command",
+        "hooks": [
+          {
+            "name": "direnv-prefixer",
+            "type": "command",
+            "command": ".gemini/hooks/direnv-prefix.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
