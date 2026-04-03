@@ -371,7 +371,8 @@ def _print_build_bench_summary(
         for name, base_time in r.baselines.items():
             overhead = ((r.elapsed / base_time) - 1) * 100
             terminalreporter.write_line(
-                f"        baseline ({name})={base_time:.1f}s ({overhead:+.1f}% overhead)"
+                f"        baseline ({name})={base_time:.1f}s "
+                f"({overhead:+.1f}% overhead)"
             )
 
         if r.profile_path:

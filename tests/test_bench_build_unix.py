@@ -136,7 +136,7 @@ async def test_build_throughput(
     caplog.set_level(logging.INFO)
     nix_file = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
     target = "parallel"
-    
+
     # Configure test.nix via environment variables
     test_nix_env = {
         "PYNIXD_PAR_COUNT": "100",  # Always 100 drvs, just varies max-jobs
@@ -157,9 +157,15 @@ async def test_build_throughput(
         rmtree_robust(local_store_path)
         local_store_path.mkdir(parents=True, exist_ok=True)
         try:
-            print(f"  Running baseline (Local Store, No Daemon) in {local_store_path}...")
+            print(
+                f"  Running baseline (Local Store, No Daemon) in {local_store_path}..."
+            )
             elapsed = await run_nix_build(
-                nix_file, target, max_jobs=max_jobs, store=str(local_store_path), extra_env=test_nix_env
+                nix_file,
+                target,
+                max_jobs=max_jobs,
+                store=str(local_store_path),
+                extra_env=test_nix_env,
             )
             print(f"  Completed in {elapsed:.1f}s")
             return elapsed
@@ -226,7 +232,9 @@ async def test_build_throughput(
     async def run_pynixd() -> float:
         nonlocal last_profile_path
         # 3. pynixd build
-        socket_path = Path(f"/tmp/pynixd-bench-{os.getpid()}-{max_jobs}-{sleep_secs}.socket")
+        pid = os.getpid()
+        socket_file = f"/tmp/pynixd-bench-{pid}-{max_jobs}-{sleep_secs}.socket"
+        socket_path = Path(socket_file)
         if socket_path.exists():
             socket_path.unlink()
 
@@ -307,7 +315,10 @@ async def test_build_throughput(
     iterations = env.int("PYNIXD_BENCH_ITERATIONS", 1)
     for i in range(iterations):
         if iterations > 1:
-            print(f"\n--- Iteration {i+1}/{iterations} (jobs={max_jobs}, sleep={sleep_secs}) ---")
+            print(
+                f"\n--- Iteration {i + 1}/{iterations} "
+                f"(jobs={max_jobs}, sleep={sleep_secs}) ---"
+            )
 
         # Shuffle to mitigate page cache order bias
         current_tasks = list(tasks)
@@ -318,7 +329,8 @@ async def test_build_throughput(
             results_accumulator[name].append(elapsed)
 
     # Average results
-    final_elapsed = sum(results_accumulator["pynixd"]) / len(results_accumulator["pynixd"])
+    pynixd_times = results_accumulator["pynixd"]
+    final_elapsed = sum(pynixd_times) / len(pynixd_times)
     final_baselines = {
         name: sum(times) / len(times)
         for name, times in results_accumulator.items()
@@ -327,9 +339,10 @@ async def test_build_throughput(
 
     # Record for terminal summary
     results = request.config.stash.get(_build_bench_key, [])
+    label = f"Unix Socket (jobs={max_jobs}, sleep={sleep_secs}s, {iterations} iters)"
     results.append(
         BenchResult(
-            label=f"Unix Socket (jobs={max_jobs}, sleep={sleep_secs}s, {iterations} iterations averaged)",
+            label=label,
             elapsed=final_elapsed,
             baselines=final_baselines,
             count=1,
