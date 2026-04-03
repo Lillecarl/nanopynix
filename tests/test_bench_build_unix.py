@@ -8,6 +8,7 @@ resulting profile only reflects server performance.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -21,6 +22,7 @@ import pyinstrument
 import pytest
 from conftest import (
     NIX_BIN,
+    rmtree_robust,
     run_process_async,
 )
 from environs import Env
@@ -46,6 +48,7 @@ env = Env()
 class BenchResult:
     label: str
     elapsed: float
+    baseline_elapsed: float
     count: int
     profile_path: str | None = None
 
@@ -74,13 +77,14 @@ def _prune_client_processor(frame, options):
 
 
 async def _run_build_async(
-    socket_path: Path,
     nix_file: Path,
     target: str,
+    remote: str | None = None,
 ) -> float:
     """Run nix build asynchronously."""
     build_env = os.environ.copy()
-    build_env["NIX_REMOTE"] = f"unix://{socket_path}"
+    if remote:
+        build_env["NIX_REMOTE"] = remote
 
     cmd = [
         str(NIX_BIN),
@@ -90,10 +94,12 @@ async def _run_build_async(
         "--no-link",
         "--file",
         str(nix_file),
+        "--store",
+        "daemon",
         target,
     ]
 
-    log.info("Starting build: %s", " ".join(cmd))
+    log.info("Starting build: %s (NIX_REMOTE=%s)", " ".join(cmd), remote)
     start = time.monotonic()
     rc, stdout, stderr = await run_process_async(cmd, env=build_env)
     elapsed = time.monotonic() - start
@@ -119,52 +125,120 @@ async def test_build_throughput(
     caplog.set_level(logging.INFO)
     nix_file = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
 
+    # 1. Run baseline build against a temporary Nix daemon
+    nix_store_path = Path("/tmp/pynixd-baseline")
+    rmtree_robust(nix_store_path)
+    nix_store_path.mkdir(parents=True, exist_ok=True)
+
+    baseline_socket = nix_store_path / "nix" / "daemon-socket" / "socket"
+    baseline_socket.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n  Spawning baseline Nix daemon in {nix_store_path}...")
+    baseline_env = os.environ.copy()
+    baseline_env["NIX_DAEMON_SOCKET_PATH"] = str(baseline_socket)
+
+    daemon_proc = await asyncio.create_subprocess_exec(
+        str(NIX_BIN),
+        "daemon",
+        "--store",
+        str(nix_store_path),
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+        env=baseline_env,
+    )
+
+    try:
+        # Wait for socket
+        for _ in range(100):
+            if baseline_socket.exists():
+                break
+            await asyncio.sleep(0.05)
+
+        # Probe connection
+        for _ in range(50):
+            try:
+                r, w = await asyncio.open_unix_connection(str(baseline_socket))
+                w.close()
+                await w.wait_closed()
+                break
+            except (ConnectionRefusedError, ConnectionResetError):
+                await asyncio.sleep(0.1)
+
+        print("  Running baseline Nix build...")
+        baseline_elapsed = await _run_build_async(
+            nix_file,
+            "bench-100mb",
+            remote=f"unix://{baseline_socket}",
+        )
+        print(f"  Baseline build completed in {baseline_elapsed:.1f}s")
+    finally:
+        daemon_proc.terminate()
+        await daemon_proc.wait()
+        rmtree_robust(nix_store_path)
+
+    # 2. Run pynixd build
     socket_path = Path(f"/tmp/pynixd-bench-{os.getpid()}.socket")
     if socket_path.exists():
         socket_path.unlink()
 
-    local_store = LocalSocketStore(
-        id="local",
-        store_path=Path("/tmp/pynixd-local-unix"),
-        max_builds=0,
-        max_transfers=100,
-    )
-    stores: Mapping[str, Store] = {
-        "builder": LocalSocketStore(
-            id="builder",
-            store_path=Path("/tmp/pynixd-builder-unix"),
-            max_builds=100,
-            max_transfers=100,
-        )
-    }
+    local_store_path = Path("/tmp/pynixd-local-unix")
+    builder_store_path = Path("/tmp/pynixd-builder-unix")
 
-    config = PynixdConfig(
-        local_store=local_store,
-        stores=stores,
-        unix_path=socket_path,
-    )
-
-    server = Server(config)
-    await server.start()
-
-    profiler = pyinstrument.Profiler(async_mode="enabled")
-    profiler.start()
+    rmtree_robust(local_store_path)
+    rmtree_robust(builder_store_path)
+    local_store_path.mkdir(parents=True, exist_ok=True)
+    builder_store_path.mkdir(parents=True, exist_ok=True)
 
     try:
-        elapsed = await _run_build_async(
-            socket_path,
-            nix_file,
-            "bench-100mb",
+        local_store = LocalSocketStore(
+            id="local",
+            store_path=local_store_path,
+            max_builds=0,
+            max_transfers=100,
         )
-        print(f"\n  Build completed in {elapsed:.1f}s")
+        stores: Mapping[str, Store] = {
+            "builder": LocalSocketStore(
+                id="builder",
+                store_path=builder_store_path,
+                max_builds=100,
+                max_transfers=100,
+            )
+        }
+
+        config = PynixdConfig(
+            local_store=local_store,
+            stores=stores,
+            unix_path=socket_path,
+        )
+
+        server = Server(config)
+        await server.start()
+
+        profiler = pyinstrument.Profiler(async_mode="enabled")
+        profiler.start()
+
+        try:
+            print("  Running pynixd build...")
+            elapsed = await _run_build_async(
+                nix_file,
+                "bench-100mb",
+                remote=f"unix://{socket_path}",
+            )
+            print(f"  pynixd build completed in {elapsed:.1f}s")
+            overhead = ((elapsed / baseline_elapsed) - 1) * 100
+            print(f"  pynixd overhead vs baseline: {overhead:.1f}%")
+        finally:
+            profiler.stop()
+
+            await server.close()
+            await server.wait_finished()
+
+            if socket_path.exists():
+                socket_path.unlink()
     finally:
-        profiler.stop()
-
-        await server.close()
-        await server.wait_finished()
-
-        if socket_path.exists():
-            socket_path.unlink()
+        rmtree_robust(local_store_path)
+        rmtree_robust(builder_store_path)
 
     # Output profile
     session = profiler.last_session
@@ -186,6 +260,7 @@ async def test_build_throughput(
         BenchResult(
             label="Unix Socket (100MB build)",
             elapsed=elapsed,
+            baseline_elapsed=baseline_elapsed,
             count=1,
             profile_path=profile_path,
         )

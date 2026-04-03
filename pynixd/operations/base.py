@@ -11,7 +11,6 @@ proxy, store, backend, scheduler, etc.
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -750,13 +749,16 @@ class ByteCollector(NixWriter):
     """NixWriter that collects bytes into a buffer."""
 
     def __init__(self) -> None:
-        self._buf = io.BytesIO()
+        self._buf = bytearray()
 
     def write(self, data: bytes) -> None:
-        self._buf.write(data)
+        self._buf.extend(data)
 
     async def drain(self) -> None:
         pass
 
+    async def is_dirty(self) -> bool:
+        return len(self._buf) > 0
+
     def getvalue(self) -> bytes:
-        return self._buf.getvalue()
+        return bytes(self._buf)

@@ -85,16 +85,46 @@ class SSHNixReader(NixReader):
     def __init__(self, reader: asyncssh.SSHReader) -> None:
         self.reader = reader
         self._buf = bytearray()
+        self._pos = 0
+
+    def _compact(self) -> None:
+        if self._pos > 0:
+            del self._buf[: self._pos]
+            self._pos = 0
+
+    async def read_uint64(self) -> int:
+        if len(self._buf) - self._pos >= 8:
+            val = _UINT64_STRUCT.unpack_from(self._buf, self._pos)[0]
+            self._pos += 8
+            if self._pos > 64 * 1024:
+                self._compact()
+            return val
+        return _UINT64_STRUCT.unpack(await self.readexactly(8))[0]
+
+    async def read_bytes(self) -> bytes:
+        if len(self._buf) - self._pos >= 8:
+            length = _UINT64_STRUCT.unpack_from(self._buf, self._pos)[0]
+            pad = _nar_pad(length)
+            total = 8 + length + pad
+            if len(self._buf) - self._pos >= total:
+                data = bytes(self._buf[self._pos + 8 : self._pos + 8 + length])
+                self._pos += total
+                if self._pos > 64 * 1024:
+                    self._compact()
+                return data
+        return await super().read_bytes()
 
     async def readexactly(self, n: int) -> bytes:
         # Fast path: serve entirely from local buffer
-        if len(self._buf) >= n:
-            result = bytes(self._buf[:n])
-            del self._buf[:n]
+        if len(self._buf) - self._pos >= n:
+            result = bytes(self._buf[self._pos : self._pos + n])
+            self._pos += n
+            if self._pos > 64 * 1024:
+                self._compact()
             return result
 
         # Need more data from SSH channel
-        needed = n - len(self._buf)
+        needed = n - (len(self._buf) - self._pos)
         if needed <= _SSH_READ_AHEAD:
             # Small read: try to grab extra data to fill future reads
             try:
@@ -105,24 +135,27 @@ class SSHNixReader(NixReader):
                 raise EOFError("SSH channel closed")
             self._buf.extend(data)
             # May still not have enough if channel had less available
-            while len(self._buf) < n:
-                data = await self.reader.readexactly(n - len(self._buf))
+            while len(self._buf) - self._pos < n:
+                data = await self.reader.readexactly(n - (len(self._buf) - self._pos))
                 self._buf.extend(data)
-            result = bytes(self._buf[:n])
-            del self._buf[:n]
+            result = bytes(self._buf[self._pos : self._pos + n])
+            self._pos += n
+            if self._pos > 64 * 1024:
+                self._compact()
             return result
         else:
             # Large read (NAR data etc.): read exactly what's needed
-            data = await self.reader.readexactly(needed)
-            if self._buf:
-                self._buf.extend(data)
-                result = bytes(self._buf[:n])
-                del self._buf[:n]
-                return result
-            return data
+            if len(self._buf) - self._pos > 0:
+                already_have = bytes(self._buf[self._pos :])
+                self._buf = bytearray()
+                self._pos = 0
+                needed = n - len(already_have)
+                return already_have + await self.reader.readexactly(needed)
+
+            return await self.reader.readexactly(n)
 
     async def is_dirty(self) -> bool:
-        if self._buf:
+        if len(self._buf) - self._pos > 0:
             return True
         if hasattr(self.reader, "get_read_buffer_size"):
             return self.reader.get_read_buffer_size() > 0  # type: ignore[reportAttributeAccessIssue]
@@ -141,20 +174,53 @@ class SSHNixReader(NixReader):
 _UNIX_READ_AHEAD = 16 * 1024  # read-ahead size to amortize syscall overhead
 
 
+_UINT64_STRUCT = struct.Struct("<Q")
+
+
 class UnixNixReader(NixReader):
     def __init__(self, reader: asyncio.StreamReader) -> None:
         self.reader = reader
         self._buf = bytearray()
+        self._pos = 0
+
+    def _compact(self) -> None:
+        if self._pos > 0:
+            del self._buf[: self._pos]
+            self._pos = 0
+
+    async def read_uint64(self) -> int:
+        if len(self._buf) - self._pos >= 8:
+            val = _UINT64_STRUCT.unpack_from(self._buf, self._pos)[0]
+            self._pos += 8
+            if self._pos > 64 * 1024:
+                self._compact()
+            return val
+        return _UINT64_STRUCT.unpack(await self.readexactly(8))[0]
+
+    async def read_bytes(self) -> bytes:
+        if len(self._buf) - self._pos >= 8:
+            length = _UINT64_STRUCT.unpack_from(self._buf, self._pos)[0]
+            pad = _nar_pad(length)
+            total = 8 + length + pad
+            if len(self._buf) - self._pos >= total:
+                data = bytes(self._buf[self._pos + 8 : self._pos + 8 + length])
+                self._pos += total
+                if self._pos > 64 * 1024:
+                    self._compact()
+                return data
+        return await super().read_bytes()
 
     async def readexactly(self, n: int) -> bytes:
         # Fast path: serve entirely from local buffer
-        if len(self._buf) >= n:
-            result = bytes(self._buf[:n])
-            del self._buf[:n]
+        if len(self._buf) - self._pos >= n:
+            result = bytes(self._buf[self._pos : self._pos + n])
+            self._pos += n
+            if self._pos > 64 * 1024:
+                self._compact()
             return result
 
         # Need more data from the stream
-        needed = n - len(self._buf)
+        needed = n - (len(self._buf) - self._pos)
         if needed <= _UNIX_READ_AHEAD:
             # Small read: try to grab extra data to fill future reads
             data = await self.reader.read(max(needed, _UNIX_READ_AHEAD))
@@ -162,24 +228,27 @@ class UnixNixReader(NixReader):
                 raise EOFError("Unix stream closed")
             self._buf.extend(data)
             # May still not have enough if stream had less available
-            while len(self._buf) < n:
-                data = await self.reader.readexactly(n - len(self._buf))
+            while len(self._buf) - self._pos < n:
+                data = await self.reader.readexactly(n - (len(self._buf) - self._pos))
                 self._buf.extend(data)
-            result = bytes(self._buf[:n])
-            del self._buf[:n]
+            result = bytes(self._buf[self._pos : self._pos + n])
+            self._pos += n
+            if self._pos > 64 * 1024:
+                self._compact()
             return result
         else:
             # Large read (NAR data etc.): read exactly what's needed
-            data = await self.reader.readexactly(needed)
-            if self._buf:
-                self._buf.extend(data)
-                result = bytes(self._buf[:n])
-                del self._buf[:n]
-                return result
-            return data
+            if len(self._buf) - self._pos > 0:
+                already_have = bytes(self._buf[self._pos :])
+                self._buf = bytearray()
+                self._pos = 0
+                needed = n - len(already_have)
+                return already_have + await self.reader.readexactly(needed)
+
+            return await self.reader.readexactly(n)
 
     async def is_dirty(self) -> bool:
-        if self._buf:
+        if len(self._buf) - self._pos > 0:
             return True
         # Check internal buffer without consuming data
         return len(self.reader._buffer) > 0  # type: ignore[attr-defined]
@@ -207,7 +276,12 @@ class NixWriter:
         """Close the underlying transport. Override in subclasses."""
 
     def write_uint64(self, val: int) -> None:
-        self.write(struct.pack("<Q", val))
+        self.write(_UINT64_STRUCT.pack(val))
+
+    def write_uint64s(self, vals: list[int]) -> None:
+        if not vals:
+            return
+        self.write(struct.pack(f"<{len(vals)}Q", *vals))
 
     def write_bool(self, val: bool) -> None:
         self.write_uint64(1 if val else 0)
@@ -250,7 +324,7 @@ class SSHNixWriter(NixWriter):
         self._buf = bytearray()
 
     def write(self, data: bytes) -> None:
-        if len(data) >= _SSH_READ_AHEAD:
+        if len(data) >= _CHUNK_SIZE:
             # Large data (NAR chunks): flush pending small writes,
             # then pass directly to asyncssh — avoids copying MBs
             # through the bytearray
@@ -260,6 +334,9 @@ class SSHNixWriter(NixWriter):
             self.writer.write(data)
         else:
             self._buf.extend(data)
+            if len(self._buf) >= _SSH_READ_AHEAD:
+                self.writer.write(bytes(self._buf))
+                self._buf.clear()
 
     async def drain(self) -> None:
         if self._buf:
@@ -285,7 +362,7 @@ class UnixNixWriter(NixWriter):
         self._buf = bytearray()
 
     def write(self, data: bytes) -> None:
-        if len(data) >= _UNIX_READ_AHEAD:
+        if len(data) >= _CHUNK_SIZE:
             # Large data (NAR chunks): flush pending small writes,
             # then pass directly to stream — avoids copying MBs
             # through the bytearray
@@ -295,6 +372,9 @@ class UnixNixWriter(NixWriter):
             self.writer.write(data)
         else:
             self._buf.extend(data)
+            if len(self._buf) >= _UNIX_READ_AHEAD:
+                self.writer.write(bytes(self._buf))
+                self._buf.clear()
 
     async def drain(self) -> None:
         if self._buf:
@@ -508,7 +588,7 @@ class FramedReader(NixReader):
     async def readexactly(self, n: int) -> bytes:
         await self._fill(n)
         result = bytes(self._buf[:n])
-        self._buf = self._buf[n:]
+        del self._buf[:n]
         return result
 
     async def is_dirty(self) -> bool:
@@ -551,9 +631,10 @@ class FramedWriter(NixWriter):
     def write(self, data: bytes) -> None:
         self._buf.extend(data)
         while len(self._buf) >= self._chunk_size:
+            chunk = bytes(self._buf[: self._chunk_size])
             self._dst.write_uint64(self._chunk_size)
-            self._dst.write(bytes(self._buf[: self._chunk_size]))
-            self._buf = self._buf[self._chunk_size :]
+            self._dst.write(chunk)
+            del self._buf[: self._chunk_size]
 
     async def drain(self) -> None:
         """No-op — actual flushing happens in write() and finalize()."""

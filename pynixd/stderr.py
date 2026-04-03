@@ -43,8 +43,7 @@ def _write_fields(w: NixWriter, fields: list[Field]) -> None:
     w.write_uint64(len(fields))
     for f in fields:
         if isinstance(f, int):
-            w.write_uint64(0)
-            w.write_uint64(f)
+            w.write_uint64s([0, f])
         else:
             w.write_uint64(1)
             w.write_string(f)

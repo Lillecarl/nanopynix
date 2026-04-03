@@ -438,7 +438,6 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
 
         # Any path being substituted is also "known" to be available
         if resp.will_substitute:
-            valid = await store.query_valid_paths(resp.will_substitute, substitute=True)
-            store.add_known_paths(valid)
+            store.add_known_paths(resp.will_substitute)
 
         return resp

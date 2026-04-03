@@ -279,7 +279,7 @@ class Scheduler:
                     tied_top_with_slot,
                     key=lambda c: self._stores[c.store_id].in_flight,
                 )
-                log.info(
+                log.debug(
                     "Build %d -> %s (score=%d, slots=%d)",
                     build.id,
                     best.store_id,
@@ -309,7 +309,7 @@ class Scheduler:
 
         unhealthy = [s.id for s in self._stores.values() if not s.is_healthy]
 
-        log.info(
+        log.debug(
             "Scheduling pass done: %d total "
             "(building=%s, transferring=%s, waiting_dag=%s, waiting_slot=%s), "
             "slots=%s",
@@ -329,7 +329,7 @@ class Scheduler:
             if s.pressure is not None
         }
         if pressure:
-            log.info("Backend pressure: %s", pressure)
+            log.debug("Backend pressure: %s", pressure)
 
         memory = {
             s.id: f"{s.meminfo.available_mb}MB/{s.meminfo.total_mb}MB"
@@ -337,7 +337,7 @@ class Scheduler:
             if s.meminfo is not None
         }
         if memory:
-            log.info("Backend memory: %s", memory)
+            log.debug("Backend memory: %s", memory)
 
     # ── Build lifecycle ─────────────────────────────────────────────
 
@@ -508,13 +508,16 @@ class Scheduler:
                 output_paths = [
                     o.path for o in build.request.derivation.outputs if o.path
                 ]
-            log.info(
+            log.debug(
                 "Build %d succeeded, pulling %d outputs: %s",
                 build.id,
                 len(output_paths),
                 output_paths,
             )
-            await self._pull_paths(store, output_paths)
+            try:
+                await self._pull_paths(store, output_paths)
+            except Exception:
+                log.exception("Failed to pull outputs for build %d", build.id)
 
         return response
 
@@ -758,7 +761,7 @@ class Scheduler:
             for path, _ in to_pull:
                 self._local_store.add_known_path(path)
                 store.add_known_path(path)
-            log.info("Pulled %d paths into local store", len(to_pull))
+            log.debug("Pulled %d paths into local store", len(to_pull))
         except Exception:
             log.exception(
                 "Failed to pull %d paths from %s",

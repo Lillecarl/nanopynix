@@ -6,7 +6,9 @@ import asyncio
 import logging
 import os
 import shlex
+import shutil
 import socket
+import stat
 import subprocess
 from pathlib import Path
 
@@ -14,6 +16,25 @@ import pytest
 from environs import Env
 
 from pynixd.store import LocalSocketStore, Store
+
+
+def rmtree_robust(path: str | Path) -> None:
+    """Recursively remove a directory, unsetting read-only bits as needed."""
+    path = Path(path)
+    if not path.exists():
+        return
+
+    def handle_errors(func, path, _excinfo):
+        # Path might be read-only, try to make it writable
+        try:
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+            func(path)
+        except Exception:
+            # If still failing, not much we can do
+            pass
+
+    shutil.rmtree(path, onerror=handle_errors)
+
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -339,12 +360,18 @@ def _print_build_bench_summary(
     if not results:
         return
 
-    terminalreporter.section("Build Benchmark Summary")
+    terminalreporter.write_sep("=", "Build Benchmark Results", bold=True)
 
     for r in results:
+        overhead = ((r.elapsed / r.baseline_elapsed) - 1) * 100
+        terminalreporter.write_line("")
+        terminalreporter.write_line(f"  TEST: {r.label}", bold=True)
+        terminalreporter.write_line(f"  DRVS: {r.count}")
         terminalreporter.write_line(
-            f"  {r.label:<36s}  {r.count:>4d} drv  ({r.elapsed:.1f}s)"
+            f"  TIME: pynixd={r.elapsed:.1f}s, baseline={r.baseline_elapsed:.1f}s"
         )
+        terminalreporter.write_line(f"  OVERHEAD: {overhead:+.1f}%", bold=True)
+
         if r.profile_path:
             try:
                 with open(r.profile_path) as f:
