@@ -79,7 +79,13 @@ def cleanup_bench_paths():
 
 def get_current_system() -> str:
     """Return nix system string (e.g. x86_64-linux)."""
-    return subprocess.check_output([str(NIX_BIN), "--version"]).decode().split()[-1]
+    return (
+        subprocess.check_output(
+            [str(NIX_BIN), "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"]
+        )
+        .decode()
+        .strip()
+    )
 
 
 def _run_subprocess_with_timeout(
@@ -109,7 +115,7 @@ async def nix_build(
         str(NIX_BIN),
         "build",
         "--builders",
-        f"{uri} {get_current_system()} - {jobs}",
+        uri,
         "--max-jobs",
         str(jobs),
         "--no-link",
@@ -187,7 +193,7 @@ class PynixdServer:
     stores: Mapping[str, Store]
     client_store_path: Path
     _task: asyncio.Task[None] = field(repr=False)
-    system: str = "x86_64-linux"
+    system: str = field(default_factory=get_current_system)
     njobs: int = 4
     # Stores are assigned during __await__ - store ref for close()
     _local_store: Store | None = field(default=None, repr=False)

@@ -17,5 +17,12 @@ fmt:
 test:
     pytest tests -v --timeout=60 -m "not slow" --durations 50
 
+aitest:
+    #!/usr/bin/env bash
+    logfile=$(mktemp)
+    echo "Logfile: $logfile"
+    pytest tests -v --timeout=60 -m "not slow" --durations=50 --maxfail=0 &> $logfile
+    echo "Logfile: $logfile"
+
 # Run all checks
 precommit: fmt test
