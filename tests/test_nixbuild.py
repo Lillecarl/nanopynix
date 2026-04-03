@@ -9,10 +9,10 @@ import pytest
 from conftest import (
     nix_build,
     nix_build_store_only,
-    run_pynixd,
 )
 from environs import Env
 
+from pynixd import Server
 from pynixd.store import SSHSubprocessStore, Store
 
 pytestmark = pytest.mark.nixbuild
@@ -42,7 +42,7 @@ async def test_simple_builders(
     test_nix = Path(request.config.getoption("--nix"))
     stores = _nixbuild_stores()
 
-    async with run_pynixd(stores) as server:
+    async with Server(stores=stores, ssh_port=0) as server:
         rc, _stdout, stderr = await nix_build(
             server.builder_uri(),
             "simple",
@@ -63,9 +63,9 @@ async def test_simple_store(
     test_nix = Path(request.config.getoption("--nix"))
     stores = _nixbuild_stores()
 
-    async with run_pynixd(stores) as server:
+    async with Server(stores=stores, ssh_port=0) as server:
         rc, _stdout, stderr = await nix_build_store_only(
-            server.uri,
+            server.uri(),
             "simple",
             nix_env,
             nix_file=test_nix,
@@ -85,7 +85,7 @@ async def test_dag_builders(
     test_nix = Path(request.config.getoption("--nix"))
     stores = _nixbuild_stores()
 
-    async with run_pynixd(stores) as server:
+    async with Server(stores=stores, ssh_port=0) as server:
         rc, _stdout, stderr = await nix_build(
             server.builder_uri(),
             "dag",
@@ -107,9 +107,9 @@ async def test_dag_store(
     test_nix = Path(request.config.getoption("--nix"))
     stores = _nixbuild_stores()
 
-    async with run_pynixd(stores) as server:
+    async with Server(stores=stores, ssh_port=0) as server:
         rc, _stdout, stderr = await nix_build_store_only(
-            server.uri,
+            server.uri(),
             "dag",
             nix_env,
             nix_file=test_nix,

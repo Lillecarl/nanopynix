@@ -29,16 +29,14 @@ import pytest
 from conftest import (
     NIX_BIN,
     _run_subprocess_with_timeout,
-    get_current_system,
-    get_free_port,
     make_local_stores,
-    run_pynixd,
 )
 from environs import Env
 
+from pynixd import Server
 from pynixd.http_cache import BinaryCacheServer
 from pynixd.operations.base import PathInfo
-from pynixd.store import LocalSocketStore, SSHSubprocessStore, Store
+from pynixd.store import LocalSocketStore, SSHSubprocessStore, Store, get_current_system
 
 log = logging.getLogger(__name__)
 
@@ -201,10 +199,11 @@ async def test_ssh_serve_small_nars(
     picked = await _pick_small_paths(local_store, 500)
     assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
 
-    async with run_pynixd(
+    async with Server(
         stores={},
         local_store=local_store,
         client_store_path=Path("/tmp/pynixd-bench-client"),
+        ssh_port=0,
     ) as server:
         client = SSHSubprocessStore(
             host=server.host,
@@ -259,10 +258,11 @@ async def test_ssh_serve_big_nar(
     info = await local_store.query_path_info(store_path)
     assert info is not None
 
-    async with run_pynixd(
+    async with Server(
         stores={},
         local_store=local_store,
         client_store_path=Path("/tmp/pynixd-bench-client"),
+        ssh_port=0,
     ) as server:
         client = SSHSubprocessStore(
             host=server.host,
@@ -301,10 +301,11 @@ async def test_ssh_query_path_info(
     picked = await _pick_small_paths(local_store, 500)
     assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
 
-    async with run_pynixd(
+    async with Server(
         stores={},
         local_store=local_store,
         client_store_path=Path("/tmp/pynixd-bench-client"),
+        ssh_port=0,
     ) as server:
         client = SSHSubprocessStore(
             host=server.host,
@@ -478,9 +479,8 @@ async def test_build_throughput(
     ready_event = threading.Event()
     stop_event = threading.Event()
     actual_port = 0
-    profile_path_out = [None]
 
-    def _run_pynixd_thread_task():
+    def _run_server_thread_task():
         nonlocal actual_port
         # Profiling
         profiler = None
@@ -491,9 +491,9 @@ async def test_build_throughput(
         async def _async_run():
             nonlocal actual_port
             stores = make_local_stores(n=4, prefix="bench-build", max_builds=4)
-            async with run_pynixd(
-                stores,
-                njobs=100,
+            async with Server(
+                stores=stores,
+                ssh_port=0,
                 client_store_path=Path("/tmp/pynixd-bench-build-local"),
             ) as server:
                 actual_port = server.port
@@ -511,7 +511,7 @@ async def test_build_throughput(
                 print(f"{'=' * 60}")
                 print(profiler.output_text(unicode=True, color=True, show_all=True))
 
-    p_thread = threading.Thread(target=_run_pynixd_thread_task, name="pynixd-bench")
+    p_thread = threading.Thread(target=_run_server_thread_task, name="pynixd-bench")
     p_thread.start()
 
     try:
@@ -522,7 +522,9 @@ async def test_build_throughput(
         drvs_per_client = n_drvs // n_clients
         username = env.str("USER", "root")
         system = get_current_system()
-        builder_uri = f"ssh-ng://{username}@127.0.0.1:{actual_port} {system} - {drvs_per_client}"
+        builder_uri = (
+            f"ssh-ng://{username}@127.0.0.1:{actual_port} {system} - {drvs_per_client}"
+        )
 
         async def _run_client(client_id: int) -> float:
             client_store = Path(f"/tmp/pynixd-bench-build-client-{client_id}")
@@ -546,7 +548,8 @@ async def test_build_throughput(
                 "parallel",
             ]
             t0 = time.monotonic()
-            # Since pynixd is in another thread, we can use blocking or non-blocking calls.
+            # Since pynixd is in another thread, we can use blocking or
+            # non-blocking calls.
             # Using _run_subprocess_with_timeout (blocking) is fine here.
             rc, _stdout, stderr = _run_subprocess_with_timeout(
                 cmd, client_env, timeout=300
@@ -558,9 +561,7 @@ async def test_build_throughput(
             return elapsed
 
         start = time.monotonic()
-        client_times = await asyncio.gather(
-            *[_run_client(i) for i in range(n_clients)]
-        )
+        client_times = await asyncio.gather(*[_run_client(i) for i in range(n_clients)])
         total_elapsed = time.monotonic() - start
 
     finally:

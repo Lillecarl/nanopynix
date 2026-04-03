@@ -14,8 +14,9 @@ from conftest import (
     make_local_stores,
     nix_build,
     nix_build_store_only,
-    run_pynixd,
 )
+
+from pynixd import Server
 
 
 @pytest.mark.builders
@@ -29,7 +30,7 @@ async def test_builders(
     test_nix = Path(request.config.getoption("--nix"))
     stores = make_local_stores(n=2)
 
-    async with run_pynixd(stores) as server:
+    async with Server(stores=stores, ssh_port=0) as server:
         rc, _stdout, stderr = await nix_build(
             server.builder_uri(),
             "dag",
@@ -50,9 +51,9 @@ async def test_store(
     test_nix = Path(request.config.getoption("--nix"))
     stores = make_local_stores(n=2)
 
-    async with run_pynixd(stores) as server:
+    async with Server(stores=stores, ssh_port=0) as server:
         rc, _stdout, stderr = await nix_build_store_only(
-            server.uri,
+            server.uri(),
             "dag",
             nix_env,
             nix_file=test_nix,

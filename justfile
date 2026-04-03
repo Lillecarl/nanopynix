@@ -1,5 +1,3 @@
-# pynixd justfile
-
 default:
     @just --list
 
@@ -14,10 +12,10 @@ fmt:
     ruff format tests
 
 # Run tests
-test:
+test: check
     pytest tests -v --timeout=60 --timeout-method=thread --forked -m "not slow" --durations 50
 
-aitest:
+aitest: check
     #!/usr/bin/env bash
     logfile=$(mktemp)
     echo "Logfile: $logfile"
@@ -25,4 +23,4 @@ aitest:
     echo "Logfile: $logfile"
 
 # Run all checks
-precommit: fmt test
+precommit: check test

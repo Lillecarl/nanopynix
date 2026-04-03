@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import shlex
@@ -17,8 +16,7 @@ from conftest import (
     _run_subprocess_with_timeout,
 )
 
-from pynixd.instance import PynixdConfig
-from pynixd.instance import run_pynixd as run_instance
+from pynixd.instance import PynixdConfig, Server
 from pynixd.store import LocalSocketStore, Store
 
 log = logging.getLogger(__name__)
@@ -61,7 +59,7 @@ def _nix_build_direct(
         "150",
         *extra_args,
     ]
-    log.info("nix_build_direct: %s", " ".join(shlex.quote(a) for a in cmd))
+    log.info("nix_build_direct: %s", " ".join(shlex.quote(str(a)) for a in cmd))
     return _run_subprocess_with_timeout(cmd, env, timeout)
 
 
@@ -128,18 +126,14 @@ async def run_unix_server(
         unix_path=socket_path,
     )
 
-    ready = asyncio.Event()
-    task = asyncio.create_task(run_instance(config, ready_event=ready))
+    server = Server(config)
+    await server.start()
 
     try:
-        await asyncio.wait_for(ready.wait(), timeout=10)
         yield socket_path
     finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        await server.close()
+        await server.wait_finished()
         if os.path.exists(socket_path):
             os.remove(socket_path)
 

@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import asyncssh
+
+if TYPE_CHECKING:
+    from aiohttp import web
 
 from .build_queue import BuildQueue
 from .gc import GarbageCollector
@@ -20,6 +25,11 @@ from .store import Store
 from .unix_server import start_unix_server
 
 log = logging.getLogger(__name__)
+
+
+class NixImplementation(Enum):
+    NIX = auto()
+    LIX = auto()
 
 
 @dataclass
@@ -54,6 +64,8 @@ class Server:
     """Programmatic pynixd server instance."""
 
     def __init__(self, config: PynixdConfig | dict | None = None, **kwargs) -> None:
+        self.client_store_path: Path | None = kwargs.pop("client_store_path", None)
+
         if isinstance(config, dict):
             # Merge dict with kwargs to instantiate PynixdConfig
             merged = {**config, **kwargs}
@@ -79,9 +91,71 @@ class Server:
         self.scheduler = Scheduler(
             self.build_queue, self.config.stores, self.config.local_store
         )
-        self.background_tasks: list[asyncio.Task] = []
-        self.servers: list[asyncssh.SSHAcceptor | asyncio.Server] = []
-        self.http_runners: list[asyncio.Task] = []
+        self.background_tasks: list[asyncio.Task[Any]] = []
+        self._ssh_server: asyncssh.SSHAcceptor | None = None
+        self._unix_server: asyncio.Server | None = None
+        self._http_server: web.AppRunner | None = None
+        self._https_server: web.AppRunner | None = None
+
+    @property
+    def host(self) -> str:
+        """SSH listen host."""
+        return self.config.ssh_host
+
+    @property
+    def port(self) -> int:
+        """SSH listen port (actual port if 0 was passed)."""
+        if self._ssh_server and self._ssh_server.sockets:
+            return self._ssh_server.sockets[0].getsockname()[1]
+        return self.config.ssh_port or 0
+
+    @property
+    def username(self) -> str:
+        """SSH username."""
+        import os
+
+        return os.environ.get("USER", "root")
+
+    def uri(self, implementation: NixImplementation = NixImplementation.NIX) -> str:
+        """ssh-ng:// URI for --store."""
+        username = self.username
+        match implementation:
+            case NixImplementation.NIX:
+                return f"ssh-ng://{username}@{self.host}:{self.port}"
+            case NixImplementation.LIX:
+                return f"ssh-ng://{username}@{self.host}?port={self.port}"
+
+        return f"ssh-ng://{username}@{self.host}:{self.port}"
+
+    def builder_uri(
+        self,
+        max_jobs: int = 4,
+        implementation: NixImplementation = NixImplementation.NIX,
+    ) -> str:
+        """Builder spec for --builders."""
+        from .store import get_current_system
+
+        system = get_current_system()
+        return f"{self.uri(implementation)} {system} - {max_jobs}"
+
+    def uri_for(
+        self, uri_format: str, implementation: NixImplementation = NixImplementation.NIX
+    ) -> str:
+        """Return URI in the given format."""
+        if uri_format == "ssh-ng":
+            return self.uri(implementation)
+        elif uri_format == "unix":
+            # For unix-server tests that use matrix
+            return f"unix:///tmp/pynixd-test.socket?remote-store={self.uri(implementation)}"
+        return self.uri(implementation)
+
+    async def __aenter__(self) -> Server:
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.close()
+        await self.wait_finished()
 
     async def start(self) -> None:
         """Start the server listeners and background tasks."""
@@ -110,7 +184,7 @@ class Server:
 
         # Start listeners
         if self.config.ssh_port is not None:
-            ssh_server = await start_ssh_server(
+            self._ssh_server = await start_ssh_server(
                 stores=stores,
                 local_store=local_store,
                 build_queue=self.build_queue,
@@ -119,17 +193,15 @@ class Server:
                 port=self.config.ssh_port,
                 host_key_path=self.config.ssh_host_key,
             )
-            self.servers.append(ssh_server)
 
         if self.config.unix_path:
-            unix_server = await start_unix_server(
+            self._unix_server = await start_unix_server(
                 stores=stores,
                 local_store=local_store,
                 build_queue=self.build_queue,
                 scheduler=self.scheduler,
                 socket_path=self.config.unix_path,
             )
-            self.servers.append(unix_server)
 
         if self.config.http_port is not None or self.config.https_port is not None:
             cache = BinaryCacheServer(
@@ -143,7 +215,7 @@ class Server:
                     host=self.config.http_host,
                     port=self.config.http_port,
                 )
-                self.http_runners.append(runner)
+                self._http_server = runner
             if self.config.https_port is not None:
                 runner, _ = await cache.start(
                     host=self.config.http_host,
@@ -155,21 +227,27 @@ class Server:
                     if self.config.https_key
                     else None,
                 )
-                self.http_runners.append(runner)
+                self._https_server = runner
 
-        if not self.servers and not self.http_runners:
+        if not (
+            self._ssh_server
+            or self._unix_server
+            or self._http_server
+            or self._https_server
+        ):
             log.warning("No servers started! Check your configuration.")
 
     async def wait_finished(self) -> None:
         """Wait for the server listeners to close."""
         wait_tasks = []
-        for s in self.servers:
-            if hasattr(s, "wait_closed"):
-                wait_tasks.append(asyncio.create_task(s.wait_closed()))
+        if self._ssh_server:
+            wait_tasks.append(asyncio.create_task(self._ssh_server.wait_closed()))
+        if self._unix_server:
+            wait_tasks.append(asyncio.create_task(self._unix_server.wait_closed()))
 
         if wait_tasks:
             await asyncio.gather(*wait_tasks)
-        elif self.http_runners:
+        elif self._http_server or self._https_server:
             # Only HTTP runners, wait forever (until cancelled)
             while True:
                 await asyncio.sleep(3600)
@@ -177,11 +255,15 @@ class Server:
     async def close(self) -> None:
         """Gracefully shut down the server."""
         log.info("Shutting down pynixd Server...")
-        for runner in self.http_runners:
-            if hasattr(runner, "cleanup"):
-                await runner.cleanup()
-        for s in self.servers:
-            s.close()
+        if self._http_server:
+            await self._http_server.cleanup()
+        if self._https_server:
+            await self._https_server.cleanup()
+
+        if self._ssh_server:
+            self._ssh_server.close()
+        if self._unix_server:
+            self._unix_server.close()
 
         # Stop scheduler gracefully (cancels builds etc)
         await self.scheduler.stop()
@@ -196,38 +278,3 @@ class Server:
         await local_store.close()
         for store in self.config.stores.values():
             await store.close()
-
-
-async def run_pynixd(
-    config: PynixdConfig,
-    ready_event: asyncio.Event | None = None,
-    servers_callback: Callable[[list[asyncssh.SSHAcceptor | asyncio.Server]], None]
-    | None = None,
-) -> list[asyncssh.SSHAcceptor | asyncio.Server]:
-    """Run a pynixd instance with the given configuration (legacy shim).
-
-    Args:
-        config: Instance configuration.
-        ready_event: Set when all servers are listening.
-        servers_callback: Optional callback called with list of started servers.
-
-    Returns:
-        List of started server/acceptor instances.
-    """
-    server = Server(config)
-    try:
-        await server.start()
-
-        if servers_callback:
-            servers_callback(server.servers)
-        if ready_event:
-            ready_event.set()
-
-        await server.wait_finished()
-        return server.servers
-
-    except asyncio.CancelledError:
-        log.info("Shutting down pynixd instance (cancelled)...")
-        return server.servers
-    finally:
-        await server.close()

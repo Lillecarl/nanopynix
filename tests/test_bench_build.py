@@ -37,7 +37,7 @@ class BenchResult:
     count: int
 
 
-def _run_pynixd_thread(
+def _run_server_thread(
     ready_event: threading.Event,
     port: int,
     stop_event: threading.Event,
@@ -88,6 +88,7 @@ def _run_pynixd_thread(
         except Exception as e:
             print(f"Exception in _async_run: {e}")
             import traceback
+
             traceback.print_exc()
             stop_event.set()
             ready_event.set()
@@ -162,7 +163,7 @@ def test_build_throughput() -> None:
 
     # Start pynixd thread
     pynixd_thread = threading.Thread(
-        target=_run_pynixd_thread,
+        target=_run_server_thread,
         args=(ready_event, port, stop_event),
         name="pynixd",
     )

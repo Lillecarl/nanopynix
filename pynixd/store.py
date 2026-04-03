@@ -1249,3 +1249,44 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         """Close stores and SSH connection."""
         await super().close()
         await self._close_ssh()
+
+
+def get_current_system() -> str:
+    """Return the current nix system string (e.g. x86_64-linux)."""
+    import subprocess
+
+    try:
+        return (
+            subprocess.check_output(
+                ["nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"]
+            )
+            .decode()
+            .strip()
+        )
+    except Exception:
+        # Fallback for systems where nix might not be in PATH
+        # but is at a standard location.
+        try:
+            return (
+                subprocess.check_output(
+                    [
+                        "/nix/var/nix/profiles/default/bin/nix",
+                        "eval",
+                        "--raw",
+                        "--impure",
+                        "--expr",
+                        "builtins.currentSystem",
+                    ]
+                )
+                .decode()
+                .strip()
+            )
+        except Exception:
+            # Final fallback, though unlikely to work if nix is broken
+            import platform
+
+            machine = platform.machine()
+            system = platform.system().lower()
+            if system == "darwin":
+                system = "darwin"
+            return f"{machine}-{system}"

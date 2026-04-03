@@ -8,15 +8,11 @@ import os
 import shlex
 import socket
 import subprocess
-from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 from environs import Env
 
-from pynixd.instance import PynixdConfig
 from pynixd.store import LocalSocketStore, Store
 
 logging.basicConfig(
@@ -203,117 +199,11 @@ async def nix_build_store_only(
     return res.returncode or 0, stdout.decode(), stderr.decode()
 
 
-@dataclass
-class PynixdServer:
-    """A running pynixd SSH server."""
-
-    host: str
-    port: int
-    username: str
-    stores: Mapping[str, Store]
-    client_store_path: Path
-    _task: asyncio.Task[None] = field(repr=False)
-    system: str = field(default_factory=get_current_system)
-    njobs: int = 4
-    # Stores are assigned during __await__ - store ref for close()
-    _local_store: Store | None = field(default=None, repr=False)
-
-    @property
-    def uri(self) -> str:
-        """ssh-ng:// URI for --store."""
-        return f"ssh-ng://{self.username}@{self.host}:{self.port}"
-
-    def builder_uri(self, max_jobs: int | None = None) -> str:
-        """Builder spec for --builders."""
-        jobs = max_jobs if max_jobs is not None else self.njobs
-        return f"{self.uri} {self.system} - {jobs}"
-
-    def uri_for(self, uri_format: str) -> str:
-        """Return URI in the given format."""
-        if uri_format == "ssh-ng":
-            return self.uri
-        elif uri_format == "unix":
-            # For unix-server tests that use matrix
-            return f"unix:///tmp/pynixd-test.socket?remote-store={self.uri}"
-        return self.uri
-
-    async def close(self) -> None:
-        """Stop pynixd and wait for task."""
-        self._task.cancel()
-        try:
-            await self._task
-        except asyncio.CancelledError:
-            pass
-
-        # Also close the stores (SSH connections)
-        for store in self.stores.values():
-            await store.close()
-
-        if self._local_store:
-            await self._local_store.close()
-
-
 def get_free_port() -> int:
     """Get a free port from the OS."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
-
-
-@asynccontextmanager
-async def run_pynixd(
-    stores: Mapping[str, Store],
-    *,
-    local_store: Store | None = None,
-    client_store_path: Path = Path("/tmp/pynixd-test-client"),
-    njobs: int = 4,
-) -> AsyncIterator[PynixdServer]:
-    """Start a pynixd SSH server with the given stores."""
-    if local_store is None:
-        local_store = LocalSocketStore(
-            store_path=Path("/tmp/pynixd-test-local"),
-            id="local",
-            max_builds=0,
-            max_transfers=64,
-            nix_bin=str(NIX_BIN),
-        )
-
-    os.makedirs(client_store_path, exist_ok=True)
-
-    bound_port = get_free_port()
-
-    config = PynixdConfig(
-        local_store=local_store,
-        stores=stores,
-        ssh_host="127.0.0.1",
-        ssh_port=bound_port,
-    )
-    from pynixd.instance import Server
-    server_instance = Server(config)
-    await server_instance.start()
-    
-    server = None
-
-    try:
-        username = env.str("USER", "root")
-
-        server = PynixdServer(
-            host="127.0.0.1",
-            port=bound_port,
-            username=username,
-            stores=stores,
-            client_store_path=client_store_path,
-            _task=None, # task no longer needed
-            system=get_current_system(),
-            njobs=njobs,
-            _local_store=local_store,
-        )
-        yield server
-    finally:
-        await server_instance.close()
-        await server_instance.wait_finished()
-        if server:
-            await server.close()
 
 
 def make_local_stores(

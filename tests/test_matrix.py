@@ -21,10 +21,11 @@ from conftest import (
     LIX_BIN,
     NIX_BIN,
     _run_subprocess_with_timeout,
-    run_pynixd,
 )
 from environs import Env
 
+from pynixd import Server
+from pynixd.instance import NixImplementation
 from pynixd.store import (
     LocalSocketStore,
     SSHSubprocessStore,
@@ -100,9 +101,10 @@ def _local_store(nix_bin: Path) -> LocalSocketStore:
 # ── Client helpers (parameterized binary) ─────────────────────────────
 
 CLIENTS = [
-    (LIX_BIN, "ssh-ng"),
-    (NIX_BIN, "ssh-ng"),
+    (LIX_BIN, "ssh-ng", NixImplementation.LIX),
+    (NIX_BIN, "ssh-ng", NixImplementation.NIX),
 ]
+
 
 LOCAL_BINS = [LIX_BIN, NIX_BIN]
 LOCAL_BUILDERS = [_local_lix_builder, _local_nix_builder]
@@ -166,25 +168,26 @@ async def _nix_build_store(
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
 @pytest.mark.parametrize("builder_factory", LOCAL_BUILDERS)
 async def test_builders_local(
-    client: tuple[Path, str],
+    client: tuple[Path, str, NixImplementation],
     local_bin: Path,
     builder_factory,
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .simple via --builders with local builder."""
-    client_bin, uri_fmt = client
+    client_bin, uri_fmt, impl = client
     test_nix = request.config.getoption("--nix")
     stores = builder_factory()
     local = _local_store(local_bin)
     client_store = Path(f"/tmp/pynixd-test-matrix-client-{_next_id()}")
 
-    async with run_pynixd(
-        stores, local_store=local, client_store_path=client_store
+    async with Server(
+        stores=stores, local_store=local, client_store_path=client_store, ssh_port=0
     ) as server:
+        assert server.client_store_path
         rc, _stdout, stderr = await _nix_build_builders(
             client_bin,
-            server.builder_uri(),
+            server.builder_uri(implementation=impl),
             server.client_store_path,
             nix_env,
             "--file",
@@ -204,22 +207,22 @@ async def test_builders_local(
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
 @pytest.mark.parametrize("builder_factory", LOCAL_BUILDERS)
 async def test_store_local(
-    client: tuple[Path, str],
+    client: tuple[Path, str, NixImplementation],
     local_bin: Path,
     builder_factory,
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .simple via --store with local builder."""
-    client_bin, uri_fmt = client
+    client_bin, uri_fmt, impl = client
     test_nix = request.config.getoption("--nix")
     stores = builder_factory()
     local = _local_store(local_bin)
 
-    async with run_pynixd(stores, local_store=local) as server:
+    async with Server(stores=stores, local_store=local, ssh_port=0) as server:
         rc, _stdout, stderr = await _nix_build_store(
             client_bin,
-            server.uri_for(uri_fmt),
+            server.uri_for(uri_fmt, implementation=impl),
             nix_env,
             "--file",
             str(test_nix),
@@ -238,24 +241,25 @@ async def test_store_local(
 @pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
 async def test_builders_nixbuild(
-    client: tuple[Path, str],
+    client: tuple[Path, str, NixImplementation],
     local_bin: Path,
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .simple via --builders with nixbuild.net."""
-    client_bin, uri_fmt = client
+    client_bin, uri_fmt, impl = client
     test_nix = request.config.getoption("--nix")
     stores = _nixbuild_builder()
     local = _local_store(local_bin)
     client_store = Path(f"/tmp/pynixd-test-matrix-client-{_next_id()}")
 
-    async with run_pynixd(
-        stores, local_store=local, client_store_path=client_store
+    async with Server(
+        stores=stores, local_store=local, client_store_path=client_store, ssh_port=0
     ) as server:
+        assert server.client_store_path
         rc, _stdout, stderr = await _nix_build_builders(
             client_bin,
-            server.builder_uri(),
+            server.builder_uri(implementation=impl),
             server.client_store_path,
             nix_env,
             "--file",
@@ -275,21 +279,21 @@ async def test_builders_nixbuild(
 @pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
 async def test_store_nixbuild(
-    client: tuple[Path, str],
+    client: tuple[Path, str, NixImplementation],
     local_bin: Path,
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
 ) -> None:
     """Build test.nix .simple via --store with nixbuild.net."""
-    client_bin, uri_fmt = client
+    client_bin, uri_fmt, impl = client
     test_nix = request.config.getoption("--nix")
     stores = _nixbuild_builder()
     local = _local_store(local_bin)
 
-    async with run_pynixd(stores, local_store=local) as server:
+    async with Server(stores=stores, local_store=local, ssh_port=0) as server:
         rc, _stdout, stderr = await _nix_build_store(
             client_bin,
-            server.uri_for(uri_fmt),
+            server.uri_for(uri_fmt, implementation=impl),
             nix_env,
             "--file",
             str(test_nix),

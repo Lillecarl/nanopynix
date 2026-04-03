@@ -19,8 +19,10 @@ from conftest import (
     _run_subprocess_with_timeout,
     make_local_stores,
     nix_build,
-    run_pynixd,
 )
+
+from pynixd import Server
+from pynixd.store import LocalSocketStore
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +48,15 @@ async def test_builder_concurrency(
     # 1 builder, 2 slots
     stores = make_local_stores(n=1, max_builds=2)
 
-    async with run_pynixd(stores) as server:
+    local_store = LocalSocketStore(
+        store_path=Path("/tmp/pynixd-parallel-local"),
+        id="local",
+        max_builds=0,
+        max_transfers=64,
+        nix_bin=str(NIX_BIN),
+    )
+
+    async with Server(stores=stores, local_store=local_store, ssh_port=0) as server:
 
         async def _client_task(client_id: int) -> float:
             # Each client uses its own isolated store path to avoid local locking
@@ -119,7 +129,15 @@ async def test_single_client_max_jobs(
     test_nix = Path(request.config.getoption("--nix"))
     stores = make_local_stores(n=1, max_builds=2)
 
-    async with run_pynixd(stores) as server:
+    local_store = LocalSocketStore(
+        store_path=Path("/tmp/pynixd-parallel-local2"),
+        id="local",
+        max_builds=0,
+        max_transfers=64,
+        nix_bin=str(NIX_BIN),
+    )
+
+    async with Server(stores=stores, local_store=local_store, ssh_port=0) as server:
         # Request 10 jobs from a single client
         rc, _stdout, stderr = await nix_build(
             server.builder_uri(),

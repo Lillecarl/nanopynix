@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
-import tempfile
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,13 +17,15 @@ from typing import Any
 import aiohttp
 import pytest
 from conftest import (
+    NIX_BIN,
     make_local_stores,
     nix_build,
-    run_pynixd,
     run_process_async,
 )
 
+from pynixd import Server
 from pynixd.http_cache import BinaryCacheServer
+from pynixd.store import LocalSocketStore
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ log = logging.getLogger(__name__)
 async def run_cache_server(
     test_nix: Path,
     nix_env: dict[str, str],
-) -> AsyncIterator[tuple[str, Any, dict[str, Any]]]:
+) -> AsyncIterator[tuple[str, Server, dict[str, Any]]]:
     """Fixture to start pynixd and an HTTP cache on its local store."""
     stores = make_local_stores(n=1)
 
@@ -42,18 +43,31 @@ async def run_cache_server(
     nix_env = nix_env.copy()
     nix_env["PYNIXD_TEST_TS"] = ts
 
-    async with run_pynixd(
-        stores,
+    local_store = LocalSocketStore(
+        store_path=Path("/tmp/pynixd-test-http-local"),
+        id="local",
+        max_builds=0,
+        max_transfers=64,
+        nix_bin=str(NIX_BIN),
+    )
+
+    async with Server(
+        stores=stores,
+        local_store=local_store,
         client_store_path=Path("/tmp/pynixd-test-http-client"),
+        ssh_port=0,
     ) as server:
         # Build something on the client store.
         # This forces pynixd to pull it from the worker to its local store.
+        assert server.client_store_path
+        os.makedirs(server.client_store_path, exist_ok=True)
         rc, stdout, stderr = await nix_build(
             server.builder_uri(),
             "simple",
             nix_env,
             "--print-out-paths",
-            "--store", str(server.client_store_path),
+            "--store",
+            str(server.client_store_path),
             nix_file=test_nix,
         )
         assert rc == 0, f"setup build failed:\n{stderr}"
@@ -68,7 +82,7 @@ async def run_cache_server(
         log.info("setup path info: %s", simple_info)
 
         # Start HTTP cache on the local store
-        cache = BinaryCacheServer(server._local_store)  # type: ignore
+        cache = BinaryCacheServer(server.config.local_store)
         runner, port = await cache.start(host="127.0.0.1", port=0)
         base_url = f"http://127.0.0.1:{port}"
         log.info("cache server listening on %s", base_url)
@@ -119,7 +133,8 @@ async def test_nar_streaming(
             "big",
             nix_env,
             "--print-out-paths",
-            "--store", str(_server.client_store_path),
+            "--store",
+            str(_server.client_store_path),
             nix_file=test_nix,
         )
         assert rc == 0, f"big build failed:\n{stderr}"
@@ -128,29 +143,30 @@ async def test_nar_streaming(
 
         # Get .narinfo to find the NAR URL
         async with aiohttp.ClientSession() as session:
-                url = f"{base_url}/{hash_part}.narinfo"
-                async with session.get(url) as resp:
-                    if resp.status != 200:
-                        log.error("FAILED .narinfo %d: %s", resp.status, await resp.text())
-                    assert resp.status == 200
-                    narinfo = await resp.text()
-                    nar_url = ""
-                    for line in narinfo.splitlines():
-                        if line.startswith("URL: "):
-                            nar_url = line.split(": ", 1)[1]
-                            break
-                    assert nar_url
+            url = f"{base_url}/{hash_part}.narinfo"
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    txt = await resp.text()
+                    log.error("FAILED .narinfo %d: %s", resp.status, txt)
+                assert resp.status == 200
+                narinfo = await resp.text()
+                nar_url = ""
+                for line in narinfo.splitlines():
+                    if line.startswith("URL: "):
+                        nar_url = line.split(": ", 1)[1]
+                        break
+                assert nar_url
 
-                # Stream the NAR and verify size
-                async with session.get(f"{base_url}/{nar_url}") as resp:
-                    assert resp.status == 200
-                    total_bytes = 0
-                    async for chunk in resp.content.iter_chunked(1024 * 1024):
-                        total_bytes += len(chunk)
+            # Stream the NAR and verify size
+            async with session.get(f"{base_url}/{nar_url}") as resp:
+                assert resp.status == 200
+                total_bytes = 0
+                async for chunk in resp.content.iter_chunked(1024 * 1024):
+                    total_bytes += len(chunk)
 
-                    # 100MB uncompressed, but it's served as .nar.xz
-                    # Just verify it's "large enough" (>1MB) to confirm streaming worked
-                    assert total_bytes > 1 * 1024 * 1024
+                # 100MB uncompressed, but it's served as .nar.xz
+                # Just verify it's "large enough" (>1MB) to confirm streaming worked
+                assert total_bytes > 1 * 1024 * 1024
 
 
 @pytest.mark.asyncio
@@ -161,8 +177,6 @@ async def test_cache_as_substituter(
     test_nix = Path(request.config.getoption("--nix"))
 
     async with run_cache_server(test_nix, nix_env) as (base_url, _server, simple_info):
-        path = simple_info["path"]
-
         # 2. Try to build it on the client store, using the cache as a substituter.
         try:
             cmd = [
@@ -189,10 +203,19 @@ async def test_cache_as_substituter(
             assert rc == 0, f"Substitution failed:\n{stderr}"
 
             # Query the path in the client store
-            cmd = ["nix", "path-info", "--store", str(_server.client_store_path), "--file", str(test_nix), "simple"]
+            cmd = [
+                "nix",
+                "path-info",
+                "--store",
+                str(_server.client_store_path),
+                "--file",
+                str(test_nix),
+                "simple",
+            ]
             rc, stdout, stderr = await run_process_async(cmd, env=nix_env)
             assert rc == 0, f"path-info on client store failed:\n{stderr}"
             client_path = stdout.strip()
+            assert _server.client_store_path
             assert (_server.client_store_path / client_path.lstrip("/")).exists()
         finally:
             pass
@@ -225,7 +248,8 @@ async def test_cache_add_multiple(
             "complex",
             nix_env,
             "--print-out-paths",
-            "--store", str(server.client_store_path),
+            "--store",
+            str(server.client_store_path),
             nix_file=test_nix,
         )
         assert rc == 0, f"complex build failed:\n{stderr}"

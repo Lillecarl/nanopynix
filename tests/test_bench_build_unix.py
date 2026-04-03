@@ -49,7 +49,7 @@ class BenchResult:
 _build_bench_key = pytest.StashKey[list[BenchResult]]()
 
 
-def _run_pynixd_thread(
+def _run_server_thread(
     ready_event: threading.Event,
     socket_path: Path,
     stop_event: threading.Event,
@@ -164,7 +164,7 @@ def test_build_throughput(request: pytest.FixtureRequest) -> None:
 
     # Start pynixd thread
     pynixd_thread = threading.Thread(
-        target=_run_pynixd_thread,
+        target=_run_server_thread,
         args=(ready_event, socket_path, stop_event),
         name="pynixd",
     )
