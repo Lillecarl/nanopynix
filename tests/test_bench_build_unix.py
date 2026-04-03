@@ -22,9 +22,9 @@ from typing import TYPE_CHECKING
 import pyinstrument
 import pytest
 from conftest import (
+    LIX_BIN,
     NIX_BIN,
     rmtree_robust,
-    run_process_async,
 )
 from environs import Env
 from pyinstrument.renderers import ConsoleRenderer
@@ -43,6 +43,11 @@ aiosqlite_logger = logging.getLogger("aiosqlite")
 aiosqlite_logger.setLevel(logging.WARNING)
 
 env = Env()
+
+CLIENT_BINS: list[tuple[Path, str]] = [
+    (NIX_BIN, "nix"),
+    (LIX_BIN, "lix"),
+]
 
 
 @dataclass
@@ -81,6 +86,7 @@ async def run_nix_build(
     nix_file: Path,
     target: str,
     max_jobs: int,
+    client_bin: Path,
     remote: str | None = None,
     store: str | None = "daemon",
     extra_env: dict[str, str] | None = None,
@@ -93,7 +99,7 @@ async def run_nix_build(
         build_env.update(extra_env)
 
     cmd = [
-        str(NIX_BIN),
+        str(client_bin),
         "build",
         "--max-jobs",
         str(max_jobs),
@@ -106,14 +112,31 @@ async def run_nix_build(
     cmd.append(target)
 
     log.info("Starting build: %s (NIX_REMOTE=%s)", " ".join(cmd), remote)
-    start = time.monotonic()
-    rc, stdout, stderr = await run_process_async(cmd, env=build_env)
-    elapsed = time.monotonic() - start
+    start = time.perf_counter()
 
-    for line in stdout.splitlines():
-        nixclient_log.info("%s", line)
-    for line in stderr.splitlines():
-        nixclient_log.info("%s", line)
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        env=build_env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    async def _stream(stream: asyncio.StreamReader) -> None:
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            nixclient_log.info("%s", line.decode().rstrip())
+
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+    await asyncio.gather(
+        _stream(proc.stdout),
+        _stream(proc.stderr),
+    )
+
+    rc = await proc.wait()
+    elapsed = time.perf_counter() - start
 
     if rc != 0:
         log.error("Build failed with rc=%d", rc)
@@ -124,11 +147,14 @@ async def run_nix_build(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("client_bin,client_label", CLIENT_BINS)
 @pytest.mark.parametrize("max_jobs", [10, 100])
 @pytest.mark.parametrize("sleep_secs", [0, 1])
 async def test_build_throughput(
     request: pytest.FixtureRequest,
     caplog: pytest.LogCaptureFixture,
+    client_bin: Path,
+    client_label: str,
     max_jobs: int,
     sleep_secs: int,
 ) -> None:
@@ -153,40 +179,47 @@ async def test_build_throughput(
 
     async def run_no_daemon() -> float:
         # 1. Baseline: Local Store (No Daemon)
-        local_store_path = Path(f"/tmp/pynixd-baseline-local-{max_jobs}-{sleep_secs}")
+        local_store_path = Path(
+            f"/tmp/pynixd-baseline-local-{client_label}-{max_jobs}-{sleep_secs}"
+        )
         rmtree_robust(local_store_path)
         local_store_path.mkdir(parents=True, exist_ok=True)
         try:
-            print(
-                f"  Running baseline (Local Store, No Daemon) in {local_store_path}..."
+            log.info(
+                "Running baseline (Local Store, No Daemon) in %s...", local_store_path
             )
             elapsed = await run_nix_build(
                 nix_file,
                 target,
                 max_jobs=max_jobs,
+                client_bin=client_bin,
                 store=str(local_store_path),
                 extra_env=test_nix_env,
             )
-            print(f"  Completed in {elapsed:.1f}s")
+            log.info("Completed in %.1fs", elapsed)
             return elapsed
         finally:
             rmtree_robust(local_store_path)
 
     async def run_daemon() -> float:
         # 2. Baseline: Nix Daemon
-        daemon_store_path = Path(f"/tmp/pynixd-baseline-daemon-{max_jobs}-{sleep_secs}")
+        daemon_store_path = Path(
+            f"/tmp/pynixd-baseline-daemon-{client_label}-{max_jobs}-{sleep_secs}"
+        )
         rmtree_robust(daemon_store_path)
         daemon_store_path.mkdir(parents=True, exist_ok=True)
 
         baseline_socket = daemon_store_path / "nix" / "daemon-socket" / "socket"
         baseline_socket.parent.mkdir(parents=True, exist_ok=True)
 
-        print(f"  Spawning baseline Nix daemon in {daemon_store_path}...")
+        log.info(
+            "Spawning baseline %s daemon in %s...", client_label, daemon_store_path
+        )
         baseline_env = os.environ.copy()
         baseline_env["NIX_DAEMON_SOCKET_PATH"] = str(baseline_socket)
 
         daemon_proc = await asyncio.create_subprocess_exec(
-            str(NIX_BIN),
+            str(client_bin),
             "daemon",
             "--store",
             str(daemon_store_path),
@@ -213,16 +246,17 @@ async def test_build_throughput(
                 except (ConnectionRefusedError, ConnectionResetError):
                     await asyncio.sleep(0.1)
 
-            print(f"  Running baseline (Nix Daemon, jobs={max_jobs})...")
+            log.info("Running baseline (%s Daemon, jobs=%d)...", client_label, max_jobs)
             elapsed = await run_nix_build(
                 nix_file,
                 target,
                 max_jobs=max_jobs,
+                client_bin=client_bin,
                 remote=f"unix://{baseline_socket}",
                 store="daemon",
                 extra_env=test_nix_env,
             )
-            print(f"  Completed in {elapsed:.1f}s")
+            log.info("Completed in %.1fs", elapsed)
             return elapsed
         finally:
             daemon_proc.terminate()
@@ -233,13 +267,19 @@ async def test_build_throughput(
         nonlocal last_profile_path
         # 3. pynixd build
         pid = os.getpid()
-        socket_file = f"/tmp/pynixd-bench-{pid}-{max_jobs}-{sleep_secs}.socket"
+        socket_file = (
+            f"/tmp/pynixd-bench-{client_label}-{pid}-{max_jobs}-{sleep_secs}.socket"
+        )
         socket_path = Path(socket_file)
         if socket_path.exists():
             socket_path.unlink()
 
-        pynixd_local_path = Path(f"/tmp/pynixd-bench-local-{max_jobs}-{sleep_secs}")
-        pynixd_builder_path = Path(f"/tmp/pynixd-bench-builder-{max_jobs}-{sleep_secs}")
+        pynixd_local_path = Path(
+            f"/tmp/pynixd-bench-local-{client_label}-{max_jobs}-{sleep_secs}"
+        )
+        pynixd_builder_path = Path(
+            f"/tmp/pynixd-bench-builder-{client_label}-{max_jobs}-{sleep_secs}"
+        )
         rmtree_robust(pynixd_local_path)
         rmtree_robust(pynixd_builder_path)
         pynixd_local_path.mkdir(parents=True, exist_ok=True)
@@ -258,6 +298,7 @@ async def test_build_throughput(
                     store_path=pynixd_builder_path,
                     max_builds=max_jobs,
                     max_transfers=max_jobs,
+                    nix_bin=str(client_bin),
                     extra_args=["--max-jobs", str(max_jobs)],
                 )
             }
@@ -275,16 +316,21 @@ async def test_build_throughput(
             profiler.start()
 
             try:
-                print(f"  Running pynixd build (jobs={max_jobs})...")
+                log.info(
+                    "Running pynixd build (client=%s, jobs=%d)...",
+                    client_label,
+                    max_jobs,
+                )
                 elapsed = await run_nix_build(
                     nix_file,
                     target,
                     max_jobs=max_jobs,
+                    client_bin=client_bin,
                     remote=f"unix://{socket_path}",
                     store="daemon",
                     extra_env=test_nix_env,
                 )
-                print(f"  Completed in {elapsed:.1f}s")
+                log.info("Completed in %.1fs", elapsed)
                 return elapsed
             finally:
                 profiler.stop()
@@ -298,7 +344,10 @@ async def test_build_throughput(
                 if session:
                     renderer = ConsoleRenderer(unicode=True, color=False, show_all=True)
                     renderer.processors.insert(0, _prune_client_processor)
-                    profile_path = tempfile.mktemp(prefix="/tmp/pynixd-profile-")
+                    fd, profile_path = tempfile.mkstemp(
+                        prefix="pynixd-profile-", suffix=".txt"
+                    )
+                    os.close(fd)
                     with open(profile_path, "w") as f:
                         f.write(renderer.render(session))
                     last_profile_path = profile_path
@@ -315,9 +364,12 @@ async def test_build_throughput(
     iterations = env.int("PYNIXD_BENCH_ITERATIONS", 1)
     for i in range(iterations):
         if iterations > 1:
-            print(
-                f"\n--- Iteration {i + 1}/{iterations} "
-                f"(jobs={max_jobs}, sleep={sleep_secs}) ---"
+            log.info(
+                "\n--- Iteration %d/%d (jobs=%d, sleep=%d) ---",
+                i + 1,
+                iterations,
+                max_jobs,
+                sleep_secs,
             )
 
         # Shuffle to mitigate page cache order bias
@@ -339,7 +391,10 @@ async def test_build_throughput(
 
     # Record for terminal summary
     results = request.config.stash.get(_build_bench_key, [])
-    label = f"Unix Socket (jobs={max_jobs}, sleep={sleep_secs}s, {iterations} iters)"
+    label = (
+        f"Unix Socket ({client_label}, jobs={max_jobs}, "
+        f"sleep={sleep_secs}s, {iterations} iters)"
+    )
     results.append(
         BenchResult(
             label=label,
