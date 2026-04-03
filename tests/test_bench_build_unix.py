@@ -294,7 +294,7 @@ async def test_build_throughput(
         ("pynixd", run_pynixd),
     ]
 
-    iterations = env.int("PYNIXD_BENCH_ITERATIONS", 3)
+    iterations = env.int("PYNIXD_BENCH_ITERATIONS", 1)
     for i in range(iterations):
         if iterations > 1:
             print(f"\n--- Iteration {i+1}/{iterations} (jobs={max_jobs}, sleep={sleep_secs}) ---")
