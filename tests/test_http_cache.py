@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,7 +19,6 @@ import pytest
 from conftest import (
     NIX_BIN,
     make_local_stores,
-    nix_build,
     nix_build_store_only,
     run_process_async,
 )

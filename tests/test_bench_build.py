@@ -138,11 +138,15 @@ def _build_in_thread(
 
     log.info("Starting build: %s", " ".join(cmd))
     start = time.monotonic()
-    result = subprocess.run(cmd, env=sub_env)
+    result = subprocess.run(cmd, env=sub_env, capture_output=True)
     elapsed = time.monotonic() - start
 
     if result.returncode != 0:
         log.error("Build failed with rc=%d", result.returncode)
+        log.error("STDOUT: %s", result.stdout.decode())
+        log.error("STDERR: %s", result.stderr.decode())
+        msg = f"Build failed with rc={result.returncode}"
+        raise RuntimeError(msg)
 
     return elapsed
 
@@ -178,7 +182,7 @@ def test_build_throughput() -> None:
             port,
             client_store,
             nix_file,
-            ".bench-100mb",
+            "bench-100mb",
             stop_event,
         )
         print(f"\n  Build completed in {elapsed:.1f}s")

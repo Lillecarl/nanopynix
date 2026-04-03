@@ -143,8 +143,8 @@ class Server:
         if uri_format == "ssh-ng":
             return self.uri(implementation)
         elif uri_format == "unix":
-            # For unix-server tests that use matrix
-            return f"unix:///tmp/pynixd-test.socket?remote-store={self.uri(implementation)}"
+            # For unix-server tests
+            return f"unix://{self.config.unix_path}" if self.config.unix_path else ""
         return self.uri(implementation)
 
     async def __aenter__(self) -> Server:
