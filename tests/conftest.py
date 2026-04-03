@@ -108,6 +108,20 @@ def _run_subprocess_with_timeout(
         raise RuntimeError(f"Command timed out after {timeout}s: {' '.join(cmd)}")
 
 
+async def run_process_async(
+    cmd: list[str], env: dict[str, str] | None = None
+) -> tuple[int, str, str]:
+    """Run a subprocess asynchronously and return (rc, stdout, stderr)."""
+    res = await asyncio.create_subprocess_exec(
+        *cmd,
+        env=env or os.environ,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await res.communicate()
+    return res.returncode or 0, stdout.decode(), stderr.decode()
+
+
 async def nix_build(
     uri: str,
     target: str,

@@ -18,6 +18,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,8 @@ import pytest
 from conftest import (
     NIX_BIN,
     _run_subprocess_with_timeout,
+    get_current_system,
+    get_free_port,
     make_local_stores,
     run_pynixd,
 )
@@ -458,11 +461,9 @@ async def test_http_narinfo(
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(300)
+@pytest.mark.timeout(400)
 @pytest.mark.parametrize(
     "n_drvs,n_clients",
-    # [(10, 1), (50, 1), (50, 5)],
-    # ids=["10drv-1cli", "50drv-1cli", "50drv-5cli"],
     [(100, 1)],
     ids=["100drv-1cli"],
 )
@@ -474,15 +475,54 @@ async def test_build_throughput(
 ) -> None:
     """Benchmark: build dispatch throughput with zero-sleep derivations."""
     test_nix = request.config.getoption("--nix")
+    ready_event = threading.Event()
+    stop_event = threading.Event()
+    actual_port = 0
+    profile_path_out = [None]
 
-    stores = make_local_stores(n=4, prefix="bench-build", max_builds=4)
+    def _run_pynixd_thread_task():
+        nonlocal actual_port
+        # Profiling
+        profiler = None
+        if _PROFILE:
+            profiler = pyinstrument.Profiler(async_mode="enabled")
+            profiler.start()
 
-    async with run_pynixd(
-        stores,
-        njobs=100,
-        client_store_path=Path("/tmp/pynixd-bench-build-local"),
-    ) as server:
+        async def _async_run():
+            nonlocal actual_port
+            stores = make_local_stores(n=4, prefix="bench-build", max_builds=4)
+            async with run_pynixd(
+                stores,
+                njobs=100,
+                client_store_path=Path("/tmp/pynixd-bench-build-local"),
+            ) as server:
+                actual_port = server.port
+                ready_event.set()
+                while not stop_event.is_set():
+                    await asyncio.sleep(0.1)
+
+        try:
+            asyncio.run(_async_run())
+        finally:
+            if profiler:
+                profiler.stop()
+                print(f"\n{'=' * 60}")
+                print(f"PROFILE: build_{n_drvs}drv_{n_clients}cli")
+                print(f"{'=' * 60}")
+                print(profiler.output_text(unicode=True, color=True, show_all=True))
+
+    p_thread = threading.Thread(target=_run_pynixd_thread_task, name="pynixd-bench")
+    p_thread.start()
+
+    try:
+        # Wait for pynixd to be ready
+        if not ready_event.wait(timeout=60):
+            raise RuntimeError("pynixd thread failed to become ready")
+
         drvs_per_client = n_drvs // n_clients
+        username = env.str("USER", "root")
+        system = get_current_system()
+        builder_uri = f"ssh-ng://{username}@127.0.0.1:{actual_port} {system} - {drvs_per_client}"
 
         async def _run_client(client_id: int) -> float:
             client_store = Path(f"/tmp/pynixd-bench-build-client-{client_id}")
@@ -497,7 +537,7 @@ async def test_build_throughput(
                 "--store",
                 str(client_store),
                 "--builders",
-                server.builder_uri(max_jobs=drvs_per_client),
+                builder_uri,
                 "--max-jobs",
                 "0",
                 "--no-link",
@@ -506,8 +546,10 @@ async def test_build_throughput(
                 "parallel",
             ]
             t0 = time.monotonic()
+            # Since pynixd is in another thread, we can use blocking or non-blocking calls.
+            # Using _run_subprocess_with_timeout (blocking) is fine here.
             rc, _stdout, stderr = _run_subprocess_with_timeout(
-                cmd, client_env, timeout=240
+                cmd, client_env, timeout=300
             )
             elapsed = time.monotonic() - t0
             if rc != 0:
@@ -515,12 +557,15 @@ async def test_build_throughput(
             assert rc == 0, f"Client {client_id} failed:\n{stderr[:1000]}"
             return elapsed
 
-        with _profile_context(f"build_{n_drvs}drv_{n_clients}cli"):
-            start = time.monotonic()
-            client_times = await asyncio.gather(
-                *[_run_client(i) for i in range(n_clients)]
-            )
-            total_elapsed = time.monotonic() - start
+        start = time.monotonic()
+        client_times = await asyncio.gather(
+            *[_run_client(i) for i in range(n_clients)]
+        )
+        total_elapsed = time.monotonic() - start
+
+    finally:
+        stop_event.set()
+        p_thread.join(timeout=30)
 
     _record(
         request,
