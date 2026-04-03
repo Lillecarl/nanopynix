@@ -81,7 +81,14 @@ def get_current_system() -> str:
     """Return nix system string (e.g. x86_64-linux)."""
     return (
         subprocess.check_output(
-            [str(NIX_BIN), "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"]
+            [
+                str(NIX_BIN),
+                "eval",
+                "--raw",
+                "--impure",
+                "--expr",
+                "builtins.currentSystem",
+            ]
         )
         .decode()
         .strip()

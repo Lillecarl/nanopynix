@@ -12,6 +12,14 @@ dependencies = [
     "aiohttp",
     "aiosqlite",
     "environs",
+    "pyinstrument",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-timeout",
     "pytest-forked",
 ]
 
@@ -20,19 +28,6 @@ pynixd = "pynixd.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pynixd"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = "test_*.py"
-python_functions = "test_*"
-asyncio_mode = "auto"
-markers = [
-    "nixbuild: tests that require eu.nixbuild.net access",
-    "store: tests using --store (pynixd as eval store)",
-    "builders: tests using --builders (pynixd as remote builder)",
-    "dag: tests building multi-layer DAG derivations",
-    "slow: tests that are slow and should be excluded by default",
-]
 
 [tool.ruff]
 target-version = "py313"
