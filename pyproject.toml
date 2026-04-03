@@ -12,6 +12,7 @@ dependencies = [
     "aiohttp",
     "aiosqlite",
     "environs",
+    "pytest-forked",
 ]
 
 [project.scripts]

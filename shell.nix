@@ -11,6 +11,7 @@ let
       ps.pytest
       ps.pytest-asyncio
       ps.pytest-timeout
+      ps.pytest-forked
     ]
   );
 in

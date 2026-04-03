@@ -37,6 +37,7 @@ let
       python.pkgs.pytest
       python.pkgs.pytest-asyncio
       python.pkgs.pytest-timeout
+      python.pkgs.pytest-forked
     ];
 
     meta = {
@@ -61,6 +62,7 @@ let
           ps.pytest
           ps.pytest-asyncio
           ps.pytest-timeout
+          ps.pytest-forked
           ps.pyinstrument
         ]))
       ];
@@ -86,7 +88,7 @@ let
           ps.pytest
           ps.pytest-asyncio
           ps.pytest-timeout
-
+          ps.pytest-forked
         ]
       );
     in
