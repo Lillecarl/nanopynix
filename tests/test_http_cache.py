@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,14 +33,12 @@ log = logging.getLogger(__name__)
 async def run_cache_server(
     test_nix: Path,
     nix_env: dict[str, str],
-) -> AsyncIterator[tuple[str, Server, Path, dict[str, Any]]]:
+) -> AsyncIterator[tuple[str, Server, dict[str, Any]]]:
     """Fixture to start pynixd and an HTTP cache on its local store."""
     stores = make_local_stores(n=1)
 
     # Use a consistent timestamp for all builds in a single test run
-    ts = "1"
     nix_env = nix_env.copy()
-    nix_env["PYNIXD_TEST_TS"] = ts
 
     local_store = LocalSocketStore(
         store_path=Path("/tmp/pynixd-test-http-local"),
@@ -50,9 +47,6 @@ async def run_cache_server(
         max_transfers=64,
         nix_bin=str(NIX_BIN),
     )
-
-    client_store_path = Path("/tmp/pynixd-test-http-client")
-    os.makedirs(client_store_path, exist_ok=True)
 
     async with Server(
         stores=stores,
@@ -67,7 +61,7 @@ async def run_cache_server(
             nix_env,
             "--print-out-paths",
             "--store",
-            str(client_store_path),
+            str(local_store.store_path),
             nix_file=test_nix,
         )
         assert rc == 0, f"setup build failed:\n{stderr}"
@@ -87,7 +81,7 @@ async def run_cache_server(
         base_url = f"http://127.0.0.1:{port}"
         log.info("cache server listening on %s", base_url)
 
-        yield base_url, server, client_store_path, simple_info
+        yield base_url, server, simple_info
 
         await runner.cleanup()
 
@@ -133,18 +127,17 @@ async def test_nar_streaming(
 
     async with run_cache_server(test_nix, nix_env) as (
         base_url,
-        _server,
-        client_store_path,
+        server,
         simple_info,
     ):
         # Build the big path
         rc, stdout, stderr = await nix_build(
-            _server.builder_uri(),
+            server.builder_uri(),
             "big",
             nix_env,
             "--print-out-paths",
             "--store",
-            str(client_store_path),
+            str(server.config.local_store.store_path),
             nix_file=test_nix,
         )
         assert rc == 0, f"big build failed:\n{stderr}"
