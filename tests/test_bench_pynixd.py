@@ -202,7 +202,6 @@ async def test_ssh_serve_small_nars(
     async with Server(
         stores={},
         local_store=local_store,
-        client_store_path=Path("/tmp/pynixd-bench-client"),
         ssh_port=0,
     ) as server:
         client = SSHSubprocessStore(
@@ -261,7 +260,6 @@ async def test_ssh_serve_big_nar(
     async with Server(
         stores={},
         local_store=local_store,
-        client_store_path=Path("/tmp/pynixd-bench-client"),
         ssh_port=0,
     ) as server:
         client = SSHSubprocessStore(
@@ -304,7 +302,6 @@ async def test_ssh_query_path_info(
     async with Server(
         stores={},
         local_store=local_store,
-        client_store_path=Path("/tmp/pynixd-bench-client"),
         ssh_port=0,
     ) as server:
         client = SSHSubprocessStore(
@@ -494,7 +491,6 @@ async def test_build_throughput(
             async with Server(
                 stores=stores,
                 ssh_port=0,
-                client_store_path=Path("/tmp/pynixd-bench-build-local"),
             ) as server:
                 actual_port = server.port
                 ready_event.set()

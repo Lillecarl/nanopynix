@@ -181,14 +181,11 @@ async def test_builders_local(
     local = _local_store(local_bin)
     client_store = Path(f"/tmp/pynixd-test-matrix-client-{_next_id()}")
 
-    async with Server(
-        stores=stores, local_store=local, client_store_path=client_store, ssh_port=0
-    ) as server:
-        assert server.client_store_path
+    async with Server(stores=stores, local_store=local, ssh_port=0) as server:
         rc, _stdout, stderr = await _nix_build_builders(
             client_bin,
             server.builder_uri(implementation=impl),
-            server.client_store_path,
+            client_store,
             nix_env,
             "--file",
             str(test_nix),
@@ -253,14 +250,11 @@ async def test_builders_nixbuild(
     local = _local_store(local_bin)
     client_store = Path(f"/tmp/pynixd-test-matrix-client-{_next_id()}")
 
-    async with Server(
-        stores=stores, local_store=local, client_store_path=client_store, ssh_port=0
-    ) as server:
-        assert server.client_store_path
+    async with Server(stores=stores, local_store=local, ssh_port=0) as server:
         rc, _stdout, stderr = await _nix_build_builders(
             client_bin,
             server.builder_uri(implementation=impl),
-            server.client_store_path,
+            client_store,
             nix_env,
             "--file",
             str(test_nix),

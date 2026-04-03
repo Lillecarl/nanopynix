@@ -64,8 +64,6 @@ class Server:
     """Programmatic pynixd server instance."""
 
     def __init__(self, config: PynixdConfig | dict | None = None, **kwargs) -> None:
-        self.client_store_path: Path | None = kwargs.pop("client_store_path", None)
-
         if isinstance(config, dict):
             # Merge dict with kwargs to instantiate PynixdConfig
             merged = {**config, **kwargs}
