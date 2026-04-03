@@ -80,19 +80,23 @@ def _prune_client_processor(frame, options):
 async def run_nix_build(
     nix_file: Path,
     target: str,
+    max_jobs: int,
     remote: str | None = None,
     store: str | None = "daemon",
+    extra_env: dict[str, str] | None = None,
 ) -> float:
     """Run nix build and return elapsed time in seconds."""
     build_env = os.environ.copy()
     if remote:
         build_env["NIX_REMOTE"] = remote
+    if extra_env:
+        build_env.update(extra_env)
 
     cmd = [
         str(NIX_BIN),
         "build",
         "--max-jobs",
-        "100",
+        str(max_jobs),
         "--no-link",
         "--file",
         str(nix_file),
@@ -120,13 +124,25 @@ async def run_nix_build(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("max_jobs", [10, 100])
+@pytest.mark.parametrize("sleep_secs", [0, 1])
 async def test_build_throughput(
-    request: pytest.FixtureRequest, caplog: pytest.LogCaptureFixture
+    request: pytest.FixtureRequest,
+    caplog: pytest.LogCaptureFixture,
+    max_jobs: int,
+    sleep_secs: int,
 ) -> None:
     """Benchmark pynixd build throughput against multiple baselines."""
     caplog.set_level(logging.INFO)
     nix_file = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
-    target = "bench-100mb"
+    target = "parallel"
+    
+    # Configure test.nix via environment variables
+    test_nix_env = {
+        "PYNIXD_PAR_COUNT": "100",  # Always 100 drvs, just varies max-jobs
+        "PYNIXD_PAR_SLEEP": str(sleep_secs),
+        "PYNIXD_PAR_ID": f"bench-{max_jobs}-{sleep_secs}",
+    }
 
     results_accumulator: dict[str, list[float]] = {
         "no-daemon": [],
@@ -137,12 +153,14 @@ async def test_build_throughput(
 
     async def run_no_daemon() -> float:
         # 1. Baseline: Local Store (No Daemon)
-        local_store_path = Path("/tmp/pynixd-baseline-local")
+        local_store_path = Path(f"/tmp/pynixd-baseline-local-{max_jobs}-{sleep_secs}")
         rmtree_robust(local_store_path)
         local_store_path.mkdir(parents=True, exist_ok=True)
         try:
             print(f"  Running baseline (Local Store, No Daemon) in {local_store_path}...")
-            elapsed = await run_nix_build(nix_file, target, store=str(local_store_path))
+            elapsed = await run_nix_build(
+                nix_file, target, max_jobs=max_jobs, store=str(local_store_path), extra_env=test_nix_env
+            )
             print(f"  Completed in {elapsed:.1f}s")
             return elapsed
         finally:
@@ -150,7 +168,7 @@ async def test_build_throughput(
 
     async def run_daemon() -> float:
         # 2. Baseline: Nix Daemon
-        daemon_store_path = Path("/tmp/pynixd-baseline-daemon")
+        daemon_store_path = Path(f"/tmp/pynixd-baseline-daemon-{max_jobs}-{sleep_secs}")
         rmtree_robust(daemon_store_path)
         daemon_store_path.mkdir(parents=True, exist_ok=True)
 
@@ -167,7 +185,7 @@ async def test_build_throughput(
             "--store",
             str(daemon_store_path),
             "--max-jobs",
-            "100",
+            str(max_jobs),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
@@ -189,9 +207,9 @@ async def test_build_throughput(
                 except (ConnectionRefusedError, ConnectionResetError):
                     await asyncio.sleep(0.1)
 
-            print("  Running baseline (Nix Daemon)...")
+            print(f"  Running baseline (Nix Daemon, jobs={max_jobs})...")
             elapsed = await run_nix_build(
-                nix_file, target, remote=f"unix://{baseline_socket}"
+                nix_file, target, max_jobs=max_jobs, remote=f"unix://{baseline_socket}", extra_env=test_nix_env
             )
             print(f"  Completed in {elapsed:.1f}s")
             return elapsed
@@ -203,12 +221,12 @@ async def test_build_throughput(
     async def run_pynixd() -> float:
         nonlocal last_profile_path
         # 3. pynixd build
-        socket_path = Path(f"/tmp/pynixd-bench-{os.getpid()}.socket")
+        socket_path = Path(f"/tmp/pynixd-bench-{os.getpid()}-{max_jobs}-{sleep_secs}.socket")
         if socket_path.exists():
             socket_path.unlink()
 
-        pynixd_local_path = Path("/tmp/pynixd-bench-local")
-        pynixd_builder_path = Path("/tmp/pynixd-bench-builder")
+        pynixd_local_path = Path(f"/tmp/pynixd-bench-local-{max_jobs}-{sleep_secs}")
+        pynixd_builder_path = Path(f"/tmp/pynixd-bench-builder-{max_jobs}-{sleep_secs}")
         rmtree_robust(pynixd_local_path)
         rmtree_robust(pynixd_builder_path)
         pynixd_local_path.mkdir(parents=True, exist_ok=True)
@@ -227,7 +245,7 @@ async def test_build_throughput(
                     store_path=pynixd_builder_path,
                     max_builds=100,
                     max_transfers=100,
-                    extra_args=["--max-jobs", "100"],
+                    extra_args=["--max-jobs", str(max_jobs)],
                 )
             }
 
@@ -244,9 +262,9 @@ async def test_build_throughput(
             profiler.start()
 
             try:
-                print("  Running pynixd build...")
+                print(f"  Running pynixd build (jobs={max_jobs})...")
                 elapsed = await run_nix_build(
-                    nix_file, target, remote=f"unix://{socket_path}"
+                    nix_file, target, max_jobs=max_jobs, remote=f"unix://{socket_path}", extra_env=test_nix_env
                 )
                 print(f"  Completed in {elapsed:.1f}s")
                 return elapsed
@@ -279,7 +297,7 @@ async def test_build_throughput(
     iterations = env.int("PYNIXD_BENCH_ITERATIONS", 3)
     for i in range(iterations):
         if iterations > 1:
-            print(f"\n--- Iteration {i+1}/{iterations} ---")
+            print(f"\n--- Iteration {i+1}/{iterations} (jobs={max_jobs}, sleep={sleep_secs}) ---")
 
         # Shuffle to mitigate page cache order bias
         current_tasks = list(tasks)
@@ -301,7 +319,7 @@ async def test_build_throughput(
     results = request.config.stash.get(_build_bench_key, [])
     results.append(
         BenchResult(
-            label=f"Unix Socket (100MB build, {iterations} iterations averaged)",
+            label=f"Unix Socket (jobs={max_jobs}, sleep={sleep_secs}s, {iterations} iterations averaged)",
             elapsed=final_elapsed,
             baselines=final_baselines,
             count=1,
