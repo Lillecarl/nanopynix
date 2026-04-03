@@ -363,14 +363,16 @@ def _print_build_bench_summary(
     terminalreporter.write_sep("=", "Build Benchmark Results", bold=True)
 
     for r in results:
-        overhead = ((r.elapsed / r.baseline_elapsed) - 1) * 100
         terminalreporter.write_line("")
         terminalreporter.write_line(f"  TEST: {r.label}", bold=True)
         terminalreporter.write_line(f"  DRVS: {r.count}")
-        terminalreporter.write_line(
-            f"  TIME: pynixd={r.elapsed:.1f}s, baseline={r.baseline_elapsed:.1f}s"
-        )
-        terminalreporter.write_line(f"  OVERHEAD: {overhead:+.1f}%", bold=True)
+        terminalreporter.write_line(f"  TIME: pynixd={r.elapsed:.1f}s")
+
+        for name, base_time in r.baselines.items():
+            overhead = ((r.elapsed / base_time) - 1) * 100
+            terminalreporter.write_line(
+                f"        baseline ({name})={base_time:.1f}s ({overhead:+.1f}% overhead)"
+            )
 
         if r.profile_path:
             try:
