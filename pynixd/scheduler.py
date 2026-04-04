@@ -801,6 +801,7 @@ class Scheduler:
                 self.local_store.add_known_path(path)
                 store.add_known_path(path)
             log.debug("pulled_paths_into_local_store", count=len(to_pull))
+            self.trigger()
         except Exception:
             log.exception(
                 "pull_paths_failed",

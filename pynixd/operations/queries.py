@@ -6,6 +6,7 @@ These operations query information from the store without mutating it.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -436,8 +437,24 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
             for dp in self.derived_paths:
                 store.add_known_paths(dp.to_outputs(store.store_path))
 
-        # Any path being substituted is also "known" to be available
+        # Any path being substituted is also "known" to be available,
+        # but we must verify availability without blocking the query response.
         if resp.will_substitute:
-            store.add_known_paths(resp.will_substitute)
+
+            async def verify_substitutable():
+                try:
+                    # Trigger substitution verification in the background
+                    valid = await store.query_valid_paths(
+                        resp.will_substitute, substitute=True
+                    )
+                    store.add_known_paths(valid)
+                except Exception:
+                    self._log.debug(
+                        "verify_substitutable_failed",
+                        paths=len(resp.will_substitute),
+                        exc_info=True,
+                    )
+
+            asyncio.create_task(verify_substitutable())
 
         return resp
