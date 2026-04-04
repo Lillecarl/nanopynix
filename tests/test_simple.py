@@ -15,7 +15,6 @@ from pynixd import Server
 
 
 @pytest.mark.builders
-@pytest.mark.asyncio
 @pytest.mark.timeout(180)
 async def test_builders(
     nix_env: dict[str, str],
@@ -36,7 +35,6 @@ async def test_builders(
 
 
 @pytest.mark.store
-@pytest.mark.asyncio
 @pytest.mark.timeout(180)
 async def test_store(
     nix_env: dict[str, str],

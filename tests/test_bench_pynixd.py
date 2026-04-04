@@ -182,7 +182,6 @@ def _hash_part(path: str) -> str:
 # exactly what nix does: SSH → exec "nix-daemon --stdio" → daemon protocol.
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
 @pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
@@ -244,7 +243,6 @@ async def test_ssh_serve_small_nars(
     )
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
 async def test_ssh_serve_big_nar(
@@ -284,7 +282,6 @@ async def test_ssh_serve_big_nar(
     _record(request, f"ssh serve big {warmth}", elapsed, 1, len(data))
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
 @pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
@@ -336,7 +333,6 @@ async def test_ssh_query_path_info(
 # ── HTTP binary cache benchmarks ─────────────────────────────────
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
 async def test_http_serve_small_nars(
@@ -386,7 +382,6 @@ async def test_http_serve_small_nars(
     )
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(300)
 async def test_http_serve_big_nar(
     request: pytest.FixtureRequest,
@@ -416,7 +411,6 @@ async def test_http_serve_big_nar(
     _record(request, "http serve big", elapsed, 1, len(data))
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
 async def test_http_narinfo(
@@ -458,7 +452,6 @@ async def test_http_narinfo(
 # ── Build dispatch benchmark ─────────────────────────────────────
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(400)
 @pytest.mark.parametrize(
     "n_drvs,n_clients",

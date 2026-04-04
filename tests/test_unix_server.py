@@ -138,7 +138,6 @@ async def run_unix_server(
             os.remove(socket_path)
 
 
-@pytest.mark.asyncio
 async def test_unix_build(
     local_store: Store,
     builder_store: Store,
@@ -160,7 +159,6 @@ async def test_unix_build(
         assert rc == 0, f"Unix build failed:\n{stderr}"
 
 
-@pytest.mark.asyncio
 async def test_unix_store_info(
     local_store: Store,
     builder_store: Store,
@@ -196,7 +194,6 @@ async def test_unix_store_info(
         assert path in stdout
 
 
-@pytest.mark.asyncio
 async def test_unix_gc(
     local_store: Store,
     builder_store: Store,

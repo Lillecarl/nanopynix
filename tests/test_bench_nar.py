@@ -233,7 +233,6 @@ def _set_chunk_size(chunk_kb: int) -> int:
 # ── Big NAR benchmark ────────────────────────────────────────────
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(600)
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
 async def test_big_nar_copy_paths(
@@ -259,7 +258,6 @@ async def test_big_nar_copy_paths(
     _record(request, f"{label} cp big", chunk_kb, elapsed, info.nar_size, 1)
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(600)
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
 async def test_big_nar_pipe_nar_from(
@@ -288,7 +286,6 @@ async def test_big_nar_pipe_nar_from(
 # ── Many small NARs benchmark ────────────────────────────────────
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(600)
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
 async def test_small_nars_copy_paths(
@@ -318,7 +315,6 @@ async def test_small_nars_copy_paths(
     _record(request, f"{label} cp small", chunk_kb, elapsed, total_bytes, len(picked))
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(600)
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
@@ -366,7 +362,6 @@ async def test_small_nars_pipe_nar_from(
 # ── NAR serving benchmark (read from store) ──────────────────────
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(300)
 async def test_serve_big_nar(
     request: pytest.FixtureRequest,
@@ -384,7 +379,6 @@ async def test_serve_big_nar(
     _record(request, f"{label} serve big", 0, elapsed, len(nar_data), 1)
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
 async def test_serve_small_nars(

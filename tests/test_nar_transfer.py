@@ -87,7 +87,6 @@ async def _get_path_info_and_nar(
 # @pytest.mark.skip(
 #     reason="test calls non-existent Connection.add_to_store_nar() - needs rewrite"
 # )
-@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_add_to_store_nar(
     src_store: LocalSocketStore,
@@ -145,7 +144,6 @@ async def test_add_to_store_nar(
 # ── AddMultipleToStore ───────────────────────────────────────────────
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_add_multiple_to_store_single(
     src_store: LocalSocketStore,
@@ -230,7 +228,6 @@ async def test_add_multiple_to_store_single(
     assert dst_info.nar_hash == info.nar_hash
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_add_multiple_to_store_two_paths(
     src_store: LocalSocketStore,
@@ -342,7 +339,6 @@ async def copy_dst_store() -> AsyncIterator[LocalSubprocessStore]:
     await s.close()
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_copy_paths_single(
     src_store: LocalSocketStore,
@@ -372,7 +368,6 @@ async def test_copy_paths_single(
     assert dst_info.nar_size == info.nar_size
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_copy_paths_multiple(
     src_store: LocalSocketStore,
@@ -425,7 +420,6 @@ async def stream_dst_store() -> AsyncIterator[LocalSubprocessStore]:
     await s.close()
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_pipe_nar_from_single(
     src_store: LocalSocketStore,
@@ -455,7 +449,6 @@ async def test_pipe_nar_from_single(
     assert dst_info.nar_size == info.nar_size
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_pipe_nar_from_multiple(
     src_store: LocalSocketStore,
@@ -507,7 +500,6 @@ async def nixbuild_store() -> AsyncIterator[SSHSubprocessStore]:
 
 
 @pytest.mark.nixbuild
-@pytest.mark.asyncio
 @pytest.mark.timeout(60)
 async def test_copy_paths_to_nixbuild(
     src_store: LocalSocketStore,
@@ -536,7 +528,6 @@ async def test_copy_paths_to_nixbuild(
 
 
 @pytest.mark.nixbuild
-@pytest.mark.asyncio
 @pytest.mark.timeout(60)
 async def test_copy_paths_roundtrip_nixbuild(
     src_store: LocalSocketStore,

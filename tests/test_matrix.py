@@ -162,7 +162,6 @@ async def _nix_build_store(
 
 
 @pytest.mark.builders
-@pytest.mark.asyncio
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
@@ -198,7 +197,6 @@ async def test_builders_local(
 
 
 @pytest.mark.store
-@pytest.mark.asyncio
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
@@ -233,7 +231,6 @@ async def test_store_local(
 
 @pytest.mark.nixbuild
 @pytest.mark.builders
-@pytest.mark.asyncio
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)
@@ -268,7 +265,6 @@ async def test_builders_nixbuild(
 
 @pytest.mark.nixbuild
 @pytest.mark.store
-@pytest.mark.asyncio
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("local_bin", LOCAL_BINS)

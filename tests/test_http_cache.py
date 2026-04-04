@@ -88,7 +88,6 @@ async def run_cache_server(
         await runner.cleanup()
 
 
-@pytest.mark.asyncio
 async def test_narinfo(request: pytest.FixtureRequest, nix_env: dict[str, str]) -> None:
     """Test fetching .narinfo from the HTTP cache."""
     test_nix = Path(request.config.getoption("--nix"))
@@ -115,7 +114,6 @@ async def test_narinfo(request: pytest.FixtureRequest, nix_env: dict[str, str]) 
                 assert "Compression: none" in text
 
 
-@pytest.mark.asyncio
 async def test_nar_streaming(
     request: pytest.FixtureRequest, nix_env: dict[str, str]
 ) -> None:
@@ -172,7 +170,6 @@ async def test_nar_streaming(
                 assert total_bytes > 100_000
 
 
-@pytest.mark.asyncio
 async def test_cache_as_substituter(
     request: pytest.FixtureRequest, nix_env: dict[str, str]
 ) -> None:
@@ -227,7 +224,6 @@ async def test_cache_as_substituter(
                 pass
 
 
-@pytest.mark.asyncio
 async def test_cache_not_found(
     request: pytest.FixtureRequest, nix_env: dict[str, str]
 ) -> None:
@@ -241,7 +237,6 @@ async def test_cache_not_found(
                 assert resp.status == 404
 
 
-@pytest.mark.asyncio
 async def test_cache_add_multiple(
     request: pytest.FixtureRequest, nix_env: dict[str, str]
 ) -> None:

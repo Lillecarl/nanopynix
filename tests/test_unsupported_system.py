@@ -22,7 +22,6 @@ def _wrong_system() -> str:
 
 
 @pytest.mark.builders
-@pytest.mark.asyncio
 async def test_unsupported_system_builders(
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,
@@ -46,7 +45,6 @@ async def test_unsupported_system_builders(
 
 
 @pytest.mark.store
-@pytest.mark.asyncio
 async def test_unsupported_system_store(
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,

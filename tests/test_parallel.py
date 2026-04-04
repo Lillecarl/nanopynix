@@ -29,7 +29,6 @@ log = logging.getLogger(__name__)
 
 @pytest.mark.parallel
 @pytest.mark.builders
-@pytest.mark.asyncio
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("n_clients", [2, 5])
 @pytest.mark.parametrize("drvs_per_client", [3])
@@ -120,7 +119,6 @@ async def test_builder_concurrency(
 
 
 @pytest.mark.builders
-@pytest.mark.asyncio
 async def test_single_client_max_jobs(
     nix_env: dict[str, str],
     request: pytest.FixtureRequest,

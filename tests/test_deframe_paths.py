@@ -74,7 +74,6 @@ async def _pick_self_contained_paths(
 # ── Unit test: FramedReader round-trip ────────────────────────────────
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(10)
 async def test_framed_reader_roundtrip() -> None:
     """FramedReader can read wire protocol values written by FramedWriter."""
@@ -108,7 +107,6 @@ async def test_framed_reader_roundtrip() -> None:
     wr.close()
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(10)
 async def test_framed_reader_with_pathinfo_and_nar(
     src_store: LocalSocketStore,
@@ -161,7 +159,6 @@ async def test_framed_reader_with_pathinfo_and_nar(
 # ── Integration test: streaming with real stores ──────────────────────
 
 
-@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_add_multiple_streaming_returns_paths(
     src_store: LocalSocketStore,

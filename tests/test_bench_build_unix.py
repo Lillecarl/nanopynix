@@ -146,7 +146,6 @@ async def run_nix_build(
     return elapsed
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("client_bin,client_label", CLIENT_BINS)
 @pytest.mark.parametrize("max_jobs", [10, 100])
 @pytest.mark.parametrize("sleep_secs", [0, 1])

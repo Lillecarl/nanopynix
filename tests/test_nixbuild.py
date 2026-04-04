@@ -32,7 +32,6 @@ def _nixbuild_stores() -> Mapping[str, Store]:
 
 
 @pytest.mark.builders
-@pytest.mark.asyncio
 @pytest.mark.timeout(120)
 async def test_simple_builders(
     nix_env: dict[str, str],
@@ -53,7 +52,6 @@ async def test_simple_builders(
 
 
 @pytest.mark.store
-@pytest.mark.asyncio
 @pytest.mark.timeout(120)
 async def test_simple_store(
     nix_env: dict[str, str],
@@ -75,7 +73,6 @@ async def test_simple_store(
 
 @pytest.mark.builders
 @pytest.mark.dag
-@pytest.mark.asyncio
 @pytest.mark.timeout(180)
 async def test_dag_builders(
     nix_env: dict[str, str],
@@ -97,7 +94,6 @@ async def test_dag_builders(
 
 @pytest.mark.store
 @pytest.mark.dag
-@pytest.mark.asyncio
 @pytest.mark.timeout(180)
 async def test_dag_store(
     nix_env: dict[str, str],
