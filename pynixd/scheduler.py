@@ -397,6 +397,11 @@ class Scheduler:
 
         Acquires its own local_store connection so the build survives
         client proxy disconnect.
+
+        After the build finishes, output paths are pulled to the local
+        store. The scheduler is triggered immediately so the next build
+        can start, but the result is not delivered to the client until
+        the pull completes.
         """
         try:
             # Stop proactive transfer gracefully before acquiring connections
@@ -436,6 +441,40 @@ class Scheduler:
             if response.result.status == 0:
                 store.record_success()
 
+            # Spawn pull as background task so build slot frees immediately.
+            # The scheduler trigger fires below so the next build can start.
+            # We await the pull task before completing so the client doesn't
+            # see the result until outputs are in local_store.
+            pull_task: asyncio.Task | None = None
+            if response.result.status == 0:
+                built = response.result.built_outputs
+                if built:
+                    output_paths = []
+                    for name, realisation in built.items():
+                        p = realisation.get("outPath", "")
+                        if p and not p.startswith("/nix/store/"):
+                            p = f"/nix/store/{p}"
+                        if p:
+                            output_paths.append(p)
+                        else:
+                            log.warning("build_output_no_path", name=name)
+                else:
+                    output_paths = [
+                        o.path for o in build.request.derivation.outputs if o.path
+                    ]
+                if output_paths:
+                    pull_task = asyncio.create_task(
+                        self._pull_paths(store, output_paths),
+                        name=f"pull-{build.id}",
+                    )
+
+            # Trigger scheduler immediately so the next build can start
+            self.trigger()
+
+            # Wait for pull to complete before delivering result to client
+            if pull_task is not None:
+                await pull_task
+
             log.debug("build_completing", id=build.id)
             await self._queue.complete(build.id, response)
             log.debug("build_completed", id=build.id)
@@ -462,12 +501,11 @@ class Scheduler:
                     f"Build failed after {build.retries} retries "
                     f"(last: {store.id}): {e}",
                 )
+            self.trigger()
         except Exception as e:
             # Programming error — don't retry, don't blame the store
             log.exception("build_unexpected_error", id=build.id)
             await self._queue.fail(build.id, f"Internal error: {type(e).__name__}: {e}")
-
-        finally:
             self.trigger()
 
     async def _execute_build_derivation(
@@ -487,36 +525,6 @@ class Scheduler:
             build_id=build.id,
             status=response.result.status,
         )
-
-        # Pull outputs to local store
-        if response.result.status == 0:
-            built = response.result.built_outputs
-            if built:
-                # CA derivations: extract paths from realisations
-                output_paths = []
-                for name, realisation in built.items():
-                    p = realisation.get("outPath", "")
-                    if p and not p.startswith("/nix/store/"):
-                        p = f"/nix/store/{p}"
-                    if p:
-                        output_paths.append(p)
-                    else:
-                        log.warning("build_output_no_path", name=name)
-            else:
-                # Input-addressed: paths known from derivation
-                output_paths = [
-                    o.path for o in build.request.derivation.outputs if o.path
-                ]
-            log.debug(
-                "build_succeeded_pulling_outputs",
-                build_id=build.id,
-                num_outputs=len(output_paths),
-                output_paths=output_paths,
-            )
-            try:
-                await self._pull_paths(store, output_paths)
-            except Exception:
-                log.exception("pull_outputs_failed", id=build.id)
         return response
 
     # ── Proactive transfer ──────────────────────────────────────────
