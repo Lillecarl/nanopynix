@@ -475,6 +475,7 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
                                 substitute=1,
                             )
                         )
+                        # Verify availability and update store tracker
                         store.add_known_paths(valid.paths)
                 except Exception:
                     self._log.debug(

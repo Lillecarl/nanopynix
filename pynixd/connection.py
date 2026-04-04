@@ -115,6 +115,7 @@ class Connection:
         self.id: str = conn_id
         self.store_path: str | None = str(store_path) if store_path else None
         self.version: int = wire.PROTOCOL_VERSION
+        self.nix_version: str = ""
         self.r = r
         self.w = w
         self.connected: bool = False
@@ -275,8 +276,8 @@ class Connection:
 
         # Server conditions these on clientVersion, not negotiated version
         if server_version >= wire.proto(1, 33):
-            nix_version = await self.r.read_string()
-            log.debug("daemon_nix_version", nix_version=nix_version)
+            self.nix_version = await self.r.read_string()
+            log.debug("daemon_nix_version", nix_version=self.nix_version)
             if server_version >= wire.proto(1, 35):
                 await self.r.read_uint64()
 

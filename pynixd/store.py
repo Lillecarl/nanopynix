@@ -98,6 +98,7 @@ class Store(ABC):
         self.id = id
         self.store_path = store_path
         self.version: int = wire.PROTOCOL_VERSION
+        self.nix_version: str = ""
         self.max_builds = max_builds
         self.max_transfers = max_transfers
         self.idle_ttl = idle_ttl
@@ -524,17 +525,11 @@ class Store(ABC):
 
     @property
     def is_lix(self) -> bool:
-        """True if this store is Lix (protocol version 1.35 and binary name)."""
+        """True if this store is Lix (protocol version 1.35 and version string)."""
         if self.version != wire.proto(1, 35):
             return False
 
-        # Check binary name if available (subprocess/socket stores)
-        nix_bin = getattr(self, "nix_bin", "").lower()
-        if nix_bin and "lix" in nix_bin:
-            return True
-
-        return False
-
+        return "lix" in self.nix_version.lower()
     def start_sweep(self) -> None:
         """Start the idle sweep task if not already running."""
         if self.sweep_task is None or self.sweep_task.done():
@@ -610,13 +605,15 @@ class Store(ABC):
         self.conn_counter += 1
         conn = await self.create_conn()
         self.all_conns.append(conn)
-        # Capture protocol version from first connection
+        # Capture protocol version and nix version string from first connection
         if self.conn_counter == 1:
             self.version = conn.version
+            self.nix_version = conn.nix_version
             log.info(
                 "store_protocol_version",
                 store_id=self.id,
                 version=wire.proto_str(self.version),
+                nix_version=self.nix_version,
             )
         pool_log.debug(
             "pool_created_connection",
