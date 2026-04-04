@@ -148,8 +148,12 @@ class Scheduler:
         for s in self.stores.values():
             if not s.supports_system(build.platform):
                 continue
-            if needs_nix and s.is_lix:
-                continue
+            if needs_nix:
+                if s.is_lix:
+                    continue
+                # For Nix stores, verify they support ca-derivations if needed
+                if "ca-derivations" not in s.supported_features:
+                    continue
             if not s.is_healthy:
                 continue
             score = s.count_common_paths(build.required_paths)

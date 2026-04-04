@@ -112,6 +112,7 @@ class Store(ABC):
         self.consecutive_failures: int = 0
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
+        self.supported_features: set[str] = set()
 
     def supports_system(self, system: str) -> bool:
         """Check if this store supports the given system."""
@@ -523,8 +524,16 @@ class Store(ABC):
 
     @property
     def is_lix(self) -> bool:
-        """True if this store is Lix (protocol version 1.35)."""
-        return self.version == wire.proto(1, 35)
+        """True if this store is Lix (protocol version 1.35 and binary name)."""
+        if self.version != wire.proto(1, 35):
+            return False
+
+        # Check binary name if available (subprocess/socket stores)
+        nix_bin = getattr(self, "nix_bin", "").lower()
+        if nix_bin and "lix" in nix_bin:
+            return True
+
+        return False
 
     def start_sweep(self) -> None:
         """Start the idle sweep task if not already running."""

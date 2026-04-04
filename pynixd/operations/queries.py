@@ -74,7 +74,11 @@ class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
                 return result
 
         # 3. Daemon fallback (Base class execute)
-        return await super().execute(store, client, suppress_last)
+        return await super().execute(
+            store,
+            client,
+            suppress_last,
+        )
 
 
 # ── QueryPathInfo ────────────────────────────────────────────────────
@@ -120,7 +124,11 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
                 return result
 
         # 2. Daemon fallback
-        resp = await super().execute(store, client, suppress_last)
+        resp = await super().execute(
+            store,
+            client,
+            suppress_last,
+        )
         if resp.valid and resp.info is not None:
             # Protocol sends path-less info, we restore it
             resp.info.path = self.path
@@ -167,7 +175,11 @@ class QueryValidPathsRequest(OpRequest[StringSetResponse]):
                     return result
 
         # 2. Daemon fallback
-        return await super().execute(store, client, suppress_last)
+        return await super().execute(
+            store,
+            client,
+            suppress_last,
+        )
 
 
 # ── QueryPathFromHashPart ────────────────────────────────────────────
@@ -192,7 +204,11 @@ class QueryPathFromHashPartRequest(SingleStringRequest[SingleStringResponse]):
                 return SingleStringResponse(value=path)
 
         # 2. Daemon fallback
-        return await super().execute(store, client, suppress_last)
+        return await super().execute(
+            store,
+            client,
+            suppress_last,
+        )
 
 
 # ── QueryReferrers ────────────────────────────────────────────────────
@@ -328,7 +344,11 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
                 return result
 
         # 2. Daemon fallback
-        resp = await super().execute(store, client, suppress_last)
+        resp = await super().execute(
+            store,
+            client,
+            suppress_last,
+        )
         store.add_known_paths(resp.paths)
         return resp
 
@@ -430,7 +450,11 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         suppress_last: bool = False,
     ) -> QueryMissingResponse:
         """Query which paths are missing from this store."""
-        resp = await super().execute(store, client, suppress_last)
+        resp = await super().execute(
+            store,
+            client,
+            suppress_last,
+        )
 
         # Update known paths: outputs of all derived paths are now expected
         if store.store_path:
@@ -443,11 +467,15 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
 
             async def verify_substitutable():
                 try:
-                    # Trigger substitution verification in the background
-                    valid = await store.query_valid_paths(
-                        resp.will_substitute, substitute=True
-                    )
-                    store.add_known_paths(valid)
+                    # Use a fresh connection from the pool for background verification
+                    async with store.transfer_conn() as conn:
+                        valid = await conn.call(
+                            QueryValidPathsRequest(
+                                paths=resp.will_substitute,
+                                substitute=1,
+                            )
+                        )
+                        store.add_known_paths(valid.paths)
                 except Exception:
                     self._log.debug(
                         "verify_substitutable_failed",
