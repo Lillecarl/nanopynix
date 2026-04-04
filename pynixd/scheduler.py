@@ -137,6 +137,9 @@ class Scheduler:
 
         Stores where this build previously failed are deprioritized
         (sorted after non-failed stores at the same locality score).
+
+        If the derivation signals build_local, the local_store is added
+        as a candidate with maximum score (it already has all inputs).
         """
         needs_nix = build.request.derivation.requires_nix
         failed = set(build.failed_backends)
@@ -161,6 +164,22 @@ class Scheduler:
                 )
             )
 
+        # Add local_store as a candidate when derivation opts in
+        if (
+            build.request.derivation.build_local
+            and self._local_store.supports_system(build.platform)
+            and self._local_store.is_healthy
+        ):
+            candidates.append(
+                CandidateStore(
+                    store_id=self._local_store.id,
+                    score=len(build.required_paths),
+                    is_high_pressure=False,
+                    in_failed=False,
+                    pressure=0.0,
+                )
+            )
+
         # Sort: high pressure first, then locality, then not failed, then lower pressure
         candidates.sort(
             key=lambda c: (c.is_high_pressure, -c.score, c.in_failed, c.pressure)
@@ -181,11 +200,21 @@ class Scheduler:
             return BuildReadiness.WAITING_DAG
         return BuildReadiness.SCHEDULABLE
 
+    def _resolve_store(self, store_id: str) -> Store:
+        """Resolve a store_id to its Store instance."""
+        if store_id == self._local_store.id:
+            return self._local_store
+        return self._stores[store_id]
+
     def _effective_slots(
         self,
         store_id: str,
         assigned_this_pass: dict[str, int],
     ) -> int:
+        if store_id == self._local_store.id:
+            return self._local_store.available_slots - assigned_this_pass.get(
+                self._local_store.id, 0
+            )
         store = self._stores[store_id]
         return store.available_slots - assigned_this_pass.get(store_id, 0)
 
@@ -277,8 +306,9 @@ class Scheduler:
                 # Pick least-loaded among tied-top
                 best = min(
                     tied_top_with_slot,
-                    key=lambda c: self._stores[c.store_id].in_flight,
+                    key=lambda c: self._resolve_store(c.store_id).in_flight,
                 )
+                store = self._resolve_store(best.store_id)
                 log.debug(
                     "build_assigned_to_store",
                     build_id=build.id,
@@ -288,7 +318,7 @@ class Scheduler:
                         best.store_id, assigned_this_pass
                     ),
                 )
-                self._start_build(build, self._stores[best.store_id])
+                self._start_build(build, store)
                 assigned_this_pass[best.store_id] = (
                     assigned_this_pass.get(best.store_id, 0) + 1
                 )
@@ -297,6 +327,8 @@ class Scheduler:
                 # Start proactive transfer to best store WITH a slot
                 if not build.is_transferring:
                     for candidate in ranking:
+                        if candidate.store_id == self._local_store.id:
+                            continue
                         store = self._stores[candidate.store_id]
                         if (
                             self._effective_slots(
@@ -407,9 +439,12 @@ class Scheduler:
             # Stop proactive transfer gracefully before acquiring connections
             await build.stop_transfer()
 
-            log.debug("build_sending_inputs", build_id=build.id, store_id=store.id)
-            # Transfer required inputs
-            await self._ensure_worker_has_inputs(build, store)
+            is_local = store is self._local_store
+
+            if not is_local:
+                log.debug("build_sending_inputs", build_id=build.id, store_id=store.id)
+                # Transfer required inputs
+                await self._ensure_worker_has_inputs(build, store)
 
             log.debug("build_executing", build_id=build.id, store_id=store.id)
             assert isinstance(build.request, BuildDerivationRequest), (
@@ -445,8 +480,9 @@ class Scheduler:
             # The scheduler trigger fires below so the next build can start.
             # We await the pull task before completing so the client doesn't
             # see the result until outputs are in local_store.
+            # Skip for local builds — outputs are already in local_store.
             pull_task: asyncio.Task | None = None
-            if response.result.status == 0:
+            if response.result.status == 0 and not is_local:
                 built = response.result.built_outputs
                 if built:
                     output_paths = []

@@ -234,6 +234,7 @@ async def run_pynixd(
     server_type: str,
     request: pytest.FixtureRequest,
     extra_env: dict[str, str] | None = None,
+    localbuild: bool = False,
 ) -> tuple[float, str | None]:
     """pynixd build with profiling."""
     pid = os.getpid()
@@ -250,11 +251,15 @@ async def run_pynixd(
 
     socket_path: Path | None = None
 
+    local_build_env = (extra_env or {}).copy()
+    if localbuild:
+        local_build_env["PYNIXD_LOCALBUILD"] = "1"
+
     try:
         local_store = LocalSocketStore(
             id="local",
             store_path=pynixd_local_path,
-            max_builds=0,
+            max_builds=max_jobs if localbuild else 0,
             max_transfers=100,
         )
         stores: dict[str, Store] = {
@@ -314,7 +319,7 @@ async def run_pynixd(
                 client_bin=client_bin,
                 remote=remote,
                 store="daemon",
-                extra_env=extra_env,
+                extra_env=local_build_env,
             )
             log.info("build_completed", elapsed=elapsed)
         finally:
@@ -439,5 +444,75 @@ async def test_build_throughput(
         label,
         elapsed=f"{final_elapsed:.1f}s",
         baselines=final_baselines,
+        profile_path=last_profile_path,
+    )
+
+
+@pytest.mark.parametrize("server_type", ["unix"])
+@pytest.mark.parametrize("client_bin,client_label", CLIENT_BINS)
+@pytest.mark.parametrize("max_jobs", [10, 100])
+@pytest.mark.parametrize("sleep_secs", [0, 1])
+@pytest.mark.parametrize("localbuild", [False, True])
+@pytest.mark.bench
+async def test_build_local_fastpath(
+    request: pytest.FixtureRequest,
+    caplog: pytest.LogCaptureFixture,
+    server_type: str,
+    client_bin: Path,
+    client_label: str,
+    max_jobs: int,
+    sleep_secs: int,
+    localbuild: bool,
+) -> None:
+    """Benchmark local build fast path vs remote-only."""
+    caplog.set_level(logging.INFO)
+    nix_file = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
+    target = "parallel"
+
+    test_nix_env = {
+        "PYNIXD_PAR_COUNT": "100",
+        "PYNIXD_PAR_SLEEP": str(sleep_secs),
+        "PYNIXD_PAR_ID": f"bench-{max_jobs}-{sleep_secs}",
+    }
+
+    iterations = env.int("PYNIXD_BENCH_ITERATIONS", 1)
+    times: list[float] = []
+    last_profile_path: str | None = None
+
+    for i in range(iterations):
+        if iterations > 1:
+            log.info(
+                "bench_iteration",
+                iteration=i + 1,
+                total=iterations,
+                jobs=max_jobs,
+                sleep=sleep_secs,
+            )
+
+        elapsed, profile_path = await run_pynixd(
+            nix_file,
+            target,
+            max_jobs,
+            client_bin,
+            client_label,
+            sleep_secs,
+            server_type,
+            request,
+            test_nix_env,
+            localbuild=localbuild,
+        )
+        times.append(elapsed)
+        last_profile_path = profile_path
+
+    avg = sum(times) / len(times)
+    mode = "local" if localbuild else "remote"
+    label = (
+        f"build {server_type} {client_label} jobs={max_jobs} "
+        f"sleep={sleep_secs}s mode={mode}"
+    )
+    _record(
+        request,
+        label,
+        elapsed=f"{avg:.1f}s",
         profile_path=last_profile_path,
     )

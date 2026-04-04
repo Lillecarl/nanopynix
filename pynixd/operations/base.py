@@ -458,6 +458,19 @@ class BasicDerivation:
         """True if this derivation needs nix (not lix)."""
         return not self.supports_lix()
 
+    @property
+    def build_local(self) -> bool:
+        """True if this derivation should be built on the local store.
+
+        Checks for explicit opt-in signals from the derivation author:
+        - pynixd_fast=1 (pynixd-specific)
+        - preferLocalBuild=1 (standard Nix attribute)
+        """
+        return (
+            self.env.get("pynixd_fast") == "1"
+            or self.env.get("preferLocalBuild") == "1"
+        )
+
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> BasicDerivation:
         n = await reader.read_uint64()

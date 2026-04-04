@@ -18,23 +18,26 @@ let
       sleepSecs ? 1,
       text ? "",
     }:
-    pkgs.stdenvNoCC.mkDerivation {
-      name = "${name}-${ts}";
-      buildInputs = deps;
-      dontUnpack = true;
-      _timestamp = ts;
-      buildPhase = ''
-        echo "Building ${name} (sleeping ${toString sleepSecs}s)..."
-        sleep ${toString sleepSecs}
-        mkdir -p $out/bin
-        cat > $out/bin/${name} << SCRIPT
-        #!/bin/sh
-        echo "${name}: ${text} (built at ${ts})"
-        SCRIPT
-        chmod +x $out/bin/${name}
-      '';
-      installPhase = "true";
-    };
+    pkgs.stdenvNoCC.mkDerivation (
+      {
+        name = "${name}-${ts}";
+        buildInputs = deps;
+        dontUnpack = true;
+        _timestamp = ts;
+        buildPhase = ''
+          echo "Building ${name} (sleeping ${toString sleepSecs}s)..."
+          sleep ${toString sleepSecs}
+          mkdir -p $out/bin
+          cat > $out/bin/${name} << SCRIPT
+          #!/bin/sh
+          echo "${name}: ${text} (built at ${ts})"
+          SCRIPT
+          chmod +x $out/bin/${name}
+        '';
+        installPhase = "true";
+      }
+      // (if builtins.getEnv "PYNIXD_LOCALBUILD" == "1" then { pynixd_fast = "1"; } else { })
+    );
 
   # Generate N independent leaves with a root depending on all of them.
   # parId: unique prefix per client to avoid deduplication
