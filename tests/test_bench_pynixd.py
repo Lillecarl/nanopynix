@@ -3,7 +3,6 @@
 Measures pynixd performance through the full stack:
 - SSH daemon protocol (asyncssh client → pynixd → local store)
 - HTTP binary cache (aiohttp client → pynixd → local store)
-- Build dispatch (nix client → pynixd → backend stores)
 
 Each benchmark runs with and without pool warming to measure cold-start
 vs steady-state performance.
@@ -17,105 +16,30 @@ import asyncio
 import os
 import subprocess
 import tempfile
-import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 import aiohttp
-import pyinstrument
 import pytest
 import structlog
 from conftest import (
     NIX_BIN,
-    _run_subprocess_with_timeout,
-    make_local_stores,
+    _record,
 )
 from environs import Env
 
 from pynixd import Server
 from pynixd.http_cache import BinaryCacheServer
 from pynixd.operations.base import PathInfo
-from pynixd.store import LocalSocketStore, SSHSubprocessStore, Store, get_current_system
+from pynixd.store import LocalSocketStore, SSHSubprocessStore, Store
 
 log = structlog.get_logger(__name__)
 
 env = Env()
 
-pytestmark = pytest.mark.benchmark
-
 _SSH_USER = env.str("USER", "root")
 
 _CONCURRENCY_LEVELS = [1, 10, 50]
-
-_PROFILE = env.str("PYNIXD_PROFILE", "")
-
-
-def _profile_context(test_name: str):
-    """Return a pyinstrument profiler context if PYNIXD_PROFILE is set.
-
-    Usage:
-        with _profile_context("test_name") as p:
-            ... # hot path
-        # prints profile tree on exit
-    """
-    import contextlib
-
-    @contextlib.contextmanager
-    def _ctx():
-        if not _PROFILE:
-            yield None
-            return
-        profiler = pyinstrument.Profiler(async_mode="enabled")
-        profiler.start()
-        try:
-            yield profiler
-        finally:
-            profiler.stop()
-            print(f"\n{'=' * 60}")
-            print(f"PROFILE: {test_name}")
-            print(f"{'=' * 60}")
-            print(profiler.output_text(unicode=True, color=True, show_all=True))
-
-    return _ctx()
-
-
-# ── Result collection ────────────────────────────────────────────
-
-
-@dataclass
-class PynixdBenchResult:
-    label: str
-    elapsed: float
-    count: int
-    total_bytes: int = 0
-
-    @property
-    def ops_per_s(self) -> float:
-        return self.count / self.elapsed if self.elapsed > 0 else 0
-
-    @property
-    def mb_per_s(self) -> float:
-        if self.total_bytes == 0:
-            return 0
-        return (
-            (self.total_bytes / (1024 * 1024)) / self.elapsed if self.elapsed > 0 else 0
-        )
-
-
-def _record(
-    request: pytest.FixtureRequest,
-    label: str,
-    elapsed: float,
-    count: int,
-    total_bytes: int = 0,
-) -> None:
-    r = PynixdBenchResult(label, elapsed, count, total_bytes)
-    results = request.config.stash.setdefault(_pynixd_bench_key, [])
-    results.append(r)
-
-
-_pynixd_bench_key = pytest.StashKey[list[PynixdBenchResult]]()
 
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -177,9 +101,6 @@ def _hash_part(path: str) -> str:
 
 
 # ── SSH daemon protocol benchmarks ──────────────────────────────
-#
-# Uses SSHSubprocessStore pointed at pynixd as a client. This is
-# exactly what nix does: SSH → exec "nix-daemon --stdio" → daemon protocol.
 
 
 @pytest.mark.timeout(300)
@@ -192,10 +113,8 @@ async def test_ssh_serve_small_nars(
     warm: bool,
 ) -> None:
     """Benchmark: fetch many small NARs from pynixd over SSH."""
-    # Use system store as pynixd's local store
     local_store = LocalSocketStore(id="bench-local", max_transfers=20)
 
-    # Pick paths before starting pynixd (from system store directly)
     picked = await _pick_small_paths(local_store, 500)
     assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
 
@@ -228,19 +147,20 @@ async def test_ssh_serve_small_nars(
                     total_bytes += len(data)
 
             warmth = "warm" if warm else "cold"
-            with _profile_context(f"ssh_serve_small_c{concurrency}_{warmth}"):
-                start = time.monotonic()
-                await asyncio.gather(*[_fetch(p, i.nar_size) for p, i in picked])
-                elapsed = time.monotonic() - start
+            start = time.monotonic()
+            await asyncio.gather(*[_fetch(p, i.nar_size) for p, i in picked])
+            elapsed = time.monotonic() - start
         finally:
             await client.close()
 
+    mb_per_s = (total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    ops_per_s = len(picked) / elapsed if elapsed > 0 else 0
     _record(
         request,
         f"ssh serve small c={concurrency} {warmth}",
-        elapsed,
-        len(picked),
-        total_bytes,
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+        ops=f"{ops_per_s:.0f} ops/s",
     )
 
 
@@ -281,7 +201,13 @@ async def test_ssh_serve_big_nar(
             await client.close()
 
     warmth = "warm" if warm else "cold"
-    _record(request, f"ssh serve big {warmth}", elapsed, 1, len(data))
+    mb_per_s = (len(data) / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    _record(
+        request,
+        f"ssh serve big {warmth}",
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+    )
 
 
 @pytest.mark.timeout(300)
@@ -323,14 +249,19 @@ async def test_ssh_query_path_info(
                     await client.query_path_info(path)
 
             warmth = "warm" if warm else "cold"
-            with _profile_context(f"ssh_query_c{concurrency}_{warmth}"):
-                start = time.monotonic()
-                await asyncio.gather(*[_query(p) for p, _ in picked])
-                elapsed = time.monotonic() - start
+            start = time.monotonic()
+            await asyncio.gather(*[_query(p) for p, _ in picked])
+            elapsed = time.monotonic() - start
         finally:
             await client.close()
 
-    _record(request, f"ssh query c={concurrency} {warmth}", elapsed, len(picked))
+    ops_per_s = len(picked) / elapsed if elapsed > 0 else 0
+    _record(
+        request,
+        f"ssh query c={concurrency} {warmth}",
+        elapsed=f"{elapsed:.1f}s",
+        ops=f"{ops_per_s:.0f} ops/s",
+    )
 
 
 # ── HTTP binary cache benchmarks ─────────────────────────────────
@@ -377,12 +308,14 @@ async def test_http_serve_small_nars(
         await runner.cleanup()
         await local_store.close()
 
+    mb_per_s = (total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    ops_per_s = len(picked) / elapsed if elapsed > 0 else 0
     _record(
         request,
         f"http serve small c={concurrency}",
-        elapsed,
-        len(picked),
-        total_bytes,
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+        ops=f"{ops_per_s:.0f} ops/s",
     )
 
 
@@ -413,7 +346,13 @@ async def test_http_serve_big_nar(
         await runner.cleanup()
         await local_store.close()
 
-    _record(request, "http serve big", elapsed, 1, len(data))
+    mb_per_s = (len(data) / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    _record(
+        request,
+        "http serve big",
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+    )
 
 
 @pytest.mark.timeout(300)
@@ -452,130 +391,10 @@ async def test_http_narinfo(
         await runner.cleanup()
         await local_store.close()
 
-    _record(request, f"http narinfo c={concurrency}", elapsed, len(picked))
-
-
-# ── Build dispatch benchmark ─────────────────────────────────────
-
-
-@pytest.mark.timeout(400)
-@pytest.mark.parametrize(
-    "n_drvs,n_clients",
-    [(100, 1)],
-    ids=["100drv-1cli"],
-)
-@pytest.mark.bench
-async def test_build_throughput(
-    request: pytest.FixtureRequest,
-    nix_env: dict[str, str],
-    n_drvs: int,
-    n_clients: int,
-) -> None:
-    """Benchmark: build dispatch throughput with zero-sleep derivations."""
-    test_nix = request.config.getoption("--nix")
-    ready_event = threading.Event()
-    stop_event = threading.Event()
-    actual_port = 0
-
-    def _run_server_thread_task():
-        nonlocal actual_port
-        # Profiling
-        profiler = None
-        if _PROFILE:
-            profiler = pyinstrument.Profiler(async_mode="enabled")
-            profiler.start()
-
-        async def _async_run():
-            nonlocal actual_port
-            stores = make_local_stores(n=4, prefix="bench-build", max_builds=4)
-            async with Server(
-                stores=stores,
-                ssh_port=0,
-            ) as server:
-                actual_port = server.port
-                ready_event.set()
-                while not stop_event.is_set():
-                    await asyncio.sleep(0.1)
-
-        try:
-            asyncio.run(_async_run())
-        finally:
-            if profiler:
-                profiler.stop()
-                print(f"\n{'=' * 60}")
-                print(f"PROFILE: build_{n_drvs}drv_{n_clients}cli")
-                print(f"{'=' * 60}")
-                print(profiler.output_text(unicode=True, color=True, show_all=True))
-
-    p_thread = threading.Thread(target=_run_server_thread_task, name="pynixd-bench")
-    p_thread.start()
-
-    try:
-        # Wait for pynixd to be ready
-        if not ready_event.wait(timeout=60):
-            raise RuntimeError("pynixd thread failed to become ready")
-
-        drvs_per_client = n_drvs // n_clients
-        username = env.str("USER", "root")
-        system = get_current_system()
-        builder_uri = (
-            f"ssh-ng://{username}@127.0.0.1:{actual_port} {system} - {drvs_per_client}"
-        )
-
-        async def _run_client(client_id: int) -> float:
-            client_store = Path(f"/tmp/pynixd-bench-build-client-{client_id}")
-            os.makedirs(client_store, exist_ok=True)
-            client_env = nix_env.copy()
-            client_env["PYNIXD_PAR_COUNT"] = str(drvs_per_client)
-            client_env["PYNIXD_PAR_ID"] = f"b{client_id}"
-            client_env["PYNIXD_PAR_SLEEP"] = "0"
-            cmd = [
-                str(NIX_BIN),
-                "build",
-                "--store",
-                str(client_store),
-                "--builders",
-                builder_uri,
-                "--max-jobs",
-                "0",
-                "--no-link",
-                "--file",
-                str(test_nix),
-                "parallel",
-            ]
-            t0 = time.monotonic()
-            # Since pynixd is in another thread, we can use blocking or
-            # non-blocking calls.
-            # Using _run_subprocess_with_timeout (blocking) is fine here.
-            rc, _stdout, stderr = _run_subprocess_with_timeout(
-                cmd, client_env, timeout=300
-            )
-            elapsed = time.monotonic() - t0
-            if rc != 0:
-                log.error(
-                    "client_build_failed", client_id=client_id, stderr=stderr[:500]
-                )
-            assert rc == 0, f"Client {client_id} failed:\n{stderr[:1000]}"
-            return elapsed
-
-        start = time.monotonic()
-        client_times = await asyncio.gather(*[_run_client(i) for i in range(n_clients)])
-        total_elapsed = time.monotonic() - start
-
-    finally:
-        stop_event.set()
-        p_thread.join(timeout=30)
-
+    ops_per_s = len(picked) / elapsed if elapsed > 0 else 0
     _record(
         request,
-        f"build {n_drvs}drv {n_clients}cli",
-        total_elapsed,
-        n_drvs,
-    )
-    log.info(
-        "Build bench: %d drvs, %d clients, %.1fs wall, client times: %s",
-        n_drvs,
-        n_clients,
-        total_elapsed,
-        [f"{t:.1f}s" for t in client_times],
+        f"http narinfo c={concurrency}",
+        elapsed=f"{elapsed:.1f}s",
+        ops=f"{ops_per_s:.0f} ops/s",
     )

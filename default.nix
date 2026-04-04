@@ -19,7 +19,7 @@ let
     dependencies = [
       # python.pkgs.asyncssh
       (python.pkgs.asyncssh.overrideAttrs {
-        src = builtins.fetchTree {
+        src = fetchTree {
           type = "github";
           repo = "asyncssh";
           owner = "ronf";
@@ -28,6 +28,7 @@ let
         doInstallCheck = false;
       })
       python.pkgs.structlog
+      python.pkgs.rich
       python.pkgs.aiohttp
       python.pkgs.pyinstrument
       python.pkgs.aiosqlite

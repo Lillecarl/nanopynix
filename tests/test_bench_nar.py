@@ -28,12 +28,11 @@ import subprocess
 import tempfile
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 import structlog
-from conftest import NIX_BIN, rmtree_robust
+from conftest import NIX_BIN, _record, rmtree_robust
 from environs import Env
 
 from pynixd import wire
@@ -50,69 +49,17 @@ log = structlog.get_logger(__name__)
 
 env = Env()
 
-pytestmark = pytest.mark.benchmark
-
 BENCH_DST = Path("/tmp/pynixd-bench-dst")
 
 _SSH_USER = env.str("USER", "root")
 
 _CHUNK_SIZES_KB = env.list("PYNIXD_BENCH_CHUNKS", [64, 256, 1024, 4096], subcast=int)
 
-# Store types that can read from the system store (used as NAR source).
-# local-subprocess is excluded — it has its own isolated store and can't
-# see paths created via "nix store add" on the system store.
 _STORE_TYPES = ["local-socket", "ssh-subprocess", "ssh-socket"]
 
-# Concurrency capped at 8 to stay within OpenSSH MaxSessions=10 default
-# (each nix-daemon --stdio channel consumes one SSH session).
 _CONCURRENCY_LEVELS = [1, 4, 8]
 
-# Transfer pool size — enough for max concurrency on both src and dst
 _MAX_TRANSFERS = 10
-
-
-# ── Result collection ────────────────────────────────────────────
-
-
-@dataclass
-class BenchResult:
-    label: str
-    chunk_kb: int
-    elapsed: float
-    total_bytes: int
-    count: int
-
-    @property
-    def mb(self) -> float:
-        return self.total_bytes / (1024 * 1024)
-
-    @property
-    def mb_per_s(self) -> float:
-        return self.mb / self.elapsed if self.elapsed > 0 else 0
-
-    @property
-    def paths_per_s(self) -> float:
-        return self.count / self.elapsed if self.elapsed > 0 else 0
-
-
-def _record(
-    request: pytest.FixtureRequest,
-    label: str,
-    chunk_kb: int,
-    elapsed: float,
-    total_bytes: int,
-    count: int,
-) -> None:
-    r = BenchResult(label, chunk_kb, elapsed, total_bytes, count)
-    # Stash on the session config so conftest can find it
-    results = request.config.stash.setdefault(_bench_results_key, [])
-    results.append(r)
-
-
-_bench_results_key = pytest.StashKey[list[BenchResult]]()
-
-
-# ── Store factory ────────────────────────────────────────────────
 
 
 async def _make_store(store_type: str) -> Store:
@@ -139,9 +86,6 @@ async def _make_store(store_type: str) -> Store:
         raise ValueError(f"Unknown store type: {store_type}")
 
 
-# ── Fixtures ──────────────────────────────────────────────────────
-
-
 @pytest.fixture(params=_STORE_TYPES)
 async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
     """Parametrized store fixture — yields one store per type."""
@@ -162,9 +106,6 @@ async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
     )
     yield s
     await s.close()
-
-
-# ── Helpers ───────────────────────────────────────────────────────
 
 
 def _create_big_path(size_mb: int) -> str:
@@ -229,9 +170,6 @@ def _set_chunk_size(chunk_kb: int) -> int:
     return old
 
 
-# ── Big NAR benchmark ────────────────────────────────────────────
-
-
 @pytest.mark.timeout(600)
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
 @pytest.mark.bench
@@ -255,7 +193,13 @@ async def test_big_nar_copy_paths(
     finally:
         wire._CHUNK_SIZE = old
 
-    _record(request, f"{label} cp big", chunk_kb, elapsed, info.nar_size, 1)
+    mb_per_s = (info.nar_size / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    _record(
+        request,
+        f"{label} cp big {chunk_kb}KB",
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+    )
 
 
 @pytest.mark.timeout(600)
@@ -281,10 +225,13 @@ async def test_big_nar_pipe_nar_from(
     finally:
         wire._CHUNK_SIZE = old
 
-    _record(request, f"{label} pipe big", chunk_kb, elapsed, info.nar_size, 1)
-
-
-# ── Many small NARs benchmark ────────────────────────────────────
+    mb_per_s = (info.nar_size / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    _record(
+        request,
+        f"{label} pipe big {chunk_kb}KB",
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+    )
 
 
 @pytest.mark.timeout(600)
@@ -314,7 +261,15 @@ async def test_small_nars_copy_paths(
     finally:
         wire._CHUNK_SIZE = old
 
-    _record(request, f"{label} cp small", chunk_kb, elapsed, total_bytes, len(picked))
+    mb_per_s = (total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    paths_per_s = len(picked) / elapsed if elapsed > 0 else 0
+    _record(
+        request,
+        f"{label} cp small {chunk_kb}KB",
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+        ops=f"{paths_per_s:.0f} paths/s",
+    )
 
 
 @pytest.mark.timeout(600)
@@ -352,17 +307,15 @@ async def test_small_nars_pipe_nar_from(
     finally:
         wire._CHUNK_SIZE = old
 
+    mb_per_s = (total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    paths_per_s = len(picked) / elapsed if elapsed > 0 else 0
     _record(
         request,
-        f"{label} pipe small c={concurrency}",
-        chunk_kb,
-        elapsed,
-        total_bytes,
-        len(picked),
+        f"{label} pipe small c={concurrency} {chunk_kb}KB",
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+        ops=f"{paths_per_s:.0f} paths/s",
     )
-
-
-# ── NAR serving benchmark (read from store) ──────────────────────
 
 
 @pytest.mark.timeout(300)
@@ -380,7 +333,13 @@ async def test_serve_big_nar(
     elapsed = time.monotonic() - start
 
     assert len(nar_data) > 0
-    _record(request, f"{label} serve big", 0, elapsed, len(nar_data), 1)
+    mb_per_s = (len(nar_data) / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    _record(
+        request,
+        f"{label} serve big",
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+    )
 
 
 @pytest.mark.timeout(300)
@@ -411,11 +370,12 @@ async def test_serve_small_nars(
     await asyncio.gather(*[_serve_one(p, info.nar_size) for p, info in picked])
     elapsed = time.monotonic() - start
 
+    mb_per_s = (total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    paths_per_s = len(picked) / elapsed if elapsed > 0 else 0
     _record(
         request,
         f"{label} serve small c={concurrency}",
-        0,
-        elapsed,
-        total_bytes,
-        len(picked),
+        elapsed=f"{elapsed:.1f}s",
+        throughput=f"{mb_per_s:.1f} MB/s",
+        ops=f"{paths_per_s:.0f} paths/s",
     )

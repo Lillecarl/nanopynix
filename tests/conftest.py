@@ -10,6 +10,7 @@ import shutil
 import socket
 import stat
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -26,12 +27,10 @@ def rmtree_robust(path: str | Path) -> None:
         return
 
     def handle_errors(func, path, _excinfo):
-        # Path might be read-only, try to make it writable
         try:
             os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
             func(path)
         except Exception:
-            # If still failing, not much we can do
             pass
 
     shutil.rmtree(path, onerror=handle_errors)
@@ -58,8 +57,6 @@ structlog.configure(
     cache_logger_on_first_use=True,
 )
 
-# Silence high-frequency per-op loggers while keeping the rest at DEBUG.
-# Use pynixd.op.{OpName} to tune individual ops.
 for _op in (
     "QueryPathInfo",
     "QueryValidPaths",
@@ -83,10 +80,121 @@ env = Env()
 
 TEST_NIX = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
 
-# LIX_BIN / NIX_BIN: paths to lix and nix binaries for LocalSubprocessStore.
-# Default to "nix" if neither is set.
 LIX_BIN = env.path("LIX_BIN", Path("nix"))
 NIX_BIN = env.path("NIX_BIN", Path("nix"))
+
+
+# ── Benchmark infrastructure ──────────────────────────────────────
+
+
+@dataclass
+class BenchResult:
+    label: str
+    columns: dict[str, str]
+    baselines: dict[str, str] = field(default_factory=dict)
+    profile_path: str | None = None
+
+
+_bench_key = pytest.StashKey[list[BenchResult]]()
+
+
+def _record(
+    request: pytest.FixtureRequest,
+    label: str,
+    baselines: dict[str, str] | None = None,
+    profile_path: str | None = None,
+    **columns: str,
+) -> None:
+    """Record a benchmark result.
+
+    All column values are pre-formatted strings with units.
+    Baselines should also be formatted strings (e.g. "30.1s (+50.2%)").
+    """
+    result = BenchResult(
+        label=label,
+        columns=columns,
+        baselines=baselines or {},
+        profile_path=profile_path,
+    )
+    results = request.config.stash.setdefault(_bench_key, [])
+    results.append(result)
+
+
+def _prune_client_processor(frame, options):
+    """Custom pyinstrument processor to remove client-side subprocess execution."""
+    if frame is None:
+        return None
+
+    for child in list(frame.children):
+        if child.function and "run_nix_build" in child.function:
+            child.remove_from_parent()
+        else:
+            _prune_client_processor(child, options)
+
+    return frame
+
+
+def _make_profile_filename(request: pytest.FixtureRequest) -> str:
+    """Generate a short identifiable filename for a profile.
+
+    E.g. pynixd-profile-test_bench_build.py-unix-lix-100-0.txt
+    """
+    node = request.node
+    parts = [node.path.name]
+    if hasattr(node, "name") and node.name != node.path.name:
+        full_name = node.name
+        if "[" in full_name:
+            param = full_name.split("[", 1)[1].rstrip("]")
+            parts.append(param)
+    return "pynixd-profile-" + "-".join(parts) + ".txt"
+
+
+def _print_bench_summary(
+    terminalreporter: pytest.TerminalReporter,
+    config: pytest.Config,
+) -> None:
+    """Print unified benchmark summary tables using rich."""
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.table import Table
+
+    results: list[BenchResult] = config.stash.get(_bench_key, [])
+    if not results:
+        return
+
+    # Group by column signature so similar benchmarks share a table
+    groups: dict[tuple[str, ...], list[BenchResult]] = {}
+    for r in results:
+        sig = tuple(sorted(r.columns.keys()))
+        groups.setdefault(sig, []).append(r)
+
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=120)
+
+    for cols, group_results in groups.items():
+        table = Table(title="Benchmark Results", show_lines=True)
+        table.add_column("Label", style="cyan", no_wrap=True)
+        for col in cols:
+            table.add_column(col, style="green", no_wrap=True)
+        table.add_column("Baselines", style="yellow", no_wrap=True)
+
+        for r in group_results:
+            row_values = [r.columns.get(col, "") for col in cols]
+            baselines_text = "\n".join(r.baselines.values()) if r.baselines else ""
+            table.add_row(r.label, *row_values, baselines_text)
+
+        console.print()
+        console.print(table)
+
+    profile_results = [r for r in results if r.profile_path]
+    if profile_results:
+        console.print()
+        console.print("Profiles:", style="bold")
+        for r in profile_results:
+            console.print(f"  {r.label} → {r.profile_path}")
+
+    terminalreporter.write_line(buf.getvalue())
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -94,8 +202,6 @@ def cleanup_bench_paths():
     """Ensure large benchmark artifacts are deleted before tests run."""
     log.info("Cleaning up old benchmark paths")
     try:
-        # The `-S` flag to path-info gives us the size, but we don't use it here.
-        # We just need the paths.
         result = subprocess.run(
             f"{NIX_BIN} path-info -rS /nix/store | grep bench-100mb | cut -f1",
             shell=True,
@@ -180,7 +286,6 @@ async def nix_build(
         str(nix_file),
         target,
     ]
-    # Add any extra args (like --file if the caller passed it as positional)
     if args:
         cmd.extend(args)
 
@@ -282,9 +387,6 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "dag: tests building multi-layer DAG derivations"
     )
-    config.addinivalue_line(
-        "markers", "benchmark: NAR streaming performance benchmarks"
-    )
     config.addinivalue_line("markers", "parallel: build parallelism pressure tests")
     config.addinivalue_line("markers", "matrix: store compatibility matrix tests")
 
@@ -294,123 +396,8 @@ def pytest_terminal_summary(
     exitstatus: int,
     config: pytest.Config,
 ) -> None:
-    """Print benchmark summary tables if any benchmark tests ran."""
-    _print_nar_bench_summary(terminalreporter, config)
-    _print_pynixd_bench_summary(terminalreporter, config)
-    _print_build_bench_summary(terminalreporter, config)
-
-
-def _print_nar_bench_summary(
-    terminalreporter: pytest.TerminalReporter,
-    config: pytest.Config,
-) -> None:
-    from test_bench_nar import BenchResult, _bench_results_key
-
-    results: list[BenchResult] = config.stash.get(_bench_results_key, [])
-    if not results:
-        return
-
-    terminalreporter.section("NAR Benchmark Summary")
-
-    # Chunk-parameterized results as a matrix
-    chunk_sizes = sorted(set(r.chunk_kb for r in results if r.chunk_kb > 0))
-    labels = list(dict.fromkeys(r.label for r in results))
-
-    if chunk_sizes:
-        header = f"{'Test':<28s}"
-        for ck in chunk_sizes:
-            header += f"  {ck:>7d}KB"
-        terminalreporter.write_line(header)
-        terminalreporter.write_line("-" * len(header))
-
-        for label in labels:
-            row_results = {r.chunk_kb: r for r in results if r.label == label}
-            if not any(ck in row_results for ck in chunk_sizes):
-                continue
-            row = f"{label:<28s}"
-            for ck in chunk_sizes:
-                r = row_results.get(ck)
-                if r:
-                    row += f"  {r.mb_per_s:>7.1f}  "
-                else:
-                    row += f"  {'—':>7s}  "
-            terminalreporter.write_line(row)
-
-    # Non-chunked results (serving benchmarks)
-    non_chunked = [r for r in results if r.chunk_kb == 0]
-    if non_chunked:
-        terminalreporter.write_line("")
-        for r in non_chunked:
-            terminalreporter.write_line(
-                f"{r.label:<28s}  {r.mb_per_s:.1f} MB/s, {r.paths_per_s:.0f} paths/s"
-            )
-
-    terminalreporter.write_line("")
-    terminalreporter.write_line("Values are MB/s (higher is better)")
-
-
-def _print_pynixd_bench_summary(
-    terminalreporter: pytest.TerminalReporter,
-    config: pytest.Config,
-) -> None:
-    from test_bench_pynixd import PynixdBenchResult, _pynixd_bench_key
-
-    results: list[PynixdBenchResult] = config.stash.get(_pynixd_bench_key, [])
-    if not results:
-        return
-
-    terminalreporter.section("pynixd Benchmark Summary")
-
-    for r in results:
-        parts = [f"{r.label:<36s}  {r.ops_per_s:>8.0f} ops/s"]
-        if r.total_bytes > 0:
-            parts.append(f"  {r.mb_per_s:>7.1f} MB/s")
-        parts.append(f"  ({r.elapsed:.1f}s)")
-        terminalreporter.write_line("".join(parts))
-
-
-def _print_build_bench_summary(
-    terminalreporter: pytest.TerminalReporter,
-    config: pytest.Config,
-) -> None:
-    from test_bench_build_unix import BenchResult, _build_bench_key
-
-    results: list[BenchResult] = config.stash.get(_build_bench_key, [])
-    if not results:
-        return
-
-    terminalreporter.write_sep("=", "Build Benchmark Results", bold=True)
-
-    for r in results:
-        terminalreporter.write_line("")
-        terminalreporter.write_line(f"  TEST: {r.label}", bold=True)
-        terminalreporter.write_line(f"  DRVS: {r.count}")
-        terminalreporter.write_line(f"  TIME: pynixd={r.elapsed:.1f}s")
-
-        for name, base_time in r.baselines.items():
-            overhead = ((r.elapsed / base_time) - 1) * 100
-            terminalreporter.write_line(
-                f"        baseline ({name})={base_time:.1f}s "
-                f"({overhead:+.1f}% overhead)"
-            )
-
-        if r.profile_path:
-            try:
-                with open(r.profile_path) as f:
-                    lines = f.readlines()
-                # Print header (first 7 lines) + top 40 lines (most indented)
-                terminalreporter.write_line("    Profile summary:")
-                for line in lines[:7]:
-                    terminalreporter.write_line(f"    {line.rstrip()}")
-                # Find the most detailed stack traces (most indented)
-                # These appear later in the profile
-                stack_lines = [line for line in lines[7:] if line.startswith("   │")]
-                for line in stack_lines[:40]:
-                    terminalreporter.write_line(f"    {line.rstrip()}")
-                terminalreporter.write_line(f"    (full profile: {r.profile_path})")
-            except Exception as e:
-                terminalreporter.write_line(f"    (Could not read profile: {e})")
-    terminalreporter.write_line("")
+    """Print benchmark summary table if any benchmark tests ran."""
+    _print_bench_summary(terminalreporter, config)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -424,6 +411,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 @pytest.fixture(scope="session")
 def nix_env() -> dict[str, str]:
     """Environment variables for nix subprocess calls."""
-    env = os.environ.copy()
-    env["NIX_SSHOPTS"] = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-    return env
+    result = os.environ.copy()
+    result["NIX_SSHOPTS"] = (
+        "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    )
+    return result
