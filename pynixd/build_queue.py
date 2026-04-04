@@ -157,10 +157,10 @@ class BuildQueue:
     """Global queue for build operations with deduplication."""
 
     def __init__(self) -> None:
-        self._queue: list[QueuedBuild] = []
-        self._by_key: dict[BuildKey, QueuedBuild] = {}  # For deduplication
-        self._next_id: int = 1
-        self._lock: asyncio.Lock = asyncio.Lock()
+        self.queue: list[QueuedBuild] = []
+        self.by_key: dict[BuildKey, QueuedBuild] = {}  # For deduplication
+        self.next_id: int = 1
+        self.lock: asyncio.Lock = asyncio.Lock()
 
     async def enqueue(
         self,
@@ -177,10 +177,10 @@ class BuildQueue:
         """
         key = BuildKey.from_request(request)
 
-        async with self._lock:
+        async with self.lock:
             # Check for duplicate — dedup with queued or in-progress builds
-            if key in self._by_key:
-                existing = self._by_key[key]
+            if key in self.by_key:
+                existing = self.by_key[key]
                 if not existing.is_done:
                     log.debug("build_deduped", id=existing.id)
                     return existing.id, existing.future
@@ -190,7 +190,7 @@ class BuildQueue:
             loop = asyncio.get_event_loop()
             future: asyncio.Future[BuildDerivationResponse] = loop.create_future()
             build = QueuedBuild(
-                id=self._next_id,
+                id=self.next_id,
                 op=op,
                 request=request,
                 client=client,
@@ -198,9 +198,9 @@ class BuildQueue:
                 future=future,
                 platform=platform,
             )
-            self._next_id += 1
-            heapq.heappush(self._queue, build)
-            self._by_key[key] = build
+            self.next_id += 1
+            heapq.heappush(self.queue, build)
+            self.by_key[key] = build
 
             log.info(
                 "build_enqueued",
@@ -212,9 +212,9 @@ class BuildQueue:
 
     async def get_pending(self) -> list[QueuedBuild]:
         """Get all non-done builds sorted by ID."""
-        async with self._lock:
+        async with self.lock:
             return sorted(
-                [b for b in self._queue if not b.is_done],
+                [b for b in self.queue if not b.is_done],
                 key=lambda b: b.id,
             )
 
@@ -227,8 +227,8 @@ class BuildQueue:
 
         Returns the client connection for the caller to use.
         """
-        async with self._lock:
-            for b in self._queue:
+        async with self.lock:
+            for b in self.queue:
                 if b.id == build_id:
                     b.finished_at = time.monotonic()
                     b.future.set_result(response)
@@ -241,8 +241,8 @@ class BuildQueue:
 
         Returns the client connection for the caller to use.
         """
-        async with self._lock:
-            for b in self._queue:
+        async with self.lock:
+            for b in self.queue:
                 if b.id == build_id:
                     b.finished_at = time.monotonic()
                     response = BuildDerivationResponse(
@@ -257,9 +257,9 @@ class BuildQueue:
 
     async def cleanup_completed(self) -> int:
         """Remove completed builds from queue, return count removed."""
-        async with self._lock:
-            before = len(self._queue)
-            self._queue = [b for b in self._queue if not b.is_done]
+        async with self.lock:
+            before = len(self.queue)
+            self.queue = [b for b in self.queue if not b.is_done]
             # Rebuild by_key
-            self._by_key = {BuildKey.from_request(b.request): b for b in self._queue}
-            return before - len(self._queue)
+            self.by_key = {BuildKey.from_request(b.request): b for b in self.queue}
+            return before - len(self.queue)

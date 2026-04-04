@@ -79,7 +79,7 @@ _CB_MAX_COOLDOWN: float = 300.0  # 5 min max
 class Store(ABC):
     """A build store with on-demand connection pooling.
 
-    Subclasses implement _create_conn() to set up transport and
+    Subclasses implement create_conn() to set up transport and
     return a connected Connection. The base class handles pooling,
     concurrency limiting, and idle TTL cleanup.
 
@@ -98,80 +98,71 @@ class Store(ABC):
         self.id = id
         self.store_path = store_path
         self.version: int = wire.PROTOCOL_VERSION
-        self._max_builds = max_builds
-        self._max_transfers = max_transfers
-        self._idle_ttl = idle_ttl
-        self._build_semaphore = asyncio.Semaphore(max_builds)
-        self._transfer_semaphore = asyncio.Semaphore(max_transfers)
-        self._idle: list[tuple[Connection, float]] = []
-        self._all: list[Connection] = []
-        self._conn_counter: int = 0
-        self._sweep_task: asyncio.Task[None] | None = None
-        self._supported_systems = supported_systems
-        self._known_paths: set[str] = set()
-        self._consecutive_failures: int = 0
-        self._cooldown_until: float = 0.0
+        self.max_builds = max_builds
+        self.max_transfers = max_transfers
+        self.idle_ttl = idle_ttl
+        self.build_semaphore = asyncio.Semaphore(max_builds)
+        self.transfer_semaphore = asyncio.Semaphore(max_transfers)
+        self.idle_conns: list[tuple[Connection, float]] = []
+        self.all_conns: list[Connection] = []
+        self.conn_counter: int = 0
+        self.sweep_task: asyncio.Task[None] | None = None
+        self.supported_systems = supported_systems or []
+        self.known_paths: set[str] = set()
+        self.consecutive_failures: int = 0
+        self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
-
-    @property
-    def supported_systems(self) -> list[str]:
-        """Systems this store can build for. Empty means all systems."""
-        return self._supported_systems or []
 
     def supports_system(self, system: str) -> bool:
         """Check if this store supports the given system."""
-        if not self._supported_systems:
+        if not self.supported_systems:
             return True  # No restriction = supports all
-        return system in self._supported_systems
+        return system in self.supported_systems
 
     # ── Circuit breaker ──────────────────────────────────────────────
 
     @property
     def is_healthy(self) -> bool:
         """False while in cooldown. Becomes True when cooldown expires (half-open)."""
-        return time.monotonic() >= self._cooldown_until
+        return time.monotonic() >= self.cooldown_until
 
     def record_success(self) -> None:
         """Reset circuit breaker on successful operation."""
-        if self._consecutive_failures > 0:
+        if self.consecutive_failures > 0:
             log.info(
                 "store_recovered",
                 store_id=self.id,
-                consecutive_failures=self._consecutive_failures,
+                consecutive_failures=self.consecutive_failures,
             )
-        self._consecutive_failures = 0
-        self._cooldown_until = 0.0
+        self.consecutive_failures = 0
+        self.cooldown_until = 0.0
 
     def record_failure(self) -> None:
         """Record a failure. After threshold, enter cooldown."""
-        self._consecutive_failures += 1
-        if self._consecutive_failures >= _CB_THRESHOLD:
+        self.consecutive_failures += 1
+        if self.consecutive_failures >= _CB_THRESHOLD:
             cooldown = min(
-                30 * 2 ** (self._consecutive_failures - _CB_THRESHOLD),
+                30 * 2 ** (self.consecutive_failures - _CB_THRESHOLD),
                 _CB_MAX_COOLDOWN,
             )
-            self._cooldown_until = time.monotonic() + cooldown
+            self.cooldown_until = time.monotonic() + cooldown
             log.warning(
                 "store_cooldown",
                 store_id=self.id,
-                consecutive_failures=self._consecutive_failures,
+                consecutive_failures=self.consecutive_failures,
                 cooldown=cooldown,
             )
 
     # ── Known paths tracking ────────────────────────────────────────
 
-    @property
-    def known_paths(self) -> set[str]:
-        return self._known_paths
-
     def has_path(self, path: str) -> bool:
-        return path in self._known_paths
+        return path in self.known_paths
 
     def has_all_paths(self, paths: set[str]) -> bool:
-        return paths.issubset(self._known_paths)
+        return paths.issubset(self.known_paths)
 
     def count_common_paths(self, paths: set[str]) -> int:
-        return len(paths & self._known_paths)
+        return len(paths & self.known_paths)
 
     async def call(
         self,
@@ -220,12 +211,12 @@ class Store(ABC):
         )
 
     def add_known_path(self, path: str, *, update_regtime: bool = True) -> None:
-        self._known_paths.add(path)
+        self.known_paths.add(path)
         if update_regtime and self.db is not None:
             self.db.mark_path(path)
 
     def add_known_paths(self, paths: set[str], *, update_regtime: bool = True) -> None:
-        self._known_paths.update(paths)
+        self.known_paths.update(paths)
         if update_regtime and self.db is not None:
             self.db.mark_paths(paths)
 
@@ -462,7 +453,7 @@ class Store(ABC):
                     max_freed=0,
                 )
             )
-            self._known_paths -= resp.paths_deleted
+            self.known_paths -= resp.paths_deleted
             return resp
 
     async def sync_paths(self) -> None:
@@ -474,21 +465,21 @@ class Store(ABC):
         try:
             async with self.transfer_conn() as conn:
                 resp = await conn.call(QueryAllValidPathsRequest())
-                self._known_paths = resp.paths
+                self.known_paths = resp.paths
             log.info(
-                "sync_paths_complete", store_id=self.id, count=len(self._known_paths)
+                "sync_paths_complete", store_id=self.id, count=len(self.known_paths)
             )
         except Exception:
             log.warning("sync_paths_failed", store_id=self.id)
-            self._known_paths = set()
+            self.known_paths = set()
 
     @property
     def available_transfer_slots(self) -> int:
         """Number of free transfer slots."""
-        return self._transfer_semaphore._value
+        return self.transfer_semaphore._value
 
     @abstractmethod
-    async def _create_conn(self) -> Connection:
+    async def create_conn(self) -> Connection:
         """Create transport, construct Connection, and connect it."""
         ...
 
@@ -503,22 +494,18 @@ class Store(ABC):
 
     async def warm_pool(self, n: int) -> None:
         """Pre-create n connections and park them in the idle pool."""
-        conns = await asyncio.gather(*[self._create_conn() for _ in range(n)])
+        conns = await asyncio.gather(*[self.create_conn() for _ in range(n)])
         now = time.monotonic()
         for conn in conns:
-            self._all.append(conn)
-            self._idle.append((conn, now))
-        self._start_sweep()
+            self.all_conns.append(conn)
+            self.idle_conns.append((conn, now))
+        self.start_sweep()
         log.info("pool_warmed", store_id=self.id, connections=n)
-
-    @property
-    def max_builds(self) -> int:
-        return self._max_builds
 
     @property
     def available_slots(self) -> int:
         """Number of free build slots."""
-        return self._build_semaphore._value
+        return self.build_semaphore._value
 
     @property
     def pressure(self) -> float | None:
@@ -532,73 +519,73 @@ class Store(ABC):
 
     @property
     def in_flight(self) -> int:
-        return self._max_builds - self._build_semaphore._value
+        return self.max_builds - self.build_semaphore._value
 
     @property
     def is_lix(self) -> bool:
         """True if this store is Lix (protocol version 1.35)."""
         return self.version == wire.proto(1, 35)
 
-    def _start_sweep(self) -> None:
+    def start_sweep(self) -> None:
         """Start the idle sweep task if not already running."""
-        if self._sweep_task is None or self._sweep_task.done():
-            self._sweep_task = asyncio.create_task(self._sweep_idle())
+        if self.sweep_task is None or self.sweep_task.done():
+            self.sweep_task = asyncio.create_task(self.sweep_idle())
 
-    async def _sweep_idle(self) -> None:
+    async def sweep_idle(self) -> None:
         """Periodically close idle connections that have expired."""
-        while self._idle:
-            await asyncio.sleep(self._idle_ttl / 2)
+        while self.idle_conns:
+            await asyncio.sleep(self.idle_ttl / 2)
             now = time.monotonic()
             still_idle: list[tuple[Connection, float]] = []
-            for conn, returned_at in self._idle:
-                if now - returned_at >= self._idle_ttl:
+            for conn, returned_at in self.idle_conns:
+                if now - returned_at >= self.idle_ttl:
                     pool_log.debug(
                         "pool_closing_expired_idle",
                         store_id=self.id,
                         conn_id=conn.id,
                     )
-                    if conn in self._all:
-                        self._all.remove(conn)
+                    if conn in self.all_conns:
+                        self.all_conns.remove(conn)
                     try:
                         await conn.close()
                     except Exception:
                         pass
                 else:
                     still_idle.append((conn, returned_at))
-            self._idle = still_idle
+            self.idle_conns = still_idle
 
     @staticmethod
-    async def _reader_is_dirty(conn: Connection) -> bool:
+    async def reader_is_dirty(conn: Connection) -> bool:
         """Check if the reader has unread buffered data (protocol desync)."""
         return await conn.r.is_dirty()
 
-    async def _get_or_create_conn(self) -> Connection:
+    async def get_or_create_conn(self) -> Connection:
         """Pop an idle connection or create a new one."""
         now = time.monotonic()
-        while self._idle:
-            candidate, returned_at = self._idle.pop()
-            if now - returned_at >= self._idle_ttl:
+        while self.idle_conns:
+            candidate, returned_at = self.idle_conns.pop()
+            if now - returned_at >= self.idle_ttl:
                 pool_log.debug(
                     "pool_discarding_expired",
                     store_id=self.id,
                     conn_id=candidate.id,
                 )
-                if candidate in self._all:
-                    self._all.remove(candidate)
+                if candidate in self.all_conns:
+                    self.all_conns.remove(candidate)
                 try:
                     await candidate.close()
                 except Exception:
                     pass
                 continue
-            if candidate.dirty or await self._reader_is_dirty(candidate):
+            if candidate.dirty or await self.reader_is_dirty(candidate):
                 log.warning(
                     "pool_discarding_dirty_conn",
                     store_id=self.id,
                     conn_id=candidate.id,
-                    op_log=" -> ".join(candidate._op_log[-10:]) or "(empty)",
+                    op_log=" -> ".join(candidate.op_log[-10:]) or "(empty)",
                 )
-                if candidate in self._all:
-                    self._all.remove(candidate)
+                if candidate in self.all_conns:
+                    self.all_conns.remove(candidate)
                 try:
                     await candidate.close()
                 except Exception:
@@ -611,11 +598,11 @@ class Store(ABC):
             )
             return candidate
 
-        self._conn_counter += 1
-        conn = await self._create_conn()
-        self._all.append(conn)
+        self.conn_counter += 1
+        conn = await self.create_conn()
+        self.all_conns.append(conn)
         # Capture protocol version from first connection
-        if self._conn_counter == 1:
+        if self.conn_counter == 1:
             self.version = conn.version
             log.info(
                 "store_protocol_version",
@@ -631,7 +618,7 @@ class Store(ABC):
         return conn
 
     @asynccontextmanager
-    async def _acquire_conn(
+    async def acquire_conn(
         self,
         semaphore: asyncio.Semaphore,
     ) -> AsyncIterator[Connection]:
@@ -641,8 +628,8 @@ class Store(ABC):
         connection or creates a new one.
         """
         if semaphore._value == 0:
-            kind = "build" if semaphore is self._build_semaphore else "transfer"
-            limit = self._max_builds if kind == "build" else self._max_transfers
+            kind = "build" if semaphore is self.build_semaphore else "transfer"
+            limit = self.max_builds if kind == "build" else self.max_transfers
             pool_log.info(
                 "pool_all_slots_in_use",
                 store_id=self.id,
@@ -652,7 +639,7 @@ class Store(ABC):
         await semaphore.acquire()
         conn: Connection | None = None
         try:
-            conn = await self._get_or_create_conn()
+            conn = await self.get_or_create_conn()
             async with conn:
                 yield conn
         finally:
@@ -662,22 +649,22 @@ class Store(ABC):
                         "store_discarding_dirty_connection",
                         store_id=self.id,
                         conn_id=conn.id,
-                        op_log=" -> ".join(conn._op_log[-10:]) or "(empty)",
+                        op_log=" -> ".join(conn.op_log[-10:]) or "(empty)",
                     )
-                    if conn in self._all:
-                        self._all.remove(conn)
+                    if conn in self.all_conns:
+                        self.all_conns.remove(conn)
                     try:
                         await conn.close()
                     except Exception:
                         pass
                 else:
-                    self._idle.append((conn, time.monotonic()))
-                    self._start_sweep()
+                    self.idle_conns.append((conn, time.monotonic()))
+                    self.start_sweep()
             semaphore.release()
 
     def build_conn(self) -> AbstractAsyncContextManager[Connection]:
         """Acquire a build connection (counts against max_builds)."""
-        return self._acquire_conn(self._build_semaphore)
+        return self.acquire_conn(self.build_semaphore)
 
     def transfer_conn(self) -> AbstractAsyncContextManager[Connection]:
         """Acquire a transfer connection (counts against max_transfers).
@@ -685,42 +672,42 @@ class Store(ABC):
         Transfer connections share the same pool as build connections
         but use a separate semaphore so transfers don't block builds.
         """
-        return self._acquire_conn(self._transfer_semaphore)
+        return self.acquire_conn(self.transfer_semaphore)
 
     async def close(self) -> None:
         """Close all pooled connections and stop sweep task."""
-        if self._sweep_task is not None:
-            self._sweep_task.cancel()
+        if self.sweep_task is not None:
+            self.sweep_task.cancel()
             try:
-                await self._sweep_task
+                await self.sweep_task
             except asyncio.CancelledError:
                 pass
-            self._sweep_task = None
-        for conn in self._all:
+            self.sweep_task = None
+        for conn in self.all_conns:
             try:
                 await conn.close()
             except (ProcessLookupError, Exception):
                 pass
-        self._all.clear()
-        self._idle.clear()
+        self.all_conns.clear()
+        self.idle_conns.clear()
 
     @property
     def pool_stats(self) -> str:
         """Human-readable pool statistics."""
-        build_in_use = self._max_builds - self._build_semaphore._value
-        transfer_in_use = self._max_transfers - self._transfer_semaphore._value
+        build_in_use = self.max_builds - self.build_semaphore._value
+        transfer_in_use = self.max_transfers - self.transfer_semaphore._value
         return (
-            f"builds={build_in_use}/{self._max_builds} "
-            f"transfers={transfer_in_use}/{self._max_transfers} "
-            f"idle={len(self._idle)} total={len(self._all)}"
+            f"builds={build_in_use}/{self.max_builds} "
+            f"transfers={transfer_in_use}/{self.max_transfers} "
+            f"idle={len(self.idle_conns)} total={len(self.all_conns)}"
         )
 
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(id={self.id!r}, "
-            f"in_flight={self.in_flight}/{self._max_builds}, "
-            f"idle={len(self._idle)}, "
-            f"connections={len(self._all)})"
+            f"in_flight={self.in_flight}/{self.max_builds}, "
+            f"idle={len(self.idle_conns)}, "
+            f"connections={len(self.all_conns)})"
         )
 
 
@@ -743,17 +730,17 @@ class LocalSubprocessStore(Store):
             max_transfers=max_transfers,
             supported_systems=supported_systems,
         )
-        self._nix_bin = nix_bin
-        self._processes: list[asyncio.subprocess.Process] = []
+        self.nix_bin = nix_bin
+        self.processes: list[asyncio.subprocess.Process] = []
 
-    async def _create_conn(self) -> Connection:
+    async def create_conn(self) -> Connection:
         path = self.store_path or Path("/")
         os.makedirs(path, exist_ok=True)
 
-        conn_id = f"{self.id}-{self._conn_counter}"
+        conn_id = f"{self.id}-{self.conn_counter}"
         log.info(
             "spawning_daemon_stdio",
-            nix_bin=self._nix_bin,
+            nix_bin=self.nix_bin,
             store_path=str(path),
             conn_id=conn_id,
         )
@@ -762,7 +749,7 @@ class LocalSubprocessStore(Store):
         for attempt in range(3):
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    self._nix_bin,
+                    self.nix_bin,
                     "daemon",
                     "--store",
                     str(path),
@@ -773,7 +760,7 @@ class LocalSubprocessStore(Store):
                 )
                 assert proc.stdout is not None
                 assert proc.stdin is not None
-                self._processes.append(proc)
+                self.processes.append(proc)
 
                 conn = Connection(
                     UnixNixReader(proc.stdout),
@@ -798,7 +785,7 @@ class LocalSubprocessStore(Store):
     async def close(self) -> None:
         """Close stores and terminate subprocesses."""
         await super().close()
-        for proc in self._processes:
+        for proc in self.processes:
             try:
                 proc.terminate()
             except ProcessLookupError:
@@ -807,73 +794,73 @@ class LocalSubprocessStore(Store):
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
             except TimeoutError:
                 proc.kill()
-        self._processes.clear()
+        self.processes.clear()
 
 
 class _SSHStoreMixin:
     """Shared SSH connection management with exponential backoff reconnection.
 
-    Subclasses must set _host, _port, _username on __init__.
+    Subclasses must set host, port, username on __init__.
     """
 
-    _host: str
-    _port: int
-    _username: str | None
-    _conn: asyncssh.SSHClientConnection | None
-    _backoff: float
-    _max_backoff: float
-    _last_failure: float
+    host: str
+    port: int
+    username: str | None
+    conn: asyncssh.SSHClientConnection | None
+    backoff: float
+    max_backoff: float
+    last_failure: float
     id: str
 
-    _INITIAL_BACKOFF: float = 1.0
-    _MAX_BACKOFF: float = 60.0
-    _PSI_INTERVAL = env.float("PYNIXD_PSI_INTERVAL", 5.0)
+    INITIAL_BACKOFF: float = 1.0
+    MAX_BACKOFF: float = 60.0
+    PSI_INTERVAL = env.float("PYNIXD_PSI_INTERVAL", 5.0)
 
-    def _init_ssh_state(self, *, monitor: bool = True) -> None:
-        self._conn = None
-        self._ssh_lock = asyncio.Lock()
-        self._backoff = self._INITIAL_BACKOFF
-        self._max_backoff = self._MAX_BACKOFF
-        self._last_failure = 0.0
-        self._monitor = monitor
-        self._psi: PsiSnapshot | None = None
-        self._meminfo: MemInfo | None = None
-        self._psi_task: asyncio.Task[None] | None = None
+    def init_ssh_state(self, *, monitor: bool = True) -> None:
+        self.conn = None
+        self.ssh_lock = asyncio.Lock()
+        self.backoff = self.INITIAL_BACKOFF
+        self.max_backoff = self.MAX_BACKOFF
+        self.last_failure = 0.0
+        self.monitor_enabled = monitor
+        self.psi_data: PsiSnapshot | None = None
+        self.meminfo_data: MemInfo | None = None
+        self.psi_task: asyncio.Task[None] | None = None
 
-    def _start_psi_polling(self) -> None:
+    def start_psi_polling(self) -> None:
         """Start PSI polling loop. Called after first successful SSH connect."""
-        if not self._monitor:
+        if not self.monitor_enabled:
             return
-        if self._psi_task is None or self._psi_task.done():
-            self._psi_task = asyncio.create_task(self._psi_poll_loop())
+        if self.psi_task is None or self.psi_task.done():
+            self.psi_task = asyncio.create_task(self.psi_poll_loop())
 
-    _PSI_FILES: tuple[str, ...] = (
+    PSI_FILES: tuple[str, ...] = (
         "/proc/pressure/cpu",
         "/proc/pressure/memory",
         "/proc/pressure/io",
     )
 
-    async def _psi_poll_loop(self) -> None:
+    async def psi_poll_loop(self) -> None:
         """Periodically read PSI and meminfo data over SFTP."""
         while True:
             try:
-                conn = self._conn
+                conn = self.conn
                 if conn is None:
-                    await asyncio.sleep(self._PSI_INTERVAL)
+                    await asyncio.sleep(self.PSI_INTERVAL)
                     continue
                 async with conn.start_sftp_client() as sftp:
                     while True:
                         parts = []
-                        for path in self._PSI_FILES:
+                        for path in self.PSI_FILES:
                             async with sftp.open(path, "r") as f:
                                 parts.append(await f.read())
-                        self._psi = parse_psi_output("".join(parts))
+                        self.psi_data = parse_psi_output("".join(parts))
                         try:
                             async with sftp.open("/proc/meminfo", "r") as f:
-                                self._meminfo = parse_meminfo(await f.read())
+                                self.meminfo_data = parse_meminfo(await f.read())
                         except asyncssh.SFTPError:
                             pass  # meminfo optional
-                        await asyncio.sleep(self._PSI_INTERVAL)
+                        await asyncio.sleep(self.PSI_INTERVAL)
             except asyncio.CancelledError:
                 return
             except (
@@ -883,105 +870,105 @@ class _SSHStoreMixin:
             ) as e:
                 # PSI not available on this host (macOS, old kernel, restricted perms)
                 log.info("psi_unavailable", store_id=self.id, error=e)
-                self._psi = None
+                self.psi_data = None
                 return
             except asyncssh.SFTPConnectionLost:
                 # SFTP channel died, retry after SSH reconnects
                 log.debug("psi_sftp_lost", store_id=self.id)
-                self._psi = None
-                await asyncio.sleep(self._PSI_INTERVAL)
+                self.psi_data = None
+                await asyncio.sleep(self.PSI_INTERVAL)
             except asyncssh.SFTPError as e:
                 # Any other SFTP error — probably not recoverable
                 log.info("psi_sftp_error", store_id=self.id, error=str(e))
-                self._psi = None
+                self.psi_data = None
                 return
             except (asyncssh.Error, OSError) as e:
                 # SSH connection-level error — retry, SSH reconnect may fix it
                 log.debug("psi_ssh_error", store_id=self.id, error=str(e))
-                self._psi = None
-                await asyncio.sleep(self._PSI_INTERVAL)
+                self.psi_data = None
+                await asyncio.sleep(self.PSI_INTERVAL)
 
-    def _stop_psi_polling(self) -> None:
+    def stop_psi_polling(self) -> None:
         """Cancel the PSI polling task."""
-        if self._psi_task is not None:
-            self._psi_task.cancel()
-            self._psi_task = None
+        if self.psi_task is not None:
+            self.psi_task.cancel()
+            self.psi_task = None
 
     @property
     def pressure(self) -> float | None:
         """System pressure score (0-100), or None if unavailable."""
-        if self._psi is None:
+        if self.psi_data is None:
             return None
         # Stale check: 3x interval
-        if time.monotonic() - self._psi.timestamp > self._PSI_INTERVAL * 3:
+        if time.monotonic() - self.psi_data.timestamp > self.PSI_INTERVAL * 3:
             return None
-        return self._psi.pressure_score()
+        return self.psi_data.pressure_score()
 
     @property
     def meminfo(self) -> MemInfo | None:
         """System memory info, or None if unavailable."""
-        return self._meminfo
+        return self.meminfo_data
 
-    async def _ensure_ssh(self) -> asyncssh.SSHClientConnection:
-        if self._conn is not None:
-            return self._conn
+    async def ensure_ssh(self) -> asyncssh.SSHClientConnection:
+        if self.conn is not None:
+            return self.conn
 
-        async with self._ssh_lock:
+        async with self.ssh_lock:
             # Re-check after acquiring lock (another task may have connected)
-            if self._conn is not None:
-                return self._conn
+            if self.conn is not None:
+                return self.conn
 
             # Respect backoff from previous failure
             now = time.monotonic()
-            wait = self._last_failure + self._backoff - now
-            if self._last_failure > 0 and wait > 0:
+            wait = self.last_failure + self.backoff - now
+            if self.last_failure > 0 and wait > 0:
                 log.info("ssh_backoff", store_id=self.id, backoff_seconds=wait)
                 await asyncio.sleep(wait)
 
             try:
                 log.info(
                     "ssh_connecting",
-                    username=self._username or "",
-                    host=self._host,
-                    port=self._port,
+                    username=self.username or "",
+                    host=self.host,
+                    port=self.port,
                 )
-                self._conn = await asyncssh.connect(
-                    self._host,
-                    port=self._port,
-                    username=self._username,
+                self.conn = await asyncssh.connect(
+                    self.host,
+                    port=self.port,
+                    username=self.username,
                     known_hosts=None,
                 )
                 # Reset backoff on success
-                self._backoff = self._INITIAL_BACKOFF
-                self._last_failure = 0.0
+                self.backoff = self.INITIAL_BACKOFF
+                self.last_failure = 0.0
                 self.record_success()  # type: ignore[attr-defined]
-                self._start_psi_polling()
-                return self._conn
+                self.start_psi_polling()
+                return self.conn
             except Exception:
-                self._last_failure = time.monotonic()
-                self._backoff = min(self._backoff * 2, self._max_backoff)
+                self.last_failure = time.monotonic()
+                self.backoff = min(self.backoff * 2, self.MAX_BACKOFF)
                 self.record_failure()  # type: ignore[attr-defined]
                 log.warning(
                     "ssh_connect_failed",
                     store_id=self.id,
-                    next_retry_seconds=self._backoff,
+                    next_retry_seconds=self.backoff,
                 )
                 raise
 
-    def _invalidate_ssh(self) -> None:
-        """Mark SSH connection as dead so next _ensure_ssh reconnects."""
-        if self._conn is not None:
+    def invalidate_ssh(self) -> None:
+        """Mark SSH connection as dead so next ensure_ssh reconnects."""
+        if self.conn is not None:
             try:
-                self._conn.close()
+                self.conn.close()
             except Exception:
                 pass
-            self._conn = None
+            self.conn = None
 
-    async def _close_ssh(self) -> None:
-        self._stop_psi_polling()
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+    async def close_ssh(self) -> None:
+        self.stop_psi_polling()
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
 
 
 class SSHSubprocessStore(_SSHStoreMixin, Store):
@@ -1010,18 +997,18 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
             max_transfers=max_transfers,
             supported_systems=supported_systems,
         )
-        self._host = host
-        self._port = port
-        self._username = username
-        self._init_ssh_state(monitor=monitor)
-        self._ssh_processes: list[asyncssh.SSHClientProcess] = []
+        self.host = host
+        self.port = port
+        self.username = username
+        self.init_ssh_state(monitor=monitor)
+        self.ssh_processes: list[asyncssh.SSHClientProcess] = []
 
-    async def _create_conn(self) -> Connection:
+    async def create_conn(self) -> Connection:
         try:
-            ssh_conn = await self._ensure_ssh()
+            ssh_conn = await self.ensure_ssh()
         except Exception:
             raise
-        conn_id = f"{self.id}-{self._conn_counter}"
+        conn_id = f"{self.id}-{self.conn_counter}"
         if self.store_path:
             cmd = f"nix daemon --store {self.store_path} --stdio"
         else:
@@ -1034,9 +1021,9 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         try:
             proc = await ssh_conn.create_process(cmd, encoding=None)
         except Exception:
-            self._invalidate_ssh()
+            self.invalidate_ssh()
             raise
-        self._ssh_processes.append(proc)
+        self.ssh_processes.append(proc)
         proc.channel.set_write_buffer_limits(
             high=wire._SSH_WINDOW_SIZE, low=wire._SSH_WINDOW_SIZE // 4
         )
@@ -1048,14 +1035,14 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
     async def close(self) -> None:
         """Close stores, SSH processes, and SSH connection."""
         await super().close()
-        for proc in self._ssh_processes:
+        for proc in self.ssh_processes:
             try:
                 proc.terminate()
             except Exception:
                 pass
             proc.close()
-        self._ssh_processes.clear()
-        await self._close_ssh()
+        self.ssh_processes.clear()
+        await self.close_ssh()
 
 
 class LocalSocketStore(Store):
@@ -1096,46 +1083,46 @@ class LocalSocketStore(Store):
             max_transfers=max_transfers,
             supported_systems=supported_systems,
         )
-        self._socket_path = socket_path
-        self._managed = managed
-        self._nix_bin = nix_bin
-        self._daemon_proc: asyncio.subprocess.Process | None = None
-        self._daemon_ready: asyncio.Event | None = None
-        self._extra_env = extra_env or {}
-        self._extra_args = extra_args or []
+        self.socket_path = socket_path
+        self.managed = managed
+        self.nix_bin = nix_bin
+        self.daemon_proc: asyncio.subprocess.Process | None = None
+        self.daemon_ready: asyncio.Event | None = None
+        self.extra_env = extra_env or {}
+        self.extra_args = extra_args or []
 
-    async def _ensure_daemon(self) -> None:
+    async def ensure_daemon(self) -> None:
         """Spawn a managed daemon if needed (first call only).
 
         Uses an Event to coordinate concurrent callers — only the first
         spawns the daemon; others wait for it to be ready.
         """
-        if not self._managed:
+        if not self.managed:
             return
-        if self._daemon_proc is not None:
+        if self.daemon_proc is not None:
             # Daemon already spawned — wait for it to be ready
-            if self._daemon_ready is not None:
-                await self._daemon_ready.wait()
+            if self.daemon_ready is not None:
+                await self.daemon_ready.wait()
             return
 
-        self._daemon_ready = asyncio.Event()
+        self.daemon_ready = asyncio.Event()
 
         path = self.store_path or Path("/")
-        socket_dir = self._socket_path.parent
+        socket_dir = self.socket_path.parent
         os.makedirs(socket_dir, exist_ok=True)
 
         log.info(
             "spawning_managed_daemon",
-            nix_bin=self._nix_bin,
+            nix_bin=self.nix_bin,
             store_path=str(path),
-            socket_path=str(self._socket_path),
+            socket_path=str(self.socket_path),
         )
         env = os.environ.copy()
-        env.update(self._extra_env)
-        env["NIX_DAEMON_SOCKET_PATH"] = str(self._socket_path)
+        env.update(self.extra_env)
+        env["NIX_DAEMON_SOCKET_PATH"] = str(self.socket_path)
 
         cmd = [
-            self._nix_bin,
+            self.nix_bin,
             "daemon",
             "--store",
             str(path),
@@ -1143,9 +1130,9 @@ class LocalSocketStore(Store):
             "build-dir",
             str(path / "tmp" / "nix-builds"),
         ]
-        cmd.extend(self._extra_args)
+        cmd.extend(self.extra_args)
 
-        self._daemon_proc = await asyncio.create_subprocess_exec(
+        self.daemon_proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
@@ -1155,41 +1142,41 @@ class LocalSocketStore(Store):
 
         # Wait for socket file to appear
         for _ in range(100):
-            if self._socket_path.exists():
+            if self.socket_path.exists():
                 break
             await asyncio.sleep(0.05)
         else:
             raise RuntimeError(
-                f"Managed daemon did not create socket at {self._socket_path} "
-                f"within 5s (pid={self._daemon_proc.pid})",
+                f"Managed daemon did not create socket at {self.socket_path} "
+                f"within 5s (pid={self.daemon_proc.pid})",
             )
 
         # Socket file exists but daemon may not be listening yet — probe
         for attempt in range(50):
             try:
-                r, w = await asyncio.open_unix_connection(str(self._socket_path))
+                r, w = await asyncio.open_unix_connection(str(self.socket_path))
                 w.close()
                 await w.wait_closed()
-                log.info("daemon_socket_ready", socket_path=str(self._socket_path))
-                self._daemon_ready.set()
+                log.info("daemon_socket_ready", socket_path=str(self.socket_path))
+                self.daemon_ready.set()
                 return
             except (ConnectionRefusedError, ConnectionResetError):
                 await asyncio.sleep(0.1)
 
         raise RuntimeError(
             f"Managed daemon socket exists but not accepting connections "
-            f"at {self._socket_path} within 5s (pid={self._daemon_proc.pid})",
+            f"at {self.socket_path} within 5s (pid={self.daemon_proc.pid})",
         )
 
-    async def _create_conn(self) -> Connection:
-        await self._ensure_daemon()
-        conn_id = f"{self.id}-{self._conn_counter}"
+    async def create_conn(self) -> Connection:
+        await self.ensure_daemon()
+        conn_id = f"{self.id}-{self.conn_counter}"
         log.debug(
             "connecting_daemon_socket",
-            socket_path=str(self._socket_path),
+            socket_path=str(self.socket_path),
             conn_id=conn_id,
         )
-        r, w = await asyncio.open_unix_connection(str(self._socket_path))
+        r, w = await asyncio.open_unix_connection(str(self.socket_path))
         conn = Connection(
             UnixNixReader(r), UnixNixWriter(w), conn_id, store_path=self.store_path
         )
@@ -1199,13 +1186,13 @@ class LocalSocketStore(Store):
     async def close(self) -> None:
         """Close stores and terminate managed daemon if any."""
         await super().close()
-        if self._daemon_proc is not None:
-            self._daemon_proc.terminate()
+        if self.daemon_proc is not None:
+            self.daemon_proc.terminate()
             try:
-                await asyncio.wait_for(self._daemon_proc.wait(), timeout=5.0)
+                await asyncio.wait_for(self.daemon_proc.wait(), timeout=5.0)
             except TimeoutError:
-                self._daemon_proc.kill()
-            self._daemon_proc = None
+                self.daemon_proc.kill()
+            self.daemon_proc = None
 
 
 DAEMON_SOCKET_PATH = Path("/nix/var/nix/daemon-socket/socket")
@@ -1232,27 +1219,27 @@ class SSHSocketStore(_SSHStoreMixin, Store):
             max_transfers=max_transfers,
             supported_systems=supported_systems,
         )
-        self._host = host
-        self._port = port
-        self._username = username
-        self._socket_path = socket_path
-        self._init_ssh_state(monitor=monitor)
+        self.host = host
+        self.port = port
+        self.username = username
+        self.socket_path = socket_path
+        self.init_ssh_state(monitor=monitor)
 
-    async def _create_conn(self) -> Connection:
+    async def create_conn(self) -> Connection:
         try:
-            ssh_conn = await self._ensure_ssh()
+            ssh_conn = await self.ensure_ssh()
         except Exception:
             raise
-        conn_id = f"{self.id}-{self._conn_counter}"
+        conn_id = f"{self.id}-{self.conn_counter}"
         log.debug(
             "tunneling_to_socket",
-            socket_path=str(self._socket_path),
+            socket_path=str(self.socket_path),
             conn_id=conn_id,
         )
         try:
-            r, w = await ssh_conn.open_unix_connection(str(self._socket_path))
+            r, w = await ssh_conn.open_unix_connection(str(self.socket_path))
         except Exception:
-            self._invalidate_ssh()
+            self.invalidate_ssh()
             raise
         conn = Connection(SSHNixReader(r), SSHNixWriter(w), conn_id)
         await conn.connect()
@@ -1261,7 +1248,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
     async def close(self) -> None:
         """Close stores and SSH connection."""
         await super().close()
-        await self._close_ssh()
+        await self.close_ssh()
 
 
 def get_current_system() -> str:

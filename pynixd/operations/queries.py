@@ -282,22 +282,22 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
     async def handle(cls, proxy: DaemonProxy) -> NarFromPathResponse | None:
         from ..protocol import op_log
 
-        request = await cls.from_reader(proxy._r, proxy._version)
+        request = await cls.from_reader(proxy.r, proxy.version)
         if await proxy.local_store.is_valid_path(request.path):
             op_log("NarFromPath").debug(
                 "nar_from_path_streaming",
                 path=request.path,
             )
             # 1. Flush any pending output to the client
-            await proxy._client.flush()
+            await proxy.client.flush()
             # 2. Protocol expects STDERR_LAST before raw NAR bytes
-            proxy._w.write_uint64(wire.STDERR_LAST)
+            proxy.w.write_uint64(wire.STDERR_LAST)
             # 3. Stream from local store to client
             await proxy.local_store.stream_nar_from_path(
                 path=request.path,
-                dst=proxy._w,
+                dst=proxy.w,
             )
-            await proxy._w.drain()
+            await proxy.w.drain()
             return None
 
         cls._log.warning("nar_not_in_local_store", path=request.path)

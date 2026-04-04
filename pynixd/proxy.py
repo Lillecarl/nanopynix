@@ -48,77 +48,77 @@ class DaemonProxy:
         build_queue: BuildQueue | None = None,
         scheduler_trigger: Callable[[], None] | None = None,
     ) -> None:
-        self._r = client_r
-        self._w = client_w
-        self._client = ClientConn(w=self._w)
+        self.r = client_r
+        self.w = client_w
+        self.client = ClientConn(w=self.w)
         self.local_store = local_store
-        self._build_queue = build_queue
-        self._scheduler_trigger = scheduler_trigger
-        self._version: int = wire.PROTOCOL_VERSION
+        self.build_queue = build_queue
+        self.scheduler_trigger = scheduler_trigger
+        self.version: int = wire.PROTOCOL_VERSION
 
     async def run(self) -> None:
         """Run the full session lifecycle."""
-        self._client.start()
+        self.client.start()
         try:
-            await self._handshake()
-            await self._op_loop()
+            await self.handshake()
+            await self.op_loop()
         except (EOFError, BrokenPipeError, ConnectionError, OSError):
             log.debug("client_disconnected")
         except Exception:
             log.exception("session_error")
         finally:
-            await self._client.stop()
+            await self.client.stop()
 
     # ── Handshake ────────────────────────────────────────────────────
 
-    async def _handshake(self) -> None:
+    async def handshake(self) -> None:
         """Server-side daemon protocol handshake."""
-        magic = await self._r.read_uint64()
+        magic = await self.r.read_uint64()
         if magic != wire.WORKER_MAGIC_1:
             raise ValueError(f"Bad client magic: {magic:#x}")
 
         # Present the local store's protocol version to the client
         server_version = self.local_store.version
-        self._w.write_uint64(wire.WORKER_MAGIC_2)
-        self._w.write_uint64(server_version)
-        await self._w.drain()
+        self.w.write_uint64(wire.WORKER_MAGIC_2)
+        self.w.write_uint64(server_version)
+        await self.w.drain()
 
-        client_version = await self._r.read_uint64()
-        self._version = min(server_version, client_version)
+        client_version = await self.r.read_uint64()
+        self.version = min(server_version, client_version)
         log.info(
             "client_protocol_negotiated",
             client_version=wire.proto_str(client_version),
             local_store_version=wire.proto_str(server_version),
-            negotiated_version=wire.proto_str(self._version),
+            negotiated_version=wire.proto_str(self.version),
         )
 
         # Feature negotiation (1.38+) — before CPU/reserveSpace
-        if self._version >= wire.proto(1, 38):
-            client_features = await self._r.read_string_set()
+        if self.version >= wire.proto(1, 38):
+            client_features = await self.r.read_string_set()
             log.debug("client_features", client_features=client_features)
-            self._w.write_string_set(set())  # our features (none)
+            self.w.write_string_set(set())  # our features (none)
 
-        if await self._r.read_uint64():  # sendCpu
-            await self._r.read_uint64()  # cpuAffinity (ignored)
-        await self._r.read_uint64()  # reserveSpace (ignored)
+        if await self.r.read_uint64():  # sendCpu
+            await self.r.read_uint64()  # cpuAffinity (ignored)
+        await self.r.read_uint64()  # reserveSpace (ignored)
 
         # Server conditions these on clientVersion
         if client_version >= wire.proto(1, 33):
-            self._w.write_string(NIX_VERSION)
+            self.w.write_string(NIX_VERSION)
             if client_version >= wire.proto(1, 35):
-                self._w.write_uint64(OptTrusted.Trusted)
-        self._w.write_uint64(wire.STDERR_LAST)
-        await self._w.drain()
+                self.w.write_uint64(OptTrusted.Trusted)
+        self.w.write_uint64(wire.STDERR_LAST)
+        await self.w.drain()
 
         log.info("client_handshake_complete")
 
     # ── Op loop ──────────────────────────────────────────────────────
 
-    async def _op_loop(self) -> None:
+    async def op_loop(self) -> None:
         """Read ops, dispatch, write responses."""
         while True:
             try:
-                op_num = await self._r.read_uint64()
+                op_num = await self.r.read_uint64()
             except (EOFError, asyncssh.misc.ConnectionLost):
                 break
 
@@ -127,37 +127,37 @@ class DaemonProxy:
                 op_log(op.name).debug("recvOp", op=op.name, op_num=op_num)
             except ValueError:
                 log.warning("unknown_op", op_num=op_num)
-                await self._send_error(f"Unsupported operation: {op_num}")
+                await self.send_error(f"Unsupported operation: {op_num}")
                 continue
 
             try:
-                response = await self._dispatch(op)
+                response = await self.dispatch(op)
 
                 if response is not None:
                     # Flush any queued stderr before sending the response
-                    await self._client.flush()
+                    await self.client.flush()
                     # Buffer the entire response so it becomes one SSH write
                     buf = ByteCollector()
                     buf.write_uint64(wire.STDERR_LAST)
-                    await response.to_writer(buf, self._version)
-                    self._w.write(buf.getvalue())
-                    await self._w.drain()
+                    await response.to_writer(buf, self.version)
+                    self.w.write(buf.getvalue())
+                    await self.w.drain()
                     op_log(op.name).debug("sendOp", op=op.name)
                 # else: already handled (streaming, error, etc.)
 
             except Exception:
                 log.exception("handle_op_error", name=op.name)
-                await self._client.flush()
-                await self._send_error(f"Internal error handling {op.name}")
+                await self.client.flush()
+                await self.send_error(f"Internal error handling {op.name}")
 
     # ── Dispatch ─────────────────────────────────────────────────────
 
-    async def _dispatch(self, op: Op) -> OpResponse | None:
+    async def dispatch(self, op: Op) -> OpResponse | None:
         """Route an operation to its request type's handle method."""
         req_cls = OP_REGISTRY.get(op.value)
         if req_cls is None:
             log.warning("unhandled_op", op=op.name, op_value=op.value)
-            await self._send_error(f"Unhandled operation: {op.name}")
+            await self.send_error(f"Unhandled operation: {op.name}")
             return None
 
         try:
@@ -167,9 +167,9 @@ class DaemonProxy:
 
     # ── Helpers ───────────────────────────────────────────────────────
 
-    async def _send_error(self, msg: str) -> None:
+    async def send_error(self, msg: str) -> None:
         """Send a STDERR_ERROR to the client."""
-        self._client.queue.put_nowait(
+        self.client.queue.put_nowait(
             StderrError(
                 error_type="Error",
                 level=0,
@@ -179,4 +179,4 @@ class DaemonProxy:
                 traces=[],
             )
         )
-        await self._client.flush()
+        await self.client.flush()

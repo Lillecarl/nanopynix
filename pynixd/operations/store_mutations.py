@@ -73,7 +73,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> AddToStoreResponse:
         """Override handle because this is a streaming operation."""
-        resp = await proxy.local_store.add_to_store_streaming(proxy._r)
+        resp = await proxy.local_store.add_to_store_streaming(proxy.r)
         proxy.local_store.add_known_path(resp.info.path)
         return resp
 
@@ -150,7 +150,7 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
         """Override handle because this is a streaming operation."""
-        path = await proxy.local_store.add_to_store_nar_streaming(proxy._r)
+        path = await proxy.local_store.add_to_store_nar_streaming(proxy.r)
         proxy.local_store.add_known_path(path)
         return EmptyResponse()
 
@@ -221,7 +221,7 @@ class AddMultipleToStoreRequest(OpRequest[EmptyResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
         """Override handle because this is a streaming operation."""
-        paths = await proxy.local_store.add_multiple_to_store_streaming(proxy._r)
+        paths = await proxy.local_store.add_multiple_to_store_streaming(proxy.r)
         proxy.local_store.add_known_paths(set(paths))
         return EmptyResponse()
 

@@ -90,8 +90,8 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
-        request = await cls.from_reader(proxy._r, proxy._version)
-        if proxy._build_queue is None or proxy._scheduler_trigger is None:
+        request = await cls.from_reader(proxy.r, proxy.version)
+        if proxy.build_queue is None or proxy.scheduler_trigger is None:
             raise RuntimeError("Build infrastructure not configured")
 
         from .build_planner import plan_and_execute_build_paths
@@ -99,9 +99,9 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
         return await plan_and_execute_build_paths(
             request,
             proxy.local_store,
-            proxy._build_queue,
-            proxy._scheduler_trigger,
-            client=proxy._client,
+            proxy.build_queue,
+            proxy.scheduler_trigger,
+            client=proxy.client,
         )
 
 
@@ -126,8 +126,8 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
-        request = await cls.from_reader(proxy._r, proxy._version)
-        if proxy._build_queue is None or proxy._scheduler_trigger is None:
+        request = await cls.from_reader(proxy.r, proxy.version)
+        if proxy.build_queue is None or proxy.scheduler_trigger is None:
             raise RuntimeError("Build infrastructure not configured")
 
         from .build_planner import plan_and_execute_build_paths_with_results
@@ -135,9 +135,9 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
         return await plan_and_execute_build_paths_with_results(
             request,
             proxy.local_store,
-            proxy._build_queue,
-            proxy._scheduler_trigger,
-            client=proxy._client,
+            proxy.build_queue,
+            proxy.scheduler_trigger,
+            client=proxy.client,
         )
 
 
@@ -168,8 +168,8 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
-        request = await cls.from_reader(proxy._r, proxy._version)
-        if proxy._build_queue is None or proxy._scheduler_trigger is None:
+        request = await cls.from_reader(proxy.r, proxy.version)
+        if proxy.build_queue is None or proxy.scheduler_trigger is None:
             raise RuntimeError("Build infrastructure not configured")
 
         # Discover paths that exist on the local store but aren't tracked.
@@ -185,9 +185,9 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         future = await enqueue_build_derivation(
             request,
             proxy.local_store,
-            proxy._build_queue,
-            proxy._scheduler_trigger,
-            client=proxy._client,
+            proxy.build_queue,
+            proxy.scheduler_trigger,
+            client=proxy.client,
         )
         response = await future
 
@@ -195,7 +195,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             if response.result.status != 0 and response.result.error_msg:
                 from ..stderr import StderrNext
 
-                proxy._client.queue.put_nowait(
+                proxy.client.queue.put_nowait(
                     StderrNext(text=f"pynixd: {response.result.error_msg}\n")
                 )
         return response

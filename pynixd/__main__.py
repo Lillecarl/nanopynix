@@ -55,7 +55,7 @@ log = structlog.get_logger(__name__)
 env = Env()
 
 
-def _load_backends_from_file(path: Path) -> dict[str, Store]:
+def load_backends_from_file(path: Path) -> dict[str, Store]:
     """Load store definitions from a JSON file."""
     with open(path) as f:
         data = json.load(f)
@@ -116,7 +116,7 @@ def _load_backends_from_file(path: Path) -> dict[str, Store]:
     return stores
 
 
-async def _async_main() -> None:
+async def async_main() -> None:
     dev_mode = env.int("PYNIXD_DEV", 0)
     stores: dict[str, Store] = {}
 
@@ -142,7 +142,7 @@ async def _async_main() -> None:
             if not backend_file.exists():
                 raise FileNotFoundError(f"Backend file not found: {backend_file}")
             log.info("loading_backends", path=str(backend_file))
-            stores = _load_backends_from_file(backend_file)
+            stores = load_backends_from_file(backend_file)
         else:
             raise ValueError("PYNIXD_BACKEND_FILE is required in non-dev mode")
 
@@ -202,7 +202,7 @@ def main() -> None:
     )
 
     try:
-        asyncio.run(_async_main())
+        asyncio.run(async_main())
     except KeyboardInterrupt:
         pass
 

@@ -42,62 +42,62 @@ class GarbageCollector:
         local_max_age: int = _GC_LOCAL_MAX_AGE,
         builder_max_age: int = _GC_BUILDER_MAX_AGE,
     ) -> None:
-        self._db = db
-        self._stores = stores
-        self._local_store = local_store
-        self._interval = interval
-        self._local_max_age = local_max_age
-        self._builder_max_age = builder_max_age
-        self._task: asyncio.Task[None] | None = None
+        self.db = db
+        self.stores = stores
+        self.local_store = local_store
+        self.interval = interval
+        self.local_max_age = local_max_age
+        self.builder_max_age = builder_max_age
+        self.task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
         """Start the GC loop. Call from async context."""
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._loop())
+        if self.task is None or self.task.done():
+            self.task = asyncio.create_task(self.gc_loop())
 
     async def stop(self) -> None:
         """Stop the GC loop."""
-        if self._task is not None:
-            self._task.cancel()
+        if self.task is not None:
+            self.task.cancel()
             try:
-                await self._task
+                await self.task
             except asyncio.CancelledError:
                 pass
-            self._task = None
+            self.task = None
 
-    async def _loop(self) -> None:
+    async def gc_loop(self) -> None:
         """Run GC passes at the configured interval."""
         while True:
-            await asyncio.sleep(self._interval)
+            await asyncio.sleep(self.interval)
             try:
-                await self._run_gc_pass()
+                await self.run_gc_pass()
             except asyncio.CancelledError:
                 return
             except Exception:
                 log.exception("gc_pass_failed")
 
-    async def _run_gc_pass(self) -> None:
+    async def run_gc_pass(self) -> None:
         """Find stale paths and delete them from all stores."""
         # Query with the shorter lifetime to get the superset of stale paths
-        builder_stale = await self._db.query_stale_paths(self._builder_max_age)
+        builder_stale = await self.db.query_stale_paths(self.builder_max_age)
         if not builder_stale:
             return
 
         # Local store uses longer lifetime — filter to older paths
-        local_stale = await self._db.query_stale_paths(self._local_max_age)
+        local_stale = await self.db.query_stale_paths(self.local_max_age)
 
         tasks = []
         stores_for_tasks: list[Store] = []
 
         # GC builders with builder lifetime
-        for store in self._stores.values():
-            tasks.append(self._gc_store(store, builder_stale))
+        for store in self.stores.values():
+            tasks.append(self.gc_store(store, builder_stale))
             stores_for_tasks.append(store)
 
         # GC local store with local lifetime
         if local_stale:
-            tasks.append(self._gc_store(self._local_store, local_stale))
-            stores_for_tasks.append(self._local_store)
+            tasks.append(self.gc_store(self.local_store, local_stale))
+            stores_for_tasks.append(self.local_store)
 
         if not tasks:
             return
@@ -105,9 +105,9 @@ class GarbageCollector:
         log.info(
             "gc_pass_started",
             builder_stale_count=len(builder_stale),
-            builder_max_age=self._builder_max_age,
+            builder_max_age=self.builder_max_age,
             local_stale_count=len(local_stale) if local_stale else 0,
-            local_max_age=self._local_max_age,
+            local_max_age=self.local_max_age,
         )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -127,7 +127,7 @@ class GarbageCollector:
             bytes_freed=total_freed,
         )
 
-    async def _gc_store(
+    async def gc_store(
         self,
         store: Store,
         paths: set[str],

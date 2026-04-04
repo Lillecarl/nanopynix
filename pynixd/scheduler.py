@@ -84,30 +84,30 @@ class Scheduler:
         stores: Mapping[str, Store],
         local_store: Store,
     ) -> None:
-        self._queue = build_queue
-        self._stores = stores
-        self._local_store = local_store
-        self._trigger = asyncio.Event()
-        self._running = False
+        self.queue = build_queue
+        self.stores = stores
+        self.local_store = local_store
+        self.trigger_event = asyncio.Event()
+        self.running = False
 
     def trigger(self) -> None:
         """Signal that a scheduling pass is needed."""
-        self._trigger.set()
+        self.trigger_event.set()
 
     async def start(self) -> None:
         """Start the scheduler loop."""
-        self._running = True
+        self.running = True
         log.info("scheduler_started")
-        while self._running:
-            await self._trigger.wait()
-            self._trigger.clear()
-            await self._run_scheduling_pass()
+        while self.running:
+            await self.trigger_event.wait()
+            self.trigger_event.clear()
+            await self.run_scheduling_pass()
 
     async def stop(self) -> None:
         """Stop the scheduler loop."""
-        self._running = False
-        self._trigger.set()
-        builds = await self._queue.get_pending()
+        self.running = False
+        self.trigger_event.set()
+        builds = await self.queue.get_pending()
         # Stop transfers gracefully, cancel builds hard (we're shutting down)
         for build in builds:
             if build.build_task and not build.build_task.done():
@@ -124,11 +124,11 @@ class Scheduler:
 
     # ── Scheduling pass ─────────────────────────────────────────────
 
-    def _is_schedulable(self, build: QueuedBuild) -> bool:
+    def is_schedulable(self, build: QueuedBuild) -> bool:
         """A build is schedulable when all required_paths exist on local."""
-        return self._local_store.has_all_paths(build.required_paths)
+        return self.local_store.has_all_paths(build.required_paths)
 
-    def _compute_ranking(self, build: QueuedBuild) -> list[CandidateStore]:
+    def compute_ranking(self, build: QueuedBuild) -> list[CandidateStore]:
         """Rank stores by locality (common paths with required_paths).
 
         Filters out stores that don't support the build's platform,
@@ -145,7 +145,7 @@ class Scheduler:
         failed = set(build.failed_backends)
 
         candidates: list[CandidateStore] = []
-        for s in self._stores.values():
+        for s in self.stores.values():
             if not s.supports_system(build.platform):
                 continue
             if needs_nix and s.is_lix:
@@ -167,12 +167,12 @@ class Scheduler:
         # Add local_store as a candidate when derivation opts in
         if (
             build.request.derivation.build_local
-            and self._local_store.supports_system(build.platform)
-            and self._local_store.is_healthy
+            and self.local_store.supports_system(build.platform)
+            and self.local_store.is_healthy
         ):
             candidates.append(
                 CandidateStore(
-                    store_id=self._local_store.id,
+                    store_id=self.local_store.id,
                     score=len(build.required_paths),
                     is_high_pressure=False,
                     in_failed=False,
@@ -188,54 +188,54 @@ class Scheduler:
 
     # ── Build readiness classification ─────────────────────────────────
 
-    def _classify_build(self, build: QueuedBuild) -> BuildReadiness:
+    def classify_build(self, build: QueuedBuild) -> BuildReadiness:
         """Classify why a build cannot be scheduled yet."""
         if build.is_building:
             return BuildReadiness.BUILDING
         if build.is_done:
             return BuildReadiness.DONE
-        if not self._compute_ranking(build):
+        if not self.compute_ranking(build):
             return BuildReadiness.NO_STORE
-        if not self._is_schedulable(build):
+        if not self.is_schedulable(build):
             return BuildReadiness.WAITING_DAG
         return BuildReadiness.SCHEDULABLE
 
-    def _resolve_store(self, store_id: str) -> Store:
+    def resolve_store(self, store_id: str) -> Store:
         """Resolve a store_id to its Store instance."""
-        if store_id == self._local_store.id:
-            return self._local_store
-        return self._stores[store_id]
+        if store_id == self.local_store.id:
+            return self.local_store
+        return self.stores[store_id]
 
-    def _effective_slots(
+    def effective_slots(
         self,
         store_id: str,
         assigned_this_pass: dict[str, int],
     ) -> int:
-        if store_id == self._local_store.id:
-            return self._local_store.available_slots - assigned_this_pass.get(
-                self._local_store.id, 0
+        if store_id == self.local_store.id:
+            return self.local_store.available_slots - assigned_this_pass.get(
+                self.local_store.id, 0
             )
-        store = self._stores[store_id]
+        store = self.stores[store_id]
         return store.available_slots - assigned_this_pass.get(store_id, 0)
 
-    def _slots_exhausted(self, assigned_this_pass: dict[str, int]) -> bool:
+    def slots_exhausted(self, assigned_this_pass: dict[str, int]) -> bool:
         """True when all build slots are spoken for (in-use + assigned this pass)."""
-        return self._total_available_slots() <= sum(assigned_this_pass.values())
+        return self.total_available_slots() <= sum(assigned_this_pass.values())
 
-    def _total_available_slots(self) -> int:
+    def total_available_slots(self) -> int:
         """Total free build slots across all healthy stores."""
-        return sum(s.available_slots for s in self._stores.values() if s.is_healthy)
+        return sum(s.available_slots for s in self.stores.values() if s.is_healthy)
 
-    async def _run_scheduling_pass(self) -> None:
+    async def run_scheduling_pass(self) -> None:
         """Run one scheduling pass."""
-        builds = await self._queue.get_pending()
+        builds = await self.queue.get_pending()
         if not builds:
             return
 
         # Skip the pass if every slot is occupied — nothing can be assigned.
         # Builds completing will trigger a new pass when slots free up.
         has_pending = any(b.is_pending for b in builds)
-        if has_pending and self._slots_exhausted({}):
+        if has_pending and self.slots_exhausted({}):
             return
 
         # Categorize builds for logging
@@ -245,7 +245,7 @@ class Scheduler:
         waiting_slot: list[int] = []  # filled during assignment loop
 
         for b in builds:
-            readiness = self._classify_build(b)
+            readiness = self.classify_build(b)
             match readiness:
                 case BuildReadiness.BUILDING:
                     building.append(b.id)
@@ -255,33 +255,33 @@ class Scheduler:
                     # Fail immediately — no compatible store
                     needs_nix = b.request.derivation.requires_nix
                     all_systems = sorted(
-                        {s for s in self._stores.values() for s in s.supported_systems}
+                        {s for s in self.stores.values() for s in s.supported_systems}
                     )
                     reason = (
                         f"No compatible store for {b.description} "
                         f"(platform={b.platform}, requires_nix={needs_nix}, "
                         f"stores: {', '.join(all_systems) or 'any (unconstrained)'})"
                     )
-                    await self._queue.fail(b.id, reason)
+                    await self.queue.fail(b.id, reason)
                 case BuildReadiness.WAITING_DAG:
                     waiting_dag.append(b.id)
                 case BuildReadiness.SCHEDULABLE:
                     # will be waiting_slot if not assigned
                     pass
 
-        slots = {s.id: s.available_slots for s in self._stores.values()}
+        slots = {s.id: s.available_slots for s in self.stores.values()}
         assigned_this_pass: dict[str, int] = {}
 
         for build in builds:
-            readiness = self._classify_build(build)
+            readiness = self.classify_build(build)
             if readiness is not BuildReadiness.SCHEDULABLE:
                 continue  # BUILDING, DONE, NO_STORE, or WAITING_DAG already handled
 
             # No slots left anywhere — stop trying to assign
-            if self._slots_exhausted(assigned_this_pass):
+            if self.slots_exhausted(assigned_this_pass):
                 # Mark all remaining pending builds as waiting_slot
                 for remaining in builds:
-                    if remaining.is_pending and self._is_schedulable(remaining):
+                    if remaining.is_pending and self.is_schedulable(remaining):
                         if (
                             remaining.id not in waiting_slot
                             and remaining.id != build.id
@@ -290,7 +290,7 @@ class Scheduler:
                 waiting_slot.append(build.id)
                 break
 
-            ranking = self._compute_ranking(build)
+            ranking = self.compute_ranking(build)
             if not ranking:
                 continue  # already failed above
 
@@ -299,26 +299,26 @@ class Scheduler:
                 c
                 for c in ranking
                 if c.score == top_score
-                and self._effective_slots(c.store_id, assigned_this_pass) > 0
+                and self.effective_slots(c.store_id, assigned_this_pass) > 0
             ]
 
             if tied_top_with_slot:
                 # Pick least-loaded among tied-top
                 best = min(
                     tied_top_with_slot,
-                    key=lambda c: self._resolve_store(c.store_id).in_flight,
+                    key=lambda c: self.resolve_store(c.store_id).in_flight,
                 )
-                store = self._resolve_store(best.store_id)
+                store = self.resolve_store(best.store_id)
                 log.debug(
                     "build_assigned_to_store",
                     build_id=build.id,
                     store_id=best.store_id,
                     score=best.score,
-                    effective_slots=self._effective_slots(
+                    effective_slots=self.effective_slots(
                         best.store_id, assigned_this_pass
                     ),
                 )
-                self._start_build(build, store)
+                self.start_build(build, store)
                 assigned_this_pass[best.store_id] = (
                     assigned_this_pass.get(best.store_id, 0) + 1
                 )
@@ -327,21 +327,19 @@ class Scheduler:
                 # Start proactive transfer to best store WITH a slot
                 if not build.is_transferring:
                     for candidate in ranking:
-                        if candidate.store_id == self._local_store.id:
+                        if candidate.store_id == self.local_store.id:
                             continue
-                        store = self._stores[candidate.store_id]
+                        store = self.stores[candidate.store_id]
                         if (
-                            self._effective_slots(
-                                candidate.store_id, assigned_this_pass
-                            )
+                            self.effective_slots(candidate.store_id, assigned_this_pass)
                             > 0
                             and store.available_transfer_slots > 0
                         ):
-                            self._start_transfer(build, store)
+                            self.start_transfer(build, store)
                             transferring.append(build.id)
                             break
 
-        unhealthy = [s.id for s in self._stores.values() if not s.is_healthy]
+        unhealthy = [s.id for s in self.stores.values() if not s.is_healthy]
 
         log.debug(
             "scheduling_pass_done",
@@ -356,14 +354,14 @@ class Scheduler:
             log.warning("stores_in_cooldown", unhealthy=unhealthy)
         pressure = {
             s.id: f"{s.pressure:.1f}"
-            for s in self._stores.values()
+            for s in self.stores.values()
             if s.pressure is not None
         }
         if pressure:
             log.debug("backend_pressure", pressure=pressure)
         memory = {
             s.id: f"{s.meminfo.available_mb}MB/{s.meminfo.total_mb}MB"
-            for s in self._stores.values()
+            for s in self.stores.values()
             if s.meminfo is not None
         }
         if memory:
@@ -371,14 +369,14 @@ class Scheduler:
 
     # ── Build lifecycle ─────────────────────────────────────────────
 
-    def _start_build(self, build: QueuedBuild, store: Store) -> None:
+    def start_build(self, build: QueuedBuild, store: Store) -> None:
         """Assign a build to a store and spawn its execution task."""
         build.started_at = time.monotonic()
         build.build_task = asyncio.create_task(
-            self._execute_build(build, store),
+            self.execute_build(build, store),
         )
 
-    def _start_transfer(self, build: QueuedBuild, store: Store) -> None:
+    def start_transfer(self, build: QueuedBuild, store: Store) -> None:
         """Start a proactive transfer to a store."""
         log.info(
             "proactive_transfer_started",
@@ -386,10 +384,10 @@ class Scheduler:
             store_id=store.id,
         )
         build.transfer_task = asyncio.create_task(
-            self._do_proactive_transfer(build, store),
+            self.do_proactive_transfer(build, store),
         )
 
-    def _should_retry(
+    def should_retry(
         self,
         build: QueuedBuild,
         status: int | None,
@@ -405,7 +403,7 @@ class Scheduler:
             return True  # infrastructure failure — always retry
         return status in _RETRYABLE_STATUSES
 
-    async def _retry_build(self, build: QueuedBuild, store: Store) -> None:
+    async def retry_build(self, build: QueuedBuild, store: Store) -> None:
         """Reset build state for retry on next scheduling pass."""
         # Capture the task we're stopping — a new scheduling pass may have
         # started a different transfer while stop_transfer() was awaiting.
@@ -420,7 +418,7 @@ class Scheduler:
             failed_store_id=store.id,
         )
 
-    async def _execute_build(
+    async def execute_build(
         self,
         build: QueuedBuild,
         store: Store,
@@ -439,19 +437,19 @@ class Scheduler:
             # Stop proactive transfer gracefully before acquiring connections
             await build.stop_transfer()
 
-            is_local = store is self._local_store
+            is_local = store is self.local_store
 
             if not is_local:
                 log.debug("build_sending_inputs", build_id=build.id, store_id=store.id)
                 # Transfer required inputs
-                await self._ensure_worker_has_inputs(build, store)
+                await self.ensure_worker_has_inputs(build, store)
 
             log.debug("build_executing", build_id=build.id, store_id=store.id)
             assert isinstance(build.request, BuildDerivationRequest), (
                 f"Build {build.id}: expected BuildDerivationRequest, "
                 f"got {type(build.request).__name__}"
             )
-            response = await self._execute_build_derivation(
+            response = await self.execute_build_derivation(
                 build,
                 store,
             )
@@ -463,14 +461,14 @@ class Scheduler:
                     error_msg=response.result.error_msg,
                 )
 
-            if response.result.status != 0 and self._should_retry(
+            if response.result.status != 0 and self.should_retry(
                 build,
                 response.result.status,
                 store,
             ):
                 if response.result.status in _RETRYABLE_STATUSES:
                     store.record_failure()
-                await self._retry_build(build, store)
+                await self.retry_build(build, store)
                 return
 
             if response.result.status == 0:
@@ -500,7 +498,7 @@ class Scheduler:
                     ]
                 if output_paths:
                     pull_task = asyncio.create_task(
-                        self._pull_paths(store, output_paths),
+                        self.pull_paths(store, output_paths),
                         name=f"pull-{build.id}",
                     )
 
@@ -512,7 +510,7 @@ class Scheduler:
                 await pull_task
 
             log.debug("build_completing", id=build.id)
-            await self._queue.complete(build.id, response)
+            await self.queue.complete(build.id, response)
             log.debug("build_completed", id=build.id)
         except (
             TimeoutError,
@@ -524,15 +522,15 @@ class Scheduler:
             asyncssh.Error,
         ) as e:
             store.record_failure()
-            if self._should_retry(build, None, store):
-                await self._retry_build(build, store)
+            if self.should_retry(build, None, store):
+                await self.retry_build(build, store)
             else:
                 log.exception(
                     "build_failed_no_retries",
                     build_id=build.id,
                     store_id=store.id,
                 )
-                await self._queue.fail(
+                await self.queue.fail(
                     build.id,
                     f"Build failed after {build.retries} retries "
                     f"(last: {store.id}): {e}",
@@ -541,10 +539,10 @@ class Scheduler:
         except Exception as e:
             # Programming error — don't retry, don't blame the store
             log.exception("build_unexpected_error", id=build.id)
-            await self._queue.fail(build.id, f"Internal error: {type(e).__name__}: {e}")
+            await self.queue.fail(build.id, f"Internal error: {type(e).__name__}: {e}")
             self.trigger()
 
-    async def _execute_build_derivation(
+    async def execute_build_derivation(
         self,
         build: QueuedBuild,
         store: Store,
@@ -565,7 +563,7 @@ class Scheduler:
 
     # ── Proactive transfer ──────────────────────────────────────────
 
-    async def _do_proactive_transfer(
+    async def do_proactive_transfer(
         self,
         build: QueuedBuild,
         store: Store,
@@ -577,7 +575,7 @@ class Scheduler:
         - Partially transferred closures still leave useful paths on the store
         """
         try:
-            sorted_paths, infos = await self._compute_transfer_plan(
+            sorted_paths, infos = await self.compute_transfer_plan(
                 build,
                 store,
             )
@@ -599,7 +597,7 @@ class Scheduler:
 
                 try:
                     await store.stream_paths_store_to_store(
-                        src=self._local_store,
+                        src=self.local_store,
                         paths_with_info=[(path, infos[path])],
                     )
                     store.add_known_path(path)
@@ -629,7 +627,7 @@ class Scheduler:
 
     # ── Path transfer helpers ───────────────────────────────────────
 
-    async def _ensure_closure(self, build: QueuedBuild) -> set[str]:
+    async def ensure_closure(self, build: QueuedBuild) -> set[str]:
         """Return the cached runtime closure, computing it on first call.
 
         The closure only depends on required_paths and the local store's
@@ -639,7 +637,7 @@ class Scheduler:
             return build.closure
 
         seeds = build.required_paths
-        db = self._local_store.db
+        db = self.local_store.db
         closure: set[str] | None = None
         if db is not None:
             closure = await db.compute_closure(seeds)
@@ -651,7 +649,7 @@ class Scheduler:
             while queue:
                 path = queue.pop()
                 try:
-                    path_info = await self._local_store.query_path_info(path)
+                    path_info = await self.local_store.query_path_info(path)
                     if path_info:
                         for ref in path_info.references:
                             if ref not in closure:
@@ -668,7 +666,7 @@ class Scheduler:
         build.closure = closure
         return closure
 
-    async def _compute_transfer_plan(
+    async def compute_transfer_plan(
         self,
         build: QueuedBuild,
         store: Store,
@@ -684,7 +682,7 @@ class Scheduler:
         if not build.required_paths:
             return [], {}
 
-        closure = await self._ensure_closure(build)
+        closure = await self.ensure_closure(build)
 
         # Diff against worker using known_paths (we control all transfers)
         missing = closure - store.known_paths
@@ -699,7 +697,7 @@ class Scheduler:
         )
 
         # Batch PathInfo for missing paths
-        infos = await self._local_store.query_path_infos(missing)
+        infos = await self.local_store.query_path_infos(missing)
 
         if not infos:
             log.debug(
@@ -707,10 +705,10 @@ class Scheduler:
             )
             return [], {}
 
-        return self._topo_sort(infos), infos
+        return self.topo_sort(infos), infos
 
     @staticmethod
-    def _topo_sort(infos: dict[str, PathInfo]) -> list[str]:
+    def topo_sort(infos: dict[str, PathInfo]) -> list[str]:
         """Topological sort: dependencies before dependents."""
         sorted_paths: list[str] = []
         visited: set[str] = set()
@@ -728,19 +726,19 @@ class Scheduler:
 
         return sorted_paths
 
-    async def _ensure_worker_has_inputs(
+    async def ensure_worker_has_inputs(
         self,
         build: QueuedBuild,
         store: Store,
     ) -> None:
         """Send missing paths from local store to a worker."""
-        sorted_paths, infos = await self._compute_transfer_plan(build, store)
+        sorted_paths, infos = await self.compute_transfer_plan(build, store)
         if not sorted_paths:
             return
 
         to_send = [(p, infos[p]) for p in sorted_paths]
         await store.stream_paths_store_to_store(
-            src=self._local_store, paths_with_info=to_send
+            src=self.local_store, paths_with_info=to_send
         )
         store.add_known_paths(set(sorted_paths))
         log.info(
@@ -749,7 +747,7 @@ class Scheduler:
             store_id=store.id,
         )
 
-    async def _pull_paths(
+    async def pull_paths(
         self,
         store: Store,
         paths: list[str],
@@ -796,11 +794,11 @@ class Scheduler:
             )
 
         try:
-            await self._local_store.stream_paths_store_to_store(
+            await self.local_store.stream_paths_store_to_store(
                 src=store, paths_with_info=to_pull
             )
             for path, _ in to_pull:
-                self._local_store.add_known_path(path)
+                self.local_store.add_known_path(path)
                 store.add_known_path(path)
             log.debug("pulled_paths_into_local_store", count=len(to_pull))
         except Exception:

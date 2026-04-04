@@ -197,13 +197,13 @@ async def enqueue_build_derivation(
 
 
 def enrich_derivation(request: BuildDerivationRequest, store: Store) -> None:
-    """Set _is_dynamic from the .drv file on disk."""
+    """Set is_dynamic from the .drv file on disk."""
     store_path = store.store_path
     if not store_path:
         return
     try:
         parsed = read_drv_file(store_path, request.drv_path)
-        request.derivation._is_dynamic = parsed.is_dynamic
+        request.derivation.is_dynamic = parsed.is_dynamic
     except FileNotFoundError:
         log.debug("drv_enrich_not_found", drv_path=request.drv_path)
     except Exception:

@@ -90,10 +90,10 @@ class Server:
             self.build_queue, self.config.stores, self.config.local_store
         )
         self.background_tasks: list[asyncio.Task[Any]] = []
-        self._ssh_server: asyncssh.SSHAcceptor | None = None
-        self._unix_server: asyncio.Server | None = None
-        self._http_server: web.AppRunner | None = None
-        self._https_server: web.AppRunner | None = None
+        self.ssh_server: asyncssh.SSHAcceptor | None = None
+        self.unix_server: asyncio.Server | None = None
+        self.http_server: web.AppRunner | None = None
+        self.https_server: web.AppRunner | None = None
 
     @property
     def host(self) -> str:
@@ -103,8 +103,8 @@ class Server:
     @property
     def port(self) -> int:
         """SSH listen port (actual port if 0 was passed)."""
-        if self._ssh_server and self._ssh_server.sockets:
-            return self._ssh_server.sockets[0].getsockname()[1]
+        if self.ssh_server and self.ssh_server.sockets:
+            return self.ssh_server.sockets[0].getsockname()[1]
         return self.config.ssh_port or 0
 
     @property
@@ -176,12 +176,12 @@ class Server:
             local_store.db.start()
             gc = GarbageCollector(local_store.db, stores, local_store)
             gc.start()
-            if gc._task:
-                self.background_tasks.append(gc._task)
+            if gc.task:
+                self.background_tasks.append(gc.task)
 
         # Start listeners
         if self.config.ssh_port is not None:
-            self._ssh_server = await start_ssh_server(
+            self.ssh_server = await start_ssh_server(
                 stores=stores,
                 local_store=local_store,
                 build_queue=self.build_queue,
@@ -192,7 +192,7 @@ class Server:
             )
 
         if self.config.unix_path:
-            self._unix_server = await start_unix_server(
+            self.unix_server = await start_unix_server(
                 stores=stores,
                 local_store=local_store,
                 build_queue=self.build_queue,
@@ -212,7 +212,7 @@ class Server:
                     host=self.config.http_host,
                     port=self.config.http_port,
                 )
-                self._http_server = runner
+                self.http_server = runner
             if self.config.https_port is not None:
                 runner, _ = await cache.start(
                     host=self.config.http_host,
@@ -224,27 +224,24 @@ class Server:
                     if self.config.https_key
                     else None,
                 )
-                self._https_server = runner
+                self.https_server = runner
 
         if not (
-            self._ssh_server
-            or self._unix_server
-            or self._http_server
-            or self._https_server
+            self.ssh_server or self.unix_server or self.http_server or self.https_server
         ):
             log.warning("no_servers_started")
 
     async def wait_finished(self) -> None:
         """Wait for the server listeners to close."""
         wait_tasks = []
-        if self._ssh_server:
-            wait_tasks.append(asyncio.create_task(self._ssh_server.wait_closed()))
-        if self._unix_server:
-            wait_tasks.append(asyncio.create_task(self._unix_server.wait_closed()))
+        if self.ssh_server:
+            wait_tasks.append(asyncio.create_task(self.ssh_server.wait_closed()))
+        if self.unix_server:
+            wait_tasks.append(asyncio.create_task(self.unix_server.wait_closed()))
 
         if wait_tasks:
             await asyncio.gather(*wait_tasks)
-        elif self._http_server or self._https_server:
+        elif self.http_server or self.https_server:
             # Only HTTP runners, wait forever (until cancelled)
             while True:
                 await asyncio.sleep(3600)
@@ -252,15 +249,15 @@ class Server:
     async def close(self) -> None:
         """Gracefully shut down the server."""
         log.info("server_shutting_down")
-        if self._http_server:
-            await self._http_server.cleanup()
-        if self._https_server:
-            await self._https_server.cleanup()
+        if self.http_server:
+            await self.http_server.cleanup()
+        if self.https_server:
+            await self.https_server.cleanup()
 
-        if self._ssh_server:
-            self._ssh_server.close()
-        if self._unix_server:
-            self._unix_server.close()
+        if self.ssh_server:
+            self.ssh_server.close()
+        if self.unix_server:
+            self.unix_server.close()
 
         # Stop scheduler gracefully (cancels builds etc)
         await self.scheduler.stop()

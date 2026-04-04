@@ -31,19 +31,19 @@ log = structlog.get_logger(__name__)
 _STORE_PREFIX = "/nix/store/"
 
 
-def _strip_store_prefix(path: str) -> str:
+def strip_store_prefix(path: str) -> str:
     """'/nix/store/abc-foo' → 'abc-foo'"""
     if path.startswith(_STORE_PREFIX):
         return path[len(_STORE_PREFIX) :]
     return path
 
 
-def _hash_part(path: str) -> str:
+def hash_part(path: str) -> str:
     """'/nix/store/abc-foo' → 'abc'"""
-    return _strip_store_prefix(path).split("-", 1)[0]
+    return strip_store_prefix(path).split("-", 1)[0]
 
 
-def _format_narinfo(
+def format_narinfo(
     path: str,
     nar_hash: str,
     nar_size: int,
@@ -53,7 +53,7 @@ def _format_narinfo(
     ca: str,
 ) -> str:
     """Format a .narinfo file from path info fields."""
-    store_hash = _hash_part(path)
+    store_hash = hash_part(path)
     # Ensure NarHash has sha256: prefix (expected by Nix)
     if not nar_hash.startswith("sha256:"):
         nar_hash = f"sha256:{nar_hash}"
@@ -67,11 +67,11 @@ def _format_narinfo(
     ]
 
     if references:
-        refs = " ".join(sorted(_strip_store_prefix(r) for r in references))
+        refs = " ".join(sorted(strip_store_prefix(r) for r in references))
         lines.append(f"References: {refs}")
 
     if deriver:
-        lines.append(f"Deriver: {_strip_store_prefix(deriver)}")
+        lines.append(f"Deriver: {strip_store_prefix(deriver)}")
 
     for sig in sorted(sigs):
         lines.append(f"Sig: {sig}")
@@ -93,29 +93,29 @@ class BinaryCacheServer:
         password: str | None = None,
         priority: int = 30,
     ) -> None:
-        self._store = local_store
-        self._username = username
-        self._password = password
-        self._priority = priority
+        self.store = local_store
+        self.username = username
+        self.password = password
+        self.priority = priority
 
-        self._app = web.Application(middlewares=[self._auth_middleware])
-        self._app.router.add_get("/nix-cache-info", self._handle_cache_info)
-        self._app.router.add_get("/{hash}.narinfo", self._handle_narinfo)
-        self._app.router.add_get("/nar/{hash}.nar", self._handle_nar)
+        self.app = web.Application(middlewares=[self.auth_middleware])
+        self.app.router.add_get("/nix-cache-info", self.handle_cache_info)
+        self.app.router.add_get("/{hash}.narinfo", self.handle_narinfo)
+        self.app.router.add_get("/nar/{hash}.nar", self.handle_nar)
 
     @property
     def db(self) -> LocalStoreDB | None:
-        return self._store.db
+        return self.store.db
 
     # ── Auth middleware ────────────────────────────────────────────────
 
     @web.middleware
-    async def _auth_middleware(
+    async def auth_middleware(
         self,
         request: web.Request,
         handler,
     ) -> web.StreamResponse:
-        if self._username is None:
+        if self.username is None:
             return await handler(request)
 
         auth_header = request.headers.get("Authorization", "")
@@ -134,7 +134,7 @@ class BinaryCacheServer:
                 status=HTTPStatus.UNAUTHORIZED, text="Malformed credentials\n"
             )
 
-        if user != self._username or passwd != self._password:
+        if user != self.username or passwd != self.password:
             return web.Response(
                 status=HTTPStatus.FORBIDDEN, text="Invalid credentials\n"
             )
@@ -143,28 +143,28 @@ class BinaryCacheServer:
 
     # ── Handlers ──────────────────────────────────────────────────────
 
-    async def _handle_cache_info(self, request: web.Request) -> web.Response:
+    async def handle_cache_info(self, request: web.Request) -> web.Response:
         lines = [
             "StoreDir: /nix/store",
             "WantMassQuery: 1",
-            f"Priority: {self._priority}",
+            f"Priority: {self.priority}",
         ]
         return web.Response(text="\n".join(lines) + "\n")
 
-    async def _handle_narinfo(self, request: web.Request) -> web.Response:
+    async def handle_narinfo(self, request: web.Request) -> web.Response:
         hash_part = request.match_info["hash"]
 
         # Resolve hash → full path
-        path = await self._resolve_path(hash_part)
+        path = await self.resolve_path(hash_part)
         if path is None:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
         # Get path info
-        info = await self._get_path_info(path)
+        info = await self.get_path_info(path)
         if info is None:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
-        narinfo = _format_narinfo(
+        narinfo = format_narinfo(
             path=info.path,
             nar_hash=info.nar_hash,
             nar_size=info.nar_size,
@@ -182,15 +182,15 @@ class BinaryCacheServer:
             content_type="text/x-nix-narinfo",
         )
 
-    async def _handle_nar(self, request: web.Request) -> web.StreamResponse:
+    async def handle_nar(self, request: web.Request) -> web.StreamResponse:
         hash_part = request.match_info["hash"]
 
-        path = await self._resolve_path(hash_part)
+        path = await self.resolve_path(hash_part)
         if path is None:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
         # Get path info for NAR size (needed for Content-Length and streaming)
-        info = await self._get_path_info(path)
+        info = await self.get_path_info(path)
         if info is None:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
@@ -204,7 +204,7 @@ class BinaryCacheServer:
         await response.prepare(request)
 
         try:
-            await self._store.nar_from_path_chunked(
+            await self.store.nar_from_path_chunked(
                 path,
                 info.nar_size,
                 response.write,
@@ -226,7 +226,7 @@ class BinaryCacheServer:
 
     # ── Path resolution helpers ───────────────────────────────────────
 
-    async def _resolve_path(self, hash_part: str) -> str | None:
+    async def resolve_path(self, hash_part: str) -> str | None:
         """Resolve a store hash to a full store path."""
         # Try SQLite first
         if self.db is not None:
@@ -236,7 +236,7 @@ class BinaryCacheServer:
 
         # Fallback: query daemon
         try:
-            async with self._store.transfer_conn() as conn:
+            async with self.store.transfer_conn() as conn:
                 resp = await conn.call(
                     QueryPathFromHashPartRequest(path=hash_part),
                     raise_on_error=True,
@@ -244,14 +244,14 @@ class BinaryCacheServer:
                 return resp.value if resp.value else None
         except Exception:
             log.debug(
-                "query_path_from_hash_part_daemon_fallback_failed",
+                "query_path_fromhash_part_daemon_fallback_failed",
                 hash_part=hash_part,
             )
             return None
 
-    async def _get_path_info(self, path: str):
+    async def get_path_info(self, path: str):
         """Get PathInfo for a store path. Returns PathInfo or None."""
-        return await self._store.query_path_info(path)
+        return await self.store.query_path_info(path)
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 
@@ -271,7 +271,7 @@ class BinaryCacheServer:
         else:
             scheme = "http"
 
-        runner = web.AppRunner(self._app)
+        runner = web.AppRunner(self.app)
         await runner.setup()
         site = web.TCPSite(runner, host, port, ssl_context=ssl_ctx)
         await site.start()

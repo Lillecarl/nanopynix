@@ -28,7 +28,7 @@ log = structlog.get_logger(__name__)
 Field = int | str
 
 
-async def _read_fields(r: NixReader) -> list[Field]:
+async def read_fields(r: NixReader) -> list[Field]:
     n = await r.read_uint64()
     fields: list[Field] = []
     for _ in range(n):
@@ -40,7 +40,7 @@ async def _read_fields(r: NixReader) -> list[Field]:
     return fields
 
 
-def _write_fields(w: NixWriter, fields: list[Field]) -> None:
+def write_fields(w: NixWriter, fields: list[Field]) -> None:
     w.write_uint64(len(fields))
     for f in fields:
         if isinstance(f, int):
@@ -88,7 +88,7 @@ class StderrStartActivity:
             level=await r.read_uint64(),
             type=await r.read_uint64(),
             text=await r.read_string(),
-            fields=await _read_fields(r),
+            fields=await read_fields(r),
             parent=await r.read_uint64(),
         )
 
@@ -98,7 +98,7 @@ class StderrStartActivity:
         w.write_uint64(self.level)
         w.write_uint64(self.type)
         w.write_string(self.text)
-        _write_fields(w, self.fields)
+        write_fields(w, self.fields)
         w.write_uint64(self.parent)
 
 
@@ -132,14 +132,14 @@ class StderrResult:
         return cls(
             act_id=await r.read_uint64(),
             result_type=await r.read_uint64(),
-            fields=await _read_fields(r),
+            fields=await read_fields(r),
         )
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
         w.write_uint64(self.act_id)
         w.write_uint64(self.result_type)
-        _write_fields(w, self.fields)
+        write_fields(w, self.fields)
 
 
 @dataclass(slots=True)

@@ -109,8 +109,8 @@ class OpRequest(ABC, Generic[Resp]):
         Streaming operations should override this method.
         """
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
-        request = await cls.from_reader(proxy._r, proxy._version)
-        return await proxy.local_store.execute(request, client=proxy._client)
+        request = await cls.from_reader(proxy.r, proxy.version)
+        return await proxy.local_store.execute(request, client=proxy.client)
 
     async def execute(
         self,
@@ -451,7 +451,7 @@ class BasicDerivation:
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     # Not part of wire protocol - set during conversion from ParsedDerivation
-    _is_dynamic: bool = field(default=False, repr=False)
+    is_dynamic: bool = field(default=False, repr=False)
 
     @property
     def requires_nix(self) -> bool:
@@ -533,7 +533,7 @@ class BasicDerivation:
         - Impure outputs
         - Text-hashed outputs without pre-computed hash (dynamic outputs)
         """
-        if self._is_dynamic:
+        if self.is_dynamic:
             return False
         for out in self.outputs:
             kind = out.kind

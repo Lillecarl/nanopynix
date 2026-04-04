@@ -606,7 +606,7 @@ def to_basic_derivation(
         builder=parsed.builder,
         args=parsed.args,
         env=parsed.env,
-        _is_dynamic=parsed.is_dynamic,
+        is_dynamic=parsed.is_dynamic,
     )
 
 

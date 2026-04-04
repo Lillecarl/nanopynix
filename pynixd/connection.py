@@ -55,28 +55,28 @@ class ClientConn:
     def __init__(self, w: NixWriter) -> None:
         self.w = w
         self.queue: asyncio.Queue[stderr.StderrMsg | None] = asyncio.Queue()
-        self._drain_task: asyncio.Task | None = None
+        self.drain_task: asyncio.Task | None = None
 
     def start(self) -> None:
         """Start the background drain task."""
-        self._drain_task = asyncio.create_task(self._drain_loop())
+        self.drain_task = asyncio.create_task(self.drain_loop())
 
     async def stop(self) -> None:
         """Stop the drain task."""
-        if self._drain_task is not None:
-            self._drain_task.cancel()
+        if self.drain_task is not None:
+            self.drain_task.cancel()
             try:
-                await self._drain_task
+                await self.drain_task
             except asyncio.CancelledError:
                 pass
-            self._drain_task = None
+            self.drain_task = None
 
     async def flush(self) -> None:
         """Wait until all queued stderr messages have been written and flushed."""
         await self.queue.join()
         await self.w.drain()
 
-    async def _drain_loop(self) -> None:
+    async def drain_loop(self) -> None:
         """Consume stderr messages from the queue and write to client."""
         while True:
             msg = await self.queue.get()
@@ -119,7 +119,7 @@ class Connection:
         self.w = w
         self.connected: bool = False
         self.dirty: bool = False
-        self._op_log: list[str] = []
+        self.op_log: list[str] = []
 
     async def __aenter__(self) -> Connection:
         return self
@@ -142,7 +142,7 @@ class Connection:
 
     async def connect(self) -> None:
         """Perform daemon protocol handshake."""
-        await self._handshake(self.r, self.w)
+        await self.handshake(self.r, self.w)
         self.connected = True
 
     async def close(self) -> None:
@@ -177,7 +177,7 @@ class Connection:
         response_type = req_cls.response_type
 
         op = Op(op_code)
-        self._op_log.append(op.name)
+        self.op_log.append(op.name)
 
         op_log(op.name).debug(
             "send_op",
@@ -240,7 +240,7 @@ class Connection:
 
     # ── Handshake ───────────────────────────────────────────────────
 
-    async def _handshake(
+    async def handshake(
         self,
         r: NixReader,
         w: NixWriter,
