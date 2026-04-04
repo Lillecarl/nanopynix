@@ -7,7 +7,6 @@ Nix-compatible binary cache, including .narinfo and .nar.xz files.
 from __future__ import annotations
 
 import json
-import logging
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -16,6 +15,7 @@ from typing import Any
 
 import aiohttp
 import pytest
+import structlog
 from conftest import (
     NIX_BIN,
     make_local_stores,
@@ -27,7 +27,7 @@ from pynixd import Server
 from pynixd.http_cache import BinaryCacheServer
 from pynixd.store import LocalSocketStore
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 @asynccontextmanager

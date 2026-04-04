@@ -16,10 +16,11 @@ Lifecycle:
 from __future__ import annotations
 
 import asyncio
-import logging
 from pathlib import Path
 from types import TracebackType
 from typing import cast
+
+import structlog
 
 from . import stderr, wire
 from .operations.base import (
@@ -34,8 +35,8 @@ from .wire import (
     NixWriter,
 )
 
-log: logging.Logger = logging.getLogger(__name__)
-stderr_log: logging.Logger = logging.getLogger("pynixd.stderr")
+log = structlog.get_logger(__name__)
+stderr_log = structlog.get_logger("pynixd.stderr")
 
 
 # ── Shared types ────────────────────────────────────────────────────
@@ -267,8 +268,7 @@ class Connection:
             self.w.write_string_set(set())  # our features (none)
             await w.drain()
             server_features = await self.r.read_string_set()
-            log.debug("Daemon features: %s", server_features)
-
+            log.debug("Daemon features:", server_features=server_features)
         self.w.write_uint64(0)  # sendCpu
         self.w.write_uint64(0)  # reserveSpace
         await w.drain()
@@ -276,8 +276,7 @@ class Connection:
         # Server conditions these on clientVersion, not negotiated version
         if server_version >= wire.proto(1, 33):
             nix_version = await self.r.read_string()
-            log.debug("Daemon nix version: %s", nix_version)
-
+            log.debug("Daemon nix version:", nix_version=nix_version)
             if server_version >= wire.proto(1, 35):
                 await self.r.read_uint64()
 

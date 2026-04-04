@@ -27,6 +27,7 @@ let
         doCheck = false;
         doInstallCheck = false;
       })
+      python.pkgs.structlog
       python.pkgs.aiohttp
       python.pkgs.pyinstrument
       python.pkgs.aiosqlite

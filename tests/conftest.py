@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import structlog
 from environs import Env
 
 from pynixd.store import LocalSocketStore, Store
@@ -38,8 +39,25 @@ def rmtree_robust(path: str | Path) -> None:
 
 logging.basicConfig(
     level=logging.DEBUG,
-    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    format="%(message)s",
 )
+
+structlog.configure(
+    processors=[
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.dev.ConsoleRenderer(),
+    ],
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
+)
+
 # Silence high-frequency per-op loggers while keeping the rest at DEBUG.
 # Use pynixd.op.{OpName} to tune individual ops.
 for _op in (
@@ -58,7 +76,7 @@ logging.getLogger("pynixd.scheduler.pass").setLevel(logging.WARNING)
 logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 logging.getLogger("pynixd.stderr").setLevel(logging.INFO)
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 env = Env()
 
@@ -73,7 +91,7 @@ NIX_BIN = env.path("NIX_BIN", Path("nix"))
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_bench_paths():
     """Ensure large benchmark artifacts are deleted before tests run."""
-    log.info("Cleaning up old benchmark paths...")
+    log.info("Cleaning up old benchmark paths")
     try:
         # The `-S` flag to path-info gives us the size, but we don't use it here.
         # We just need the paths.
@@ -85,12 +103,12 @@ def cleanup_bench_paths():
         )
         for p in result.stdout.splitlines():
             if p.strip():
-                log.info("Deleting old benchmark path: %s", p)
+                log.info("Deleting old benchmark path", path=p)
                 subprocess.run(
                     [str(NIX_BIN), "store", "delete", p], capture_output=True
                 )
     except Exception as e:
-        log.warning("Could not cleanup benchmark paths: %s", e)
+        log.warning("Could not cleanup benchmark paths", error=e)
 
 
 def get_current_system() -> str:
@@ -170,7 +188,7 @@ async def nix_build(
         "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
     )
 
-    log.debug("Building: %s", shlex.join(cmd))
+    log.debug("Building", cmd=shlex.join(cmd))
     res = await asyncio.create_subprocess_exec(
         *cmd,
         env=build_env,

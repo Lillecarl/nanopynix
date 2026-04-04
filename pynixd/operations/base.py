@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum, auto
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 
+import structlog
+
 from .. import wire
 from ..wire import NixReader, NixWriter
 
@@ -27,7 +29,7 @@ if TYPE_CHECKING:
     from ..stderr import StderrMsg
     from ..store import Store
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 class BuildResultStatus(IntEnum):
@@ -97,9 +99,7 @@ class OpRequest(ABC, Generic[Resp]):
         if "op" in cls.__dict__:
             OP_REGISTRY[cls.op] = cls
             # Each operation gets its own logger for fine-grained control
-            cls._log: logging.Logger = logging.getLogger(
-                f"pynixd.operations.{cls.__name__}"
-            )
+            cls._log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
@@ -108,6 +108,7 @@ class OpRequest(ABC, Generic[Resp]):
         Decodes the request and delegates execution to the local store.
         Streaming operations should override this method.
         """
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
         request = await cls.from_reader(proxy._r, proxy._version)
         return await proxy.local_store.execute(request, client=proxy._client)
 
@@ -157,12 +158,12 @@ class StderrBuffer:
 class OpResponse(ABC):
     """Base class for operation responses."""
 
-    _log: ClassVar[logging.Logger] = logging.getLogger(__name__)
+    _log: ClassVar = structlog.get_logger(__name__)
     stderr: StderrBuffer = field(default_factory=StderrBuffer)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        cls._log = logging.getLogger(f"pynixd.operations.{cls.__name__}")
+        cls._log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
 
     @classmethod
     @abstractmethod
@@ -651,7 +652,7 @@ class BuiltOutput:
 
 @dataclass
 class BuildResult:
-    _log: ClassVar[logging.Logger] = logging.getLogger("pynixd.operations.BuildResult")
+    _log: ClassVar = structlog.get_logger("pynixd.operations.BuildResult")
     status: BuildResultStatus = BuildResultStatus.BUILT
     error_msg: str = ""
     times_built: int = 0
@@ -739,7 +740,7 @@ class BuildResult:
 
 
 # Silence BuildResult debug logs — verbose in hot paths
-BuildResult._log.setLevel(logging.WARNING)
+logging.getLogger("pynixd.operations.BuildResult").setLevel(logging.WARNING)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

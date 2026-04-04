@@ -8,12 +8,12 @@ without overwhelming backends.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import time
 from pathlib import Path
 
 import pytest
+import structlog
 from conftest import (
     NIX_BIN,
     _run_subprocess_with_timeout,
@@ -24,7 +24,7 @@ from conftest import (
 from pynixd import Server
 from pynixd.store import LocalSocketStore
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 @pytest.mark.parallel

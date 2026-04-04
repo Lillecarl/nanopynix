@@ -8,9 +8,10 @@ for each client. Used for testing (avoids SSH) and local daemon mode.
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Mapping
 from pathlib import Path
+
+import structlog
 
 from .build_queue import BuildQueue
 from .proxy import DaemonProxy
@@ -18,7 +19,7 @@ from .scheduler import Scheduler
 from .store import Store
 from .wire import UnixNixReader, UnixNixWriter
 
-log: logging.Logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 async def start_unix_server(
@@ -46,8 +47,7 @@ async def start_unix_server(
         writer: asyncio.StreamWriter,
     ) -> None:
         peer = writer.get_extra_info("peername") or "unknown"
-        log.info("Unix client connected: %s", peer)
-
+        log.info("Unix client connected:", peer=peer)
         try:
             proxy = DaemonProxy(
                 UnixNixReader(reader),
@@ -67,5 +67,5 @@ async def start_unix_server(
         socket_path.unlink()
 
     server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
-    log.info("pynixd Unix server listening on %s", socket_path)
+    log.info("pynixd Unix server listening on", socket_path=socket_path)
     return server

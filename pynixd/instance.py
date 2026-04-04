@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -11,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import asyncssh
+import structlog
 
 if TYPE_CHECKING:
     from aiohttp import web
@@ -24,7 +24,7 @@ from .ssh_server import start_ssh_server
 from .store import Store
 from .unix_server import start_unix_server
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 class NixImplementation(Enum):
@@ -167,8 +167,7 @@ class Server:
             try:
                 await store.sync_paths()
             except Exception:
-                log.exception("Failed to sync paths for store %s", store.id)
-
+                log.exception("Failed to sync paths for store", id=store.id)
         # Start background services
         scheduler_task = asyncio.create_task(self.scheduler.start())
         self.background_tasks.append(scheduler_task)

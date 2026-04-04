@@ -5,10 +5,11 @@ Build planner for decomposing high-level build requests into derivations.
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import structlog
 
 from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file, to_basic_derivation
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 async def plan_and_execute_build_paths(
@@ -139,7 +140,7 @@ async def decompose_build_paths(
         try:
             parsed = dp.to_derivation(store_path)
         except FileNotFoundError:
-            log.warning("Cannot read drv %s for decomposition", dp.drv_path)
+            log.warning("Cannot read drv for decomposition", drv_path=dp.drv_path)
             continue
 
         basic = to_basic_derivation(parsed, store_path)
@@ -184,8 +185,11 @@ async def enqueue_build_derivation(
         set(request.derivation.input_srcs),
         platform=request.derivation.platform,
     )
-    log.info("Build %d enqueued (BuildDerivation %s)", build_id, request.drv_path)
-
+    log.info(
+        "Build {} enqueued (BuildDerivation {})",
+        build_id=build_id,
+        drv_path=request.drv_path,
+    )
     scheduler_trigger()
 
     return future
@@ -200,6 +204,8 @@ def enrich_derivation(request: BuildDerivationRequest, store: Store) -> None:
         parsed = read_drv_file(store_path, request.drv_path)
         request.derivation._is_dynamic = parsed.is_dynamic
     except FileNotFoundError:
-        log.debug("Cannot enrich %s: .drv not in local store", request.drv_path)
+        log.debug(
+            "Cannot enrich {}: .drv not in local store", drv_path=request.drv_path
+        )
     except Exception:
-        log.debug("Cannot enrich %s", request.drv_path, exc_info=True)
+        log.debug("Cannot enrich", drv_path=request.drv_path, exc_info=True)

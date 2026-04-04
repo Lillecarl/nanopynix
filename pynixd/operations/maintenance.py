@@ -10,6 +10,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
+import structlog
+
 from .. import wire
 from ..protocol import Op
 
@@ -25,7 +27,7 @@ from .base import (
     Uint64Response,
 )
 
-log: logging.Logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # Silence SetOptions by default — it's extremely verbose
 logging.getLogger("pynixd.operations.SetOptionsRequest").setLevel(logging.WARNING)

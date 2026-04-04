@@ -11,7 +11,6 @@ before starting the build thread.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import subprocess
 import tempfile
@@ -21,9 +20,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import structlog
 from environs import Env
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 env = Env()
 

@@ -16,17 +16,17 @@ Supports optional basic auth and TLS.
 from __future__ import annotations
 
 import base64
-import logging
 import ssl
 from http import HTTPStatus
 
+import structlog
 from aiohttp import web
 
 from .local_store_db import LocalStoreDB
 from .operations.queries import QueryPathFromHashPartRequest
 from .store import Store
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _STORE_PREFIX = "/nix/store/"
 
@@ -210,7 +210,7 @@ class BinaryCacheServer:
                 response.write,
             )
         except Exception:
-            log.exception("nar_from_path streaming failed for %s", path)
+            log.exception("nar_from_path streaming failed for", path=path)
             # Response already started — can't change status code.
             # We close the connection abruptly to signal failure.
             # aiohttp: force-close the underlying transport.
@@ -244,7 +244,8 @@ class BinaryCacheServer:
                 return resp.value if resp.value else None
         except Exception:
             log.debug(
-                "query_path_from_hash_part daemon fallback failed for %s", hash_part
+                "query_path_from_hash_part daemon fallback failed for {}",
+                hash_part=hash_part,
             )
             return None
 
@@ -279,6 +280,9 @@ class BinaryCacheServer:
         # types-aiohttp don't declare sockets on AbstractServer (added in Python 3.7)
         bound_port = site._server.sockets[0].getsockname()[1]  # type: ignore[reportAttributeAccessIssue]
         log.info(
-            "Binary cache server listening on %s://%s:%d", scheme, host, bound_port
+            "Binary cache server listening on {}://{}:{}",
+            scheme=scheme,
+            host=host,
+            bound_port=bound_port,
         )
         return runner, bound_port

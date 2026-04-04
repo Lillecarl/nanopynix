@@ -7,13 +7,13 @@ Uses LocalSubprocessStore as destination — fresh empty store.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
+import structlog
 from conftest import NIX_BIN
 
 from pynixd.operations.base import PathInfo
@@ -28,7 +28,7 @@ from pynixd.store import (
 )
 from pynixd.wire import UnixNixReader, UnixNixWriter
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 DEST_STORE = Path("/tmp/pynixd-test-nar-dst")
 

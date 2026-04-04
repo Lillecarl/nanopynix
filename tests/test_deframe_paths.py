@@ -8,12 +8,12 @@ are correctly extracted and returned.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
+import structlog
 from conftest import NIX_BIN
 
 from pynixd import wire
@@ -26,7 +26,7 @@ from pynixd.wire import (
     UnixNixWriter,
 )
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 DEST_STORE = Path("/tmp/pynixd-test-deframe-dst")
 

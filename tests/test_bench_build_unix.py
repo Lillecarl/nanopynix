@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import pyinstrument
 import pytest
+import structlog
 from conftest import (
     LIX_BIN,
     NIX_BIN,
@@ -35,8 +36,8 @@ from pynixd.store import LocalSocketStore, Store
 if TYPE_CHECKING:
     pass
 
-log = logging.getLogger(__name__)
-nixclient_log = logging.getLogger("nixclient")
+log = structlog.get_logger(__name__)
+nixclient_log = structlog.get_logger("nixclient")
 
 # Silence aiosqlite verbose logging
 aiosqlite_logger = logging.getLogger("aiosqlite")

@@ -14,13 +14,13 @@ each pass (stateless).
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum, auto
 
 import asyncssh
+import structlog
 from environs import Env
 
 from .build_queue import BuildQueue, QueuedBuild
@@ -32,7 +32,7 @@ from .operations.builds import (
 )
 from .store import Store
 
-log: logging.Logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 env = Env()
 
@@ -321,23 +321,21 @@ class Scheduler:
             slots,
         )
         if unhealthy:
-            log.warning("Stores in cooldown: %s", unhealthy)
-
+            log.warning("Stores in cooldown:", unhealthy=unhealthy)
         pressure = {
             s.id: f"{s.pressure:.1f}"
             for s in self._stores.values()
             if s.pressure is not None
         }
         if pressure:
-            log.debug("Backend pressure: %s", pressure)
-
+            log.debug("Backend pressure:", pressure=pressure)
         memory = {
             s.id: f"{s.meminfo.available_mb}MB/{s.meminfo.total_mb}MB"
             for s in self._stores.values()
             if s.meminfo is not None
         }
         if memory:
-            log.debug("Backend memory: %s", memory)
+            log.debug("Backend memory:", memory=memory)
 
     # ── Build lifecycle ─────────────────────────────────────────────
 
@@ -404,11 +402,11 @@ class Scheduler:
             # Stop proactive transfer gracefully before acquiring connections
             await build.stop_transfer()
 
-            log.debug("Build %d: sending inputs to %s", build.id, store.id)
+            log.debug("Build sending inputs", build_id=build.id, store_id=store.id)
             # Transfer required inputs
             await self._ensure_worker_has_inputs(build, store)
 
-            log.debug("Build %d: executing on %s", build.id, store.id)
+            log.debug("Build executing", build_id=build.id, store_id=store.id)
             assert isinstance(build.request, BuildDerivationRequest), (
                 f"Build {build.id}: expected BuildDerivationRequest, "
                 f"got {type(build.request).__name__}"
@@ -438,10 +436,9 @@ class Scheduler:
             if response.result.status == 0:
                 store.record_success()
 
-            log.debug("Build %d: completing", build.id)
+            log.debug("Build : completing", id=build.id)
             await self._queue.complete(build.id, response)
-            log.debug("Build %d completed", build.id)
-
+            log.debug("Build completed", id=build.id)
         except (
             TimeoutError,
             InfrastructureError,
@@ -456,7 +453,9 @@ class Scheduler:
                 await self._retry_build(build, store)
             else:
                 log.exception(
-                    "Build %d failed on %s (no retries left)", build.id, store.id
+                    "Build failed on store (no retries left)",
+                    build_id=build.id,
+                    store_id=store.id,
                 )
                 await self._queue.fail(
                     build.id,
@@ -465,7 +464,7 @@ class Scheduler:
                 )
         except Exception as e:
             # Programming error — don't retry, don't blame the store
-            log.exception("Build %d: unexpected error", build.id)
+            log.exception("Build : unexpected error", id=build.id)
             await self._queue.fail(build.id, f"Internal error: {type(e).__name__}: {e}")
 
         finally:
@@ -502,7 +501,7 @@ class Scheduler:
                     if p:
                         output_paths.append(p)
                     else:
-                        log.warning("Built output %s has no path", name)
+                        log.warning("Built output has no path", name=name)
             else:
                 # Input-addressed: paths known from derivation
                 output_paths = [
@@ -517,8 +516,7 @@ class Scheduler:
             try:
                 await self._pull_paths(store, output_paths)
             except Exception:
-                log.exception("Failed to pull outputs for build %d", build.id)
-
+                log.exception("Failed to pull outputs for build", id=build.id)
         return response
 
     # ── Proactive transfer ──────────────────────────────────────────
@@ -717,19 +715,21 @@ class Scheduler:
         if not paths:
             return
 
-        log.info("Pulling %d paths from %s", len(paths), store.id)
+        log.info("Pulling paths", count=len(paths), store_id=store.id)
 
         # Query PathInfo for all paths concurrently
         async def query_one(path: str) -> tuple[str, PathInfo] | None:
             try:
                 path_info = await store.query_path_info(path)
                 if path_info is None:
-                    log.warning("Path %s not valid on store %s", path, store.id)
+                    log.warning("Path not valid on store", path=path, store_id=store.id)
                     return None
                 path_info.path = path
                 return (path, path_info)
             except Exception:
-                log.exception("Failed to query PathInfo for %s on %s", path, store.id)
+                log.exception(
+                    "Failed to query PathInfo for {} on {}", path=path, id=store.id
+                )
                 return None
 
         results = await asyncio.gather(*[query_one(path) for path in paths])
@@ -761,7 +761,7 @@ class Scheduler:
             for path, _ in to_pull:
                 self._local_store.add_known_path(path)
                 store.add_known_path(path)
-            log.debug("Pulled %d paths into local store", len(to_pull))
+            log.debug("Pulled paths into local store", count=len(to_pull))
         except Exception:
             log.exception(
                 "Failed to pull %d paths from %s",

@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import glob
 import json
-import logging
 import random
 import subprocess
 
 import pytest
+import structlog
 
 from pynixd.drv_parser import parse_drv
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # How many .drv files to compare against nix derivation show
 JSON_SAMPLE_SIZE = 200

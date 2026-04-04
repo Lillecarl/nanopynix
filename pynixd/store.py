@@ -16,7 +16,6 @@ Store types:
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import time
 from abc import ABC, abstractmethod
@@ -25,6 +24,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 
 import asyncssh
+import structlog
 from environs import Env
 
 from . import stderr, wire
@@ -66,8 +66,8 @@ from .wire import (
     UnixNixWriter,
 )
 
-log: logging.Logger = logging.getLogger(__name__)
-pool_log: logging.Logger = logging.getLogger(f"{__name__}.pool")
+log = structlog.get_logger(__name__)
+pool_log = structlog.get_logger(f"{__name__}.pool")
 
 env = Env()
 
@@ -135,9 +135,9 @@ class Store(ABC):
         """Reset circuit breaker on successful operation."""
         if self._consecutive_failures > 0:
             log.info(
-                "Store %s: recovered (was %d consecutive failures)",
-                self.id,
-                self._consecutive_failures,
+                "Store recovered",
+                store_id=self.id,
+                consecutive_failures=self._consecutive_failures,
             )
         self._consecutive_failures = 0
         self._cooldown_until = 0.0
@@ -152,10 +152,10 @@ class Store(ABC):
             )
             self._cooldown_until = time.monotonic() + cooldown
             log.warning(
-                "Store %s: %d consecutive failures, cooling down %.0fs",
-                self.id,
-                self._consecutive_failures,
-                cooldown,
+                "Store cooling down",
+                store_id=self.id,
+                consecutive_failures=self._consecutive_failures,
+                cooldown=cooldown,
             )
 
     # ── Known paths tracking ────────────────────────────────────────
@@ -553,9 +553,9 @@ class Store(ABC):
             for conn, returned_at in self._idle:
                 if now - returned_at >= self._idle_ttl:
                     pool_log.debug(
-                        "Store %s: closing expired idle %s",
-                        self.id,
-                        conn.id,
+                        "Store closing expired idle",
+                        store_id=self.id,
+                        conn_id=conn.id,
                     )
                     if conn in self._all:
                         self._all.remove(conn)
@@ -579,9 +579,9 @@ class Store(ABC):
             candidate, returned_at = self._idle.pop()
             if now - returned_at >= self._idle_ttl:
                 pool_log.debug(
-                    "Store %s: discarding expired %s",
-                    self.id,
-                    candidate.id,
+                    "Store discarding expired",
+                    store_id=self.id,
+                    conn_id=candidate.id,
                 )
                 if candidate in self._all:
                     self._all.remove(candidate)
@@ -592,10 +592,10 @@ class Store(ABC):
                 continue
             if candidate.dirty or await self._reader_is_dirty(candidate):
                 log.warning(
-                    "Store %s: discarding dirty connection %s (op log: %s)",
-                    self.id,
-                    candidate.id,
-                    " -> ".join(candidate._op_log[-10:]) or "(empty)",
+                    "Store discarding dirty connection",
+                    store_id=self.id,
+                    conn_id=candidate.id,
+                    op_log=" -> ".join(candidate._op_log[-10:]) or "(empty)",
                 )
                 if candidate in self._all:
                     self._all.remove(candidate)
@@ -605,9 +605,9 @@ class Store(ABC):
                     pass
                 continue
             pool_log.debug(
-                "Store %s: reusing connection %s",
-                self.id,
-                candidate.id,
+                "Store reusing connection",
+                store_id=self.id,
+                conn_id=candidate.id,
             )
             return candidate
 
@@ -618,15 +618,15 @@ class Store(ABC):
         if self._conn_counter == 1:
             self.version = conn.version
             log.info(
-                "Store %s: protocol version %s",
-                self.id,
-                wire.proto_str(self.version),
+                "Store protocol version",
+                store_id=self.id,
+                version=wire.proto_str(self.version),
             )
         pool_log.debug(
-            "Store %s: created connection %s [%s]",
-            self.id,
-            conn.id,
-            self.pool_stats,
+            "Store created connection",
+            store_id=self.id,
+            conn_id=conn.id,
+            pool_stats=self.pool_stats,
         )
         return conn
 
@@ -644,10 +644,10 @@ class Store(ABC):
             kind = "build" if semaphore is self._build_semaphore else "transfer"
             limit = self._max_builds if kind == "build" else self._max_transfers
             pool_log.info(
-                "Store %s: all %d %s slots in use, waiting",
-                self.id,
-                limit,
-                kind,
+                "Store all slots in use",
+                store_id=self.id,
+                limit=limit,
+                kind=kind,
             )
         await semaphore.acquire()
         conn: Connection | None = None

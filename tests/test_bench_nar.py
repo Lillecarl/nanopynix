@@ -23,7 +23,6 @@ Set PYNIXD_BENCH_CHUNKS to a comma-separated list of sizes in KB
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import shutil
 import subprocess
@@ -34,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import structlog
 from conftest import NIX_BIN
 from environs import Env
 
@@ -47,7 +47,7 @@ from pynixd.store import (
     Store,
 )
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 env = Env()
 

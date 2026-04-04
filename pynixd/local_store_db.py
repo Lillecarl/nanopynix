@@ -18,12 +18,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 import time
 from pathlib import Path
 
 import aiosqlite
+import structlog
 
 from .operations.base import PathInfo, StringSetResponse
 from .operations.queries import (
@@ -31,7 +31,7 @@ from .operations.queries import (
     QueryPathInfoResponse,
 )
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # ── SQL ───────────────────────────────────────────────────────────────
 
@@ -202,7 +202,7 @@ class LocalStoreDB:
                 row = await cursor.fetchone()
             return IsValidPathResponse(valid=row is not None)
         except Exception:
-            log.debug("is_valid_path query failed for %s", path, exc_info=True)
+            log.debug("is_valid_path query failed", path=path, exc_info=True)
             return None
 
     async def query_path_info(self, path: str) -> QueryPathInfoResponse | None:
@@ -237,7 +237,7 @@ class LocalStoreDB:
                 ),
             )
         except Exception:
-            log.debug("query_path_info failed for %s", path, exc_info=True)
+            log.debug("query_path_info failed for", path=path, exc_info=True)
             return None
 
     async def query_valid_paths(self, paths: set[str]) -> StringSetResponse | None:
@@ -295,7 +295,7 @@ class LocalStoreDB:
             return row[0] if row else None
         except Exception:
             log.debug(
-                "query_path_from_hash_part failed for %s", hash_part, exc_info=True
+                "query_path_from_hash_part failed", hash_part=hash_part, exc_info=True
             )
             return None
 
@@ -374,7 +374,7 @@ class LocalStoreDB:
     def mark_path(self, path: str) -> None:
         """Queue a path for registration time update."""
         if self._db is not None and not self._read_only:
-            log.debug("DB: mark_path %s", path)
+            log.debug("DB: mark_path", path=path)
             self._pending_regtime.add(path)
 
     def mark_paths(self, paths: set[str]) -> None:
@@ -451,6 +451,6 @@ def _resolve_db_path(store_path: Path) -> Path | None:
         db_path = store_path / "nix" / "var" / "nix" / "db" / "db.sqlite"
 
     if not db_path.exists():
-        log.warning("Nix DB not found at %s, direct queries disabled", db_path)
+        log.warning("Nix DB not found at , direct queries disabled", db_path=db_path)
         return None
     return db_path

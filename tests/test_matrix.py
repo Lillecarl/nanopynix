@@ -11,12 +11,12 @@ Each test builds a single simple derivation (test.nix .simple).
 
 from __future__ import annotations
 
-import logging
 import os
 import shlex
 from pathlib import Path
 
 import pytest
+import structlog
 from conftest import (
     LIX_BIN,
     NIX_BIN,
@@ -32,7 +32,7 @@ from pynixd.store import (
     Store,
 )
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 env = Env()
 

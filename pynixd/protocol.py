@@ -3,19 +3,20 @@ Nix daemon protocol types and operation codes.
 Protocol versions 1.32+ are supported (negotiated per connection).
 """
 
-import logging
 from enum import IntEnum
 from functools import cache
 
+import structlog
+
 
 @cache
-def op_log(op_name: str) -> logging.Logger:
+def op_log(op_name: str):
     """Per-op logger: pynixd.op.{OpName}.
 
     Allows silencing noisy ops individually, e.g.:
         logging.getLogger("pynixd.op.QueryPathInfo").setLevel(logging.WARNING)
     """
-    return logging.getLogger(f"pynixd.op.{op_name}")
+    return structlog.get_logger(f"pynixd.op.{op_name}")
 
 
 class Op(IntEnum):

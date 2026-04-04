@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import shlex
 import subprocess
@@ -11,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
+import structlog
 from conftest import (
     NIX_BIN,
     _run_subprocess_with_timeout,
@@ -19,7 +19,7 @@ from conftest import (
 from pynixd.instance import PynixdConfig, Server
 from pynixd.store import LocalSocketStore, Store
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 def _nix_build_unix(

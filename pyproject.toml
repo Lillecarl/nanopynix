@@ -13,6 +13,7 @@ dependencies = [
     "aiosqlite",
     "environs",
     "pyinstrument",
+    "structlog",
 ]
 
 [project.optional-dependencies]

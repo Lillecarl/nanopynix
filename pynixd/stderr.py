@@ -11,16 +11,17 @@ making _forward_stderr and _drain_stderr trivial consumers.
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import ClassVar
+
+import structlog
 
 from . import wire
 from .exceptions import BackendError
 from .wire import NixReader, NixWriter
 
-log: logging.Logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # ── Field type (used in StartActivity and Result) ─────────────────
 
@@ -242,7 +243,7 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
         parser = _PARSERS.get(msg_type)
         if parser is None:
             unknown_streak += 1
-            log.warning("stderr: unknown msg_type 0x%x", msg_type)
+            log.warning("stderr: unknown msg_type 0x", msg_type=msg_type)
             if unknown_streak >= _MAX_UNKNOWN_MSG_TYPES:
                 raise ConnectionError(
                     f"Protocol desync: {unknown_streak} consecutive "
@@ -266,7 +267,10 @@ async def drain(
     async for msg in read_stream(r):
         if isinstance(msg, StderrError):
             log.warning(
-                "store=%s daemon error: [%s] %s", conn_id, msg.error_type, msg.msg
+                "store={} daemon error: [{}] {}",
+                conn_id=conn_id,
+                error_type=msg.error_type,
+                msg=msg.msg,
             )
             last_error = msg
             if raise_on_error:

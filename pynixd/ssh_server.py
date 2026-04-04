@@ -7,11 +7,11 @@ for each `nix-daemon --stdio` exec request.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from pathlib import Path
 
 import asyncssh
+import structlog
 
 from . import wire
 from .build_queue import BuildQueue
@@ -20,7 +20,7 @@ from .scheduler import Scheduler
 from .store import Store
 from .wire import SSHNixReader, SSHNixWriter
 
-log: logging.Logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 class _NixSSHServer(asyncssh.SSHServer):
@@ -30,14 +30,16 @@ class _NixSSHServer(asyncssh.SSHServer):
         return True
 
     def validate_password(self, username: str, password: str) -> bool:
-        log.info("Password auth: user=%s", username)
+        log.info("Password auth: user=", username=username)
         return True
 
     def public_key_auth_supported(self) -> bool:
         return True
 
     def validate_public_key(self, username: str, key: asyncssh.SSHKey) -> bool:
-        log.info("Pubkey auth: user=%s key=%s", username, key.get_fingerprint())
+        log.info(
+            "Pubkey auth: user= key=", username=username, arg=key.get_fingerprint()
+        )
         return True
 
 
@@ -67,19 +69,18 @@ async def start_ssh_server(
     # Load or generate host key
     if host_key_path and host_key_path.exists():
         host_key: asyncssh.SSHKey = asyncssh.read_private_key(str(host_key_path))
-        log.info("Loaded host key from %s", host_key_path)
+        log.info("Loaded host key from", host_key_path=host_key_path)
     else:
         host_key = asyncssh.generate_private_key("ssh-rsa", key_size=4096)
         if host_key_path:
             host_key.write_private_key(str(host_key_path))
-            log.info("Generated and saved host key to %s", host_key_path)
+            log.info("Generated and saved host key to", host_key_path=host_key_path)
         else:
             log.info("Generated ephemeral host key")
 
     async def handle_client(process: asyncssh.SSHServerProcess) -> None:
         cmd: str | None = process.command
-        log.info("Client exec: %s", cmd)
-
+        log.info("Client exec:", cmd=cmd)
         if not cmd or ("nix-daemon" not in cmd and "nix daemon" not in cmd):
             process.stderr.write(b"pynixd: unsupported command\n")
             process.exit(1)
@@ -114,5 +115,5 @@ async def start_ssh_server(
         encoding=None,
     )
     bound_port = server.get_port()
-    log.info("pynixd SSH server listening on %s:%d", host, bound_port)
+    log.info("pynixd SSH server listening", host=host, port=bound_port)
     return server

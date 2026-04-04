@@ -12,16 +12,16 @@ Separate lifetimes for local and builder stores:
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Mapping
 
+import structlog
 from environs import Env
 
 from .local_store_db import LocalStoreDB
 from .operations.maintenance import CollectGarbageResponse
 from .store import Store
 
-log: logging.Logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 env = Env()
 
@@ -116,7 +116,7 @@ class GarbageCollector:
         total_freed = 0
         for store, result in zip(stores_for_tasks, results):
             if isinstance(result, BaseException):
-                log.warning("GC on %s failed: %s", store.id, result)
+                log.warning("GC failed", store_id=store.id, error=result)
             elif isinstance(result, CollectGarbageResponse):
                 total_deleted += len(result.paths_deleted)
                 total_freed += result.bytes_freed

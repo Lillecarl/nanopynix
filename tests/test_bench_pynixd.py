@@ -14,7 +14,6 @@ Concurrency levels test how well pynixd handles parallel clients/channels.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import subprocess
 import tempfile
@@ -26,6 +25,7 @@ from pathlib import Path
 import aiohttp
 import pyinstrument
 import pytest
+import structlog
 from conftest import (
     NIX_BIN,
     _run_subprocess_with_timeout,
@@ -38,7 +38,7 @@ from pynixd.http_cache import BinaryCacheServer
 from pynixd.operations.base import PathInfo
 from pynixd.store import LocalSocketStore, SSHSubprocessStore, Store, get_current_system
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 env = Env()
 

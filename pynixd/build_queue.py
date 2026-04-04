@@ -10,17 +10,18 @@ from __future__ import annotations
 
 import asyncio
 import heapq
-import logging
 import time
 from dataclasses import dataclass, field
 from typing import Self
+
+import structlog
 
 from .connection import ClientConn
 from .operations.base import BuildResult, BuildResultStatus
 from .operations.builds import BuildDerivationRequest, BuildDerivationResponse
 from .protocol import Op
 
-log: logging.Logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -181,10 +182,7 @@ class BuildQueue:
             if key in self._by_key:
                 existing = self._by_key[key]
                 if not existing.is_done:
-                    log.debug(
-                        "Build deduped onto existing build ID %d",
-                        existing.id,
-                    )
+                    log.debug("Build deduped onto existing build ID", id=existing.id)
                     return existing.id, existing.future
                 # else: done, create new entry
 
@@ -234,7 +232,7 @@ class BuildQueue:
                 if b.id == build_id:
                     b.finished_at = time.monotonic()
                     b.future.set_result(response)
-                    log.info("Build %d completed", build_id)
+                    log.info("Build completed", build_id=build_id)
                     return b.client
         raise ValueError(f"Build {build_id} not found")
 
@@ -253,7 +251,9 @@ class BuildQueue:
                         ),
                     )
                     b.future.set_result(response)
-                    log.info("Build %d failed: %s", build_id, error_msg)
+                    log.info(
+                        "Build {} failed: {}", build_id=build_id, error_msg=error_msg
+                    )
                     return b.client
         raise ValueError(f"Build {build_id} not found")
 

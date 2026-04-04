@@ -7,10 +7,10 @@ and dispatches them to request type handle() classmethods.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 
 import asyncssh
+import structlog
 
 from . import wire
 from .build_queue import BuildQueue
@@ -26,7 +26,7 @@ from .stderr import StderrError
 from .store import Store
 from .wire import NixReader, NixWriter
 
-log: logging.Logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 NIX_VERSION: str = "pynixd-0.1.0"
 
@@ -95,7 +95,7 @@ class DaemonProxy:
         # Feature negotiation (1.38+) — before CPU/reserveSpace
         if self._version >= wire.proto(1, 38):
             client_features = await self._r.read_string_set()
-            log.debug("Client features: %s", client_features)
+            log.debug("Client features", client_features=client_features)
             self._w.write_string_set(set())  # our features (none)
 
         if await self._r.read_uint64():  # sendCpu
@@ -124,9 +124,9 @@ class DaemonProxy:
 
             try:
                 op = Op(op_num)
-                op_log(op.name).debug("recvOp: %s (%d)", op.name, op_num)
+                op_log(op.name).debug("recvOp", op=op.name, op_num=op_num)
             except ValueError:
-                log.warning("Unknown op: %d", op_num)
+                log.warning("Unknown op:", op_num=op_num)
                 await self._send_error(f"Unsupported operation: {op_num}")
                 continue
 
@@ -142,11 +142,11 @@ class DaemonProxy:
                     await response.to_writer(buf, self._version)
                     self._w.write(buf.getvalue())
                     await self._w.drain()
-                    op_log(op.name).debug("sendOp: %s - done", op.name)
+                    op_log(op.name).debug("sendOp", op=op.name)
                 # else: already handled (streaming, error, etc.)
 
             except Exception:
-                log.exception("Error handling op %s", op.name)
+                log.exception("Error handling op", name=op.name)
                 await self._client.flush()
                 await self._send_error(f"Internal error handling {op.name}")
 
@@ -156,7 +156,7 @@ class DaemonProxy:
         """Route an operation to its request type's handle method."""
         req_cls = OP_REGISTRY.get(op.value)
         if req_cls is None:
-            log.warning("Unhandled op: %s (%d)", op.name, op.value)
+            log.warning("Unhandled op", op=op.name, op_value=op.value)
             await self._send_error(f"Unhandled operation: {op.name}")
             return None
 

@@ -37,6 +37,7 @@ import json
 import logging
 from pathlib import Path
 
+import structlog
 from environs import Env
 
 from .instance import PynixdConfig, Server
@@ -47,6 +48,9 @@ from .store import (
     SSHSubprocessStore,
     Store,
 )
+
+env = Env()
+log = structlog.get_logger(__name__)
 
 env = Env()
 
@@ -115,10 +119,9 @@ def _load_backends_from_file(path: Path) -> dict[str, Store]:
 async def _async_main() -> None:
     dev_mode = env.int("PYNIXD_DEV", 0)
     stores: dict[str, Store] = {}
-    log_main: logging.Logger = logging.getLogger("pynixd")
 
     if dev_mode > 0:
-        log_main.info("Development mode: %d local builders", dev_mode)
+        log.info("dev_mode", count=dev_mode)
 
         for i in range(dev_mode):
             store = LocalSubprocessStore(
@@ -138,14 +141,14 @@ async def _async_main() -> None:
         if backend_file:
             if not backend_file.exists():
                 raise FileNotFoundError(f"Backend file not found: {backend_file}")
-            log_main.info("Loading stores from %s", backend_file)
+            log.info("loading_backends", path=str(backend_file))
             stores = _load_backends_from_file(backend_file)
         else:
             raise ValueError("PYNIXD_BACKEND_FILE is required in non-dev mode")
 
         if "local" in stores:
             local_store = stores.pop("local")
-            log_main.info("Using 'local' from backend file as local store")
+            log.info("using_local_from_backend")
         else:
             local_store = LocalSocketStore(id="local", store_path=Path("/"))
 
@@ -176,11 +179,26 @@ async def _async_main() -> None:
 
 def main() -> None:
     log_level_str = env.str("PYNIXD_LOG_LEVEL", "WARNING").upper()
-    level = getattr(logging, log_level_str, logging.WARNING)
 
     logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+        level=log_level_str,
+        format="%(message)s",
+    )
+
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer(),
+        ],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
     )
 
     try:
