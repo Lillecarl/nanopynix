@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import subprocess
 import tempfile
 import time
@@ -34,7 +33,7 @@ from pathlib import Path
 
 import pytest
 import structlog
-from conftest import NIX_BIN
+from conftest import NIX_BIN, rmtree_robust
 from environs import Env
 
 from pynixd import wire
@@ -153,7 +152,7 @@ async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
 
 @pytest.fixture
 async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
-    shutil.rmtree(BENCH_DST, ignore_errors=True)
+    rmtree_robust(BENCH_DST)
     os.makedirs(BENCH_DST, exist_ok=True)
     s = LocalSubprocessStore(
         store_path=BENCH_DST,
@@ -235,6 +234,7 @@ def _set_chunk_size(chunk_kb: int) -> int:
 
 @pytest.mark.timeout(600)
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
+@pytest.mark.bench
 async def test_big_nar_copy_paths(
     request: pytest.FixtureRequest,
     bench_store: Store,
@@ -260,6 +260,7 @@ async def test_big_nar_copy_paths(
 
 @pytest.mark.timeout(600)
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
+@pytest.mark.bench
 async def test_big_nar_pipe_nar_from(
     request: pytest.FixtureRequest,
     bench_store: Store,
@@ -288,6 +289,7 @@ async def test_big_nar_pipe_nar_from(
 
 @pytest.mark.timeout(600)
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
+@pytest.mark.bench
 async def test_small_nars_copy_paths(
     request: pytest.FixtureRequest,
     bench_store: Store,
@@ -318,6 +320,7 @@ async def test_small_nars_copy_paths(
 @pytest.mark.timeout(600)
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
+@pytest.mark.bench
 async def test_small_nars_pipe_nar_from(
     request: pytest.FixtureRequest,
     bench_store: Store,
@@ -363,6 +366,7 @@ async def test_small_nars_pipe_nar_from(
 
 
 @pytest.mark.timeout(300)
+@pytest.mark.bench
 async def test_serve_big_nar(
     request: pytest.FixtureRequest,
     bench_store: Store,
@@ -381,6 +385,7 @@ async def test_serve_big_nar(
 
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
+@pytest.mark.bench
 async def test_serve_small_nars(
     request: pytest.FixtureRequest,
     bench_store: Store,

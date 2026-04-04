@@ -135,7 +135,7 @@ class Store(ABC):
         """Reset circuit breaker on successful operation."""
         if self._consecutive_failures > 0:
             log.info(
-                "Store recovered",
+                "store_recovered",
                 store_id=self.id,
                 consecutive_failures=self._consecutive_failures,
             )
@@ -152,7 +152,7 @@ class Store(ABC):
             )
             self._cooldown_until = time.monotonic() + cooldown
             log.warning(
-                "Store cooling down",
+                "store_cooldown",
                 store_id=self.id,
                 consecutive_failures=self._consecutive_failures,
                 cooldown=cooldown,
@@ -475,11 +475,11 @@ class Store(ABC):
             async with self.transfer_conn() as conn:
                 resp = await conn.call(QueryAllValidPathsRequest())
                 self._known_paths = resp.paths
-            log.info("Store %s: %d known paths", self.id, len(self._known_paths))
-        except Exception:
-            log.warning(
-                "Store %s: sync_paths failed, starting with empty known paths", self.id
+            log.info(
+                "sync_paths_complete", store_id=self.id, count=len(self._known_paths)
             )
+        except Exception:
+            log.warning("sync_paths_failed", store_id=self.id)
             self._known_paths = set()
 
     @property
@@ -509,7 +509,7 @@ class Store(ABC):
             self._all.append(conn)
             self._idle.append((conn, now))
         self._start_sweep()
-        log.info("Store %s: warmed pool with %d connections", self.id, n)
+        log.info("pool_warmed", store_id=self.id, connections=n)
 
     @property
     def max_builds(self) -> int:
@@ -553,7 +553,7 @@ class Store(ABC):
             for conn, returned_at in self._idle:
                 if now - returned_at >= self._idle_ttl:
                     pool_log.debug(
-                        "Store closing expired idle",
+                        "pool_closing_expired_idle",
                         store_id=self.id,
                         conn_id=conn.id,
                     )
@@ -579,7 +579,7 @@ class Store(ABC):
             candidate, returned_at = self._idle.pop()
             if now - returned_at >= self._idle_ttl:
                 pool_log.debug(
-                    "Store discarding expired",
+                    "pool_discarding_expired",
                     store_id=self.id,
                     conn_id=candidate.id,
                 )
@@ -592,7 +592,7 @@ class Store(ABC):
                 continue
             if candidate.dirty or await self._reader_is_dirty(candidate):
                 log.warning(
-                    "Store discarding dirty connection",
+                    "pool_discarding_dirty_conn",
                     store_id=self.id,
                     conn_id=candidate.id,
                     op_log=" -> ".join(candidate._op_log[-10:]) or "(empty)",
@@ -605,7 +605,7 @@ class Store(ABC):
                     pass
                 continue
             pool_log.debug(
-                "Store reusing connection",
+                "pool_reusing_conn",
                 store_id=self.id,
                 conn_id=candidate.id,
             )
@@ -618,12 +618,12 @@ class Store(ABC):
         if self._conn_counter == 1:
             self.version = conn.version
             log.info(
-                "Store protocol version",
+                "store_protocol_version",
                 store_id=self.id,
                 version=wire.proto_str(self.version),
             )
         pool_log.debug(
-            "Store created connection",
+            "pool_created_connection",
             store_id=self.id,
             conn_id=conn.id,
             pool_stats=self.pool_stats,
@@ -644,7 +644,7 @@ class Store(ABC):
             kind = "build" if semaphore is self._build_semaphore else "transfer"
             limit = self._max_builds if kind == "build" else self._max_transfers
             pool_log.info(
-                "Store all slots in use",
+                "pool_all_slots_in_use",
                 store_id=self.id,
                 limit=limit,
                 kind=kind,
@@ -659,10 +659,10 @@ class Store(ABC):
             if conn is not None:
                 if conn.dirty:
                     log.warning(
-                        "Store %s: discarding dirty connection %s (op log: %s)",
-                        self.id,
-                        conn.id,
-                        " -> ".join(conn._op_log[-10:]) or "(empty)",
+                        "store_discarding_dirty_connection",
+                        store_id=self.id,
+                        conn_id=conn.id,
+                        op_log=" -> ".join(conn._op_log[-10:]) or "(empty)",
                     )
                     if conn in self._all:
                         self._all.remove(conn)
@@ -752,10 +752,10 @@ class LocalSubprocessStore(Store):
 
         conn_id = f"{self.id}-{self._conn_counter}"
         log.info(
-            "Spawning %s daemon --store %s --stdio (%s)",
-            self._nix_bin,
-            path,
-            conn_id,
+            "spawning_daemon_stdio",
+            nix_bin=self._nix_bin,
+            store_path=str(path),
+            conn_id=conn_id,
         )
 
         last_err: Exception | None = None
@@ -785,10 +785,11 @@ class LocalSubprocessStore(Store):
                 return conn
             except (EOFError, FileNotFoundError) as e:
                 log.warning(
-                    "Spawning daemon %s failed (attempt %d/3): %s",
-                    conn_id,
-                    attempt + 1,
-                    e,
+                    "daemon_spawn_failed",
+                    conn_id=conn_id,
+                    attempt=attempt + 1,
+                    max_attempts=3,
+                    error=e,
                 )
                 last_err = e
                 await asyncio.sleep(0.05)
@@ -881,24 +882,22 @@ class _SSHStoreMixin:
                 asyncssh.SFTPOpUnsupported,
             ) as e:
                 # PSI not available on this host (macOS, old kernel, restricted perms)
-                log.info(
-                    "Store %s: PSI unavailable (%s), disabling polling", self.id, e
-                )
+                log.info("psi_unavailable", store_id=self.id, error=e)
                 self._psi = None
                 return
             except asyncssh.SFTPConnectionLost:
                 # SFTP channel died, retry after SSH reconnects
-                log.debug("Store %s: PSI SFTP connection lost, will retry", self.id)
+                log.debug("psi_sftp_lost", store_id=self.id)
                 self._psi = None
                 await asyncio.sleep(self._PSI_INTERVAL)
             except asyncssh.SFTPError as e:
                 # Any other SFTP error — probably not recoverable
-                log.info("Store %s: PSI SFTP error (%s), disabling polling", self.id, e)
+                log.info("psi_sftp_error", store_id=self.id, error=str(e))
                 self._psi = None
                 return
             except (asyncssh.Error, OSError) as e:
                 # SSH connection-level error — retry, SSH reconnect may fix it
-                log.debug("Store %s: PSI SSH error (%s), will retry", self.id, e)
+                log.debug("psi_ssh_error", store_id=self.id, error=str(e))
                 self._psi = None
                 await asyncio.sleep(self._PSI_INTERVAL)
 
@@ -936,19 +935,15 @@ class _SSHStoreMixin:
             now = time.monotonic()
             wait = self._last_failure + self._backoff - now
             if self._last_failure > 0 and wait > 0:
-                log.info(
-                    "Store %s: SSH backoff %.1fs before reconnecting",
-                    self.id,
-                    wait,
-                )
+                log.info("ssh_backoff", store_id=self.id, backoff_seconds=wait)
                 await asyncio.sleep(wait)
 
             try:
                 log.info(
-                    "SSH connecting to %s@%s:%d",
-                    self._username or "",
-                    self._host,
-                    self._port,
+                    "ssh_connecting",
+                    username=self._username or "",
+                    host=self._host,
+                    port=self._port,
                 )
                 self._conn = await asyncssh.connect(
                     self._host,
@@ -967,9 +962,9 @@ class _SSHStoreMixin:
                 self._backoff = min(self._backoff * 2, self._max_backoff)
                 self.record_failure()  # type: ignore[attr-defined]
                 log.warning(
-                    "Store %s: SSH connect failed, next retry in %.1fs",
-                    self.id,
-                    self._backoff,
+                    "ssh_connect_failed",
+                    store_id=self.id,
+                    next_retry_seconds=self._backoff,
                 )
                 raise
 
@@ -1032,9 +1027,9 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         else:
             cmd = "nix-daemon --stdio"
         log.debug(
-            "Spawning remote %s (%s)",
-            cmd,
-            conn_id,
+            "spawning_remote_daemon",
+            cmd=cmd,
+            conn_id=conn_id,
         )
         try:
             proc = await ssh_conn.create_process(cmd, encoding=None)
@@ -1130,10 +1125,10 @@ class LocalSocketStore(Store):
         os.makedirs(socket_dir, exist_ok=True)
 
         log.info(
-            "Spawning managed daemon: %s daemon --store %s (socket %s)",
-            self._nix_bin,
-            path,
-            self._socket_path,
+            "spawning_managed_daemon",
+            nix_bin=self._nix_bin,
+            store_path=str(path),
+            socket_path=str(self._socket_path),
         )
         env = os.environ.copy()
         env.update(self._extra_env)
@@ -1144,6 +1139,9 @@ class LocalSocketStore(Store):
             "daemon",
             "--store",
             str(path),
+            "--option",
+            "build-dir",
+            str(path / "tmp" / "nix-builds"),
         ]
         cmd.extend(self._extra_args)
 
@@ -1172,7 +1170,7 @@ class LocalSocketStore(Store):
                 r, w = await asyncio.open_unix_connection(str(self._socket_path))
                 w.close()
                 await w.wait_closed()
-                log.info("Managed daemon socket ready: %s", self._socket_path)
+                log.info("daemon_socket_ready", socket_path=str(self._socket_path))
                 self._daemon_ready.set()
                 return
             except (ConnectionRefusedError, ConnectionResetError):
@@ -1186,7 +1184,11 @@ class LocalSocketStore(Store):
     async def _create_conn(self) -> Connection:
         await self._ensure_daemon()
         conn_id = f"{self.id}-{self._conn_counter}"
-        log.debug("Connecting to daemon socket %s (%s)", self._socket_path, conn_id)
+        log.debug(
+            "connecting_daemon_socket",
+            socket_path=str(self._socket_path),
+            conn_id=conn_id,
+        )
         r, w = await asyncio.open_unix_connection(str(self._socket_path))
         conn = Connection(
             UnixNixReader(r), UnixNixWriter(w), conn_id, store_path=self.store_path
@@ -1243,9 +1245,9 @@ class SSHSocketStore(_SSHStoreMixin, Store):
             raise
         conn_id = f"{self.id}-{self._conn_counter}"
         log.debug(
-            "Tunneling to %s (%s)",
-            self._socket_path,
-            conn_id,
+            "tunneling_to_socket",
+            socket_path=str(self._socket_path),
+            conn_id=conn_id,
         )
         try:
             r, w = await ssh_conn.open_unix_connection(str(self._socket_path))

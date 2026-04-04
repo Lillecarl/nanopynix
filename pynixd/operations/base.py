@@ -705,19 +705,19 @@ class BuildResult:
             built_outputs=built_outputs,
         )
         cls._log.debug(
-            "BuildResult from_reader: status=%d, error='%s', outputs=%s",
-            status,
-            error_msg,
-            built_outputs,
+            "build_result_from_reader",
+            status=status,
+            error_msg=error_msg,
+            built_outputs=built_outputs,
         )
         return result
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self._log.debug(
-            "BuildResult to_writer: status=%d, error='%s', outputs=%s",
-            self.status,
-            self.error_msg,
-            self.built_outputs,
+            "build_result_to_writer",
+            status=self.status,
+            error_msg=self.error_msg,
+            built_outputs=self.built_outputs,
         )
         writer.write_uint64(self.status)
         writer.write_string(self.error_msg)

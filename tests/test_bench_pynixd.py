@@ -185,6 +185,7 @@ def _hash_part(path: str) -> str:
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
 @pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
+@pytest.mark.bench
 async def test_ssh_serve_small_nars(
     request: pytest.FixtureRequest,
     concurrency: int,
@@ -245,6 +246,7 @@ async def test_ssh_serve_small_nars(
 
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
+@pytest.mark.bench
 async def test_ssh_serve_big_nar(
     request: pytest.FixtureRequest,
     warm: bool,
@@ -285,6 +287,7 @@ async def test_ssh_serve_big_nar(
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
 @pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
+@pytest.mark.bench
 async def test_ssh_query_path_info(
     request: pytest.FixtureRequest,
     concurrency: int,
@@ -335,6 +338,7 @@ async def test_ssh_query_path_info(
 
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
+@pytest.mark.bench
 async def test_http_serve_small_nars(
     request: pytest.FixtureRequest,
     concurrency: int,
@@ -383,6 +387,7 @@ async def test_http_serve_small_nars(
 
 
 @pytest.mark.timeout(300)
+@pytest.mark.bench
 async def test_http_serve_big_nar(
     request: pytest.FixtureRequest,
 ) -> None:
@@ -413,6 +418,7 @@ async def test_http_serve_big_nar(
 
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
+@pytest.mark.bench
 async def test_http_narinfo(
     request: pytest.FixtureRequest,
     concurrency: int,
@@ -458,6 +464,7 @@ async def test_http_narinfo(
     [(100, 1)],
     ids=["100drv-1cli"],
 )
+@pytest.mark.bench
 async def test_build_throughput(
     request: pytest.FixtureRequest,
     nix_env: dict[str, str],
@@ -545,7 +552,9 @@ async def test_build_throughput(
             )
             elapsed = time.monotonic() - t0
             if rc != 0:
-                log.error("Client %d failed: %s", client_id, stderr[:500])
+                log.error(
+                    "client_build_failed", client_id=client_id, stderr=stderr[:500]
+                )
             assert rc == 0, f"Client {client_id} failed:\n{stderr[:1000]}"
             return elapsed
 

@@ -180,10 +180,10 @@ class Connection:
         self._op_log.append(op.name)
 
         op_log(op.name).debug(
-            "sendOp: store=%s op=%s(%d)",
-            self.id,
-            op.name,
-            op.value,
+            "send_op",
+            store_id=self.id,
+            op_name=op.name,
+            op_value=op.value,
         )
 
         buf = ByteCollector()
@@ -210,10 +210,10 @@ class Connection:
 
             if isinstance(msg, stderr.StderrError):
                 stderr_log.warning(
-                    "store=%s daemon error: [%s] %s",
-                    self.id,
-                    msg.error_type,
-                    msg.msg,
+                    "daemon_error",
+                    store_id=self.id,
+                    error_type=msg.error_type,
+                    error_msg=msg.msg,
                 )
                 if raise_on_error:
                     from .exceptions import BackendError
@@ -229,9 +229,9 @@ class Connection:
         response.stderr = msgs
 
         op_log(op.name).debug(
-            "recvOp: store=%s op=%s done",
-            self.id,
-            op.name,
+            "recv_op_done",
+            store_id=self.id,
+            op_name=op.name,
         )
         # response_type is ClassVar[type[OpResponse]] so from_reader
         # returns OpResponse, not Resp. The actual type is correct at
@@ -256,9 +256,9 @@ class Connection:
         server_version = await self.r.read_uint64()
         self.version = min(wire.PROTOCOL_VERSION, server_version)
         log.debug(
-            "Daemon protocol: %s (negotiated %s)",
-            wire.proto_str(server_version),
-            wire.proto_str(self.version),
+            "daemon_protocol_negotiated",
+            server_version=wire.proto_str(server_version),
+            negotiated=wire.proto_str(self.version),
         )
 
         self.w.write_uint64(wire.PROTOCOL_VERSION)
@@ -268,7 +268,7 @@ class Connection:
             self.w.write_string_set(set())  # our features (none)
             await w.drain()
             server_features = await self.r.read_string_set()
-            log.debug("Daemon features:", server_features=server_features)
+            log.debug("daemon_features", server_features=server_features)
         self.w.write_uint64(0)  # sendCpu
         self.w.write_uint64(0)  # reserveSpace
         await w.drain()
@@ -276,7 +276,7 @@ class Connection:
         # Server conditions these on clientVersion, not negotiated version
         if server_version >= wire.proto(1, 33):
             nix_version = await self.r.read_string()
-            log.debug("Daemon nix version:", nix_version=nix_version)
+            log.debug("daemon_nix_version", nix_version=nix_version)
             if server_version >= wire.proto(1, 35):
                 await self.r.read_uint64()
 

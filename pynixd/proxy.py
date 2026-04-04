@@ -63,9 +63,9 @@ class DaemonProxy:
             await self._handshake()
             await self._op_loop()
         except (EOFError, BrokenPipeError, ConnectionError, OSError):
-            log.debug("Client disconnected")
+            log.debug("client_disconnected")
         except Exception:
-            log.exception("Session error")
+            log.exception("session_error")
         finally:
             await self._client.stop()
 
@@ -86,16 +86,16 @@ class DaemonProxy:
         client_version = await self._r.read_uint64()
         self._version = min(server_version, client_version)
         log.info(
-            "Client protocol version: %s, local store version: %s, negotiated: %s",
-            wire.proto_str(client_version),
-            wire.proto_str(server_version),
-            wire.proto_str(self._version),
+            "client_protocol_negotiated",
+            client_version=wire.proto_str(client_version),
+            local_store_version=wire.proto_str(server_version),
+            negotiated_version=wire.proto_str(self._version),
         )
 
         # Feature negotiation (1.38+) — before CPU/reserveSpace
         if self._version >= wire.proto(1, 38):
             client_features = await self._r.read_string_set()
-            log.debug("Client features", client_features=client_features)
+            log.debug("client_features", client_features=client_features)
             self._w.write_string_set(set())  # our features (none)
 
         if await self._r.read_uint64():  # sendCpu
@@ -110,7 +110,7 @@ class DaemonProxy:
         self._w.write_uint64(wire.STDERR_LAST)
         await self._w.drain()
 
-        log.info("Client handshake complete")
+        log.info("client_handshake_complete")
 
     # ── Op loop ──────────────────────────────────────────────────────
 
@@ -126,7 +126,7 @@ class DaemonProxy:
                 op = Op(op_num)
                 op_log(op.name).debug("recvOp", op=op.name, op_num=op_num)
             except ValueError:
-                log.warning("Unknown op:", op_num=op_num)
+                log.warning("unknown_op", op_num=op_num)
                 await self._send_error(f"Unsupported operation: {op_num}")
                 continue
 
@@ -146,7 +146,7 @@ class DaemonProxy:
                 # else: already handled (streaming, error, etc.)
 
             except Exception:
-                log.exception("Error handling op", name=op.name)
+                log.exception("handle_op_error", name=op.name)
                 await self._client.flush()
                 await self._send_error(f"Internal error handling {op.name}")
 
@@ -156,7 +156,7 @@ class DaemonProxy:
         """Route an operation to its request type's handle method."""
         req_cls = OP_REGISTRY.get(op.value)
         if req_cls is None:
-            log.warning("Unhandled op", op=op.name, op_value=op.value)
+            log.warning("unhandled_op", op=op.name, op_value=op.value)
             await self._send_error(f"Unhandled operation: {op.name}")
             return None
 

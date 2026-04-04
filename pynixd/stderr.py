@@ -243,7 +243,7 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
         parser = _PARSERS.get(msg_type)
         if parser is None:
             unknown_streak += 1
-            log.warning("stderr: unknown msg_type 0x", msg_type=msg_type)
+            log.warning("stderr_unknown_msg_type", msg_type=msg_type)
             if unknown_streak >= _MAX_UNKNOWN_MSG_TYPES:
                 raise ConnectionError(
                     f"Protocol desync: {unknown_streak} consecutive "
@@ -267,10 +267,10 @@ async def drain(
     async for msg in read_stream(r):
         if isinstance(msg, StderrError):
             log.warning(
-                "store={} daemon error: [{}] {}",
+                "daemon_error_stderr_stream",
                 conn_id=conn_id,
                 error_type=msg.error_type,
-                msg=msg.msg,
+                error_msg=msg.msg,
             )
             last_error = msg
             if raise_on_error:

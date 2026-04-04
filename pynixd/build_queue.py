@@ -182,7 +182,7 @@ class BuildQueue:
             if key in self._by_key:
                 existing = self._by_key[key]
                 if not existing.is_done:
-                    log.debug("Build deduped onto existing build ID", id=existing.id)
+                    log.debug("build_deduped", id=existing.id)
                     return existing.id, existing.future
                 # else: done, create new entry
 
@@ -203,10 +203,10 @@ class BuildQueue:
             self._by_key[key] = build
 
             log.info(
-                "Build %d enqueued: %s (%d required paths)",
-                build.id,
-                build.description,
-                len(required_paths),
+                "build_enqueued",
+                build_id=build.id,
+                description=build.description,
+                required_paths=len(required_paths),
             )
             return build.id, future
 
@@ -232,7 +232,7 @@ class BuildQueue:
                 if b.id == build_id:
                     b.finished_at = time.monotonic()
                     b.future.set_result(response)
-                    log.info("Build completed", build_id=build_id)
+                    log.info("build_completed", build_id=build_id)
                     return b.client
         raise ValueError(f"Build {build_id} not found")
 
@@ -251,9 +251,7 @@ class BuildQueue:
                         ),
                     )
                     b.future.set_result(response)
-                    log.info(
-                        "Build {} failed: {}", build_id=build_id, error_msg=error_msg
-                    )
+                    log.info("build_failed", build_id=build_id, error_msg=error_msg)
                     return b.client
         raise ValueError(f"Build {build_id} not found")
 

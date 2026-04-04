@@ -74,7 +74,7 @@ class GarbageCollector:
             except asyncio.CancelledError:
                 return
             except Exception:
-                log.exception("GC pass failed")
+                log.exception("gc_pass_failed")
 
     async def _run_gc_pass(self) -> None:
         """Find stale paths and delete them from all stores."""
@@ -103,11 +103,11 @@ class GarbageCollector:
             return
 
         log.info(
-            "GC pass: %d builder-stale paths (>%ds), %d local-stale paths (>%ds)",
-            len(builder_stale),
-            self._builder_max_age,
-            len(local_stale) if local_stale else 0,
-            self._local_max_age,
+            "gc_pass_started",
+            builder_stale_count=len(builder_stale),
+            builder_max_age=self._builder_max_age,
+            local_stale_count=len(local_stale) if local_stale else 0,
+            local_max_age=self._local_max_age,
         )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -116,15 +116,15 @@ class GarbageCollector:
         total_freed = 0
         for store, result in zip(stores_for_tasks, results):
             if isinstance(result, BaseException):
-                log.warning("GC failed", store_id=store.id, error=result)
+                log.warning("gc_store_failed", store_id=store.id, error=result)
             elif isinstance(result, CollectGarbageResponse):
                 total_deleted += len(result.paths_deleted)
                 total_freed += result.bytes_freed
 
         log.info(
-            "GC pass done: %d paths deleted, %d bytes freed",
-            total_deleted,
-            total_freed,
+            "gc_pass_complete",
+            paths_deleted=total_deleted,
+            bytes_freed=total_freed,
         )
 
     async def _gc_store(
@@ -139,9 +139,9 @@ class GarbageCollector:
         resp = await store.collect_garbage(paths)
         if resp.paths_deleted:
             log.info(
-                "GC %s: deleted %d paths, freed %d bytes",
-                store.id,
-                len(resp.paths_deleted),
-                resp.bytes_freed,
+                "gc_store_complete",
+                store_id=store.id,
+                paths_deleted=len(resp.paths_deleted),
+                bytes_freed=resp.bytes_freed,
             )
         return resp

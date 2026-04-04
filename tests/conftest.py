@@ -75,6 +75,7 @@ logging.getLogger("pynixd.store.pool").setLevel(logging.WARNING)
 logging.getLogger("pynixd.scheduler.pass").setLevel(logging.WARNING)
 logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 logging.getLogger("pynixd.stderr").setLevel(logging.INFO)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 log = structlog.get_logger(__name__)
 
@@ -227,7 +228,7 @@ async def nix_build_store_only(
         "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
     )
 
-    log.debug("Building (store only): %s", shlex.join(cmd))
+    log.debug("building_store_only", cmd=shlex.join(cmd))
     res = await asyncio.create_subprocess_exec(
         *cmd,
         env=build_env,

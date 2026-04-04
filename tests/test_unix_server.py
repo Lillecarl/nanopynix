@@ -38,7 +38,7 @@ def _nix_build_unix(
         "--no-link",
         *extra_args,
     ]
-    log.info("nix_build_unix: %s", " ".join(shlex.quote(a) for a in cmd))
+    log.info("nix_build_unix", cmd=" ".join(shlex.quote(a) for a in cmd))
     return _run_subprocess_with_timeout(cmd, env, timeout)
 
 
@@ -59,7 +59,7 @@ def _nix_build_direct(
         "150",
         *extra_args,
     ]
-    log.info("nix_build_direct: %s", " ".join(shlex.quote(str(a)) for a in cmd))
+    log.info("nix_build_direct", cmd=" ".join(shlex.quote(str(a)) for a in cmd))
     return _run_subprocess_with_timeout(cmd, env, timeout)
 
 
@@ -78,7 +78,7 @@ def _nix_store_unix(
         "--store",
         store_uri,
     ]
-    log.info("nix_store_unix: %s", " ".join(shlex.quote(a) for a in cmd))
+    log.info("nix_store_unix", cmd=" ".join(shlex.quote(a) for a in cmd))
     return _run_subprocess_with_timeout(cmd, env, timeout)
 
 

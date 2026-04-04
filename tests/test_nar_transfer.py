@@ -8,13 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 import structlog
-from conftest import NIX_BIN
+from conftest import NIX_BIN, rmtree_robust
 
 from pynixd.operations.base import PathInfo
 from pynixd.operations.store_mutations import (
@@ -44,7 +43,7 @@ async def src_store() -> AsyncIterator[LocalSocketStore]:
 @pytest.fixture
 async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
     """Fresh empty store as destination."""
-    shutil.rmtree(DEST_STORE, ignore_errors=True)
+    rmtree_robust(DEST_STORE)
     os.makedirs(DEST_STORE, exist_ok=True)
     s = LocalSubprocessStore(store_path=DEST_STORE, id="dst", nix_bin=str(NIX_BIN))
     yield s
@@ -330,7 +329,7 @@ COPY_DEST_STORE = Path("/tmp/pynixd-test-nar-copy")
 @pytest.fixture
 async def copy_dst_store() -> AsyncIterator[LocalSubprocessStore]:
     """Separate dest store for copy_paths tests."""
-    shutil.rmtree(COPY_DEST_STORE, ignore_errors=True)
+    rmtree_robust(COPY_DEST_STORE)
     os.makedirs(COPY_DEST_STORE, exist_ok=True)
     s = LocalSubprocessStore(
         store_path=COPY_DEST_STORE, id="copy-dst", nix_bin=str(NIX_BIN)
@@ -411,7 +410,7 @@ STREAM_DEST_STORE = Path("/tmp/pynixd-test-nar-stream")
 @pytest.fixture
 async def stream_dst_store() -> AsyncIterator[LocalSubprocessStore]:
     """Separate dest store for streaming tests."""
-    shutil.rmtree(STREAM_DEST_STORE, ignore_errors=True)
+    rmtree_robust(STREAM_DEST_STORE)
     os.makedirs(STREAM_DEST_STORE, exist_ok=True)
     s = LocalSubprocessStore(
         store_path=STREAM_DEST_STORE, id="stream-dst", nix_bin=str(NIX_BIN)
@@ -535,7 +534,7 @@ async def test_copy_paths_roundtrip_nixbuild(
 ) -> None:
     """Push paths to nixbuild, then pull them back via copy_paths (proto 1.32)."""
     roundtrip_store = Path("/tmp/pynixd-test-nar-roundtrip")
-    shutil.rmtree(roundtrip_store, ignore_errors=True)
+    rmtree_robust(roundtrip_store)
     os.makedirs(roundtrip_store, exist_ok=True)
     roundtrip_store_instance = LocalSubprocessStore(
         store_path=roundtrip_store,
@@ -561,13 +560,13 @@ async def test_copy_paths_roundtrip_nixbuild(
 
         # Push to nixbuild
         await nixbuild_store.stream_paths_store_to_store(src_store, picked)
-        log.info("Pushed %d paths to nixbuild", len(picked))
+        log.info("pushed_paths_to_nixbuild", count=len(picked))
 
         # Pull back from nixbuild to fresh local store
         await roundtrip_store_instance.stream_paths_store_to_store(
             nixbuild_store, picked
         )
-        log.info("Pulled %d paths from nixbuild", len(picked))
+        log.info("pulled_paths_from_nixbuild", count=len(picked))
 
         # Verify all arrived with matching hashes
         for path, orig_info in picked:

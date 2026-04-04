@@ -71,7 +71,8 @@ async def plan_and_execute_build_paths_with_results(
 ) -> KeyedBuildResultsResponse:
     """Decompose and execute a BuildPathsWithResults request."""
     op_log("BuildPathsWithResults").debug(
-        "BuildPathsWithResults len(drvs)=%d", len(request.derived_paths)
+        "build_paths_with_results_decomposed",
+        num_derivations=len(request.derived_paths),
     )
     decomposed = await decompose_build_paths(
         request, store, build_queue, scheduler_trigger, client
@@ -96,9 +97,9 @@ async def plan_and_execute_build_paths_with_results(
             )
             if resp.result.status not in (0, 1, 2):
                 log.warning(
-                    "Unexpected BuildPathsWithResults status=%d: %s",
-                    resp.result.status,
-                    resp.result.error_msg,
+                    "unexpected_build_paths_with_results_status",
+                    status=resp.result.status,
+                    error_msg=resp.result.error_msg,
                 )
             if resp.result.status != 0 and resp.result.error_msg and client:
                 from ..stderr import StderrNext
@@ -140,7 +141,7 @@ async def decompose_build_paths(
         try:
             parsed = dp.to_derivation(store_path)
         except FileNotFoundError:
-            log.warning("Cannot read drv for decomposition", drv_path=dp.drv_path)
+            log.warning("drv_read_failed", drv_path=dp.drv_path)
             continue
 
         basic = to_basic_derivation(parsed, store_path)
@@ -186,7 +187,7 @@ async def enqueue_build_derivation(
         platform=request.derivation.platform,
     )
     log.info(
-        "Build {} enqueued (BuildDerivation {})",
+        "build_derivation_enqueued",
         build_id=build_id,
         drv_path=request.drv_path,
     )
@@ -204,8 +205,6 @@ def enrich_derivation(request: BuildDerivationRequest, store: Store) -> None:
         parsed = read_drv_file(store_path, request.drv_path)
         request.derivation._is_dynamic = parsed.is_dynamic
     except FileNotFoundError:
-        log.debug(
-            "Cannot enrich {}: .drv not in local store", drv_path=request.drv_path
-        )
+        log.debug("drv_enrich_not_found", drv_path=request.drv_path)
     except Exception:
-        log.debug("Cannot enrich", drv_path=request.drv_path, exc_info=True)
+        log.debug("drv_enrich_failed", drv_path=request.drv_path, exc_info=True)

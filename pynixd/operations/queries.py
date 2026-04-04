@@ -285,8 +285,8 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
         request = await cls.from_reader(proxy._r, proxy._version)
         if await proxy.local_store.is_valid_path(request.path):
             op_log("NarFromPath").debug(
-                "NarFromPath %s -> streaming to client",
-                request.path,
+                "nar_from_path_streaming",
+                path=request.path,
             )
             # 1. Flush any pending output to the client
             await proxy._client.flush()
@@ -300,7 +300,7 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
             await proxy._w.drain()
             return None
 
-        cls._log.warning("NarFromPath %s not in local store", request.path)
+        cls._log.warning("nar_not_in_local_store", path=request.path)
         return NarFromPathResponse(nar_data=b"")
 
 

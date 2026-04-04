@@ -131,9 +131,9 @@ async def _nix_build_builders(
         "--no-link",
         *extra_args,
     ]
-    log.info("matrix build (--builders): %s", " ".join(shlex.quote(a) for a in cmd))
+    log.info("matrix_build_builders", cmd=" ".join(shlex.quote(a) for a in cmd))
     rc, out, err = _run_subprocess_with_timeout(cmd, env, timeout)
-    log.info("rc=%d\n  stdout: %s\n  stderr: %s", rc, out[:500], err[:2000])
+    log.info("matrix_build_result", rc=rc, stdout=out[:500], stderr=err[:2000])
     return rc, out, err
 
 
@@ -152,9 +152,9 @@ async def _nix_build_store(
         "--no-link",
         *extra_args,
     ]
-    log.info("matrix build (--store): %s", " ".join(shlex.quote(a) for a in cmd))
+    log.info("matrix_build_store", cmd=" ".join(shlex.quote(a) for a in cmd))
     rc, out, err = _run_subprocess_with_timeout(cmd, env, timeout)
-    log.info("rc=%d\n  stdout: %s\n  stderr: %s", rc, out[:500], err[:2000])
+    log.info("matrix_build_result", rc=rc, stdout=out[:500], stderr=err[:2000])
     return rc, out, err
 
 

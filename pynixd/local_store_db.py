@@ -172,9 +172,9 @@ class LocalStoreDB:
             # Sanity check
             await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
             log.info(
-                "Local store DB active: %s (%s)",
-                db_path,
-                "read-write" if not read_only else "read-only",
+                "local_store_db_active",
+                db_path=db_path,
+                mode="read-write" if not read_only else "read-only",
             )
             return cls(
                 db=db,
@@ -183,9 +183,9 @@ class LocalStoreDB:
             )
         except Exception as e:
             log.warning(
-                "Cannot open Nix DB at %s, direct queries disabled: %s",
-                db_path,
-                e,
+                "nix_db_open_failed",
+                db_path=db_path,
+                error=e,
             )
             return cls(
                 db=None, read_only=True, regtime_flush_interval=regtime_flush_interval
@@ -202,7 +202,7 @@ class LocalStoreDB:
                 row = await cursor.fetchone()
             return IsValidPathResponse(valid=row is not None)
         except Exception:
-            log.debug("is_valid_path query failed", path=path, exc_info=True)
+            log.debug("is_valid_path_query_failed", path=path, exc_info=True)
             return None
 
     async def query_path_info(self, path: str) -> QueryPathInfoResponse | None:
@@ -237,7 +237,7 @@ class LocalStoreDB:
                 ),
             )
         except Exception:
-            log.debug("query_path_info failed for", path=path, exc_info=True)
+            log.debug("query_path_info_failed", path=path, exc_info=True)
             return None
 
     async def query_valid_paths(self, paths: set[str]) -> StringSetResponse | None:
@@ -252,7 +252,7 @@ class LocalStoreDB:
                 rows = await cursor.fetchall()
             return StringSetResponse(paths={row[0] for row in rows})
         except Exception:
-            log.debug("query_valid_paths failed", exc_info=True)
+            log.debug("query_valid_paths_failed", exc_info=True)
             return None
 
     async def query_all_valid_paths(self) -> StringSetResponse | None:
@@ -264,7 +264,7 @@ class LocalStoreDB:
                 rows = await cursor.fetchall()
             return StringSetResponse(paths={r[0] for r in rows})
         except Exception:
-            log.debug("query_all_valid_paths failed", exc_info=True)
+            log.debug("query_all_valid_paths_failed", exc_info=True)
             return None
 
     async def query_path_from_hash_part(self, hash_part: str) -> str | None:
@@ -277,10 +277,10 @@ class LocalStoreDB:
             # Upper bound: increment last char for range query
             upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
             log.debug(
-                "DB: query_path_from_hash_part %s (range [%s, %s))",
-                hash_part,
-                prefix,
-                upper,
+                "db_query_path_from_hash_part",
+                hash_part=hash_part,
+                range_start=prefix,
+                range_end=upper,
             )
             async with self._db.execute(
                 _QUERY_PATH_FROM_HASH_PART,
@@ -288,9 +288,9 @@ class LocalStoreDB:
             ) as cursor:
                 row = await cursor.fetchone()
             log.debug(
-                "DB: query_path_from_hash_part %s -> %s",
-                hash_part,
-                row[0] if row else None,
+                "db_query_path_from_hash_part_result",
+                hash_part=hash_part,
+                result=row[0] if row else None,
             )
             return row[0] if row else None
         except Exception:
@@ -312,7 +312,7 @@ class LocalStoreDB:
                 rows = await cursor.fetchall()
             return {r[0] for r in rows}
         except Exception:
-            log.debug("compute_closure failed", exc_info=True)
+            log.debug("compute_closure_failed", exc_info=True)
             return None
 
     async def query_path_infos(self, paths: set[str]) -> dict[str, PathInfo] | None:
@@ -350,7 +350,7 @@ class LocalStoreDB:
                 )
             return infos
         except Exception:
-            log.debug("query_path_infos failed", exc_info=True)
+            log.debug("query_path_infos_failed", exc_info=True)
             return None
 
     async def query_stale_paths(self, max_age_seconds: int) -> set[str] | None:
@@ -366,7 +366,7 @@ class LocalStoreDB:
                 rows = await cursor.fetchall()
             return {r[0] for r in rows}
         except Exception:
-            log.debug("query_stale_paths failed", exc_info=True)
+            log.debug("query_stale_paths_failed", exc_info=True)
             return None
 
     # ── Registration time updates ─────────────────────────────────────
@@ -374,7 +374,7 @@ class LocalStoreDB:
     def mark_path(self, path: str) -> None:
         """Queue a path for registration time update."""
         if self._db is not None and not self._read_only:
-            log.debug("DB: mark_path", path=path)
+            log.debug("db_mark_path", path=path)
             self._pending_regtime.add(path)
 
     def mark_paths(self, paths: set[str]) -> None:
@@ -397,12 +397,12 @@ class LocalStoreDB:
             await self._db.commit()
             elapsed = time.monotonic() - t0
             log.debug(
-                "Updated registrationTime for %d seed paths (%.1fms)",
-                len(paths),
-                elapsed * 1000,
+                "registration_time_updated",
+                seed_count=len(paths),
+                elapsed_ms=elapsed * 1000,
             )
         except Exception:
-            log.exception("registrationTime update failed, disabling DB")
+            log.exception("registration_time_update_failed")
             await self._close_db()
 
     def start(self) -> None:
@@ -451,6 +451,6 @@ def _resolve_db_path(store_path: Path) -> Path | None:
         db_path = store_path / "nix" / "var" / "nix" / "db" / "db.sqlite"
 
     if not db_path.exists():
-        log.warning("Nix DB not found at , direct queries disabled", db_path=db_path)
+        log.warning("nix_db_not_found", db_path=db_path)
         return None
     return db_path

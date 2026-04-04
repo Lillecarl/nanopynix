@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
 import structlog
 from environs import Env
 
@@ -136,21 +137,25 @@ def _build_in_thread(
         target,
     ]
 
-    log.info("Starting build: %s", " ".join(cmd))
+    log.info("starting_build", cmd=" ".join(cmd))
     start = time.monotonic()
     result = subprocess.run(cmd, env=sub_env, capture_output=True)
     elapsed = time.monotonic() - start
 
     if result.returncode != 0:
-        log.error("Build failed with rc=%d", result.returncode)
-        log.error("STDOUT: %s", result.stdout.decode())
-        log.error("STDERR: %s", result.stderr.decode())
+        log.error(
+            "build_failed",
+            rc=result.returncode,
+            stdout=result.stdout.decode(),
+            stderr=result.stderr.decode(),
+        )
         msg = f"Build failed with rc={result.returncode}"
         raise RuntimeError(msg)
 
     return elapsed
 
 
+@pytest.mark.bench
 def test_build_throughput() -> None:
     """Run nix build against pynixd and measure wall time."""
     from conftest import get_free_port

@@ -30,7 +30,7 @@ class _NixSSHServer(asyncssh.SSHServer):
         return True
 
     def validate_password(self, username: str, password: str) -> bool:
-        log.info("Password auth: user=", username=username)
+        log.info("password_auth", username=username)
         return True
 
     def public_key_auth_supported(self) -> bool:
@@ -38,7 +38,7 @@ class _NixSSHServer(asyncssh.SSHServer):
 
     def validate_public_key(self, username: str, key: asyncssh.SSHKey) -> bool:
         log.info(
-            "Pubkey auth: user= key=", username=username, arg=key.get_fingerprint()
+            "pubkey_auth", username=username, key_fingerprint=key.get_fingerprint()
         )
         return True
 
@@ -69,18 +69,18 @@ async def start_ssh_server(
     # Load or generate host key
     if host_key_path and host_key_path.exists():
         host_key: asyncssh.SSHKey = asyncssh.read_private_key(str(host_key_path))
-        log.info("Loaded host key from", host_key_path=host_key_path)
+        log.info("host_key_loaded_from_file", host_key_path=host_key_path)
     else:
         host_key = asyncssh.generate_private_key("ssh-rsa", key_size=4096)
         if host_key_path:
             host_key.write_private_key(str(host_key_path))
-            log.info("Generated and saved host key to", host_key_path=host_key_path)
+            log.info("host_key_generated", host_key_path=host_key_path)
         else:
-            log.info("Generated ephemeral host key")
+            log.info("host_key_ephemeral_generated")
 
     async def handle_client(process: asyncssh.SSHServerProcess) -> None:
         cmd: str | None = process.command
-        log.info("Client exec:", cmd=cmd)
+        log.info("client_exec", cmd=cmd)
         if not cmd or ("nix-daemon" not in cmd and "nix daemon" not in cmd):
             process.stderr.write(b"pynixd: unsupported command\n")
             process.exit(1)
@@ -100,7 +100,7 @@ async def start_ssh_server(
             )
             await proxy.run()
         except Exception:
-            log.exception("Proxy session failed")
+            log.exception("proxy_session_failed")
             exit_code = 1
         finally:
             process.exit(exit_code)
@@ -115,5 +115,5 @@ async def start_ssh_server(
         encoding=None,
     )
     bound_port = server.get_port()
-    log.info("pynixd SSH server listening", host=host, port=bound_port)
+    log.info("ssh_server_listening", host=host, port=bound_port)
     return server

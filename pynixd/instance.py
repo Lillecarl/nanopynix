@@ -167,7 +167,7 @@ class Server:
             try:
                 await store.sync_paths()
             except Exception:
-                log.exception("Failed to sync paths for store", id=store.id)
+                log.exception("sync_paths_failed", id=store.id)
         # Start background services
         scheduler_task = asyncio.create_task(self.scheduler.start())
         self.background_tasks.append(scheduler_task)
@@ -232,7 +232,7 @@ class Server:
             or self._http_server
             or self._https_server
         ):
-            log.warning("No servers started! Check your configuration.")
+            log.warning("no_servers_started")
 
     async def wait_finished(self) -> None:
         """Wait for the server listeners to close."""
@@ -251,7 +251,7 @@ class Server:
 
     async def close(self) -> None:
         """Gracefully shut down the server."""
-        log.info("Shutting down pynixd Server...")
+        log.info("server_shutting_down")
         if self._http_server:
             await self._http_server.cleanup()
         if self._https_server:

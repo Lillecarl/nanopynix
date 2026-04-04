@@ -47,7 +47,7 @@ async def start_unix_server(
         writer: asyncio.StreamWriter,
     ) -> None:
         peer = writer.get_extra_info("peername") or "unknown"
-        log.info("Unix client connected:", peer=peer)
+        log.info("unix_client_connected", peer=peer)
         try:
             proxy = DaemonProxy(
                 UnixNixReader(reader),
@@ -58,7 +58,7 @@ async def start_unix_server(
             )
             await proxy.run()
         except Exception:
-            log.exception("Unix proxy session failed")
+            log.exception("unix_proxy_session_failed")
         finally:
             writer.close()
 
@@ -67,5 +67,5 @@ async def start_unix_server(
         socket_path.unlink()
 
     server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
-    log.info("pynixd Unix server listening on", socket_path=socket_path)
+    log.info("unix_server_listening", socket_path=socket_path)
     return server

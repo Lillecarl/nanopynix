@@ -94,18 +94,16 @@ class SetOptionsRequest(OpRequest[EmptyResponse]):
         )
 
         cls._log.debug(
-            "SetOptions: keep-failed=%d keep-going=%d fallback=%d verbosity=%d "
-            "max-jobs=%d max-silent-time=%d build-verbosity=%d cores=%d "
-            "use-substitutes=%d",
-            keep_failed,
-            keep_going,
-            try_fallback,
-            verbosity,
-            max_build_jobs,
-            max_silent_time,
-            build_verbosity,
-            build_cores,
-            use_substitutes,
+            "set_options_from_reader",
+            keep_failed=keep_failed,
+            keep_going=keep_going,
+            try_fallback=try_fallback,
+            verbosity=verbosity,
+            max_build_jobs=max_build_jobs,
+            max_silent_time=max_silent_time,
+            build_verbosity=build_verbosity,
+            build_cores=build_cores,
+            use_substitutes=use_substitutes,
         )
         return result
 

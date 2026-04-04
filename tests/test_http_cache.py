@@ -68,20 +68,20 @@ async def run_cache_server(
         )
         assert rc == 0, f"setup build failed:\n{stderr}"
         path = stdout.splitlines()[0].strip()
-        log.info("setup built path: %s", path)
+        log.info("setup_built_path", path=path)
 
         # Get detailed path info
         cmd = ["nix", "path-info", "--json", path]
         rc, stdout, stderr = await run_process_async(cmd, env=nix_env)
         assert rc == 0, f"path-info failed:\n{stderr}"
         simple_info = json.loads(stdout)[0]
-        log.info("setup path info: %s", simple_info)
+        log.info("setup_path_info", info=simple_info)
 
         # Start HTTP cache on the local store
         cache = BinaryCacheServer(server.config.local_store)
         runner, port = await cache.start(host="127.0.0.1", port=0)
         base_url = f"http://127.0.0.1:{port}"
-        log.info("cache server listening on %s", base_url)
+        log.info("cache_server_listening", url=base_url)
 
         yield base_url, server, simple_info
 
@@ -99,14 +99,16 @@ async def test_narinfo(request: pytest.FixtureRequest, nix_env: dict[str, str]) 
     ):
         path = simple_info["path"]
         hash_part = path.split("/")[-1].split("-")[0]
-        log.info("test_narinfo hash_part=%s", hash_part)
+        log.info("test_narinfo", hash_part=hash_part)
 
         async with aiohttp.ClientSession() as session:
             url = f"{base_url}/{hash_part}.narinfo"
-            log.info("GET %s", url)
+            log.info("http_get", url=url)
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    log.error("FAILED %d: %s", resp.status, await resp.text())
+                    log.error(
+                        "narinfo_failed", status=resp.status, body=await resp.text()
+                    )
                 assert resp.status == 200
                 text = await resp.text()
                 assert f"StorePath: {path}" in text
@@ -148,7 +150,7 @@ async def test_nar_streaming(
             async with session.get(url) as resp:
                 if resp.status != 200:
                     txt = await resp.text()
-                    log.error("FAILED .narinfo %d: %s", resp.status, txt)
+                    log.error("narinfo_failed", status=resp.status, body=txt)
                 assert resp.status == 200
                 narinfo = await resp.text()
                 nar_url = ""

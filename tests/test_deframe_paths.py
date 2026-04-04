@@ -219,7 +219,7 @@ async def test_add_multiple_streaming_returns_paths(
         assert dst_info.nar_hash == info.nar_hash
         assert dst_info.nar_size == info.nar_size
 
-    log.info("Extracted paths during streaming: %s", paths)
+    log.info("extracted_paths", paths=paths)
 
     payload_wr.close()
 

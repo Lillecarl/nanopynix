@@ -112,7 +112,7 @@ async def run_nix_build(
         cmd.extend(["--store", store])
     cmd.append(target)
 
-    log.info("Starting build: %s (NIX_REMOTE=%s)", " ".join(cmd), remote)
+    log.info("starting_build", cmd=" ".join(cmd), nix_remote=remote)
     start = time.perf_counter()
 
     proc = await asyncio.create_subprocess_exec(
@@ -127,7 +127,7 @@ async def run_nix_build(
             line = await stream.readline()
             if not line:
                 break
-            nixclient_log.info("%s", line.decode().rstrip())
+            nixclient_log.info("nix_client_output", line=line.decode().rstrip())
 
     assert proc.stdout is not None
     assert proc.stderr is not None
@@ -140,7 +140,7 @@ async def run_nix_build(
     elapsed = time.perf_counter() - start
 
     if rc != 0:
-        log.error("Build failed with rc=%d", rc)
+        log.error("build_failed", rc=rc)
         msg = f"Build failed with rc={rc}"
         raise RuntimeError(msg)
 
@@ -150,6 +150,7 @@ async def run_nix_build(
 @pytest.mark.parametrize("client_bin,client_label", CLIENT_BINS)
 @pytest.mark.parametrize("max_jobs", [10, 100])
 @pytest.mark.parametrize("sleep_secs", [0, 1])
+@pytest.mark.bench
 async def test_build_throughput(
     request: pytest.FixtureRequest,
     caplog: pytest.LogCaptureFixture,
@@ -185,9 +186,7 @@ async def test_build_throughput(
         rmtree_robust(local_store_path)
         local_store_path.mkdir(parents=True, exist_ok=True)
         try:
-            log.info(
-                "Running baseline (Local Store, No Daemon) in %s...", local_store_path
-            )
+            log.info("running_baseline_local_store", store_path=str(local_store_path))
             elapsed = await run_nix_build(
                 nix_file,
                 target,
@@ -196,7 +195,7 @@ async def test_build_throughput(
                 store=str(local_store_path),
                 extra_env=test_nix_env,
             )
-            log.info("Completed in %.1fs", elapsed)
+            log.info("build_completed", elapsed=elapsed)
             return elapsed
         finally:
             rmtree_robust(local_store_path)
@@ -213,7 +212,9 @@ async def test_build_throughput(
         baseline_socket.parent.mkdir(parents=True, exist_ok=True)
 
         log.info(
-            "Spawning baseline %s daemon in %s...", client_label, daemon_store_path
+            "spawning_baseline_daemon",
+            client=client_label,
+            store_path=str(daemon_store_path),
         )
         baseline_env = os.environ.copy()
         baseline_env["NIX_DAEMON_SOCKET_PATH"] = str(baseline_socket)
@@ -246,7 +247,7 @@ async def test_build_throughput(
                 except (ConnectionRefusedError, ConnectionResetError):
                     await asyncio.sleep(0.1)
 
-            log.info("Running baseline (%s Daemon, jobs=%d)...", client_label, max_jobs)
+            log.info("running_baseline_daemon", client=client_label, jobs=max_jobs)
             elapsed = await run_nix_build(
                 nix_file,
                 target,
@@ -256,7 +257,7 @@ async def test_build_throughput(
                 store="daemon",
                 extra_env=test_nix_env,
             )
-            log.info("Completed in %.1fs", elapsed)
+            log.info("build_completed", elapsed=elapsed)
             return elapsed
         finally:
             daemon_proc.terminate()
@@ -317,9 +318,9 @@ async def test_build_throughput(
 
             try:
                 log.info(
-                    "Running pynixd build (client=%s, jobs=%d)...",
-                    client_label,
-                    max_jobs,
+                    "running_pynixd_build",
+                    client=client_label,
+                    jobs=max_jobs,
                 )
                 elapsed = await run_nix_build(
                     nix_file,
@@ -330,7 +331,7 @@ async def test_build_throughput(
                     store="daemon",
                     extra_env=test_nix_env,
                 )
-                log.info("Completed in %.1fs", elapsed)
+                log.info("build_completed", elapsed=elapsed)
                 return elapsed
             finally:
                 profiler.stop()

@@ -13,13 +13,13 @@ fmt:
 
 # Run tests
 test: check
-    pytest tests -v --timeout=60 --timeout-method=thread --forked -m "not slow" --durations 50
+    pytest tests -v --timeout=60 --timeout-method=thread -m "not slow" --durations 50
 
 aitest: check
     #!/usr/bin/env bash
     logfile=$(mktemp)
     echo "Logfile: $logfile"
-    pytest tests -v --timeout=60 --timeout-method=thread --forked -m "not slow" --durations=50 --maxfail=0 2>&1 | tee $logfile
+    pytest tests -v --timeout=60 --timeout-method=thread -m "not slow" --durations=50 --maxfail=0 2>&1 | tee $logfile
     echo "Logfile: $logfile"
 
 # Run all checks

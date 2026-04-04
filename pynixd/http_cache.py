@@ -210,7 +210,7 @@ class BinaryCacheServer:
                 response.write,
             )
         except Exception:
-            log.exception("nar_from_path streaming failed for", path=path)
+            log.exception("nar_from_path_streaming_failed", path=path)
             # Response already started — can't change status code.
             # We close the connection abruptly to signal failure.
             # aiohttp: force-close the underlying transport.
@@ -244,7 +244,7 @@ class BinaryCacheServer:
                 return resp.value if resp.value else None
         except Exception:
             log.debug(
-                "query_path_from_hash_part daemon fallback failed for {}",
+                "query_path_from_hash_part_daemon_fallback_failed",
                 hash_part=hash_part,
             )
             return None
@@ -280,9 +280,9 @@ class BinaryCacheServer:
         # types-aiohttp don't declare sockets on AbstractServer (added in Python 3.7)
         bound_port = site._server.sockets[0].getsockname()[1]  # type: ignore[reportAttributeAccessIssue]
         log.info(
-            "Binary cache server listening on {}://{}:{}",
+            "binary_cache_server_listening",
             scheme=scheme,
             host=host,
-            bound_port=bound_port,
+            port=bound_port,
         )
         return runner, bound_port
