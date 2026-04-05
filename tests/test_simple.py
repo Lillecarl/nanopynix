@@ -6,12 +6,13 @@ from pathlib import Path
 
 import pytest
 from conftest import (
+    LIX_BIN,
     make_local_stores,
-    nix_build,
-    nix_build_store_only,
+    nix_command,
 )
 
 from pynixd import Server
+from pynixd.instance import NixImplementation
 
 
 @pytest.mark.builders
@@ -25,11 +26,12 @@ async def test_builders(
     stores = make_local_stores(n=2)
 
     async with Server(stores=stores, ssh_port=0) as server:
-        rc, _stdout, stderr = await nix_build(
-            server.builder_uri(),
-            "simple",
-            nix_env,
-            nix_file=test_nix,
+        rc, _stdout, stderr = await (
+            nix_command(LIX_BIN)
+            .builders(server.builder_uri(implementation=NixImplementation.LIX))
+            .file(test_nix, "simple")
+            .with_env(nix_env)
+            .run()
         )
         assert rc == 0, f"simple build failed:\n{stderr}"
 
@@ -45,10 +47,11 @@ async def test_store(
     stores = make_local_stores(n=2)
 
     async with Server(stores=stores, ssh_port=0) as server:
-        rc, _stdout, stderr = await nix_build_store_only(
-            server.uri(),
-            "simple",
-            nix_env,
-            nix_file=test_nix,
+        rc, _stdout, stderr = await (
+            nix_command(LIX_BIN)
+            .store(server.uri(implementation=NixImplementation.LIX))
+            .file(test_nix, "simple")
+            .with_env(nix_env)
+            .run()
         )
         assert rc == 0, f"simple build failed:\n{stderr}"

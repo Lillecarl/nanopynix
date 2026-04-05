@@ -41,9 +41,7 @@ async def src_store() -> AsyncIterator[LocalSocketStore]:
 @pytest.fixture
 async def dst_store() -> AsyncIterator[LocalSocketStore]:
     os.makedirs(DEST_STORE, exist_ok=True)
-    s = LocalSocketStore(
-        store_path=DEST_STORE, id="deframe-dst", nix_bin=str(NIX_BIN)
-    )
+    s = LocalSocketStore(store_path=DEST_STORE, id="deframe-dst", nix_bin=str(NIX_BIN))
     yield s
     await s.close()
 

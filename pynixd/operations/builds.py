@@ -91,9 +91,10 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
         request = await cls.from_reader(proxy.r, proxy.version)
-        if proxy.build_queue is None or proxy.scheduler_trigger is None:
-            raise RuntimeError("Build infrastructure not configured")
+        if proxy.build_queue is None:
+            return await proxy.local_store.execute(request, client=proxy.client)
 
+        assert proxy.scheduler_trigger is not None
         from .build_planner import plan_and_execute_build_paths
 
         return await plan_and_execute_build_paths(
@@ -127,9 +128,10 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
         request = await cls.from_reader(proxy.r, proxy.version)
-        if proxy.build_queue is None or proxy.scheduler_trigger is None:
-            raise RuntimeError("Build infrastructure not configured")
+        if proxy.build_queue is None:
+            return await proxy.local_store.execute(request, client=proxy.client)
 
+        assert proxy.scheduler_trigger is not None
         from .build_planner import plan_and_execute_build_paths_with_results
 
         return await plan_and_execute_build_paths_with_results(
@@ -169,8 +171,8 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
         request = await cls.from_reader(proxy.r, proxy.version)
-        if proxy.build_queue is None or proxy.scheduler_trigger is None:
-            raise RuntimeError("Build infrastructure not configured")
+        if proxy.build_queue is None:
+            return await proxy.local_store.execute(request, client=proxy.client)
 
         # Discover paths that exist on the local store but aren't tracked.
         unknown = (
@@ -180,6 +182,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             valid = await proxy.local_store.query_valid_paths(unknown)
             proxy.local_store.add_known_paths(valid, update_regtime=False)
 
+        assert proxy.scheduler_trigger is not None
         from .build_planner import enqueue_build_derivation
 
         future = await enqueue_build_derivation(

@@ -68,9 +68,8 @@ class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
         # 2. SQLite fast path
         if store.db:
             result = await store.db.is_valid_path(self.path)
-            if result is not None:
-                # TODO: We might want to send some information about where
-                # this path was found if it's relevant for the client
+            if result is not None and result.valid:
+                store.add_known_path(self.path)
                 return result
 
         # 3. Daemon fallback (Base class execute)
@@ -118,9 +117,8 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
         # 1. SQLite fast path
         if store.db:
             result = await store.db.query_path_info(self.path)
-            if result is not None:
-                # TODO: We might want to send some information about where
-                # this path was found if it's relevant for the client
+            if result is not None and result.valid:
+                store.add_known_path(self.path)
                 return result
 
         # 2. Daemon fallback
@@ -172,6 +170,7 @@ class QueryValidPathsRequest(OpRequest[StringSetResponse]):
                 # If substitution is requested, DB hits alone aren't sufficient
                 # unless all paths were found in SQLite.
                 if not self.substitute or result.paths >= self.paths:
+                    store.add_known_paths(result.paths)
                     return result
 
         # 2. Daemon fallback
@@ -201,6 +200,7 @@ class QueryPathFromHashPartRequest(SingleStringRequest[SingleStringResponse]):
         if store.db:
             path = await store.db.query_path_from_hash_part(self.path)
             if path is not None:
+                store.add_known_path(path)
                 return SingleStringResponse(value=path)
 
         # 2. Daemon fallback

@@ -529,6 +529,7 @@ class Store(ABC):
             return False
 
         return "lix" in self.nix_version.lower()
+
     def start_sweep(self) -> None:
         """Start the idle sweep task if not already running."""
         if self.sweep_task is None or self.sweep_task.done():
@@ -1119,7 +1120,7 @@ class LocalSocketStore(Store):
             self.daemon_proc.terminate()
             try:
                 await asyncio.wait_for(self.daemon_proc.wait(), timeout=5.0)
-            except (TimeoutError, asyncio.TimeoutError):
+            except TimeoutError:
                 self.daemon_proc.kill()
             self.daemon_proc = None
             # Small delay to let OS clean up the socket file

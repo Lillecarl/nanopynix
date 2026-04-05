@@ -85,10 +85,15 @@ class Server:
             config = PynixdConfig(**kwargs)
 
         self.config: PynixdConfig = config
-        self.build_queue = BuildQueue()
-        self.scheduler = Scheduler(
-            self.build_queue, self.config.stores, self.config.local_store
-        )
+        if self.config.stores:
+            self.build_queue: BuildQueue | None = BuildQueue()
+            self.scheduler: Scheduler | None = Scheduler(
+                self.build_queue, self.config.stores, self.config.local_store
+            )
+        else:
+            self.build_queue = None
+            self.scheduler = None
+
         self.background_tasks: list[asyncio.Task[Any]] = []
         self.ssh_server: asyncssh.SSHAcceptor | None = None
         self.unix_server: asyncio.Server | None = None
@@ -168,9 +173,11 @@ class Server:
                 await store.sync_paths()
             except Exception:
                 log.exception("sync_paths_failed", id=store.id)
+
         # Start background services
-        scheduler_task = asyncio.create_task(self.scheduler.start())
-        self.background_tasks.append(scheduler_task)
+        if self.scheduler:
+            scheduler_task = asyncio.create_task(self.scheduler.start())
+            self.background_tasks.append(scheduler_task)
 
         if local_store.db:
             local_store.db.start()
@@ -260,7 +267,8 @@ class Server:
             self.unix_server.close()
 
         # Stop scheduler gracefully (cancels builds etc)
-        await self.scheduler.stop()
+        if self.scheduler:
+            await self.scheduler.stop()
 
         for task in self.background_tasks:
             task.cancel()

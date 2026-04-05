@@ -46,8 +46,8 @@ class _NixSSHServer(asyncssh.SSHServer):
 async def start_ssh_server(
     stores: Mapping[str, Store],
     local_store: Store,
-    build_queue: BuildQueue,
-    scheduler: Scheduler,
+    build_queue: BuildQueue | None,
+    scheduler: Scheduler | None,
     host: str = "127.0.0.1",
     port: int = 0,
     host_key_path: Path | None = None,
@@ -57,8 +57,8 @@ async def start_ssh_server(
     Args:
         stores: Store instances (shared across clients)
         local_store: Shared local Store for client connections
-        build_queue: Shared build queue
-        scheduler: Shared scheduler
+        build_queue: Shared build queue (None in local mode)
+        scheduler: Shared scheduler (None in local mode)
         host: Listen address
         port: Listen port (0 for random available port)
         host_key_path: Path to SSH host key
@@ -96,7 +96,7 @@ async def start_ssh_server(
                 SSHNixWriter(process.stdout),
                 local_store=local_store,
                 build_queue=build_queue,
-                scheduler_trigger=scheduler.trigger,
+                scheduler_trigger=scheduler.trigger if scheduler else None,
             )
             await proxy.run()
         except Exception:

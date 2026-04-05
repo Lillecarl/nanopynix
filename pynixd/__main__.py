@@ -143,7 +143,8 @@ async def async_main() -> None:
             log.info("loading_backends", path=str(backend_file))
             stores = load_backends_from_file(backend_file)
         else:
-            raise ValueError("PYNIXD_BACKEND_FILE is required in non-dev mode")
+            log.info("no_backends_configured", mode="local-only")
+            stores = {}
 
         if "local" in stores:
             local_store = stores.pop("local")

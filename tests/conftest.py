@@ -270,11 +270,12 @@ async def nix_build(
     *args: str,
     nix_file: Path | None = None,
     jobs: int = 1,
+    nix_bin: Path = NIX_BIN,
 ) -> tuple[int, str, str]:
     """Run nix build against a pynixd SSH server."""
     nix_file = nix_file or TEST_NIX
     cmd = [
-        str(NIX_BIN),
+        str(nix_bin),
         "build",
         "--builders",
         uri,
@@ -311,11 +312,12 @@ async def nix_build_store_only(
     env: dict[str, str] | None = None,
     *args: str,
     nix_file: Path | None = None,
+    nix_bin: Path = NIX_BIN,
 ) -> tuple[int, str, str]:
     """Run nix build --store against a pynixd SSH server."""
     nix_file = nix_file or TEST_NIX
     cmd = [
-        str(NIX_BIN),
+        str(nix_bin),
         "build",
         "--store",
         uri,
@@ -342,6 +344,110 @@ async def nix_build_store_only(
     )
     stdout, stderr = await res.communicate()
     return res.returncode or 0, stdout.decode(), stderr.decode()
+
+
+@dataclass
+class NixCommandBuilder:
+    """StringBuilder-like builder for constructing and running Nix commands."""
+
+    bin: Path = NIX_BIN
+    command: str = "build"
+    args: list[str] = field(default_factory=list)
+    options: dict[str, str | list[str]] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=lambda: os.environ.copy())
+    installables: list[str] = field(default_factory=list)
+
+    def lix(self) -> NixCommandBuilder:
+        self.bin = LIX_BIN
+        return self
+
+    def nix(self) -> NixCommandBuilder:
+        self.bin = NIX_BIN
+        return self
+
+    def store(self, uri: str) -> NixCommandBuilder:
+        self.args.extend(["--store", uri])
+        return self
+
+    def builders(
+        self, uri: str, system: str = "", max_jobs: int = 4
+    ) -> NixCommandBuilder:
+        if " " in uri:
+            # Already a full spec (like from Server.builder_uri)
+            spec = uri
+        else:
+            if not system:
+                from pynixd.store import get_current_system
+
+                system = get_current_system()
+            spec = f"{uri} {system} - {max_jobs}"
+        self.args.extend(["--builders", spec])
+        return self
+
+    def file(self, path: str | Path, attribute: str = "") -> NixCommandBuilder:
+        self.args.extend(["--file", str(path)])
+        if attribute:
+            self.installables.append(attribute)
+        return self
+
+    def option(self, name: str, value: str) -> NixCommandBuilder:
+        self.args.extend(["--option", name, value])
+        return self
+
+    def arg(self, *args: str) -> NixCommandBuilder:
+        self.args.extend(args)
+        return self
+
+    def installable(self, *names: str) -> NixCommandBuilder:
+        self.installables.extend(names)
+        return self
+
+    def remote(self, uri: str) -> NixCommandBuilder:
+        self.env["NIX_REMOTE"] = uri
+        return self
+
+    def set_env(self, name: str, value: str) -> NixCommandBuilder:
+        self.env[name] = value
+        return self
+
+    def with_env(self, env: dict[str, str]) -> NixCommandBuilder:
+        self.env.update(env)
+        return self
+
+    async def run(self) -> tuple[int, str, str]:
+        """Execute the constructed nix command."""
+        cmd = [str(self.bin), self.command]
+        cmd.extend(self.args)
+        cmd.extend(self.installables)
+
+        # Default useful flags for tests
+        if self.command == "build":
+            if "--no-link" not in self.args:
+                cmd.append("--no-link")
+            if "--print-out-paths" not in self.args:
+                cmd.append("--print-out-paths")
+
+        # Ensure SSH opts are set if not already in env
+        if "NIX_SSHOPTS" not in self.env:
+            self.env["NIX_SSHOPTS"] = (
+                "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+            )
+
+        log.debug("nix_command_run", cmd=shlex.join(cmd))
+        res = await asyncio.create_subprocess_exec(
+            *cmd,
+            env=self.env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await res.communicate()
+        rc = res.returncode or 0
+        return rc, stdout.decode(), stderr.decode()
+
+
+def nix_command(bin: Path = NIX_BIN) -> NixCommandBuilder:
+    """Entry point for creating a Nix command."""
+    return NixCommandBuilder(bin=bin)
 
 
 def get_free_port() -> int:

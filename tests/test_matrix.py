@@ -11,8 +11,6 @@ Each test builds a single simple derivation (test.nix .simple).
 
 from __future__ import annotations
 
-import os
-import shlex
 from pathlib import Path
 
 import pytest
@@ -20,7 +18,7 @@ import structlog
 from conftest import (
     LIX_BIN,
     NIX_BIN,
-    _run_subprocess_with_timeout,
+    nix_command,
 )
 from environs import Env
 
@@ -110,54 +108,6 @@ LOCAL_BINS = [LIX_BIN, NIX_BIN]
 LOCAL_BUILDERS = [_local_lix_builder, _local_nix_builder]
 
 
-async def _nix_build_builders(
-    client_bin: Path,
-    builder_uri: str,
-    client_store_path: Path,
-    env: dict[str, str],
-    *extra_args: str,
-    timeout: int = 120,
-) -> tuple[int, str, str]:
-    os.makedirs(client_store_path, exist_ok=True)
-    cmd = [
-        str(client_bin),
-        "build",
-        "--store",
-        str(client_store_path),
-        "--builders",
-        builder_uri,
-        "--max-jobs",
-        "0",
-        "--no-link",
-        *extra_args,
-    ]
-    log.info("matrix_build_builders", cmd=" ".join(shlex.quote(a) for a in cmd))
-    rc, out, err = _run_subprocess_with_timeout(cmd, env, timeout)
-    log.info("matrix_build_result", rc=rc, stdout=out[:500], stderr=err[:2000])
-    return rc, out, err
-
-
-async def _nix_build_store(
-    client_bin: Path,
-    store_uri: str,
-    env: dict[str, str],
-    *extra_args: str,
-    timeout: int = 120,
-) -> tuple[int, str, str]:
-    cmd = [
-        str(client_bin),
-        "build",
-        "--store",
-        store_uri,
-        "--no-link",
-        *extra_args,
-    ]
-    log.info("matrix_build_store", cmd=" ".join(shlex.quote(a) for a in cmd))
-    rc, out, err = _run_subprocess_with_timeout(cmd, env, timeout)
-    log.info("matrix_build_result", rc=rc, stdout=out[:500], stderr=err[:2000])
-    return rc, out, err
-
-
 # ── Tests: --builders mode (local builders) ───────────────────────────
 
 
@@ -181,14 +131,14 @@ async def test_builders_local(
     client_store = Path(f"/tmp/pynixd-test-matrix-client-{_next_id()}")
 
     async with Server(stores=stores, local_store=local, ssh_port=0) as server:
-        rc, _stdout, stderr = await _nix_build_builders(
-            client_bin,
-            server.builder_uri(implementation=impl),
-            client_store,
-            nix_env,
-            "--file",
-            str(test_nix),
-            "simple",
+        rc, _stdout, stderr = await (
+            nix_command(client_bin)
+            .store(str(client_store))
+            .builders(server.builder_uri(implementation=impl))
+            .arg("--max-jobs", "0")
+            .file(test_nix, "simple")
+            .with_env(nix_env)
+            .run()
         )
         assert rc == 0, f"build failed:\n{stderr}"
 
@@ -215,13 +165,12 @@ async def test_store_local(
     local = _local_store(local_bin)
 
     async with Server(stores=stores, local_store=local, ssh_port=0) as server:
-        rc, _stdout, stderr = await _nix_build_store(
-            client_bin,
-            server.uri_for(uri_fmt, implementation=impl),
-            nix_env,
-            "--file",
-            str(test_nix),
-            "simple",
+        rc, _stdout, stderr = await (
+            nix_command(client_bin)
+            .store(server.uri_for(uri_fmt, implementation=impl))
+            .file(test_nix, "simple")
+            .with_env(nix_env)
+            .run()
         )
         assert rc == 0, f"build failed:\n{stderr}"
 
@@ -248,14 +197,14 @@ async def test_builders_nixbuild(
     client_store = Path(f"/tmp/pynixd-test-matrix-client-{_next_id()}")
 
     async with Server(stores=stores, local_store=local, ssh_port=0) as server:
-        rc, _stdout, stderr = await _nix_build_builders(
-            client_bin,
-            server.builder_uri(implementation=impl),
-            client_store,
-            nix_env,
-            "--file",
-            str(test_nix),
-            "simple",
+        rc, _stdout, stderr = await (
+            nix_command(client_bin)
+            .store(str(client_store))
+            .builders(server.builder_uri(implementation=impl))
+            .arg("--max-jobs", "0")
+            .file(test_nix, "simple")
+            .with_env(nix_env)
+            .run()
         )
         assert rc == 0, f"build failed:\n{stderr}"
 
@@ -281,12 +230,11 @@ async def test_store_nixbuild(
     local = _local_store(local_bin)
 
     async with Server(stores=stores, local_store=local, ssh_port=0) as server:
-        rc, _stdout, stderr = await _nix_build_store(
-            client_bin,
-            server.uri_for(uri_fmt, implementation=impl),
-            nix_env,
-            "--file",
-            str(test_nix),
-            "simple",
+        rc, _stdout, stderr = await (
+            nix_command(client_bin)
+            .store(server.uri_for(uri_fmt, implementation=impl))
+            .file(test_nix, "simple")
+            .with_env(nix_env)
+            .run()
         )
         assert rc == 0, f"build failed:\n{stderr}"

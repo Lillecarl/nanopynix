@@ -49,3 +49,8 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 - `BuildPaths` and `BuildPathsWithResults` are decomposed into individual `BuildDerivation` requests.
 - Each build executes in a spawned task, surviving client disconnects.
 - Outputs are automatically pulled into the `LocalStore` upon successful completion.
+
+## 6. Execution Sanity & Recovery
+- **Halt on Ambiguity**: If a tool output indicates potential corruption (e.g., duplicate declarations in a `replace` output, unexpected truncations), or if you lose track of the file state relative to the VCS, **STOP immediately**. Do not attempt blind recovery (like `write_file` with partial content).
+- **Verify Before Rewrite**: Before using `write_file` to "fix" a large file, you MUST have read the *entire* file in the current turn to ensure no data loss.
+- **VCS Truth**: If `jj status` or `jj diff` contradicts your internal model of the changes, re-sync by reading the files from disk before taking further action. Do not guess.

@@ -15,13 +15,14 @@ from pathlib import Path
 import pytest
 import structlog
 from conftest import (
+    LIX_BIN,
     NIX_BIN,
-    _run_subprocess_with_timeout,
     make_local_stores,
-    nix_build,
+    nix_command,
 )
 
 from pynixd import Server
+from pynixd.instance import NixImplementation
 from pynixd.store import LocalSocketStore
 
 log = structlog.get_logger(__name__)
@@ -68,25 +69,29 @@ async def test_builder_concurrency(
             # Sleep 1s per drv to make concurrency measurable
             client_env["PYNIXD_PAR_SLEEP"] = "1"
 
-            cmd = [
-                str(NIX_BIN),
-                "build",
-                "--store",
-                str(client_store),
-                "--builders",
-                server.builder_uri(max_jobs=drvs_per_client),
-                "--max-jobs",
-                "0",
-                "--no-link",
-                "--file",
-                str(test_nix),
-                "parallel",
-            ]
-
             t0 = time.monotonic()
-            rc, _out, err = _run_subprocess_with_timeout(cmd, client_env, timeout=120)
+            rc, stdout, stderr = await (
+                nix_command(LIX_BIN)
+                .store(str(client_store))
+                .builders(
+                    server.builder_uri(
+                        max_jobs=drvs_per_client, implementation=NixImplementation.LIX
+                    )
+                )
+                .arg("--max-jobs", "0")
+                .file(test_nix, "parallel")
+                .with_env(client_env)
+                .run()
+            )
             elapsed = time.monotonic() - t0
-            assert rc == 0, f"Client {client_id} failed:\n{err}"
+            if rc != 0:
+                log.error(
+                    "client_failed",
+                    client_id=client_id,
+                    rc=rc,
+                    stderr=stderr,
+                )
+            assert rc == 0, f"Client {client_id} failed:\n{stderr}"
             return elapsed
 
         start = time.monotonic()
@@ -97,6 +102,8 @@ async def test_builder_concurrency(
         total_elapsed = time.monotonic() - start
 
         failed = [r for r in results if isinstance(r, Exception)]
+        assert not failed, f"{len(failed)} clients failed: {failed}"
+
         client_times = [r for r in results if isinstance(r, float)]
 
         print(
@@ -107,8 +114,6 @@ async def test_builder_concurrency(
             f"\n  Sum of client times: {sum(client_times):.1f}s"
             f"\n  Effective concurrency: {sum(client_times) / total_elapsed:.1f}x"
         )
-
-        assert not failed, f"{len(failed)} clients failed: {failed}"
 
         # With max_builds=2, total wall clock should be at least
         # (n_clients * drvs_per_client * sleep_time) / 2
@@ -137,11 +142,14 @@ async def test_single_client_max_jobs(
 
     async with Server(stores=stores, local_store=local_store, ssh_port=0) as server:
         # Request 10 jobs from a single client
-        rc, _stdout, stderr = await nix_build(
-            server.builder_uri(),
-            "parallel",
-            nix_env,
-            nix_file=test_nix,
-            jobs=10,
+        rc, _stdout, stderr = await (
+            nix_command(LIX_BIN)
+            .builders(
+                server.builder_uri(max_jobs=10, implementation=NixImplementation.LIX)
+            )
+            .arg("--max-jobs", "10")
+            .file(test_nix, "parallel")
+            .with_env(nix_env)
+            .run()
         )
         assert rc == 0, f"build failed:\n{stderr}"
