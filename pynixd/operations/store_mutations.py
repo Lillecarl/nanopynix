@@ -11,6 +11,8 @@ import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
+import structlog
+
 from ..protocol import Op
 
 if TYPE_CHECKING:
@@ -26,6 +28,8 @@ from .base import (
     SingleStringRequest,
     Uint64Response,
 )
+
+log = structlog.get_logger(__name__)
 
 # ── AddToStore (subframe) ────────────────────────────────────────────
 
@@ -73,6 +77,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> AddToStoreResponse:
         """Override handle because this is a streaming operation."""
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
         resp = await proxy.local_store.add_to_store_streaming(proxy.r)
         proxy.local_store.add_known_path(resp.info.path)
         return resp
@@ -150,6 +155,7 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
         """Override handle because this is a streaming operation."""
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
         path = await proxy.local_store.add_to_store_nar_streaming(proxy.r)
         proxy.local_store.add_known_path(path)
         return EmptyResponse()
@@ -221,6 +227,7 @@ class AddMultipleToStoreRequest(OpRequest[EmptyResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
         """Override handle because this is a streaming operation."""
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
         paths = await proxy.local_store.add_multiple_to_store_streaming(proxy.r)
         proxy.local_store.add_known_paths(set(paths))
         return EmptyResponse()

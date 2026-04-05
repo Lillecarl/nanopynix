@@ -22,6 +22,7 @@ from .operations.base import (
     OpResponse,
 )
 from .protocol import Op, OptTrusted, op_log
+from .scheduler import Scheduler
 from .stderr import StderrError
 from .store import Store
 from .wire import NixReader, NixWriter
@@ -43,18 +44,23 @@ class DaemonProxy:
         self,
         client_r: NixReader,
         client_w: NixWriter,
-        *,
         local_store: Store,
-        build_queue: BuildQueue | None = None,
-        scheduler_trigger: Callable[[], None] | None = None,
+        scheduler: Scheduler | None = None,
     ) -> None:
         self.r = client_r
         self.w = client_w
         self.client = ClientConn(w=self.w)
         self.local_store = local_store
-        self.build_queue = build_queue
-        self.scheduler_trigger = scheduler_trigger
+        self.scheduler = scheduler
         self.version: int = wire.PROTOCOL_VERSION
+
+    @property
+    def build_queue(self) -> BuildQueue | None:
+        return self.scheduler.queue if self.scheduler else None
+
+    @property
+    def scheduler_trigger(self) -> Callable[[], None] | None:
+        return self.scheduler.trigger if self.scheduler else None
 
     async def run(self) -> None:
         """Run the full session lifecycle."""

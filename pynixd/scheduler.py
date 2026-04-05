@@ -24,12 +24,14 @@ import structlog
 from environs import Env
 
 from .build_queue import BuildQueue, QueuedBuild
+from .connection import ClientConn
 from .exceptions import BackendError, InfrastructureError
 from .operations.base import BuildResultStatus, PathInfo
 from .operations.builds import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )
+from .protocol import Op
 from .store import Store
 
 log = structlog.get_logger(__name__)
@@ -80,11 +82,10 @@ class Scheduler:
 
     def __init__(
         self,
-        build_queue: BuildQueue,
         stores: Mapping[str, Store],
         local_store: Store,
     ) -> None:
-        self.queue = build_queue
+        self.queue = BuildQueue()
         self.stores = stores
         self.local_store = local_store
         self.trigger_event = asyncio.Event()
@@ -93,6 +94,19 @@ class Scheduler:
     def trigger(self) -> None:
         """Signal that a scheduling pass is needed."""
         self.trigger_event.set()
+
+    async def enqueue(
+        self,
+        op: Op,
+        request: BuildDerivationRequest,
+        client: ClientConn | None,
+        required_paths: set[str],
+        platform: str = "",
+    ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
+        """Add a build to the queue and trigger the scheduler."""
+        res = await self.queue.enqueue(op, request, client, required_paths, platform)
+        self.trigger()
+        return res
 
     async def start(self) -> None:
         """Start the scheduler loop."""

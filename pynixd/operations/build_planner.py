@@ -5,7 +5,6 @@ Build planner for decomposing high-level build requests into derivations.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,8 +25,8 @@ from .builds import (
 from .queries import QueryMissingRequest
 
 if TYPE_CHECKING:
-    from ..build_queue import BuildQueue
     from ..connection import ClientConn
+    from ..scheduler import Scheduler
     from ..store import Store
 
 log = structlog.get_logger(__name__)
@@ -36,15 +35,12 @@ log = structlog.get_logger(__name__)
 async def plan_and_execute_build_paths(
     request: BuildPathsRequest,
     store: Store,
-    build_queue: BuildQueue,
-    scheduler_trigger: Callable[[], None],
+    scheduler: Scheduler,
     client: ClientConn | None = None,
 ) -> Uint64Response:
     """Decompose and execute a BuildPaths request."""
     op_log("BuildPaths").debug("BuildPaths len(paths)=%d", len(request.derived_paths))
-    decomposed = await decompose_build_paths(
-        request, store, build_queue, scheduler_trigger, client
-    )
+    decomposed = await decompose_build_paths(request, store, scheduler, client)
 
     if not decomposed:
         return Uint64Response(value=0)  # nothing to build
@@ -65,8 +61,7 @@ async def plan_and_execute_build_paths(
 async def plan_and_execute_build_paths_with_results(
     request: BuildPathsWithResultsRequest,
     store: Store,
-    build_queue: BuildQueue,
-    scheduler_trigger: Callable[[], None],
+    scheduler: Scheduler,
     client: ClientConn | None = None,
 ) -> KeyedBuildResultsResponse:
     """Decompose and execute a BuildPathsWithResults request."""
@@ -74,9 +69,7 @@ async def plan_and_execute_build_paths_with_results(
         "build_paths_with_results_decomposed",
         num_derivations=len(request.derived_paths),
     )
-    decomposed = await decompose_build_paths(
-        request, store, build_queue, scheduler_trigger, client
-    )
+    decomposed = await decompose_build_paths(request, store, scheduler, client)
 
     if not decomposed:
         return KeyedBuildResultsResponse(results=[])
@@ -114,8 +107,7 @@ async def plan_and_execute_build_paths_with_results(
 async def decompose_build_paths(
     request: BuildPathsRequest | BuildPathsWithResultsRequest,
     store: Store,
-    build_queue: BuildQueue,
-    scheduler_trigger: Callable[[], None],
+    scheduler: Scheduler,
     client: ClientConn | None = None,
 ) -> list[tuple[str, set[str], asyncio.Future[BuildDerivationResponse]]]:
     """Decompose BuildPaths into individual BuildDerivation requests.
@@ -160,9 +152,7 @@ async def decompose_build_paths(
         store.add_known_paths(valid, update_regtime=False)
 
     for dp, output_names, drv_request in resolved:
-        future = await enqueue_build_derivation(
-            drv_request, store, build_queue, scheduler_trigger, client
-        )
+        future = await enqueue_build_derivation(drv_request, store, scheduler, client)
         results.append((dp, output_names, future))
 
     return results
@@ -171,15 +161,14 @@ async def decompose_build_paths(
 async def enqueue_build_derivation(
     request: BuildDerivationRequest,
     store: Store,
-    build_queue: BuildQueue,
-    scheduler_trigger: Callable[[], None],
+    scheduler: Scheduler,
     client: ClientConn | None = None,
 ) -> asyncio.Future[BuildDerivationResponse]:
     """Enqueue a single BuildDerivation request."""
     # Enrich with .drv metadata (e.g. _is_dynamic) if not already set
     enrich_derivation(request, store)
 
-    build_id, future = await build_queue.enqueue(
+    build_id, future = await scheduler.enqueue(
         Op.BuildDerivation,
         request,
         client,
@@ -191,7 +180,6 @@ async def enqueue_build_derivation(
         build_id=build_id,
         drv_path=request.drv_path,
     )
-    scheduler_trigger()
 
     return future
 

@@ -15,7 +15,6 @@ import structlog
 if TYPE_CHECKING:
     from aiohttp import web
 
-from .build_queue import BuildQueue
 from .gc import GarbageCollector
 from .http_cache import BinaryCacheServer
 from .local_store_db import LocalStoreDB
@@ -86,12 +85,10 @@ class Server:
 
         self.config: PynixdConfig = config
         if self.config.stores:
-            self.build_queue: BuildQueue | None = BuildQueue()
             self.scheduler: Scheduler | None = Scheduler(
-                self.build_queue, self.config.stores, self.config.local_store
+                self.config.stores, self.config.local_store
             )
         else:
-            self.build_queue = None
             self.scheduler = None
 
         self.background_tasks: list[asyncio.Task[Any]] = []
@@ -191,7 +188,6 @@ class Server:
             self.ssh_server = await start_ssh_server(
                 stores=stores,
                 local_store=local_store,
-                build_queue=self.build_queue,
                 scheduler=self.scheduler,
                 host=self.config.ssh_host,
                 port=self.config.ssh_port,
@@ -202,7 +198,6 @@ class Server:
             self.unix_server = await start_unix_server(
                 stores=stores,
                 local_store=local_store,
-                build_queue=self.build_queue,
                 scheduler=self.scheduler,
                 socket_path=self.config.unix_path,
             )

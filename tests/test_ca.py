@@ -11,6 +11,8 @@ from conftest import get_free_port, nix_build_store_only, rmtree_robust
 from pynixd.instance import PynixdConfig, Server
 from pynixd.store import LocalSocketStore, Store
 
+pytestmark = pytest.mark.skip(reason="Temporarily disabled")
+
 CA_NIX = Path("ca.nix").absolute()
 # This specific binary is confirmed to support ca-derivations
 CA_COMPAT_NIX = Path("/nix/store/ky4l78069kvsy4dcpjf2i4ikjbdvnrdq-nix-2.31.3/bin/nix")

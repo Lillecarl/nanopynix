@@ -14,7 +14,6 @@ import asyncssh
 import structlog
 
 from . import wire
-from .build_queue import BuildQueue
 from .proxy import DaemonProxy
 from .scheduler import Scheduler
 from .store import Store
@@ -46,7 +45,6 @@ class _NixSSHServer(asyncssh.SSHServer):
 async def start_ssh_server(
     stores: Mapping[str, Store],
     local_store: Store,
-    build_queue: BuildQueue | None,
     scheduler: Scheduler | None,
     host: str = "127.0.0.1",
     port: int = 0,
@@ -57,7 +55,6 @@ async def start_ssh_server(
     Args:
         stores: Store instances (shared across clients)
         local_store: Shared local Store for client connections
-        build_queue: Shared build queue (None in local mode)
         scheduler: Shared scheduler (None in local mode)
         host: Listen address
         port: Listen port (0 for random available port)
@@ -95,8 +92,7 @@ async def start_ssh_server(
                 SSHNixReader(process.stdin),
                 SSHNixWriter(process.stdout),
                 local_store=local_store,
-                build_queue=build_queue,
-                scheduler_trigger=scheduler.trigger if scheduler else None,
+                scheduler=scheduler,
             )
             await proxy.run()
         except Exception:

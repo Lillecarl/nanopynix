@@ -7,6 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
+import structlog
+
 from ..derived_path import DerivedPath
 
 if TYPE_CHECKING:
@@ -21,6 +23,8 @@ from .base import (
     OpResponse,
     Uint64Response,
 )
+
+log = structlog.get_logger(__name__)
 
 # ── Shared structures ─────────────────────────────────────────────────
 
@@ -90,18 +94,18 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
         request = await cls.from_reader(proxy.r, proxy.version)
-        if proxy.build_queue is None:
+        if proxy.scheduler is None:
+            log.debug("handle_local_mode_fallback")
             return await proxy.local_store.execute(request, client=proxy.client)
 
-        assert proxy.scheduler_trigger is not None
         from .build_planner import plan_and_execute_build_paths
 
         return await plan_and_execute_build_paths(
             request,
             proxy.local_store,
-            proxy.build_queue,
-            proxy.scheduler_trigger,
+            proxy.scheduler,
             client=proxy.client,
         )
 
@@ -127,18 +131,18 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
         request = await cls.from_reader(proxy.r, proxy.version)
-        if proxy.build_queue is None:
+        if proxy.scheduler is None:
+            log.debug("handle_local_mode_fallback")
             return await proxy.local_store.execute(request, client=proxy.client)
 
-        assert proxy.scheduler_trigger is not None
         from .build_planner import plan_and_execute_build_paths_with_results
 
         return await plan_and_execute_build_paths_with_results(
             request,
             proxy.local_store,
-            proxy.build_queue,
-            proxy.scheduler_trigger,
+            proxy.scheduler,
             client=proxy.client,
         )
 
@@ -170,8 +174,10 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
         request = await cls.from_reader(proxy.r, proxy.version)
-        if proxy.build_queue is None:
+        if proxy.scheduler is None:
+            log.debug("handle_local_mode_fallback")
             return await proxy.local_store.execute(request, client=proxy.client)
 
         # Discover paths that exist on the local store but aren't tracked.
@@ -182,14 +188,12 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             valid = await proxy.local_store.query_valid_paths(unknown)
             proxy.local_store.add_known_paths(valid, update_regtime=False)
 
-        assert proxy.scheduler_trigger is not None
         from .build_planner import enqueue_build_derivation
 
         future = await enqueue_build_derivation(
             request,
             proxy.local_store,
-            proxy.build_queue,
-            proxy.scheduler_trigger,
+            proxy.scheduler,
             client=proxy.client,
         )
         response = await future

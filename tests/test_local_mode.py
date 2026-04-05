@@ -6,15 +6,20 @@ import os
 from pathlib import Path
 
 import pytest
+import structlog
 from conftest import (
     LIX_BIN,
+    NIX_BIN,
     TEST_NIX,
+    get_free_port,
     nix_command,
     rmtree_robust,
 )
 
-from pynixd.instance import PynixdConfig, Server
+from pynixd.instance import NixImplementation, PynixdConfig, Server
 from pynixd.store import LocalSocketStore
+
+log = structlog.get_logger(__name__)
 
 
 @pytest.mark.asyncio
@@ -49,8 +54,7 @@ async def test_local_mode_passthrough(nix_env):
             .with_env(nix_env)
             .run()
         )
-        print(f"DEBUG: stdout={stdout!r}")
-        print(f"DEBUG: stderr={stderr!r}")
+        log.debug("build_result", rc=rc, stdout=stdout, stderr=stderr)
 
         assert rc == 0, f"Local mode build failed:\n{stderr}"
         assert "test-" in stdout

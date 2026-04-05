@@ -374,7 +374,6 @@ class LocalStoreDB:
     def mark_path(self, path: str) -> None:
         """Queue a path for registration time update."""
         if self.db_conn is not None and not self.read_only:
-            log.debug("db_mark_path", path=path)
             self.pending_regtime.add(path)
 
     def mark_paths(self, paths: set[str]) -> None:

@@ -106,13 +106,14 @@ async def test_builder_concurrency(
 
         client_times = [r for r in results if isinstance(r, float)]
 
-        print(
-            f"\n  Total wall-clock: {total_elapsed:.1f}s"
-            f"\n  Client times: min={min(client_times):.1f}s "
-            f"max={max(client_times):.1f}s "
-            f"avg={sum(client_times) / len(client_times):.1f}s"
-            f"\n  Sum of client times: {sum(client_times):.1f}s"
-            f"\n  Effective concurrency: {sum(client_times) / total_elapsed:.1f}x"
+        log.info(
+            "concurrency_stats",
+            total_wall_clock=f"{total_elapsed:.1f}s",
+            client_min=f"{min(client_times):.1f}s",
+            client_max=f"{max(client_times):.1f}s",
+            client_avg=f"{sum(client_times) / len(client_times):.1f}s",
+            sum_client_times=f"{sum(client_times):.1f}s",
+            effective_concurrency=f"{sum(client_times) / total_elapsed:.1f}x",
         )
 
         # With max_builds=2, total wall clock should be at least

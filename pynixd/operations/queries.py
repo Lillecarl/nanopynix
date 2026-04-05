@@ -10,6 +10,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
+import structlog
+
 from .. import wire
 from ..derived_path import DerivedPath
 
@@ -298,6 +300,8 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> NarFromPathResponse | None:
         from ..protocol import op_log
+
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
 
         request = await cls.from_reader(proxy.r, proxy.version)
         if await proxy.local_store.is_valid_path(request.path):

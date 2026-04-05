@@ -13,7 +13,6 @@ from pathlib import Path
 
 import structlog
 
-from .build_queue import BuildQueue
 from .proxy import DaemonProxy
 from .scheduler import Scheduler
 from .store import Store
@@ -25,7 +24,6 @@ log = structlog.get_logger(__name__)
 async def start_unix_server(
     stores: Mapping[str, Store],
     local_store: Store,
-    build_queue: BuildQueue | None,
     scheduler: Scheduler | None,
     socket_path: Path,
 ) -> asyncio.Server:
@@ -34,7 +32,6 @@ async def start_unix_server(
     Args:
         stores: Store instances (shared across clients)
         local_store: Shared local Store for client connections
-        build_queue: Shared build queue (None in local mode)
         scheduler: Shared scheduler (None in local mode)
         socket_path: Path for the Unix domain socket
 
@@ -53,8 +50,7 @@ async def start_unix_server(
                 UnixNixReader(reader),
                 UnixNixWriter(writer),
                 local_store=local_store,
-                build_queue=build_queue,
-                scheduler_trigger=scheduler.trigger if scheduler else None,
+                scheduler=scheduler,
             )
             await proxy.run()
         except Exception:
