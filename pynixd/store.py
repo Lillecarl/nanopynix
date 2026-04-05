@@ -812,6 +812,7 @@ class _SSHStoreMixin:
     host: str
     port: int
     username: str | None
+    client_keys: list[str | Path] | None
     conn: asyncssh.SSHClientConnection | None
     backoff: float
     max_backoff: float
@@ -822,13 +823,16 @@ class _SSHStoreMixin:
     MAX_BACKOFF: float = 60.0
     PSI_INTERVAL = env.float("PYNIXD_PSI_INTERVAL", 5.0)
 
-    def init_ssh_state(self, *, monitor: bool = True) -> None:
+    def init_ssh_state(
+        self, *, monitor: bool = True, client_keys: list[str | Path] | None = None
+    ) -> None:
         self.conn = None
         self.ssh_lock = asyncio.Lock()
         self.backoff = self.INITIAL_BACKOFF
         self.max_backoff = self.MAX_BACKOFF
         self.last_failure = 0.0
         self.monitor_enabled = monitor
+        self.client_keys = client_keys
         self.psi_data: PsiSnapshot | None = None
         self.meminfo_data: MemInfo | None = None
         self.psi_task: asyncio.Task[None] | None = None
@@ -942,6 +946,7 @@ class _SSHStoreMixin:
                     self.host,
                     port=self.port,
                     username=self.username,
+                    client_keys=self.client_keys,
                     known_hosts=None,
                 )
                 # Reset backoff on success
@@ -995,6 +1000,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
         monitor: bool = True,
+        client_keys: list[str | Path] | None = None,
     ) -> None:
         super().__init__(
             id=id or f"ssh:{username or ''}@{host}:{port}",
@@ -1006,7 +1012,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         self.host = host
         self.port = port
         self.username = username
-        self.init_ssh_state(monitor=monitor)
+        self.init_ssh_state(monitor=monitor, client_keys=client_keys)
         self.ssh_processes: list[asyncssh.SSHClientProcess] = []
 
     async def create_conn(self) -> Connection:
@@ -1218,6 +1224,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
         monitor: bool = True,
+        client_keys: list[str | Path] | None = None,
     ) -> None:
         super().__init__(
             id=id or f"ssh-socket:{username or ''}@{host}:{port}",
@@ -1229,7 +1236,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         self.port = port
         self.username = username
         self.socket_path = socket_path
-        self.init_ssh_state(monitor=monitor)
+        self.init_ssh_state(monitor=monitor, client_keys=client_keys)
 
     async def create_conn(self) -> Connection:
         try:
