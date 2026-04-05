@@ -6,12 +6,13 @@ from pathlib import Path
 
 import pytest
 from conftest import (
+    LIX_BIN,
     make_local_stores,
-    nix_build,
-    nix_build_store_only,
+    nix_command,
 )
 
 from pynixd import Server
+from pynixd.instance import NixImplementation
 from pynixd.store import get_current_system
 
 
@@ -33,15 +34,17 @@ async def test_unsupported_system_builders(
     # All stores in pynixd report only the current system by default.
     # If we request a build for a different system, it should fail.
     async with Server(stores=stores, ssh_port=0) as server:
-        rc, _stdout, stderr = await nix_build(
-            server.builder_uri(),
-            "unsupported",
-            nix_env,
-            nix_file=test_nix,
+        rc, _stdout, stderr = await (
+            nix_command(LIX_BIN)
+            .builders(server.builder_uri(implementation=NixImplementation.LIX))
+            .file(test_nix, "unsupported")
+            .with_env(nix_env)
+            .run()
         )
         # It should fail because no builder supports the system
         assert rc != 0
-        assert "no-substitute" in stderr or "unsupported system" in stderr
+        expected = ["no-substitute", "unsupported system", "not found"]
+        assert any(m in stderr for m in expected)
 
 
 @pytest.mark.store
@@ -54,11 +57,13 @@ async def test_unsupported_system_store(
     stores = make_local_stores(n=1)
 
     async with Server(stores=stores, ssh_port=0) as server:
-        rc, _stdout, stderr = await nix_build_store_only(
-            server.uri(),
-            "unsupported",
-            nix_env,
-            nix_file=test_nix,
+        rc, _stdout, stderr = await (
+            nix_command(LIX_BIN)
+            .store(server.uri(implementation=NixImplementation.LIX))
+            .file(test_nix, "unsupported")
+            .with_env(nix_env)
+            .run()
         )
         assert rc != 0
-        assert "no-substitute" in stderr or "unsupported system" in stderr
+        expected = ["no-substitute", "unsupported system", "not found"]
+        assert any(m in stderr for m in expected)

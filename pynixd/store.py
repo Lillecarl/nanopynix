@@ -55,6 +55,7 @@ from .operations.store_mutations import (
 )
 from .protocol import Op
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
+from .store_path import StorePath
 from .wire import (
     _CHUNK_SIZE,
     NixReader,
@@ -108,7 +109,7 @@ class Store(ABC):
         self.conn_counter: int = 0
         self.sweep_task: asyncio.Task[None] | None = None
         self.supported_systems = supported_systems or []
-        self.known_paths: set[str] = set()
+        self.known_paths: set[str | StorePath] = set()
         self.consecutive_failures: int = 0
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
@@ -156,13 +157,13 @@ class Store(ABC):
 
     # ── Known paths tracking ────────────────────────────────────────
 
-    def has_path(self, path: str) -> bool:
+    def has_path(self, path: str | StorePath) -> bool:
         return path in self.known_paths
 
-    def has_all_paths(self, paths: set[str]) -> bool:
+    def has_all_paths(self, paths: set[str] | set[StorePath]) -> bool:
         return paths.issubset(self.known_paths)
 
-    def count_common_paths(self, paths: set[str]) -> int:
+    def count_common_paths(self, paths: set[str] | set[StorePath]) -> int:
         return len(paths & self.known_paths)
 
     async def call(
@@ -221,17 +222,21 @@ class Store(ABC):
             suppress_last=suppress_last,
         )
 
-    def add_known_path(self, path: str, *, update_regtime: bool = True) -> None:
+    def add_known_path(
+        self, path: str | StorePath, *, update_regtime: bool = True
+    ) -> None:
         self.known_paths.add(path)
         if update_regtime and self.db is not None:
             self.db.mark_path(path)
 
-    def add_known_paths(self, paths: set[str], *, update_regtime: bool = True) -> None:
+    def add_known_paths(
+        self, paths: set[str] | set[StorePath], *, update_regtime: bool = True
+    ) -> None:
         self.known_paths.update(paths)
         if update_regtime and self.db is not None:
-            self.db.mark_paths(paths)
+            self.db.mark_paths(set(paths))
 
-    async def query_path_info(self, path: str) -> PathInfo | None:
+    async def query_path_info(self, path: str | StorePath) -> PathInfo | None:
         """Get PathInfo for a store path using a QueryPathInfoRequest."""
 
         resp = await self.call(QueryPathInfoRequest(path=path))
@@ -240,25 +245,27 @@ class Store(ABC):
             return resp.info
         return None
 
-    async def query_path_infos(self, paths: set[str]) -> dict[str, PathInfo]:
+    async def query_path_infos(
+        self, paths: set[str] | set[StorePath]
+    ) -> dict[str | StorePath, PathInfo]:
         """Batch PathInfo for multiple paths. DB fast path, daemon fallback."""
         if not paths:
             return {}
 
         if self.db is not None:
-            result = await self.db.query_path_infos(paths)
+            result = await self.db.query_path_infos(set(paths))
             if result is not None:
                 return result
 
         # Slow path: sequential query_path_info
-        infos: dict[str, PathInfo] = {}
+        infos: dict[str | StorePath, PathInfo] = {}
         for path in paths:
             info = await self.query_path_info(path)
             if info is not None:
                 infos[path] = info
         return infos
 
-    async def is_valid_path(self, path: str) -> bool:
+    async def is_valid_path(self, path: str | StorePath) -> bool:
         """Check if a path is valid on this store."""
 
         if self.has_path(path):
@@ -269,30 +276,30 @@ class Store(ABC):
 
     async def query_valid_paths(
         self,
-        paths: set[str],
+        paths: set[str] | set[StorePath],
         substitute: bool = False,
-    ) -> set[str]:
+    ) -> set[StorePath]:
         """Query which paths are valid on this store."""
 
         resp = await self.call(
             QueryValidPathsRequest(
-                paths=paths,
+                paths=set(paths),
                 substitute=1 if substitute else 0,
             )
         )
-        return resp.paths
+        return {StorePath(p) for p in resp.paths}
 
-    async def query_all_valid_paths(self) -> set[str]:
+    async def query_all_valid_paths(self) -> set[StorePath]:
         """Query all valid paths on this store."""
         from .operations.queries import QueryAllValidPathsRequest
 
         resp = await self.execute(QueryAllValidPathsRequest())
-        return resp.paths
+        return {StorePath(p) for p in resp.paths}
 
     async def stream_paths_store_to_store(
         self,
         src: Store,
-        paths_with_info: list[tuple[str, PathInfo]],
+        paths_with_info: list[tuple[str | StorePath, PathInfo]],
     ) -> None:
         """Copy multiple paths from src store to this store via streaming."""
         if not paths_with_info:
@@ -333,14 +340,14 @@ class Store(ABC):
             await stderr.drain(dst_conn.r)
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
 
-    async def add_to_store_nar_streaming(self, src: NixReader) -> str:
+    async def add_to_store_nar_streaming(self, src: NixReader) -> StorePath:
         """Stream AddToStoreNar from src to this store."""
         async with self.transfer_conn() as conn:
             path = await AddToStoreNarRequest.forward(src, conn.w)
             await conn.w.drain()
             await stderr.drain(conn.r)
             await EmptyResponse.from_reader(conn.r, conn.version)
-            return path
+            return StorePath(path)
 
     async def add_to_store_streaming(self, src: NixReader) -> AddToStoreResponse:
         """Stream AddToStore from src to this store."""
@@ -348,18 +355,22 @@ class Store(ABC):
             await AddToStoreRequest.forward(src, conn.w)
             await conn.w.drain()
             await stderr.drain(conn.r)
-            return await AddToStoreResponse.from_reader(conn.r, conn.version)
+            resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
+            resp.info.path = StorePath(resp.info.path)
+            return resp
 
-    async def add_multiple_to_store_streaming(self, src: NixReader) -> list[str]:
+    async def add_multiple_to_store_streaming(self, src: NixReader) -> list[StorePath]:
         """Stream AddMultipleToStore from src to this store."""
         async with self.transfer_conn() as conn:
             paths = await AddMultipleToStoreRequest.forward(src, conn.w)
             await conn.w.drain()
             await stderr.drain(conn.r)
             await EmptyResponse.from_reader(conn.r, conn.version)
-            return paths
+            return [StorePath(p) for p in paths]
 
-    async def buffer_nar_from_path(self, path: str, nar_size: int = 0) -> bytes:
+    async def buffer_nar_from_path(
+        self, path: str | StorePath, nar_size: int = 0
+    ) -> bytes:
         """Read NAR into memory."""
         async with self.transfer_conn() as conn:
             if nar_size > 0:
@@ -374,7 +385,7 @@ class Store(ABC):
 
     async def stream_nar_from_path(
         self,
-        path: str,
+        path: str | StorePath,
         dst: NixWriter,
         nar_size: int = 0,
         chunk_size: int = _CHUNK_SIZE,
@@ -403,7 +414,7 @@ class Store(ABC):
 
     async def nar_from_path_chunked(
         self,
-        path: str,
+        path: str | StorePath,
         nar_size: int,
         write_chunk,
         chunk_size: int = _CHUNK_SIZE,
@@ -424,7 +435,7 @@ class Store(ABC):
     async def pipe_nar_from(
         self,
         src: Store,
-        path: str,
+        path: str | StorePath,
         info: PathInfo,
     ) -> None:
         """Stream NAR from src store to this store."""
@@ -453,13 +464,15 @@ class Store(ABC):
             await stderr.drain(dst_conn.r)
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
 
-    async def collect_garbage(self, paths: set[str]) -> CollectGarbageResponse:
+    async def collect_garbage(
+        self, paths: set[str] | set[StorePath]
+    ) -> CollectGarbageResponse:
         """Delete specific paths via CollectGarbage (action=3)."""
         async with self.transfer_conn() as conn:
             resp = await conn.call(
                 CollectGarbageRequest(
                     action=3,  # DeleteSpecific
-                    paths_to_delete=paths,
+                    paths_to_delete=set(paths),
                     ignore_liveness=0,
                     max_freed=0,
                 )
@@ -476,7 +489,7 @@ class Store(ABC):
         try:
             async with self.transfer_conn() as conn:
                 resp = await conn.call(QueryAllValidPathsRequest())
-                self.known_paths = resp.paths
+                self.known_paths = {StorePath(p) for p in resp.paths}
             log.info(
                 "sync_paths_complete", store_id=self.id, count=len(self.known_paths)
             )
@@ -679,7 +692,7 @@ class Store(ABC):
             semaphore.release()
 
     def build_conn(self) -> AbstractAsyncContextManager[Connection]:
-        """Acquire a build connection (counts against max_builds)."""
+        """Acquire a build connection (counts against max_builds).."""
         return self.acquire_conn(self.build_semaphore)
 
     def transfer_conn(self) -> AbstractAsyncContextManager[Connection]:

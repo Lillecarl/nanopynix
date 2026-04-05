@@ -14,7 +14,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Self
 
 import pytest
 import structlog
@@ -47,10 +47,10 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     run_id = time.strftime("%Y%m%d-%H%M%S")
     path = Path(tempfile.gettempdir()) / f"pynixd-testrun-{run_id}"
     path.mkdir(parents=True, exist_ok=True)
-    
+
     # Store path in session for fixtures to use
     session.stash[_log_dir_key] = path
-    
+
     # Use terminalreporter to print even when capture is on
     tr = session.config.pluginmanager.get_plugin("terminalreporter")
     if tr:
@@ -71,7 +71,12 @@ def test_log(request: pytest.FixtureRequest, test_run_dir: Path):
     """Redirect all logging for this specific test to a file."""
     # Create filename from test name and parameters
     node = request.node
-    safe_name = node.name.replace("/", "_").replace(":", "_").replace("[", "_").replace("]", "_")
+    safe_name = (
+        node.name.replace("/", "_")
+        .replace(":", "_")
+        .replace("[", "_")
+        .replace("]", "_")
+    )
     log_file = test_run_dir / f"{safe_name}.log"
 
     # Set up file handler
@@ -98,7 +103,7 @@ def test_log(request: pytest.FixtureRequest, test_run_dir: Path):
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(message)s",
-    handlers=[], # Don't add default console handler
+    handlers=[],  # Don't add default console handler
 )
 
 # Structlog configuration with standard library integration
@@ -336,37 +341,15 @@ async def nix_build(
     nix_bin: Path = NIX_BIN,
 ) -> tuple[int, str, str]:
     """Run nix build against a pynixd SSH server."""
-    nix_file = nix_file or TEST_NIX
-    cmd = [
-        str(nix_bin),
-        "build",
-        "--builders",
-        uri,
-        "--max-jobs",
-        str(jobs),
-        "--no-link",
-        "--print-out-paths",
-        "--file",
-        str(nix_file),
-        target,
-    ]
-    if args:
-        cmd.extend(args)
-
-    build_env = (env or os.environ).copy()
-    build_env["NIX_SSHOPTS"] = (
-        "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    builder = NixBuildCommandBuilder(_bin=nix_bin)
+    if env:
+        builder.with_env(env)
+    return await (
+        builder.builders(uri, max_jobs=jobs)
+        .file(nix_file or TEST_NIX, target)
+        .arg(*args)
+        .run()
     )
-
-    log.debug("Building", cmd=shlex.join(cmd))
-    res = await asyncio.create_subprocess_exec(
-        *cmd,
-        env=build_env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await res.communicate()
-    return res.returncode or 0, stdout.decode(), stderr.decode()
 
 
 async def nix_build_store_only(
@@ -378,141 +361,71 @@ async def nix_build_store_only(
     nix_bin: Path = NIX_BIN,
 ) -> tuple[int, str, str]:
     """Run nix build --store against a pynixd SSH server."""
-    nix_file = nix_file or TEST_NIX
-    cmd = [
-        str(nix_bin),
-        "build",
-        "--store",
-        uri,
-        "--no-link",
-        "--print-out-paths",
-        "--file",
-        str(nix_file),
-        target,
-    ]
-    if args:
-        cmd.extend(args)
-
-    build_env = (env or os.environ).copy()
-    build_env["NIX_SSHOPTS"] = (
-        "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-    )
-
-    log.debug("building_store_only", cmd=shlex.join(cmd))
-    res = await asyncio.create_subprocess_exec(
-        *cmd,
-        env=build_env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await res.communicate()
-    return res.returncode or 0, stdout.decode(), stderr.decode()
+    builder = NixBuildCommandBuilder(_bin=nix_bin)
+    if env:
+        builder.with_env(env)
+    return await builder.store(uri).file(nix_file or TEST_NIX, target).arg(*args).run()
 
 
 @dataclass
 class NixCommandBuilder:
-    """StringBuilder-like builder for constructing and running Nix commands."""
+    """Abstract base builder for constructing and running Nix commands."""
 
     _bin: Path = NIX_BIN
-    _command: str = "build"
+    _subcommand: str = ""
     _store: str | None = None
-    _builders: list[str] = field(default_factory=list)
     _options: list[tuple[str, str]] = field(default_factory=list)
-    _file: Path | None = None
     _args: list[str] = field(default_factory=list)
     _env: dict[str, str] = field(default_factory=lambda: os.environ.copy())
-    _installables: list[str] = field(default_factory=list)
 
-    def lix(self) -> NixCommandBuilder:
+    def lix(self) -> Self:
         self._bin = LIX_BIN
         return self
 
-    def nix(self) -> NixCommandBuilder:
+    def nix(self) -> Self:
         self._bin = NIX_BIN
         return self
 
-    def store(self, uri: str) -> NixCommandBuilder:
+    def store(self, uri: str) -> Self:
         if self._store is not None and self._store != uri:
             log.warning("nix_command_store_overwrite", old=self._store, new=uri)
         self._store = uri
         return self
 
-    def builders(
-        self, uri: str, system: str = "", max_jobs: int = 4
-    ) -> NixCommandBuilder:
-        if " " in uri:
-            # Already a full spec (like from Server.builder_uri)
-            spec = uri
-        else:
-            if not system:
-                from pynixd.store import get_current_system
-
-                system = get_current_system()
-            spec = f"{uri} {system} - {max_jobs}"
-        self._builders.append(spec)
-        return self
-
-    def file(self, path: str | Path, attribute: str = "") -> NixCommandBuilder:
-        path = Path(path)
-        if self._file is not None and self._file != path:
-            log.warning("nix_command_file_overwrite", old=self._file, new=path)
-        self._file = path
-        if attribute:
-            self._installables.append(attribute)
-        return self
-
-    def option(self, name: str, value: str) -> NixCommandBuilder:
+    def option(self, name: str, value: str) -> Self:
         self._options.append((name, value))
         return self
 
-    def arg(self, *args: str) -> NixCommandBuilder:
+    def arg(self, *args: str) -> Self:
         self._args.extend(args)
         return self
 
-    def installable(self, *names: str) -> NixCommandBuilder:
-        self._installables.extend(names)
-        return self
-
-    def remote(self, uri: str) -> NixCommandBuilder:
+    def remote(self, uri: str) -> Self:
         self._env["NIX_REMOTE"] = uri
         return self
 
-    def set_env(self, name: str, value: str) -> NixCommandBuilder:
-        self._env[name] = value
-        return self
-
-    def with_env(self, env: dict[str, str]) -> NixCommandBuilder:
+    def with_env(self, env: dict[str, str]) -> Self:
         self._env.update(env)
         return self
 
+    def _build_args(self) -> list[str]:
+        """Override in subclasses to add specialized arguments."""
+        return []
+
     async def run(self) -> tuple[int, str, str]:
         """Execute the constructed nix command."""
-        cmd = [str(self._bin), self._command]
+        cmd = [str(self._bin)]
+        if self._subcommand:
+            cmd.append(self._subcommand)
 
         if self._store:
             cmd.extend(["--store", self._store])
 
-        if self._builders:
-            # Nix accepts multiple --builders or a comma-separated list.
-            # We'll use multiple flags for clarity.
-            for b in self._builders:
-                cmd.extend(["--builders", b])
-
-        if self._file:
-            cmd.extend(["--file", str(self._file)])
-
         for name, value in self._options:
             cmd.extend(["--option", name, value])
 
+        cmd.extend(self._build_args())
         cmd.extend(self._args)
-        cmd.extend(self._installables)
-
-        # Default useful flags for tests
-        if self._command == "build":
-            if "--no-link" not in cmd:
-                cmd.append("--no-link")
-            if "--print-out-paths" not in cmd:
-                cmd.append("--print-out-paths")
 
         # Ensure SSH opts are set if not already in env
         if "NIX_SSHOPTS" not in self._env:
@@ -532,9 +445,75 @@ class NixCommandBuilder:
         return rc, stdout.decode(), stderr.decode()
 
 
-def nix_command(bin: Path = NIX_BIN) -> NixCommandBuilder:
-    """Entry point for creating a Nix command."""
-    return NixCommandBuilder(_bin=bin)
+@dataclass
+class NixBuildCommandBuilder(NixCommandBuilder):
+    """Specialized builder for 'nix build'."""
+
+    _subcommand: str = "build"
+    _builders: list[str] = field(default_factory=list)
+    _file: Path | None = None
+    _installables: list[str] = field(default_factory=list)
+
+    def builders(
+        self, uri: str, system: str = "", max_jobs: int = 4
+    ) -> NixBuildCommandBuilder:
+        if " " in uri:
+            spec = uri
+        else:
+            if not system:
+                from pynixd.store import get_current_system
+
+                system = get_current_system()
+            spec = f"{uri} {system} - {max_jobs}"
+        self._builders.append(spec)
+        return self
+
+    def file(self, path: str | Path, attribute: str = "") -> NixBuildCommandBuilder:
+        path = Path(path)
+        if self._file is not None and self._file != path:
+            log.warning("nix_command_file_overwrite", old=self._file, new=path)
+        self._file = path
+        if attribute:
+            self._installables.append(attribute)
+        return self
+
+    def installable(self, *names: str) -> NixBuildCommandBuilder:
+        self._installables.extend(names)
+        return self
+
+    def _build_args(self) -> list[str]:
+        args = []
+        if self._builders:
+            for b in self._builders:
+                args.extend(["--builders", b])
+        if self._file:
+            args.extend(["--file", str(self._file)])
+
+        args.extend(self._installables)
+
+        if "--no-link" not in self._args and "--no-link" not in args:
+            args.append("--no-link")
+        if "--print-out-paths" not in self._args and "--print-out-paths" not in args:
+            args.append("--print-out-paths")
+
+        return args
+
+
+@dataclass
+class NixStoreCommandBuilder(NixCommandBuilder):
+    """Specialized builder for 'nix store'."""
+
+    _subcommand: str = "store"
+
+
+def nix_command(bin: Path = NIX_BIN) -> NixBuildCommandBuilder:
+    """Entry point for creating a 'nix build' command."""
+    return NixBuildCommandBuilder(_bin=bin)
+
+
+def nix_store(bin: Path = NIX_BIN) -> NixStoreCommandBuilder:
+    """Entry point for creating a 'nix store' command."""
+    return NixStoreCommandBuilder(_bin=bin)
 
 
 def get_free_port() -> int:

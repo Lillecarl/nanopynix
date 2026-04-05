@@ -9,14 +9,12 @@ import pytest
 import structlog
 from conftest import (
     LIX_BIN,
-    NIX_BIN,
     TEST_NIX,
-    get_free_port,
     nix_command,
     rmtree_robust,
 )
 
-from pynixd.instance import NixImplementation, PynixdConfig, Server
+from pynixd.instance import PynixdConfig, Server
 from pynixd.store import LocalSocketStore
 
 log = structlog.get_logger(__name__)

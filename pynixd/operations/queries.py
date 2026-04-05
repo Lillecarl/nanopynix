@@ -75,11 +75,14 @@ class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
                 return result
 
         # 3. Daemon fallback (Base class execute)
-        return await super().execute(
+        resp = await super().execute(
             store,
             client,
             suppress_last,
         )
+        if resp.valid:
+            store.add_known_path(self.path)
+        return resp
 
 
 # ── QueryPathInfo ────────────────────────────────────────────────────
@@ -121,6 +124,8 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
             result = await store.db.query_path_info(self.path)
             if result is not None and result.valid:
                 store.add_known_path(self.path)
+                if result.info:
+                    result.info.path = self.path
                 return result
 
         # 2. Daemon fallback
@@ -129,9 +134,11 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
             client,
             suppress_last,
         )
-        if resp.valid and resp.info is not None:
-            # Protocol sends path-less info, we restore it
-            resp.info.path = self.path
+        if resp.valid:
+            store.add_known_path(self.path)
+            if resp.info is not None:
+                # Protocol sends path-less info, we restore it
+                resp.info.path = self.path
         return resp
 
 
@@ -176,11 +183,13 @@ class QueryValidPathsRequest(OpRequest[StringSetResponse]):
                     return result
 
         # 2. Daemon fallback
-        return await super().execute(
+        resp = await super().execute(
             store,
             client,
             suppress_last,
         )
+        store.add_known_paths(resp.paths)
+        return resp
 
 
 # ── QueryPathFromHashPart ────────────────────────────────────────────
@@ -206,11 +215,14 @@ class QueryPathFromHashPartRequest(SingleStringRequest[SingleStringResponse]):
                 return SingleStringResponse(value=path)
 
         # 2. Daemon fallback
-        return await super().execute(
+        resp = await super().execute(
             store,
             client,
             suppress_last,
         )
+        if resp.value:
+            store.add_known_path(resp.value)
+        return resp
 
 
 # ── QueryReferrers ────────────────────────────────────────────────────
@@ -344,7 +356,7 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
         if store.db:
             result = await store.db.query_all_valid_paths()
             if result is not None:
-                store.add_known_paths(result.paths)
+                store.add_known_paths(result.paths, update_regtime=False)
                 return result
 
         # 2. Daemon fallback
@@ -353,7 +365,7 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
             client,
             suppress_last,
         )
-        store.add_known_paths(resp.paths)
+        store.add_known_paths(resp.paths, update_regtime=False)
         return resp
 
 

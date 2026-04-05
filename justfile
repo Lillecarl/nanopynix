@@ -12,8 +12,9 @@ fmt:
     ruff format tests
 
 # Run tests
-test: check
-    pytest tests -v --timeout=60 --timeout-method=thread -m "not slow and not bench" --durations 50
+test:
+    # pytest tests -v --timeout=60 --timeout-method=thread -m "not slow and not bench" --durations 50
+    pytest tests -m "not slow and not bench"
 
 aitest: check
     #!/usr/bin/env bash

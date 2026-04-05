@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import shlex
-import subprocess
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,8 +10,10 @@ from pathlib import Path
 import pytest
 import structlog
 from conftest import (
+    LIX_BIN,
     NIX_BIN,
-    _run_subprocess_with_timeout,
+    nix_command,
+    nix_store,
 )
 
 from pynixd.instance import PynixdConfig, Server
@@ -22,64 +22,52 @@ from pynixd.store import LocalSocketStore, Store
 log = structlog.get_logger(__name__)
 
 
-def _nix_build_unix(
+async def _nix_build_unix(
     socket_path: Path,
     env: dict[str, str],
     *extra_args: str,
-    timeout: int = 120,
 ) -> tuple[int, str, str]:
     """Run nix build using pynixd unix socket as the store."""
-    store_uri = f"unix://{socket_path}"
-    cmd = [
-        str(NIX_BIN),
-        "build",
-        "--store",
-        store_uri,
-        "--no-link",
-        *extra_args,
-    ]
-    log.info("nix_build_unix", cmd=" ".join(shlex.quote(a) for a in cmd))
-    return _run_subprocess_with_timeout(cmd, env, timeout)
+    return await (
+        nix_command(LIX_BIN)
+        .remote(f"unix://{socket_path}")
+        .arg(*extra_args)
+        .with_env(env)
+        .run()
+    )
 
 
-def _nix_build_direct(
+async def _nix_build_direct(
     store_path: Path,
     env: dict[str, str],
     *extra_args: str,
-    timeout: int = 120,
 ) -> tuple[int, str, str]:
-    """Run nix build directly against a local store (no pynixd)."""
-    cmd = [
-        str(NIX_BIN),
-        "build",
-        "--store",
-        str(store_path),
-        "--no-link",
-        "--max-jobs",
-        "150",
-        *extra_args,
-    ]
-    log.info("nix_build_direct", cmd=" ".join(shlex.quote(str(a)) for a in cmd))
-    return _run_subprocess_with_timeout(cmd, env, timeout)
+    """Run nix build directly against a local store (no pynixd).."""
+    return await (
+        nix_command(LIX_BIN)
+        .store(str(store_path))
+        .arg("--max-jobs", "150")
+        .arg(*extra_args)
+        .with_env(env)
+        .run()
+    )
 
 
-def _nix_store_unix(
+async def _nix_store_unix(
     socket_path: Path,
     env: dict[str, str],
+    subcommand: str,
     *args: str,
-    timeout: int = 30,
 ) -> tuple[int, str, str]:
     """Run nix store subcommand against pynixd unix socket."""
-    store_uri = f"unix://{socket_path}"
-    cmd = [
-        str(NIX_BIN),
-        "store",
-        *args,
-        "--store",
-        store_uri,
-    ]
-    log.info("nix_store_unix", cmd=" ".join(shlex.quote(a) for a in cmd))
-    return _run_subprocess_with_timeout(cmd, env, timeout)
+    return await (
+        nix_store(LIX_BIN)
+        .arg(subcommand)
+        .arg(*args)
+        .remote(f"unix://{socket_path}")
+        .with_env(env)
+        .run()
+    )
 
 
 @pytest.fixture
@@ -149,11 +137,11 @@ async def test_unix_build(
     stores = {builder_store.id: builder_store}
 
     async with run_unix_server(local_store, stores) as socket_path:
-        rc, _stdout, stderr = _nix_build_unix(
+        rc, _stdout, stderr = await _nix_build_unix(
             socket_path,
             nix_env,
             "--file",
-            test_nix,
+            str(test_nix),
             "simple",
         )
         assert rc == 0, f"Unix build failed:\n{stderr}"
@@ -171,20 +159,28 @@ async def test_unix_store_info(
 
     async with run_unix_server(local_store, stores) as socket_path:
         # First build it to make sure it exists
-        rc, _stdout, stderr = _nix_build_unix(
+        rc, _stdout, stderr = await _nix_build_unix(
             socket_path,
             nix_env,
             "--file",
-            test_nix,
+            str(test_nix),
             "simple",
         )
         assert rc == 0
 
         # Now query info
-        cmd = ["nix", "path-info", "--file", str(test_nix), "simple"]
-        path = subprocess.check_output(cmd).decode().strip()
+        # Get path using our builder
+        rc, stdout, _ = await (
+            nix_command(LIX_BIN)
+            .file(test_nix, "simple")
+            .arg("--print-out-paths")
+            .with_env(nix_env)
+            .run()
+        )
+        assert rc == 0
+        path = stdout.strip()
 
-        rc, stdout, stderr = _nix_store_unix(
+        rc, stdout, stderr = await _nix_store_unix(
             socket_path,
             nix_env,
             "path-info",
@@ -204,7 +200,7 @@ async def test_unix_gc(
     stores = {builder_store.id: builder_store}
 
     async with run_unix_server(local_store, stores) as socket_path:
-        rc, stdout, stderr = _nix_store_unix(
+        rc, stdout, stderr = await _nix_store_unix(
             socket_path,
             nix_env,
             "gc",

@@ -14,15 +14,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .store_path import StorePath
+
 if TYPE_CHECKING:
     from .drv_parser import ParsedDerivation
 
 
-class DerivedPath(str):
+class DerivedPath(StorePath):
     """A derived path string with helpers for .drv resolution.
 
-    A DerivedPath is a str subclass representing a Nix derived path, which
-    encodes both the .drv file and the requested output names.
+    A DerivedPath is a StorePath subclass representing a Nix derived path,
+    which encodes both the .drv file and the requested output names.
     """
 
     __slots__ = ()
