@@ -898,6 +898,10 @@ class _SSHStoreMixin:
 class SSHSubprocessStore(_SSHStoreMixin, Store):
     """Persistent SSH connection, spawns nix-daemon --stdio channels.
 
+    Used primarily for "fake Nix" stores like nixbuild.net that provide
+    a nix-daemon protocol over stdin/stdout. For real Nix stores over SSH,
+    SSHSocketStore (tunnelling to a Unix socket) is preferred.
+
     If store_path is set, runs ``nix daemon --store <path> --stdio``.
     Otherwise runs ``nix-daemon --stdio`` (default store, nixbuild.net compat).
     """

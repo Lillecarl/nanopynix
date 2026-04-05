@@ -54,7 +54,7 @@ _SSH_USER = env.str("USER", "root")
 
 _CHUNK_SIZES_KB = env.list("PYNIXD_BENCH_CHUNKS", [64, 256, 1024, 4096], subcast=int)
 
-_STORE_TYPES = ["local-socket", "ssh-subprocess", "ssh-socket"]
+_STORE_TYPES = ["local-socket", "ssh-socket"]
 
 _CONCURRENCY_LEVELS = [1, 4, 8]
 
