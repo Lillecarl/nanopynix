@@ -39,7 +39,6 @@ from pynixd import wire
 from pynixd.operations.base import PathInfo
 from pynixd.store import (
     LocalSocketStore,
-    LocalSubprocessStore,
     SSHSocketStore,
     SSHSubprocessStore,
     Store,
@@ -95,10 +94,10 @@ async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
 
 
 @pytest.fixture
-async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
+async def dst_store() -> AsyncIterator[LocalSocketStore]:
     rmtree_robust(BENCH_DST)
     os.makedirs(BENCH_DST, exist_ok=True)
-    s = LocalSubprocessStore(
+    s = LocalSocketStore(
         store_path=BENCH_DST,
         id="bench-dst",
         nix_bin=str(NIX_BIN),
@@ -176,7 +175,7 @@ def _set_chunk_size(chunk_kb: int) -> int:
 async def test_big_nar_copy_paths(
     request: pytest.FixtureRequest,
     bench_store: Store,
-    dst_store: LocalSubprocessStore,
+    dst_store: LocalSocketStore,
     chunk_kb: int,
 ) -> None:
     """Benchmark: stream a 100MB NAR via copy_paths at various chunk sizes."""
@@ -208,7 +207,7 @@ async def test_big_nar_copy_paths(
 async def test_big_nar_pipe_nar_from(
     request: pytest.FixtureRequest,
     bench_store: Store,
-    dst_store: LocalSubprocessStore,
+    dst_store: LocalSocketStore,
     chunk_kb: int,
 ) -> None:
     """Benchmark: stream a 100MB NAR via pipe_nar_from at various chunk sizes."""
@@ -240,7 +239,7 @@ async def test_big_nar_pipe_nar_from(
 async def test_small_nars_copy_paths(
     request: pytest.FixtureRequest,
     bench_store: Store,
-    dst_store: LocalSubprocessStore,
+    dst_store: LocalSocketStore,
     chunk_kb: int,
 ) -> None:
     """Benchmark: stream many small NARs via copy_paths (batched).
@@ -279,7 +278,7 @@ async def test_small_nars_copy_paths(
 async def test_small_nars_pipe_nar_from(
     request: pytest.FixtureRequest,
     bench_store: Store,
-    dst_store: LocalSubprocessStore,
+    dst_store: LocalSocketStore,
     chunk_kb: int,
     concurrency: int,
 ) -> None:

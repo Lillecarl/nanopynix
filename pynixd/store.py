@@ -7,7 +7,6 @@ Each Store type handles transport setup (subprocess, SSH channel, socket)
 and constructs Connection instances with the resulting reader/writer pair.
 
 Store types:
-- LocalSubprocessStore: spawns local nix-daemon --stdio
 - LocalSocketStore: connects to local nix-daemon Unix socket
 - SSHSubprocessStore: persistent SSH, nix-daemon --stdio channels
 - SSHSocketStore: persistent SSH, Unix socket tunnels
@@ -717,92 +716,6 @@ class Store(ABC):
         )
 
 
-class LocalSubprocessStore(Store):
-    """Spawns local nix-daemon --stdio subprocesses."""
-
-    def __init__(
-        self,
-        store_path: Path,
-        id: str | None = None,
-        max_builds: int = 2,
-        max_transfers: int = 4,
-        supported_systems: list[str] | None = None,
-        nix_bin: str = "nix",
-    ) -> None:
-        super().__init__(
-            id=id or f"local:{store_path}",
-            store_path=store_path,
-            max_builds=max_builds,
-            max_transfers=max_transfers,
-            supported_systems=supported_systems,
-        )
-        self.nix_bin = nix_bin
-        self.processes: list[asyncio.subprocess.Process] = []
-
-    async def create_conn(self) -> Connection:
-        path = self.store_path or Path("/")
-        os.makedirs(path, exist_ok=True)
-
-        conn_id = f"{self.id}-{self.conn_counter}"
-        log.info(
-            "spawning_daemon_stdio",
-            nix_bin=self.nix_bin,
-            store_path=str(path),
-            conn_id=conn_id,
-        )
-
-        last_err: Exception | None = None
-        for attempt in range(3):
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    self.nix_bin,
-                    "daemon",
-                    "--store",
-                    str(path),
-                    "--stdio",
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                assert proc.stdout is not None
-                assert proc.stdin is not None
-                self.processes.append(proc)
-
-                conn = Connection(
-                    UnixNixReader(proc.stdout),
-                    UnixNixWriter(proc.stdin),
-                    conn_id,
-                    store_path=path,
-                )
-                await conn.connect()
-                return conn
-            except (EOFError, FileNotFoundError) as e:
-                log.warning(
-                    "daemon_spawn_failed",
-                    conn_id=conn_id,
-                    attempt=attempt + 1,
-                    max_attempts=3,
-                    error=e,
-                )
-                last_err = e
-                await asyncio.sleep(0.05)
-        raise ConnectionError(f"Daemon {conn_id} failed after 3 attempts") from last_err
-
-    async def close(self) -> None:
-        """Close stores and terminate subprocesses."""
-        await super().close()
-        for proc in self.processes:
-            try:
-                proc.terminate()
-            except ProcessLookupError:
-                continue
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=5.0)
-            except TimeoutError:
-                proc.kill()
-        self.processes.clear()
-
-
 class _SSHStoreMixin:
     """Shared SSH connection management with exponential backoff reconnection.
 
@@ -1148,7 +1061,7 @@ class LocalSocketStore(Store):
             *cmd,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
             env=env,
         )
 
@@ -1156,7 +1069,7 @@ class LocalSocketStore(Store):
         for _ in range(100):
             if self.socket_path.exists():
                 break
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.1)
         else:
             raise RuntimeError(
                 f"Managed daemon did not create socket at {self.socket_path} "
@@ -1173,7 +1086,7 @@ class LocalSocketStore(Store):
                 self.daemon_ready.set()
                 return
             except (ConnectionRefusedError, ConnectionResetError):
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.2)
 
         raise RuntimeError(
             f"Managed daemon socket exists but not accepting connections "
@@ -1198,13 +1111,15 @@ class LocalSocketStore(Store):
     async def close(self) -> None:
         """Close stores and terminate managed daemon if any."""
         await super().close()
-        if self.daemon_proc is not None:
+        if self.managed and self.daemon_proc is not None:
             self.daemon_proc.terminate()
             try:
                 await asyncio.wait_for(self.daemon_proc.wait(), timeout=5.0)
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 self.daemon_proc.kill()
             self.daemon_proc = None
+            # Small delay to let OS clean up the socket file
+            await asyncio.sleep(0.1)
 
 
 DAEMON_SOCKET_PATH = Path("/nix/var/nix/daemon-socket/socket")

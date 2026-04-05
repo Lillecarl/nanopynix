@@ -1,7 +1,7 @@
 """Tests for NAR transfer between stores using AddToStoreNar and AddMultipleToStore.
 
 Uses LocalSocketStore (system store) as source — it already has paths.
-Uses LocalSubprocessStore as destination — fresh empty store.
+Uses LocalSocketStore as destination — fresh empty store.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from pynixd.operations.store_mutations import (
 )
 from pynixd.store import (
     LocalSocketStore,
-    LocalSubprocessStore,
     SSHSubprocessStore,
     Store,
 )
@@ -41,11 +40,11 @@ async def src_store() -> AsyncIterator[LocalSocketStore]:
 
 
 @pytest.fixture
-async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
+async def dst_store() -> AsyncIterator[LocalSocketStore]:
     """Fresh empty store as destination."""
     rmtree_robust(DEST_STORE)
     os.makedirs(DEST_STORE, exist_ok=True)
-    s = LocalSubprocessStore(store_path=DEST_STORE, id="dst", nix_bin=str(NIX_BIN))
+    s = LocalSocketStore(store_path=DEST_STORE, id="dst", nix_bin=str(NIX_BIN))
     yield s
     await s.close()
 
@@ -89,7 +88,7 @@ async def _get_path_info_and_nar(
 @pytest.mark.timeout(30)
 async def test_add_to_store_nar(
     src_store: LocalSocketStore,
-    dst_store: LocalSubprocessStore,
+    dst_store: LocalSocketStore,
 ) -> None:
     """Copy a single path from system store to dest using AddToStoreNar."""
     path = await _pick_a_path(src_store, need_no_refs=True)
@@ -146,7 +145,7 @@ async def test_add_to_store_nar(
 @pytest.mark.timeout(30)
 async def test_add_multiple_to_store_single(
     src_store: LocalSocketStore,
-    dst_store: LocalSubprocessStore,
+    dst_store: LocalSocketStore,
 ) -> None:
     """Copy a single path from system store to dest using AddMultipleToStore."""
     path = await _pick_a_path(src_store, need_no_refs=True)
@@ -230,7 +229,7 @@ async def test_add_multiple_to_store_single(
 @pytest.mark.timeout(30)
 async def test_add_multiple_to_store_two_paths(
     src_store: LocalSocketStore,
-    dst_store: LocalSubprocessStore,
+    dst_store: LocalSocketStore,
 ) -> None:
     """Copy two paths from system store to dest using AddMultipleToStore."""
     all_paths = await src_store.query_all_valid_paths()
@@ -327,11 +326,11 @@ COPY_DEST_STORE = Path("/tmp/pynixd-test-nar-copy")
 
 
 @pytest.fixture
-async def copy_dst_store() -> AsyncIterator[LocalSubprocessStore]:
+async def copy_dst_store() -> AsyncIterator[LocalSocketStore]:
     """Separate dest store for copy_paths tests."""
     rmtree_robust(COPY_DEST_STORE)
     os.makedirs(COPY_DEST_STORE, exist_ok=True)
-    s = LocalSubprocessStore(
+    s = LocalSocketStore(
         store_path=COPY_DEST_STORE, id="copy-dst", nix_bin=str(NIX_BIN)
     )
     yield s
@@ -341,7 +340,7 @@ async def copy_dst_store() -> AsyncIterator[LocalSubprocessStore]:
 @pytest.mark.timeout(30)
 async def test_copy_paths_single(
     src_store: LocalSocketStore,
-    copy_dst_store: LocalSubprocessStore,
+    copy_dst_store: LocalSocketStore,
 ) -> None:
     """Copy a single path via copy_paths (NarFromPath → AddMultipleToStore)."""
     path = await _pick_a_path(src_store, need_no_refs=True)
@@ -370,7 +369,7 @@ async def test_copy_paths_single(
 @pytest.mark.timeout(30)
 async def test_copy_paths_multiple(
     src_store: LocalSocketStore,
-    copy_dst_store: LocalSubprocessStore,
+    copy_dst_store: LocalSocketStore,
 ) -> None:
     """Copy multiple paths via copy_paths in one AddMultipleToStore call."""
     all_paths = await src_store.query_all_valid_paths()
@@ -408,11 +407,11 @@ STREAM_DEST_STORE = Path("/tmp/pynixd-test-nar-stream")
 
 
 @pytest.fixture
-async def stream_dst_store() -> AsyncIterator[LocalSubprocessStore]:
+async def stream_dst_store() -> AsyncIterator[LocalSocketStore]:
     """Separate dest store for streaming tests."""
     rmtree_robust(STREAM_DEST_STORE)
     os.makedirs(STREAM_DEST_STORE, exist_ok=True)
-    s = LocalSubprocessStore(
+    s = LocalSocketStore(
         store_path=STREAM_DEST_STORE, id="stream-dst", nix_bin=str(NIX_BIN)
     )
     yield s
@@ -422,7 +421,7 @@ async def stream_dst_store() -> AsyncIterator[LocalSubprocessStore]:
 @pytest.mark.timeout(30)
 async def test_pipe_nar_from_single(
     src_store: LocalSocketStore,
-    stream_dst_store: LocalSubprocessStore,
+    stream_dst_store: LocalSocketStore,
 ) -> None:
     """Stream a single path via pipe_nar_from (NarFromPath → AddToStoreNar)."""
     path = await _pick_a_path(src_store, need_no_refs=True)
@@ -451,7 +450,7 @@ async def test_pipe_nar_from_single(
 @pytest.mark.timeout(30)
 async def test_pipe_nar_from_multiple(
     src_store: LocalSocketStore,
-    stream_dst_store: LocalSubprocessStore,
+    stream_dst_store: LocalSocketStore,
 ) -> None:
     """Stream multiple paths via pipe_nar_from in sequence."""
     all_paths = await src_store.query_all_valid_paths()
@@ -536,7 +535,7 @@ async def test_copy_paths_roundtrip_nixbuild(
     roundtrip_store = Path("/tmp/pynixd-test-nar-roundtrip")
     rmtree_robust(roundtrip_store)
     os.makedirs(roundtrip_store, exist_ok=True)
-    roundtrip_store_instance = LocalSubprocessStore(
+    roundtrip_store_instance = LocalSocketStore(
         store_path=roundtrip_store,
         id="roundtrip",
         nix_bin=str(NIX_BIN),

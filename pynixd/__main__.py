@@ -43,7 +43,6 @@ from environs import Env
 from .instance import PynixdConfig, Server
 from .store import (
     LocalSocketStore,
-    LocalSubprocessStore,
     SSHSocketStore,
     SSHSubprocessStore,
     Store,
@@ -101,7 +100,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 supported_systems=supported_systems,
             )
         elif btype == "local-subprocess":
-            store = LocalSubprocessStore(
+            store = LocalSocketStore(
                 store_path=Path(spec["store_path"]),
                 id=b_id,
                 max_builds=max_builds,
@@ -124,14 +123,14 @@ async def async_main() -> None:
         log.info("dev_mode", count=dev_mode)
 
         for i in range(dev_mode):
-            store = LocalSubprocessStore(
+            store = LocalSocketStore(
                 store_path=Path(f"/tmp/pynixd-{i}"),
                 id=f"builder{i}",
                 max_builds=2,
             )
             stores[store.id] = store
 
-        local_store: Store = LocalSubprocessStore(
+        local_store: Store = LocalSocketStore(
             store_path=Path("/tmp/pynixdlocal"),
             id="local",
         )

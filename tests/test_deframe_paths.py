@@ -18,7 +18,7 @@ from conftest import NIX_BIN
 
 from pynixd import wire
 from pynixd.operations.base import PathInfo
-from pynixd.store import LocalSocketStore, LocalSubprocessStore, Store
+from pynixd.store import LocalSocketStore, Store
 from pynixd.wire import (
     FramedReader,
     FramedWriter,
@@ -39,9 +39,9 @@ async def src_store() -> AsyncIterator[LocalSocketStore]:
 
 
 @pytest.fixture
-async def dst_store() -> AsyncIterator[LocalSubprocessStore]:
+async def dst_store() -> AsyncIterator[LocalSocketStore]:
     os.makedirs(DEST_STORE, exist_ok=True)
-    s = LocalSubprocessStore(
+    s = LocalSocketStore(
         store_path=DEST_STORE, id="deframe-dst", nix_bin=str(NIX_BIN)
     )
     yield s
@@ -162,7 +162,7 @@ async def test_framed_reader_with_pathinfo_and_nar(
 @pytest.mark.timeout(30)
 async def test_add_multiple_streaming_returns_paths(
     src_store: LocalSocketStore,
-    dst_store: LocalSubprocessStore,
+    dst_store: LocalSocketStore,
 ) -> None:
     """add_multiple_to_store_streaming extracts paths while forwarding to store."""
     picked = await _pick_self_contained_paths(src_store, 2)
