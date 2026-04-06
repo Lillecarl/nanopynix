@@ -471,6 +471,10 @@ class BasicDerivation:
             or self.env.get("preferLocalBuild") == "1"
         )
 
+    def output_paths(self) -> dict[str, str]:
+        """Return {output_name: output_path} for all outputs."""
+        return {o.name: o.path for o in self.outputs}
+
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> BasicDerivation:
         n = await reader.read_uint64()

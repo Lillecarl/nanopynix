@@ -6,7 +6,6 @@ These operations query information from the store without mutating it.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -477,29 +476,25 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
             for dp in self.derived_paths:
                 store.add_known_paths(dp.to_outputs(store.store_path))
 
-        # Any path being substituted is also "known" to be available,
-        # but we must verify availability without blocking the query response.
+        # Any path being substituted is also "known" to be available.
+        # TODO: This could be optimized by running in a background task,
+        # but for now we await it inline to ensure paths are registered
+        # before the scheduler runs.
         if resp.will_substitute:
-
-            async def verify_substitutable():
-                try:
-                    # Use a fresh connection from the pool for background verification
-                    async with store.transfer_conn() as conn:
-                        valid = await conn.call(
-                            QueryValidPathsRequest(
-                                paths=resp.will_substitute,
-                                substitute=1,
-                            )
+            try:
+                async with store.transfer_conn() as conn:
+                    valid = await conn.call(
+                        QueryValidPathsRequest(
+                            paths=resp.will_substitute,
+                            substitute=1,
                         )
-                        # Verify availability and update store tracker
-                        store.add_known_paths(valid.paths)
-                except Exception:
-                    self._log.debug(
-                        "verify_substitutable_failed",
-                        paths=len(resp.will_substitute),
-                        exc_info=True,
                     )
-
-            asyncio.create_task(verify_substitutable())
+                    store.add_known_paths(valid.paths)
+            except Exception:
+                self._log.debug(
+                    "verify_substitutable_failed",
+                    paths=len(resp.will_substitute),
+                    exc_info=True,
+                )
 
         return resp
