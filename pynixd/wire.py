@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import struct
-from typing import Final
+from collections.abc import AsyncIterator
+from typing import Any, Final
 
 import asyncssh
 from environs import Env
@@ -143,6 +144,18 @@ class NixReader:
     async def read_string_set[T: str = str](self, tp: type[T] = str) -> set[T]:
         count: int = await self.read_uint64()
         return {await self.read_string(tp) for _ in range(count)}
+
+    async def drain_stderr(self, raise_on_error: bool = True) -> None:
+        """Read and discard all stderr messages until STDERR_LAST."""
+        from . import stderr
+
+        await stderr.drain(self, raise_on_error=raise_on_error)
+
+    def read_stderr(self) -> AsyncIterator[Any]:
+        """Return an AsyncIterator that yields stderr messages until STDERR_LAST."""
+        from . import stderr
+
+        return stderr.read_stream(self)
 
     async def is_dirty(self) -> bool:
         if len(self._buf) - self._pos > 0:

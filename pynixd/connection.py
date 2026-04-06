@@ -194,15 +194,15 @@ class Connection:
         await self.w.drain()
 
         msgs = StderrBuffer()
-        async for msg in stderr.read_stream(self.r):
+        async for msg in self.r.read_stderr():
             msgs.add(msg)
 
             # Real-time forwarding if client is provided
             if client is not None:
                 # Logic for suppress_last: don't forward STDERR_LAST to client
-                # (but it's already filtered out by read_stream, which only
+                # (but it's already filtered out by read_stderr, which only
                 # yields messages BEFORE the last one).
-                # Actually, read_stream yields until LAST but doesn't yield LAST.
+                # Actually, read_stderr yields until LAST but doesn't yield LAST.
                 # We need to decide if we inject a LAST into the queue.
                 # Nix protocol: stderr.read_stream stops BEFORE LAST.
                 # We usually want to forward everything EXCEPT the final LAST
@@ -282,7 +282,7 @@ class Connection:
                 await self.r.read_uint64()
 
         # Drain initial STDERR_LAST
-        await stderr.drain(self.r)
+        await self.r.drain_stderr()
 
     def __repr__(self) -> str:
         return f"Connection(id={self.id!r})"

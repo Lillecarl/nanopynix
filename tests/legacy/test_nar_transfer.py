@@ -123,9 +123,7 @@ async def test_add_to_store_nar(
         await fw.finalize()
 
         # Read stderr and response
-        from pynixd import stderr as nix_stderr
-
-        await nix_stderr.drain(dst.r)
+        await dst.r.drain_stderr()
         await EmptyResponse.from_reader(dst.r, dst.version)
 
     # Verify it arrived

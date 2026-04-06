@@ -26,7 +26,7 @@ import asyncssh
 import structlog
 from environs import Env
 
-from . import stderr, wire
+from . import wire
 from .connection import ClientConn, Connection
 from .local_store_db import LocalStoreDB
 from .operations.base import (
@@ -418,7 +418,7 @@ class Store(ABC):
                 # Send the NarFromPath request
                 await src_conn.w.drain()
                 # Throw away stderr
-                await stderr.drain(src_conn.r, True, conn_id=src_conn.id)
+                await src_conn.r.drain_stderr()
 
                 # Stream the NAR into the framedwriter
                 await wire.pipe_raw_to_framed_writer(
@@ -431,7 +431,7 @@ class Store(ABC):
             await fw.finalize()
 
             # Throw away destination stderr
-            await stderr.drain(dst_conn.r, True, conn_id=dst_conn.id)
+            await dst_conn.r.drain_stderr()
             # Read the empty response to clean the connection
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
 
@@ -495,7 +495,7 @@ class Store(ABC):
         async with self.transfer_conn() as conn:
             path = await AddToStoreNarRequest.forward(src, conn.w)
             await conn.w.drain()
-            await stderr.drain(conn.r)
+            await conn.r.drain_stderr()
             await EmptyResponse.from_reader(conn.r, conn.version)
             return StorePath(path)
 
@@ -504,7 +504,7 @@ class Store(ABC):
         async with self.transfer_conn() as conn:
             await AddToStoreRequest.forward(src, conn.w)
             await conn.w.drain()
-            await stderr.drain(conn.r)
+            await conn.r.drain_stderr()
             resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
             resp.info.path = StorePath(resp.info.path)
             return resp
@@ -514,7 +514,7 @@ class Store(ABC):
         async with self.transfer_conn() as conn:
             paths = await AddMultipleToStoreRequest.forward(src, conn.w)
             await conn.w.drain()
-            await stderr.drain(conn.r)
+            await conn.r.drain_stderr()
             await EmptyResponse.from_reader(conn.r, conn.version)
             return [StorePath(p) for p in paths]
 
@@ -527,7 +527,7 @@ class Store(ABC):
                 conn.w.write_uint64(Op.NarFromPath)
                 await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
                 await conn.w.drain()
-                await stderr.drain(conn.r)
+                await conn.r.drain_stderr()
                 return await conn.r.readexactly(nar_size)
             else:
                 resp = await conn.call(NarFromPathRequest(path=path))
@@ -551,7 +551,7 @@ class Store(ABC):
             conn.w.write_uint64(Op.NarFromPath)
             await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
             await conn.w.drain()
-            await stderr.drain(conn.r)
+            await conn.r.drain_stderr()
             if nar_size > 0:
                 remaining = nar_size
                 while remaining > 0:
@@ -574,7 +574,7 @@ class Store(ABC):
             conn.w.write_uint64(Op.NarFromPath)
             await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
             await conn.w.drain()
-            await stderr.drain(conn.r)
+            await conn.r.drain_stderr()
             remaining = nar_size
             while remaining > 0:
                 to_read = min(remaining, chunk_size)
@@ -595,7 +595,7 @@ class Store(ABC):
                 path=path,
             ).to_writer(src_conn.w, src_conn.version)
             await src_conn.w.drain()
-            await stderr.drain(src_conn.r)
+            await src_conn.r.drain_stderr()
 
             dst_conn.w.write_uint64(Op.AddToStoreNar)
             nar_request = AddToStoreNarRequest(
@@ -611,7 +611,7 @@ class Store(ABC):
                 info.nar_size,
             )
 
-            await stderr.drain(dst_conn.r)
+            await dst_conn.r.drain_stderr()
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
 
     async def collect_garbage(
