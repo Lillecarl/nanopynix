@@ -19,10 +19,16 @@ async def test_builders() -> None:
     """Build test.nix .simple via --builders."""
     test_nix = Path("test.nix")
     local_store = LocalSocketStore(
-        id="local", store_path=STORE_PREFIX / "local", nix_bin=NIX_BIN
+        id="local",
+        store_path=STORE_PREFIX / "local",
+        nix_bin=NIX_BIN,
+        extra_args=["--log-format", "raw"],
     )
     builder_store = LocalSocketStore(
-        id="builder", store_path=STORE_PREFIX / "builder", nix_bin=NIX_BIN
+        id="builder",
+        store_path=STORE_PREFIX / "builder",
+        nix_bin=NIX_BIN,
+        extra_args=["--log-format", "raw"],
     )
 
     async with Server(
@@ -48,10 +54,16 @@ async def test_store() -> None:
     """Build test.nix .simple via --store."""
     test_nix = Path("test.nix")
     local_store = LocalSocketStore(
-        id="local", store_path=STORE_PREFIX / "local", nix_bin=NIX_BIN
+        id="local",
+        store_path=STORE_PREFIX / "local",
+        nix_bin=NIX_BIN,
+        extra_args=["--log-format", "internal-json"],
     )
     builder_store = LocalSocketStore(
-        id="builder", store_path=STORE_PREFIX / "builder", nix_bin=NIX_BIN
+        id="builder",
+        store_path=STORE_PREFIX / "builder",
+        nix_bin=NIX_BIN,
+        extra_args=["--log-format", "internal-json"],
     )
 
     # AddToStore is muted to INFO because it produces ~4500 DEBUG log lines

@@ -89,7 +89,7 @@ class Store(ABC):
     def __init__(
         self,
         id: str,
-        store_path: Path | None = None,
+        store_path: Path = Path("/"),
         max_builds: int = 2,
         max_transfers: int = 4,
         idle_ttl: float = _DEFAULT_IDLE_TTL,
@@ -301,16 +301,95 @@ class Store(ABC):
         cls,
         src: Store,
         dst: Store,
-        paths_with_info: list[tuple[str | StorePath, PathInfo]],
+        paths: list[str | StorePath],
+        src_conn: Connection | None = None,
+        dst_conn: Connection | None = None,
     ) -> None:
-        """Copy multiple paths from src store to dst store via streaming."""
-        if not paths_with_info:
+        """Copy paths from src to dst via streaming.
+
+        Recursively expands the closure of the given paths and topologically
+        sorts them to ensure valid insertion order at the destination.
+        """
+        paths_list = [str(p) for p in paths]
+        if not paths_list:
             return
 
         async with (
-            dst.transfer_conn() as dst_conn,
-            src.transfer_conn() as src_conn,
+            src_conn if src_conn else src.transfer_conn() as src_conn,
+            dst_conn if dst_conn else dst.transfer_conn() as dst_conn,
         ):
+            # 1. Expand closure and fetch all PathInfo
+            all_infos: dict[str, PathInfo] = {}
+            pending = set(paths_list)
+
+            while pending:
+                # Fetch info for all currently pending paths that we don't have yet
+                to_fetch = {p for p in pending if p not in all_infos}
+                if not to_fetch:
+                    break
+
+                # Use query_path_infos which may use DB fast path
+                new_infos = await src.query_path_infos(to_fetch)
+
+                # Ensure we got info for all requested paths
+                for p in to_fetch:
+                    p_str = str(p)
+                    if p_str not in {str(k) for k in new_infos.keys()}:
+                        # Fallback to connection for missing ones if not in DB
+                        resp = await src_conn.call(QueryPathInfoRequest(path=p_str))
+                        if resp.valid and resp.info:
+                            resp.info.path = p_str
+                            new_infos[p_str] = resp.info
+                        else:
+                            raise ValueError(f"Path {p_str} not found in source store")
+
+                all_infos.update({str(p): info for p, info in new_infos.items()})
+
+                # Find new references to explore
+                next_pending = set()
+                for info in new_infos.values():
+                    for ref in info.references:
+                        ref_str = str(ref)
+                        if ref_str not in all_infos:
+                            next_pending.add(ref_str)
+                pending = next_pending
+
+            # 2. Topologically sort the entire closure
+            sorted_paths: list[str] = []
+            visited: set[str] = set()
+            visiting: set[str] = set()
+
+            def visit(p: str):
+                if p in visited:
+                    return
+                if p in visiting:
+                    return
+                visiting.add(p)
+                info = all_infos.get(p)
+                if info:
+                    for ref in info.references:
+                        ref_str = str(ref)
+                        if ref_str != p:
+                            visit(ref_str)
+                visiting.remove(p)
+                visited.add(p)
+                sorted_paths.append(p)
+
+            for p in sorted(all_infos.keys()):
+                visit(p)
+
+            final_paths_with_info = [(p, all_infos[p]) for p in sorted_paths]
+
+            log.info(
+                "stream_paths_with_info_store_to_store",
+                count=len(final_paths_with_info),
+                requested=len(paths_list),
+            )
+
+            # 3. Stream to destination
+            dst_conn.op_log.append(
+                "AddMultipleToStore (stream_paths_with_info_store_to_store)"
+            )
             dst_conn.w.write_uint64(Op.AddMultipleToStore)
             req = AddMultipleToStoreRequest(
                 repair=0,
@@ -318,28 +397,42 @@ class Store(ABC):
             )
             await req.to_writer(dst_conn.w, dst_conn.version)
 
+            # Construct framedwriter that allows us to chunk NARs
             fw = dst_conn.w.framed()
-            fw.write_uint64(len(paths_with_info))
+            # Write how many paths we're looking to send
+            fw.write_uint64(len(final_paths_with_info))
 
-            for path, info in paths_with_info:
+            for path, info in final_paths_with_info:
+                src_conn.op_log.append(
+                    "NarFromPath (stream_paths_with_info_store_to_store)"
+                )
+                # Write PathInfo to the framed stream
                 await info.to_writer_keyed(fw)
 
+                # Write NarFromPath opcode to src
                 src_conn.w.write_uint64(Op.NarFromPath)
+                # Write which path we're looking for
                 await SingleStringRequest(
                     path=path,
                 ).to_writer(src_conn.w, src_conn.version)
+                # Send the NarFromPath request
                 await src_conn.w.drain()
-                await stderr.drain(src_conn.r)
+                # Throw away stderr
+                await stderr.drain(src_conn.r, True, conn_id=src_conn.id)
 
+                # Stream the NAR into the framedwriter
                 await wire.pipe_raw_to_framed_writer(
                     src_conn.r,
                     fw,
                     info.nar_size,
                 )
 
+            # Send the final 0 size frame
             await fw.finalize()
 
-            await stderr.drain(dst_conn.r)
+            # Throw away destination stderr
+            await stderr.drain(dst_conn.r, True, conn_id=dst_conn.id)
+            # Read the empty response to clean the connection
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
 
     @classmethod
@@ -349,35 +442,37 @@ class Store(ABC):
         dst: Store,
         paths: Iterable[str | StorePath],
     ) -> None:
-        """Copy paths from src to dst via streaming, querying info first."""
+        """Copy paths from src to dst via streaming, querying info first.
+
+        Acquires connections once and reuses them for both metadata and data.
+        """
         paths_list = list(paths)
         if not paths_list:
             return
 
-        paths_with_info: list[tuple[str | StorePath, PathInfo]] = []
-        for path in paths_list:
-            info = await src.query_path_info(path)
-            if info is None:
-                raise ValueError(f"Path {path} not found in source store")
-            paths_with_info.append((path, info))
-
-        await cls.stream_paths_with_info_store_to_store(src, dst, paths_with_info)
+        async with (
+            dst.transfer_conn() as dst_conn,
+            src.transfer_conn() as src_conn,
+        ):
+            await cls.stream_paths_with_info_store_to_store(
+                src, dst, paths_list, src_conn=src_conn, dst_conn=dst_conn
+            )
 
     async def stream_paths_with_info_to(
         self,
         dst: Store,
-        paths_with_info: list[tuple[str | StorePath, PathInfo]],
+        paths: list[str | StorePath],
     ) -> None:
         """Copy multiple paths from this store to dst store via streaming."""
-        await self.stream_paths_with_info_store_to_store(self, dst, paths_with_info)
+        await self.stream_paths_with_info_store_to_store(self, dst, paths)
 
     async def stream_paths_with_info_from(
         self,
         src: Store,
-        paths_with_info: list[tuple[str | StorePath, PathInfo]],
+        paths: list[str | StorePath],
     ) -> None:
         """Copy multiple paths from src store to this store via streaming."""
-        await self.stream_paths_with_info_store_to_store(src, self, paths_with_info)
+        await self.stream_paths_with_info_store_to_store(src, self, paths)
 
     async def stream_paths_to(
         self,
@@ -991,7 +1086,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         id: str | None = None,
         port: int = 22,
         username: str | None = None,
-        store_path: Path | None = None,
+        store_path: Path = Path("/"),
         max_builds: int = 2,
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,

@@ -48,9 +48,7 @@ from .store import (
     Store,
 )
 
-env = Env()
 log = structlog.get_logger(__name__)
-
 env = Env()
 
 
@@ -73,7 +71,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 id=b_id,
                 port=spec.get("port", 22),
                 username=spec.get("username"),
-                store_path=Path(spec["store_path"]) if spec.get("store_path") else None,
+                store_path=Path(spec.get("store_path", "/")),
                 max_builds=max_builds,
                 max_transfers=max_transfers,
                 supported_systems=supported_systems,

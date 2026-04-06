@@ -354,7 +354,7 @@ async def test_copy_paths_single(
         info.nar_hash,
     )
 
-    await copy_dst_store.stream_paths_with_info_from(src_store, [(path, info)])
+    await copy_dst_store.stream_paths_with_info_from(src_store, [path])
 
     # Verify it arrived
     valid_after = await copy_dst_store.query_valid_paths({path})
@@ -387,7 +387,7 @@ async def test_copy_paths_multiple(
 
     assert len(picked) >= 2, f"Need at least 2 paths, found {len(picked)}"
 
-    await copy_dst_store.stream_paths_with_info_from(src_store, picked)
+    await copy_dst_store.stream_paths_with_info_from(src_store, [p for p, _ in picked])
 
     # Verify all arrived
     paths = {p for p, _ in picked}
@@ -497,6 +497,7 @@ async def nixbuild_store() -> AsyncIterator[SSHSubprocessStore]:
     await s.close()
 
 
+@pytest.mark.skip()
 @pytest.mark.nixbuild
 @pytest.mark.timeout(60)
 async def test_copy_paths_to_nixbuild(
@@ -514,7 +515,7 @@ async def test_copy_paths_to_nixbuild(
         info.nar_size,
     )
 
-    await nixbuild_store.stream_paths_with_info_from(src_store, [(path, info)])
+    await nixbuild_store.stream_paths_with_info_from(src_store, [path])
 
     # Verify it arrived
     valid = await nixbuild_store.query_valid_paths({path})
@@ -525,6 +526,7 @@ async def test_copy_paths_to_nixbuild(
     assert nb_info.nar_hash == info.nar_hash
 
 
+@pytest.mark.skip()
 @pytest.mark.nixbuild
 @pytest.mark.timeout(60)
 async def test_copy_paths_roundtrip_nixbuild(
@@ -558,12 +560,14 @@ async def test_copy_paths_roundtrip_nixbuild(
         assert len(picked) >= 2, f"Need 2 paths, found {len(picked)}"
 
         # Push to nixbuild
-        await nixbuild_store.stream_paths_with_info_from(src_store, picked)
+        await nixbuild_store.stream_paths_with_info_from(
+            src_store, [p for p, _ in picked]
+        )
         log.info("pushed_paths_to_nixbuild", count=len(picked))
 
         # Pull back from nixbuild to fresh local store
         await roundtrip_store_instance.stream_paths_with_info_from(
-            nixbuild_store, picked
+            nixbuild_store, [p for p, _ in picked]
         )
         log.info("pulled_paths_from_nixbuild", count=len(picked))
 

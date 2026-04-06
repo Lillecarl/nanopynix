@@ -5,7 +5,6 @@ Build planner for decomposing high-level build requests into derivations.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -36,7 +35,7 @@ async def plan_and_execute_build_paths(
     request: BuildPathsRequest,
     store: Store,
     scheduler: Scheduler,
-    client: ClientConn | None = None,
+    client: ClientConn,
 ) -> Uint64Response:
     """Decompose and execute a BuildPaths request."""
     op_log("BuildPaths").debug("BuildPaths len(paths)=%d", len(request.derived_paths))
@@ -62,7 +61,7 @@ async def plan_and_execute_build_paths_with_results(
     request: BuildPathsWithResultsRequest,
     store: Store,
     scheduler: Scheduler,
-    client: ClientConn | None = None,
+    client: ClientConn,
 ) -> KeyedBuildResultsResponse:
     """Decompose and execute a BuildPathsWithResults request."""
     op_log("BuildPathsWithResults").debug(
@@ -108,15 +107,12 @@ async def decompose_build_paths(
     request: BuildPathsRequest | BuildPathsWithResultsRequest,
     store: Store,
     scheduler: Scheduler,
-    client: ClientConn | None = None,
+    client: ClientConn,
 ) -> list[tuple[str, set[str], asyncio.Future[BuildDerivationResponse]]]:
     """Decompose BuildPaths into individual BuildDerivation requests.
 
     Returns list of (derived_path, output_names, future) tuples.
     """
-    store_path = store.store_path
-    if store_path is None:
-        store_path = Path("/")
 
     # Query which drvs actually need building
     missing_resp = await store.execute(
@@ -131,12 +127,12 @@ async def decompose_build_paths(
 
     for dp in (DerivedPath(p) for p in missing_resp.will_build):
         try:
-            parsed = dp.to_derivation(store_path)
+            parsed = dp.to_derivation(store.store_path)
         except FileNotFoundError:
             log.warning("drv_read_failed", drv_path=dp.drv_path)
             continue
 
-        basic = to_basic_derivation(parsed, store_path)
+        basic = to_basic_derivation(parsed, store.store_path)
         drv_request = BuildDerivationRequest(
             drv_path=dp.drv_path,
             derivation=basic,
@@ -162,7 +158,7 @@ async def enqueue_build_derivation(
     request: BuildDerivationRequest,
     store: Store,
     scheduler: Scheduler,
-    client: ClientConn | None = None,
+    client: ClientConn,
 ) -> asyncio.Future[BuildDerivationResponse]:
     """Enqueue a single BuildDerivation request."""
     # Enrich with .drv metadata (e.g. _is_dynamic) if not already set
