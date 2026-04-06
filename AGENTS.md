@@ -54,3 +54,26 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 - **Halt on Ambiguity**: If a tool output indicates potential corruption (e.g., duplicate declarations in a `replace` output, unexpected truncations), or if you lose track of the file state relative to the VCS, **STOP immediately**. Do not attempt blind recovery (like `write_file` with partial content).
 - **Verify Before Rewrite**: Before using `write_file` to "fix" a large file, you MUST have read the *entire* file in the current turn to ensure no data loss.
 - **VCS Truth**: If `jj status` or `jj diff` contradicts your internal model of the changes, re-sync by reading the files from disk before taking further action. Do not guess.
+
+## 7. Test Suite Rules
+
+### Directory Structure
+- **`tests/functional/`** — active end-to-end and integration tests
+- **`tests/benchmark/`** — performance benchmarks
+- **`tests/legacy/`** — old tests, do not modify
+
+### Test Store Conventions
+- All test stores MUST use the `/tmp/pynixd-store-` prefix (defined as `STORE_PREFIX` in `tests/conftest.py`).
+- Use `rmtree_robust_glob(f"{STORE_PREFIX}*")` in fixtures to clean up leftover stores.
+- Only a few select tests should run against the root store (`store_path=Path("/")`). Most tests should use isolated stores with the prefix.
+
+### Test Helpers
+- **`run_captured(cmd, **kwargs)`** — runs a subprocess, returns `(rc, stdout, stderr)`.
+- **`run_logged(cmd, **kwargs)`** — runs a subprocess, streams output through structlog in real-time.
+- Both helpers auto-set `NIX_SSHOPTS` if not already present.
+- Use `env.str("NIX_BIN", "nix")` and `env.str("LIX_BIN", "nix")` from the `environs` singleton for binary paths.
+
+### Test Design
+- Keep tests simple and explicit. Avoid over-engineered abstractions.
+- Construct commands as plain lists so the exact invocation is visible at a glance.
+- Use `pytest.fixture(autouse=True)` for per-test cleanup (store directories, etc.).
