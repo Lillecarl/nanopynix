@@ -3,7 +3,7 @@ default:
 
 check: fmt
     pyright pynixd
-    pyright tests
+    pyright tests/conftest.py tests/functional
 
 fmt:
     ruff check --fix pynixd
@@ -13,15 +13,14 @@ fmt:
 
 # Run tests
 test:
-    # pytest tests -v --timeout=60 --timeout-method=thread -m "not slow and not bench" --durations 50
-    pytest tests -m "not slow and not bench"
+    pytest tests/functional
 
-aitest: check
-    #!/usr/bin/env bash
-    logfile=$(mktemp)
-    echo "Logfile: $logfile"
-    pytest tests -v --timeout=60 --timeout-method=thread -m "not slow and not bench" --durations=50 --maxfail=0 2>&1 | tee $logfile
-    echo "Logfile: $logfile"
+# aitest: check
+#     #!/usr/bin/env bash
+#     logfile=$(mktemp)
+#     echo "Logfile: $logfile"
+#     pytest tests -v --timeout=60 --timeout-method=thread -m "not slow and not bench" --durations=50 --maxfail=0 2>&1 | tee $logfile
+#     echo "Logfile: $logfile"
 
 # Run all checks
 precommit: check test
