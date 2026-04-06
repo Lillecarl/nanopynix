@@ -34,6 +34,28 @@ structlog.configure(
 
 log = structlog.get_logger(__name__)
 
+logging.getLogger("asyncio").setLevel(logging.INFO)
+logging.getLogger("aiosqlite").setLevel(logging.INFO)
+logging.getLogger("pynixd.store.pool").setLevel(logging.INFO)
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def set_log_levels(levels: dict[str, int]):
+    """Temporarily set logger levels, restoring them on exit."""
+    saved = {}
+    for name, level in levels.items():
+        logger = logging.getLogger(name)
+        saved[name] = logger.level
+        logger.setLevel(level)
+    try:
+        yield
+    finally:
+        for name, level in saved.items():
+            logging.getLogger(name).setLevel(level)
+
+
 NIX_BIN = env.str("NIX_BIN", "nix")
 LIX_BIN = env.str("LIX_BIN", "nix")
 
@@ -51,7 +73,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
     tr = session.config.pluginmanager.get_plugin("terminalreporter")
     if tr:
-        tr.write_line(f"\n📝 Test run logs: {log_dir}")
+        tr.write_line(f"\nIMPORTANT: Test run logs: {log_dir}")
 
 
 def pytest_terminal_summary(
@@ -62,7 +84,7 @@ def pytest_terminal_summary(
     """Print log directory path at the end of the test run."""
     log_dir = config.stash.get(_log_dir_key, None)
     if log_dir:
-        terminalreporter.write_line(f"\n📝 Test run logs: {log_dir}")
+        terminalreporter.write_line(f"\nIMPORTANT: Test run logs: {log_dir}")
 
 
 @pytest.fixture(scope="session")
@@ -80,7 +102,7 @@ def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
 
     handler = logging.FileHandler(log_file)
     handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    formatter = logging.Formatter("%(message)s")
     handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()
@@ -93,6 +115,32 @@ def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
     root_logger.removeHandler(handler)
     root_logger.setLevel(old_level)
     handler.close()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call):
+    """Write captured output and failure details to log file, suppress console display."""
+    outcome = yield
+    report = outcome.get_result()
+
+    if report.when == "call" and report.failed:
+        log_dir = item.config.stash.get(_log_dir_key, None)
+        if log_dir:
+            safe_name = item.name.replace("/", "_")
+            log_file = log_dir / f"{safe_name}.log"
+            with open(log_file, "a") as f:
+                if report.longrepr:
+                    f.write("\n--- Failure details ---\n")
+                    f.write(str(report.longrepr))
+                if report.capstdout:
+                    f.write("\n--- Captured stdout ---\n")
+                    f.write(report.capstdout)
+                if report.capstderr:
+                    f.write("\n--- Captured stderr ---\n")
+                    f.write(report.capstderr)
+
+            # Replace longrepr with short message for console
+            report.longrepr = f"FAILED (see log file: {log_file / f'{safe_name}.log'})"
 
 
 def rmtree_robust(path: str | Path) -> None:

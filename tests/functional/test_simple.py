@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import structlog
 
 from pynixd import Server
 from pynixd.instance import NixImplementation
 from pynixd.store import LocalSocketStore
-from tests.conftest import LIX_BIN, NIX_BIN, STORE_PREFIX, run_captured
+from tests.conftest import LIX_BIN, NIX_BIN, STORE_PREFIX, run_captured, set_log_levels
+
+log = structlog.get_logger(__name__)
 
 
 async def test_builders() -> None:
@@ -47,20 +52,22 @@ async def test_store() -> None:
         id="builder", store_path=store_path, nix_bin=NIX_BIN
     )
 
-    async with Server(
-        local_store=local_store, stores={"builder": builder_store}, ssh_port=0
-    ) as server:
-        uri = server.uri(implementation=NixImplementation.NIX)
-        cmd = [
-            str(NIX_BIN),
-            "build",
-            "--store",
-            uri,
-            "--file",
-            str(test_nix),
-            "simple",
-            "--no-link",
-            "--print-out-paths",
-        ]
-        rc, stdout, stderr = await run_captured(cmd)
-        assert rc == 0, f"build failed:\n{stderr}"
+    with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
+        log.info("pynixd.op.AddToStore is muted for this test")
+        async with Server(
+            local_store=local_store, stores={"builder": builder_store}, ssh_port=0
+        ) as server:
+            uri = server.uri(implementation=NixImplementation.NIX)
+            cmd = [
+                str(NIX_BIN),
+                "build",
+                "--store",
+                uri,
+                "--file",
+                str(test_nix),
+                "simple",
+                "--no-link",
+                "--print-out-paths",
+            ]
+            rc, stdout, stderr = await run_captured(cmd)
+            assert rc == 0, f"build failed:\n{stderr}"
