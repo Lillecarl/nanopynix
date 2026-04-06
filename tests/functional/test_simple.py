@@ -18,10 +18,11 @@ log = structlog.get_logger(__name__)
 async def test_builders() -> None:
     """Build test.nix .simple via --builders."""
     test_nix = Path("test.nix")
-    store_path = STORE_PREFIX / "builders"
-    local_store = LocalSocketStore(id="local", store_path=store_path, nix_bin=NIX_BIN)
+    local_store = LocalSocketStore(
+        id="local", store_path=STORE_PREFIX / "local", nix_bin=NIX_BIN
+    )
     builder_store = LocalSocketStore(
-        id="builder", store_path=store_path, nix_bin=NIX_BIN
+        id="builder", store_path=STORE_PREFIX / "builder", nix_bin=NIX_BIN
     )
 
     async with Server(
@@ -46,14 +47,22 @@ async def test_builders() -> None:
 async def test_store() -> None:
     """Build test.nix .simple via --store."""
     test_nix = Path("test.nix")
-    store_path = STORE_PREFIX / "store"
-    local_store = LocalSocketStore(id="local", store_path=store_path, nix_bin=NIX_BIN)
+    local_store = LocalSocketStore(
+        id="local", store_path=STORE_PREFIX / "local", nix_bin=NIX_BIN
+    )
     builder_store = LocalSocketStore(
-        id="builder", store_path=store_path, nix_bin=NIX_BIN
+        id="builder", store_path=STORE_PREFIX / "builder", nix_bin=NIX_BIN
     )
 
+    # AddToStore is muted to INFO because it produces ~4500 DEBUG log lines
+    # (one per path being added). This is 100% confirmed working — the missing
+    # DEBUG output is NOT the cause of any test failure. Do NOT remove this
+    # silencing unless you want to drown the AI in thousands of log lines.
     with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
-        log.info("pynixd.op.AddToStore is muted for this test")
+        log.info(
+            "IMPORTANT: pynixd.op.AddToStore is configured to INFO "
+            "so you won't see it here unless it errors out"
+        )
         async with Server(
             local_store=local_store, stores={"builder": builder_store}, ssh_port=0
         ) as server:
