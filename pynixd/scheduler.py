@@ -14,20 +14,15 @@ they are pulled automatically.
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
-import asyncssh
 import structlog
 from environs import Env
 
 from .build_queue import BuildQueue, QueuedBuild
 from .connection import ClientConn
 from .exceptions import BackendError, InfrastructureError
-from .operations.base import BuildResultStatus, PathInfo
 from .operations.builds import (
     BuildDerivationRequest,
     BuildDerivationResponse,
@@ -245,7 +240,7 @@ class Scheduler:
             missing = build.required_paths - store.known_paths
             if missing:
                 log.debug("build_sending_inputs", build_id=build.id, store_id=store.id)
-                await store.pipe_paths_from(self.local_store, missing)
+                await store.stream_paths_from(self.local_store, missing)
 
             # 2. Trigger build
             log.debug("build_executing", build_id=build.id, store_id=store.id)
@@ -260,7 +255,7 @@ class Scheduler:
                 log.info("pulling_paths", store_id=store.id, count=len(outputs))
                 for p in outputs.values():
                     log.debug("pulling_path", store_id=store.id, path=p)
-                await self.local_store.pipe_paths_from(store, set(outputs.values()))
+                await self.local_store.stream_paths_from(store, set(outputs.values()))
                 log.debug(
                     "pulled_paths_into_local_store",
                     count=len(outputs),
@@ -298,7 +293,7 @@ class Scheduler:
                 log.debug("pulling_path", store_id=store.id, path=p)
             try:
                 # We pull from the build machine into our local store
-                await self.local_store.pipe_paths_from(store, to_pull)
+                await self.local_store.stream_paths_from(store, to_pull)
                 log.debug(
                     "pulled_paths_into_local_store",
                     count=len(to_pull),

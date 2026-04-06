@@ -187,7 +187,7 @@ async def test_big_nar_copy_paths(
     old = _set_chunk_size(chunk_kb)
     try:
         start = time.monotonic()
-        await dst_store.stream_paths_store_to_store(bench_store, [(store_path, info)])
+        await dst_store.stream_paths_with_info_from(bench_store, [(store_path, info)])
         elapsed = time.monotonic() - start
     finally:
         wire._CHUNK_SIZE = old
@@ -255,7 +255,7 @@ async def test_small_nars_copy_paths(
     old = _set_chunk_size(chunk_kb)
     try:
         start = time.monotonic()
-        await dst_store.stream_paths_store_to_store(bench_store, picked)
+        await dst_store.stream_paths_with_info_from(bench_store, picked)
         elapsed = time.monotonic() - start
     finally:
         wire._CHUNK_SIZE = old

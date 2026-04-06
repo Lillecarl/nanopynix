@@ -10,7 +10,7 @@ import structlog
 from pynixd import Server
 from pynixd.instance import NixImplementation
 from pynixd.store import LocalSocketStore
-from tests.conftest import LIX_BIN, NIX_BIN, STORE_PREFIX, run_captured, set_log_levels
+from tests.conftest import NIX_BIN, STORE_PREFIX, run_captured, set_log_levels
 
 log = structlog.get_logger(__name__)
 

@@ -9,6 +9,7 @@ import os
 import shlex
 import stat
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -37,8 +38,6 @@ log = structlog.get_logger(__name__)
 logging.getLogger("asyncio").setLevel(logging.INFO)
 logging.getLogger("aiosqlite").setLevel(logging.INFO)
 logging.getLogger("pynixd.store.pool").setLevel(logging.INFO)
-
-from contextlib import contextmanager
 
 
 @contextmanager
@@ -119,7 +118,9 @@ def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call):
-    """Write captured output and failure details to log file, suppress console display."""
+    """
+    Write captured output and failure details to log file, suppress console display.
+    """
     outcome = yield
     report = outcome.get_result()
 

@@ -18,7 +18,7 @@ import asyncio
 import os
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 
@@ -296,17 +296,19 @@ class Store(ABC):
         resp = await self.execute(QueryAllValidPathsRequest())
         return {StorePath(p) for p in resp.paths}
 
-    async def stream_paths_store_to_store(
-        self,
+    @classmethod
+    async def stream_paths_with_info_store_to_store(
+        cls,
         src: Store,
+        dst: Store,
         paths_with_info: list[tuple[str | StorePath, PathInfo]],
     ) -> None:
-        """Copy multiple paths from src store to this store via streaming."""
+        """Copy multiple paths from src store to dst store via streaming."""
         if not paths_with_info:
             return
 
         async with (
-            self.transfer_conn() as dst_conn,
+            dst.transfer_conn() as dst_conn,
             src.transfer_conn() as src_conn,
         ):
             dst_conn.w.write_uint64(Op.AddMultipleToStore)
@@ -339,6 +341,59 @@ class Store(ABC):
 
             await stderr.drain(dst_conn.r)
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
+
+    @classmethod
+    async def stream_paths_store_to_store(
+        cls,
+        src: Store,
+        dst: Store,
+        paths: Iterable[str | StorePath],
+    ) -> None:
+        """Copy paths from src to dst via streaming, querying info first."""
+        paths_list = list(paths)
+        if not paths_list:
+            return
+
+        paths_with_info: list[tuple[str | StorePath, PathInfo]] = []
+        for path in paths_list:
+            info = await src.query_path_info(path)
+            if info is None:
+                raise ValueError(f"Path {path} not found in source store")
+            paths_with_info.append((path, info))
+
+        await cls.stream_paths_with_info_store_to_store(src, dst, paths_with_info)
+
+    async def stream_paths_with_info_to(
+        self,
+        dst: Store,
+        paths_with_info: list[tuple[str | StorePath, PathInfo]],
+    ) -> None:
+        """Copy multiple paths from this store to dst store via streaming."""
+        await self.stream_paths_with_info_store_to_store(self, dst, paths_with_info)
+
+    async def stream_paths_with_info_from(
+        self,
+        src: Store,
+        paths_with_info: list[tuple[str | StorePath, PathInfo]],
+    ) -> None:
+        """Copy multiple paths from src store to this store via streaming."""
+        await self.stream_paths_with_info_store_to_store(src, self, paths_with_info)
+
+    async def stream_paths_to(
+        self,
+        dst: Store,
+        paths: Iterable[str | StorePath],
+    ) -> None:
+        """Copy multiple paths from this store to dst store via streaming."""
+        await self.stream_paths_store_to_store(self, dst, paths)
+
+    async def stream_paths_from(
+        self,
+        src: Store,
+        paths: Iterable[str | StorePath],
+    ) -> None:
+        """Copy multiple paths from src store to this store via streaming."""
+        await self.stream_paths_store_to_store(src, self, paths)
 
     async def add_to_store_nar_streaming(self, src: NixReader) -> StorePath:
         """Stream AddToStoreNar from src to this store."""
