@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import struct
 from collections.abc import AsyncIterator
-from typing import Any, Final
+from typing import TYPE_CHECKING, Final
 
 import asyncssh
 from environs import Env
@@ -23,6 +23,9 @@ env = Env()
 _CHUNK_SIZE = env.int("PYNIXD_CHUNK_SIZE", 1024 * 1024)
 
 _SSH_WINDOW_SIZE = env.int("PYNIXD_SSH_WINDOW", 16 * 1024 * 1024)
+
+if TYPE_CHECKING:
+    from . import stderr
 
 
 def _nar_pad(n: int) -> int:
@@ -151,7 +154,7 @@ class NixReader:
 
         await stderr.drain(self, raise_on_error=raise_on_error)
 
-    def read_stderr(self) -> AsyncIterator[Any]:
+    def read_stderr(self) -> AsyncIterator[stderr.StderrMsg]:
         """Return an AsyncIterator that yields stderr messages until STDERR_LAST."""
         from . import stderr
 
