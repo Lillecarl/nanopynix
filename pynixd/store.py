@@ -233,7 +233,7 @@ class Store(ABC):
         cls,
         src: Store,
         dst: Store,
-        paths: list[StorePath],
+        paths: set[StorePath],
         src_conn: Connection | None = None,
         dst_conn: Connection | None = None,
     ) -> None:
@@ -242,8 +242,7 @@ class Store(ABC):
         Recursively expands the closure of the given paths and topologically
         sorts them to ensure valid insertion order at the destination.
         """
-        paths_list: list[StorePath] = [StorePath(p) for p in paths]
-        if not paths_list:
+        if not paths:
             return
 
         async with (
@@ -253,15 +252,13 @@ class Store(ABC):
             # 1. Expand closure and fetch all PathInfo (returns topo-sorted list)
             from .operations.queries import QueryClosureWithInfoRequest
 
-            closure_resp = await src.execute(
-                QueryClosureWithInfoRequest(paths=set(paths_list))
-            )
+            closure_resp = await src.execute(QueryClosureWithInfoRequest(paths=paths))
             final_paths_with_info = closure_resp.infos
 
             log.info(
                 "stream_paths_with_info_store_to_store",
                 count=len(final_paths_with_info),
-                requested=len(paths_list),
+                requested=len(paths),
             )
 
             # 2. Stream to destination
@@ -326,8 +323,8 @@ class Store(ABC):
 
         Acquires connections once and reuses them for both metadata and data.
         """
-        paths_list: list[StorePath] = [StorePath(p) for p in paths]
-        if not paths_list:
+        paths_set: set[StorePath] = {StorePath(p) for p in paths}
+        if not paths_set:
             return
 
         async with (
@@ -335,13 +332,13 @@ class Store(ABC):
             src.transfer_conn() as src_conn,
         ):
             await cls.stream_paths_with_info_store_to_store(
-                src, dst, paths_list, src_conn=src_conn, dst_conn=dst_conn
+                src, dst, paths_set, src_conn=src_conn, dst_conn=dst_conn
             )
 
     async def stream_paths_with_info_to(
         self,
         dst: Store,
-        paths: list[StorePath],
+        paths: set[StorePath],
     ) -> None:
         """Copy multiple paths from this store to dst store via streaming."""
         await self.stream_paths_with_info_store_to_store(self, dst, paths)
@@ -349,7 +346,7 @@ class Store(ABC):
     async def stream_paths_with_info_from(
         self,
         src: Store,
-        paths: list[StorePath],
+        paths: set[StorePath],
     ) -> None:
         """Copy multiple paths from src store to this store via streaming."""
         await self.stream_paths_with_info_store_to_store(src, self, paths)
