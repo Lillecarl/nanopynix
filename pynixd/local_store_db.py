@@ -30,6 +30,7 @@ from .operations.queries import (
     IsValidPathResponse,
     QueryPathInfoResponse,
 )
+from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -141,7 +142,7 @@ class LocalStoreDB:
         regtime_flush_interval: float,
     ) -> None:
         self.db_conn: aiosqlite.Connection | None = db
-        self.pending_regtime: set[str] = set()
+        self.pending_regtime: set[StorePath] = set()
         self.flush_task: asyncio.Task[None] | None = None
         self.regtime_flush_interval = regtime_flush_interval
         self.read_only: bool = read_only
@@ -193,7 +194,7 @@ class LocalStoreDB:
 
     # ── Read queries ──────────────────────────────────────────────────
 
-    async def is_valid_path(self, path: str) -> IsValidPathResponse | None:
+    async def is_valid_path(self, path: StorePath) -> IsValidPathResponse | None:
         """Check if a path exists. Returns None if DB unavailable."""
         if self.db_conn is None:
             return None
@@ -205,7 +206,7 @@ class LocalStoreDB:
             log.debug("is_valid_path_query_failed", path=path, exc_info=True)
             return None
 
-    async def query_path_info(self, path: str) -> QueryPathInfoResponse | None:
+    async def query_path_info(self, path: StorePath) -> QueryPathInfoResponse | None:
         """Get full path info. Returns None if DB unavailable."""
         if self.db_conn is None:
             return None
@@ -226,9 +227,9 @@ class LocalStoreDB:
                 valid=True,
                 info=PathInfo(
                     path=path,
-                    deriver=deriver or "",
+                    deriver=StorePath(deriver or ""),
                     nar_hash=nar_hash,
-                    references=refs,
+                    references={StorePath(r) for r in refs},
                     registration_time=reg_time,
                     nar_size=nar_size or 0,
                     ultimate=1 if ultimate else 0,
@@ -240,7 +241,9 @@ class LocalStoreDB:
             log.debug("query_path_info_failed", path=path, exc_info=True)
             return None
 
-    async def query_valid_paths(self, paths: set[str]) -> StringSetResponse | None:
+    async def query_valid_paths(
+        self, paths: set[StorePath]
+    ) -> StringSetResponse | None:
         """Filter a set of paths to those that exist. Returns None if DB unavailable."""
         if self.db_conn is None:
             return None
@@ -267,7 +270,7 @@ class LocalStoreDB:
             log.debug("query_all_valid_paths_failed", exc_info=True)
             return None
 
-    async def query_path_from_hash_part(self, hash_part: str) -> str | None:
+    async def query_path_from_hash_part(self, hash_part: StorePath) -> StorePath | None:
         """Find a path by its hash prefix. Returns path string or None."""
         if self.db_conn is None:
             return None
@@ -299,7 +302,7 @@ class LocalStoreDB:
             )
             return None
 
-    async def compute_closure(self, seeds: set[str]) -> set[str] | None:
+    async def compute_closure(self, seeds: set[StorePath]) -> set[StorePath] | None:
         """Expand seed paths to their full runtime reference closure.
 
         Single recursive CTE — no per-path queries. Returns None if DB unavailable.
@@ -315,7 +318,9 @@ class LocalStoreDB:
             log.debug("compute_closure_failed", exc_info=True)
             return None
 
-    async def query_path_infos(self, paths: set[str]) -> dict[str, PathInfo] | None:
+    async def query_path_infos(
+        self, paths: set[StorePath]
+    ) -> dict[StorePath, PathInfo] | None:
         """Batch PathInfo for multiple paths. Returns None if DB unavailable."""
         if self.db_conn is None or not paths:
             return None
@@ -331,17 +336,18 @@ class LocalStoreDB:
                 ref_rows = await cursor.fetchall()
 
             # Build referrer -> {references} map
-            refs_map: dict[str, set[str]] = {}
+            refs_map: dict[StorePath, set[StorePath]] = {}
             for referrer, reference in ref_rows:
                 refs_map.setdefault(referrer, set()).add(reference)
 
-            infos: dict[str, PathInfo] = {}
+            infos: dict[StorePath, PathInfo] = {}
             for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
-                infos[path] = PathInfo(
-                    path=path,
-                    deriver=deriver or "",
+                p = StorePath(path)
+                infos[p] = PathInfo(
+                    path=p,
+                    deriver=StorePath(deriver or ""),
                     nar_hash=nar_hash,
-                    references=refs_map.get(path, set()),
+                    references={StorePath(r) for r in refs_map.get(path, set())},
                     registration_time=reg_time,
                     nar_size=nar_size or 0,
                     ultimate=1 if ultimate else 0,
@@ -353,7 +359,7 @@ class LocalStoreDB:
             log.debug("query_path_infos_failed", exc_info=True)
             return None
 
-    async def query_stale_paths(self, max_age_seconds: int) -> set[str] | None:
+    async def query_stale_paths(self, max_age_seconds: int) -> set[StorePath] | None:
         """Find paths with registrationTime older than max_age_seconds ago.
 
         Returns None if DB unavailable.
@@ -371,12 +377,12 @@ class LocalStoreDB:
 
     # ── Registration time updates ─────────────────────────────────────
 
-    def mark_path(self, path: str) -> None:
+    def mark_path(self, path: StorePath) -> None:
         """Queue a path for registration time update."""
         if self.db_conn is not None and not self.read_only:
             self.pending_regtime.add(path)
 
-    def mark_paths(self, paths: set[str]) -> None:
+    def mark_paths(self, paths: set[StorePath]) -> None:
         """Queue multiple paths for registration time update."""
         if self.db_conn is not None and not self.read_only:
             self.pending_regtime.update(paths)

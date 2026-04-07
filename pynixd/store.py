@@ -109,7 +109,7 @@ class Store(ABC):
         self.conn_counter: int = 0
         self.sweep_task: asyncio.Task[None] | None = None
         self.supported_systems = supported_systems or []
-        self.known_paths: set[str | StorePath] = set()
+        self.known_paths: set[StorePath] = set()
         self.consecutive_failures: int = 0
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
@@ -157,18 +157,18 @@ class Store(ABC):
 
     # ── Known paths tracking ────────────────────────────────────────
 
-    def has_path(self, path: str | StorePath) -> bool:
+    def has_path(self, path: StorePath) -> bool:
         return path in self.known_paths
 
-    def has_all_paths(self, paths: set[str] | set[StorePath]) -> bool:
+    def has_all_paths(self, paths: set[StorePath]) -> bool:
         return paths.issubset(self.known_paths)
 
-    def count_common_paths(self, paths: set[str] | set[StorePath]) -> int:
+    def count_common_paths(self, paths: set[StorePath]) -> int:
         return len(paths & self.known_paths)
 
     async def compute_closure_with_info(
-        self, paths: Iterable[str | StorePath], conn: Connection | None = None
-    ) -> dict[str, PathInfo]:
+        self, paths: Iterable[StorePath], conn: Connection | None = None
+    ) -> dict[StorePath, PathInfo]:
         """Recursively find all paths and their info in the store closure.
 
         If a connection is provided, it's used as a fallback if paths are
@@ -176,8 +176,8 @@ class Store(ABC):
         """
         from .operations.queries import QueryPathInfoRequest
 
-        all_infos: dict[str, PathInfo] = {}
-        pending = {str(p) for p in paths}
+        all_infos: dict[StorePath, PathInfo] = {}
+        pending = {StorePath(p) for p in paths}
 
         while pending:
             to_fetch = {p for p in pending if p not in all_infos}
@@ -185,8 +185,7 @@ class Store(ABC):
                 break
 
             # Use query_path_infos which may use DB fast path
-            new_infos_raw = await self.query_path_infos(to_fetch)
-            new_infos = {str(p): info for p, info in new_infos_raw.items()}
+            new_infos = await self.query_path_infos(to_fetch)
 
             # Ensure we got info for all requested paths (fallback to connection)
             for p in to_fetch:
@@ -205,17 +204,16 @@ class Store(ABC):
             next_pending = set()
             for info in new_infos.values():
                 for ref in info.references:
-                    ref_str = str(ref)
-                    if ref_str not in all_infos:
-                        next_pending.add(ref_str)
+                    if ref not in all_infos:
+                        next_pending.add(ref)
             pending = next_pending
 
         return all_infos
 
-    async def compute_closure(self, paths: Iterable[str | StorePath]) -> set[str]:
+    async def compute_closure(self, paths: Iterable[StorePath]) -> set[StorePath]:
         """Recursively find all paths in the store closure of the given paths."""
         infos = await self.compute_closure_with_info(paths)
-        return set(infos.keys())
+        return {StorePath(p) for p in infos.keys()}
 
     async def call(
         self,
@@ -273,21 +271,19 @@ class Store(ABC):
             suppress_last=suppress_last,
         )
 
-    def add_known_path(
-        self, path: str | StorePath, *, update_regtime: bool = True
-    ) -> None:
+    def add_known_path(self, path: StorePath, *, update_regtime: bool = True) -> None:
         self.known_paths.add(path)
         if update_regtime and self.db is not None:
             self.db.mark_path(path)
 
     def add_known_paths(
-        self, paths: set[str] | set[StorePath], *, update_regtime: bool = True
+        self, paths: set[StorePath], *, update_regtime: bool = True
     ) -> None:
         self.known_paths.update(paths)
         if update_regtime and self.db is not None:
             self.db.mark_paths(set(paths))
 
-    async def query_path_info(self, path: str | StorePath) -> PathInfo | None:
+    async def query_path_info(self, path: StorePath) -> PathInfo | None:
         """Get PathInfo for a store path using a QueryPathInfoRequest."""
 
         resp = await self.call(QueryPathInfoRequest(path=path))
@@ -297,26 +293,26 @@ class Store(ABC):
         return None
 
     async def query_path_infos(
-        self, paths: set[str] | set[StorePath]
-    ) -> dict[str | StorePath, PathInfo]:
+        self, paths: set[StorePath]
+    ) -> dict[StorePath, PathInfo]:
         """Batch PathInfo for multiple paths. DB fast path, daemon fallback."""
         if not paths:
             return {}
 
         if self.db is not None:
-            result = await self.db.query_path_infos(set(paths))
+            result = await self.db.query_path_infos(paths)
             if result is not None:
                 return result
 
         # Slow path: sequential query_path_info
-        infos: dict[str | StorePath, PathInfo] = {}
+        infos: dict[StorePath, PathInfo] = {}
         for path in paths:
             info = await self.query_path_info(path)
             if info is not None:
                 infos[path] = info
         return infos
 
-    async def is_valid_path(self, path: str | StorePath) -> bool:
+    async def is_valid_path(self, path: StorePath) -> bool:
         """Check if a path is valid on this store."""
 
         if self.has_path(path):
@@ -327,7 +323,7 @@ class Store(ABC):
 
     async def query_valid_paths(
         self,
-        paths: set[str] | set[StorePath],
+        paths: set[StorePath],
         substitute: bool = False,
     ) -> set[StorePath]:
         """Query which paths are valid on this store."""
@@ -352,7 +348,7 @@ class Store(ABC):
         cls,
         src: Store,
         dst: Store,
-        paths: list[str | StorePath],
+        paths: list[StorePath],
         src_conn: Connection | None = None,
         dst_conn: Connection | None = None,
     ) -> None:
@@ -361,7 +357,7 @@ class Store(ABC):
         Recursively expands the closure of the given paths and topologically
         sorts them to ensure valid insertion order at the destination.
         """
-        paths_list = [str(p) for p in paths]
+        paths_list: list[StorePath] = [StorePath(p) for p in paths]
         if not paths_list:
             return
 
@@ -373,11 +369,11 @@ class Store(ABC):
             all_infos = await src.compute_closure_with_info(paths_list, conn=src_conn)
 
             # 2. Topologically sort the entire closure
-            sorted_paths: list[str] = []
-            visited: set[str] = set()
-            visiting: set[str] = set()
+            sorted_paths: list[StorePath] = []
+            visited: set[StorePath] = set()
+            visiting: set[StorePath] = set()
 
-            def visit(p: str):
+            def visit(p: StorePath):
                 if p in visited:
                     return
                 if p in visiting:
@@ -386,9 +382,8 @@ class Store(ABC):
                 info = all_infos.get(p)
                 if info:
                     for ref in info.references:
-                        ref_str = str(ref)
-                        if ref_str != p:
-                            visit(ref_str)
+                        if ref != p:
+                            visit(ref)
                 visiting.remove(p)
                 visited.add(p)
                 sorted_paths.append(p)
@@ -420,10 +415,12 @@ class Store(ABC):
             # Write how many paths we're looking to send
             fw.write_uint64(len(final_paths_with_info))
 
-            for path, info in final_paths_with_info:
-                src_conn.op_log.append(
-                    "NarFromPath (stream_paths_with_info_store_to_store)"
+            for p, info in final_paths_with_info:
+                path = StorePath(p)
+                dst_conn.op_log.append(
+                    "AddToStoreNar (stream_paths_with_info_store_to_store)"
                 )
+
                 # Write PathInfo to the framed stream
                 await info.to_writer_keyed(fw)
 
@@ -431,7 +428,7 @@ class Store(ABC):
                 src_conn.w.write_uint64(Op.NarFromPath)
                 # Write which path we're looking for
                 await SingleStringRequest(
-                    path=path,
+                    path=StorePath(path),
                 ).to_writer(src_conn.w, src_conn.version)
                 # Send the NarFromPath request
                 await src_conn.w.drain()
@@ -458,13 +455,13 @@ class Store(ABC):
         cls,
         src: Store,
         dst: Store,
-        paths: Iterable[str | StorePath],
+        paths: Iterable[StorePath],
     ) -> None:
         """Copy paths from src to dst via streaming, querying info first.
 
         Acquires connections once and reuses them for both metadata and data.
         """
-        paths_list = list(paths)
+        paths_list: list[StorePath] = [StorePath(p) for p in paths]
         if not paths_list:
             return
 
@@ -479,7 +476,7 @@ class Store(ABC):
     async def stream_paths_with_info_to(
         self,
         dst: Store,
-        paths: list[str | StorePath],
+        paths: list[StorePath],
     ) -> None:
         """Copy multiple paths from this store to dst store via streaming."""
         await self.stream_paths_with_info_store_to_store(self, dst, paths)
@@ -487,7 +484,7 @@ class Store(ABC):
     async def stream_paths_with_info_from(
         self,
         src: Store,
-        paths: list[str | StorePath],
+        paths: list[StorePath],
     ) -> None:
         """Copy multiple paths from src store to this store via streaming."""
         await self.stream_paths_with_info_store_to_store(src, self, paths)
@@ -495,7 +492,7 @@ class Store(ABC):
     async def stream_paths_to(
         self,
         dst: Store,
-        paths: Iterable[str | StorePath],
+        paths: Iterable[StorePath],
     ) -> None:
         """Copy multiple paths from this store to dst store via streaming."""
         await self.stream_paths_store_to_store(self, dst, paths)
@@ -503,7 +500,7 @@ class Store(ABC):
     async def stream_paths_from(
         self,
         src: Store,
-        paths: Iterable[str | StorePath],
+        paths: Iterable[StorePath],
     ) -> None:
         """Copy multiple paths from src store to this store via streaming."""
         await self.stream_paths_store_to_store(src, self, paths)
@@ -536,9 +533,7 @@ class Store(ABC):
             await EmptyResponse.from_reader(conn.r, conn.version)
             return [StorePath(p) for p in paths]
 
-    async def buffer_nar_from_path(
-        self, path: str | StorePath, nar_size: int = 0
-    ) -> bytes:
+    async def buffer_nar_from_path(self, path: StorePath, nar_size: int = 0) -> bytes:
         """Read NAR into memory."""
         async with self.transfer_conn() as conn:
             if nar_size > 0:
@@ -553,7 +548,7 @@ class Store(ABC):
 
     async def stream_nar_from_path(
         self,
-        path: str | StorePath,
+        path: StorePath,
         dst: NixWriter,
         nar_size: int = 0,
         chunk_size: int = _CHUNK_SIZE,
@@ -582,7 +577,7 @@ class Store(ABC):
 
     async def nar_from_path_chunked(
         self,
-        path: str | StorePath,
+        path: StorePath,
         nar_size: int,
         write_chunk,
         chunk_size: int = _CHUNK_SIZE,
@@ -603,7 +598,7 @@ class Store(ABC):
     async def pipe_nar_from(
         self,
         src: Store,
-        path: str | StorePath,
+        path: StorePath,
         info: PathInfo,
     ) -> None:
         """Stream NAR from src store to this store."""
@@ -632,9 +627,7 @@ class Store(ABC):
             await dst_conn.r.drain_stderr()
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
 
-    async def collect_garbage(
-        self, paths: set[str] | set[StorePath]
-    ) -> CollectGarbageResponse:
+    async def collect_garbage(self, paths: set[StorePath]) -> CollectGarbageResponse:
         """Delete specific paths via CollectGarbage (action=3)."""
         async with self.transfer_conn() as conn:
             resp = await conn.call(

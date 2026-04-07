@@ -20,6 +20,7 @@ from .connection import ClientConn
 from .operations.base import BuildResult, BuildResultStatus
 from .operations.builds import BuildDerivationRequest, BuildDerivationResponse
 from .protocol import Op
+from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -44,7 +45,7 @@ class QueuedBuild:
     request: BuildDerivationRequest  # The request to forward to the backend
     client: ClientConn | None  # Client connection for stderr forwarding
     required_paths: set[
-        str
+        StorePath
     ]  # All paths the backend needs (input_srcs for BuildDerivation)
     future: asyncio.Future[BuildDerivationResponse]  # Resolved when done
     platform: str = ""  # Derivation platform (for backend filtering)
@@ -56,7 +57,9 @@ class QueuedBuild:
     build_task: asyncio.Task | None = field(default=None, repr=False)
     transfer_task: asyncio.Task | None = field(default=None, repr=False)
     transfer_cancel: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
-    closure: set[str] | None = field(default=None, repr=False)  # cached runtime closure
+    closure: set[StorePath] | None = field(
+        default=None, repr=False
+    )  # cached runtime closure
 
     # For heap ordering
     def __lt__(self, other: Self) -> bool:
@@ -142,8 +145,8 @@ class QueuedBuild:
 class BuildKey:
     """Key for deduplication."""
 
-    drv_path: str
-    input_srcs: frozenset[str] = frozenset()
+    drv_path: StorePath
+    input_srcs: frozenset[StorePath] = frozenset()
 
     @classmethod
     def from_request(cls, request: BuildDerivationRequest) -> Self:
@@ -167,7 +170,7 @@ class BuildQueue:
         op: Op,
         request: BuildDerivationRequest,
         client: ClientConn | None,
-        required_paths: set[str],
+        required_paths: set[StorePath],
         platform: str = "",
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue (deduplicates if already present).

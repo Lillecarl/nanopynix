@@ -29,6 +29,7 @@ from .operations.builds import (
 )
 from .protocol import Op
 from .store import Store
+from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -58,7 +59,7 @@ class Scheduler:
         op: Op,
         request: BuildDerivationRequest,
         client: ClientConn | None,
-        required_paths: set[str],
+        required_paths: set[StorePath],
         platform: str = "",
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue and trigger the scheduler."""
@@ -216,7 +217,7 @@ class Scheduler:
         # Sort descending by score
         return sorted(scores, key=lambda x: x[1], reverse=True)
 
-    def find_best_source(self, paths: set[str]) -> Store | None:
+    def find_best_source(self, paths: set[StorePath]) -> Store | None:
         """Find the store that has the most of the given paths."""
         best_store: Store | None = None
         max_count = -1
@@ -279,7 +280,7 @@ class Scheduler:
             self.trigger()
 
     async def transfer_inputs(
-        self, build: QueuedBuild, store: Store, paths: set[str]
+        self, build: QueuedBuild, store: Store, paths: set[StorePath]
     ) -> None:
         """Background task to proactively pull missing inputs for a build."""
         try:

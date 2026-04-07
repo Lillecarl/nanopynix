@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from ..protocol import Op
+from ..store_path import StorePath
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -56,7 +57,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     response_type: ClassVar[type[OpResponse]] = AddToStoreResponse
     name: str = ""
     cam: str = ""  # ContentAddressMethodWithAlgo
-    references: set[str] = field(default_factory=set)
+    references: set[StorePath] = field(default_factory=set)
     repair: int = 0
 
     @classmethod
@@ -64,7 +65,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         return cls(
             name=await reader.read_string(),
             cam=await reader.read_string(),
-            references=await reader.read_string_set(),
+            references=await reader.read_string_set(StorePath),
             repair=await reader.read_uint64(),
         )
 
@@ -93,7 +94,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
 
         name = await src.read_string()
         cam = await src.read_string()
-        refs = await src.read_string_set()
+        refs = await src.read_string_set(StorePath)
         repair = await src.read_uint64()
 
         dst.write_string(name)
@@ -123,10 +124,10 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         info = PathInfo(
-            path=await reader.read_string(),
-            deriver=await reader.read_string(),
+            path=await reader.read_string(StorePath),
+            deriver=await reader.read_string(StorePath),
             nar_hash=await reader.read_string(),
-            references=await reader.read_string_set(),
+            references=await reader.read_string_set(StorePath),
             registration_time=await reader.read_uint64(),
             nar_size=await reader.read_uint64(),
             ultimate=await reader.read_uint64(),
@@ -161,18 +162,19 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
         return EmptyResponse()
 
     @classmethod
-    async def forward(cls, src: NixReader, dst: NixWriter) -> str:
+    async def forward(cls, src: NixReader, dst: NixWriter) -> StorePath:
         """Forward the request prefix and then stream framed NAR data from src to dst.
+
 
         Writes Op.AddToStoreNar, then prefix fields, then framed NAR dump.
         Returns the store path extracted from the request.
         """
         dst.write_uint64(Op.AddToStoreNar)
 
-        path = await src.read_string()
-        deriver = await src.read_string()
+        path = await src.read_string(StorePath)
+        deriver = await src.read_string(StorePath)
         nar_hash = await src.read_string()
-        refs = await src.read_string_set()
+        refs = await src.read_string_set(StorePath)
         reg_time = await src.read_uint64()
         nar_size = await src.read_uint64()
         ultimate = await src.read_uint64()
@@ -233,7 +235,7 @@ class AddMultipleToStoreRequest(OpRequest[EmptyResponse]):
         return EmptyResponse()
 
     @classmethod
-    async def forward(cls, src: NixReader, dst: NixWriter) -> list[str]:
+    async def forward(cls, src: NixReader, dst: NixWriter) -> list[StorePath]:
         """Forward AddMultipleToStore verbatim, snooping store paths.
 
         Forwards frame chunks as-is from src to dst while parsing just
@@ -270,7 +272,7 @@ class AddSignaturesRequest(OpRequest[Uint64Response]):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
-            path=await reader.read_string(),
+            path=await reader.read_string(StorePath),
             sigs=await reader.read_string_set(),
         )
 
@@ -350,7 +352,7 @@ class EnsurePathRequest(SingleStringRequest[Uint64Response]):
 async def _forward_framed_snooping(
     src: NixReader,
     dst: NixWriter,
-) -> list[str]:
+) -> list[StorePath]:
     """Forward framed data verbatim while extracting store paths.
 
     Reads frame chunks from src and writes them to dst unchanged.
@@ -438,6 +440,9 @@ async def _forward_framed_snooping(
         data = _consume(padded)
         return data[:length].decode("utf-8")
 
+    async def _read_store_path() -> StorePath:
+        return StorePath(await _read_string())
+
     async def _skip_string() -> None:
         length = await _read_uint64()
         padded = length + _nar_pad(length)
@@ -451,10 +456,11 @@ async def _forward_framed_snooping(
     # Parse the logical stream
     count = await _read_uint64()
 
-    paths: list[str] = []
+    paths: list[StorePath] = []
     for _ in range(count):
-        path = await _read_string()
+        path = await _read_store_path()
         paths.append(path)
+
         await _skip_string()  # deriver
         await _skip_string()  # nar_hash
         await _skip_string_set()  # references

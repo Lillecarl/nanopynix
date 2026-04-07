@@ -37,7 +37,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .derived_path import DerivedPath
 from .operations.base import BasicDerivation, DerivationOutput
+from .store_path import StorePath
 
 
 @dataclass
@@ -56,10 +58,10 @@ class ParsedDerivation:
 
     outputs: list[OutputInfo] = field(default_factory=list)
 
-    input_drvs: dict[str, list[str]] = field(default_factory=dict)
+    input_drvs: dict[StorePath, list[str]] = field(default_factory=dict)
     # input_drvs: {drv_path: [output_name, ...]}
 
-    input_srcs: set[str] = field(default_factory=set)
+    input_srcs: set[StorePath] = field(default_factory=set)
     # input_srcs: {store_path, ...}
 
     platform: str = ""
@@ -70,21 +72,24 @@ class ParsedDerivation:
     is_dynamic: bool = False
     """True if DrvWithVersion("xp-dyn-drv",...) format (dynamic derivations)."""
 
-    dynamic_input_drvs: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    dynamic_input_drvs: dict[StorePath, dict[str, list[str]]] = field(
+        default_factory=dict
+    )
     # dynamic_input_drvs: {drv_path: {output_name: [nested_output_name, ...], ...}}
     # Only present for DrvWithVersion format where outputs depend on
     # other dynamic outputs
 
-    def output_paths(self) -> dict[str, str]:
+    def output_paths(self) -> dict[str, StorePath]:
         """Return {output_name: output_path} for all outputs."""
-        return {o.name: o.path for o in self.outputs}
+        return {o.name: StorePath(o.path) for o in self.outputs}
 
-    def to_json(self, drv_path: str) -> dict[str, Any]:
+    def to_json(self, drv_path: StorePath | str) -> dict[str, Any]:
         """Serialize to the same JSON format as `nix derivation show`.
 
         Args:
             drv_path: The store path of this .drv file (used as top-level key).
         """
+        drv_path_str = str(drv_path)
         # Outputs: {name: {path, hash?, hashAlgo?}}
         outputs: dict[str, dict[str, str]] = {}
         for o in self.outputs:
@@ -107,13 +112,13 @@ class ParsedDerivation:
             dynamic_out: dict[str, dict[str, list[str]]] = {}
             for out_name, nested in dynamic.items():
                 dynamic_out[out_name] = {"outputs": nested}
-            input_drvs[dp] = {
+            input_drvs[str(dp)] = {
                 "dynamicOutputs": dynamic_out,
                 "outputs": entry_outputs,
             }
 
         # name is derived from the store path: /nix/store/<hash>-<name>.drv
-        basename = drv_path.rsplit("/", 1)[-1]  # <hash>-<name>.drv
+        basename = drv_path_str.rsplit("/", 1)[-1]  # <hash>-<name>.drv
         name = basename.split("-", 1)[1] if "-" in basename else basename
         if name.endswith(".drv"):
             name = name[:-4]
@@ -123,12 +128,12 @@ class ParsedDerivation:
             "builder": self.builder,
             "env": self.env,
             "inputDrvs": input_drvs,
-            "inputSrcs": sorted(self.input_srcs),
+            "inputSrcs": sorted(str(p) for p in self.input_srcs),
             "name": name,
             "outputs": outputs,
             "system": self.platform,
         }
-        return {drv_path: inner}
+        return {drv_path_str: inner}
 
 
 _STRING_CHUNK = re.compile(r'([^"\\]*)(["\\])')
@@ -244,17 +249,17 @@ class _Parser:
         self._expect("]")
         return result
 
-    def parse_input_drvs_simple(self) -> dict[str, list[str]]:
+    def parse_input_drvs_simple(self) -> dict[StorePath, list[str]]:
         """Parse [("drvPath",["out",...]), ...] - traditional format."""
         self._expect("[")
-        result: dict[str, list[str]] = {}
+        result: dict[StorePath, list[str]] = {}
         self._skip_ws()
         while self._peek() != "]":
             if result:
                 self._expect(",")
             self._skip_ws()
             self._expect("(")
-            drv_path = self.parse_string()
+            drv_path = StorePath(self.parse_string())
             self._expect(",")
             outputs = self.parse_string_list()
             self._expect(")")
@@ -265,7 +270,7 @@ class _Parser:
 
     def parse_input_drvs_dynamic(
         self,
-    ) -> tuple[dict[str, list[str]], dict[str, dict[str, list[str]]]]:
+    ) -> tuple[dict[StorePath, list[str]], dict[StorePath, dict[str, list[str]]]]:
         """Parse dynamic input drvs format.
 
         Returns:
@@ -275,15 +280,15 @@ class _Parser:
               for inputs that depend on dynamic outputs
         """
         self._expect("[")
-        simple: dict[str, list[str]] = {}
-        dynamic: dict[str, dict[str, list[str]]] = {}
+        simple: dict[StorePath, list[str]] = {}
+        dynamic: dict[StorePath, dict[str, list[str]]] = {}
         self._skip_ws()
         while self._peek() != "]":
             if simple or dynamic:
                 self._expect(",")
             self._skip_ws()
             self._expect("(")
-            drv_path = self.parse_string()
+            drv_path = StorePath(self.parse_string())
             self._expect(",")
             self._skip_ws()
 
@@ -388,7 +393,7 @@ class _Parser:
         return ParsedDerivation(
             outputs=outputs,
             input_drvs=input_drvs,
-            input_srcs=set(input_srcs_list),
+            input_srcs={StorePath(p) for p in input_srcs_list},
             platform=platform,
             builder=builder,
             args=args,
@@ -438,7 +443,7 @@ class _Parser:
         return ParsedDerivation(
             outputs=outputs,
             input_drvs=input_drvs,
-            input_srcs=set(input_srcs_list),
+            input_srcs={StorePath(p) for p in input_srcs_list},
             platform=platform,
             builder=builder,
             args=args,
@@ -448,11 +453,11 @@ class _Parser:
         )
 
 
-def extract_platforms(derived_paths: set[str], store_path: Path) -> set[str]:
+def extract_platforms(derived_paths: set[DerivedPath], store_path: Path) -> set[str]:
     """Extract the set of platforms from derived paths by peeking at .drv files."""
     platforms: set[str] = set()
     for dp in derived_paths:
-        drv_path = dp.split("!")[0] if "!" in dp else dp
+        drv_path = dp.drv_path
         if drv_path.endswith(".drv"):
             try:
                 parsed = read_drv_file(store_path, drv_path)
@@ -462,17 +467,19 @@ def extract_platforms(derived_paths: set[str], store_path: Path) -> set[str]:
     return platforms
 
 
-def collect_required_paths(derived_paths: set[str], store_path: Path) -> set[str]:
+def collect_required_paths(
+    derived_paths: set[DerivedPath], store_path: Path
+) -> set[StorePath]:
     """Collect the full transitive closure of store paths needed for BuildPaths.
 
     Recursively walks inputDrvs to collect every .drv file and input source
     the backend's nix-daemon will need to resolve the full build graph.
     """
-    paths: set[str] = set()
-    queue: list[str] = []
+    paths: set[StorePath] = set()
+    queue: list[StorePath] = []
 
     for dp in derived_paths:
-        drv_path = dp.split("!")[0] if "!" in dp else dp
+        drv_path = StorePath(dp.drv_path)
         if drv_path not in paths:
             paths.add(drv_path)
             queue.append(drv_path)
@@ -517,29 +524,24 @@ def collect_required_paths(derived_paths: set[str], store_path: Path) -> set[str
     return paths
 
 
-def collect_output_paths(derived_paths: set[str], store_path: Path) -> list[str]:
+def collect_output_paths(
+    derived_paths: set[DerivedPath], store_path: Path
+) -> list[StorePath]:
     """Collect expected output paths from derived paths by reading .drv files.
 
     Used after a BuildPaths completes to know which outputs to pull.
     """
     # Parse derived paths into {drv_path: {output_name, ...}}
-    drv_map: dict[str, set[str]] = {}
+    drv_map: dict[StorePath, set[str]] = {}
     for dp in derived_paths:
-        if "!" in dp:
-            drv_path, outputs_str = dp.split("!", 1)
-            if outputs_str == "*":
-                outputs = {"*"}
-            else:
-                outputs = set(outputs_str.split(","))
-        else:
-            drv_path = dp
-            outputs = {"*"}
+        drv_path = StorePath(dp.drv_path)
+        outputs = dp.output_names
         if drv_path in drv_map:
             drv_map[drv_path].update(outputs)
         else:
             drv_map[drv_path] = outputs
 
-    output_paths: list[str] = []
+    output_paths: list[StorePath] = []
     for drv_path, wanted_outputs in drv_map.items():
         try:
             parsed = read_drv_file(store_path, drv_path)
@@ -550,7 +552,7 @@ def collect_output_paths(derived_paths: set[str], store_path: Path) -> list[str]
             output_paths.extend(p for p in all_outputs.values() if p)
         else:
             for name in wanted_outputs:
-                p = all_outputs.get(name, "")
+                p = all_outputs.get(name)
                 if p:
                     output_paths.append(p)
     return output_paths
@@ -581,7 +583,7 @@ def to_basic_derivation(
     ]
 
     # Start with the explicit input sources
-    input_srcs: set[str] = set(parsed.input_srcs)
+    input_srcs: set[StorePath] = set(parsed.input_srcs)
 
     # Resolve inputDrvs: for each input drv, look up its output paths
     # and add them to input_srcs (this is what nix does before sending
@@ -591,11 +593,11 @@ def to_basic_derivation(
             input_parsed = read_drv_file(store_path, drv_path)
         except FileNotFoundError:
             # Can't resolve — add the drv itself as a dependency
-            input_srcs.add(drv_path)
+            input_srcs.add(StorePath(drv_path))
             continue
         all_outputs = input_parsed.output_paths()
         for name in output_names:
-            p = all_outputs.get(name, "")
+            p = all_outputs.get(name)
             if p:
                 input_srcs.add(p)
 
@@ -615,7 +617,9 @@ def parse_drv(content: str) -> ParsedDerivation:
     return _Parser(content).parse_derivation()
 
 
-def read_drv_file(store_path: Path, drv_store_path: str) -> ParsedDerivation:
+def read_drv_file(
+    store_path: Path, drv_store_path: StorePath | str
+) -> ParsedDerivation:
     """Read and parse a .drv file from a store's filesystem.
 
     Args:
@@ -627,6 +631,6 @@ def read_drv_file(store_path: Path, drv_store_path: str) -> ParsedDerivation:
     """
     # drv_store_path is like "/nix/store/xxx.drv"
     # On disk it's at "{store_path}/nix/store/xxx.drv"
-    fs_path = store_path / drv_store_path.lstrip("/")
+    fs_path = store_path / str(drv_store_path).lstrip("/")
     with open(fs_path) as f:
         return parse_drv(f.read())

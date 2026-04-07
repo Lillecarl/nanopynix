@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from ..derived_path import DerivedPath
+from ..store_path import StorePath
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
@@ -32,7 +33,7 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class KeyedBuildResult:
-    derived_path: str = ""
+    derived_path: DerivedPath = field(default_factory=lambda: DerivedPath(""))
     result: BuildResult = field(default_factory=BuildResult)
 
 
@@ -47,7 +48,7 @@ class KeyedBuildResultsResponse(OpResponse):
         n = await reader.read_uint64()
         results = []
         for _ in range(n):
-            derived_path = await reader.read_string()
+            derived_path = await reader.read_string(DerivedPath)
             result = await BuildResult.from_reader(reader, version)
             results.append(KeyedBuildResult(derived_path=derived_path, result=result))
         return cls(results=results)
@@ -90,7 +91,7 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string_set(set(self.derived_paths))
+        writer.write_string_set(self.derived_paths)
         writer.write_uint64(self.build_mode)
 
     @classmethod
@@ -145,7 +146,7 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string_set(set(self.derived_paths))
+        writer.write_string_set(self.derived_paths)
         writer.write_uint64(self.build_mode)
 
     @classmethod
@@ -210,14 +211,14 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
     op: ClassVar[int] = Op.BuildDerivation
     response_type: ClassVar[type[OpResponse]] = BuildDerivationResponse
     is_build: ClassVar[bool] = True
-    drv_path: str = ""
+    drv_path: StorePath = field(default_factory=lambda: StorePath(""))
     derivation: BasicDerivation = field(default_factory=BasicDerivation)
     build_mode: BuildMode = BuildMode.NORMAL
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
-            drv_path=await reader.read_string(),
+            drv_path=await reader.read_string(StorePath),
             derivation=await BasicDerivation.from_reader(reader, version),
             build_mode=BuildMode(await reader.read_uint64()),
         )
@@ -247,9 +248,8 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         # Expand input_srcs to full closure, matching Nix's behavior
         # when delegating to remote builders.
-        request.derivation.input_srcs = await proxy.local_store.compute_closure(
-            request.derivation.input_srcs
-        )
+        closure = await proxy.local_store.compute_closure(request.derivation.input_srcs)
+        request.derivation.input_srcs = {StorePath(p) for p in closure}
 
         future = await enqueue_build_derivation(
             request,

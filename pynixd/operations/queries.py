@@ -13,6 +13,7 @@ import structlog
 
 from .. import wire
 from ..derived_path import DerivedPath
+from ..store_path import StorePath
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -27,7 +28,7 @@ from .base import (
     OpResponse,
     PathInfo,
     SingleStringRequest,
-    SingleStringResponse,
+    StorePathResponse,
     StringMapRequest,
     StringMapResponse,
     StringSetRequest,
@@ -149,12 +150,12 @@ class QueryValidPathsRequest(OpRequest[StringSetResponse]):
     op: ClassVar[int] = Op.QueryValidPaths
     response_type: ClassVar[type[OpResponse]] = StringSetResponse
     is_query: ClassVar[bool] = True
-    paths: set[str] = field(default_factory=set)
+    paths: set[StorePath] = field(default_factory=set)
     substitute: int = 0
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        paths = await reader.read_string_set()
+        paths = await reader.read_string_set(StorePath)
         substitute = 0
         if version >= wire.proto(1, 27):
             substitute = await reader.read_uint64()
@@ -195,9 +196,9 @@ class QueryValidPathsRequest(OpRequest[StringSetResponse]):
 
 
 @dataclass
-class QueryPathFromHashPartRequest(SingleStringRequest[SingleStringResponse]):
+class QueryPathFromHashPartRequest(SingleStringRequest[StorePathResponse]):
     op: ClassVar[int] = Op.QueryPathFromHashPart
-    response_type: ClassVar[type[OpResponse]] = SingleStringResponse
+    response_type: ClassVar[type[OpResponse]] = StorePathResponse
     is_query: ClassVar[bool] = True
 
     async def execute(
@@ -205,13 +206,13 @@ class QueryPathFromHashPartRequest(SingleStringRequest[SingleStringResponse]):
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
-    ) -> SingleStringResponse:
+    ) -> StorePathResponse:
         # 1. SQLite fast path
         if store.db:
             path = await store.db.query_path_from_hash_part(self.path)
             if path is not None:
                 store.add_known_path(path)
-                return SingleStringResponse(value=path)
+                return StorePathResponse(value=path)
 
         # 2. Daemon fallback
         resp = await super().execute(
@@ -220,7 +221,7 @@ class QueryPathFromHashPartRequest(SingleStringRequest[SingleStringResponse]):
             suppress_last,
         )
         if resp.value:
-            store.add_known_path(resp.value)
+            store.add_known_path(StorePath(resp.value))
         return resp
 
 
@@ -364,7 +365,7 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
             client,
             suppress_last,
         )
-        store.add_known_paths(resp.paths, update_regtime=False)
+        store.add_known_paths({StorePath(p) for p in resp.paths}, update_regtime=False)
         return resp
 
 
@@ -420,18 +421,18 @@ class QuerySubstPathInfosRequest(StringMapRequest[QuerySubstPathInfosResponse]):
 
 @dataclass
 class QueryMissingResponse(OpResponse):
-    will_build: set[str] = field(default_factory=set)
-    will_substitute: set[str] = field(default_factory=set)
-    unknown: set[str] = field(default_factory=set)
+    will_build: set[StorePath] = field(default_factory=set)
+    will_substitute: set[StorePath] = field(default_factory=set)
+    unknown: set[StorePath] = field(default_factory=set)
     download_size: int = 0
     nar_size: int = 0
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
-            will_build=await reader.read_string_set(),
-            will_substitute=await reader.read_string_set(),
-            unknown=await reader.read_string_set(),
+            will_build=await reader.read_string_set(StorePath),
+            will_substitute=await reader.read_string_set(StorePath),
+            unknown=await reader.read_string_set(StorePath),
             download_size=await reader.read_uint64(),
             nar_size=await reader.read_uint64(),
         )
@@ -456,7 +457,7 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         return cls(derived_paths=await reader.read_string_set(DerivedPath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string_set(set(self.derived_paths))
+        writer.write_string_set(self.derived_paths)
 
     async def execute(
         self,
@@ -474,7 +475,8 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         # Update known paths: outputs of all derived paths are now expected
         if store.store_path:
             for dp in self.derived_paths:
-                store.add_known_paths(dp.to_outputs(store.store_path))
+                outputs = dp.to_outputs(store.store_path)
+                store.add_known_paths({StorePath(p) for p in outputs})
 
         # Any path being substituted is also "known" to be available.
         # TODO: This could be optimized by running in a background task,

@@ -20,6 +20,7 @@ from environs import Env
 from .local_store_db import LocalStoreDB
 from .operations.maintenance import CollectGarbageResponse
 from .store import Store
+from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -79,12 +80,16 @@ class GarbageCollector:
     async def run_gc_pass(self) -> None:
         """Find stale paths and delete them from all stores."""
         # Query with the shorter lifetime to get the superset of stale paths
-        builder_stale = await self.db.query_stale_paths(self.builder_max_age)
-        if not builder_stale:
+        builder_stale_raw = await self.db.query_stale_paths(self.builder_max_age)
+        if not builder_stale_raw:
             return
+        builder_stale = {StorePath(p) for p in builder_stale_raw}
 
         # Local store uses longer lifetime — filter to older paths
-        local_stale = await self.db.query_stale_paths(self.local_max_age)
+        local_stale_raw = await self.db.query_stale_paths(self.local_max_age)
+        local_stale = (
+            {StorePath(p) for p in local_stale_raw} if local_stale_raw else set()
+        )
 
         tasks = []
         stores_for_tasks: list[Store] = []
@@ -130,7 +135,7 @@ class GarbageCollector:
     async def gc_store(
         self,
         store: Store,
-        paths: set[str],
+        paths: set[StorePath],
     ) -> CollectGarbageResponse | None:
         """Run CollectGarbage on a single store."""
         if not store.is_healthy:

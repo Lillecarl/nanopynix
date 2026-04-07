@@ -25,30 +25,32 @@ from aiohttp import web
 from .local_store_db import LocalStoreDB
 from .operations.queries import QueryPathFromHashPartRequest
 from .store import Store
+from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
 _STORE_PREFIX = "/nix/store/"
 
 
-def strip_store_prefix(path: str) -> str:
+def strip_store_prefix(path: StorePath | str) -> str:
     """'/nix/store/abc-foo' → 'abc-foo'"""
-    if path.startswith(_STORE_PREFIX):
-        return path[len(_STORE_PREFIX) :]
-    return path
+    path_str = str(path)
+    if path_str.startswith(_STORE_PREFIX):
+        return path_str[len(_STORE_PREFIX) :]
+    return path_str
 
 
-def hash_part(path: str) -> str:
+def hash_part(path: StorePath | str) -> str:
     """'/nix/store/abc-foo' → 'abc'"""
     return strip_store_prefix(path).split("-", 1)[0]
 
 
 def format_narinfo(
-    path: str,
+    path: StorePath,
     nar_hash: str,
     nar_size: int,
-    references: set[str],
-    deriver: str,
+    references: set[StorePath],
+    deriver: StorePath,
     sigs: set[str],
     ca: str,
 ) -> str:
@@ -226,22 +228,22 @@ class BinaryCacheServer:
 
     # ── Path resolution helpers ───────────────────────────────────────
 
-    async def resolve_path(self, hash_part: str) -> str | None:
+    async def resolve_path(self, hash_part: str) -> StorePath | None:
         """Resolve a store hash to a full store path."""
         # Try SQLite first
         if self.db is not None:
-            path = await self.db.query_path_from_hash_part(hash_part)
+            path = await self.db.query_path_from_hash_part(StorePath(hash_part))
             if path is not None:
-                return path
+                return StorePath(path)
 
         # Fallback: query daemon
         try:
             async with self.store.transfer_conn() as conn:
                 resp = await conn.call(
-                    QueryPathFromHashPartRequest(path=hash_part),
+                    QueryPathFromHashPartRequest(path=StorePath(hash_part)),
                     raise_on_error=True,
                 )
-                return resp.value if resp.value else None
+                return StorePath(resp.value) if resp.value else None
         except Exception:
             log.debug(
                 "query_path_fromhash_part_daemon_fallback_failed",
@@ -249,7 +251,7 @@ class BinaryCacheServer:
             )
             return None
 
-    async def get_path_info(self, path: str):
+    async def get_path_info(self, path: StorePath):
         """Get PathInfo for a store path. Returns PathInfo or None."""
         return await self.store.query_path_info(path)
 

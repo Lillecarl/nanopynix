@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import struct
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from typing import TYPE_CHECKING, Final
 
 import asyncssh
@@ -313,15 +313,14 @@ class NixWriter:
     def write_string(self, s: str) -> None:
         self.write_bytes(s.encode("utf-8"))
 
-    def write_string_list(self, items: list[str]) -> None:
-        self.write_uint64(len(items))
-        for item in items:
+    def write_string_list(self, items: Iterable[str]) -> None:
+        items_list = list(items)
+        self.write_uint64(len(items_list))
+        for item in items_list:
             self.write_string(item)
 
-    def write_string_set(self, items: set[str]) -> None:
-        self.write_uint64(len(items))
-        for item in items:
-            self.write_string(item)
+    def write_string_set(self, items: Iterable[str]) -> None:
+        self.write_string_list(items)
 
     def framed(self, chunk_size: int = _CHUNK_SIZE) -> FramedWriter:
         """Create a FramedWriter that writes framed data to this writer."""

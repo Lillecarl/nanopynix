@@ -12,6 +12,7 @@ import structlog
 from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file, to_basic_derivation
 from ..protocol import Op
+from ..store_path import StorePath
 from .builds import (
     BuildDerivationRequest,
     BuildDerivationResponse,
@@ -33,7 +34,7 @@ async def decompose_build_paths(
     store: Store,
     scheduler: Scheduler,
     client: ClientConn,
-) -> list[tuple[str, set[str], asyncio.Future[BuildDerivationResponse]]]:
+) -> list[tuple[DerivedPath, set[str], asyncio.Future[BuildDerivationResponse]]]:
     """Decompose BuildPaths into individual BuildDerivation requests.
 
     Returns list of (derived_path, output_names, future) tuples.
@@ -44,11 +45,13 @@ async def decompose_build_paths(
         QueryMissingRequest(derived_paths=request.derived_paths)
     )
 
-    results: list[tuple[str, set[str], asyncio.Future[BuildDerivationResponse]]] = []
+    results: list[
+        tuple[DerivedPath, set[str], asyncio.Future[BuildDerivationResponse]]
+    ] = []
 
     # Resolve all builds first so we can batch-discover input paths
-    resolved: list[tuple[str, set[str], BuildDerivationRequest]] = []
-    all_input_srcs: set[str] = set()
+    resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []
+    all_input_srcs: set[StorePath] = set()
 
     for dp in (DerivedPath(p) for p in missing_resp.will_build):
         try:
@@ -59,11 +62,11 @@ async def decompose_build_paths(
 
         basic = to_basic_derivation(parsed, store.store_path)
         drv_request = BuildDerivationRequest(
-            drv_path=dp.drv_path,
+            drv_path=StorePath(dp.drv_path),
             derivation=basic,
             build_mode=request.build_mode,
         )
-        resolved.append((str(dp), dp.output_names, drv_request))
+        resolved.append((dp, dp.output_names, drv_request))
         all_input_srcs.update(basic.input_srcs)
 
     # Discover paths that exist on the local store but aren't tracked.
@@ -75,9 +78,8 @@ async def decompose_build_paths(
     for dp, output_names, drv_request in resolved:
         # Expand input_srcs to full closure, matching Nix's behavior
         # when delegating to remote builders.
-        drv_request.derivation.input_srcs = await store.compute_closure(
-            drv_request.derivation.input_srcs
-        )
+        closure = await store.compute_closure(drv_request.derivation.input_srcs)
+        drv_request.derivation.input_srcs = {StorePath(p) for p in closure}
 
         future = await enqueue_build_derivation(drv_request, store, scheduler, client)
         results.append((dp, output_names, future))
@@ -99,7 +101,7 @@ async def enqueue_build_derivation(
         Op.BuildDerivation,
         request,
         client,
-        set(request.derivation.input_srcs),
+        request.derivation.input_srcs,
         platform=request.derivation.platform,
     )
     log.info(

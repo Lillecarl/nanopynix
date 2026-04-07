@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 import structlog
 
 from .. import wire
+from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
@@ -188,11 +189,11 @@ class EmptyRequest(OpRequest[Resp]):
 
 @dataclass
 class SingleStringRequest(OpRequest[Resp]):
-    path: str = ""
+    path: StorePath = field(default_factory=lambda: StorePath(""))
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(path=await reader.read_string())
+        return cls(path=await reader.read_string(StorePath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.path)
@@ -200,11 +201,11 @@ class SingleStringRequest(OpRequest[Resp]):
 
 @dataclass
 class StringSetRequest(OpRequest[Resp]):
-    paths: set[str] = field(default_factory=set)
+    paths: set[StorePath] = field(default_factory=set)
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(paths=await reader.read_string_set())
+        return cls(paths=await reader.read_string_set(StorePath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(self.paths)
@@ -258,11 +259,11 @@ class Uint64Response(OpResponse):
 
 @dataclass
 class StringSetResponse(OpResponse):
-    paths: set[str] = field(default_factory=set)
+    paths: set[StorePath] = field(default_factory=set)
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(paths=await reader.read_string_set())
+        return cls(paths=await reader.read_string_set(StorePath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(self.paths)
@@ -275,6 +276,18 @@ class SingleStringResponse(OpResponse):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(value=await reader.read_string())
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string(self.value)
+
+
+@dataclass
+class StorePathResponse(OpResponse):
+    value: StorePath = field(default_factory=lambda: StorePath(""))
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(value=await reader.read_string(StorePath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.value)
@@ -308,10 +321,10 @@ class StringMapResponse(OpResponse):
 class PathInfo:
     """Metadata for a store path."""
 
-    path: str = ""
-    deriver: str = ""
+    path: StorePath = field(default_factory=lambda: StorePath(""))
+    deriver: StorePath = field(default_factory=lambda: StorePath(""))
     nar_hash: str = ""
-    references: set[str] = field(default_factory=set)
+    references: set[StorePath] = field(default_factory=set)
     registration_time: int = 0
     nar_size: int = 0
     ultimate: int = 0
@@ -319,13 +332,17 @@ class PathInfo:
     ca: str = ""
 
     @classmethod
-    async def from_reader_unkeyed(cls, reader: NixReader, path: str = "") -> PathInfo:
+    async def from_reader_unkeyed(
+        cls,
+        reader: NixReader,
+        path: StorePath = field(default_factory=lambda: StorePath("")),
+    ) -> PathInfo:
         """Read UnkeyedValidPathInfo (no path prefix) from wire."""
         return cls(
             path=path,
-            deriver=await reader.read_string(),
+            deriver=await reader.read_string(StorePath),
             nar_hash=await reader.read_string(),
-            references=await reader.read_string_set(),
+            references=await reader.read_string_set(StorePath),
             registration_time=await reader.read_uint64(),
             nar_size=await reader.read_uint64(),
             ultimate=await reader.read_uint64(),
@@ -336,7 +353,7 @@ class PathInfo:
     @classmethod
     async def from_reader_keyed(cls, reader: NixReader) -> PathInfo:
         """Read ValidPathInfo (path + UnkeyedValidPathInfo) from wire."""
-        path = await reader.read_string()
+        path = await reader.read_string(StorePath)
         return await cls.from_reader_unkeyed(reader, path)
 
     async def to_writer_unkeyed(self, writer: NixWriter) -> None:
@@ -445,7 +462,7 @@ class DerivationOutput:
 @dataclass
 class BasicDerivation:
     outputs: list[DerivationOutput] = field(default_factory=list)
-    input_srcs: set[str] = field(default_factory=set)
+    input_srcs: set[StorePath] = field(default_factory=set)
     platform: str = ""
     builder: str = ""
     args: list[str] = field(default_factory=list)
@@ -471,9 +488,9 @@ class BasicDerivation:
             or self.env.get("preferLocalBuild") == "1"
         )
 
-    def output_paths(self) -> dict[str, str]:
+    def output_paths(self) -> dict[str, StorePath]:
         """Return {output_name: output_path} for all outputs."""
-        return {o.name: o.path for o in self.outputs}
+        return {o.name: StorePath(o.path) for o in self.outputs}
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> BasicDerivation:
@@ -488,7 +505,7 @@ class BasicDerivation:
                     hash_digest=await reader.read_string(),
                 )
             )
-        input_srcs = await reader.read_string_set()
+        input_srcs = await reader.read_string_set(StorePath)
         platform = await reader.read_string()
         builder = await reader.read_string()
         args = await reader.read_string_list()
@@ -581,16 +598,16 @@ class BasicDerivation:
 class SubstPathInfo:
     """Substitutable path info (deriver, refs, sizes)."""
 
-    deriver: str = ""
-    references: set[str] = field(default_factory=set)
+    deriver: StorePath = field(default_factory=lambda: StorePath(""))
+    references: set[StorePath] = field(default_factory=set)
     download_size: int = 0
     nar_size: int = 0
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> SubstPathInfo:
         return cls(
-            deriver=await reader.read_string(),
-            references=await reader.read_string_set(),
+            deriver=await reader.read_string(StorePath),
+            references=await reader.read_string_set(StorePath),
             download_size=await reader.read_uint64(),
             nar_size=await reader.read_uint64(),
         )
@@ -612,7 +629,7 @@ class BuiltOutput:
     We parse this into a proper class so we can work with it easily.
     """
 
-    out_path: str = ""
+    out_path: StorePath = field(default_factory=lambda: StorePath(""))
     ca: str = ""  # content-addressed hash info (CA, text hash, or fixed)
     hash: str = ""  # hash digest
     hash_algo: str = ""  # hash algorithm (sha256, etc.)
@@ -631,7 +648,7 @@ class BuiltOutput:
             data = json.loads(s)
             if isinstance(data, dict):
                 return cls(
-                    out_path=data.get("outPath", ""),
+                    out_path=StorePath(data.get("outPath", "")),
                     ca=data.get("ca", ""),
                     hash=data.get("hash", ""),
                     hash_algo=data.get("hashAlgo", ""),
@@ -643,7 +660,7 @@ class BuiltOutput:
             pass
 
         # Plain path format
-        return cls(out_path=s)
+        return cls(out_path=StorePath(s))
 
     def to_string(self) -> str:
         """Serialize back to the format the daemon expects."""
