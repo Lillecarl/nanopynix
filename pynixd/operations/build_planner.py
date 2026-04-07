@@ -19,7 +19,11 @@ from .builds import (
     BuildPathsRequest,
     BuildPathsWithResultsRequest,
 )
-from .queries import QueryMissingRequest, QueryValidPathsRequest
+from .queries import (
+    QueryClosureRequest,
+    QueryMissingRequest,
+    QueryValidPathsRequest,
+)
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -78,9 +82,10 @@ async def decompose_build_paths(
     for dp, output_names, drv_request in resolved:
         # Expand input_srcs to full closure, matching Nix's behavior
         # when delegating to remote builders.
-        drv_request.derivation.input_srcs = await store.compute_closure(
-            drv_request.derivation.input_srcs
+        closure_resp = await store.execute(
+            QueryClosureRequest(paths=drv_request.derivation.input_srcs)
         )
+        drv_request.derivation.input_srcs = closure_resp.paths
 
         future = await enqueue_build_derivation(drv_request, store, scheduler, client)
         results.append((dp, output_names, future))

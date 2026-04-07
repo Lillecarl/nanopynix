@@ -57,6 +57,8 @@ class Op(IntEnum):
     PynixdStartProfiling = 101
     PynixdStopProfiling = 102
     QueryPathInfos = 103
+    QueryClosure = 104
+    QueryClosureWithInfo = 105
 
     # Obsolete ops that we reject
     HasSubstitutes = 3

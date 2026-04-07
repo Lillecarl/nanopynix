@@ -249,12 +249,14 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             proxy.local_store.add_known_paths(valid_resp.paths, update_regtime=False)
 
         from .build_planner import enqueue_build_derivation
+        from .queries import QueryClosureRequest
 
         # Expand input_srcs to full closure, matching Nix's behavior
         # when delegating to remote builders.
-        request.derivation.input_srcs = await proxy.local_store.compute_closure(
-            request.derivation.input_srcs
+        closure_resp = await proxy.local_store.execute(
+            QueryClosureRequest(paths=request.derivation.input_srcs)
         )
+        request.derivation.input_srcs = closure_resp.paths
 
         future = await enqueue_build_derivation(
             request,

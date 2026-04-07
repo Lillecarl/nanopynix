@@ -43,7 +43,6 @@ from .operations.maintenance import (
 from .operations.queries import (
     NarFromPathRequest,
     QueryAllValidPathsRequest,
-    QueryPathInfoRequest,
 )
 from .operations.store_mutations import (
     AddMultipleToStoreRequest,
@@ -161,87 +160,6 @@ class Store(ABC):
     def count_common_paths(self, paths: set[StorePath]) -> int:
         return len(paths & self.known_paths)
 
-    async def compute_closure_with_info(
-        self, paths: Iterable[StorePath], conn: Connection | None = None
-    ) -> list[PathInfo]:
-        """Recursively find all paths and their info in the store closure.
-
-        Returns a topologically sorted list of PathInfo objects.
-        If a connection is provided, it's used as a fallback if paths are
-        missing from the store's local metadata (DB).
-        """
-        paths_set = {StorePath(p) for p in paths}
-        if self.db:
-            db_res = await self.db.query_closure_with_info(paths_set)
-            if db_res is not None:
-                return db_res
-
-        # Daemon fallback: BFS closure expansion, then topo sort
-
-        all_infos: dict[StorePath, PathInfo] = {}
-        pending = paths_set
-
-        while pending:
-            to_fetch = {p for p in pending if p not in all_infos}
-            if not to_fetch:
-                break
-
-            # Use query_path_infos which may use DB fast path
-            from .operations.queries import QueryPathInfosRequest
-
-            resp = await self.execute(QueryPathInfosRequest(paths=to_fetch))
-            new_infos = resp.infos
-
-            # Ensure we got info for all requested paths (fallback to connection)
-            for p in to_fetch:
-                if p not in new_infos:
-                    if conn:
-                        resp = await conn.call(QueryPathInfoRequest(path=p))
-                        if resp.valid and resp.info:
-                            resp.info.path = p
-                            new_infos[p] = resp.info
-                        else:
-                            raise ValueError(f"Path {p} not found in source store")
-
-            all_infos.update(new_infos)
-
-            # Find new references to explore
-            next_pending = set()
-            for info in new_infos.values():
-                for ref in info.references:
-                    if ref not in all_infos:
-                        next_pending.add(ref)
-            pending = next_pending
-
-        # Topological sort
-        sorted_infos: list[PathInfo] = []
-        visited: set[StorePath] = set()
-        visiting: set[StorePath] = set()
-
-        def visit(p: StorePath):
-            if p in visited:
-                return
-            if p in visiting:
-                return
-            visiting.add(p)
-            info = all_infos[p]
-            for ref in info.references:
-                if ref != p:
-                    visit(ref)
-            visiting.remove(p)
-            visited.add(p)
-            sorted_infos.append(info)
-
-        for p in sorted(all_infos.keys()):
-            visit(p)
-
-        return sorted_infos
-
-    async def compute_closure(self, paths: Iterable[StorePath]) -> set[StorePath]:
-        """Recursively find all paths in the store closure of the given paths."""
-        infos = await self.compute_closure_with_info(paths)
-        return {info.path for info in infos}
-
     async def call(
         self,
         request: OpRequest[Resp],
@@ -333,9 +251,12 @@ class Store(ABC):
             dst_conn if dst_conn else dst.transfer_conn() as dst_conn,
         ):
             # 1. Expand closure and fetch all PathInfo (returns topo-sorted list)
-            final_paths_with_info = await src.compute_closure_with_info(
-                paths_list, conn=src_conn
+            from .operations.queries import QueryClosureWithInfoRequest
+
+            closure_resp = await src.execute(
+                QueryClosureWithInfoRequest(paths=set(paths_list))
             )
+            final_paths_with_info = closure_resp.infos
 
             log.info(
                 "stream_paths_with_info_store_to_store",

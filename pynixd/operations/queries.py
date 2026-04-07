@@ -215,6 +215,172 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         return await proxy.local_store.execute(request, client=proxy.client)
 
 
+# ── QueryClosure ──────────────────────────────────────────────────────
+
+
+@dataclass
+class QueryClosureResponse(OpResponse):
+    paths: set[StorePath] = field(default_factory=set)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(paths=await reader.read_string_set(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string_set(self.paths)
+
+
+@dataclass
+class QueryClosureRequest(OpRequest[QueryClosureResponse]):
+    op: ClassVar[int] = Op.QueryClosure
+    response_type: ClassVar[type[OpResponse]] = QueryClosureResponse
+    is_query: ClassVar[bool] = True
+    paths: set[StorePath] = field(default_factory=set)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(paths=await reader.read_string_set(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string_set(self.paths)
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> QueryClosureResponse:
+        # Just use QueryClosureWithInfo and extract paths
+        resp = await store.execute(
+            QueryClosureWithInfoRequest(paths=self.paths),
+            client=client,
+            suppress_last=suppress_last,
+        )
+        return QueryClosureResponse(paths={info.path for info in resp.infos})
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> QueryClosureResponse:
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        request = await cls.from_reader(proxy.r, proxy.version)
+        return await proxy.local_store.execute(request, client=proxy.client)
+
+
+# ── QueryClosureWithInfo ─────────────────────────────────────────────
+
+
+@dataclass
+class QueryClosureWithInfoResponse(OpResponse):
+    infos: list[PathInfo] = field(default_factory=list)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        n = await reader.read_uint64()
+        infos = []
+        for _ in range(n):
+            infos.append(await PathInfo.from_reader_keyed(reader))
+        return cls(infos=infos)
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(len(self.infos))
+        for info in self.infos:
+            await info.to_writer_keyed(writer)
+
+
+@dataclass
+class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
+    op: ClassVar[int] = Op.QueryClosureWithInfo
+    response_type: ClassVar[type[OpResponse]] = QueryClosureWithInfoResponse
+    is_query: ClassVar[bool] = True
+    paths: set[StorePath] = field(default_factory=set)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(paths=await reader.read_string_set(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string_set(self.paths)
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> QueryClosureWithInfoResponse:
+        # 1. SQLite fast path
+        if store.db:
+            result = await store.db.query_closure_with_info(self.paths)
+            if result is not None:
+                store.add_known_paths({info.path for info in result})
+                return QueryClosureWithInfoResponse(infos=result)
+
+        # 2. Custom feature check
+        async with store.transfer_conn() as conn:
+            if "QueryClosureWithInfo" in conn.features:
+                return await conn.call(self, client=client, suppress_last=suppress_last)
+
+        # 3. Fallback: BFS + Topo sort
+        all_infos: dict[StorePath, PathInfo] = {}
+        pending = self.paths
+
+        while pending:
+            to_fetch = {p for p in pending if p not in all_infos}
+            if not to_fetch:
+                break
+
+            # Use QueryPathInfos which might use DB or feature
+            resp = await store.execute(
+                QueryPathInfosRequest(paths=to_fetch),
+                client=client,
+                suppress_last=suppress_last,
+            )
+            new_infos = resp.infos
+
+            for p in to_fetch:
+                if p not in new_infos:
+                    # If any path is missing, we can't complete the closure.
+                    raise ValueError(f"Path {p} not found in store closure")
+
+            all_infos.update(new_infos)
+
+            # Find new references to explore
+            next_pending = set()
+            for info in new_infos.values():
+                for ref in info.references:
+                    if ref not in all_infos:
+                        next_pending.add(ref)
+            pending = next_pending
+
+        # Topological sort
+        sorted_infos: list[PathInfo] = []
+        visited: set[StorePath] = set()
+        visiting: set[StorePath] = set()
+
+        def visit(p: StorePath):
+            if p in visited:
+                return
+            if p in visiting:
+                return  # Should not happen in Nix store
+            visiting.add(p)
+            info = all_infos[p]
+            for ref in info.references:
+                if ref != p:
+                    visit(ref)
+            visiting.remove(p)
+            visited.add(p)
+            sorted_infos.append(info)
+
+        for p in sorted(all_infos.keys()):
+            visit(p)
+
+        return QueryClosureWithInfoResponse(infos=sorted_infos)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> QueryClosureWithInfoResponse:
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        request = await cls.from_reader(proxy.r, proxy.version)
+        return await proxy.local_store.execute(request, client=proxy.client)
+
+
 # ── QueryValidPaths ──────────────────────────────────────────────────
 
 
