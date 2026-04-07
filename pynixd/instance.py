@@ -95,7 +95,9 @@ class Server:
         self.ssh_server: asyncssh.SSHAcceptor | None = None
         self.unix_server: asyncio.Server | None = None
         self.http_server: web.AppRunner | None = None
+        self.http_bound_port: int | None = None
         self.https_server: web.AppRunner | None = None
+        self.https_bound_port: int | None = None
 
     @property
     def host(self) -> str:
@@ -155,7 +157,6 @@ class Server:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self.close()
-        await self.wait_finished()
 
     async def start(self) -> None:
         """Start the server listeners and background tasks."""
@@ -212,13 +213,14 @@ class Server:
                 priority=self.config.http_priority,
             )
             if self.config.http_port is not None:
-                runner, _ = await cache.start(
+                runner, port = await cache.start(
                     host=self.config.http_host,
                     port=self.config.http_port,
                 )
                 self.http_server = runner
+                self.http_bound_port = port
             if self.config.https_port is not None:
-                runner, _ = await cache.start(
+                runner, port = await cache.start(
                     host=self.config.http_host,
                     port=self.config.https_port,
                     ssl_cert=str(self.config.https_cert)
@@ -229,6 +231,7 @@ class Server:
                     else None,
                 )
                 self.https_server = runner
+                self.https_bound_port = port
 
         if not (
             self.ssh_server or self.unix_server or self.http_server or self.https_server

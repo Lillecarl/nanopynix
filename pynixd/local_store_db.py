@@ -312,7 +312,7 @@ class LocalStoreDB:
                     _QUERY_VALID_PATHS_BATCH, (paths_json,)
                 ) as cursor:
                     rows = await cursor.fetchall()
-            return StringSetResponse(paths={row[0] for row in rows})
+            return StringSetResponse(paths={StorePath(row[0]) for row in rows})
         except Exception:
             log.debug("query_valid_paths_failed", exc_info=True)
             return None
@@ -325,7 +325,7 @@ class LocalStoreDB:
             async with self.acquire_conn() as db:
                 async with db.execute(_QUERY_ALL_VALID_PATHS) as cursor:
                     rows = await cursor.fetchall()
-            return StringSetResponse(paths={r[0] for r in rows})
+            return StringSetResponse(paths={StorePath(r[0]) for r in rows})
         except Exception:
             log.debug("query_all_valid_paths_failed", exc_info=True)
             return None
@@ -356,7 +356,7 @@ class LocalStoreDB:
                 hash_part=hash_part,
                 result=row[0] if row else None,
             )
-            return row[0] if row else None
+            return StorePath(row[0]) if row else None
         except Exception:
             log.debug(
                 "query_path_from_hash_part failed", hash_part=hash_part, exc_info=True
@@ -466,7 +466,7 @@ class LocalStoreDB:
             async with self.acquire_conn() as db:
                 async with db.execute(_QUERY_STALE_PATHS, (cutoff,)) as cursor:
                     rows = await cursor.fetchall()
-            return {r[0] for r in rows}
+            return {StorePath(r[0]) for r in rows}
         except Exception:
             log.debug("query_stale_paths_failed", exc_info=True)
             return None
