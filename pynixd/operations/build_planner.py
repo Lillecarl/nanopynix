@@ -13,12 +13,12 @@ from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file, to_basic_derivation
 from ..protocol import Op
 from ..store_path import StorePath
-from .builds import (
+from .build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
-    BuildPathsRequest,
-    BuildPathsWithResultsRequest,
 )
+from .build_paths import BuildPathsRequest
+from .build_paths_with_results import BuildPathsWithResultsRequest
 from .queries import (
     QueryClosureRequest,
     QueryDerivationOutputsBatchRequest,

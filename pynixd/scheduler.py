@@ -23,7 +23,7 @@ from environs import Env
 from .build_queue import BuildQueue, QueuedBuild
 from .connection import ClientConn
 from .exceptions import BackendError, InfrastructureError
-from .operations.builds import (
+from .operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )

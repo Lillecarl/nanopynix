@@ -29,16 +29,14 @@ from environs import Env
 from . import wire
 from .connection import ClientConn, Connection
 from .local_store_db import LocalStoreDB
+from .operations.add_multiple_to_store import AddMultipleToStoreRequest
+from .operations.add_to_store_nar import AddToStoreNarRequest
 from .operations.base import (
     EmptyResponse,
     OpRequest,
     PathInfo,
     Resp,
     SingleStringRequest,
-)
-from .operations.store_mutations import (
-    AddMultipleToStoreRequest,
-    AddToStoreNarRequest,
 )
 from .protocol import Op
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output

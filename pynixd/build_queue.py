@@ -18,7 +18,7 @@ import structlog
 
 from .connection import ClientConn
 from .operations.base import BuildResult, BuildResultStatus
-from .operations.builds import BuildDerivationRequest, BuildDerivationResponse
+from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
 from .protocol import Op
 from .store_path import StorePath
 
