@@ -41,12 +41,6 @@ class QueryPathFromHashPartRequest(SingleStringRequest[StorePathResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> StorePathResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None and result.value:
-                store.add_known_path(StorePath(result.value))
-                return result
-
         resp = await super().execute(store, client, suppress_last)
         if resp.value:
             store.add_known_path(StorePath(resp.value))

@@ -144,12 +144,6 @@ class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
         if store.has_path(self.path):
             return IsValidPathResponse(valid=True)
 
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None and result.valid:
-                store.add_known_path(self.path)
-                return result
-
         resp = await super().execute(store, client, suppress_last)
         if resp.valid:
             store.add_known_path(self.path)
@@ -218,12 +212,6 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfoResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None and result.valid:
-                store.add_known_path(self.path)
-                return result
-
         resp = await super().execute(store, client, suppress_last)
         if resp.valid:
             store.add_known_path(self.path)
@@ -305,11 +293,11 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfosResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None:
-                store.add_known_paths(set(result.infos.keys()))
-                return result
+        # Try DB (via super) or existing wire connection
+        result = await super().execute(store, client, suppress_last)
+        if result.infos:
+            store.add_known_paths(set(result.infos.keys()))
+            return result
 
         async with store.transfer_conn() as conn:
             if "QueryPathInfos" in conn.features:
@@ -567,13 +555,6 @@ class QueryValidPathsRequest(OpRequest[StringSetResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> StringSetResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None:
-                if not self.substitute or result.paths >= self.paths:
-                    store.add_known_paths(result.paths)
-                    return result
-
         resp = await super().execute(store, client, suppress_last)
         store.add_known_paths(resp.paths)
         return resp
@@ -604,12 +585,6 @@ class QueryPathFromHashPartRequest(SingleStringRequest[StorePathResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> StorePathResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None and result.value:
-                store.add_known_path(StorePath(result.value))
-                return result
-
         resp = await super().execute(store, client, suppress_last)
         if resp.value:
             store.add_known_path(StorePath(resp.value))
@@ -721,10 +696,10 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> DerivationOutputsBatchResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None:
-                return result
+        # Try DB (via super) or existing .drv files on disk
+        res = await super().execute(store, client, suppress_last)
+        if res.outputs:
+            return res
 
         # Fallback: read each .drv file from disk
         outputs: dict[StorePath, dict[str, StorePath]] = {}
@@ -893,12 +868,6 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
         suppress_last: bool = False,
     ) -> StringSetResponse:
         try:
-            if store.db:
-                result = await store.db.execute(self)
-                if result is not None:
-                    store.add_known_paths(result.paths, update_regtime=False)
-                    return result
-
             resp = await super().execute(store, client, suppress_last)
             store.add_known_paths(resp.paths, update_regtime=False)
             self._log.info(

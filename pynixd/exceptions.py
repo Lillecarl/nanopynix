@@ -27,3 +27,7 @@ class BackendError(PynixdError):
 
     The error has already been forwarded to the client.
     """
+
+
+class OpNotImplementedError(PynixdError):
+    """Raised when an operation is not implemented for a specific executor (e.g. DB)."""

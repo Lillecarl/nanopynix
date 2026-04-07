@@ -36,12 +36,6 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
         suppress_last: bool = False,
     ) -> StringSetResponse:
         try:
-            if store.db:
-                result = await store.db.execute(self)
-                if result is not None:
-                    store.add_known_paths(result.paths, update_regtime=False)
-                    return result
-
             resp = await super().execute(store, client, suppress_last)
             store.add_known_paths(resp.paths, update_regtime=False)
             self._log.info(

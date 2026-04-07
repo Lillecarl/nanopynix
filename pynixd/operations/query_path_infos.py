@@ -107,11 +107,11 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfosResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None:
-                store.add_known_paths(set(result.infos.keys()))
-                return result
+        # Try DB (via super) or existing wire connection
+        result = await super().execute(store, client, suppress_last)
+        if result.infos:
+            store.add_known_paths(set(result.infos.keys()))
+            return result
 
         async with store.transfer_conn() as conn:
             if "QueryPathInfos" in conn.features:

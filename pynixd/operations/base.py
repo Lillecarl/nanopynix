@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 import structlog
 
 from .. import wire
+from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 
@@ -124,9 +125,17 @@ class OpRequest(ABC, Generic[Resp]):
     ) -> Resp:
         """Execute this operation on a store and return a buffered response.
 
-        Default implementation just calls the wire protocol.
-        Override in subclasses to add fast-paths (SQLite, memory, etc.).
+        Tries the SQLite fast-path first if a database is available.
+        Otherwise, falls back to the wire protocol.
         """
+        if store.db:
+            try:
+                res = await store.db.execute(self)
+                if res is not None:
+                    return res
+            except OpNotImplementedError:
+                pass
+
         return await store.call(
             self,
             client=client,
@@ -137,11 +146,11 @@ class OpRequest(ABC, Generic[Resp]):
         """Execute this operation against the SQLite database.
 
         Returns the response on success, or None to signal the caller
-        should fall back to the wire protocol.
+        should fall back to the wire protocol (e.g. for dynamic logic).
 
-        Override in subclasses that have a DB fast-path.
+        Raises OpNotImplementedError if this operation has no DB handler.
         """
-        return None
+        raise OpNotImplementedError(f"{type(self).__name__} not implemented for DB")
 
     @classmethod
     @abstractmethod

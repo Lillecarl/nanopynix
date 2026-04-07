@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import aiosqlite
 import structlog
 
+from .exceptions import OpNotImplementedError
 from .store_path import StorePath
 
 if TYPE_CHECKING:
@@ -253,11 +254,15 @@ class LocalStoreDB:
 
         Returns the response if the DB is active and the query succeeded,
         or None if the DB is unavailable (caller should fall back to wire).
+
+        Raises OpNotImplementedError if the operation is not supported by DB.
         """
         if not self.active:
             return None
         try:
             return await request.execute_db(self)
+        except OpNotImplementedError:
+            raise
         except Exception:
             log.debug(
                 "db_execute_failed", request=type(request).__name__, exc_info=True

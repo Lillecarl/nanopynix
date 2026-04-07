@@ -118,11 +118,11 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryClosureWithInfoResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None:
-                store.add_known_paths({info.path for info in result.infos})
-                return result
+        # Try DB (via super) or existing wire connection
+        result = await super().execute(store, client, suppress_last)
+        if result.infos:
+            store.add_known_paths({info.path for info in result.infos})
+            return result
 
         async with store.transfer_conn() as conn:
             if "QueryClosureWithInfo" in conn.features:

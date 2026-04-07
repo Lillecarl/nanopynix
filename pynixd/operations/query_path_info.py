@@ -86,12 +86,6 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfoResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None and result.valid:
-                store.add_known_path(self.path)
-                return result
-
         resp = await super().execute(store, client, suppress_last)
         if resp.valid:
             store.add_known_path(self.path)

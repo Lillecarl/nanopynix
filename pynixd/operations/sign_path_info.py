@@ -90,10 +90,9 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> SignPathInfoResponse:
-        if store.db:
-            res = await store.db.execute(self)
-            if res:
-                return res
+        res = await super().execute(store, client, suppress_last)
+        if res.info.sigs != self.info.sigs:
+            return res
 
         key = self.key or get_default_signing_key()
         if key is None:
