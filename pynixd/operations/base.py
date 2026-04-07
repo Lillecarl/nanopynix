@@ -97,6 +97,8 @@ class OpRequest(ABC, Generic[Resp]):
     is_build: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Runs when an OpRequest subclass is instantiated, registers
+        the subclass in OP_REGISTRY"""
         super().__init_subclass__(**kwargs)
         if "op" in cls.__dict__:
             OP_REGISTRY[cls.op] = cls

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, Uint64Response
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..store import Store
 
 
 @dataclass
@@ -28,3 +32,11 @@ class AddSignaturesRequest(OpRequest[Uint64Response]):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.path)
         writer.write_string_set(self.sigs)
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> Uint64Response:
+        return await super().execute(store, client, suppress_last)
