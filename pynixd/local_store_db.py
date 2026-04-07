@@ -20,6 +20,8 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import aiosqlite
@@ -145,15 +147,54 @@ class LocalStoreDB:
 
     def __init__(
         self,
-        db: aiosqlite.Connection | None,
+        db_path: Path | None,
         read_only: bool,
         regtime_flush_interval: float,
+        max_conns: int = 8,
     ) -> None:
-        self.db_conn: aiosqlite.Connection | None = db
+        self.db_path = db_path
+        self.read_only: bool = read_only
+        self.regtime_flush_interval = regtime_flush_interval
+
         self.pending_regtime: set[StorePath] = set()
         self.flush_task: asyncio.Task[None] | None = None
-        self.regtime_flush_interval = regtime_flush_interval
-        self.read_only: bool = read_only
+
+        self._all_conns: list[aiosqlite.Connection] = []
+        self._idle_conns: list[aiosqlite.Connection] = []
+        self._pool_lock = asyncio.Lock()
+        self._sem = asyncio.Semaphore(max_conns)
+
+    @property
+    def active(self) -> bool:
+        return self.db_path is not None
+
+    @asynccontextmanager
+    async def acquire_conn(self) -> AsyncIterator[aiosqlite.Connection]:
+        """Acquire a connection from the pool."""
+        if not self.active:
+            raise RuntimeError("Database not active")
+
+        await self._sem.acquire()
+        conn: aiosqlite.Connection | None = None
+        try:
+            async with self._pool_lock:
+                if self._idle_conns:
+                    conn = self._idle_conns.pop()
+
+            if conn is None:
+                # Create new connection
+                mode = "ro" if self.read_only else "rw"
+                uri = f"file:{self.db_path}?mode={mode}"
+                conn = await aiosqlite.connect(uri, uri=True)
+                async with self._pool_lock:
+                    self._all_conns.append(conn)
+
+            yield conn
+        finally:
+            if conn is not None:
+                async with self._pool_lock:
+                    self._idle_conns.append(conn)
+            self._sem.release()
 
     @classmethod
     async def open(
@@ -165,7 +206,9 @@ class LocalStoreDB:
         db_path = resolve_db_path(store_path)
         if db_path is None:
             return cls(
-                db=None, read_only=True, regtime_flush_interval=regtime_flush_interval
+                db_path=None,
+                read_only=True,
+                regtime_flush_interval=regtime_flush_interval,
             )
 
         db_dir = db_path.parent
@@ -173,23 +216,26 @@ class LocalStoreDB:
         read_only = not can_write
 
         try:
-            mode = "ro" if read_only else "rw"
-            uri = f"file:{db_path}?mode={mode}"
-            db = await aiosqlite.connect(uri, uri=True)
-            if not read_only:
-                await db.execute("PRAGMA journal_mode=WAL")
-            # Sanity check
-            await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
+            # Create instance first
+            instance = cls(
+                db_path=db_path,
+                read_only=read_only,
+                regtime_flush_interval=regtime_flush_interval,
+            )
+
+            # Open one connection to verify and set WAL
+            async with instance.acquire_conn() as db:
+                if not read_only:
+                    await db.execute("PRAGMA journal_mode=WAL")
+                # Sanity check
+                await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
+
             log.info(
                 "local_store_db_active",
                 db_path=db_path,
                 mode="read-write" if not read_only else "read-only",
             )
-            return cls(
-                db=db,
-                read_only=read_only,
-                regtime_flush_interval=regtime_flush_interval,
-            )
+            return instance
         except Exception as e:
             log.warning(
                 "nix_db_open_failed",
@@ -197,18 +243,21 @@ class LocalStoreDB:
                 error=e,
             )
             return cls(
-                db=None, read_only=True, regtime_flush_interval=regtime_flush_interval
+                db_path=None,
+                read_only=True,
+                regtime_flush_interval=regtime_flush_interval,
             )
 
     # ── Read queries ──────────────────────────────────────────────────
 
     async def is_valid_path(self, path: StorePath) -> IsValidPathResponse | None:
         """Check if a path exists. Returns None if DB unavailable."""
-        if self.db_conn is None:
+        if not self.active:
             return None
         try:
-            async with self.db_conn.execute(_IS_VALID_PATH, (path,)) as cursor:
-                row = await cursor.fetchone()
+            async with self.acquire_conn() as db:
+                async with db.execute(_IS_VALID_PATH, (path,)) as cursor:
+                    row = await cursor.fetchone()
             return IsValidPathResponse(valid=row is not None)
         except Exception:
             log.debug("is_valid_path_query_failed", path=path, exc_info=True)
@@ -216,20 +265,21 @@ class LocalStoreDB:
 
     async def query_path_info(self, path: StorePath) -> QueryPathInfoResponse | None:
         """Get full path info. Returns None if DB unavailable."""
-        if self.db_conn is None:
+        if not self.active:
             return None
         try:
-            async with self.db_conn.execute(_QUERY_PATH_INFO, (path,)) as cursor:
-                row = await cursor.fetchone()
-            if row is None:
-                return QueryPathInfoResponse(valid=False)
+            async with self.acquire_conn() as db:
+                async with db.execute(_QUERY_PATH_INFO, (path,)) as cursor:
+                    row = await cursor.fetchone()
+                if row is None:
+                    return QueryPathInfoResponse(valid=False)
 
-            _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
+                _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
 
-            # Fetch references
-            async with self.db_conn.execute(_QUERY_REFERENCES, (path,)) as cursor:
-                ref_rows = await cursor.fetchall()
-            refs = {r[0] for r in ref_rows}
+                # Fetch references
+                async with db.execute(_QUERY_REFERENCES, (path,)) as cursor:
+                    ref_rows = await cursor.fetchall()
+                refs = {r[0] for r in ref_rows}
 
             return QueryPathInfoResponse(
                 valid=True,
@@ -253,14 +303,15 @@ class LocalStoreDB:
         self, paths: set[StorePath]
     ) -> StringSetResponse | None:
         """Filter a set of paths to those that exist. Returns None if DB unavailable."""
-        if self.db_conn is None:
+        if not self.active:
             return None
         try:
             paths_json = json.dumps(list(paths))
-            async with self.db_conn.execute(
-                _QUERY_VALID_PATHS_BATCH, (paths_json,)
-            ) as cursor:
-                rows = await cursor.fetchall()
+            async with self.acquire_conn() as db:
+                async with db.execute(
+                    _QUERY_VALID_PATHS_BATCH, (paths_json,)
+                ) as cursor:
+                    rows = await cursor.fetchall()
             return StringSetResponse(paths={row[0] for row in rows})
         except Exception:
             log.debug("query_valid_paths_failed", exc_info=True)
@@ -268,11 +319,12 @@ class LocalStoreDB:
 
     async def query_all_valid_paths(self) -> StringSetResponse | None:
         """Get all valid paths. Returns None if DB unavailable."""
-        if self.db_conn is None:
+        if not self.active:
             return None
         try:
-            async with self.db_conn.execute(_QUERY_ALL_VALID_PATHS) as cursor:
-                rows = await cursor.fetchall()
+            async with self.acquire_conn() as db:
+                async with db.execute(_QUERY_ALL_VALID_PATHS) as cursor:
+                    rows = await cursor.fetchall()
             return StringSetResponse(paths={r[0] for r in rows})
         except Exception:
             log.debug("query_all_valid_paths_failed", exc_info=True)
@@ -280,7 +332,7 @@ class LocalStoreDB:
 
     async def query_path_from_hash_part(self, hash_part: StorePath) -> StorePath | None:
         """Find a path by its hash prefix. Returns path string or None."""
-        if self.db_conn is None:
+        if not self.active:
             return None
         try:
             # Match /nix/store/<hash_part>...
@@ -293,11 +345,12 @@ class LocalStoreDB:
                 range_start=prefix,
                 range_end=upper,
             )
-            async with self.db_conn.execute(
-                _QUERY_PATH_FROM_HASH_PART,
-                (prefix, upper),
-            ) as cursor:
-                row = await cursor.fetchone()
+            async with self.acquire_conn() as db:
+                async with db.execute(
+                    _QUERY_PATH_FROM_HASH_PART,
+                    (prefix, upper),
+                ) as cursor:
+                    row = await cursor.fetchone()
             log.debug(
                 "db_query_path_from_hash_part_result",
                 hash_part=hash_part,
@@ -317,14 +370,15 @@ class LocalStoreDB:
 
         Returns a topologically sorted list of PathInfo objects.
         """
-        if self.db_conn is None or not seeds:
+        if not self.active or not seeds:
             return None
         try:
             seeds_json = json.dumps(list(seeds))
-            async with self.db_conn.execute(
-                _QUERY_CLOSURE_WITH_INFO, (seeds_json,)
-            ) as cursor:
-                rows = await cursor.fetchall()
+            async with self.acquire_conn() as db:
+                async with db.execute(
+                    _QUERY_CLOSURE_WITH_INFO, (seeds_json,)
+                ) as cursor:
+                    rows = await cursor.fetchall()
 
             # Create PathInfo objects (already sorted by SQLite)
             sorted_infos: list[PathInfo] = []
@@ -366,18 +420,15 @@ class LocalStoreDB:
         self, paths: set[StorePath]
     ) -> dict[StorePath, PathInfo] | None:
         """Batch PathInfo for multiple paths. Returns None if DB unavailable."""
-        if self.db_conn is None or not paths:
+        if not self.active or not paths:
             return None
         try:
             paths_json = json.dumps(list(paths))
-            async with self.db_conn.execute(
-                _QUERY_PATH_INFOS_BATCH, (paths_json,)
-            ) as cursor:
-                rows = await cursor.fetchall()
-            async with self.db_conn.execute(
-                _QUERY_REFERENCES_BATCH, (paths_json,)
-            ) as cursor:
-                ref_rows = await cursor.fetchall()
+            async with self.acquire_conn() as db:
+                async with db.execute(_QUERY_PATH_INFOS_BATCH, (paths_json,)) as cursor:
+                    rows = await cursor.fetchall()
+                async with db.execute(_QUERY_REFERENCES_BATCH, (paths_json,)) as cursor:
+                    ref_rows = await cursor.fetchall()
 
             # Build referrer -> {references} map
             refs_map: dict[StorePath, set[StorePath]] = {}
@@ -408,12 +459,13 @@ class LocalStoreDB:
 
         Returns None if DB unavailable.
         """
-        if self.db_conn is None:
+        if not self.active:
             return None
         try:
             cutoff = int(time.time()) - max_age_seconds
-            async with self.db_conn.execute(_QUERY_STALE_PATHS, (cutoff,)) as cursor:
-                rows = await cursor.fetchall()
+            async with self.acquire_conn() as db:
+                async with db.execute(_QUERY_STALE_PATHS, (cutoff,)) as cursor:
+                    rows = await cursor.fetchall()
             return {r[0] for r in rows}
         except Exception:
             log.debug("query_stale_paths_failed", exc_info=True)
@@ -423,17 +475,17 @@ class LocalStoreDB:
 
     def mark_path(self, path: StorePath) -> None:
         """Queue a path for registration time update."""
-        if self.db_conn is not None and not self.read_only:
+        if self.active and not self.read_only:
             self.pending_regtime.add(path)
 
     def mark_paths(self, paths: set[StorePath]) -> None:
         """Queue multiple paths for registration time update."""
-        if self.db_conn is not None and not self.read_only:
+        if self.active and not self.read_only:
             self.pending_regtime.update(paths)
 
     async def flush_regtime(self) -> None:
         """Flush pending registration time updates to SQLite."""
-        if self.db_conn is None or self.read_only or not self.pending_regtime:
+        if not self.active or self.read_only or not self.pending_regtime:
             return
 
         paths = self.pending_regtime
@@ -442,8 +494,9 @@ class LocalStoreDB:
         try:
             paths_json = json.dumps(list(paths))
             t0 = time.monotonic()
-            await self.db_conn.execute(_UPDATE_REGTIME, (paths_json,))
-            await self.db_conn.commit()
+            async with self.acquire_conn() as db:
+                await db.execute(_UPDATE_REGTIME, (paths_json,))
+                await db.commit()
             elapsed = time.monotonic() - t0
             log.debug(
                 "registration_time_updated",
@@ -452,11 +505,11 @@ class LocalStoreDB:
             )
         except Exception:
             log.exception("registration_time_update_failed")
-            await self.close_db()
+            await self.close_db_pool()
 
     def start(self) -> None:
         """Start background regtime flush task. Call from async context."""
-        if self.db_conn is None or self.flush_task is not None or self.read_only:
+        if not self.active or self.flush_task is not None or self.read_only:
             return
         self.flush_task = asyncio.create_task(self.flush_loop())
 
@@ -480,16 +533,19 @@ class LocalStoreDB:
                 pass
             self.flush_task = None
         await self.flush_regtime()
-        await self.close_db()
+        await self.close_db_pool()
 
-    async def close_db(self) -> None:
-        db = self.db_conn
-        self.db_conn = None
-        if db is not None:
-            try:
-                await db.close()
-            except Exception:
-                pass
+    async def close_db_pool(self) -> None:
+        async with self._pool_lock:
+            for db in self._all_conns:
+                try:
+                    await db.close()
+                except Exception:
+                    pass
+            self._all_conns.clear()
+            self._idle_conns.clear()
+            # Also nullify db_path to prevent further acquisitions
+            self.db_path = None
 
 
 def resolve_db_path(store_path: Path) -> Path | None:
