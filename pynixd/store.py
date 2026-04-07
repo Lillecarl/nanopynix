@@ -233,35 +233,29 @@ class Store(ABC):
         cls,
         src: Store,
         dst: Store,
-        paths: set[StorePath],
+        infos: Iterable[PathInfo],
         src_conn: Connection | None = None,
         dst_conn: Connection | None = None,
     ) -> None:
-        """Copy paths from src to dst via streaming.
+        """Copy paths from src to dst via streaming using pre-resolved PathInfo.
 
-        Recursively expands the closure of the given paths and topologically
-        sorts them to ensure valid insertion order at the destination.
+        The infos should be topologically sorted to ensure valid insertion order
+        at the destination.
         """
-        if not paths:
+        infos_list = list(infos)
+        if not infos_list:
             return
 
         async with (
             src_conn if src_conn else src.transfer_conn() as src_conn,
             dst_conn if dst_conn else dst.transfer_conn() as dst_conn,
         ):
-            # 1. Expand closure and fetch all PathInfo (returns topo-sorted list)
-            from .operations.queries import QueryClosureWithInfoRequest
-
-            closure_resp = await src.execute(QueryClosureWithInfoRequest(paths=paths))
-            final_paths_with_info = closure_resp.infos
-
             log.info(
                 "stream_paths_with_info_store_to_store",
-                count=len(final_paths_with_info),
-                requested=len(paths),
+                count=len(infos_list),
             )
 
-            # 2. Stream to destination
+            # 1. Stream to destination
             dst_conn.op_log.append(
                 "AddMultipleToStore (stream_paths_with_info_store_to_store)"
             )
@@ -275,9 +269,9 @@ class Store(ABC):
             # Construct framedwriter that allows us to chunk NARs
             fw = dst_conn.w.framed()
             # Write how many paths we're looking to send
-            fw.write_uint64(len(final_paths_with_info))
+            fw.write_uint64(len(infos_list))
 
-            for info in final_paths_with_info:
+            for info in infos_list:
                 path = info.path
                 dst_conn.op_log.append(
                     "AddToStoreNar (stream_paths_with_info_store_to_store)"
@@ -331,25 +325,33 @@ class Store(ABC):
             dst.transfer_conn() as dst_conn,
             src.transfer_conn() as src_conn,
         ):
+            # 1. Expand closure and fetch all PathInfo (returns topo-sorted list)
+            from .operations.queries import QueryClosureWithInfoRequest
+
+            closure_resp = await src.execute(
+                QueryClosureWithInfoRequest(paths=paths_set),
+                client=None,  # No client forwarding for discovery
+            )
+
             await cls.stream_paths_with_info_store_to_store(
-                src, dst, paths_set, src_conn=src_conn, dst_conn=dst_conn
+                src, dst, closure_resp.infos, src_conn=src_conn, dst_conn=dst_conn
             )
 
     async def stream_paths_with_info_to(
         self,
         dst: Store,
-        paths: set[StorePath],
+        infos: Iterable[PathInfo],
     ) -> None:
-        """Copy multiple paths from this store to dst store via streaming."""
-        await self.stream_paths_with_info_store_to_store(self, dst, paths)
+        """Copy paths from this store to dst store via streaming using PathInfos."""
+        await self.stream_paths_with_info_store_to_store(self, dst, infos)
 
     async def stream_paths_with_info_from(
         self,
         src: Store,
-        paths: set[StorePath],
+        infos: Iterable[PathInfo],
     ) -> None:
-        """Copy multiple paths from src store to this store via streaming."""
-        await self.stream_paths_with_info_store_to_store(src, self, paths)
+        """Copy paths from src store to this store via streaming using PathInfos."""
+        await self.stream_paths_with_info_store_to_store(src, self, infos)
 
     async def stream_paths_to(
         self,
