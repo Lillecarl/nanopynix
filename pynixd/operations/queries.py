@@ -6,6 +6,7 @@ These operations query information from the store without mutating it.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -547,7 +548,10 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
     op: ClassVar[int] = Op.NarFromPath
     response_type: ClassVar[type[OpResponse]] = NarFromPathResponse
     is_query: ClassVar[bool] = True
-    nar_size: int = 0  # Optional optimization: if > 0, we read raw bytes directly
+    nar_size: int = 0  # Optional optimization: if > 0, read raw bytes directly
+    async_callback: Callable[[bytes], Awaitable[None]] | None = (
+        None  # For chunked streaming
+    )
 
     async def execute(
         self,
@@ -558,11 +562,23 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
         # Optimization: if size is known, read raw bytes without full OpRequest logic
         # which would try to parse the entire NAR into memory.
         if self.nar_size > 0:
+            from ..wire import _CHUNK_SIZE
+
             async with store.transfer_conn() as conn:
                 conn.w.write_uint64(self.op)
                 await self.to_writer(conn.w, conn.version)
                 await conn.w.drain()
                 await conn.r.drain_stderr()
+
+                if self.async_callback:
+                    remaining = self.nar_size
+                    while remaining > 0:
+                        to_read = min(remaining, _CHUNK_SIZE)
+                        chunk = await conn.r.readexactly(to_read)
+                        await self.async_callback(chunk)
+                        remaining -= to_read
+                    return NarFromPathResponse()
+
                 data = await conn.r.readexactly(self.nar_size)
                 return NarFromPathResponse(nar_data=data)
 
@@ -575,28 +591,48 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
 
         request = await cls.from_reader(proxy.r, proxy.version)
-        is_valid_resp = await proxy.local_store.execute(
-            IsValidPathRequest(path=request.path)
-        )
-        if is_valid_resp.valid:
-            op_log("NarFromPath").debug(
-                "nar_from_path_streaming",
-                path=request.path,
-            )
-            # 1. Flush any pending output to the client
-            await proxy.client.flush()
-            # 2. Protocol expects STDERR_LAST before raw NAR bytes
-            proxy.w.write_uint64(wire.STDERR_LAST)
-            # 3. Stream from local store to client
-            await proxy.local_store.stream_nar_from_path(
-                path=request.path,
-                dst=proxy.w,
-            )
-            await proxy.w.drain()
-            return None
+        path = request.path
 
-        cls._log.warning("nar_not_in_local_store", path=request.path)
-        return NarFromPathResponse(nar_data=b"")
+        # 1. Fetch info to get NAR size (optimization for raw copying)
+        info_resp = await proxy.local_store.execute(QueryPathInfoRequest(path=path))
+        if not info_resp.valid or info_resp.info is None:
+            cls._log.warning("nar_not_in_local_store", path=path)
+            return NarFromPathResponse(nar_data=b"")
+
+        nar_size = info_resp.info.nar_size
+
+        op_log("NarFromPath").debug(
+            "nar_from_path_streaming",
+            path=path,
+            size=nar_size,
+        )
+
+        # 2. Flush any pending output to the client
+        await proxy.client.flush()
+        # 3. Protocol expects STDERR_LAST before raw NAR bytes
+        proxy.w.write_uint64(wire.STDERR_LAST)
+
+        # 4. Stream from local store to client
+        async with proxy.local_store.transfer_conn() as conn:
+            conn.w.write_uint64(Op.NarFromPath)
+            await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
+            await conn.w.drain()
+            await conn.r.drain_stderr()
+
+            if nar_size > 0:
+                from ..wire import _CHUNK_SIZE
+
+                remaining = nar_size
+                while remaining > 0:
+                    to_read = min(remaining, _CHUNK_SIZE)
+                    chunk = await conn.r.readexactly(to_read)
+                    proxy.w.write(chunk)
+                    remaining -= to_read
+            else:
+                await wire.stream_parse_nar(conn.r, proxy.w)
+
+        await proxy.w.drain()
+        return None
 
 
 # ── QueryAllValidPaths ───────────────────────────────────────────────

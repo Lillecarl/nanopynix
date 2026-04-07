@@ -209,10 +209,14 @@ class BinaryCacheServer:
         await response.prepare(request)
 
         try:
-            await self.store.nar_from_path_chunked(
-                path,
-                info.nar_size,
-                response.write,
+            from .operations.queries import NarFromPathRequest
+
+            await self.store.execute(
+                NarFromPathRequest(
+                    path=path,
+                    nar_size=info.nar_size,
+                    async_callback=response.write,
+                )
             )
         except Exception:
             log.exception("nar_from_path_streaming_failed", path=path)

@@ -51,8 +51,6 @@ from .protocol import Op
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
 from .store_path import StorePath
 from .wire import (
-    _CHUNK_SIZE,
-    NixWriter,
     SSHNixReader,
     SSHNixWriter,
     UnixNixReader,
@@ -367,57 +365,6 @@ class Store(ABC):
     ) -> None:
         """Copy multiple paths from src store to this store via streaming."""
         await self.stream_paths_store_to_store(src, self, paths)
-
-    async def stream_nar_from_path(
-        self,
-        path: StorePath,
-        dst: NixWriter,
-        nar_size: int = 0,
-        chunk_size: int = _CHUNK_SIZE,
-    ) -> None:
-        """Stream NAR to a NixWriter."""
-        # If NAR size isn't specified we try to fetch it first
-        if nar_size == 0:
-            from .operations.queries import QueryPathInfoRequest
-
-            resp = await self.execute(QueryPathInfoRequest(path=path))
-            if resp.valid and resp.info:
-                nar_size = resp.info.nar_size
-
-        async with self.transfer_conn() as conn:
-            conn.w.write_uint64(Op.NarFromPath)
-            await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
-            await conn.w.drain()
-            await conn.r.drain_stderr()
-            if nar_size > 0:
-                remaining = nar_size
-                while remaining > 0:
-                    to_read = min(remaining, chunk_size)
-                    chunk = await conn.r.readexactly(to_read)
-                    dst.write(chunk)
-                    remaining -= to_read
-            else:
-                await wire.stream_parse_nar(conn.r, dst)
-
-    async def nar_from_path_chunked(
-        self,
-        path: StorePath,
-        nar_size: int,
-        write_chunk,
-        chunk_size: int = _CHUNK_SIZE,
-    ) -> None:
-        """Stream NAR to an async callback in fixed-size chunks."""
-        async with self.transfer_conn() as conn:
-            conn.w.write_uint64(Op.NarFromPath)
-            await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
-            await conn.w.drain()
-            await conn.r.drain_stderr()
-            remaining = nar_size
-            while remaining > 0:
-                to_read = min(remaining, chunk_size)
-                chunk = await conn.r.readexactly(to_read)
-                await write_chunk(chunk)
-                remaining -= to_read
 
     async def pipe_nar_from(
         self,
