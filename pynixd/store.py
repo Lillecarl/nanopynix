@@ -166,6 +166,57 @@ class Store(ABC):
     def count_common_paths(self, paths: set[str] | set[StorePath]) -> int:
         return len(paths & self.known_paths)
 
+    async def compute_closure_with_info(
+        self, paths: Iterable[str | StorePath], conn: Connection | None = None
+    ) -> dict[str, PathInfo]:
+        """Recursively find all paths and their info in the store closure.
+
+        If a connection is provided, it's used as a fallback if paths are
+        missing from the store's local metadata (DB).
+        """
+        from .operations.queries import QueryPathInfoRequest
+
+        all_infos: dict[str, PathInfo] = {}
+        pending = {str(p) for p in paths}
+
+        while pending:
+            to_fetch = {p for p in pending if p not in all_infos}
+            if not to_fetch:
+                break
+
+            # Use query_path_infos which may use DB fast path
+            new_infos_raw = await self.query_path_infos(to_fetch)
+            new_infos = {str(p): info for p, info in new_infos_raw.items()}
+
+            # Ensure we got info for all requested paths (fallback to connection)
+            for p in to_fetch:
+                if p not in new_infos:
+                    if conn:
+                        resp = await conn.call(QueryPathInfoRequest(path=p))
+                        if resp.valid and resp.info:
+                            resp.info.path = p
+                            new_infos[p] = resp.info
+                        else:
+                            raise ValueError(f"Path {p} not found in source store")
+
+            all_infos.update(new_infos)
+
+            # Find new references to explore
+            next_pending = set()
+            for info in new_infos.values():
+                for ref in info.references:
+                    ref_str = str(ref)
+                    if ref_str not in all_infos:
+                        next_pending.add(ref_str)
+            pending = next_pending
+
+        return all_infos
+
+    async def compute_closure(self, paths: Iterable[str | StorePath]) -> set[str]:
+        """Recursively find all paths in the store closure of the given paths."""
+        infos = await self.compute_closure_with_info(paths)
+        return set(infos.keys())
+
     async def call(
         self,
         request: OpRequest[Resp],
@@ -319,40 +370,7 @@ class Store(ABC):
             dst_conn if dst_conn else dst.transfer_conn() as dst_conn,
         ):
             # 1. Expand closure and fetch all PathInfo
-            all_infos: dict[str, PathInfo] = {}
-            pending = set(paths_list)
-
-            while pending:
-                # Fetch info for all currently pending paths that we don't have yet
-                to_fetch = {p for p in pending if p not in all_infos}
-                if not to_fetch:
-                    break
-
-                # Use query_path_infos which may use DB fast path
-                new_infos = await src.query_path_infos(to_fetch)
-
-                # Ensure we got info for all requested paths
-                for p in to_fetch:
-                    p_str = str(p)
-                    if p_str not in {str(k) for k in new_infos.keys()}:
-                        # Fallback to connection for missing ones if not in DB
-                        resp = await src_conn.call(QueryPathInfoRequest(path=p_str))
-                        if resp.valid and resp.info:
-                            resp.info.path = p_str
-                            new_infos[p_str] = resp.info
-                        else:
-                            raise ValueError(f"Path {p_str} not found in source store")
-
-                all_infos.update({str(p): info for p, info in new_infos.items()})
-
-                # Find new references to explore
-                next_pending = set()
-                for info in new_infos.values():
-                    for ref in info.references:
-                        ref_str = str(ref)
-                        if ref_str not in all_infos:
-                            next_pending.add(ref_str)
-                pending = next_pending
+            all_infos = await src.compute_closure_with_info(paths_list, conn=src_conn)
 
             # 2. Topologically sort the entire closure
             sorted_paths: list[str] = []

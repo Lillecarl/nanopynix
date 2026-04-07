@@ -73,6 +73,12 @@ async def decompose_build_paths(
         store.add_known_paths(valid, update_regtime=False)
 
     for dp, output_names, drv_request in resolved:
+        # Expand input_srcs to full closure, matching Nix's behavior
+        # when delegating to remote builders.
+        drv_request.derivation.input_srcs = await store.compute_closure(
+            drv_request.derivation.input_srcs
+        )
+
         future = await enqueue_build_derivation(drv_request, store, scheduler, client)
         results.append((dp, output_names, future))
 

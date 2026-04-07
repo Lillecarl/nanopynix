@@ -245,6 +245,12 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         from .build_planner import enqueue_build_derivation
 
+        # Expand input_srcs to full closure, matching Nix's behavior
+        # when delegating to remote builders.
+        request.derivation.input_srcs = await proxy.local_store.compute_closure(
+            request.derivation.input_srcs
+        )
+
         future = await enqueue_build_derivation(
             request,
             proxy.local_store,
