@@ -53,6 +53,22 @@ class QueryClosureRequest(OpRequest[QueryClosureResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryClosureResponse:
+        # Try DB first
+        if store.db:
+            from .query_closure_with_info import QueryClosureWithInfoRequest
+
+            res = await store.db.execute(QueryClosureWithInfoRequest(paths=self.paths))
+            if res:
+                store.add_known_paths({info.path for info in res.infos})
+                return QueryClosureResponse(paths={info.path for info in res.infos})
+
+        # Try native QueryClosure on the wire if available and QueryClosureWithInfo is NOT
+        async with store.transfer_conn() as conn:
+            if "QueryClosureWithInfo" not in conn.features:
+                # remote doesn't support our custom op, use native one
+                return await conn.call(self, client=client, suppress_last=suppress_last)
+
+        # remote supports QueryClosureWithInfo, use it to get metadata for cache
         from .query_closure_with_info import QueryClosureWithInfoRequest
 
         resp = await store.execute(

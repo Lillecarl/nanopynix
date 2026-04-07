@@ -226,3 +226,13 @@ async def run_logged(cmd: list[str], **kwargs) -> int:
         stream("stderr", proc.stderr),
     )
     return proc.returncode or 0
+
+
+@pytest.fixture(scope="session")
+def nix_env() -> dict[str, str]:
+    """Environment variables for nix subprocess calls."""
+    result = os.environ.copy()
+    result["NIX_SSHOPTS"] = (
+        "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    )
+    return result
