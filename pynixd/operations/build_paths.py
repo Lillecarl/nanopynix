@@ -1,4 +1,4 @@
-"""BuildPaths operation request/response types."""
+"""BuildPaths and BuildPathsWithResults operation types."""
 
 from __future__ import annotations
 
@@ -9,19 +9,138 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from ..derived_path import DerivedPath
-from ..protocol import Op, op_log
+from ..drv_parser import read_drv_file, to_basic_derivation
+from ..protocol import Op
+from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     BuildMode,
+    BuildResult,
     OpRequest,
     OpResponse,
     Uint64Response,
 )
 
 if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..drv_parser import ParsedDerivation
     from ..proxy import DaemonProxy
+    from ..scheduler import Scheduler
+    from ..store import Store
 
 log = structlog.get_logger(__name__)
+
+
+# ── Decomposition (private) ──────────────────────────────────────────
+
+
+async def _decompose_build_paths(
+    request: BuildPathsRequest | BuildPathsWithResultsRequest,
+    store: Store,
+    scheduler: Scheduler,
+    client: ClientConn,
+) -> list[tuple[DerivedPath, set[str], asyncio.Future]]:
+    """Decompose high-level build requests into individual BuildDerivation futures."""
+    from .build_derivation import (
+        BuildDerivationRequest,
+    )
+    from .query_closure import QueryClosureRequest
+    from .query_derivation_outputs_batch import QueryDerivationOutputsBatchRequest
+    from .query_missing import QueryMissingRequest
+    from .query_valid_paths import QueryValidPathsRequest
+
+    missing_resp = await store.execute(
+        QueryMissingRequest(derived_paths=request.derived_paths)
+    )
+
+    results: list[tuple[DerivedPath, set[str], asyncio.Future]] = []
+
+    parsed_cache: dict[StorePath, ParsedDerivation] = {}
+    all_planned_outputs: set[StorePath] = set()
+    all_input_drvs: set[StorePath] = set()
+
+    for dp in (DerivedPath(p) for p in missing_resp.will_build):
+        try:
+            parsed = dp.to_derivation(store.store_path)
+        except FileNotFoundError:
+            log.warning("drv_read_failed", drv_path=dp.drv_path)
+            continue
+
+        parsed_cache[StorePath(dp.drv_path)] = parsed
+        all_planned_outputs.update(parsed.output_paths().values())
+        all_input_drvs.update(parsed.input_drvs.keys())
+
+    output_cache = None
+    if all_input_drvs:
+        resp = await store.execute(
+            QueryDerivationOutputsBatchRequest(drv_paths=all_input_drvs)
+        )
+        output_cache = resp.outputs if resp.outputs else {}
+
+    resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []
+    all_input_srcs: set[StorePath] = set()
+
+    for dp in (DerivedPath(p) for p in missing_resp.will_build):
+        drv_path = StorePath(dp.drv_path)
+        parsed = parsed_cache.get(drv_path)
+        if parsed is None:
+            continue
+
+        basic = to_basic_derivation(parsed, store.store_path, output_cache=output_cache)
+        drv_request = BuildDerivationRequest(
+            drv_path=drv_path,
+            derivation=basic,
+            build_mode=request.build_mode,
+        )
+        resolved.append((dp, dp.output_names, drv_request))
+        all_input_srcs.update(basic.input_srcs)
+
+    unknown = all_input_srcs - store.known_paths
+    if unknown:
+        valid_resp = await store.execute(QueryValidPathsRequest(paths=unknown))
+        store.add_known_paths(valid_resp.paths, update_regtime=False)
+
+    for dp, output_names, drv_request in resolved:
+        existing_inputs = drv_request.derivation.input_srcs - all_planned_outputs
+        unbuilt_inputs = drv_request.derivation.input_srcs & all_planned_outputs
+
+        closure_resp = await store.execute(QueryClosureRequest(paths=existing_inputs))
+        drv_request.derivation.input_srcs = closure_resp.paths | unbuilt_inputs
+
+        # Enrich with .drv metadata
+        if drv_request.drv_path in parsed_cache:
+            drv_request.derivation.is_dynamic = parsed_cache[
+                drv_request.drv_path
+            ].is_dynamic
+        else:
+            try:
+                parsed = read_drv_file(store.store_path, drv_request.drv_path)
+                drv_request.derivation.is_dynamic = parsed.is_dynamic
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+
+        required_paths = set(drv_request.derivation.input_srcs) | {drv_request.drv_path}
+        build_id, future = await scheduler.enqueue(
+            Op.BuildDerivation,
+            drv_request,
+            client,
+            required_paths,
+            platform=drv_request.derivation.platform,
+        )
+        log.info(
+            "build_derivation_enqueued",
+            build_id=build_id,
+            drv_path=drv_request.drv_path,
+        )
+
+        results.append((dp, output_names, future))
+
+    return results
+
+
+# ── BuildPaths ───────────────────────────────────────────────────────
 
 
 @dataclass
@@ -51,13 +170,8 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
             log.debug("handle_local_mode_fallback")
             return await proxy.local_store.execute(request, client=proxy.client)
 
-        from .build_derivation import BuildDerivationResponse
-        from .build_planner import decompose_build_paths
-
-        op_log("BuildPaths").debug(
-            "BuildPaths len(paths)=%d", len(request.derived_paths)
-        )
-        decomposed = await decompose_build_paths(
+        log.debug("BuildPaths len(paths)=%d", len(request.derived_paths))
+        decomposed = await _decompose_build_paths(
             request,
             proxy.local_store,
             proxy.scheduler,
@@ -66,6 +180,8 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
 
         if not decomposed:
             return Uint64Response(value=0)
+
+        from .build_derivation import BuildDerivationResponse
 
         futures = [f for _, _, f in decomposed]
         responses = await asyncio.gather(*futures)
@@ -76,3 +192,104 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
                     return Uint64Response(value=1)
 
         return Uint64Response(value=0)
+
+
+# ── BuildPathsWithResults ────────────────────────────────────────────
+
+
+@dataclass
+class KeyedBuildResult:
+    derived_path: DerivedPath = field(default_factory=lambda: DerivedPath(""))
+    result: BuildResult = field(default_factory=BuildResult)
+
+
+@dataclass
+class KeyedBuildResultsResponse(OpResponse):
+    results: list[KeyedBuildResult] = field(default_factory=list)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        n = await reader.read_uint64()
+        results = []
+        for _ in range(n):
+            derived_path = await reader.read_string(DerivedPath)
+            result = await BuildResult.from_reader(reader, version)
+            results.append(KeyedBuildResult(derived_path=derived_path, result=result))
+        return cls(results=results)
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(len(self.results))
+        for entry in self.results:
+            writer.write_string(entry.derived_path)
+            await entry.result.to_writer(writer, version)
+
+
+@dataclass
+class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
+    op: ClassVar[int] = Op.BuildPathsWithResults
+    response_type: ClassVar[type[OpResponse]] = KeyedBuildResultsResponse
+    is_build: ClassVar[bool] = True
+    derived_paths: set[DerivedPath] = field(default_factory=set)
+    build_mode: BuildMode = BuildMode.NORMAL
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(
+            derived_paths=await reader.read_string_set(DerivedPath),
+            build_mode=BuildMode(await reader.read_uint64()),
+        )
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string_set(self.derived_paths)
+        writer.write_uint64(self.build_mode)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        request = await cls.from_reader(proxy.r, proxy.version)
+        if proxy.scheduler is None:
+            log.debug("handle_local_mode_fallback")
+            return await proxy.local_store.execute(request, client=proxy.client)
+
+        log.debug(
+            "build_paths_with_results_decomposed",
+            num_derivations=len(request.derived_paths),
+        )
+        decomposed = await _decompose_build_paths(
+            request,
+            proxy.local_store,
+            proxy.scheduler,
+            client=proxy.client,
+        )
+
+        if not decomposed:
+            return KeyedBuildResultsResponse(results=[])
+
+        from .build_derivation import BuildDerivationResponse
+
+        futures = [f for _, _, f in decomposed]
+        responses = await asyncio.gather(*futures)
+
+        keyed_results: list[KeyedBuildResult] = []
+        for (dp, _, _), resp in zip(decomposed, responses):
+            if isinstance(resp, BuildDerivationResponse):
+                keyed_results.append(
+                    KeyedBuildResult(
+                        derived_path=dp,
+                        result=resp.result,
+                    )
+                )
+                if resp.result.status not in (0, 1, 2):
+                    log.warning(
+                        "unexpected_build_paths_with_results_status",
+                        status=resp.result.status,
+                        error_msg=resp.result.error_msg,
+                    )
+                if resp.result.status != 0 and resp.result.error_msg and proxy.client:
+                    from ..stderr import StderrNext
+
+                    proxy.client.queue.put_nowait(
+                        StderrNext(text=f"pynixd: {resp.result.error_msg}\n")
+                    )
+
+        return KeyedBuildResultsResponse(results=keyed_results)

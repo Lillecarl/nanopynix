@@ -71,15 +71,14 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             set(request.derivation.input_srcs) | {request.drv_path}
         ) - proxy.local_store.known_paths
         if unknown:
-            from .queries import QueryValidPathsRequest
+            from .query_valid_paths import QueryValidPathsRequest
 
             valid_resp = await proxy.local_store.execute(
                 QueryValidPathsRequest(paths=unknown)
             )
             proxy.local_store.add_known_paths(valid_resp.paths, update_regtime=False)
 
-        from .build_planner import enqueue_build_derivation
-        from .queries import QueryClosureRequest
+        from .query_closure import QueryClosureRequest
 
         existing_inputs = request.derivation.input_srcs & proxy.local_store.known_paths
         unbuilt_inputs = request.derivation.input_srcs - proxy.local_store.known_paths
@@ -90,11 +89,18 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         request.derivation.input_srcs = closure_resp.paths | unbuilt_inputs
 
-        future = await enqueue_build_derivation(
+        required_paths = set(request.derivation.input_srcs) | {request.drv_path}
+        build_id, future = await proxy.scheduler.enqueue(
+            Op.BuildDerivation,
             request,
-            proxy.local_store,
-            proxy.scheduler,
-            client=proxy.client,
+            proxy.client,
+            required_paths,
+            platform=request.derivation.platform,
+        )
+        log.info(
+            "build_derivation_enqueued",
+            build_id=build_id,
+            drv_path=request.drv_path,
         )
         response = await future
 

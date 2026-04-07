@@ -12,14 +12,11 @@ from . import (  # noqa: F401
     add_to_store_nar,
     build_derivation,
     build_paths,
-    build_paths_with_results,
-    builds,
     ca_derivations,
     collect_garbage,
     ensure_path,
     find_roots,
     is_valid_path,
-    maintenance,
     nar_from_path,
     optimise_store,
     queries,
@@ -39,7 +36,6 @@ from . import (  # noqa: F401
     query_valid_derivers,
     query_valid_paths,
     set_options,
-    store_mutations,
     verify_store,
 )
 from .base import OP_REGISTRY as OP_REGISTRY
