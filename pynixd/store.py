@@ -48,15 +48,12 @@ from .operations.queries import (
 from .operations.store_mutations import (
     AddMultipleToStoreRequest,
     AddToStoreNarRequest,
-    AddToStoreRequest,
-    AddToStoreResponse,
 )
 from .protocol import Op
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
 from .store_path import StorePath
 from .wire import (
     _CHUNK_SIZE,
-    NixReader,
     NixWriter,
     SSHNixReader,
     SSHNixWriter,
@@ -469,34 +466,6 @@ class Store(ABC):
     ) -> None:
         """Copy multiple paths from src store to this store via streaming."""
         await self.stream_paths_store_to_store(src, self, paths)
-
-    async def add_to_store_nar_streaming(self, src: NixReader) -> StorePath:
-        """Stream AddToStoreNar from src to this store."""
-        async with self.transfer_conn() as conn:
-            path = await AddToStoreNarRequest.forward(src, conn.w)
-            await conn.w.drain()
-            await conn.r.drain_stderr()
-            await EmptyResponse.from_reader(conn.r, conn.version)
-            return StorePath(path)
-
-    async def add_to_store_streaming(self, src: NixReader) -> AddToStoreResponse:
-        """Stream AddToStore from src to this store."""
-        async with self.transfer_conn() as conn:
-            await AddToStoreRequest.forward(src, conn.w)
-            await conn.w.drain()
-            await conn.r.drain_stderr()
-            resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
-            resp.info.path = StorePath(resp.info.path)
-            return resp
-
-    async def add_multiple_to_store_streaming(self, src: NixReader) -> list[StorePath]:
-        """Stream AddMultipleToStore from src to this store."""
-        async with self.transfer_conn() as conn:
-            paths = await AddMultipleToStoreRequest.forward(src, conn.w)
-            await conn.w.drain()
-            await conn.r.drain_stderr()
-            await EmptyResponse.from_reader(conn.r, conn.version)
-            return paths
 
     async def buffer_nar_from_path(self, path: StorePath, nar_size: int = 0) -> bytes:
         """Read NAR into memory."""

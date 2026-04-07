@@ -79,9 +79,13 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     async def handle(cls, proxy: DaemonProxy) -> AddToStoreResponse:
         """Override handle because this is a streaming operation."""
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
-        resp = await proxy.local_store.add_to_store_streaming(proxy.r)
-        proxy.local_store.add_known_path(resp.info.path)
-        return resp
+        async with proxy.local_store.transfer_conn() as conn:
+            await cls.forward(proxy.r, conn.w)
+            await conn.w.drain()
+            await conn.r.drain_stderr()
+            resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
+            proxy.local_store.add_known_path(resp.info.path)
+            return resp
 
     @classmethod
     async def forward(cls, src: NixReader, dst: NixWriter) -> None:
@@ -157,8 +161,12 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
     async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
         """Override handle because this is a streaming operation."""
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
-        path = await proxy.local_store.add_to_store_nar_streaming(proxy.r)
-        proxy.local_store.add_known_path(path)
+        async with proxy.local_store.transfer_conn() as conn:
+            path = await cls.forward(proxy.r, conn.w)
+            await conn.w.drain()
+            await conn.r.drain_stderr()
+            await EmptyResponse.from_reader(conn.r, conn.version)
+            proxy.local_store.add_known_path(path)
         return EmptyResponse()
 
     @classmethod
@@ -230,8 +238,12 @@ class AddMultipleToStoreRequest(OpRequest[EmptyResponse]):
     async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
         """Override handle because this is a streaming operation."""
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
-        paths = await proxy.local_store.add_multiple_to_store_streaming(proxy.r)
-        proxy.local_store.add_known_paths(set(paths))
+        async with proxy.local_store.transfer_conn() as conn:
+            paths = await cls.forward(proxy.r, conn.w)
+            await conn.w.drain()
+            await conn.r.drain_stderr()
+            await EmptyResponse.from_reader(conn.r, conn.version)
+            proxy.local_store.add_known_paths(set(paths))
         return EmptyResponse()
 
     @classmethod
@@ -256,7 +268,116 @@ class AddMultipleToStoreRequest(OpRequest[EmptyResponse]):
         dst.write_uint64(repair)
         dst.write_uint64(dont_check_sigs)
 
-        return await _forward_framed_snooping(src, dst)
+        buf = bytearray()
+        eof = False
+
+        async def _ensure(n: int) -> None:
+            """Read frame chunks until buf has at least n bytes."""
+            nonlocal buf, eof
+            while len(buf) < n:
+                if eof:
+                    raise EOFError("Framed stream ended prematurely")
+                size = await src.read_uint64()
+                if size == 0:
+                    eof = True
+                    dst.write_uint64(0)
+                    if len(buf) < n:
+                        raise EOFError("Framed stream ended prematurely")
+                    return
+                data = await src.readexactly(size)
+                dst.write_uint64(size)
+                dst.write(data)
+                buf.extend(data)
+
+        def _consume(n: int) -> bytes:
+            nonlocal buf
+            result = bytes(buf[:n])
+            del buf[:n]
+            return result
+
+        async def _skip(n: int) -> None:
+            """Skip n logical bytes, consuming from buf first."""
+            nonlocal buf, eof
+            # Consume whatever is already buffered
+            from_buf = min(len(buf), n)
+            if from_buf:
+                del buf[:from_buf]
+                n -= from_buf
+            # Skip remaining by reading+forwarding frame chunks
+            while n > 0:
+                if eof:
+                    raise EOFError("Framed stream ended prematurely")
+                size = await src.read_uint64()
+                if size == 0:
+                    eof = True
+                    dst.write_uint64(0)
+                    raise EOFError("Framed stream ended prematurely")
+                data = await src.readexactly(size)
+                dst.write_uint64(size)
+                dst.write(data)
+                if size <= n:
+                    # Entire chunk is part of the skip
+                    n -= size
+                else:
+                    # Chunk has data beyond what we're skipping
+                    buf.extend(data[n:])
+                    n = 0
+
+        async def _read_uint64() -> int:
+            await _ensure(8)
+            return struct.unpack("<Q", _consume(8))[0]
+
+        async def _read_string() -> str:
+            length = await _read_uint64()
+            padded = length + _nar_pad(length)
+            await _ensure(padded)
+            data = _consume(padded)
+            return data[:length].decode("utf-8")
+
+        async def _read_store_path() -> StorePath:
+            return StorePath(await _read_string())
+
+        async def _skip_string() -> None:
+            length = await _read_uint64()
+            padded = length + _nar_pad(length)
+            await _skip(padded)
+
+        async def _skip_string_set() -> None:
+            count = await _read_uint64()
+            for _ in range(count):
+                await _skip_string()
+
+        # Parse the logical stream
+        count = await _read_uint64()
+
+        paths: list[StorePath] = []
+        for _ in range(count):
+            path = await _read_store_path()
+            paths.append(path)
+
+            await _skip_string()  # deriver
+            await _skip_string()  # nar_hash
+            await _skip_string_set()  # references
+            await _skip(8)  # registration_time
+            nar_size = await _read_uint64()
+            await _skip(8)  # ultimate
+            await _skip_string_set()  # sigs
+            await _skip_string()  # ca
+            await _skip(nar_size)  # raw NAR (not padded in framed)
+
+        # Forward any remaining frames
+        if not eof:
+            while True:
+                size = await src.read_uint64()
+                if size == 0:
+                    dst.write_uint64(0)
+                    break
+                data = await src.readexactly(size)
+                dst.write_uint64(size)
+                dst.write(data)
+
+        await dst.drain()
+        return paths
 
 
 # ── AddSignatures ────────────────────────────────────────────────────
@@ -344,143 +465,3 @@ class AddIndirectRootRequest(SingleStringRequest[Uint64Response]):
 class EnsurePathRequest(SingleStringRequest[Uint64Response]):
     op: ClassVar[int] = Op.EnsurePath
     response_type: ClassVar[type[OpResponse]] = Uint64Response
-
-
-# ── Forwarding helpers ─────────────────────────────────────────────
-
-
-async def _forward_framed_snooping(
-    src: NixReader,
-    dst: NixWriter,
-) -> list[StorePath]:
-    """Forward framed data verbatim while extracting store paths.
-
-    Reads frame chunks from src and writes them to dst unchanged.
-    Maintains a small parse buffer over the logical stream to read
-    structured PathInfo fields (path, nar_size), then skips past
-    NAR bytes without buffering them.
-
-    Wire layout of the logical (deframed) stream:
-        uint64 count
-        for each entry:
-            string path          <- extracted
-            string deriver       <- skipped
-            string nar_hash      <- skipped
-            string_set refs      <- skipped
-            uint64 reg_time      <- skipped
-            uint64 nar_size      <- extracted (to know how much NAR to skip)
-            uint64 ultimate      <- skipped
-            string_set sigs      <- skipped
-            string ca            <- skipped
-            bytes[nar_size] NAR  <- skipped (not padded)
-    """
-    buf = bytearray()
-    eof = False
-
-    async def _ensure(n: int) -> None:
-        """Read frame chunks until buf has at least n bytes."""
-        nonlocal buf, eof
-        while len(buf) < n:
-            if eof:
-                raise EOFError("Framed stream ended prematurely")
-            size = await src.read_uint64()
-            if size == 0:
-                eof = True
-                dst.write_uint64(0)
-                if len(buf) < n:
-                    raise EOFError("Framed stream ended prematurely")
-                return
-            data = await src.readexactly(size)
-            dst.write_uint64(size)
-            dst.write(data)
-            buf.extend(data)
-
-    def _consume(n: int) -> bytes:
-        nonlocal buf
-        result = bytes(buf[:n])
-        del buf[:n]
-        return result
-
-    async def _skip(n: int) -> None:
-        """Skip n logical bytes, consuming from buf first."""
-        nonlocal buf, eof
-        # Consume whatever is already buffered
-        from_buf = min(len(buf), n)
-        if from_buf:
-            del buf[:from_buf]
-            n -= from_buf
-        # Skip remaining by reading+forwarding frame chunks
-        while n > 0:
-            if eof:
-                raise EOFError("Framed stream ended prematurely")
-            size = await src.read_uint64()
-            if size == 0:
-                eof = True
-                dst.write_uint64(0)
-                raise EOFError("Framed stream ended prematurely")
-            data = await src.readexactly(size)
-            dst.write_uint64(size)
-            dst.write(data)
-            if size <= n:
-                # Entire chunk is part of the skip
-                n -= size
-            else:
-                # Chunk has data beyond what we're skipping
-                buf.extend(data[n:])
-                n = 0
-
-    async def _read_uint64() -> int:
-        await _ensure(8)
-        return struct.unpack("<Q", _consume(8))[0]
-
-    async def _read_string() -> str:
-        length = await _read_uint64()
-        padded = length + _nar_pad(length)
-        await _ensure(padded)
-        data = _consume(padded)
-        return data[:length].decode("utf-8")
-
-    async def _read_store_path() -> StorePath:
-        return StorePath(await _read_string())
-
-    async def _skip_string() -> None:
-        length = await _read_uint64()
-        padded = length + _nar_pad(length)
-        await _skip(padded)
-
-    async def _skip_string_set() -> None:
-        count = await _read_uint64()
-        for _ in range(count):
-            await _skip_string()
-
-    # Parse the logical stream
-    count = await _read_uint64()
-
-    paths: list[StorePath] = []
-    for _ in range(count):
-        path = await _read_store_path()
-        paths.append(path)
-
-        await _skip_string()  # deriver
-        await _skip_string()  # nar_hash
-        await _skip_string_set()  # references
-        await _skip(8)  # registration_time
-        nar_size = await _read_uint64()
-        await _skip(8)  # ultimate
-        await _skip_string_set()  # sigs
-        await _skip_string()  # ca
-        await _skip(nar_size)  # raw NAR (not padded in framed)
-
-    # Forward any remaining frames
-    if not eof:
-        while True:
-            size = await src.read_uint64()
-            if size == 0:
-                dst.write_uint64(0)
-                break
-            data = await src.readexactly(size)
-            dst.write_uint64(size)
-            dst.write(data)
-
-    await dst.drain()
-    return paths
