@@ -104,6 +104,14 @@ JOIN ValidPaths vp_ref ON r.reference = vp_ref.id
 WHERE vp_referrer.path IN (SELECT value FROM json_each(?))
 """
 
+# Batch outputs: all (drv_path, output_name, output_path) for a set of .drv files
+_QUERY_DERIVATION_OUTPUTS_BATCH = """
+SELECT vp_drv.path, do.id, do.path
+FROM DerivationOutputs do
+JOIN ValidPaths vp_drv ON do.drv = vp_drv.id
+WHERE vp_drv.path IN (SELECT value FROM json_each(?))
+"""
+
 # Lix's UpdateRegistrationTimeRecursive — walks the full closure
 _UPDATE_REGTIME = """
 UPDATE ValidPaths
@@ -452,6 +460,34 @@ class LocalStoreDB:
             return infos
         except Exception:
             log.debug("query_path_infos_failed", exc_info=True)
+            return None
+
+    async def query_derivation_outputs_batch(
+        self, drv_paths: set[StorePath]
+    ) -> dict[StorePath, dict[str, StorePath]] | None:
+        """Batch query output paths for multiple .drv files.
+
+        Returns {drv_path: {output_name: output_path}} for all found derivations.
+        Returns None if DB unavailable.
+        """
+        if not self.active or not drv_paths:
+            return None
+        try:
+            paths_json = json.dumps(list(drv_paths))
+            async with self.acquire_conn() as db:
+                async with db.execute(
+                    _QUERY_DERIVATION_OUTPUTS_BATCH, (paths_json,)
+                ) as cursor:
+                    rows = await cursor.fetchall()
+
+            result: dict[StorePath, dict[str, StorePath]] = {}
+            for drv_path, output_name, output_path in rows:
+                result.setdefault(StorePath(drv_path), {})[output_name] = StorePath(
+                    output_path
+                )
+            return result
+        except Exception:
+            log.debug("query_derivation_outputs_batch_failed", exc_info=True)
             return None
 
     async def query_stale_paths(self, max_age_seconds: int) -> set[StorePath] | None:

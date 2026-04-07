@@ -27,6 +27,7 @@ from .queries import (
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..drv_parser import ParsedDerivation
     from ..scheduler import Scheduler
     from ..store import Store
 
@@ -53,20 +54,11 @@ async def decompose_build_paths(
         tuple[DerivedPath, set[str], asyncio.Future[BuildDerivationResponse]]
     ] = []
 
-    # 1. Parse all planned derivations to collect every output path they produce.
-    # This gives us exactly the set of paths that are part of this build DAG
-    # and have not yet been built.
+    # 1. Parse each derivation ONCE. Cache the parsed result.
+    # Collect all output paths and all input_drvs for batch DB lookup.
+    parsed_cache: dict[StorePath, ParsedDerivation] = {}
     all_planned_outputs: set[StorePath] = set()
-    for dp in (DerivedPath(p) for p in missing_resp.will_build):
-        try:
-            parsed = dp.to_derivation(store.store_path)
-            all_planned_outputs.update(parsed.output_paths().values())
-        except FileNotFoundError:
-            pass
-
-    # 2. Resolve all builds so we can batch-discover input paths
-    resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []
-    all_input_srcs: set[StorePath] = set()
+    all_input_drvs: set[StorePath] = set()
 
     for dp in (DerivedPath(p) for p in missing_resp.will_build):
         try:
@@ -75,9 +67,30 @@ async def decompose_build_paths(
             log.warning("drv_read_failed", drv_path=dp.drv_path)
             continue
 
-        basic = to_basic_derivation(parsed, store.store_path)
+        parsed_cache[StorePath(dp.drv_path)] = parsed
+        all_planned_outputs.update(parsed.output_paths().values())
+        all_input_drvs.update(parsed.input_drvs.keys())
+
+    # 2. Batch-query the DB for input_drv output paths (skip file reads)
+    output_cache = None
+    if store.db and store.db.active and all_input_drvs:
+        output_cache = await store.db.query_derivation_outputs_batch(all_input_drvs)
+        if output_cache is None:
+            output_cache = {}
+
+    # 3. Convert to wire format using the cached data
+    resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []
+    all_input_srcs: set[StorePath] = set()
+
+    for dp in (DerivedPath(p) for p in missing_resp.will_build):
+        drv_path = StorePath(dp.drv_path)
+        parsed = parsed_cache.get(drv_path)
+        if parsed is None:
+            continue
+
+        basic = to_basic_derivation(parsed, store.store_path, output_cache=output_cache)
         drv_request = BuildDerivationRequest(
-            drv_path=StorePath(dp.drv_path),
+            drv_path=drv_path,
             derivation=basic,
             build_mode=request.build_mode,
         )
@@ -110,6 +123,7 @@ async def decompose_build_paths(
             store,
             scheduler,
             client,
+            parsed_cache=parsed_cache,
         )
         results.append((dp, output_names, future))
 
@@ -121,10 +135,11 @@ async def enqueue_build_derivation(
     store: Store,
     scheduler: Scheduler,
     client: ClientConn,
+    parsed_cache: dict[StorePath, ParsedDerivation] | None = None,
 ) -> asyncio.Future[BuildDerivationResponse]:
     """Enqueue a single BuildDerivation request."""
     # Enrich with .drv metadata (e.g. _is_dynamic) if not already set
-    enrich_derivation(request, store)
+    enrich_derivation(request, store, parsed_cache=parsed_cache)
 
     required_paths = set(request.derivation.input_srcs) | {request.drv_path}
 
@@ -144,11 +159,21 @@ async def enqueue_build_derivation(
     return future
 
 
-def enrich_derivation(request: BuildDerivationRequest, store: Store) -> None:
-    """Set is_dynamic from the .drv file on disk."""
+def enrich_derivation(
+    request: BuildDerivationRequest,
+    store: Store,
+    parsed_cache: dict[StorePath, ParsedDerivation] | None = None,
+) -> None:
+    """Set is_dynamic from the .drv file on disk (or from cache)."""
     store_path = store.store_path
     if not store_path:
         return
+
+    # Check cache first — avoids redundant file read
+    if parsed_cache and request.drv_path in parsed_cache:
+        request.derivation.is_dynamic = parsed_cache[request.drv_path].is_dynamic
+        return
+
     try:
         parsed = read_drv_file(store_path, request.drv_path)
         request.derivation.is_dynamic = parsed.is_dynamic

@@ -561,6 +561,7 @@ def collect_output_paths(
 def to_basic_derivation(
     parsed: ParsedDerivation,
     store_path: Path,
+    output_cache: dict[StorePath, dict[str, StorePath]] | None = None,
 ) -> BasicDerivation:
     """Convert a ParsedDerivation to a BasicDerivation (wire protocol format).
 
@@ -571,6 +572,8 @@ def to_basic_derivation(
     Args:
         parsed: The parsed .drv file
         store_path: Store root for reading referenced .drv files
+        output_cache: Optional {drv_path: {output_name: output_path}} cache
+            from the DB to skip reading input .drv files from disk.
     """
     outputs = [
         DerivationOutput(
@@ -589,6 +592,16 @@ def to_basic_derivation(
     # and add them to input_srcs (this is what nix does before sending
     # BuildDerivation over the wire)
     for drv_path, output_names in parsed.input_drvs.items():
+        # Try cache first (from DB)
+        if output_cache and drv_path in output_cache:
+            cached = output_cache[drv_path]
+            for name in output_names:
+                p = cached.get(name)
+                if p:
+                    input_srcs.add(p)
+            continue
+
+        # Fall back to reading the .drv file
         try:
             input_parsed = read_drv_file(store_path, drv_path)
         except FileNotFoundError:
