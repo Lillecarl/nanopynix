@@ -4,6 +4,7 @@
 from . import (  # noqa: F401
     builds,
     ca_derivations,
+    collect_garbage,
     maintenance,
     queries,
     set_options,

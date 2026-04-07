@@ -18,7 +18,7 @@ import structlog
 from environs import Env
 
 from .local_store_db import LocalStoreDB
-from .operations.maintenance import CollectGarbageRequest, CollectGarbageResponse
+from .operations.collect_garbage import CollectGarbageRequest, CollectGarbageResponse
 from .store import Store
 from .store_path import StorePath
 
