@@ -79,6 +79,7 @@ SELECT vp.path, vp.deriver, vp.hash, vp.registrationTime, vp.narSize,
        vp.ultimate, vp.sigs, vp.ca
 FROM closure c
 JOIN ValidPaths vp ON c.id = vp.id
+ORDER BY vp.id ASC
 """
 
 # Batch query: PathInfo for multiple paths at once
@@ -322,8 +323,8 @@ class LocalStoreDB:
             ) as cursor:
                 rows = await cursor.fetchall()
 
-            # We also need the references for topological sorting.
-            # Use _QUERY_REFERENCES_BATCH but we need the full closure paths first.
+            # We also need the references for the PathInfo objects.
+            # We can use _QUERY_REFERENCES_BATCH now that we have the full closure.
             closure_paths = {StorePath(r[0]) for r in rows}
             closure_paths_json = json.dumps(list(closure_paths))
 
@@ -339,43 +340,23 @@ class LocalStoreDB:
                     StorePath(reference)
                 )
 
-            # Create PathInfo objects
-            infos: dict[StorePath, PathInfo] = {}
+            # Create PathInfo objects (already sorted by SQLite)
+            sorted_infos: list[PathInfo] = []
             for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
                 p = StorePath(path)
-                infos[p] = PathInfo(
-                    path=p,
-                    deriver=StorePath(deriver or ""),
-                    nar_hash=nar_hash,
-                    references=refs_map.get(p, set()),
-                    registration_time=reg_time,
-                    nar_size=nar_size or 0,
-                    ultimate=1 if ultimate else 0,
-                    sigs=set(sigs.split()) if sigs else set(),
-                    ca=ca or "",
+                sorted_infos.append(
+                    PathInfo(
+                        path=p,
+                        deriver=StorePath(deriver or ""),
+                        nar_hash=nar_hash,
+                        references=refs_map.get(p, set()),
+                        registration_time=reg_time,
+                        nar_size=nar_size or 0,
+                        ultimate=1 if ultimate else 0,
+                        sigs=set(sigs.split()) if sigs else set(),
+                        ca=ca or "",
+                    )
                 )
-
-            # Topological sort
-            sorted_infos: list[PathInfo] = []
-            visited: set[StorePath] = set()
-            visiting: set[StorePath] = set()
-
-            def visit(p: StorePath):
-                if p in visited:
-                    return
-                if p in visiting:
-                    return
-                visiting.add(p)
-                info = infos[p]
-                for ref in info.references:
-                    if ref != p:
-                        visit(ref)
-                visiting.remove(p)
-                visited.add(p)
-                sorted_infos.append(info)
-
-            for p in sorted(infos.keys()):
-                visit(p)
 
             return sorted_infos
         except Exception:
