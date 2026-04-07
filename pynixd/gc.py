@@ -18,7 +18,7 @@ import structlog
 from environs import Env
 
 from .local_store_db import LocalStoreDB
-from .operations.maintenance import CollectGarbageResponse
+from .operations.maintenance import CollectGarbageRequest, CollectGarbageResponse
 from .store import Store
 from .store_path import StorePath
 
@@ -137,7 +137,12 @@ class GarbageCollector:
         if not store.is_healthy:
             return None
 
-        resp = await store.collect_garbage(paths)
+        resp = await store.execute(
+            CollectGarbageRequest(
+                action=3,  # DeleteSpecific
+                paths_to_delete=paths,
+            )
+        )
         if resp.paths_deleted:
             log.info(
                 "gc_store_complete",

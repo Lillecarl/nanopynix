@@ -36,10 +36,6 @@ from .operations.base import (
     Resp,
     SingleStringRequest,
 )
-from .operations.maintenance import (
-    CollectGarbageRequest,
-    CollectGarbageResponse,
-)
 from .operations.queries import (
     QueryAllValidPathsRequest,
 )
@@ -397,20 +393,6 @@ class Store(ABC):
 
             await dst_conn.r.drain_stderr()
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
-
-    async def collect_garbage(self, paths: set[StorePath]) -> CollectGarbageResponse:
-        """Delete specific paths via CollectGarbage (action=3)."""
-        async with self.transfer_conn() as conn:
-            resp = await conn.call(
-                CollectGarbageRequest(
-                    action=3,  # DeleteSpecific
-                    paths_to_delete=set(paths),
-                    ignore_liveness=0,
-                    max_freed=0,
-                )
-            )
-            self.known_paths -= resp.paths_deleted
-            return resp
 
     async def sync_paths(self) -> None:
         """Query the daemon for all valid paths. Called once at startup.
