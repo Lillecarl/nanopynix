@@ -226,6 +226,7 @@ class Store(ABC):
         infos: Iterable[PathInfo],
         src_conn: Connection | None = None,
         dst_conn: Connection | None = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> None:
         """Copy paths from src to dst via streaming using pre-resolved PathInfo.
 
@@ -262,6 +263,10 @@ class Store(ABC):
             fw.write_uint64(len(infos_list))
 
             for info in infos_list:
+                if cancel_event and cancel_event.is_set():
+                    log.info("stream_paths_transfer_cancelled")
+                    break
+
                 path = info.path
                 dst_conn.op_log.append(
                     "AddToStoreNar (stream_paths_with_info_store_to_store)"
@@ -302,6 +307,7 @@ class Store(ABC):
         src: Store,
         dst: Store,
         paths: Iterable[StorePath],
+        cancel_event: asyncio.Event | None = None,
     ) -> None:
         """Copy paths from src to dst via streaming, querying info first.
 
@@ -324,40 +330,57 @@ class Store(ABC):
             )
 
             await cls.stream_paths_with_info_store_to_store(
-                src, dst, closure_resp.infos, src_conn=src_conn, dst_conn=dst_conn
+                src,
+                dst,
+                closure_resp.infos,
+                src_conn=src_conn,
+                dst_conn=dst_conn,
+                cancel_event=cancel_event,
             )
 
     async def stream_paths_with_info_to(
         self,
         dst: Store,
         infos: Iterable[PathInfo],
+        cancel_event: asyncio.Event | None = None,
     ) -> None:
         """Copy paths from this store to dst store via streaming using PathInfos."""
-        await self.stream_paths_with_info_store_to_store(self, dst, infos)
+        await self.stream_paths_with_info_store_to_store(
+            self, dst, infos, cancel_event=cancel_event
+        )
 
     async def stream_paths_with_info_from(
         self,
         src: Store,
         infos: Iterable[PathInfo],
+        cancel_event: asyncio.Event | None = None,
     ) -> None:
         """Copy paths from src store to this store via streaming using PathInfos."""
-        await self.stream_paths_with_info_store_to_store(src, self, infos)
+        await self.stream_paths_with_info_store_to_store(
+            src, self, infos, cancel_event=cancel_event
+        )
 
     async def stream_paths_to(
         self,
         dst: Store,
         paths: Iterable[StorePath],
+        cancel_event: asyncio.Event | None = None,
     ) -> None:
         """Copy multiple paths from this store to dst store via streaming."""
-        await self.stream_paths_store_to_store(self, dst, paths)
+        await self.stream_paths_store_to_store(
+            self, dst, paths, cancel_event=cancel_event
+        )
 
     async def stream_paths_from(
         self,
         src: Store,
         paths: Iterable[StorePath],
+        cancel_event: asyncio.Event | None = None,
     ) -> None:
         """Copy multiple paths from src store to this store via streaming."""
-        await self.stream_paths_store_to_store(src, self, paths)
+        await self.stream_paths_store_to_store(
+            src, self, paths, cancel_event=cancel_event
+        )
 
     async def pipe_nar_from(
         self,
