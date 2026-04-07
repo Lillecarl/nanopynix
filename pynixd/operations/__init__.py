@@ -6,6 +6,7 @@ from . import (  # noqa: F401
     ca_derivations,
     maintenance,
     queries,
+    set_options,
     store_mutations,
 )
 from .base import OP_REGISTRY as OP_REGISTRY

@@ -1,0 +1,125 @@
+"""SetOptions operation request/response types."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, ClassVar, Self
+
+from .. import wire
+from ..protocol import Op
+from ..wire import NixReader, NixWriter
+from .base import (
+    EmptyRequest,
+    EmptyResponse,
+    OpResponse,
+)
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..store import Store
+
+# Silence SetOptions by default — it's extremely verbose
+logging.getLogger("pynixd.operations.SetOptionsRequest").setLevel(logging.WARNING)
+
+
+@dataclass
+class SetOptionsRequest(EmptyRequest[EmptyResponse]):
+    op: ClassVar[int] = Op.SetOptions
+    response_type: ClassVar[type[OpResponse]] = EmptyResponse
+    keep_failed: int = 0
+    keep_going: int = 0
+    try_fallback: int = 0
+    verbosity: int = 0
+    max_build_jobs: int = 0
+    max_silent_time: int = 0
+    _obsolete_use_build_hook: int = 0
+    build_verbosity: int = 0
+    _obsolete_log_type: int = 0
+    _obsolete_print_build_trace: int = 0
+    build_cores: int = 0
+    use_substitutes: int = 0
+    overrides: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        keep_failed = await reader.read_uint64()
+        keep_going = await reader.read_uint64()
+        try_fallback = await reader.read_uint64()
+        verbosity = await reader.read_uint64()
+        max_build_jobs = await reader.read_uint64()
+        max_silent_time = await reader.read_uint64()
+        obsolete_use_build_hook = await reader.read_uint64()
+        build_verbosity = await reader.read_uint64()
+        obsolete_log_type = await reader.read_uint64()
+        obsolete_print_build_trace = await reader.read_uint64()
+        build_cores = await reader.read_uint64()
+        use_substitutes = await reader.read_uint64()
+
+        overrides: dict[str, str] = {}
+        if version >= wire.proto(1, 12):
+            n = await reader.read_uint64()
+            for _ in range(n):
+                k = await reader.read_string()
+                v = await reader.read_string()
+                overrides[k] = v
+
+        result = cls(
+            keep_failed=keep_failed,
+            keep_going=keep_going,
+            try_fallback=try_fallback,
+            verbosity=verbosity,
+            max_build_jobs=max_build_jobs,
+            max_silent_time=max_silent_time,
+            _obsolete_use_build_hook=obsolete_use_build_hook,
+            build_verbosity=build_verbosity,
+            _obsolete_log_type=obsolete_log_type,
+            _obsolete_print_build_trace=obsolete_print_build_trace,
+            build_cores=build_cores,
+            use_substitutes=use_substitutes,
+            overrides=overrides,
+        )
+
+        cls._log.debug(
+            "set_options_from_reader",
+            keep_failed=keep_failed,
+            keep_going=keep_going,
+            try_fallback=try_fallback,
+            verbosity=verbosity,
+            max_build_jobs=max_build_jobs,
+            max_silent_time=max_silent_time,
+            build_verbosity=build_verbosity,
+            build_cores=build_cores,
+            use_substitutes=use_substitutes,
+        )
+        return result
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> EmptyResponse:
+        # We don't forward SetOptions to the local store daemon as it would
+        # mess with our own proxy's session state if it was a real daemon.
+        # We just return EmptyResponse.
+        return EmptyResponse()
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.keep_failed)
+        writer.write_uint64(self.keep_going)
+        writer.write_uint64(self.try_fallback)
+        writer.write_uint64(self.verbosity)
+        writer.write_uint64(self.max_build_jobs)
+        writer.write_uint64(self.max_silent_time)
+        writer.write_uint64(self._obsolete_use_build_hook)
+        writer.write_uint64(self.build_verbosity)
+        writer.write_uint64(self._obsolete_log_type)
+        writer.write_uint64(self._obsolete_print_build_trace)
+        writer.write_uint64(self.build_cores)
+        writer.write_uint64(self.use_substitutes)
+        if version >= wire.proto(1, 12):
+            writer.write_uint64(len(self.overrides))
+            for k, v in self.overrides.items():
+                writer.write_string(k)
+                writer.write_string(v)
