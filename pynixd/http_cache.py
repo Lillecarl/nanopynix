@@ -1,6 +1,6 @@
 """HTTP binary cache server for the local Nix store.
 
-Serves the standard Nix binary cache protocol (read-only) over HTTP/HTTPS.
+Serves the standard Nix binary cache protocol over HTTP/HTTPS.
 Metadata queries (narinfo) are served from LocalStoreDB when available,
 falling back to the daemon protocol. NAR data is always streamed from
 the daemon via NarFromPath.
@@ -9,6 +9,8 @@ Endpoints:
     GET /nix-cache-info       → cache metadata
     GET /{hash}.narinfo       → path metadata
     GET /nar/{hash}.nar       → NAR archive data
+    PUT /nar/{hash}.nar       → upload NAR data (temporary)
+    PUT /{hash}.narinfo       → upload path metadata (finalizes upload)
 
 Supports optional basic auth and TLS.
 """
@@ -16,6 +18,7 @@ Supports optional basic auth and TLS.
 from __future__ import annotations
 
 import base64
+import os
 import ssl
 from http import HTTPStatus
 from pathlib import Path
@@ -58,14 +61,15 @@ def format_narinfo(
     ca: str,
 ) -> str:
     """Format a .narinfo file from path info fields."""
-    store_hash = hash_part(path)
     # Ensure NarHash has sha256: prefix (expected by Nix)
     if not nar_hash.startswith("sha256:"):
         nar_hash = f"sha256:{nar_hash}"
 
+    nar_hash_part = nar_hash.split(":")[-1]
+
     lines = [
         f"StorePath: {path}",
-        f"URL: nar/{store_hash}.nar",
+        f"URL: nar/{nar_hash_part}.nar",
         "Compression: none",
         f"NarHash: {nar_hash}",
         f"NarSize: {nar_size}",
@@ -88,7 +92,10 @@ def format_narinfo(
 
 
 class BinaryCacheServer:
-    """Read-only HTTP binary cache backed by a local Nix store."""
+    """HTTP binary cache server for the local Nix store.
+
+    Supports reading and (optionally) writing paths via standard protocol.
+    """
 
     def __init__(
         self,
@@ -98,6 +105,7 @@ class BinaryCacheServer:
         password: str | None = None,
         htpasswd_path: str | Path | None = None,
         priority: int = 30,
+        upload_dir: str | Path | None = None,
     ) -> None:
         self.store = local_store
         self.username = username
@@ -106,11 +114,21 @@ class BinaryCacheServer:
         if htpasswd_path:
             self.htpasswd = HtpasswdFile(str(htpasswd_path))
         self.priority = priority
+        self.upload_dir = Path(upload_dir) if upload_dir else None
+        if self.upload_dir:
+            self.upload_dir.mkdir(parents=True, exist_ok=True)
 
-        self.app = web.Application(middlewares=[self.auth_middleware])
+        self.app = web.Application(
+            middlewares=[self.auth_middleware],
+            client_max_size=1024**4,  # 1 TiB
+        )
         self.app.router.add_get("/nix-cache-info", self.handle_cache_info)
         self.app.router.add_get("/{hash}.narinfo", self.handle_narinfo)
-        self.app.router.add_get("/nar/{hash}.nar", self.handle_nar)
+        self.app.router.add_get("/nar/{filename:.+}", self.handle_nar)
+
+        if self.upload_dir:
+            self.app.router.add_put("/nar/{filename:.+}", self.handle_put_nar)
+            self.app.router.add_put("/{hash}.narinfo", self.handle_put_narinfo)
 
     @property
     def db(self) -> LocalStoreDB | None:
@@ -198,7 +216,16 @@ class BinaryCacheServer:
         )
 
     async def handle_nar(self, request: web.Request) -> web.StreamResponse:
-        hash_part = request.match_info["hash"]
+        filename = request.match_info["filename"]
+        # Standard format is /nar/<hash>.nar[.comp]
+        hash_part = filename.split(".", 1)[0]
+
+        if not filename.endswith(".nar"):
+            # We only serve raw NARs. If Nix asks for .xz or other, we return 404
+            # so it might fall back to .nar if it wants.
+            return web.Response(
+                status=HTTPStatus.NOT_FOUND, text="compression not supported\n"
+            )
 
         path = await self.resolve_path(hash_part)
         if path is None:
@@ -242,6 +269,112 @@ class BinaryCacheServer:
 
         await response.write_eof()
         return response
+
+    async def handle_put_nar(self, request: web.Request) -> web.Response:
+        """Receive NAR data and save it to a temporary file."""
+        if not self.upload_dir:
+            return web.Response(
+                status=HTTPStatus.METHOD_NOT_ALLOWED, text="Upload disabled\n"
+            )
+
+        filename = request.match_info["filename"]
+        # Standard format is /nar/<hash>.nar[.comp]
+        hash_part = filename.split(".", 1)[0]
+        temp_path = self.upload_dir / f"{hash_part}.nar"
+
+        if ".nar" not in filename:
+            log.warning("invalid_nar_upload_name", filename=filename)
+            return web.Response(
+                status=HTTPStatus.BAD_REQUEST, text="Filename must contain .nar\n"
+            )
+
+        log.info("receiving_nar_upload", hash=hash_part, path=str(temp_path))
+        with open(temp_path, "wb") as f:
+            async for chunk in request.content.iter_any():
+                f.write(chunk)
+
+        log.info("nar_upload_complete", hash=hash_part, size=temp_path.stat().st_size)
+        return web.Response(status=HTTPStatus.OK, text="ok\n")
+
+    async def handle_put_narinfo(self, request: web.Request) -> web.Response:
+        """Receive .narinfo, parse it, and finalize the upload to the Nix store."""
+        if not self.upload_dir:
+            return web.Response(
+                status=HTTPStatus.METHOD_NOT_ALLOWED, text="Upload disabled\n"
+            )
+
+        content = await request.text()
+
+        from .operations.base import PathInfo
+
+        try:
+            info = PathInfo.from_narinfo(content)
+        except Exception as e:
+            log.warning("invalid_narinfo_upload", error=str(e))
+            return web.Response(
+                status=HTTPStatus.BAD_REQUEST, text=f"Invalid .narinfo: {e}\n"
+            )
+
+        # Determine the NAR filename from the 'URL' field in .narinfo
+        nar_url = ""
+        for line in content.splitlines():
+            if line.startswith("URL: "):
+                nar_url = line.split(": ", 1)[1].strip()
+                break
+
+        if not nar_url:
+            return web.Response(
+                status=HTTPStatus.BAD_REQUEST, text="Missing 'URL' field in .narinfo\n"
+            )
+
+        # nar_url is usually "nar/<narhash>.nar[.comp]"
+        nar_filename = nar_url.split("/")[-1]
+        nar_hash_part = nar_filename.split(".", 1)[0]
+
+        # Check if the NAR exists
+        nar_temp_path = self.upload_dir / f"{nar_hash_part}.nar"
+        if not nar_temp_path.exists():
+            log.warning(
+                "nar_missing_for_narinfo", nar_hash=nar_hash_part, path=info.path
+            )
+            return web.Response(
+                status=HTTPStatus.NOT_FOUND,
+                text=f"NAR {nar_hash_part} not found. Upload it first.\n",
+            )
+
+        # Now add it to the store
+        from .operations.add_to_store_nar import AddToStoreNarRequest
+        from .wire import NixWriter
+
+        async def provide_nar(writer: NixWriter):
+            # We need to wrap the raw NAR in Nix framing (framed NAR data)
+            framed = writer.framed()
+            with open(nar_temp_path, "rb") as f:
+                while True:
+                    chunk = f.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    framed.write(chunk)
+            await framed.finalize()
+
+        log.info("finalizing_upload_to_store", path=info.path)
+        try:
+            req = AddToStoreNarRequest(info=info, async_provider=provide_nar)
+            await self.store.execute(req)
+        except Exception as e:
+            log.exception("finalize_upload_failed", path=info.path)
+            return web.Response(
+                status=HTTPStatus.INTERNAL_SERVER_ERROR, text=f"Finalize failed: {e}\n"
+            )
+        finally:
+            # Clean up temporary NAR
+            try:
+                os.remove(nar_temp_path)
+            except OSError:
+                pass
+
+        log.info("upload_to_store_complete", path=info.path)
+        return web.Response(status=HTTPStatus.OK, text="ok\n")
 
     # ── Path resolution helpers ───────────────────────────────────────
 

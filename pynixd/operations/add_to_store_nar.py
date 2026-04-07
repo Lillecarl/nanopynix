@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -13,7 +14,9 @@ from ..wire import NixReader, NixWriter, forward_framed
 from .base import OpRequest, OpResponse, PathInfo
 
 if TYPE_CHECKING:
+    from ..connection import ClientConn
     from ..proxy import DaemonProxy
+    from ..store import Store
 
 log = structlog.get_logger(__name__)
 
@@ -37,6 +40,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
     info: PathInfo = field(default_factory=PathInfo)
     repair: int = 0
     dont_check_sigs: int = 0
+    async_provider: Callable[[NixWriter], Awaitable[None]] | None = None
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
@@ -70,6 +74,21 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         writer.write_string(self.info.ca)
         writer.write_uint64(self.repair)
         writer.write_uint64(self.dont_check_sigs)
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> AddToStoreNarResponse:
+        if self.async_provider:
+            async with store.transfer_conn() as conn:
+                await self.to_writer(conn.w, conn.version)
+                await self.async_provider(conn.w)
+                await conn.w.drain()
+                await conn.r.drain_stderr()
+                return await AddToStoreNarResponse.from_reader(conn.r, conn.version)
+        return await super().execute(store, client, suppress_last)
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> AddToStoreNarResponse:

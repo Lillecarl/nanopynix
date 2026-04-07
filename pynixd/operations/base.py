@@ -273,6 +273,57 @@ class PathInfo:
         writer.write_string(self.path)
         await self.to_writer_unkeyed(writer)
 
+    @classmethod
+    def from_narinfo(cls, content: str) -> PathInfo:
+        """Parse PathInfo from .narinfo file content."""
+        data: dict[str, Any] = {
+            "references": set(),
+            "sigs": set(),
+        }
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or ":" not in line or line.startswith("#"):
+                continue
+            key, val = line.split(":", 1)
+            key = key.strip()
+            val = val.strip()
+
+            if key == "StorePath":
+                data["path"] = StorePath(val)
+            elif key == "NarHash":
+                data["nar_hash"] = val
+            elif key == "NarSize":
+                data["nar_size"] = int(val)
+            elif key == "References":
+                for r in val.split():
+                    if r:
+                        if r.startswith("/nix/store/"):
+                            data["references"].add(StorePath(r))
+                        else:
+                            data["references"].add(StorePath(f"/nix/store/{r}"))
+            elif key == "Deriver":
+                if val:
+                    if val.startswith("/nix/store/"):
+                        data["deriver"] = StorePath(val)
+                    else:
+                        data["deriver"] = StorePath(f"/nix/store/{val}")
+                else:
+                    data["deriver"] = StorePath("")
+            elif key == "Sig":
+                data["sigs"].add(val)
+            elif key == "CA":
+                data["ca"] = val
+
+        return cls(
+            path=data.get("path", StorePath("")),
+            deriver=data.get("deriver", StorePath("")),
+            nar_hash=data.get("nar_hash", ""),
+            references=data.get("references", set()),
+            nar_size=data.get("nar_size", 0),
+            sigs=data.get("sigs", set()),
+            ca=data.get("ca", ""),
+        )
+
 
 class OutputKind(Enum):
     """Classification of a single derivation output."""

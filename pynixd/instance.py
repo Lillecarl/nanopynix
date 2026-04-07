@@ -53,8 +53,10 @@ class PynixdConfig:
     http_pass: str | None = None
     http_htpasswd: Path | None = None
     http_priority: int = 30
+    http_upload_dir: Path | str | None = None
 
     # HTTPS Binary Cache
+
     https_port: int | None = None
     https_cert: Path | None = None
     https_key: Path | None = None
@@ -213,6 +215,7 @@ class Server:
                 password=self.config.http_pass,
                 htpasswd_path=self.config.http_htpasswd,
                 priority=self.config.http_priority,
+                upload_dir=self.config.http_upload_dir,
             )
             if self.config.http_port is not None:
                 runner, port = await cache.start(
