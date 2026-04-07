@@ -20,6 +20,7 @@ HTTP Binary Cache:
   PYNIXD_HTTP_HOST     HTTP listen address (default: 0.0.0.0)
   PYNIXD_HTTP_USER     HTTP basic auth username
   PYNIXD_HTTP_PASS     HTTP basic auth password
+  PYNIXD_HTTP_HTPASSWD Path to htpasswd file for authentication
   PYNIXD_HTTP_PRIORITY Binary cache priority (default: 30)
 
 HTTPS Binary Cache:
@@ -161,6 +162,7 @@ async def async_main() -> None:
         http_port=env.int("PYNIXD_HTTP_PORT", None),
         http_user=env.str("PYNIXD_HTTP_USER", None),
         http_pass=env.str("PYNIXD_HTTP_PASS", None),
+        http_htpasswd=env.path("PYNIXD_HTTP_HTPASSWD", None),
         http_priority=env.int("PYNIXD_HTTP_PRIORITY", 30),
         https_port=env.int("PYNIXD_HTTPS_PORT", None),
         https_cert=env.path("PYNIXD_HTTPS_CERT", None),

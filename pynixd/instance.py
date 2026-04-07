@@ -51,6 +51,7 @@ class PynixdConfig:
     http_port: int | None = None
     http_user: str | None = None
     http_pass: str | None = None
+    http_htpasswd: Path | None = None
     http_priority: int = 30
 
     # HTTPS Binary Cache
@@ -210,6 +211,7 @@ class Server:
                 local_store,
                 username=self.config.http_user,
                 password=self.config.http_pass,
+                htpasswd_path=self.config.http_htpasswd,
                 priority=self.config.http_priority,
             )
             if self.config.http_port is not None:

@@ -34,6 +34,7 @@ let
       python.pkgs.aiosqlite
       python.pkgs.environs
       python.pkgs.pynacl
+      python.pkgs.passlib
     ];
 
     nativeCheckInputs = [

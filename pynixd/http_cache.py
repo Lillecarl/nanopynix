@@ -18,9 +18,11 @@ from __future__ import annotations
 import base64
 import ssl
 from http import HTTPStatus
+from pathlib import Path
 
 import structlog
 from aiohttp import web
+from passlib.apache import HtpasswdFile
 
 from .local_store_db import LocalStoreDB
 from .operations.query_path_from_hash_part import QueryPathFromHashPartRequest
@@ -94,11 +96,15 @@ class BinaryCacheServer:
         *,
         username: str | None = None,
         password: str | None = None,
+        htpasswd_path: str | Path | None = None,
         priority: int = 30,
     ) -> None:
         self.store = local_store
         self.username = username
         self.password = password
+        self.htpasswd = None
+        if htpasswd_path:
+            self.htpasswd = HtpasswdFile(str(htpasswd_path))
         self.priority = priority
 
         self.app = web.Application(middlewares=[self.auth_middleware])
@@ -118,7 +124,7 @@ class BinaryCacheServer:
         request: web.Request,
         handler,
     ) -> web.StreamResponse:
-        if self.username is None:
+        if self.username is None and self.htpasswd is None:
             return await handler(request)
 
         auth_header = request.headers.get("Authorization", "")
@@ -137,10 +143,16 @@ class BinaryCacheServer:
                 status=HTTPStatus.UNAUTHORIZED, text="Malformed credentials\n"
             )
 
-        if user != self.username or passwd != self.password:
-            return web.Response(
-                status=HTTPStatus.FORBIDDEN, text="Invalid credentials\n"
-            )
+        if self.htpasswd:
+            if not self.htpasswd.check_password(user, passwd):
+                return web.Response(
+                    status=HTTPStatus.FORBIDDEN, text="Invalid credentials\n"
+                )
+        elif self.username is not None:
+            if user != self.username or passwd != self.password:
+                return web.Response(
+                    status=HTTPStatus.FORBIDDEN, text="Invalid credentials\n"
+                )
 
         return await handler(request)
 

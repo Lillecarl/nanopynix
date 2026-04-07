@@ -1,6 +1,6 @@
 # pynixd
 
-> **Built with Claude** (Anthropic) and **MiniMax** AI models.
+> Built by me with a bunch of AI models
 
 A Nix daemon protocol proxy and distributed build cache implemented in Python using AsyncSSH. pynixd acts as an intermediary between Nix clients and remote builders, providing query caching, build deduplication, and intelligent scheduling across multiple build backends.
 
