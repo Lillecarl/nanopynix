@@ -40,6 +40,7 @@ from .operations.base import (
 )
 from .protocol import Op
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
+from .signing import SecretKey
 from .store_path import StorePath
 from .wire import (
     SSHNixReader,
@@ -96,6 +97,19 @@ class Store(ABC):
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
         self.supported_features: set[str] = set()
+        self.signing_keys: dict[str, SecretKey] = {}
+
+    @property
+    def signing_key_names(self) -> list[str]:
+        """List of signing key names configured on this store."""
+        return list(self.signing_keys.keys())
+
+    def get_signing_key(self, name: str) -> SecretKey:
+        """Get a signing key by name."""
+        key = self.signing_keys.get(name)
+        if key is None:
+            raise KeyError(f"Signing key '{name}' not found")
+        return key
 
     def supports_system(self, system: str) -> bool:
         """Check if this store supports the given system."""

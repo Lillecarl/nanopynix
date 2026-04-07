@@ -36,6 +36,7 @@ from . import (  # noqa: F401
     query_valid_derivers,
     query_valid_paths,
     set_options,
+    sign_path_info,
     verify_store,
 )
 from .base import OP_REGISTRY as OP_REGISTRY

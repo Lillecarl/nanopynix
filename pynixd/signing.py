@@ -11,13 +11,28 @@ from __future__ import annotations
 from base64 import b64decode, b64encode
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import nacl.signing
+from environs import Env
 
 from .store_path import StorePath
 
+if TYPE_CHECKING:
+    from .operations.base import PathInfo
+
+env = Env()
+
 # Nix32 alphabet (base-32 encoding used by Nix for hashes)
 _NIX32_CHARS = b"0123456789abcdfghijklmnpqrsvwxyz"
+
+
+def get_default_signing_key() -> SecretKey | None:
+    """Get the default signing key from PYNIXD_SIGNING_KEY env var."""
+    val = env.str("PYNIXD_SIGNING_KEY", "")
+    if not val:
+        return None
+    return SecretKey.from_string(val)
 
 
 def _nix32_encode(data: bytes) -> str:
@@ -43,8 +58,6 @@ class SecretKey:
 
     _signing_key: nacl.signing.SigningKey = field(repr=False)
     name: str = ""
-    name: str = ""
-    name: str = ""
 
     @classmethod
     def from_file(cls, path: Path) -> SecretKey:
@@ -59,9 +72,9 @@ class SecretKey:
 
     @classmethod
     def _parse(cls, text: str) -> SecretKey:
-        colon = text.index(":")
-        name = text[:colon]
-        raw = b64decode(text[colon + 1 :])
+        split = text.split(":", 1)
+        name = split[0]
+        raw = b64decode(split[1])
         if len(raw) == 64:
             # Full libsodium secret key (seed + public key)
             seed = raw[:32]
@@ -109,23 +122,17 @@ def fingerprint(
 
 
 def sign_path_info(
-    secret_key: SecretKey,
-    store_path: StorePath,
-    nar_hash: str,
-    nar_size: int,
-    references: set[StorePath],
+    key: SecretKey,
+    info: PathInfo,
 ) -> str:
     """Sign a path info and return the signature string.
 
     Args:
-        secret_key: The signing key
-        store_path: Full store path
-        nar_hash: Hash string (e.g. ``sha256:abc...``)
-        nar_size: NAR size in bytes
-        references: Set of reference store paths
+        key: The signing key
+        info: The path info to sign
 
     Returns:
         Signature in ``<name>:<base64>`` format
     """
-    fp = fingerprint(store_path, nar_hash, nar_size, references)
-    return secret_key.sign_fingerprint(fp)
+    fp = fingerprint(info.path, info.nar_hash, info.nar_size, info.references)
+    return key.sign_fingerprint(fp)

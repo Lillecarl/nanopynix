@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
+from pynixd.operations.sign_path_info import SignPathInfoRequest
+
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
@@ -67,6 +69,9 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
             await conn.w.drain()
             await conn.r.drain_stderr()
             resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
+            resp.info = (
+                await proxy.local_store.execute(SignPathInfoRequest(resp.info))
+            ).info
             proxy.local_store.add_known_path(resp.info.path)
             return resp
 
