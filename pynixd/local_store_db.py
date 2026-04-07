@@ -65,7 +65,8 @@ WHERE registrationTime > 0 AND registrationTime < ?
 """
 
 # Recursive CTE: expand seed paths to their full runtime reference closure
-_COMPUTE_CLOSURE = """
+# and return metadata for all paths in the closure.
+_QUERY_CLOSURE_WITH_INFO = """
 WITH RECURSIVE closure(id, path) AS (
     SELECT id, path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
     UNION
@@ -74,7 +75,10 @@ WITH RECURSIVE closure(id, path) AS (
     JOIN Refs r ON c.id = r.referrer
     JOIN ValidPaths vp ON r.reference = vp.id
 )
-SELECT path FROM closure
+SELECT vp.path, vp.deriver, vp.hash, vp.registrationTime, vp.narSize,
+       vp.ultimate, vp.sigs, vp.ca
+FROM closure c
+JOIN ValidPaths vp ON c.id = vp.id
 """
 
 # Batch query: PathInfo for multiple paths at once
@@ -302,20 +306,80 @@ class LocalStoreDB:
             )
             return None
 
-    async def compute_closure(self, seeds: set[StorePath]) -> set[StorePath] | None:
-        """Expand seed paths to their full runtime reference closure.
+    async def query_closure_with_info(
+        self, seeds: set[StorePath]
+    ) -> list[PathInfo] | None:
+        """Expand seed paths to their full closure and return PathInfo for all.
 
-        Single recursive CTE — no per-path queries. Returns None if DB unavailable.
+        Returns a topologically sorted list of PathInfo objects.
         """
         if self.db_conn is None or not seeds:
             return None
         try:
             seeds_json = json.dumps(list(seeds))
-            async with self.db_conn.execute(_COMPUTE_CLOSURE, (seeds_json,)) as cursor:
+            async with self.db_conn.execute(
+                _QUERY_CLOSURE_WITH_INFO, (seeds_json,)
+            ) as cursor:
                 rows = await cursor.fetchall()
-            return {r[0] for r in rows}
+
+            # We also need the references for topological sorting.
+            # Use _QUERY_REFERENCES_BATCH but we need the full closure paths first.
+            closure_paths = {StorePath(r[0]) for r in rows}
+            closure_paths_json = json.dumps(list(closure_paths))
+
+            async with self.db_conn.execute(
+                _QUERY_REFERENCES_BATCH, (closure_paths_json,)
+            ) as cursor:
+                ref_rows = await cursor.fetchall()
+
+            # Build referrer -> {references} map
+            refs_map: dict[StorePath, set[StorePath]] = {}
+            for referrer, reference in ref_rows:
+                refs_map.setdefault(StorePath(referrer), set()).add(
+                    StorePath(reference)
+                )
+
+            # Create PathInfo objects
+            infos: dict[StorePath, PathInfo] = {}
+            for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
+                p = StorePath(path)
+                infos[p] = PathInfo(
+                    path=p,
+                    deriver=StorePath(deriver or ""),
+                    nar_hash=nar_hash,
+                    references=refs_map.get(p, set()),
+                    registration_time=reg_time,
+                    nar_size=nar_size or 0,
+                    ultimate=1 if ultimate else 0,
+                    sigs=set(sigs.split()) if sigs else set(),
+                    ca=ca or "",
+                )
+
+            # Topological sort
+            sorted_infos: list[PathInfo] = []
+            visited: set[StorePath] = set()
+            visiting: set[StorePath] = set()
+
+            def visit(p: StorePath):
+                if p in visited:
+                    return
+                if p in visiting:
+                    return
+                visiting.add(p)
+                info = infos[p]
+                for ref in info.references:
+                    if ref != p:
+                        visit(ref)
+                visiting.remove(p)
+                visited.add(p)
+                sorted_infos.append(info)
+
+            for p in sorted(infos.keys()):
+                visit(p)
+
+            return sorted_infos
         except Exception:
-            log.debug("compute_closure_failed", exc_info=True)
+            log.debug("query_closure_with_info_failed", exc_info=True)
             return None
 
     async def query_path_infos(

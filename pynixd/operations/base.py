@@ -331,6 +331,14 @@ class PathInfo:
     sigs: set[str] = field(default_factory=set)
     ca: str = ""
 
+    def __hash__(self) -> int:
+        return hash(self.path)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PathInfo):
+            return False
+        return self.path == other.path
+
     @classmethod
     async def from_reader_unkeyed(
         cls,

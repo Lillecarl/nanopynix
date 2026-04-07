@@ -168,16 +168,24 @@ class Store(ABC):
 
     async def compute_closure_with_info(
         self, paths: Iterable[StorePath], conn: Connection | None = None
-    ) -> dict[StorePath, PathInfo]:
+    ) -> list[PathInfo]:
         """Recursively find all paths and their info in the store closure.
 
+        Returns a topologically sorted list of PathInfo objects.
         If a connection is provided, it's used as a fallback if paths are
         missing from the store's local metadata (DB).
         """
+        paths_set = {StorePath(p) for p in paths}
+        if self.db:
+            db_res = await self.db.query_closure_with_info(paths_set)
+            if db_res is not None:
+                return db_res
+
+        # Daemon fallback: BFS closure expansion, then topo sort
         from .operations.queries import QueryPathInfoRequest
 
         all_infos: dict[StorePath, PathInfo] = {}
-        pending = {StorePath(p) for p in paths}
+        pending = paths_set
 
         while pending:
             to_fetch = {p for p in pending if p not in all_infos}
@@ -208,12 +216,34 @@ class Store(ABC):
                         next_pending.add(ref)
             pending = next_pending
 
-        return all_infos
+        # Topological sort
+        sorted_infos: list[PathInfo] = []
+        visited: set[StorePath] = set()
+        visiting: set[StorePath] = set()
+
+        def visit(p: StorePath):
+            if p in visited:
+                return
+            if p in visiting:
+                return
+            visiting.add(p)
+            info = all_infos[p]
+            for ref in info.references:
+                if ref != p:
+                    visit(ref)
+            visiting.remove(p)
+            visited.add(p)
+            sorted_infos.append(info)
+
+        for p in sorted(all_infos.keys()):
+            visit(p)
+
+        return sorted_infos
 
     async def compute_closure(self, paths: Iterable[StorePath]) -> set[StorePath]:
         """Recursively find all paths in the store closure of the given paths."""
         infos = await self.compute_closure_with_info(paths)
-        return set(infos.keys())
+        return {info.path for info in infos}
 
     async def call(
         self,
@@ -365,33 +395,10 @@ class Store(ABC):
             src_conn if src_conn else src.transfer_conn() as src_conn,
             dst_conn if dst_conn else dst.transfer_conn() as dst_conn,
         ):
-            # 1. Expand closure and fetch all PathInfo
-            all_infos = await src.compute_closure_with_info(paths_list, conn=src_conn)
-
-            # 2. Topologically sort the entire closure
-            sorted_paths: list[StorePath] = []
-            visited: set[StorePath] = set()
-            visiting: set[StorePath] = set()
-
-            def visit(p: StorePath):
-                if p in visited:
-                    return
-                if p in visiting:
-                    return
-                visiting.add(p)
-                info = all_infos.get(p)
-                if info:
-                    for ref in info.references:
-                        if ref != p:
-                            visit(ref)
-                visiting.remove(p)
-                visited.add(p)
-                sorted_paths.append(p)
-
-            for p in sorted(all_infos.keys()):
-                visit(p)
-
-            final_paths_with_info = [(p, all_infos[p]) for p in sorted_paths]
+            # 1. Expand closure and fetch all PathInfo (returns topo-sorted list)
+            final_paths_with_info = await src.compute_closure_with_info(
+                paths_list, conn=src_conn
+            )
 
             log.info(
                 "stream_paths_with_info_store_to_store",
@@ -399,7 +406,7 @@ class Store(ABC):
                 requested=len(paths_list),
             )
 
-            # 3. Stream to destination
+            # 2. Stream to destination
             dst_conn.op_log.append(
                 "AddMultipleToStore (stream_paths_with_info_store_to_store)"
             )
@@ -415,8 +422,8 @@ class Store(ABC):
             # Write how many paths we're looking to send
             fw.write_uint64(len(final_paths_with_info))
 
-            for p, info in final_paths_with_info:
-                path = StorePath(p)
+            for info in final_paths_with_info:
+                path = info.path
                 dst_conn.op_log.append(
                     "AddToStoreNar (stream_paths_with_info_store_to_store)"
                 )
@@ -428,7 +435,7 @@ class Store(ABC):
                 src_conn.w.write_uint64(Op.NarFromPath)
                 # Write which path we're looking for
                 await SingleStringRequest(
-                    path=StorePath(path),
+                    path=path,
                 ).to_writer(src_conn.w, src_conn.version)
                 # Send the NarFromPath request
                 await src_conn.w.drain()
