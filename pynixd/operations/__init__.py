@@ -5,7 +5,6 @@ from . import (  # noqa: F401
     builds,
     ca_derivations,
     maintenance,
-    profiling,
     queries,
     store_mutations,
 )

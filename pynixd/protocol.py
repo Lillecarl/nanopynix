@@ -53,9 +53,7 @@ class Op(IntEnum):
     BuildPathsWithResults = 46
     AddPermRoot = 47
 
-    # pynixd profiling extensions (not standard Nix protocol)
-    PynixdStartProfiling = 101
-    PynixdStopProfiling = 102
+    # pynixd extensions (not standard Nix protocol)
     QueryPathInfos = 103
     QueryClosure = 104
     QueryClosureWithInfo = 105
