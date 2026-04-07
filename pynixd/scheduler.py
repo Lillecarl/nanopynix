@@ -253,6 +253,7 @@ class Scheduler:
             if resp.result.status == 0:
                 # Resolve drv to outputs
                 outputs = build.request.derivation.output_paths()
+                store.add_known_paths(set(outputs.values()))
                 log.info("pulling_paths", store_id=store.id, count=len(outputs))
                 for p in outputs.values():
                     log.debug("pulling_path", store_id=store.id, path=p)

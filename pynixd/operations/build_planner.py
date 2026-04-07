@@ -53,7 +53,18 @@ async def decompose_build_paths(
         tuple[DerivedPath, set[str], asyncio.Future[BuildDerivationResponse]]
     ] = []
 
-    # Resolve all builds first so we can batch-discover input paths
+    # 1. Parse all planned derivations to collect every output path they produce.
+    # This gives us exactly the set of paths that are part of this build DAG
+    # and have not yet been built.
+    all_planned_outputs: set[StorePath] = set()
+    for dp in (DerivedPath(p) for p in missing_resp.will_build):
+        try:
+            parsed = dp.to_derivation(store.store_path)
+            all_planned_outputs.update(parsed.output_paths().values())
+        except FileNotFoundError:
+            pass
+
+    # 2. Resolve all builds so we can batch-discover input paths
     resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []
     all_input_srcs: set[StorePath] = set()
 
@@ -80,14 +91,26 @@ async def decompose_build_paths(
         store.add_known_paths(valid_resp.paths, update_regtime=False)
 
     for dp, output_names, drv_request in resolved:
-        # Expand input_srcs to full closure, matching Nix's behavior
-        # when delegating to remote builders.
-        closure_resp = await store.execute(
-            QueryClosureRequest(paths=drv_request.derivation.input_srcs)
-        )
-        drv_request.derivation.input_srcs = closure_resp.paths
+        # Expand input_srcs to full closure early on. It's relevant for the
+        # ranking mechanism to know about as many paths as possible.
+        # We only compute the closure for paths that are NOT produced by this
+        # build plan (i.e. static source files or outputs of prior builds).
+        # The outputs of this plan are kept as direct references; the backend
+        # will know their closures because they will be built and valid in its
+        # store before this specific derivation starts.
+        existing_inputs = drv_request.derivation.input_srcs - all_planned_outputs
+        unbuilt_inputs = drv_request.derivation.input_srcs & all_planned_outputs
 
-        future = await enqueue_build_derivation(drv_request, store, scheduler, client)
+        closure_resp = await store.execute(QueryClosureRequest(paths=existing_inputs))
+
+        drv_request.derivation.input_srcs = closure_resp.paths | unbuilt_inputs
+
+        future = await enqueue_build_derivation(
+            drv_request,
+            store,
+            scheduler,
+            client,
+        )
         results.append((dp, output_names, future))
 
     return results
@@ -103,11 +126,13 @@ async def enqueue_build_derivation(
     # Enrich with .drv metadata (e.g. _is_dynamic) if not already set
     enrich_derivation(request, store)
 
+    required_paths = set(request.derivation.input_srcs) | {request.drv_path}
+
     build_id, future = await scheduler.enqueue(
         Op.BuildDerivation,
         request,
         client,
-        request.derivation.input_srcs,
+        required_paths,
         platform=request.derivation.platform,
     )
     log.info(

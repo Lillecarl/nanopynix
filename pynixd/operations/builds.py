@@ -251,12 +251,20 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         from .build_planner import enqueue_build_derivation
         from .queries import QueryClosureRequest
 
-        # Expand input_srcs to full closure, matching Nix's behavior
-        # when delegating to remote builders.
+        # Expand input_srcs to full closure early on. It's relevant for the
+        # ranking mechanism to know about as many paths as possible.
+        # We only compute the closure for paths that already exist (like source
+        # files). The unbuilt paths are kept as direct references; the backend
+        # will know their closures because they will be valid paths in its store
+        # before the build starts.
+        existing_inputs = request.derivation.input_srcs & proxy.local_store.known_paths
+        unbuilt_inputs = request.derivation.input_srcs - proxy.local_store.known_paths
+
         closure_resp = await proxy.local_store.execute(
-            QueryClosureRequest(paths=request.derivation.input_srcs)
+            QueryClosureRequest(paths=existing_inputs)
         )
-        request.derivation.input_srcs = closure_resp.paths
+
+        request.derivation.input_srcs = closure_resp.paths | unbuilt_inputs
 
         future = await enqueue_build_derivation(
             request,

@@ -1,4 +1,4 @@
-"""Simple end-to-end build tests."""
+"""DAG build tests."""
 
 from __future__ import annotations
 
@@ -15,8 +15,42 @@ from tests.conftest import NIX_BIN, STORE_PREFIX, run_captured, set_log_levels
 log = structlog.get_logger(__name__)
 
 
-async def test_builders() -> None:
-    """Build test.nix .simple via --builders."""
+async def test_dag_builders() -> None:
+    """Build test.nix .dag via --builders."""
+    test_nix = Path("test.nix")
+    local_store = LocalSocketStore(
+        id="local",
+        store_path=STORE_PREFIX / "dag-builders-local",
+        nix_bin=NIX_BIN,
+    )
+    builder_store = LocalSocketStore(
+        id="builder",
+        store_path=STORE_PREFIX / "dag-builders-builder",
+        nix_bin=NIX_BIN,
+    )
+
+    async with Server(
+        local_store=local_store, stores={"builder": builder_store}, ssh_port=0
+    ) as server:
+        uri = server.builder_uri(implementation=NixImplementation.NIX, max_jobs=4)
+        cmd = [
+            str(NIX_BIN),
+            "build",
+            "--builders",
+            uri,
+            "--file",
+            str(test_nix),
+            "dag",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr = await run_captured(cmd)
+        assert rc == 0, f"""build failed:
+{stderr}"""
+
+
+async def test_dag_store() -> None:
+    """Build test.nix .dag via --store."""
     test_nix = Path("test.nix")
     local_store = LocalSocketStore(
         id="local",
@@ -26,40 +60,6 @@ async def test_builders() -> None:
     builder_store = LocalSocketStore(
         id="builder",
         store_path=STORE_PREFIX / "builder",
-        nix_bin=NIX_BIN,
-    )
-
-    async with Server(
-        local_store=local_store, stores={"builder": builder_store}, ssh_port=0
-    ) as server:
-        uri = server.builder_uri(implementation=NixImplementation.NIX, max_jobs=1)
-        cmd = [
-            str(NIX_BIN),
-            "build",
-            "--builders",
-            uri,
-            "--file",
-            str(test_nix),
-            "simple",
-            "--no-link",
-            "--print-out-paths",
-        ]
-        rc, stdout, stderr = await run_captured(cmd)
-        assert rc == 0, f"""build failed:
-{stderr}"""
-
-
-async def test_store() -> None:
-    """Build test.nix .simple via --store."""
-    test_nix = Path("test.nix")
-    local_store = LocalSocketStore(
-        id="local",
-        store_path=STORE_PREFIX / "local-store",
-        nix_bin=NIX_BIN,
-    )
-    builder_store = LocalSocketStore(
-        id="builder",
-        store_path=STORE_PREFIX / "builder-store",
         nix_bin=NIX_BIN,
     )
 
@@ -79,7 +79,7 @@ async def test_store() -> None:
                 uri,
                 "--file",
                 str(test_nix),
-                "simple",
+                "dag",
                 "--no-link",
                 "--print-out-paths",
             ]

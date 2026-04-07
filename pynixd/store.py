@@ -301,6 +301,9 @@ class Store(ABC):
             # Read the empty response to clean the connection
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
 
+            # Update destination's known paths
+            dst.add_known_paths({info.path for info in infos_list})
+
     @classmethod
     async def stream_paths_store_to_store(
         cls,
