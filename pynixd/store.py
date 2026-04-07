@@ -187,7 +187,10 @@ class Store(ABC):
                 break
 
             # Use query_path_infos which may use DB fast path
-            new_infos = await self.query_path_infos(to_fetch)
+            from .operations.queries import QueryPathInfosRequest
+
+            resp = await self.execute(QueryPathInfosRequest(paths=to_fetch))
+            new_infos = resp.infos
 
             # Ensure we got info for all requested paths (fallback to connection)
             for p in to_fetch:
@@ -306,27 +309,6 @@ class Store(ABC):
         self.known_paths.update(paths)
         if update_regtime and self.db is not None:
             self.db.mark_paths(set(paths))
-
-    async def query_path_infos(
-        self, paths: set[StorePath]
-    ) -> dict[StorePath, PathInfo]:
-        """Batch PathInfo for multiple paths. DB fast path, daemon fallback."""
-        if not paths:
-            return {}
-
-        if self.db is not None:
-            result = await self.db.query_path_infos(paths)
-            if result is not None:
-                return result
-
-        # Slow path: sequential query_path_info
-
-        infos: dict[StorePath, PathInfo] = {}
-        for path in paths:
-            resp = await self.execute(QueryPathInfoRequest(path=path))
-            if resp.valid and resp.info:
-                infos[path] = resp.info
-        return infos
 
     @classmethod
     async def stream_paths_with_info_store_to_store(

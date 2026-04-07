@@ -102,7 +102,7 @@ class DaemonProxy:
         if self.version >= wire.proto(1, 38):
             client_features = await self.r.read_string_set()
             log.debug("client_features", client_features=client_features)
-            self.w.write_string_set(set())  # our features (none)
+            self.w.write_string_set({"QueryPathInfos"})  # our features
 
         if await self.r.read_uint64():  # sendCpu
             await self.r.read_uint64()  # cpuAffinity (ignored)

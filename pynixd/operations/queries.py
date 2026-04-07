@@ -142,6 +142,79 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
         return resp
 
 
+# ── QueryPathInfos ───────────────────────────────────────────────────
+
+
+@dataclass
+class QueryPathInfosResponse(OpResponse):
+    infos: dict[StorePath, PathInfo] = field(default_factory=dict)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        n = await reader.read_uint64()
+        infos = {}
+        for _ in range(n):
+            info = await PathInfo.from_reader_keyed(reader)
+            infos[info.path] = info
+        return cls(infos=infos)
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(len(self.infos))
+        for info in self.infos.values():
+            await info.to_writer_keyed(writer)
+
+
+@dataclass
+class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
+    op: ClassVar[int] = Op.QueryPathInfos
+    response_type: ClassVar[type[OpResponse]] = QueryPathInfosResponse
+    is_query: ClassVar[bool] = True
+    paths: set[StorePath] = field(default_factory=set)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(paths=await reader.read_string_set(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string_set(self.paths)
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> QueryPathInfosResponse:
+        # 1. SQLite fast path
+        if store.db:
+            result = await store.db.query_path_infos(self.paths)
+            if result is not None:
+                store.add_known_paths(set(result.keys()))
+                return QueryPathInfosResponse(infos=result)
+
+        # 2. Custom feature check
+        async with store.transfer_conn() as conn:
+            if "QueryPathInfos" in conn.features:
+                return await conn.call(self, client=client, suppress_last=suppress_last)
+
+        # 3. Sequential fallback
+        infos: dict[StorePath, PathInfo] = {}
+        for path in self.paths:
+            resp = await store.execute(
+                QueryPathInfoRequest(path=path),
+                client=client,
+                suppress_last=suppress_last,
+            )
+            if resp.valid and resp.info:
+                infos[path] = resp.info
+        return QueryPathInfosResponse(infos=infos)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> QueryPathInfosResponse:
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        request = await cls.from_reader(proxy.r, proxy.version)
+        return await proxy.local_store.execute(request, client=proxy.client)
+
+
 # ── QueryValidPaths ──────────────────────────────────────────────────
 
 

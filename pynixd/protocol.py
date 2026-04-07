@@ -56,6 +56,7 @@ class Op(IntEnum):
     # pynixd profiling extensions (not standard Nix protocol)
     PynixdStartProfiling = 101
     PynixdStopProfiling = 102
+    QueryPathInfos = 103
 
     # Obsolete ops that we reject
     HasSubstitutes = 3
