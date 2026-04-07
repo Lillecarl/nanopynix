@@ -19,9 +19,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-from environs import Env
-
-env = Env()
+from environs import env
 
 
 @dataclass

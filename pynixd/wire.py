@@ -16,9 +16,8 @@ from collections.abc import AsyncIterator, Iterable
 from typing import TYPE_CHECKING, Final
 
 import asyncssh
-from environs import Env
+from environs import env
 
-env = Env()
 
 _CHUNK_SIZE = env.int("PYNIXD_CHUNK_SIZE", 1024 * 1024)
 

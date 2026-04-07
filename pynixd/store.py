@@ -24,7 +24,7 @@ from pathlib import Path
 
 import asyncssh
 import structlog
-from environs import Env
+from environs import env
 
 from . import wire
 from .connection import ClientConn, Connection
@@ -49,7 +49,6 @@ from .wire import (
 log = structlog.get_logger(__name__)
 pool_log = structlog.get_logger(f"{__name__}.pool")
 
-env = Env()
 
 _DEFAULT_IDLE_TTL: float = 10.0
 _CB_THRESHOLD: int = 3  # failures before cooldown

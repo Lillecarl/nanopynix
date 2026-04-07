@@ -26,7 +26,7 @@ from conftest import (
     NIX_BIN,
     _record,
 )
-from environs import Env
+from environs import env
 
 from pynixd import Server
 from pynixd.http_cache import BinaryCacheServer
@@ -37,7 +37,6 @@ from pynixd.store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
-env = Env()
 
 _SSH_USER = env.str("USER", "root")
 

@@ -18,7 +18,7 @@ from typing import Self
 
 import pytest
 import structlog
-from environs import Env
+from environs import env
 
 from pynixd.store import LocalSocketStore, Store
 
@@ -144,7 +144,6 @@ logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 log = structlog.get_logger(__name__)
 
-env = Env()
 
 TEST_NIX = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
 

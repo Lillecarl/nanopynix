@@ -39,7 +39,7 @@ import logging
 from pathlib import Path
 
 import structlog
-from environs import Env
+from environs import env
 
 from .instance import PynixdConfig, Server
 from .store import (
@@ -50,7 +50,6 @@ from .store import (
 )
 
 log = structlog.get_logger(__name__)
-env = Env()
 
 
 def load_backends_from_file(path: Path) -> dict[str, Store]:

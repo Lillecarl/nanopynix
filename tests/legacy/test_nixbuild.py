@@ -10,14 +10,12 @@ from conftest import (
     nix_build,
     nix_build_store_only,
 )
-from environs import Env
+from environs import env
 
 from pynixd import Server
 from pynixd.store import SSHSubprocessStore, Store
 
 pytestmark = pytest.mark.nixbuild
-
-env = Env()
 
 
 def _nixbuild_stores() -> Mapping[str, Store]:

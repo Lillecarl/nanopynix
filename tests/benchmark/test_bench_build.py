@@ -31,7 +31,7 @@ from conftest import (
     _record,
     rmtree_robust,
 )
-from environs import Env
+from environs import env
 from pyinstrument.renderers import ConsoleRenderer
 
 from pynixd.instance import PynixdConfig, Server
@@ -46,7 +46,6 @@ nixclient_log = structlog.get_logger("nixclient")
 aiosqlite_logger = logging.getLogger("aiosqlite")
 aiosqlite_logger.setLevel(logging.WARNING)
 
-env = Env()
 
 CLIENT_BINS: list[tuple[Path, str]] = [
     (NIX_BIN, "nix"),

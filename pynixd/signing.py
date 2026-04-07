@@ -14,14 +14,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import nacl.signing
-from environs import Env
+from environs import env
 
 from .store_path import StorePath
 
 if TYPE_CHECKING:
     from .operations.base import PathInfo
 
-env = Env()
 
 # Nix32 alphabet (base-32 encoding used by Nix for hashes)
 _NIX32_CHARS = b"0123456789abcdfghijklmnpqrsvwxyz"

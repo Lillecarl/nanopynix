@@ -15,7 +15,7 @@ import asyncio
 from collections.abc import Mapping
 
 import structlog
-from environs import Env
+from environs import env
 
 from .local_store_db import LocalStoreDB
 from .operations.collect_garbage import CollectGarbageRequest, CollectGarbageResponse
@@ -24,7 +24,6 @@ from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
-env = Env()
 
 _GC_INTERVAL = env.float("PYNIXD_GC_INTERVAL", 3600.0)
 _GC_LOCAL_MAX_AGE = env.int("PYNIXD_GC_LOCAL_MAX_AGE", 604800)

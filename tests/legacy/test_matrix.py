@@ -20,7 +20,7 @@ from conftest import (
     NIX_BIN,
     nix_command,
 )
-from environs import Env
+from environs import env
 
 from pynixd import Server
 from pynixd.instance import NixImplementation
@@ -32,7 +32,6 @@ from pynixd.store import (
 
 log = structlog.get_logger(__name__)
 
-env = Env()
 
 pytestmark = pytest.mark.matrix
 

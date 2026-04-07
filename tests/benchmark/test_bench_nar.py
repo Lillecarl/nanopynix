@@ -33,7 +33,7 @@ from pathlib import Path
 import pytest
 import structlog
 from conftest import NIX_BIN, _record, rmtree_robust
-from environs import Env
+from environs import env
 
 from pynixd import wire
 from pynixd.operations.base import PathInfo
@@ -48,7 +48,6 @@ from pynixd.store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
-env = Env()
 
 BENCH_DST = Path("/tmp/pynixd-bench-dst")
 

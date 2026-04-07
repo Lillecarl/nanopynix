@@ -18,7 +18,6 @@ import time
 from collections.abc import Mapping
 
 import structlog
-from environs import Env
 
 from .build_queue import BuildQueue, QueuedBuild
 from .connection import ClientConn
@@ -32,8 +31,6 @@ from .store import Store
 from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
-
-env = Env()
 
 
 class Scheduler:
