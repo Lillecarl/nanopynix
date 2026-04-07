@@ -323,7 +323,7 @@ class Store(ABC):
             src.transfer_conn() as src_conn,
         ):
             # 1. Expand closure and fetch all PathInfo (returns topo-sorted list)
-            from .operations.queries import QueryClosureWithInfoRequest
+            from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 
             closure_resp = await src.execute(
                 QueryClosureWithInfoRequest(paths=paths_set),

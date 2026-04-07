@@ -167,7 +167,7 @@ class Server:
         local_store.db = await LocalStoreDB.open(local_store.store_path or Path("/"))
 
         for store in stores.values():
-            from .operations.queries import QueryAllValidPathsRequest
+            from .operations.query_all_valid_paths import QueryAllValidPathsRequest
 
             try:
                 await store.execute(QueryAllValidPathsRequest())

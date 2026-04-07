@@ -23,10 +23,8 @@ import structlog
 from aiohttp import web
 
 from .local_store_db import LocalStoreDB
-from .operations.queries import (
-    QueryPathFromHashPartRequest,
-    QueryPathInfoRequest,
-)
+from .operations.query_path_from_hash_part import QueryPathFromHashPartRequest
+from .operations.query_path_info import QueryPathInfoRequest
 from .store import Store
 from .store_path import StorePath
 
@@ -209,7 +207,7 @@ class BinaryCacheServer:
         await response.prepare(request)
 
         try:
-            from .operations.queries import NarFromPathRequest
+            from .operations.nar_from_path import NarFromPathRequest
 
             await self.store.execute(
                 NarFromPathRequest(
