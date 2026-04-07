@@ -166,8 +166,10 @@ class Server:
         local_store.db = await LocalStoreDB.open(local_store.store_path or Path("/"))
 
         for store in stores.values():
+            from .operations.queries import QueryAllValidPathsRequest
+
             try:
-                await store.sync_paths()
+                await store.execute(QueryAllValidPathsRequest())
             except Exception:
                 log.exception("sync_paths_failed", id=store.id)
 

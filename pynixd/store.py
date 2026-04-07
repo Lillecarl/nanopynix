@@ -36,9 +36,6 @@ from .operations.base import (
     Resp,
     SingleStringRequest,
 )
-from .operations.queries import (
-    QueryAllValidPathsRequest,
-)
 from .operations.store_mutations import (
     AddMultipleToStoreRequest,
     AddToStoreNarRequest,
@@ -393,23 +390,6 @@ class Store(ABC):
 
             await dst_conn.r.drain_stderr()
             await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
-
-    async def sync_paths(self) -> None:
-        """Query the daemon for all valid paths. Called once at startup.
-
-        Falls back to empty set if the store doesn't support QueryAllValidPaths
-        (e.g. nixbuild.net). Locality ranking just won't apply.
-        """
-        try:
-            async with self.transfer_conn() as conn:
-                resp = await conn.call(QueryAllValidPathsRequest())
-                self.known_paths = resp.paths
-            log.info(
-                "sync_paths_complete", store_id=self.id, count=len(self.known_paths)
-            )
-        except Exception:
-            log.warning("sync_paths_failed", store_id=self.id)
-            self.known_paths = set()
 
     @property
     def available_transfer_slots(self) -> int:

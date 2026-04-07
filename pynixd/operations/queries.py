@@ -650,21 +650,30 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> StringSetResponse:
-        # 1. SQLite fast path
-        if store.db:
-            result = await store.db.query_all_valid_paths()
-            if result is not None:
-                store.add_known_paths(result.paths, update_regtime=False)
-                return result
+        try:
+            # 1. SQLite fast path
+            if store.db:
+                result = await store.db.query_all_valid_paths()
+                if result is not None:
+                    store.add_known_paths(result.paths, update_regtime=False)
+                    return result
 
-        # 2. Daemon fallback
-        resp = await super().execute(
-            store,
-            client,
-            suppress_last,
-        )
-        store.add_known_paths(resp.paths, update_regtime=False)
-        return resp
+            # 2. Daemon fallback
+            resp = await super().execute(
+                store,
+                client,
+                suppress_last,
+            )
+            store.add_known_paths(resp.paths, update_regtime=False)
+            self._log.info(
+                "sync_paths_complete", store_id=store.id, count=len(resp.paths)
+            )
+            return resp
+        except Exception:
+            self._log.warning("sync_paths_failed", store_id=store.id)
+            # Ensure we have a clean state on failure
+            store.known_paths = set()
+            return StringSetResponse(paths=set())
 
 
 # ── QuerySubstitutablePaths ──────────────────────────────────────────
