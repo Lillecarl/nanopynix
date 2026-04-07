@@ -365,7 +365,7 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
             client,
             suppress_last,
         )
-        store.add_known_paths({StorePath(p) for p in resp.paths}, update_regtime=False)
+        store.add_known_paths(resp.paths, update_regtime=False)
         return resp
 
 
@@ -476,7 +476,7 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         if store.store_path:
             for dp in self.derived_paths:
                 outputs = dp.to_outputs(store.store_path)
-                store.add_known_paths({StorePath(p) for p in outputs})
+                store.add_known_paths(outputs)
 
         # Any path being substituted is also "known" to be available.
         # TODO: This could be optimized by running in a background task,

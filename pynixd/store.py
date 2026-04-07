@@ -213,7 +213,7 @@ class Store(ABC):
     async def compute_closure(self, paths: Iterable[StorePath]) -> set[StorePath]:
         """Recursively find all paths in the store closure of the given paths."""
         infos = await self.compute_closure_with_info(paths)
-        return {StorePath(p) for p in infos.keys()}
+        return set(infos.keys())
 
     async def call(
         self,
@@ -334,14 +334,14 @@ class Store(ABC):
                 substitute=1 if substitute else 0,
             )
         )
-        return {StorePath(p) for p in resp.paths}
+        return resp.paths
 
     async def query_all_valid_paths(self) -> set[StorePath]:
         """Query all valid paths on this store."""
         from .operations.queries import QueryAllValidPathsRequest
 
         resp = await self.execute(QueryAllValidPathsRequest())
-        return {StorePath(p) for p in resp.paths}
+        return resp.paths
 
     @classmethod
     async def stream_paths_with_info_store_to_store(
@@ -531,7 +531,7 @@ class Store(ABC):
             await conn.w.drain()
             await conn.r.drain_stderr()
             await EmptyResponse.from_reader(conn.r, conn.version)
-            return [StorePath(p) for p in paths]
+            return paths
 
     async def buffer_nar_from_path(self, path: StorePath, nar_size: int = 0) -> bytes:
         """Read NAR into memory."""
@@ -650,7 +650,7 @@ class Store(ABC):
         try:
             async with self.transfer_conn() as conn:
                 resp = await conn.call(QueryAllValidPathsRequest())
-                self.known_paths = {StorePath(p) for p in resp.paths}
+                self.known_paths = resp.paths
             log.info(
                 "sync_paths_complete", store_id=self.id, count=len(self.known_paths)
             )

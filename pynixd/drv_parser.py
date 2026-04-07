@@ -205,16 +205,16 @@ class _Parser:
                 parts.append("\\")
                 parts.append(esc)
 
-    def parse_string_list(self) -> list[str]:
+    def parse_string_list[T: str = str](self, tp: type[T] = str) -> list[T]:
         """Parse [str, str, ...]."""
         self._expect("[")
-        result: list[str] = []
+        result: list[T] = []
         self._skip_ws()
         while self._peek() != "]":
             if result:
                 self._expect(",")
             self._skip_ws()
-            result.append(self.parse_string())
+            result.append(tp(self.parse_string()))
             self._skip_ws()
         self._expect("]")
         return result
@@ -370,7 +370,7 @@ class _Parser:
         self._expect(",")
         self._skip_ws()
 
-        input_srcs_list = self.parse_string_list()
+        input_srcs_list = self.parse_string_list(StorePath)
         self._expect(",")
         self._skip_ws()
 
@@ -393,7 +393,7 @@ class _Parser:
         return ParsedDerivation(
             outputs=outputs,
             input_drvs=input_drvs,
-            input_srcs={StorePath(p) for p in input_srcs_list},
+            input_srcs=set(input_srcs_list),
             platform=platform,
             builder=builder,
             args=args,
@@ -420,7 +420,7 @@ class _Parser:
         self._expect(",")
         self._skip_ws()
 
-        input_srcs_list = self.parse_string_list()
+        input_srcs_list = self.parse_string_list(StorePath)
         self._expect(",")
         self._skip_ws()
 
@@ -443,7 +443,7 @@ class _Parser:
         return ParsedDerivation(
             outputs=outputs,
             input_drvs=input_drvs,
-            input_srcs={StorePath(p) for p in input_srcs_list},
+            input_srcs=set(input_srcs_list),
             platform=platform,
             builder=builder,
             args=args,

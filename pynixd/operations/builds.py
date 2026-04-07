@@ -248,8 +248,9 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         # Expand input_srcs to full closure, matching Nix's behavior
         # when delegating to remote builders.
-        closure = await proxy.local_store.compute_closure(request.derivation.input_srcs)
-        request.derivation.input_srcs = {StorePath(p) for p in closure}
+        request.derivation.input_srcs = await proxy.local_store.compute_closure(
+            request.derivation.input_srcs
+        )
 
         future = await enqueue_build_derivation(
             request,

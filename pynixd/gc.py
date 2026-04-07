@@ -80,16 +80,12 @@ class GarbageCollector:
     async def run_gc_pass(self) -> None:
         """Find stale paths and delete them from all stores."""
         # Query with the shorter lifetime to get the superset of stale paths
-        builder_stale_raw = await self.db.query_stale_paths(self.builder_max_age)
-        if not builder_stale_raw:
+        builder_stale = await self.db.query_stale_paths(self.builder_max_age)
+        if not builder_stale:
             return
-        builder_stale = {StorePath(p) for p in builder_stale_raw}
 
         # Local store uses longer lifetime — filter to older paths
-        local_stale_raw = await self.db.query_stale_paths(self.local_max_age)
-        local_stale = (
-            {StorePath(p) for p in local_stale_raw} if local_stale_raw else set()
-        )
+        local_stale = await self.db.query_stale_paths(self.local_max_age)
 
         tasks = []
         stores_for_tasks: list[Store] = []

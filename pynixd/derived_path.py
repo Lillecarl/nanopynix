@@ -64,7 +64,7 @@ class DerivedPath(StorePath):
 
         return read_drv_file(store_path, self.drv_path)
 
-    def to_outputs(self, store_path: Path) -> set[str]:
+    def to_outputs(self, store_path: Path) -> set[StorePath]:
         """Resolve this derived path to actual output store paths.
 
         Args:
@@ -79,7 +79,7 @@ class DerivedPath(StorePath):
             parsed = self.to_derivation(store_path)
         except (FileNotFoundError, OSError):
             return set()
-        all_outputs = parsed.output_paths()  # {name: path}
+        all_outputs = parsed.output_paths()  # {name: StorePath}
         if "*" in names:
             return set(all_outputs.values())
         return {p for n, p in all_outputs.items() if n in names}
