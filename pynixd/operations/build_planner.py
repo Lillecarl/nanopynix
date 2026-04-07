@@ -19,7 +19,7 @@ from .builds import (
     BuildPathsRequest,
     BuildPathsWithResultsRequest,
 )
-from .queries import QueryMissingRequest
+from .queries import QueryMissingRequest, QueryValidPathsRequest
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -72,8 +72,8 @@ async def decompose_build_paths(
     # Discover paths that exist on the local store but aren't tracked.
     unknown = all_input_srcs - store.known_paths
     if unknown:
-        valid = await store.query_valid_paths(unknown)
-        store.add_known_paths(valid, update_regtime=False)
+        valid_resp = await store.execute(QueryValidPathsRequest(paths=unknown))
+        store.add_known_paths(valid_resp.paths, update_regtime=False)
 
     for dp, output_names, drv_request in resolved:
         # Expand input_srcs to full closure, matching Nix's behavior

@@ -241,8 +241,12 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             set(request.derivation.input_srcs) | {request.drv_path}
         ) - proxy.local_store.known_paths
         if unknown:
-            valid = await proxy.local_store.query_valid_paths(unknown)
-            proxy.local_store.add_known_paths(valid, update_regtime=False)
+            from .queries import QueryValidPathsRequest
+
+            valid_resp = await proxy.local_store.execute(
+                QueryValidPathsRequest(paths=unknown)
+            )
+            proxy.local_store.add_known_paths(valid_resp.paths, update_regtime=False)
 
         from .build_planner import enqueue_build_derivation
 

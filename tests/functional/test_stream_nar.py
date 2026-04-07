@@ -7,6 +7,11 @@ from pathlib import Path
 import pytest
 import structlog
 
+from pynixd.operations.queries import (
+    IsValidPathRequest,
+    QueryAllValidPathsRequest,
+    QueryPathInfoRequest,
+)
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import NIX_BIN, STORE_PREFIX
@@ -16,12 +21,14 @@ log = structlog.get_logger(__name__)
 
 async def _pick_a_path(store: LocalSocketStore) -> StorePath:
     """Pick an arbitrary valid path from the store."""
-    all_paths = await store.query_all_valid_paths()
+    all_paths_resp = await store.execute(QueryAllValidPathsRequest())
+    all_paths = all_paths_resp.paths
     assert all_paths, "Store has no paths?!"
     for p in sorted(all_paths):
         if p.endswith(".drv"):
             continue
-        info = await store.query_path_info(p)
+        resp = await store.execute(QueryPathInfoRequest(path=p))
+        info = resp.info
         # Pick something small-ish
         if info and 0 < info.nar_size < 1_000_000:
             return p
@@ -50,20 +57,23 @@ async def test_stream_nar() -> None:
 
         # 2. Stream the path from src to dst
         # Check if path exists in src
-        assert await src_store.is_valid_path(store_path), (
-            f"Path {store_path} not valid in system store"
-        )
+        is_valid_src = await src_store.execute(IsValidPathRequest(path=store_path))
+        assert is_valid_src.valid, f"Path {store_path} not valid in system store"
 
         # Ensure it doesn't exist in dst (or at least we hope so for a fresh store)
         # If it happens to be there, we'll still test the streaming logic
-        if await dst_store.is_valid_path(store_path):
+        is_valid_dst = await dst_store.execute(IsValidPathRequest(path=store_path))
+        if is_valid_dst.valid:
             log.warning("path_already_in_dst", path=store_path)
 
         # Use stream_paths_to which handles the NAR piping
         await src_store.stream_paths_to(dst_store, [store_path])
 
         # Verify it now exists in dst
-        assert await dst_store.is_valid_path(store_path)
+        is_valid_dst_after = await dst_store.execute(
+            IsValidPathRequest(path=store_path)
+        )
+        assert is_valid_dst_after.valid
     finally:
         await src_store.close()
         await dst_store.close()

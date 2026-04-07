@@ -41,11 +41,9 @@ from .operations.maintenance import (
     CollectGarbageResponse,
 )
 from .operations.queries import (
-    IsValidPathRequest,
     NarFromPathRequest,
     QueryAllValidPathsRequest,
     QueryPathInfoRequest,
-    QueryValidPathsRequest,
 )
 from .operations.store_mutations import (
     AddMultipleToStoreRequest,
@@ -182,7 +180,6 @@ class Store(ABC):
                 return db_res
 
         # Daemon fallback: BFS closure expansion, then topo sort
-        from .operations.queries import QueryPathInfoRequest
 
         all_infos: dict[StorePath, PathInfo] = {}
         pending = paths_set
@@ -313,15 +310,6 @@ class Store(ABC):
         if update_regtime and self.db is not None:
             self.db.mark_paths(set(paths))
 
-    async def query_path_info(self, path: StorePath) -> PathInfo | None:
-        """Get PathInfo for a store path using a QueryPathInfoRequest."""
-
-        resp = await self.call(QueryPathInfoRequest(path=path))
-        if resp.valid and resp.info is not None:
-            resp.info.path = path
-            return resp.info
-        return None
-
     async def query_path_infos(
         self, paths: set[StorePath]
     ) -> dict[StorePath, PathInfo]:
@@ -335,43 +323,13 @@ class Store(ABC):
                 return result
 
         # Slow path: sequential query_path_info
+
         infos: dict[StorePath, PathInfo] = {}
         for path in paths:
-            info = await self.query_path_info(path)
-            if info is not None:
-                infos[path] = info
+            resp = await self.execute(QueryPathInfoRequest(path=path))
+            if resp.valid and resp.info:
+                infos[path] = resp.info
         return infos
-
-    async def is_valid_path(self, path: StorePath) -> bool:
-        """Check if a path is valid on this store."""
-
-        if self.has_path(path):
-            return True
-
-        resp = await self.call(IsValidPathRequest(path=path))
-        return resp.valid
-
-    async def query_valid_paths(
-        self,
-        paths: set[StorePath],
-        substitute: bool = False,
-    ) -> set[StorePath]:
-        """Query which paths are valid on this store."""
-
-        resp = await self.call(
-            QueryValidPathsRequest(
-                paths=set(paths),
-                substitute=1 if substitute else 0,
-            )
-        )
-        return resp.paths
-
-    async def query_all_valid_paths(self) -> set[StorePath]:
-        """Query all valid paths on this store."""
-        from .operations.queries import QueryAllValidPathsRequest
-
-        resp = await self.execute(QueryAllValidPathsRequest())
-        return resp.paths
 
     @classmethod
     async def stream_paths_with_info_store_to_store(
@@ -563,9 +521,11 @@ class Store(ABC):
         """Stream NAR to a NixWriter."""
         # If NAR size isn't specified we try to fetch it first
         if nar_size == 0:
-            path_info = await self.query_path_info(path)
-            if path_info is not None:
-                nar_size = path_info.nar_size
+            from .operations.queries import QueryPathInfoRequest
+
+            resp = await self.execute(QueryPathInfoRequest(path=path))
+            if resp.valid and resp.info:
+                nar_size = resp.info.nar_size
 
         async with self.transfer_conn() as conn:
             conn.w.write_uint64(Op.NarFromPath)

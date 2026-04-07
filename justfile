@@ -6,10 +6,10 @@ check: fmt
     pyright tests/conftest.py tests/functional
 
 fmt:
-    ruff check --fix pynixd
     ruff format pynixd
-    ruff check --fix tests
+    ruff check --fix pynixd
     ruff format tests
+    ruff check --fix tests
 
 # Run tests
 test:

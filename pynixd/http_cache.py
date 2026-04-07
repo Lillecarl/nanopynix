@@ -23,7 +23,10 @@ import structlog
 from aiohttp import web
 
 from .local_store_db import LocalStoreDB
-from .operations.queries import QueryPathFromHashPartRequest
+from .operations.queries import (
+    QueryPathFromHashPartRequest,
+    QueryPathInfoRequest,
+)
 from .store import Store
 from .store_path import StorePath
 
@@ -253,7 +256,8 @@ class BinaryCacheServer:
 
     async def get_path_info(self, path: StorePath):
         """Get PathInfo for a store path. Returns PathInfo or None."""
-        return await self.store.query_path_info(path)
+        resp = await self.store.execute(QueryPathInfoRequest(path=path))
+        return resp.info if resp.valid else None
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 

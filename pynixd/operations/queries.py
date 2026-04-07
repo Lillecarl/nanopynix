@@ -316,7 +316,10 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
 
         request = await cls.from_reader(proxy.r, proxy.version)
-        if await proxy.local_store.is_valid_path(request.path):
+        is_valid_resp = await proxy.local_store.execute(
+            IsValidPathRequest(path=request.path)
+        )
+        if is_valid_resp.valid:
             op_log("NarFromPath").debug(
                 "nar_from_path_streaming",
                 path=request.path,
