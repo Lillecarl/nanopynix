@@ -282,53 +282,6 @@ class LocalStoreDB:
             log.debug("query_stale_paths_failed", exc_info=True)
             return None
 
-    async def query_path_from_hash_part(self, hash_part: StorePath) -> StorePath | None:
-        """Find a path by its hash prefix. Used by http_cache resolve_path."""
-        if not self.active:
-            return None
-        try:
-            prefix = f"/nix/store/{hash_part}"
-            upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
-            async with self.acquire_conn() as conn:
-                async with conn.execute(
-                    QUERY_PATH_FROM_HASH_PART, (prefix, upper)
-                ) as cursor:
-                    row = await cursor.fetchone()
-            return StorePath(row[0]) if row else None
-        except Exception:
-            log.debug("query_path_from_hash_part_failed", exc_info=True)
-            return None
-
-    async def query_derivation_outputs_batch(
-        self, drv_paths: set[StorePath]
-    ) -> dict[StorePath, dict[str, StorePath]] | None:
-        """Batch query output paths for multiple .drv files.
-
-        Returns {drv_path: {output_name: output_path}}.
-        Used by build planner to skip parsing input .drv files.
-        """
-        if not self.active or not drv_paths:
-            return None
-        try:
-            import json
-
-            paths_json = json.dumps(list(drv_paths))
-            async with self.acquire_conn() as conn:
-                async with conn.execute(
-                    QUERY_DERIVATION_OUTPUTS_BATCH, (paths_json,)
-                ) as cursor:
-                    rows = await cursor.fetchall()
-
-            result: dict[StorePath, dict[str, StorePath]] = {}
-            for drv_path, output_name, output_path in rows:
-                result.setdefault(StorePath(drv_path), {})[output_name] = StorePath(
-                    output_path
-                )
-            return result
-        except Exception:
-            log.debug("query_derivation_outputs_batch_failed", exc_info=True)
-            return None
-
     # ── Registration time updates ─────────────────────────────────────
 
     def mark_path(self, path: StorePath) -> None:

@@ -59,6 +59,7 @@ class Op(IntEnum):
     QueryPathInfos = 103
     QueryClosure = 104
     QueryClosureWithInfo = 105
+    QueryDerivationOutputsBatch = 106
 
     # Obsolete ops that we reject
     HasSubstitutes = 3

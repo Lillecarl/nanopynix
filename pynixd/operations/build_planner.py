@@ -21,6 +21,7 @@ from .builds import (
 )
 from .queries import (
     QueryClosureRequest,
+    QueryDerivationOutputsBatchRequest,
     QueryMissingRequest,
     QueryValidPathsRequest,
 )
@@ -71,12 +72,13 @@ async def decompose_build_paths(
         all_planned_outputs.update(parsed.output_paths().values())
         all_input_drvs.update(parsed.input_drvs.keys())
 
-    # 2. Batch-query the DB for input_drv output paths (skip file reads)
+    # 2. Batch-query for input_drv output paths (skip file reads)
     output_cache = None
-    if store.db and store.db.active and all_input_drvs:
-        output_cache = await store.db.query_derivation_outputs_batch(all_input_drvs)
-        if output_cache is None:
-            output_cache = {}
+    if all_input_drvs:
+        resp = await store.execute(
+            QueryDerivationOutputsBatchRequest(drv_paths=all_input_drvs)
+        )
+        output_cache = resp.outputs if resp.outputs else {}
 
     # 3. Convert to wire format using the cached data
     resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []

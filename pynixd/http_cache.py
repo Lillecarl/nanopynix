@@ -237,26 +237,10 @@ class BinaryCacheServer:
 
     async def resolve_path(self, hash_part: str) -> StorePath | None:
         """Resolve a store hash to a full store path."""
-        # Try SQLite first
-        if self.db is not None:
-            path = await self.db.query_path_from_hash_part(StorePath(hash_part))
-            if path is not None:
-                return StorePath(path)
-
-        # Fallback: query daemon
-        try:
-            async with self.store.transfer_conn() as conn:
-                resp = await conn.call(
-                    QueryPathFromHashPartRequest(path=StorePath(hash_part)),
-                    raise_on_error=True,
-                )
-                return StorePath(resp.value) if resp.value else None
-        except Exception:
-            log.debug(
-                "query_path_fromhash_part_daemon_fallback_failed",
-                hash_part=hash_part,
-            )
-            return None
+        resp = await self.store.execute(
+            QueryPathFromHashPartRequest(path=StorePath(hash_part))
+        )
+        return StorePath(resp.value) if resp.value else None
 
     async def get_path_info(self, path: StorePath):
         """Get PathInfo for a store path. Returns PathInfo or None."""
