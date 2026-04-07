@@ -18,6 +18,7 @@ from conftest import NIX_BIN
 
 from pynixd import wire
 from pynixd.operations.base import PathInfo
+from pynixd.operations.queries import NarFromPathRequest
 from pynixd.store import LocalSocketStore, Store
 from pynixd.wire import (
     FramedReader,
@@ -62,7 +63,8 @@ async def _pick_self_contained_paths(
         if info and 0 < info.nar_size < 100_000:
             if info.references - {p}:
                 continue
-            nar = await store.buffer_nar_from_path(p)
+            resp = await store.execute(NarFromPathRequest(path=p))
+            nar = resp.nar_data
             if nar:
                 picked.append((p, info, nar))
     assert len(picked) == count, f"Need {count} paths, found {len(picked)}"

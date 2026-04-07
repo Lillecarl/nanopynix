@@ -16,6 +16,7 @@ import structlog
 from conftest import NIX_BIN, rmtree_robust
 
 from pynixd.operations.base import PathInfo
+from pynixd.operations.queries import NarFromPathRequest
 from pynixd.operations.store_mutations import (
     AddToStoreNarRequest,
 )
@@ -24,6 +25,7 @@ from pynixd.store import (
     SSHSubprocessStore,
     Store,
 )
+from pynixd.store_path import StorePath
 from pynixd.wire import UnixNixReader, UnixNixWriter
 
 log = structlog.get_logger(__name__)
@@ -49,7 +51,7 @@ async def dst_store() -> AsyncIterator[LocalSocketStore]:
     await s.close()
 
 
-async def _pick_a_path(store: Store, need_no_refs: bool = False) -> str:
+async def _pick_a_path(store: Store, need_no_refs: bool = False) -> StorePath:
     """Pick an arbitrary valid path from the store.
 
     If need_no_refs=True, pick a path with no references (self-contained).
@@ -69,12 +71,13 @@ async def _pick_a_path(store: Store, need_no_refs: bool = False) -> str:
 
 async def _get_path_info_and_nar(
     store: Store,
-    path: str,
+    path: StorePath,
 ) -> tuple[PathInfo, bytes]:
     """Query PathInfo and fetch NAR for a path."""
     info = await store.query_path_info(path)
     assert info is not None, f"Path {path} not valid in store"
-    nar = await store.buffer_nar_from_path(path)
+    resp = await store.execute(NarFromPathRequest(path=path))
+    nar = resp.nar_data
     assert nar, f"Empty NAR for {path}"
     return info, nar
 
@@ -209,7 +212,15 @@ async def test_add_multiple_to_store_single(
 
     write_task = asyncio.create_task(_write_payload())
     try:
-        paths = await dst_store.add_multiple_to_store_streaming(daemon_payload_rd)
+        from pynixd.operations.store_mutations import AddMultipleToStoreRequest
+
+        async with dst_store.transfer_conn() as conn:
+            paths = await AddMultipleToStoreRequest.forward(daemon_payload_rd, conn.w)
+            await conn.w.drain()
+            await conn.r.drain_stderr()
+            from pynixd.operations.base import EmptyResponse
+
+            await EmptyResponse.from_reader(conn.r, conn.version)
     finally:
         reader_done.set()
     await write_task
@@ -232,7 +243,7 @@ async def test_add_multiple_to_store_two_paths(
     """Copy two paths from system store to dest using AddMultipleToStore."""
     all_paths = await src_store.query_all_valid_paths()
     # Pick two small self-contained paths (no external references)
-    picked: list[tuple[str, PathInfo, bytes]] = []
+    picked: list[tuple[StorePath, PathInfo, bytes]] = []
     for p in sorted(all_paths):
         if len(picked) >= 2:
             break
@@ -242,7 +253,8 @@ async def test_add_multiple_to_store_two_paths(
         if info and 0 < info.nar_size < 100_000:
             if info.references - {p}:
                 continue
-            nar = await src_store.buffer_nar_from_path(p)
+            resp = await src_store.execute(NarFromPathRequest(path=p))
+            nar = resp.nar_data
             if nar:
                 picked.append((p, info, nar))
 
@@ -304,7 +316,15 @@ async def test_add_multiple_to_store_two_paths(
 
     write_task = asyncio.create_task(_write_payload())
     try:
-        paths = await dst_store.add_multiple_to_store_streaming(daemon_payload_rd)
+        from pynixd.operations.store_mutations import AddMultipleToStoreRequest
+
+        async with dst_store.transfer_conn() as conn:
+            paths = await AddMultipleToStoreRequest.forward(daemon_payload_rd, conn.w)
+            await conn.w.drain()
+            await conn.r.drain_stderr()
+            from pynixd.operations.base import EmptyResponse
+
+            await EmptyResponse.from_reader(conn.r, conn.version)
     finally:
         reader_done.set()
     await write_task
@@ -352,7 +372,7 @@ async def test_copy_paths_single(
         info.nar_hash,
     )
 
-    await copy_dst_store.stream_paths_with_info_from(src_store, [path])
+    await copy_dst_store.stream_paths_with_info_from(src_store, [info])
 
     # Verify it arrived
     valid_after = await copy_dst_store.query_valid_paths({path})
@@ -371,7 +391,7 @@ async def test_copy_paths_multiple(
 ) -> None:
     """Copy multiple paths via copy_paths in one AddMultipleToStore call."""
     all_paths = await src_store.query_all_valid_paths()
-    picked: list[tuple[str, PathInfo]] = []
+    picked: list[PathInfo] = []
     for p in sorted(all_paths):
         if len(picked) >= 3:
             break
@@ -381,16 +401,17 @@ async def test_copy_paths_multiple(
         if info and 0 < info.nar_size < 100_000:
             if info.references - {p}:
                 continue
-            picked.append((p, info))
+            picked.append(info)
 
     assert len(picked) >= 2, f"Need at least 2 paths, found {len(picked)}"
 
-    await copy_dst_store.stream_paths_with_info_from(src_store, [p for p, _ in picked])
+    await copy_dst_store.stream_paths_with_info_from(src_store, picked)
 
     # Verify all arrived
-    paths = {p for p, _ in picked}
+    paths = {p.path for p in picked}
     valid_after = await copy_dst_store.query_valid_paths(paths)
-    for p, info in picked:
+    for info in picked:
+        p = info.path
         assert p in valid_after, f"Path {p} not in dest after copy_paths"
 
         dst_info = await copy_dst_store.query_path_info(p)
@@ -452,7 +473,7 @@ async def test_pipe_nar_from_multiple(
 ) -> None:
     """Stream multiple paths via pipe_nar_from in sequence."""
     all_paths = await src_store.query_all_valid_paths()
-    picked: list[tuple[str, PathInfo]] = []
+    picked: list[tuple[StorePath, PathInfo]] = []
     for p in sorted(all_paths):
         if len(picked) >= 3:
             break
@@ -513,7 +534,13 @@ async def test_copy_paths_to_nixbuild(
         info.nar_size,
     )
 
-    await nixbuild_store.stream_paths_with_info_from(src_store, [path])
+    from .operations.queries import QueryClosureWithInfoRequest
+
+    closure_resp = await src_store.execute(
+        QueryClosureWithInfoRequest(paths={path}),
+    )
+
+    await nixbuild_store.stream_paths_with_info_from(src_store, closure_resp.infos)
 
     # Verify it arrived
     valid = await nixbuild_store.query_valid_paths({path})
@@ -542,7 +569,7 @@ async def test_copy_paths_roundtrip_nixbuild(
     )
 
     try:
-        picked: list[tuple[str, PathInfo]] = []
+        picked: list[PathInfo] = []
         all_paths = await src_store.query_all_valid_paths()
         for p in sorted(all_paths):
             if len(picked) >= 2:
@@ -553,27 +580,26 @@ async def test_copy_paths_roundtrip_nixbuild(
             if info and 0 < info.nar_size < 100_000:
                 if info.references - {p}:
                     continue
-                picked.append((p, info))
+                picked.append(info)
 
         assert len(picked) >= 2, f"Need 2 paths, found {len(picked)}"
 
         # Push to nixbuild
-        await nixbuild_store.stream_paths_with_info_from(
-            src_store, [p for p, _ in picked]
-        )
+        await nixbuild_store.stream_paths_with_info_from(src_store, picked)
         log.info("pushed_paths_to_nixbuild", count=len(picked))
 
         # Pull back from nixbuild to fresh local store
         await roundtrip_store_instance.stream_paths_with_info_from(
-            nixbuild_store, [p for p, _ in picked]
+            nixbuild_store, picked
         )
         log.info("pulled_paths_from_nixbuild", count=len(picked))
 
         # Verify all arrived with matching hashes
-        for path, orig_info in picked:
+        for info in picked:
+            path = info.path
             rt_info = await roundtrip_store_instance.query_path_info(path)
             assert rt_info is not None, f"{path} missing after roundtrip"
-            assert rt_info.nar_hash == orig_info.nar_hash
-            assert rt_info.nar_size == orig_info.nar_size
+            assert rt_info.nar_hash == info.nar_hash
+            assert rt_info.nar_size == info.nar_size
     finally:
         await roundtrip_store_instance.close()

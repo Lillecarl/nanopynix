@@ -37,12 +37,14 @@ from environs import Env
 
 from pynixd import wire
 from pynixd.operations.base import PathInfo
+from pynixd.operations.queries import NarFromPathRequest
 from pynixd.store import (
     LocalSocketStore,
     SSHSocketStore,
     SSHSubprocessStore,
     Store,
 )
+from pynixd.store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -328,7 +330,8 @@ async def test_serve_big_nar(
 
     label = _store_label(bench_store)
     start = time.monotonic()
-    nar_data = await bench_store.buffer_nar_from_path(store_path)
+    resp = await bench_store.execute(NarFromPathRequest(path=store_path))
+    nar_data = resp.nar_data
     elapsed = time.monotonic() - start
 
     assert len(nar_data) > 0
@@ -358,10 +361,13 @@ async def test_serve_small_nars(
     total_bytes = 0
     lock = asyncio.Lock()
 
-    async def _serve_one(path: str, nar_size: int) -> None:
+    async def _serve_one(path: StorePath, nar_size: int) -> None:
         nonlocal total_bytes
         async with sem:
-            nar_data = await bench_store.buffer_nar_from_path(path, nar_size=nar_size)
+            resp = await bench_store.execute(
+                NarFromPathRequest(path=path, nar_size=nar_size)
+            )
+            nar_data = resp.nar_data
         async with lock:
             total_bytes += len(nar_data)
 

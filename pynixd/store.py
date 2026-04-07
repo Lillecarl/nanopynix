@@ -41,7 +41,6 @@ from .operations.maintenance import (
     CollectGarbageResponse,
 )
 from .operations.queries import (
-    NarFromPathRequest,
     QueryAllValidPathsRequest,
 )
 from .operations.store_mutations import (
@@ -368,12 +367,6 @@ class Store(ABC):
     ) -> None:
         """Copy multiple paths from src store to this store via streaming."""
         await self.stream_paths_store_to_store(src, self, paths)
-
-    async def buffer_nar_from_path(self, path: StorePath, nar_size: int = 0) -> bytes:
-        """Read NAR into memory."""
-
-        resp = await self.execute(NarFromPathRequest(path=path, nar_size=nar_size))
-        return resp.nar_data
 
     async def stream_nar_from_path(
         self,

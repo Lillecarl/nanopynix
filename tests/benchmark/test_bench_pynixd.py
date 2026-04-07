@@ -31,7 +31,9 @@ from environs import Env
 from pynixd import Server
 from pynixd.http_cache import BinaryCacheServer
 from pynixd.operations.base import PathInfo
+from pynixd.operations.queries import NarFromPathRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore, Store
+from pynixd.store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -142,7 +144,10 @@ async def test_ssh_serve_small_nars(
             async def _fetch(path: str, nar_size: int) -> None:
                 nonlocal total_bytes
                 async with sem:
-                    data = await client.buffer_nar_from_path(path, nar_size=nar_size)
+                    resp = await client.execute(
+                        NarFromPathRequest(path=StorePath(path), nar_size=nar_size)
+                    )
+                    data = resp.nar_data
                 async with lock:
                     total_bytes += len(data)
 
@@ -195,7 +200,10 @@ async def test_ssh_serve_big_nar(
                 await client.warm_pool(1)
 
             start = time.monotonic()
-            data = await client.buffer_nar_from_path(store_path, nar_size=info.nar_size)
+            resp = await client.execute(
+                NarFromPathRequest(path=store_path, nar_size=info.nar_size)
+            )
+            data = resp.nar_data
             elapsed = time.monotonic() - start
         finally:
             await client.close()
