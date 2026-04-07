@@ -65,18 +65,21 @@ WHERE registrationTime > 0 AND registrationTime < ?
 """
 
 # Recursive CTE: expand seed paths to their full runtime reference closure
-# and return metadata for all paths in the closure.
+# and return metadata including references for all paths in the closure.
 _QUERY_CLOSURE_WITH_INFO = """
-WITH RECURSIVE closure(id, path) AS (
-    SELECT id, path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
+WITH RECURSIVE closure(id) AS (
+    SELECT id FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
     UNION
-    SELECT vp.id, vp.path
+    SELECT r.reference
     FROM closure c
     JOIN Refs r ON c.id = r.referrer
-    JOIN ValidPaths vp ON r.reference = vp.id
 )
 SELECT vp.path, vp.deriver, vp.hash, vp.registrationTime, vp.narSize,
-       vp.ultimate, vp.sigs, vp.ca
+       vp.ultimate, vp.sigs, vp.ca,
+       (SELECT group_concat(ref_vp.path, ' ')
+        FROM Refs r
+        JOIN ValidPaths ref_vp ON r.reference = ref_vp.id
+        WHERE r.referrer = vp.id)
 FROM closure c
 JOIN ValidPaths vp ON c.id = vp.id
 ORDER BY vp.id ASC
@@ -323,33 +326,29 @@ class LocalStoreDB:
             ) as cursor:
                 rows = await cursor.fetchall()
 
-            # We also need the references for the PathInfo objects.
-            # We can use _QUERY_REFERENCES_BATCH now that we have the full closure.
-            closure_paths = {StorePath(r[0]) for r in rows}
-            closure_paths_json = json.dumps(list(closure_paths))
-
-            async with self.db_conn.execute(
-                _QUERY_REFERENCES_BATCH, (closure_paths_json,)
-            ) as cursor:
-                ref_rows = await cursor.fetchall()
-
-            # Build referrer -> {references} map
-            refs_map: dict[StorePath, set[StorePath]] = {}
-            for referrer, reference in ref_rows:
-                refs_map.setdefault(StorePath(referrer), set()).add(
-                    StorePath(reference)
-                )
-
             # Create PathInfo objects (already sorted by SQLite)
             sorted_infos: list[PathInfo] = []
-            for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
+            for (
+                path,
+                deriver,
+                nar_hash,
+                reg_time,
+                nar_size,
+                ultimate,
+                sigs,
+                ca,
+                refs_str,
+            ) in rows:
                 p = StorePath(path)
+                references = (
+                    {StorePath(r) for r in refs_str.split()} if refs_str else set()
+                )
                 sorted_infos.append(
                     PathInfo(
                         path=p,
                         deriver=StorePath(deriver or ""),
                         nar_hash=nar_hash,
-                        references=refs_map.get(p, set()),
+                        references=references,
                         registration_time=reg_time,
                         nar_size=nar_size or 0,
                         ultimate=1 if ultimate else 0,
