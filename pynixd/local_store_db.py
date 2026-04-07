@@ -1,14 +1,11 @@
 """Direct SQLite access to the local Nix store database.
 
-Provides two capabilities:
+Provides a connection pool and dispatcher for operation types that
+implement their own DB fast-paths via ``execute_db(db)``.
 
-1. **Fast read queries** — IsValidPath, QueryPathInfo, QueryValidPaths,
-   QueryAllValidPaths, QueryPathFromHashPart served directly from SQLite
-   instead of round-tripping through the daemon protocol.
-
-2. **Registration time updates** — Batched writes using Lix's recursive CTE
-   that touches the full closure (references, derivers, deriver references)
-   of each seed path.
+Registration time updates are batched writes using Lix's recursive CTE
+that touches the full closure (references, derivers, deriver references)
+of each seed path.
 
 If the database can't be opened (permissions, missing file, wrong schema),
 logs a warning and becomes unavailable — callers fall back to the daemon.
@@ -17,58 +14,56 @@ logs a warning and becomes unavailable — callers fall back to the daemon.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiosqlite
 import structlog
 
-from .operations.base import PathInfo, StringSetResponse
-from .operations.queries import (
-    IsValidPathResponse,
-    QueryPathInfoResponse,
-)
 from .store_path import StorePath
+
+if TYPE_CHECKING:
+    from .operations.base import OpRequest, Resp
 
 log = structlog.get_logger(__name__)
 
-# ── SQL ───────────────────────────────────────────────────────────────
+# ── SQL constants (imported by operation types) ──────────────────────
 
-_IS_VALID_PATH = "SELECT 1 FROM ValidPaths WHERE path = ? LIMIT 1"
+IS_VALID_PATH = "SELECT 1 FROM ValidPaths WHERE path = ? LIMIT 1"
 
-_QUERY_PATH_INFO = """
+QUERY_PATH_INFO = """
 SELECT path, deriver, hash, registrationTime, narSize, ultimate, sigs, ca
 FROM ValidPaths WHERE path = ?
 """
 
-_QUERY_REFERENCES = """
+QUERY_REFERENCES = """
 SELECT vp.path FROM Refs r
 JOIN ValidPaths vp ON r.reference = vp.id
 WHERE r.referrer = (SELECT id FROM ValidPaths WHERE path = ?)
 """
 
-_QUERY_PATH_FROM_HASH_PART = """
+QUERY_PATH_FROM_HASH_PART = """
 SELECT path FROM ValidPaths WHERE path >= ? AND path < ? LIMIT 1
 """
 
-_QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
+QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
 
-_QUERY_VALID_PATHS_BATCH = (
+QUERY_VALID_PATHS_BATCH = (
     "SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))"
 )
 
-_QUERY_STALE_PATHS = """
+QUERY_STALE_PATHS = """
 SELECT path FROM ValidPaths
 WHERE registrationTime > 0 AND registrationTime < ?
 """
 
 # Recursive CTE: expand seed paths to their full runtime reference closure
 # and return metadata including references for all paths in the closure.
-_QUERY_CLOSURE_WITH_INFO = """
+QUERY_CLOSURE_WITH_INFO = """
 WITH RECURSIVE closure(id) AS (
     SELECT id FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
     UNION
@@ -88,7 +83,7 @@ ORDER BY vp.id ASC
 """
 
 # Batch query: PathInfo for multiple paths at once
-_QUERY_PATH_INFOS_BATCH = """
+QUERY_PATH_INFOS_BATCH = """
 SELECT vp.path, vp.deriver, vp.hash, vp.registrationTime, vp.narSize,
        vp.ultimate, vp.sigs, vp.ca
 FROM ValidPaths vp
@@ -96,7 +91,7 @@ WHERE vp.path IN (SELECT value FROM json_each(?))
 """
 
 # Batch references: all (referrer_path, reference_path) pairs for a set of paths
-_QUERY_REFERENCES_BATCH = """
+QUERY_REFERENCES_BATCH = """
 SELECT vp_referrer.path, vp_ref.path
 FROM Refs r
 JOIN ValidPaths vp_referrer ON r.referrer = vp_referrer.id
@@ -105,7 +100,7 @@ WHERE vp_referrer.path IN (SELECT value FROM json_each(?))
 """
 
 # Batch outputs: all (drv_path, output_name, output_path) for a set of .drv files
-_QUERY_DERIVATION_OUTPUTS_BATCH = """
+QUERY_DERIVATION_OUTPUTS_BATCH = """
 SELECT vp_drv.path, do.id, do.path
 FROM DerivationOutputs do
 JOIN ValidPaths vp_drv ON do.drv = vp_drv.id
@@ -113,7 +108,7 @@ WHERE vp_drv.path IN (SELECT value FROM json_each(?))
 """
 
 # Lix's UpdateRegistrationTimeRecursive — walks the full closure
-_UPDATE_REGTIME = """
+UPDATE_REGTIME = """
 UPDATE ValidPaths
 SET registrationTime = unixepoch()
 WHERE id IN (
@@ -144,11 +139,10 @@ _DEFAULT_REGTIME_FLUSH_INTERVAL = 5.0
 
 
 class LocalStoreDB:
-    """Direct aiosqlite interface to a Nix store's database.
+    """Connection pool and dispatcher for Nix store SQLite.
 
-    Provides fast reads and batched registrationTime writes.
-    All methods are safe to call even when the DB is unavailable —
-    read methods return None, write methods silently no-op.
+    Operation types implement their own DB logic via ``execute_db(db)``.
+    This class only manages connections and dispatches.
 
     Use the async factory ``await LocalStoreDB.open(store_path)`` to create.
     """
@@ -190,7 +184,6 @@ class LocalStoreDB:
                     conn = self._idle_conns.pop()
 
             if conn is None:
-                # Create new connection
                 mode = "ro" if self.read_only else "rw"
                 uri = f"file:{self.db_path}?mode={mode}"
                 conn = await aiosqlite.connect(uri, uri=True)
@@ -224,18 +217,15 @@ class LocalStoreDB:
         read_only = not can_write
 
         try:
-            # Create instance first
             instance = cls(
                 db_path=db_path,
                 read_only=read_only,
                 regtime_flush_interval=regtime_flush_interval,
             )
 
-            # Open one connection to verify and set WAL
             async with instance.acquire_conn() as db:
                 if not read_only:
                     await db.execute("PRAGMA journal_mode=WAL")
-                # Sanity check
                 await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
 
             log.info(
@@ -256,210 +246,57 @@ class LocalStoreDB:
                 regtime_flush_interval=regtime_flush_interval,
             )
 
-    # ── Read queries ──────────────────────────────────────────────────
+    # ── Dispatcher ────────────────────────────────────────────────────
 
-    async def is_valid_path(self, path: StorePath) -> IsValidPathResponse | None:
-        """Check if a path exists. Returns None if DB unavailable."""
+    async def execute(self, request: OpRequest[Resp]) -> Resp | None:
+        """Dispatch a request to its DB handler.
+
+        Returns the response if the DB is active and the query succeeded,
+        or None if the DB is unavailable (caller should fall back to wire).
+        """
         if not self.active:
             return None
         try:
-            async with self.acquire_conn() as db:
-                async with db.execute(_IS_VALID_PATH, (path,)) as cursor:
-                    row = await cursor.fetchone()
-            return IsValidPathResponse(valid=row is not None)
+            return await request.execute_db(self)
         except Exception:
-            log.debug("is_valid_path_query_failed", path=path, exc_info=True)
-            return None
-
-    async def query_path_info(self, path: StorePath) -> QueryPathInfoResponse | None:
-        """Get full path info. Returns None if DB unavailable."""
-        if not self.active:
-            return None
-        try:
-            async with self.acquire_conn() as db:
-                async with db.execute(_QUERY_PATH_INFO, (path,)) as cursor:
-                    row = await cursor.fetchone()
-                if row is None:
-                    return QueryPathInfoResponse(valid=False)
-
-                _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
-
-                # Fetch references
-                async with db.execute(_QUERY_REFERENCES, (path,)) as cursor:
-                    ref_rows = await cursor.fetchall()
-                refs = {r[0] for r in ref_rows}
-
-            return QueryPathInfoResponse(
-                valid=True,
-                info=PathInfo(
-                    path=path,
-                    deriver=StorePath(deriver or ""),
-                    nar_hash=nar_hash,
-                    references={StorePath(r) for r in refs},
-                    registration_time=reg_time,
-                    nar_size=nar_size or 0,
-                    ultimate=1 if ultimate else 0,
-                    sigs=set(sigs.split()) if sigs else set(),
-                    ca=ca or "",
-                ),
+            log.debug(
+                "db_execute_failed", request=type(request).__name__, exc_info=True
             )
-        except Exception:
-            log.debug("query_path_info_failed", path=path, exc_info=True)
             return None
 
-    async def query_valid_paths(
-        self, paths: set[StorePath]
-    ) -> StringSetResponse | None:
-        """Filter a set of paths to those that exist. Returns None if DB unavailable."""
+    # ── Internal utility queries ──────────────────────────────────────
+    # These are not operation dispatches but internal helpers used by
+    # non-operation code (GC, build planner, http cache).
+
+    async def query_stale_paths(self, max_age_seconds: int) -> set[StorePath] | None:
+        """Find paths with registrationTime older than max_age_seconds ago."""
         if not self.active:
             return None
         try:
-            paths_json = json.dumps(list(paths))
-            async with self.acquire_conn() as db:
-                async with db.execute(
-                    _QUERY_VALID_PATHS_BATCH, (paths_json,)
-                ) as cursor:
+            cutoff = int(time.time()) - max_age_seconds
+            async with self.acquire_conn() as conn:
+                async with conn.execute(QUERY_STALE_PATHS, (cutoff,)) as cursor:
                     rows = await cursor.fetchall()
-            return StringSetResponse(paths={StorePath(row[0]) for row in rows})
+            return {StorePath(r[0]) for r in rows}
         except Exception:
-            log.debug("query_valid_paths_failed", exc_info=True)
-            return None
-
-    async def query_all_valid_paths(self) -> StringSetResponse | None:
-        """Get all valid paths. Returns None if DB unavailable."""
-        if not self.active:
-            return None
-        try:
-            async with self.acquire_conn() as db:
-                async with db.execute(_QUERY_ALL_VALID_PATHS) as cursor:
-                    rows = await cursor.fetchall()
-            return StringSetResponse(paths={StorePath(r[0]) for r in rows})
-        except Exception:
-            log.debug("query_all_valid_paths_failed", exc_info=True)
+            log.debug("query_stale_paths_failed", exc_info=True)
             return None
 
     async def query_path_from_hash_part(self, hash_part: StorePath) -> StorePath | None:
-        """Find a path by its hash prefix. Returns path string or None."""
+        """Find a path by its hash prefix. Used by http_cache resolve_path."""
         if not self.active:
             return None
         try:
-            # Match /nix/store/<hash_part>...
             prefix = f"/nix/store/{hash_part}"
-            # Upper bound: increment last char for range query
             upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
-            log.debug(
-                "db_query_path_from_hash_part",
-                hash_part=hash_part,
-                range_start=prefix,
-                range_end=upper,
-            )
-            async with self.acquire_conn() as db:
-                async with db.execute(
-                    _QUERY_PATH_FROM_HASH_PART,
-                    (prefix, upper),
+            async with self.acquire_conn() as conn:
+                async with conn.execute(
+                    QUERY_PATH_FROM_HASH_PART, (prefix, upper)
                 ) as cursor:
                     row = await cursor.fetchone()
-            log.debug(
-                "db_query_path_from_hash_part_result",
-                hash_part=hash_part,
-                result=row[0] if row else None,
-            )
             return StorePath(row[0]) if row else None
         except Exception:
-            log.debug(
-                "query_path_from_hash_part failed", hash_part=hash_part, exc_info=True
-            )
-            return None
-
-    async def query_closure_with_info(
-        self, seeds: set[StorePath]
-    ) -> list[PathInfo] | None:
-        """Expand seed paths to their full closure and return PathInfo for all.
-
-        Returns a topologically sorted list of PathInfo objects.
-        """
-        if not self.active or not seeds:
-            return None
-        try:
-            seeds_json = json.dumps(list(seeds))
-            async with self.acquire_conn() as db:
-                async with db.execute(
-                    _QUERY_CLOSURE_WITH_INFO, (seeds_json,)
-                ) as cursor:
-                    rows = await cursor.fetchall()
-
-            # Create PathInfo objects (already sorted by SQLite)
-            sorted_infos: list[PathInfo] = []
-            for (
-                path,
-                deriver,
-                nar_hash,
-                reg_time,
-                nar_size,
-                ultimate,
-                sigs,
-                ca,
-                refs_str,
-            ) in rows:
-                p = StorePath(path)
-                references = (
-                    {StorePath(r) for r in refs_str.split()} if refs_str else set()
-                )
-                sorted_infos.append(
-                    PathInfo(
-                        path=p,
-                        deriver=StorePath(deriver or ""),
-                        nar_hash=nar_hash,
-                        references=references,
-                        registration_time=reg_time,
-                        nar_size=nar_size or 0,
-                        ultimate=1 if ultimate else 0,
-                        sigs=set(sigs.split()) if sigs else set(),
-                        ca=ca or "",
-                    )
-                )
-
-            return sorted_infos
-        except Exception:
-            log.debug("query_closure_with_info_failed", exc_info=True)
-            return None
-
-    async def query_path_infos(
-        self, paths: set[StorePath]
-    ) -> dict[StorePath, PathInfo] | None:
-        """Batch PathInfo for multiple paths. Returns None if DB unavailable."""
-        if not self.active or not paths:
-            return None
-        try:
-            paths_json = json.dumps(list(paths))
-            async with self.acquire_conn() as db:
-                async with db.execute(_QUERY_PATH_INFOS_BATCH, (paths_json,)) as cursor:
-                    rows = await cursor.fetchall()
-                async with db.execute(_QUERY_REFERENCES_BATCH, (paths_json,)) as cursor:
-                    ref_rows = await cursor.fetchall()
-
-            # Build referrer -> {references} map
-            refs_map: dict[StorePath, set[StorePath]] = {}
-            for referrer, reference in ref_rows:
-                refs_map.setdefault(referrer, set()).add(reference)
-
-            infos: dict[StorePath, PathInfo] = {}
-            for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
-                p = StorePath(path)
-                infos[p] = PathInfo(
-                    path=p,
-                    deriver=StorePath(deriver or ""),
-                    nar_hash=nar_hash,
-                    references={StorePath(r) for r in refs_map.get(path, set())},
-                    registration_time=reg_time,
-                    nar_size=nar_size or 0,
-                    ultimate=1 if ultimate else 0,
-                    sigs=set(sigs.split()) if sigs else set(),
-                    ca=ca or "",
-                )
-            return infos
-        except Exception:
-            log.debug("query_path_infos_failed", exc_info=True)
+            log.debug("query_path_from_hash_part_failed", exc_info=True)
             return None
 
     async def query_derivation_outputs_batch(
@@ -467,16 +304,18 @@ class LocalStoreDB:
     ) -> dict[StorePath, dict[str, StorePath]] | None:
         """Batch query output paths for multiple .drv files.
 
-        Returns {drv_path: {output_name: output_path}} for all found derivations.
-        Returns None if DB unavailable.
+        Returns {drv_path: {output_name: output_path}}.
+        Used by build planner to skip parsing input .drv files.
         """
         if not self.active or not drv_paths:
             return None
         try:
+            import json
+
             paths_json = json.dumps(list(drv_paths))
-            async with self.acquire_conn() as db:
-                async with db.execute(
-                    _QUERY_DERIVATION_OUTPUTS_BATCH, (paths_json,)
+            async with self.acquire_conn() as conn:
+                async with conn.execute(
+                    QUERY_DERIVATION_OUTPUTS_BATCH, (paths_json,)
                 ) as cursor:
                     rows = await cursor.fetchall()
 
@@ -488,23 +327,6 @@ class LocalStoreDB:
             return result
         except Exception:
             log.debug("query_derivation_outputs_batch_failed", exc_info=True)
-            return None
-
-    async def query_stale_paths(self, max_age_seconds: int) -> set[StorePath] | None:
-        """Find paths with registrationTime older than max_age_seconds ago.
-
-        Returns None if DB unavailable.
-        """
-        if not self.active:
-            return None
-        try:
-            cutoff = int(time.time()) - max_age_seconds
-            async with self.acquire_conn() as db:
-                async with db.execute(_QUERY_STALE_PATHS, (cutoff,)) as cursor:
-                    rows = await cursor.fetchall()
-            return {StorePath(r[0]) for r in rows}
-        except Exception:
-            log.debug("query_stale_paths_failed", exc_info=True)
             return None
 
     # ── Registration time updates ─────────────────────────────────────
@@ -524,6 +346,8 @@ class LocalStoreDB:
         if not self.active or self.read_only or not self.pending_regtime:
             return
 
+        import json
+
         paths = self.pending_regtime
         self.pending_regtime = set()
 
@@ -531,7 +355,7 @@ class LocalStoreDB:
             paths_json = json.dumps(list(paths))
             t0 = time.monotonic()
             async with self.acquire_conn() as db:
-                await db.execute(_UPDATE_REGTIME, (paths_json,))
+                await db.execute(UPDATE_REGTIME, (paths_json,))
                 await db.commit()
             elapsed = time.monotonic() - t0
             log.debug(
@@ -580,7 +404,6 @@ class LocalStoreDB:
                     pass
             self._all_conns.clear()
             self._idle_conns.clear()
-            # Also nullify db_path to prevent further acquisitions
             self.db_path = None
 
 

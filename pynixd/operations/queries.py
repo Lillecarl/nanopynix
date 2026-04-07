@@ -2,10 +2,13 @@
 Query operation request/response types.
 
 These operations query information from the store without mutating it.
+Each operation that has a DB fast-path implements ``execute_db(db)`` for
+SQLite dispatch and ``execute(store)`` for the full pipeline.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
@@ -18,6 +21,7 @@ from ..store_path import StorePath
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..local_store_db import LocalStoreDB
     from ..proxy import DaemonProxy
     from ..store import Store
 from ..protocol import Op
@@ -36,6 +40,73 @@ from .base import (
     StringSetResponse,
     SubstPathInfo,
 )
+
+# ── SQL constants ─────────────────────────────────────────────────────
+# Operations import these to run their own queries against LocalStoreDB.
+
+IS_VALID_PATH = "SELECT 1 FROM ValidPaths WHERE path = ? LIMIT 1"
+
+QUERY_PATH_INFO = """
+SELECT path, deriver, hash, registrationTime, narSize, ultimate, sigs, ca
+FROM ValidPaths WHERE path = ?
+"""
+
+QUERY_REFERENCES = """
+SELECT vp.path FROM Refs r
+JOIN ValidPaths vp ON r.reference = vp.id
+WHERE r.referrer = (SELECT id FROM ValidPaths WHERE path = ?)
+"""
+
+QUERY_PATH_FROM_HASH_PART = """
+SELECT path FROM ValidPaths WHERE path >= ? AND path < ? LIMIT 1
+"""
+
+QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
+
+QUERY_VALID_PATHS_BATCH = (
+    "SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))"
+)
+
+QUERY_CLOSURE_WITH_INFO = """
+WITH RECURSIVE closure(id) AS (
+    SELECT id FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
+    UNION
+    SELECT r.reference
+    FROM closure c
+    JOIN Refs r ON c.id = r.referrer
+)
+SELECT vp.path, vp.deriver, vp.hash, vp.registrationTime, vp.narSize,
+       vp.ultimate, vp.sigs, vp.ca,
+       (SELECT group_concat(ref_vp.path, ' ')
+        FROM Refs r
+        JOIN ValidPaths ref_vp ON r.reference = ref_vp.id
+        WHERE r.referrer = vp.id)
+FROM closure c
+JOIN ValidPaths vp ON c.id = vp.id
+ORDER BY vp.id ASC
+"""
+
+QUERY_PATH_INFOS_BATCH = """
+SELECT vp.path, vp.deriver, vp.hash, registrationTime, narSize,
+       vp.ultimate, vp.sigs, vp.ca
+FROM ValidPaths vp
+WHERE vp.path IN (SELECT value FROM json_each(?))
+"""
+
+QUERY_REFERENCES_BATCH = """
+SELECT vp_referrer.path, vp_ref.path
+FROM Refs r
+JOIN ValidPaths vp_referrer ON r.referrer = vp_referrer.id
+JOIN ValidPaths vp_ref ON r.reference = vp_ref.id
+WHERE vp_referrer.path IN (SELECT value FROM json_each(?))
+"""
+
+QUERY_DERIVATION_OUTPUTS_BATCH = """
+SELECT vp_drv.path, do.id, do.path
+FROM DerivationOutputs do
+JOIN ValidPaths vp_drv ON do.drv = vp_drv.id
+WHERE vp_drv.path IN (SELECT value FROM json_each(?))
+"""
 
 # ── IsValidPath ──────────────────────────────────────────────────────
 
@@ -58,29 +129,28 @@ class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
     response_type: ClassVar[type[OpResponse]] = IsValidPathResponse
     is_query: ClassVar[bool] = True
 
+    async def execute_db(self, db: LocalStoreDB) -> IsValidPathResponse | None:
+        async with db.acquire_conn() as conn:
+            async with conn.execute(IS_VALID_PATH, (self.path,)) as cursor:
+                row = await cursor.fetchone()
+        return IsValidPathResponse(valid=row is not None)
+
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> IsValidPathResponse:
-        # 1. Memory cache
         if store.has_path(self.path):
             return IsValidPathResponse(valid=True)
 
-        # 2. SQLite fast path
         if store.db:
-            result = await store.db.is_valid_path(self.path)
+            result = await store.db.execute(self)
             if result is not None and result.valid:
                 store.add_known_path(self.path)
                 return result
 
-        # 3. Daemon fallback (Base class execute)
-        resp = await super().execute(
-            store,
-            client,
-            suppress_last,
-        )
+        resp = await super().execute(store, client, suppress_last)
         if resp.valid:
             store.add_known_path(self.path)
         return resp
@@ -114,31 +184,50 @@ class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
     response_type: ClassVar[type[OpResponse]] = QueryPathInfoResponse
     is_query: ClassVar[bool] = True
 
+    async def execute_db(self, db: LocalStoreDB) -> QueryPathInfoResponse | None:
+        async with db.acquire_conn() as conn:
+            async with conn.execute(QUERY_PATH_INFO, (self.path,)) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                return QueryPathInfoResponse(valid=False)
+
+            _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
+
+            async with conn.execute(QUERY_REFERENCES, (self.path,)) as cursor:
+                ref_rows = await cursor.fetchall()
+            refs = {r[0] for r in ref_rows}
+
+        return QueryPathInfoResponse(
+            valid=True,
+            info=PathInfo(
+                path=self.path,
+                deriver=StorePath(deriver or ""),
+                nar_hash=nar_hash,
+                references={StorePath(r) for r in refs},
+                registration_time=reg_time,
+                nar_size=nar_size or 0,
+                ultimate=1 if ultimate else 0,
+                sigs=set(sigs.split()) if sigs else set(),
+                ca=ca or "",
+            ),
+        )
+
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfoResponse:
-        # 1. SQLite fast path
         if store.db:
-            result = await store.db.query_path_info(self.path)
+            result = await store.db.execute(self)
             if result is not None and result.valid:
                 store.add_known_path(self.path)
-                if result.info:
-                    result.info.path = self.path
                 return result
 
-        # 2. Daemon fallback
-        resp = await super().execute(
-            store,
-            client,
-            suppress_last,
-        )
+        resp = await super().execute(store, client, suppress_last)
         if resp.valid:
             store.add_known_path(self.path)
             if resp.info is not None:
-                # Protocol sends path-less info, we restore it
                 resp.info.path = self.path
         return resp
 
@@ -179,25 +268,53 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(self.paths)
 
+    async def execute_db(self, db: LocalStoreDB) -> QueryPathInfosResponse | None:
+        if not self.paths:
+            return QueryPathInfosResponse(infos={})
+
+        paths_json = json.dumps(list(self.paths))
+        async with db.acquire_conn() as conn:
+            async with conn.execute(QUERY_PATH_INFOS_BATCH, (paths_json,)) as cursor:
+                rows = await cursor.fetchall()
+            async with conn.execute(QUERY_REFERENCES_BATCH, (paths_json,)) as cursor:
+                ref_rows = await cursor.fetchall()
+
+        refs_map: dict[StorePath, set[StorePath]] = {}
+        for referrer, reference in ref_rows:
+            refs_map.setdefault(StorePath(referrer), set()).add(StorePath(reference))
+
+        infos: dict[StorePath, PathInfo] = {}
+        for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
+            p = StorePath(path)
+            infos[p] = PathInfo(
+                path=p,
+                deriver=StorePath(deriver or ""),
+                nar_hash=nar_hash,
+                references=refs_map.get(p, set()),
+                registration_time=reg_time,
+                nar_size=nar_size or 0,
+                ultimate=1 if ultimate else 0,
+                sigs=set(sigs.split()) if sigs else set(),
+                ca=ca or "",
+            )
+        return QueryPathInfosResponse(infos=infos)
+
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfosResponse:
-        # 1. SQLite fast path
         if store.db:
-            result = await store.db.query_path_infos(self.paths)
+            result = await store.db.execute(self)
             if result is not None:
-                store.add_known_paths(set(result.keys()))
-                return QueryPathInfosResponse(infos=result)
+                store.add_known_paths(set(result.infos.keys()))
+                return result
 
-        # 2. Custom feature check
         async with store.transfer_conn() as conn:
             if "QueryPathInfos" in conn.features:
                 return await conn.call(self, client=client, suppress_last=suppress_last)
 
-        # 3. Sequential fallback
         infos: dict[StorePath, PathInfo] = {}
         for path in self.paths:
             resp = await store.execute(
@@ -251,7 +368,6 @@ class QueryClosureRequest(OpRequest[QueryClosureResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryClosureResponse:
-        # Just use QueryClosureWithInfo and extract paths
         resp = await store.execute(
             QueryClosureWithInfoRequest(paths=self.paths),
             client=client,
@@ -301,25 +417,61 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(self.paths)
 
+    async def execute_db(self, db: LocalStoreDB) -> QueryClosureWithInfoResponse | None:
+        if not self.paths:
+            return QueryClosureWithInfoResponse(infos=[])
+
+        seeds_json = json.dumps(list(self.paths))
+        async with db.acquire_conn() as conn:
+            async with conn.execute(QUERY_CLOSURE_WITH_INFO, (seeds_json,)) as cursor:
+                rows = await cursor.fetchall()
+
+        sorted_infos: list[PathInfo] = []
+        for (
+            path,
+            deriver,
+            nar_hash,
+            reg_time,
+            nar_size,
+            ultimate,
+            sigs,
+            ca,
+            refs_str,
+        ) in rows:
+            p = StorePath(path)
+            references = {StorePath(r) for r in refs_str.split()} if refs_str else set()
+            sorted_infos.append(
+                PathInfo(
+                    path=p,
+                    deriver=StorePath(deriver or ""),
+                    nar_hash=nar_hash,
+                    references=references,
+                    registration_time=reg_time,
+                    nar_size=nar_size or 0,
+                    ultimate=1 if ultimate else 0,
+                    sigs=set(sigs.split()) if sigs else set(),
+                    ca=ca or "",
+                )
+            )
+
+        return QueryClosureWithInfoResponse(infos=sorted_infos)
+
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryClosureWithInfoResponse:
-        # 1. SQLite fast path
         if store.db:
-            result = await store.db.query_closure_with_info(self.paths)
+            result = await store.db.execute(self)
             if result is not None:
-                store.add_known_paths({info.path for info in result})
-                return QueryClosureWithInfoResponse(infos=result)
+                store.add_known_paths({info.path for info in result.infos})
+                return result
 
-        # 2. Custom feature check
         async with store.transfer_conn() as conn:
             if "QueryClosureWithInfo" in conn.features:
                 return await conn.call(self, client=client, suppress_last=suppress_last)
 
-        # 3. Fallback: BFS + Topo sort
         all_infos: dict[StorePath, PathInfo] = {}
         pending = self.paths
 
@@ -328,7 +480,6 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
             if not to_fetch:
                 break
 
-            # Use QueryPathInfos which might use DB or feature
             resp = await store.execute(
                 QueryPathInfosRequest(paths=to_fetch),
                 client=client,
@@ -338,12 +489,10 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
 
             for p in to_fetch:
                 if p not in new_infos:
-                    # If any path is missing, we can't complete the closure.
                     raise ValueError(f"Path {p} not found in store closure")
 
             all_infos.update(new_infos)
 
-            # Find new references to explore
             next_pending = set()
             for info in new_infos.values():
                 for ref in info.references:
@@ -351,7 +500,6 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
                         next_pending.add(ref)
             pending = next_pending
 
-        # Topological sort
         sorted_infos: list[PathInfo] = []
         visited: set[StorePath] = set()
         visiting: set[StorePath] = set()
@@ -360,7 +508,7 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
             if p in visited:
                 return
             if p in visiting:
-                return  # Should not happen in Nix store
+                return
             visiting.add(p)
             info = all_infos[p]
             for ref in info.references:
@@ -406,28 +554,27 @@ class QueryValidPathsRequest(OpRequest[StringSetResponse]):
         if version >= wire.proto(1, 27):
             writer.write_uint64(self.substitute)
 
+    async def execute_db(self, db: LocalStoreDB) -> StringSetResponse | None:
+        paths_json = json.dumps(list(self.paths))
+        async with db.acquire_conn() as conn:
+            async with conn.execute(QUERY_VALID_PATHS_BATCH, (paths_json,)) as cursor:
+                rows = await cursor.fetchall()
+        return StringSetResponse(paths={StorePath(row[0]) for row in rows})
+
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> StringSetResponse:
-        # 1. SQLite fast path
         if store.db:
-            result = await store.db.query_valid_paths(self.paths)
+            result = await store.db.execute(self)
             if result is not None:
-                # If substitution is requested, DB hits alone aren't sufficient
-                # unless all paths were found in SQLite.
                 if not self.substitute or result.paths >= self.paths:
                     store.add_known_paths(result.paths)
                     return result
 
-        # 2. Daemon fallback
-        resp = await super().execute(
-            store,
-            client,
-            suppress_last,
-        )
+        resp = await super().execute(store, client, suppress_last)
         store.add_known_paths(resp.paths)
         return resp
 
@@ -441,25 +588,29 @@ class QueryPathFromHashPartRequest(SingleStringRequest[StorePathResponse]):
     response_type: ClassVar[type[OpResponse]] = StorePathResponse
     is_query: ClassVar[bool] = True
 
+    async def execute_db(self, db: LocalStoreDB) -> StorePathResponse | None:
+        prefix = f"/nix/store/{self.path}"
+        upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+        async with db.acquire_conn() as conn:
+            async with conn.execute(
+                QUERY_PATH_FROM_HASH_PART, (prefix, upper)
+            ) as cursor:
+                row = await cursor.fetchone()
+        return StorePathResponse(value=StorePath(row[0])) if row else None
+
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> StorePathResponse:
-        # 1. SQLite fast path
         if store.db:
-            path = await store.db.query_path_from_hash_part(self.path)
-            if path is not None:
-                store.add_known_path(path)
-                return StorePathResponse(value=path)
+            result = await store.db.execute(self)
+            if result is not None and result.value:
+                store.add_known_path(StorePath(result.value))
+                return result
 
-        # 2. Daemon fallback
-        resp = await super().execute(
-            store,
-            client,
-            suppress_last,
-        )
+        resp = await super().execute(store, client, suppress_last)
         if resp.value:
             store.add_known_path(StorePath(resp.value))
         return resp
@@ -548,10 +699,8 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
     op: ClassVar[int] = Op.NarFromPath
     response_type: ClassVar[type[OpResponse]] = NarFromPathResponse
     is_query: ClassVar[bool] = True
-    nar_size: int = 0  # Optional optimization: if > 0, read raw bytes directly
-    async_callback: Callable[[bytes], Awaitable[None]] | None = (
-        None  # For chunked streaming
-    )
+    nar_size: int = 0
+    async_callback: Callable[[bytes], Awaitable[None]] | None = None
 
     async def execute(
         self,
@@ -559,8 +708,6 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> NarFromPathResponse:
-        # Optimization: if size is known, read raw bytes without full OpRequest logic
-        # which would try to parse the entire NAR into memory.
         if self.nar_size > 0:
             from ..wire import _CHUNK_SIZE
 
@@ -593,7 +740,6 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
         request = await cls.from_reader(proxy.r, proxy.version)
         path = request.path
 
-        # 1. Fetch info to get NAR size (optimization for raw copying)
         info_resp = await proxy.local_store.execute(QueryPathInfoRequest(path=path))
         if not info_resp.valid or info_resp.info is None:
             cls._log.warning("nar_not_in_local_store", path=path)
@@ -607,12 +753,9 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
             size=nar_size,
         )
 
-        # 2. Flush any pending output to the client
         await proxy.client.flush()
-        # 3. Protocol expects STDERR_LAST before raw NAR bytes
         proxy.w.write_uint64(wire.STDERR_LAST)
 
-        # 4. Stream from local store to client
         async with proxy.local_store.transfer_conn() as conn:
             conn.w.write_uint64(Op.NarFromPath)
             await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
@@ -644,6 +787,12 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
     response_type: ClassVar[type[OpResponse]] = StringSetResponse
     is_query: ClassVar[bool] = True
 
+    async def execute_db(self, db: LocalStoreDB) -> StringSetResponse | None:
+        async with db.acquire_conn() as conn:
+            async with conn.execute(QUERY_ALL_VALID_PATHS) as cursor:
+                rows = await cursor.fetchall()
+        return StringSetResponse(paths={StorePath(r[0]) for r in rows})
+
     async def execute(
         self,
         store: Store,
@@ -651,19 +800,13 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
         suppress_last: bool = False,
     ) -> StringSetResponse:
         try:
-            # 1. SQLite fast path
             if store.db:
-                result = await store.db.query_all_valid_paths()
+                result = await store.db.execute(self)
                 if result is not None:
                     store.add_known_paths(result.paths, update_regtime=False)
                     return result
 
-            # 2. Daemon fallback
-            resp = await super().execute(
-                store,
-                client,
-                suppress_last,
-            )
+            resp = await super().execute(store, client, suppress_last)
             store.add_known_paths(resp.paths, update_regtime=False)
             self._log.info(
                 "sync_paths_complete", store_id=store.id, count=len(resp.paths)
@@ -671,7 +814,6 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
             return resp
         except Exception:
             self._log.warning("sync_paths_failed", store_id=store.id)
-            # Ensure we have a clean state on failure
             store.known_paths = set()
             return StringSetResponse(paths=set())
 
@@ -772,23 +914,13 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryMissingResponse:
-        """Query which paths are missing from this store."""
-        resp = await super().execute(
-            store,
-            client,
-            suppress_last,
-        )
+        resp = await super().execute(store, client, suppress_last)
 
-        # Update known paths: outputs of all derived paths are now expected
         if store.store_path:
             for dp in self.derived_paths:
                 outputs = dp.to_outputs(store.store_path)
                 store.add_known_paths(outputs)
 
-        # Any path being substituted is also "known" to be available.
-        # TODO: This could be optimized by running in a background task,
-        # but for now we await it inline to ensure paths are registered
-        # before the scheduler runs.
         if resp.will_substitute:
             try:
                 async with store.transfer_conn() as conn:

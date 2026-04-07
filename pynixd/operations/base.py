@@ -26,6 +26,7 @@ from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..local_store_db import LocalStoreDB
     from ..proxy import DaemonProxy
     from ..stderr import StderrMsg
     from ..store import Store
@@ -129,6 +130,16 @@ class OpRequest(ABC, Generic[Resp]):
             client=client,
             suppress_last=suppress_last,
         )
+
+    async def execute_db(self, db: LocalStoreDB) -> Resp | None:
+        """Execute this operation against the SQLite database.
+
+        Returns the response on success, or None to signal the caller
+        should fall back to the wire protocol.
+
+        Override in subclasses that have a DB fast-path.
+        """
+        return None
 
     @classmethod
     @abstractmethod
