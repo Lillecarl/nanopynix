@@ -54,6 +54,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string(self.drv_path)
         await self.derivation.to_writer(writer, version)
         writer.write_uint64(self.build_mode)

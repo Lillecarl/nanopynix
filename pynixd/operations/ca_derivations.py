@@ -17,7 +17,6 @@ from typing import ClassVar, Self
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
-    EmptyResponse,
     OpRequest,
     OpResponse,
 )
@@ -32,14 +31,24 @@ DrvOutput = str
 
 
 @dataclass
-class RegisterDrvOutputRequest(OpRequest[EmptyResponse]):
+class RegisterDrvOutputResponse(OpResponse):
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls()
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        pass
+
+
+@dataclass
+class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     """Request to register a realised derivation output.
 
     Input: Realisation JSON string
     """
 
     op: ClassVar[int] = Op.RegisterDrvOutput
-    response_type: ClassVar[type[OpResponse]] = EmptyResponse
+    response_type: ClassVar[type[OpResponse]] = RegisterDrvOutputResponse
     realisation: dict = field(default_factory=dict)
 
     @classmethod
@@ -48,6 +57,7 @@ class RegisterDrvOutputRequest(OpRequest[EmptyResponse]):
         return cls(realisation=json.loads(realisation_json))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string(json.dumps(self.realisation))
 
 
@@ -91,4 +101,5 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
         return cls(drv_output=await reader.read_string())
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string(self.drv_output)

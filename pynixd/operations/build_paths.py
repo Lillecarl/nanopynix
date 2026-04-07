@@ -18,7 +18,6 @@ from .base import (
     BuildResult,
     OpRequest,
     OpResponse,
-    Uint64Response,
 )
 
 if TYPE_CHECKING:
@@ -144,9 +143,21 @@ async def _decompose_build_paths(
 
 
 @dataclass
-class BuildPathsRequest(OpRequest[Uint64Response]):
+class BuildPathsResponse(OpResponse):
+    value: int = 0
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(value=await reader.read_uint64())
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.value)
+
+
+@dataclass
+class BuildPathsRequest(OpRequest[BuildPathsResponse]):
     op: ClassVar[int] = Op.BuildPaths
-    response_type: ClassVar[type[OpResponse]] = Uint64Response
+    response_type: ClassVar[type[OpResponse]] = BuildPathsResponse
     is_build: ClassVar[bool] = True
     derived_paths: set[DerivedPath] = field(default_factory=set)
     build_mode: BuildMode = BuildMode.NORMAL
@@ -159,6 +170,7 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)
         writer.write_uint64(self.build_mode)
 
@@ -179,7 +191,7 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
         )
 
         if not decomposed:
-            return Uint64Response(value=0)
+            return BuildPathsResponse(value=0)
 
         from .build_derivation import BuildDerivationResponse
 
@@ -189,9 +201,9 @@ class BuildPathsRequest(OpRequest[Uint64Response]):
         for resp in responses:
             if isinstance(resp, BuildDerivationResponse):
                 if resp.result.status != 0:
-                    return Uint64Response(value=1)
+                    return BuildPathsResponse(value=1)
 
-        return Uint64Response(value=0)
+        return BuildPathsResponse(value=0)
 
 
 # ── BuildPathsWithResults ────────────────────────────────────────────
@@ -240,6 +252,7 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)
         writer.write_uint64(self.build_mode)
 

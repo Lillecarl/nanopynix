@@ -1,4 +1,4 @@
-"""QueryClosureWithInfo operation request/response types."""
+"""QueryClosureWithInfo operation request/response types. This is a custom operation."""
 
 from __future__ import annotations
 
@@ -8,16 +8,11 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
+from ..exceptions import OpNotImplementedError
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, PathInfo
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
-    from ..proxy import DaemonProxy
-    from ..store import Store
 
 QUERY_CLOSURE_WITH_INFO = """
 WITH RECURSIVE closure(id) AS (
@@ -37,6 +32,12 @@ FROM closure c
 JOIN ValidPaths vp ON c.id = vp.id
 ORDER BY vp.id ASC
 """
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..local_store_db import LocalStoreDB
+    from ..proxy import DaemonProxy
+    from ..store import Store
 
 log = structlog.get_logger(__name__)
 
@@ -71,6 +72,7 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
         return cls(paths=await reader.read_string_set(StorePath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string_set(self.paths)
 
     async def execute_db(self, db: LocalStoreDB) -> QueryClosureWithInfoResponse | None:
@@ -118,11 +120,14 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryClosureWithInfoResponse:
-        # Try DB (via super) or existing wire connection
-        result = await super().execute(store, client, suppress_last)
-        if result.infos:
-            store.add_known_paths({info.path for info in result.infos})
-            return result
+        # Try DB (via super)
+        try:
+            result = await super().execute(store, client, suppress_last)
+            if result.infos:
+                store.add_known_paths({info.path for info in result.infos})
+                return result
+        except OpNotImplementedError:
+            pass
 
         async with store.transfer_conn() as conn:
             if "QueryClosureWithInfo" in conn.features:

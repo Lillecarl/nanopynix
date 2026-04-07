@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, Uint64Response
+from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -16,9 +16,21 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class AddSignaturesRequest(OpRequest[Uint64Response]):
+class AddSignaturesResponse(OpResponse):
+    value: int = 0
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(value=await reader.read_uint64())
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.value)
+
+
+@dataclass
+class AddSignaturesRequest(OpRequest[AddSignaturesResponse]):
     op: ClassVar[int] = Op.AddSignatures
-    response_type: ClassVar[type[OpResponse]] = Uint64Response
+    response_type: ClassVar[type[OpResponse]] = AddSignaturesResponse
     path: str = ""
     sigs: set[str] = field(default_factory=set)
 
@@ -30,6 +42,7 @@ class AddSignaturesRequest(OpRequest[Uint64Response]):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string(self.path)
         writer.write_string_set(self.sigs)
 
@@ -38,5 +51,5 @@ class AddSignaturesRequest(OpRequest[Uint64Response]):
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
-    ) -> Uint64Response:
+    ) -> AddSignaturesResponse:
         return await super().execute(store, client, suppress_last)

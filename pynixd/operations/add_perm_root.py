@@ -51,5 +51,6 @@ class AddPermRootRequest(OpRequest[AddPermRootResponse]):
         return AddPermRootResponse(gc_root=self.gc_root)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string(self.store_path)
         writer.write_string(self.gc_root)

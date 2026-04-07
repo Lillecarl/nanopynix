@@ -7,11 +7,9 @@ from pathlib import Path
 import pytest
 import structlog
 
-from pynixd.operations.queries import (
-    IsValidPathRequest,
-    QueryAllValidPathsRequest,
-    QueryPathInfoRequest,
-)
+from pynixd.operations.is_valid_path import IsValidPathRequest
+from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
+from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import NIX_BIN, STORE_PREFIX

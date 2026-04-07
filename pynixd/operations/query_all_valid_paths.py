@@ -2,39 +2,59 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..protocol import Op
 from ..store_path import StorePath
-from .base import EmptyRequest, OpResponse, StringSetResponse
+from ..wire import NixReader, NixWriter
+from .base import OpRequest, OpResponse
+
+QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..local_store_db import LocalStoreDB
     from ..store import Store
 
-QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
+
+@dataclass
+class QueryAllValidPathsResponse(OpResponse):
+    paths: set[StorePath] = field(default_factory=set)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(paths=await reader.read_string_set(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string_set(self.paths)
 
 
 @dataclass
-class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
+class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
     op: ClassVar[int] = Op.QueryAllValidPaths
-    response_type: ClassVar[type[OpResponse]] = StringSetResponse
+    response_type: ClassVar[type[OpResponse]] = QueryAllValidPathsResponse
     is_query: ClassVar[bool] = True
 
-    async def execute_db(self, db: LocalStoreDB) -> StringSetResponse | None:
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls()
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
+
+    async def execute_db(self, db: LocalStoreDB) -> QueryAllValidPathsResponse | None:
         async with db.acquire_conn() as conn:
             async with conn.execute(QUERY_ALL_VALID_PATHS) as cursor:
                 rows = await cursor.fetchall()
-        return StringSetResponse(paths={StorePath(r[0]) for r in rows})
+        return QueryAllValidPathsResponse(paths={StorePath(r[0]) for r in rows})
 
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
-    ) -> StringSetResponse:
+    ) -> QueryAllValidPathsResponse:
         try:
             resp = await super().execute(store, client, suppress_last)
             store.add_known_paths(resp.paths, update_regtime=False)
@@ -45,4 +65,4 @@ class QueryAllValidPathsRequest(EmptyRequest[StringSetResponse]):
         except Exception:
             self._log.warning("sync_paths_failed", store_id=store.id)
             store.known_paths = set()
-            return StringSetResponse(paths=set())
+            return QueryAllValidPathsResponse(paths=set())

@@ -8,12 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpResponse, PathInfo, SingleStringRequest
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
-    from ..store import Store
+from .base import OpRequest, OpResponse, PathInfo
 
 QUERY_PATH_INFO = """
 SELECT path, deriver, hash, registrationTime, narSize, ultimate, sigs, ca
@@ -25,6 +20,11 @@ SELECT vp.path FROM Refs r
 JOIN ValidPaths vp ON r.reference = vp.id
 WHERE r.referrer = (SELECT id FROM ValidPaths WHERE path = ?)
 """
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..local_store_db import LocalStoreDB
+    from ..store import Store
 
 
 @dataclass
@@ -47,10 +47,19 @@ class QueryPathInfoResponse(OpResponse):
 
 
 @dataclass
-class QueryPathInfoRequest(SingleStringRequest[QueryPathInfoResponse]):
+class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
     op: ClassVar[int] = Op.QueryPathInfo
     response_type: ClassVar[type[OpResponse]] = QueryPathInfoResponse
     is_query: ClassVar[bool] = True
+    path: StorePath = StorePath("")
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(path=await reader.read_string(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
+        writer.write_string(self.path)
 
     async def execute_db(self, db: LocalStoreDB) -> QueryPathInfoResponse | None:
         async with db.acquire_conn() as conn:

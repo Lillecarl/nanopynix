@@ -2,13 +2,47 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from dataclasses import dataclass, field
+from typing import ClassVar, Self
 
 from ..protocol import Op
-from .base import OpResponse, SingleStringRequest, StringMapResponse
+from ..store_path import StorePath
+from ..wire import NixReader, NixWriter
+from .base import OpRequest, OpResponse
 
 
-class QueryDerivationOutputMapRequest(SingleStringRequest[StringMapResponse]):
+@dataclass
+class QueryDerivationOutputMapResponse(OpResponse):
+    items: dict[str, StorePath] = field(default_factory=dict)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        n = await reader.read_uint64()
+        items: dict[str, StorePath] = {}
+        for _ in range(n):
+            k = await reader.read_string()
+            v = await reader.read_string(StorePath)
+            items[k] = v
+        return cls(items=items)
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(len(self.items))
+        for k, v in self.items.items():
+            writer.write_string(k)
+            writer.write_string(v)
+
+
+@dataclass
+class QueryDerivationOutputMapRequest(OpRequest[QueryDerivationOutputMapResponse]):
     op: ClassVar[int] = Op.QueryDerivationOutputMap
-    response_type: ClassVar[type[OpResponse]] = StringMapResponse
+    response_type: ClassVar[type[OpResponse]] = QueryDerivationOutputMapResponse
     is_query: ClassVar[bool] = True
+    path: StorePath = StorePath("")
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(path=await reader.read_string(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
+        writer.write_string(self.path)

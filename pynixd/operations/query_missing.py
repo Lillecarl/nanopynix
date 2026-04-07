@@ -54,6 +54,7 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         return cls(derived_paths=await reader.read_string_set(DerivedPath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)
 
     async def execute(

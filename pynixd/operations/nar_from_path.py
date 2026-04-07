@@ -10,11 +10,12 @@ import structlog
 
 from .. import wire
 from ..protocol import Op, op_log
+from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     ByteCollector,
+    OpRequest,
     OpResponse,
-    SingleStringRequest,
 )
 
 if TYPE_CHECKING:
@@ -42,12 +43,21 @@ class NarFromPathResponse(OpResponse):
 
 
 @dataclass
-class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
+class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     op: ClassVar[int] = Op.NarFromPath
     response_type: ClassVar[type[OpResponse]] = NarFromPathResponse
     is_query: ClassVar[bool] = True
+    path: StorePath = StorePath("")
     nar_size: int = 0
     async_callback: Callable[[bytes], Awaitable[None]] | None = None
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(path=await reader.read_string(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
+        writer.write_string(self.path)
 
     async def execute(
         self,
@@ -59,7 +69,6 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
             from ..wire import _CHUNK_SIZE
 
             async with store.transfer_conn() as conn:
-                conn.w.write_uint64(self.op)
                 await self.to_writer(conn.w, conn.version)
                 await conn.w.drain()
                 await conn.r.drain_stderr()
@@ -104,8 +113,9 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
         proxy.w.write_uint64(wire.STDERR_LAST)
 
         async with proxy.local_store.transfer_conn() as conn:
-            conn.w.write_uint64(Op.NarFromPath)
-            await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
+            # We explicitly write OpRequest fields here because handle is special.
+            # However, we can also just create a temporary request.
+            await cls(path=path).to_writer(conn.w, conn.version)
             await conn.w.drain()
             await conn.r.drain_stderr()
 

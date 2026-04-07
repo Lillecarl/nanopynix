@@ -3,13 +3,36 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Self
 
 from ..protocol import Op
-from .base import OpResponse, SingleStringRequest, Uint64Response
+from ..store_path import StorePath
+from ..wire import NixReader, NixWriter
+from .base import OpRequest, OpResponse
 
 
 @dataclass
-class EnsurePathRequest(SingleStringRequest[Uint64Response]):
+class EnsurePathResponse(OpResponse):
+    value: int = 0
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(value=await reader.read_uint64())
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.value)
+
+
+@dataclass
+class EnsurePathRequest(OpRequest[EnsurePathResponse]):
     op: ClassVar[int] = Op.EnsurePath
-    response_type: ClassVar[type[OpResponse]] = Uint64Response
+    response_type: ClassVar[type[OpResponse]] = EnsurePathResponse
+    path: StorePath = StorePath("")
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(path=await reader.read_string(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
+        writer.write_string(self.path)

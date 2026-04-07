@@ -189,7 +189,6 @@ class Connection:
         )
 
         buf = ByteCollector()
-        buf.write_uint64(op)
         await request.to_writer(buf, self.version)
         self.w.write(buf.getvalue())
         await self.w.drain()

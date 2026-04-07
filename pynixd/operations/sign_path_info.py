@@ -1,4 +1,5 @@
-"""SignPathInfo operation - sign a PathInfo with configured secret keys."""
+"""SignPathInfo operation - sign a PathInfo with configured secret keys.
+This is a custom operation."""
 
 from __future__ import annotations
 
@@ -49,6 +50,7 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         return cls(info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         await self.info.to_writer_keyed(writer)
 
     async def execute_db(self, db: LocalStoreDB) -> SignPathInfoResponse | None:

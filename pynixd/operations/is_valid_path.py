@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..protocol import Op
+from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpResponse, SingleStringRequest
+from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -30,10 +31,19 @@ class IsValidPathResponse(OpResponse):
 
 
 @dataclass
-class IsValidPathRequest(SingleStringRequest[IsValidPathResponse]):
+class IsValidPathRequest(OpRequest[IsValidPathResponse]):
     op: ClassVar[int] = Op.IsValidPath
     response_type: ClassVar[type[OpResponse]] = IsValidPathResponse
     is_query: ClassVar[bool] = True
+    path: StorePath = StorePath("")
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(path=await reader.read_string(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
+        writer.write_string(self.path)
 
     async def execute_db(self, db: LocalStoreDB) -> IsValidPathResponse | None:
         async with db.acquire_conn() as conn:

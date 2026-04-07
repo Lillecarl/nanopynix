@@ -44,6 +44,7 @@ class QueryClosureRequest(OpRequest[QueryClosureResponse]):
         return cls(paths=await reader.read_string_set(StorePath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string_set(self.paths)
 
     async def execute(

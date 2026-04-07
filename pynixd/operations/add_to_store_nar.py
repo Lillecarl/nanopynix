@@ -10,7 +10,7 @@ import structlog
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
-from .base import EmptyResponse, OpRequest, OpResponse, PathInfo
+from .base import OpRequest, OpResponse, PathInfo
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
@@ -19,11 +19,21 @@ log = structlog.get_logger(__name__)
 
 
 @dataclass
-class AddToStoreNarRequest(OpRequest[EmptyResponse]):
+class AddToStoreNarResponse(OpResponse):
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls()
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        pass
+
+
+@dataclass
+class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
     """Prefix for AddToStoreNar (framed NAR data follows)."""
 
     op: ClassVar[int] = Op.AddToStoreNar
-    response_type: ClassVar[type[OpResponse]] = EmptyResponse
+    response_type: ClassVar[type[OpResponse]] = AddToStoreNarResponse
     info: PathInfo = field(default_factory=PathInfo)
     repair: int = 0
     dont_check_sigs: int = 0
@@ -48,6 +58,7 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string(self.info.path)
         writer.write_string(self.info.deriver)
         writer.write_string(self.info.nar_hash)
@@ -61,16 +72,16 @@ class AddToStoreNarRequest(OpRequest[EmptyResponse]):
         writer.write_uint64(self.dont_check_sigs)
 
     @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> EmptyResponse:
+    async def handle(cls, proxy: DaemonProxy) -> AddToStoreNarResponse:
         """Override handle because this is a streaming operation."""
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
         async with proxy.local_store.transfer_conn() as conn:
             path = await cls.forward(proxy.r, conn.w)
             await conn.w.drain()
             await conn.r.drain_stderr()
-            await EmptyResponse.from_reader(conn.r, conn.version)
+            await AddToStoreNarResponse.from_reader(conn.r, conn.version)
             proxy.local_store.add_known_path(path)
-        return EmptyResponse()
+        return AddToStoreNarResponse()
 
     @classmethod
     async def forward(cls, src: NixReader, dst: NixWriter) -> StorePath:

@@ -30,15 +30,12 @@ from . import wire
 from .connection import ClientConn, Connection
 from .local_store_db import LocalStoreDB
 from .operations.add_multiple_to_store import AddMultipleToStoreRequest
-from .operations.add_to_store_nar import AddToStoreNarRequest
 from .operations.base import (
-    EmptyResponse,
     OpRequest,
     PathInfo,
     Resp,
-    SingleStringRequest,
 )
-from .protocol import Op
+from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
 from .signing import SecretKey
 from .store_path import StorePath
@@ -262,7 +259,6 @@ class Store(ABC):
             dst_conn.op_log.append(
                 "AddMultipleToStore (stream_paths_with_info_store_to_store)"
             )
-            dst_conn.w.write_uint64(Op.AddMultipleToStore)
             req = AddMultipleToStoreRequest(
                 repair=0,
                 dont_check_sigs=1,
@@ -287,13 +283,12 @@ class Store(ABC):
                 # Write PathInfo to the framed stream
                 await info.to_writer_keyed(fw)
 
-                # Write NarFromPath opcode to src
-                src_conn.w.write_uint64(Op.NarFromPath)
-                # Write which path we're looking for
-                await SingleStringRequest(
-                    path=path,
-                ).to_writer(src_conn.w, src_conn.version)
+                from .operations.nar_from_path import NarFromPathRequest
+
                 # Send the NarFromPath request
+                await NarFromPathRequest(path=path).to_writer(
+                    src_conn.w, src_conn.version
+                )
                 await src_conn.w.drain()
                 # Throw away stderr
                 await src_conn.r.drain_stderr()
@@ -311,7 +306,7 @@ class Store(ABC):
             # Throw away destination stderr
             await dst_conn.r.drain_stderr()
             # Read the empty response to clean the connection
-            await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
+            await req.response_type.from_reader(dst_conn.r, dst_conn.version)
 
             # Update destination's known paths
             dst.add_known_paths({info.path for info in infos_list})
@@ -336,9 +331,6 @@ class Store(ABC):
             dst.transfer_conn() as dst_conn,
             src.transfer_conn() as src_conn,
         ):
-            # 1. Expand closure and fetch all PathInfo (returns topo-sorted list)
-            from .operations.query_closure_with_info import QueryClosureWithInfoRequest
-
             closure_resp = await src.execute(
                 QueryClosureWithInfoRequest(paths=paths_set),
                 client=None,  # No client forwarding for discovery
@@ -405,14 +397,13 @@ class Store(ABC):
     ) -> None:
         """Stream NAR from src store to this store."""
         async with self.transfer_conn() as dst_conn, src.transfer_conn() as src_conn:
-            src_conn.w.write_uint64(Op.NarFromPath)
-            await SingleStringRequest(
-                path=path,
-            ).to_writer(src_conn.w, src_conn.version)
+            from .operations.add_to_store_nar import AddToStoreNarRequest
+            from .operations.nar_from_path import NarFromPathRequest
+
+            await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
             await src_conn.w.drain()
             await src_conn.r.drain_stderr()
 
-            dst_conn.w.write_uint64(Op.AddToStoreNar)
             nar_request = AddToStoreNarRequest(
                 info=info,
                 repair=0,
@@ -427,7 +418,7 @@ class Store(ABC):
             )
 
             await dst_conn.r.drain_stderr()
-            await EmptyResponse.from_reader(dst_conn.r, dst_conn.version)
+            await nar_request.response_type.from_reader(dst_conn.r, dst_conn.version)
 
     @property
     def available_transfer_slots(self) -> int:

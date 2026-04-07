@@ -7,7 +7,7 @@ from typing import ClassVar, Self
 
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
-from .base import EmptyRequest, OpResponse
+from .base import OpRequest, OpResponse
 
 
 @dataclass
@@ -38,6 +38,13 @@ class FindRootsResponse(OpResponse):
 
 
 @dataclass
-class FindRootsRequest(EmptyRequest[FindRootsResponse]):
+class FindRootsRequest(OpRequest[FindRootsResponse]):
     op: ClassVar[int] = Op.FindRoots
     response_type: ClassVar[type[OpResponse]] = FindRootsResponse
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls()
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)

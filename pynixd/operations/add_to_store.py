@@ -55,6 +55,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string(self.name)
         writer.write_string(self.cam)
         writer.write_string_set(self.references)

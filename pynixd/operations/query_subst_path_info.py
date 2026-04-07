@@ -7,7 +7,7 @@ from typing import ClassVar, Self
 
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
-from .base import OpResponse, SingleStringRequest, SubstPathInfo
+from .base import OpRequest, OpResponse, SubstPathInfo
 
 
 @dataclass
@@ -29,7 +29,17 @@ class QuerySubstPathInfoResponse(OpResponse):
             await self.info.to_writer(writer, version)
 
 
-class QuerySubstPathInfoRequest(SingleStringRequest[QuerySubstPathInfoResponse]):
+@dataclass
+class QuerySubstPathInfoRequest(OpRequest[QuerySubstPathInfoResponse]):
     op: ClassVar[int] = Op.QuerySubstitutablePathInfo
     response_type: ClassVar[type[OpResponse]] = QuerySubstPathInfoResponse
     is_query: ClassVar[bool] = True
+    path: str = ""
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(path=await reader.read_string())
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
+        writer.write_string(self.path)

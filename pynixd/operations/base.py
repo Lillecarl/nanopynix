@@ -117,6 +117,11 @@ class OpRequest(ABC, Generic[Resp]):
         request = await cls.from_reader(proxy.r, proxy.version)
         return await proxy.local_store.execute(request, client=proxy.client)
 
+    @property
+    def is_extension(self) -> bool:
+        """True if this is a pynixd extension operation (not standard Nix)."""
+        return self.op >= 100
+
     async def execute(
         self,
         store: Store,
@@ -126,7 +131,7 @@ class OpRequest(ABC, Generic[Resp]):
         """Execute this operation on a store and return a buffered response.
 
         Tries the SQLite fast-path first if a database is available.
-        Otherwise, falls back to the wire protocol.
+        Otherwise, falls back to the wire protocol (standard ops only).
         """
         if store.db:
             try:
@@ -135,6 +140,12 @@ class OpRequest(ABC, Generic[Resp]):
                     return res
             except OpNotImplementedError:
                 pass
+
+        if self.is_extension:
+            raise OpNotImplementedError(
+                f"Extension operation {type(self).__name__} (op={self.op}) "
+                "not supported by this store (no DB and no wire fallback)"
+            )
 
         return await store.call(
             self,
@@ -194,146 +205,6 @@ class OpResponse(ABC):
 
     @abstractmethod
     async def to_writer(self, writer: NixWriter, version: int) -> None: ...
-
-
-# ── Common request types ─────────────────────────────────────────────
-
-
-@dataclass
-class EmptyRequest(OpRequest[Resp]):
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls()
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        pass
-
-
-@dataclass
-class SingleStringRequest(OpRequest[Resp]):
-    path: StorePath = field(default_factory=lambda: StorePath(""))
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(path=await reader.read_string(StorePath))
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string(self.path)
-
-
-@dataclass
-class StringSetRequest(OpRequest[Resp]):
-    paths: set[StorePath] = field(default_factory=set)
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(paths=await reader.read_string_set(StorePath))
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string_set(self.paths)
-
-
-@dataclass
-class StringMapRequest(OpRequest[Resp]):
-    items: dict[str, str] = field(default_factory=dict)
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        n = await reader.read_uint64()
-        items: dict[str, str] = {}
-        for _ in range(n):
-            k = await reader.read_string()
-            v = await reader.read_string()
-            items[k] = v
-        return cls(items=items)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_uint64(len(self.items))
-        for k, v in self.items.items():
-            writer.write_string(k)
-            writer.write_string(v)
-
-
-# ── Common response types ────────────────────────────────────────────
-
-
-@dataclass
-class EmptyResponse(OpResponse):
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls()
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        pass
-
-
-@dataclass
-class Uint64Response(OpResponse):
-    value: int = 0
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(value=await reader.read_uint64())
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_uint64(self.value)
-
-
-@dataclass
-class StringSetResponse(OpResponse):
-    paths: set[StorePath] = field(default_factory=set)
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(paths=await reader.read_string_set(StorePath))
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string_set(self.paths)
-
-
-@dataclass
-class SingleStringResponse(OpResponse):
-    value: str = ""
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(value=await reader.read_string())
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string(self.value)
-
-
-@dataclass
-class StorePathResponse(OpResponse):
-    value: StorePath = field(default_factory=lambda: StorePath(""))
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(value=await reader.read_string(StorePath))
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string(self.value)
-
-
-@dataclass
-class StringMapResponse(OpResponse):
-    items: dict[str, str] = field(default_factory=dict)
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        n = await reader.read_uint64()
-        items: dict[str, str] = {}
-        for _ in range(n):
-            k = await reader.read_string()
-            v = await reader.read_string()
-            items[k] = v
-        return cls(items=items)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_uint64(len(self.items))
-        for k, v in self.items.items():
-            writer.write_string(k)
-            writer.write_string(v)
 
 
 # ── Complex structures ───────────────────────────────────────────────

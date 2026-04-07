@@ -19,7 +19,6 @@ from . import (  # noqa: F401
     is_valid_path,
     nar_from_path,
     optimise_store,
-    queries,
     query_all_valid_paths,
     query_closure,
     query_closure_with_info,

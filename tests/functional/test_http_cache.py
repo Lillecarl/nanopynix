@@ -10,7 +10,8 @@ import pytest
 import structlog
 
 from pynixd import Server
-from pynixd.operations.queries import QueryAllValidPathsRequest, QueryPathInfoRequest
+from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
+from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import STORE_PREFIX, run_captured

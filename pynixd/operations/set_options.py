@@ -10,8 +10,7 @@ from .. import wire
 from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
-    EmptyRequest,
-    EmptyResponse,
+    OpRequest,
     OpResponse,
 )
 
@@ -24,9 +23,19 @@ logging.getLogger("pynixd.operations.SetOptionsRequest").setLevel(logging.WARNIN
 
 
 @dataclass
-class SetOptionsRequest(EmptyRequest[EmptyResponse]):
+class SetOptionsResponse(OpResponse):
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls()
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        pass
+
+
+@dataclass
+class SetOptionsRequest(OpRequest[SetOptionsResponse]):
     op: ClassVar[int] = Op.SetOptions
-    response_type: ClassVar[type[OpResponse]] = EmptyResponse
+    response_type: ClassVar[type[OpResponse]] = SetOptionsResponse
     keep_failed: int = 0
     keep_going: int = 0
     try_fallback: int = 0
@@ -99,13 +108,14 @@ class SetOptionsRequest(EmptyRequest[EmptyResponse]):
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
-    ) -> EmptyResponse:
+    ) -> SetOptionsResponse:
         # We don't forward SetOptions to the local store daemon as it would
         # mess with our own proxy's session state if it was a real daemon.
-        # We just return EmptyResponse.
-        return EmptyResponse()
+        # We just return SetOptionsResponse.
+        return SetOptionsResponse()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_uint64(self.keep_failed)
         writer.write_uint64(self.keep_going)
         writer.write_uint64(self.try_fallback)

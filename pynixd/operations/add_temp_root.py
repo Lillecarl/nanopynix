@@ -3,26 +3,36 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar, Self
 
 from ..protocol import Op
-from .base import OpResponse, SingleStringRequest, Uint64Response
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..store import Store
+from ..store_path import StorePath
+from ..wire import NixReader, NixWriter
+from .base import OpRequest, OpResponse
 
 
 @dataclass
-class AddTempRootRequest(SingleStringRequest[Uint64Response]):
-    op: ClassVar[int] = Op.AddTempRoot
-    response_type: ClassVar[type[OpResponse]] = Uint64Response
+class AddTempRootResponse(OpResponse):
+    value: int = 0
 
-    async def execute(
-        self,
-        store: Store,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-    ) -> Uint64Response:
-        # We don't want clients creating temp roots on our host.
-        return Uint64Response(value=0)
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(value=await reader.read_uint64())
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.value)
+
+
+@dataclass
+class AddTempRootRequest(OpRequest[AddTempRootResponse]):
+    op: ClassVar[int] = Op.AddTempRoot
+    response_type: ClassVar[type[OpResponse]] = AddTempRootResponse
+    path: StorePath = StorePath("")
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        return cls(path=await reader.read_string(StorePath))
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
+        writer.write_string(self.path)

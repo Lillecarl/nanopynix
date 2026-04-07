@@ -63,6 +63,7 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_uint64(self.action)
         writer.write_string_set(self.paths_to_delete)
         writer.write_uint64(self.ignore_liveness)

@@ -11,17 +11,17 @@ from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
 
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
-    from ..store import Store
-
 QUERY_DERIVATION_OUTPUTS_BATCH = """
 SELECT vp_drv.path, do.id, do.path
 FROM DerivationOutputs do
 JOIN ValidPaths vp_drv ON do.drv = vp_drv.id
 WHERE vp_drv.path IN (SELECT value FROM json_each(?))
 """
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..local_store_db import LocalStoreDB
+    from ..store import Store
 
 
 @dataclass
@@ -67,6 +67,7 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         return cls(drv_paths=await reader.read_string_set(StorePath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_uint64(self.op)
         writer.write_string_set(self.drv_paths)
 
     async def execute_db(
@@ -95,10 +96,12 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> DerivationOutputsBatchResponse:
-        if store.db:
-            result = await store.db.execute(self)
-            if result is not None:
+        try:
+            result = await super().execute(store, client, suppress_last)
+            if result.outputs:
                 return result
+        except Exception:
+            pass
 
         # Fallback: read each .drv file from disk
         outputs: dict[StorePath, dict[str, StorePath]] = {}

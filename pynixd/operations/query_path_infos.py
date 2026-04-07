@@ -1,4 +1,4 @@
-"""QueryPathInfos operation request/response types."""
+"""QueryPathInfos operation request/response types. This is a custom operation."""
 
 from __future__ import annotations
 
@@ -8,16 +8,11 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
+from ..exceptions import OpNotImplementedError
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, PathInfo
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
-    from ..proxy import DaemonProxy
-    from ..store import Store
 
 QUERY_PATH_INFOS_BATCH = """
 SELECT vp.path, vp.deriver, vp.hash, registrationTime, narSize,
@@ -33,6 +28,12 @@ JOIN ValidPaths vp_referrer ON r.referrer = vp_referrer.id
 JOIN ValidPaths vp_ref ON r.reference = vp_ref.id
 WHERE vp_referrer.path IN (SELECT value FROM json_each(?))
 """
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..local_store_db import LocalStoreDB
+    from ..proxy import DaemonProxy
+    from ..store import Store
 
 log = structlog.get_logger(__name__)
 
@@ -68,6 +69,10 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         return cls(paths=await reader.read_string_set(StorePath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        # NOTE: This is a custom operation, so we only write the opcode if specifically
+        # allowed or if we are implementing a wire protocol that supports it.
+        # For now, we follow the user's wish to write it here.
+        writer.write_uint64(self.op)
         writer.write_string_set(self.paths)
 
     async def execute_db(self, db: LocalStoreDB) -> QueryPathInfosResponse | None:
@@ -107,11 +112,14 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfosResponse:
-        # Try DB (via super) or existing wire connection
-        result = await super().execute(store, client, suppress_last)
-        if result.infos:
-            store.add_known_paths(set(result.infos.keys()))
-            return result
+        # Try DB (via super)
+        try:
+            result = await super().execute(store, client, suppress_last)
+            if result.infos:
+                store.add_known_paths(set(result.infos.keys()))
+                return result
+        except OpNotImplementedError:
+            pass
 
         async with store.transfer_conn() as conn:
             if "QueryPathInfos" in conn.features:
