@@ -547,6 +547,26 @@ class NarFromPathRequest(SingleStringRequest[NarFromPathResponse]):
     op: ClassVar[int] = Op.NarFromPath
     response_type: ClassVar[type[OpResponse]] = NarFromPathResponse
     is_query: ClassVar[bool] = True
+    nar_size: int = 0  # Optional optimization: if > 0, we read raw bytes directly
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> NarFromPathResponse:
+        # Optimization: if size is known, read raw bytes without full OpRequest logic
+        # which would try to parse the entire NAR into memory.
+        if self.nar_size > 0:
+            async with store.transfer_conn() as conn:
+                conn.w.write_uint64(self.op)
+                await self.to_writer(conn.w, conn.version)
+                await conn.w.drain()
+                await conn.r.drain_stderr()
+                data = await conn.r.readexactly(self.nar_size)
+                return NarFromPathResponse(nar_data=data)
+
+        return await super().execute(store, client, suppress_last)
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> NarFromPathResponse | None:

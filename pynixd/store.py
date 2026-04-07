@@ -371,16 +371,9 @@ class Store(ABC):
 
     async def buffer_nar_from_path(self, path: StorePath, nar_size: int = 0) -> bytes:
         """Read NAR into memory."""
-        async with self.transfer_conn() as conn:
-            if nar_size > 0:
-                conn.w.write_uint64(Op.NarFromPath)
-                await SingleStringRequest(path=path).to_writer(conn.w, conn.version)
-                await conn.w.drain()
-                await conn.r.drain_stderr()
-                return await conn.r.readexactly(nar_size)
-            else:
-                resp = await conn.call(NarFromPathRequest(path=path))
-                return resp.nar_data
+
+        resp = await self.execute(NarFromPathRequest(path=path, nar_size=nar_size))
+        return resp.nar_data
 
     async def stream_nar_from_path(
         self,
