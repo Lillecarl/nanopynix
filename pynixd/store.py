@@ -729,11 +729,13 @@ class Store(ABC):
         if self.conn_counter == 1:
             self.version = conn.version
             self.nix_version = conn.nix_version
+            self.supported_features = conn.features
             log.info(
                 "store_protocol_version",
                 store_id=self.id,
                 version=wire.proto_str(self.version),
                 nix_version=self.nix_version,
+                features=sorted(self.supported_features),
             )
         pool_log.debug(
             "pool_created_connection",

@@ -116,6 +116,7 @@ class Connection:
         self.store_path: str | None = str(store_path) if store_path else None
         self.version: int = wire.PROTOCOL_VERSION
         self.nix_version: str = ""
+        self.features: set[str] = set()
         self.r = r
         self.w = w
         self.connected: bool = False
@@ -268,8 +269,8 @@ class Connection:
         if self.version >= wire.proto(1, 38):
             self.w.write_string_set(set())  # our features (none)
             await w.drain()
-            server_features = await self.r.read_string_set()
-            log.debug("daemon_features", server_features=server_features)
+            self.features = await self.r.read_string_set()
+            log.debug("daemon_features", server_features=self.features)
         self.w.write_uint64(0)  # sendCpu
         self.w.write_uint64(0)  # reserveSpace
         await w.drain()
