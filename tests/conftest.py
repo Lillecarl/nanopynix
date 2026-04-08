@@ -94,6 +94,37 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         tr.write_line(f"\nIMPORTANT: Test run logs: {log_dir}")
 
 
+def _prune_client_processor(frame, options):
+    """Custom pyinstrument processor to remove client-side subprocess execution."""
+    if frame is None:
+        return None
+
+    for child in list(frame.children):
+        if child.function and "run_nix_build" in child.function:
+            child.remove_from_parent()
+        else:
+            _prune_client_processor(child, options)
+
+    return frame
+
+
+def _make_profile_filename(request: pytest.FixtureRequest) -> str:
+    """Generate a short identifiable filename for a profile."""
+    node = request.node
+    parts = [node.path.name]
+    if hasattr(node, "name") and node.name != node.path.name:
+        full_name = node.name
+        if "[" in full_name:
+            param = full_name.split("[", 1)[1].rstrip("]")
+            parts.append(param)
+    return "pynixd-profile-" + "-".join(parts) + ".txt"
+
+
+def _record(request: pytest.FixtureRequest, label: str, **kwargs: Any) -> None:
+    """Record benchmark results in the test stash."""
+    log.info("benchmark_result", label=label, **kwargs)
+
+
 def pytest_terminal_summary(
     terminalreporter: pytest.TerminalReporter,
     exitstatus: int,

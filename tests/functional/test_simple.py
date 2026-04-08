@@ -64,7 +64,7 @@ async def test_builders(test_log_dir: Path) -> None:
         session = profiler.last_session
         if session:
             renderer = ConsoleRenderer(unicode=True, color=False, show_all=True)
-            profile_path = test_log_dir / "pyinstrument-test_builders"
+            profile_path = test_log_dir / "pyinstrument"
             with open(profile_path, "w") as f:
                 f.write(renderer.render(session))
 
@@ -115,6 +115,6 @@ async def test_store(test_log_dir: Path) -> None:
         session = profiler.last_session
         if session:
             renderer = ConsoleRenderer(unicode=True, color=False, show_all=True)
-            profile_path = test_log_dir / "pyinstrument-test_store"
+            profile_path = test_log_dir / "pyinstrument"
             with open(profile_path, "w") as f:
                 f.write(renderer.render(session))

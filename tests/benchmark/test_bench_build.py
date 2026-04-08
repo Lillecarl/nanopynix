@@ -333,12 +333,19 @@ async def run_pynixd(
         if session:
             renderer = ConsoleRenderer(unicode=True, color=False, show_all=True)
             renderer.processors.insert(0, _prune_client_processor)
-            fd, profile_path = tempfile.mkstemp(
-                prefix=_make_profile_filename(request),
-                suffix=".txt",
-                dir="/tmp",
-            )
-            os.close(fd)
+
+            # Try to save to test_log_dir if available
+            try:
+                test_log_dir = request.getfixturevalue("test_log_dir")
+                profile_path = str(test_log_dir / "pyinstrument")
+            except Exception:
+                fd, profile_path = tempfile.mkstemp(
+                    prefix=_make_profile_filename(request),
+                    suffix=".txt",
+                    dir="/tmp",
+                )
+                os.close(fd)
+
             with open(profile_path, "w") as f:
                 f.write(renderer.render(session))
 
