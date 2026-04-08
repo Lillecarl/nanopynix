@@ -86,6 +86,15 @@ def pytest_terminal_summary(
         terminalreporter.write_line(f"\nIMPORTANT: Test run logs: {log_dir}")
 
 
+@pytest.fixture(autouse=True)
+def clear_instrumentation():
+    """Clear internal test stash before each test."""
+    from pynixd.testing import clear_test_stash
+
+    clear_test_stash()
+    yield
+
+
 @pytest.fixture(scope="session")
 def test_log_dir(request: pytest.FixtureRequest) -> Path:
     """Return the session-wide log directory."""

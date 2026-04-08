@@ -153,6 +153,9 @@ class OpRequest(ABC, Generic[Resp]):
             try:
                 feature_name = Op(self.op).name
                 if feature_name in store.supported_features:
+                    from ..testing import set_test_value
+
+                    set_test_value(f"{feature_name}_delegated", True)
                     return await store.call(
                         self, client=client, suppress_last=suppress_last
                     )

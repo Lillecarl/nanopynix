@@ -15,6 +15,7 @@ from pynixd.operations.query_path_infos import (
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
+from pynixd.testing import get_test_value
 from tests.conftest import NIX_BIN, run_captured
 
 log = structlog.get_logger(__name__)
@@ -104,3 +105,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
 
             assert path in resp_a.infos
             log.info("delegated_query_path_infos_success", path=path)
+
+            # 4. Verify fast path was taken via internal instrumentation
+            assert get_test_value("QueryPathInfos_delegated") is True
+            log.info("delegation_path_verified_via_instrumentation")
