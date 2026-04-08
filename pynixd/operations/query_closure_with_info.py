@@ -46,6 +46,10 @@ log = structlog.get_logger(__name__)
 class QueryClosureWithInfoResponse(OpResponse):
     infos: list[PathInfo] = field(default_factory=list)
 
+    @property
+    def is_not_found(self) -> bool:
+        return not self.infos
+
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         n = await reader.read_uint64()
@@ -190,4 +194,4 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
     async def handle(cls, proxy: DaemonProxy) -> QueryClosureWithInfoResponse:
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
         request = await cls.from_reader(proxy.r, proxy.version)
-        return await proxy.local_store.execute(request, client=proxy.client)
+        return await proxy.execute(request)

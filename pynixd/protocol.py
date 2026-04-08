@@ -75,6 +75,11 @@ class Op(IntEnum):
     QueryDerivationOutputNames = 28
 
 
+def get_extension_features() -> set[str]:
+    """Return all pynixd extension operation names."""
+    return {op.name for op in Op if op.value >= 100}
+
+
 class OptTrusted(IntEnum):
     Unknown = 0
     Trusted = 1

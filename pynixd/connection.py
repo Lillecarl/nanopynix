@@ -266,9 +266,9 @@ class Connection:
 
         # Feature negotiation (1.38+) — before CPU/reserveSpace
         if self.version >= wire.proto(1, 38):
-            self.w.write_string_set(
-                {"QueryPathInfos", "QueryClosure", "QueryClosureWithInfo"}
-            )  # our features
+            from .protocol import get_extension_features
+
+            self.w.write_string_set(get_extension_features())  # our features
             await w.drain()
             self.features = await self.r.read_string_set()
             log.debug("daemon_features", server_features=self.features)

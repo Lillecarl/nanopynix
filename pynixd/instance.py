@@ -167,7 +167,14 @@ class Server:
         stores = self.config.stores
 
         await local_store.probe_version()
-        local_store.db = await LocalStoreDB.open(local_store.store_path or Path("/"))
+
+        use_db = getattr(local_store, "use_db", True)
+        if use_db:
+            local_store.db = await LocalStoreDB.open(
+                local_store.store_path or Path("/")
+            )
+        else:
+            local_store.db = None
 
         for store in stores.values():
             from .operations.query_all_valid_paths import QueryAllValidPathsRequest

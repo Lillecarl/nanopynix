@@ -673,7 +673,7 @@ class _SSHStoreMixin:
     host: str
     port: int
     username: str | None
-    client_keys: list[str | Path] | None
+    client_keys: list[str | Path | asyncssh.SSHKey] | None
     conn: asyncssh.SSHClientConnection | None
     backoff: float
     max_backoff: float
@@ -685,7 +685,10 @@ class _SSHStoreMixin:
     PSI_INTERVAL = env.float("PYNIXD_PSI_INTERVAL", 5.0)
 
     def init_ssh_state(
-        self, *, monitor: bool = True, client_keys: list[str | Path] | None = None
+        self,
+        *,
+        monitor: bool = True,
+        client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
     ) -> None:
         self.conn = None
         self.ssh_lock = asyncio.Lock()
@@ -865,7 +868,8 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
         monitor: bool = True,
-        client_keys: list[str | Path] | None = None,
+        client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
+        nix_bin: str = "nix",
     ) -> None:
         super().__init__(
             id=id or f"ssh:{username or ''}@{host}:{port}",
@@ -877,6 +881,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         self.host = host
         self.port = port
         self.username = username
+        self.nix_bin = nix_bin
         self.init_ssh_state(monitor=monitor, client_keys=client_keys)
         self.ssh_processes: list[asyncssh.SSHClientProcess] = []
 
@@ -886,8 +891,10 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         except Exception:
             raise
         conn_id = f"{self.id}-{self.conn_counter}"
-        if self.store_path:
-            cmd = f"nix daemon --store {self.store_path} --stdio"
+        if self.store_path and self.store_path != Path("/"):
+            cmd = f"{self.nix_bin} daemon --store {self.store_path} --stdio"
+        elif self.nix_bin != "nix":
+            cmd = f"{self.nix_bin} daemon --stdio"
         else:
             cmd = "nix-daemon --stdio"
         log.debug(
@@ -938,31 +945,35 @@ class LocalSocketStore(Store):
         self,
         id: str | None = None,
         store_path: Path | None = None,
+        socket_path: Path | None = None,
         max_builds: int = 1,
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
         nix_bin: str = "nix",
         extra_env: dict[str, str] | None = None,
         extra_args: list[str] | None = None,
+        use_db: bool = True,
     ) -> None:
         if store_path is None:
             store_path = Path("/")
         managed = store_path != Path("/")
-        if managed:
-            socket_path = store_path / "var" / "nix" / "daemon-socket" / "socket"
+        if socket_path:
+            self.socket_path = socket_path
+        elif managed:
+            self.socket_path = store_path / "var" / "nix" / "daemon-socket" / "socket"
         else:
-            socket_path = DAEMON_SOCKET_PATH
+            self.socket_path = DAEMON_SOCKET_PATH
 
         super().__init__(
-            id=id or f"local-socket:{socket_path}",
+            id=id or f"local-socket:{self.socket_path}",
             store_path=store_path,
             max_builds=max_builds,
             max_transfers=max_transfers,
             supported_systems=supported_systems,
         )
-        self.socket_path = socket_path
         self.managed = managed
         self.nix_bin = nix_bin
+        self.use_db = use_db
         self.daemon_proc: asyncio.subprocess.Process | None = None
         self.daemon_ready: asyncio.Event | None = None
         self.extra_env = extra_env or {}
@@ -1091,7 +1102,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
         monitor: bool = True,
-        client_keys: list[str | Path] | None = None,
+        client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
     ) -> None:
         super().__init__(
             id=id or f"ssh-socket:{username or ''}@{host}:{port}",

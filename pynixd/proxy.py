@@ -7,7 +7,7 @@ and dispatches them to request type handle() classmethods.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 import asyncssh
 import structlog
@@ -15,11 +15,13 @@ import structlog
 from . import wire
 from .build_queue import BuildQueue
 from .connection import ClientConn
-from .exceptions import BackendError
+from .exceptions import BackendError, OpNotImplementedError
 from .operations import OP_REGISTRY
 from .operations.base import (
     ByteCollector,
+    OpRequest,
     OpResponse,
+    Resp,
 )
 from .protocol import Op, OptTrusted, op_log
 from .scheduler import Scheduler
@@ -62,6 +64,10 @@ class DaemonProxy:
     def scheduler_trigger(self) -> Callable[[], None] | None:
         return self.scheduler.trigger if self.scheduler else None
 
+    @property
+    def stores(self) -> Mapping[str, Store]:
+        return self.scheduler.stores if self.scheduler else {}
+
     async def run(self) -> None:
         """Run the full session lifecycle."""
         self.client.start()
@@ -83,8 +89,9 @@ class DaemonProxy:
         if magic != wire.WORKER_MAGIC_1:
             raise ValueError(f"Bad client magic: {magic:#x}")
 
-        # Present the local store's protocol version to the client
-        server_version = self.local_store.version
+        # Present pynixd's supported protocol version to the client.
+        # This enables feature negotiation (1.38+) even if the local store is older.
+        server_version = wire.PROTOCOL_VERSION
         self.w.write_uint64(wire.WORKER_MAGIC_2)
         self.w.write_uint64(server_version)
         await self.w.drain()
@@ -102,9 +109,10 @@ class DaemonProxy:
         if self.version >= wire.proto(1, 38):
             client_features = await self.r.read_string_set()
             log.debug("client_features", client_features=client_features)
-            self.w.write_string_set(
-                {"QueryPathInfos", "QueryClosure", "QueryClosureWithInfo"}
-            )  # our features
+            from .protocol import get_extension_features
+
+            self.w.write_string_set(get_extension_features())  # our features
+            await self.w.drain()
 
         if await self.r.read_uint64():  # sendCpu
             await self.r.read_uint64()  # cpuAffinity (ignored)
@@ -159,6 +167,44 @@ class DaemonProxy:
                 await self.send_error(f"Internal error handling {op.name}")
 
     # ── Dispatch ─────────────────────────────────────────────────────
+
+    async def execute(
+        self,
+        request: OpRequest[Resp],
+    ) -> Resp:
+        """Execute an operation, falling back to other stores for extensions."""
+        try:
+            resp = await self.local_store.execute(request, client=self.client)
+            if not (request.is_extension and resp.is_not_found):
+                return resp
+        except OpNotImplementedError:
+            if not request.is_extension:
+                raise
+
+        # Extension not supported by local store or returned not found — try other stores
+        for store in self.stores.values():
+            try:
+                # We don't forward client logs to remote stores for simple queries
+                # unless they are builds.
+                resp = await store.execute(request, client=self.client)
+                if not resp.is_not_found:
+                    return resp
+            except OpNotImplementedError:
+                continue
+
+        # If we got here and have a resp from local store, return it (even if empty)
+        # unless it was OpNotImplementedError.
+        # But wait, if all backends also returned not found, we should return one of them.
+        # The local_store result is a good default.
+        try:
+            return await self.local_store.execute(request, client=self.client)
+        except OpNotImplementedError:
+            pass
+
+        raise OpNotImplementedError(
+            f"Extension operation {type(request).__name__} (op={request.op}) "
+            "not supported by any configured store"
+        )
 
     async def dispatch(self, op: Op) -> OpResponse | None:
         """Route an operation to its request type's handle method."""

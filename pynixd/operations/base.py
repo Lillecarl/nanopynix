@@ -110,12 +110,12 @@ class OpRequest(ABC, Generic[Resp]):
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
         """Handle this operation from a client.
 
-        Decodes the request and delegates execution to the local store.
+        Decodes the request and delegates execution to the stores.
         Streaming operations should override this method.
         """
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
         request = await cls.from_reader(proxy.r, proxy.version)
-        return await proxy.local_store.execute(request, client=proxy.client)
+        return await proxy.execute(request)
 
     @property
     def is_extension(self) -> bool:
@@ -142,6 +142,13 @@ class OpRequest(ABC, Generic[Resp]):
                 pass
 
         if self.is_extension:
+            # If the store explicitly supports this extension via feature negotiation,
+            # allow falling back to the wire.
+            if type(self).__name__ in store.supported_features:
+                return await store.call(
+                    self, client=client, suppress_last=suppress_last
+                )
+
             raise OpNotImplementedError(
                 f"Extension operation {type(self).__name__} (op={self.op}) "
                 "not supported by this store (no DB and no wire fallback)"
@@ -198,6 +205,13 @@ class OpResponse(ABC):
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         cls._log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+
+    @property
+    def is_not_found(self) -> bool:
+        """True if this response indicates that the requested data was not found.
+        Used by proxy to decide whether to try other stores.
+        """
+        return False
 
     @classmethod
     @abstractmethod

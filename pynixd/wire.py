@@ -379,7 +379,7 @@ class UnixNixWriter(NixWriter):
 
 WORKER_MAGIC_1: Final[int] = 0x6E697863  # client hello
 WORKER_MAGIC_2: Final[int] = 0x6478696F  # server hello
-PROTOCOL_VERSION: Final[int] = (1 << 8) | 35  # 1.35
+PROTOCOL_VERSION: Final[int] = (1 << 8) | 38  # 1.38
 
 
 def proto(major: int, minor: int) -> int:
