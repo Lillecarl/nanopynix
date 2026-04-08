@@ -46,51 +46,6 @@ def strip_store_prefix(path: StorePath | str) -> str:
     return path_str
 
 
-def hash_part(path: StorePath | str) -> str:
-    """'/nix/store/abc-foo' → 'abc'"""
-    return strip_store_prefix(path).split("-", 1)[0]
-
-
-def format_narinfo(
-    path: StorePath,
-    nar_hash: str,
-    nar_size: int,
-    references: set[StorePath],
-    deriver: StorePath,
-    sigs: set[str],
-    ca: str,
-) -> str:
-    """Format a .narinfo file from path info fields."""
-    # Ensure NarHash has sha256: prefix (expected by Nix)
-    if not nar_hash.startswith("sha256:"):
-        nar_hash = f"sha256:{nar_hash}"
-
-    nar_hash_part = nar_hash.split(":")[-1]
-
-    lines = [
-        f"StorePath: {path}",
-        f"URL: nar/{nar_hash_part}.nar",
-        "Compression: none",
-        f"NarHash: {nar_hash}",
-        f"NarSize: {nar_size}",
-    ]
-
-    if references:
-        refs = " ".join(sorted(strip_store_prefix(r) for r in references))
-        lines.append(f"References: {refs}")
-
-    if deriver:
-        lines.append(f"Deriver: {strip_store_prefix(deriver)}")
-
-    for sig in sorted(sigs):
-        lines.append(f"Sig: {sig}")
-
-    if ca:
-        lines.append(f"CA: {ca}")
-
-    return "\n".join(lines) + "\n"
-
-
 class BinaryCacheServer:
     """HTTP binary cache server for the local Nix store.
 
@@ -197,15 +152,7 @@ class BinaryCacheServer:
         if info is None:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
-        narinfo = format_narinfo(
-            path=info.path,
-            nar_hash=info.nar_hash,
-            nar_size=info.nar_size,
-            references=info.references,
-            deriver=info.deriver,
-            sigs=info.sigs,
-            ca=info.ca,
-        )
+        narinfo = info.to_narinfo()
 
         if self.db is not None:
             self.db.mark_path(path)

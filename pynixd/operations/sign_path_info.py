@@ -6,6 +6,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
+import structlog
+
+from ..exceptions import OpNotImplementedError
 from ..protocol import Op
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
 from ..wire import NixReader, NixWriter
@@ -15,7 +18,10 @@ from .base import OpRequest, OpResponse, PathInfo
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..local_store_db import LocalStoreDB
+    from ..proxy import DaemonProxy
     from ..store import Store
+
+log = structlog.get_logger(__name__)
 
 SIGN_PATH_INFO = 107
 
@@ -92,9 +98,12 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> SignPathInfoResponse:
-        res = await super().execute(store, client, suppress_last)
-        if res.info.sigs != self.info.sigs:
-            return res
+        try:
+            res = await super().execute(store, client, suppress_last)
+            if res.info.sigs != self.info.sigs:
+                return res
+        except OpNotImplementedError:
+            pass
 
         key = self.key or get_default_signing_key()
         if key is None:
@@ -113,3 +122,10 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         )
 
         return SignPathInfoResponse(info=self.info)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> SignPathInfoResponse:
+
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        request = await cls.from_reader(proxy.r, proxy.version)
+        return await proxy.execute(request)

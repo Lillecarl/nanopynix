@@ -124,19 +124,16 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryClosureWithInfoResponse:
-        # Try DB (via super)
+        # 1. Try DB or remote delegation via base class
         try:
             result = await super().execute(store, client, suppress_last)
-            if result.infos:
+            if not result.is_not_found:
                 store.add_known_paths({info.path for info in result.infos})
                 return result
         except OpNotImplementedError:
             pass
 
-        async with store.transfer_conn() as conn:
-            if "QueryClosureWithInfo" in conn.features:
-                return await conn.call(self, client=client, suppress_last=suppress_last)
-
+        # 2. Decomposition fallback: build closure info by fetching metadata recursively
         all_infos: dict[StorePath, PathInfo] = {}
         pending = self.paths
 

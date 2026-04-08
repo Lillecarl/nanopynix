@@ -93,7 +93,13 @@ class Store(ABC):
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
         self.supported_features: set[str] = set()
+        self.probed = False
         self.signing_keys: dict[str, SecretKey] = {}
+
+    @property
+    def db_enabled(self) -> bool:
+        """True if this store should use a local SQLite DB for metadata."""
+        return True
 
     @property
     def signing_key_names(self) -> list[str]:
@@ -555,6 +561,7 @@ class Store(ABC):
             self.version = conn.version
             self.nix_version = conn.nix_version
             self.supported_features = conn.features
+            self.probed = True
             log.info(
                 "store_protocol_version",
                 store_id=self.id,
@@ -978,6 +985,10 @@ class LocalSocketStore(Store):
         self.daemon_ready: asyncio.Event | None = None
         self.extra_env = extra_env or {}
         self.extra_args = extra_args or []
+
+    @property
+    def db_enabled(self) -> bool:
+        return self.use_db
 
     async def ensure_daemon(self) -> None:
         """Spawn a managed daemon if needed (first call only).

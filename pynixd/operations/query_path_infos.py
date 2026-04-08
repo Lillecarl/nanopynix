@@ -116,19 +116,16 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfosResponse:
-        # Try DB (via super)
+        # 1. Try DB or remote delegation via base class
         try:
             result = await super().execute(store, client, suppress_last)
-            if result.infos:
+            if not result.is_not_found:
                 store.add_known_paths(set(result.infos.keys()))
                 return result
         except OpNotImplementedError:
             pass
 
-        async with store.transfer_conn() as conn:
-            if "QueryPathInfos" in conn.features:
-                return await conn.call(self, client=client, suppress_last=suppress_last)
-
+        # 2. Decomposition fallback: try one by one
         infos: dict[StorePath, PathInfo] = {}
         for path in self.paths:
             from .query_path_info import QueryPathInfoRequest

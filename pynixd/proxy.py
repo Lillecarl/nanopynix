@@ -173,10 +173,11 @@ class DaemonProxy:
         request: OpRequest[Resp],
     ) -> Resp:
         """Execute an operation, falling back to other stores for extensions."""
+        local_resp: Resp | None = None
         try:
-            resp = await self.local_store.execute(request, client=self.client)
-            if not (request.is_extension and resp.is_not_found):
-                return resp
+            local_resp = await self.local_store.execute(request, client=self.client)
+            if not (request.is_extension and local_resp.is_not_found):
+                return local_resp
         except OpNotImplementedError:
             if not request.is_extension:
                 raise
@@ -192,14 +193,11 @@ class DaemonProxy:
             except OpNotImplementedError:
                 continue
 
-        # If we got here and have a resp from local store, return it (even if empty)
-        # unless it was OpNotImplementedError.
-        # But wait, if all backends also returned not found, we should return one of them.
-        # The local_store result is a good default.
-        try:
-            return await self.local_store.execute(request, client=self.client)
-        except OpNotImplementedError:
-            pass
+        # If we got here, none of the backends had a "found" result.
+        # Return the local_store result (even if empty) as the final word,
+        # unless it wasn't even implemented.
+        if local_resp is not None:
+            return local_resp
 
         raise OpNotImplementedError(
             f"Extension operation {type(request).__name__} (op={request.op}) "

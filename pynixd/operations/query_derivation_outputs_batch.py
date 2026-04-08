@@ -6,6 +6,9 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
+import structlog
+
+from ..exceptions import OpNotImplementedError
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
@@ -21,7 +24,10 @@ WHERE vp_drv.path IN (SELECT value FROM json_each(?))
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..local_store_db import LocalStoreDB
+    from ..proxy import DaemonProxy
     from ..store import Store
+
+log = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -29,6 +35,10 @@ class DerivationOutputsBatchResponse(OpResponse):
     """{drv_path: {output_name: output_path}}."""
 
     outputs: dict[StorePath, dict[str, StorePath]] = field(default_factory=dict)
+
+    @property
+    def is_not_found(self) -> bool:
+        return not self.outputs
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
@@ -98,9 +108,9 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
     ) -> DerivationOutputsBatchResponse:
         try:
             result = await super().execute(store, client, suppress_last)
-            if result.outputs:
+            if not result.is_not_found:
                 return result
-        except Exception:
+        except OpNotImplementedError:
             pass
 
         # Fallback: read each .drv file from disk
@@ -114,3 +124,9 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
             except FileNotFoundError:
                 pass
         return DerivationOutputsBatchResponse(outputs=outputs)
+
+    @classmethod
+    async def handle(cls, proxy: DaemonProxy) -> DerivationOutputsBatchResponse:
+        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        request = await cls.from_reader(proxy.r, proxy.version)
+        return await proxy.execute(request)

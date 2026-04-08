@@ -10,7 +10,6 @@ import pytest
 import structlog
 
 from pynixd import Server
-from pynixd.http_cache import format_narinfo
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.operations.nar_from_path import NarFromPathRequest
@@ -59,15 +58,7 @@ async def test_http_upload(tmp_path: Path) -> None:
         )
     )
 
-    narinfo = format_narinfo(
-        path=info.path,
-        nar_hash=info.nar_hash,
-        nar_size=info.nar_size,
-        references=info.references,
-        deriver=info.deriver,
-        sigs=info.sigs,
-        ca=info.ca,
-    )
+    narinfo = info.to_narinfo()
 
     # 2. Target store (temp) is empty
     target_store_path = STORE_PREFIX / "http-upload-target-direct"

@@ -168,8 +168,7 @@ class Server:
 
         await local_store.probe_version()
 
-        use_db = getattr(local_store, "use_db", True)
-        if use_db:
+        if local_store.db_enabled:
             local_store.db = await LocalStoreDB.open(
                 local_store.store_path or Path("/")
             )

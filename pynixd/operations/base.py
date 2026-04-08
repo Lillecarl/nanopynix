@@ -142,12 +142,22 @@ class OpRequest(ABC, Generic[Resp]):
                 pass
 
         if self.is_extension:
+            # Ensure we've probed the store at least once to know its features.
+            if not store.probed:
+                await store.probe_version()
+
             # If the store explicitly supports this extension via feature negotiation,
             # allow falling back to the wire.
-            if type(self).__name__ in store.supported_features:
-                return await store.call(
-                    self, client=client, suppress_last=suppress_last
-                )
+            from ..protocol import Op
+
+            try:
+                feature_name = Op(self.op).name
+                if feature_name in store.supported_features:
+                    return await store.call(
+                        self, client=client, suppress_last=suppress_last
+                    )
+            except ValueError:
+                pass
 
             raise OpNotImplementedError(
                 f"Extension operation {type(self).__name__} (op={self.op}) "
@@ -337,6 +347,42 @@ class PathInfo:
             sigs=data.get("sigs", set()),
             ca=data.get("ca", ""),
         )
+
+    def to_narinfo(self) -> str:
+        """Format PathInfo as .narinfo file content."""
+        # Ensure NarHash has sha256: prefix (expected by Nix)
+        nar_hash = self.nar_hash
+        if not nar_hash.startswith("sha256:"):
+            nar_hash = f"sha256:{nar_hash}"
+
+        nar_hash_part = nar_hash.split(":")[-1]
+
+        lines = [
+            f"StorePath: {self.path}",
+            f"URL: nar/{nar_hash_part}.nar",
+            "Compression: none",
+            f"NarHash: {nar_hash}",
+            f"NarSize: {self.nar_size}",
+        ]
+
+        if self.references:
+            # references are stored as full StorePath, Nix expects base name
+            def strip_prefix(p: str) -> str:
+                return p.split("/")[-1]
+
+            refs = " ".join(sorted(strip_prefix(str(r)) for r in self.references))
+            lines.append(f"References: {refs}")
+
+        if self.deriver:
+            lines.append(f"Deriver: {self.deriver.split('/')[-1]}")
+
+        for sig in sorted(self.sigs):
+            lines.append(f"Sig: {sig}")
+
+        if self.ca:
+            lines.append(f"CA: {self.ca}")
+
+        return "\n".join(lines) + "\n"
 
 
 class OutputKind(Enum):
