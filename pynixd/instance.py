@@ -15,6 +15,7 @@ import structlog
 if TYPE_CHECKING:
     from aiohttp import web
 
+from . import wire
 from .gc import GarbageCollector
 from .http_cache import BinaryCacheServer
 from .local_store_db import LocalStoreDB
@@ -167,6 +168,16 @@ class Server:
         stores = self.config.stores
 
         await local_store.probe_version()
+
+        # Enforce minimum protocol version for the local store.
+        # 1.35 is required for reliable operation and modern field support.
+        # Remote stores (like nixbuild.net) can still use 1.32.
+        if local_store.version < wire.proto(1, 35):
+            raise RuntimeError(
+                f"Local store {local_store.id} uses protocol {wire.proto_str(local_store.version)}, "
+                "but pynixd requires at least 1.35 for the local store. "
+                "Please upgrade your Nix daemon."
+            )
 
         if local_store.db_enabled:
             local_store.db = await LocalStoreDB.open(
