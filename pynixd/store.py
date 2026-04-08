@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
@@ -1010,16 +1011,6 @@ class LocalSocketStore(Store):
         socket_dir = self.socket_path.parent
         os.makedirs(socket_dir, exist_ok=True)
 
-        log.info(
-            "spawning_managed_daemon",
-            nix_bin=self.nix_bin,
-            store_path=str(path),
-            socket_path=str(self.socket_path),
-        )
-        env = os.environ.copy()
-        env.update(self.extra_env)
-        env["NIX_DAEMON_SOCKET_PATH"] = str(self.socket_path)
-
         cmd = [
             self.nix_bin,
             "daemon",
@@ -1030,6 +1021,17 @@ class LocalSocketStore(Store):
             str(path / "tmp" / "nix-builds"),
         ]
         cmd.extend(self.extra_args)
+
+        log.info(
+            "spawning_managed_daemon",
+            nix_bin=self.nix_bin,
+            store_path=str(path),
+            socket_path=str(self.socket_path),
+            cmd=shlex.join(cmd),
+        )
+        env = os.environ.copy()
+        env.update(self.extra_env)
+        env["NIX_DAEMON_SOCKET_PATH"] = str(self.socket_path)
 
         self.daemon_proc = await asyncio.create_subprocess_exec(
             *cmd,

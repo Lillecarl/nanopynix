@@ -15,7 +15,7 @@ from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.operations.nar_from_path import NarFromPathRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
-from tests.conftest import STORE_PREFIX, rmtree_robust
+from tests.conftest import STORE_PREFIX, get_test_store_kwargs, rmtree_robust
 
 log = structlog.get_logger(__name__)
 
@@ -38,7 +38,9 @@ async def _pick_random_path(store: LocalSocketStore) -> StorePath:
 async def test_http_upload(tmp_path: Path) -> None:
     """Test uploading a path to the HTTP cache via PUT using aiohttp directly."""
     # 1. Source store (root) has the path
-    root_store = LocalSocketStore(id="root", store_path=Path("/"))
+    root_store = LocalSocketStore(
+        id="root", store_path=Path("/"), **get_test_store_kwargs()
+    )
     path = await _pick_random_path(root_store)
     hash_part = path.hash_part()
 
@@ -64,7 +66,9 @@ async def test_http_upload(tmp_path: Path) -> None:
     target_store_path = STORE_PREFIX / "http-upload-target-direct"
     rmtree_robust(target_store_path)
     os.makedirs(target_store_path, exist_ok=True)
-    target_store = LocalSocketStore(id="target", store_path=target_store_path)
+    target_store = LocalSocketStore(
+        id="target", store_path=target_store_path, **get_test_store_kwargs()
+    )
 
     # Enable uploads in pynixd
     upload_dir = tmp_path / "uploads"

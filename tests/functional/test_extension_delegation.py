@@ -16,7 +16,7 @@ from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
 from pynixd.testing import get_test_value
-from tests.conftest import NIX_BIN, run_captured
+from tests.conftest import NIX_BIN, get_test_store_kwargs, run_captured
 
 log = structlog.get_logger(__name__)
 
@@ -39,7 +39,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
     store_b_path = tmp_path / "store-b"
     store_b_path.mkdir()
     store_b = LocalSocketStore(
-        id="b-local", store_path=store_b_path, nix_bin=str(NIX_BIN)
+        id="b-local", store_path=store_b_path, **get_test_store_kwargs()
     )
     await store_b.ensure_daemon()
 
@@ -71,7 +71,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
 
         # Server A's local store doesn't have a DB and doesn't support extensions
         store_a = LocalSocketStore(
-            id="a-local", store_path=Path("/"), nix_bin=str(NIX_BIN), use_db=False
+            id="a-local", store_path=Path("/"), use_db=False, **get_test_store_kwargs()
         )
 
         unix_path_a = tmp_path / "server-a.sock"

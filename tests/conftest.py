@@ -11,6 +11,7 @@ import stat
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 import structlog
@@ -57,6 +58,24 @@ def set_log_levels(levels: dict[str, int]):
 
 NIX_BIN = env.str("NIX_BIN", "nix")
 LIX_BIN = env.str("LIX_BIN", "nix")
+
+
+def get_test_store_kwargs(**kwargs) -> dict[str, Any]:
+    """Return common kwargs for LocalSocketStore in tests.
+
+    Includes --extra-substituters "/" to speed up tests by using the root store.
+    """
+    extra_args = ["--option", "extra-substituters", "/"]
+    if "extra_args" in kwargs:
+        extra_args.extend(kwargs.pop("extra_args"))
+
+    res = {
+        "nix_bin": str(NIX_BIN),
+        "extra_args": extra_args,
+    }
+    res.update(kwargs)
+    return res
+
 
 STORE_PREFIX = Path("/tmp/pynixd-stores")
 

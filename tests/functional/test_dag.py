@@ -10,7 +10,13 @@ import structlog
 from pynixd import Server
 from pynixd.instance import NixImplementation
 from pynixd.store import LocalSocketStore
-from tests.conftest import NIX_BIN, STORE_PREFIX, run_captured, set_log_levels
+from tests.conftest import (
+    NIX_BIN,
+    STORE_PREFIX,
+    get_test_store_kwargs,
+    run_captured,
+    set_log_levels,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -21,12 +27,12 @@ async def test_dag_builders() -> None:
     local_store = LocalSocketStore(
         id="local",
         store_path=STORE_PREFIX / "dag-builders-local",
-        nix_bin=NIX_BIN,
+        **get_test_store_kwargs(),
     )
     builder_store = LocalSocketStore(
         id="builder",
         store_path=STORE_PREFIX / "dag-builders-builder",
-        nix_bin=NIX_BIN,
+        **get_test_store_kwargs(),
     )
 
     async with Server(
@@ -54,13 +60,13 @@ async def test_dag_store() -> None:
     test_nix = Path("test.nix")
     local_store = LocalSocketStore(
         id="local",
-        store_path=STORE_PREFIX / "local",
-        nix_bin=NIX_BIN,
+        store_path=STORE_PREFIX / "dag-store-local",
+        **get_test_store_kwargs(),
     )
     builder_store = LocalSocketStore(
         id="builder",
-        store_path=STORE_PREFIX / "builder",
-        nix_bin=NIX_BIN,
+        store_path=STORE_PREFIX / "dag-store-builder",
+        **get_test_store_kwargs(),
     )
 
     # AddToStore is muted to INFO because it produces ~4500 DEBUG log lines

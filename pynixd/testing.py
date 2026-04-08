@@ -7,11 +7,10 @@ All functions are NOOPs when not running under pytest.
 from __future__ import annotations
 
 import os
-import sys
 from typing import Any
 
-# Detection: check for pytest module or the environment variable set by pytest
-_IS_TESTING = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
+# Detection: check for the environment variable set by pytest
+_IS_TESTING = "PYTEST_VERSION" in os.environ
 
 _stash: dict[str, Any] = {}
 
