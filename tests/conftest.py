@@ -26,7 +26,6 @@ structlog.configure(
         structlog.contextvars.merge_contextvars,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
         structlog.dev.ConsoleRenderer(colors=False),
     ],
     logger_factory=structlog.stdlib.LoggerFactory(),

@@ -10,7 +10,7 @@ import structlog
 from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
-from pynixd.store import LocalSocketStore
+from pynixd.store import LocalSocketStore, Store
 from pynixd.store_path import StorePath
 from tests.conftest import NIX_BIN, STORE_PREFIX
 
@@ -64,8 +64,8 @@ async def test_stream_nar() -> None:
         if is_valid_dst.valid:
             log.warning("path_already_in_dst", path=store_path)
 
-        # Use stream_paths_to which handles the NAR piping
-        await src_store.stream_paths_to(dst_store, [store_path])
+        # Use stream_paths_store_to_store which handles the NAR piping
+        await Store.stream_paths_store_to_store(src_store, dst_store, [store_path])
 
         # Verify it now exists in dst
         is_valid_dst_after = await dst_store.execute(

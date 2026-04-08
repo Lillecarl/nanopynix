@@ -18,6 +18,7 @@ import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,9 @@ if TYPE_CHECKING:
     from .operations.base import OpRequest, Resp
 
 log = structlog.get_logger(__name__)
+
+# Context variable to track nested connection acquisitions within the same task
+_db_nested_conns: ContextVar[int] = ContextVar("_db_nested_conns", default=0)
 
 # ── SQL constants ─────────────────────────────────────────────────────
 
@@ -104,12 +108,47 @@ class LocalStoreDB:
 
     @asynccontextmanager
     async def acquire_conn(self) -> AsyncIterator[aiosqlite.Connection]:
-        """Acquire a connection from the pool."""
+        """Acquire a connection from the pool.
+
+        If the same task that is already holding a connection tries to
+        acquire again (re-entry), a new connection is allocated outside
+        the semaphore to avoid deadlock. A warning is logged for investigation.
+        """
         if not self.active:
             raise RuntimeError("Database not active")
 
+        re_entrant = _db_nested_conns.get() > 0 and self._sem.locked()
+        if re_entrant:
+            log.warning(
+                "local_store_db_reentrant_acquire",
+                db_path=str(self.db_path),
+                holder_task=getattr(asyncio.current_task(), "get_name", lambda: "?")(),
+            )
+            conn: aiosqlite.Connection | None = None
+            try:
+                mode = "ro" if self.read_only else "rw"
+                uri = f"file:{self.db_path}?mode={mode}"
+                conn = await aiosqlite.connect(uri, uri=True)
+                async with self._pool_lock:
+                    self._all_conns.append(conn)
+                _db_nested_conns.set(_db_nested_conns.get() + 1)
+                yield conn
+            finally:
+                _db_nested_conns.set(_db_nested_conns.get() - 1)
+                if conn is not None:
+                    async with self._pool_lock:
+                        try:
+                            self._all_conns.remove(conn)
+                        except ValueError:
+                            pass
+                    try:
+                        await conn.close()
+                    except Exception:
+                        pass
+            return
+
         await self._sem.acquire()
-        conn: aiosqlite.Connection | None = None
+        conn = None
         try:
             async with self._pool_lock:
                 if self._idle_conns:
@@ -122,8 +161,10 @@ class LocalStoreDB:
                 async with self._pool_lock:
                     self._all_conns.append(conn)
 
+            _db_nested_conns.set(_db_nested_conns.get() + 1)
             yield conn
         finally:
+            _db_nested_conns.set(_db_nested_conns.get() - 1)
             if conn is not None:
                 async with self._pool_lock:
                     self._idle_conns.append(conn)

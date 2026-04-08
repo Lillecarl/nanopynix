@@ -372,7 +372,7 @@ async def test_copy_paths_single(
         info.nar_hash,
     )
 
-    await copy_dst_store.stream_paths_with_info_from(src_store, [info])
+    await Store.stream_paths_with_info_store_to_store(src_store, copy_dst_store, [info])
 
     # Verify it arrived
     valid_after = await copy_dst_store.query_valid_paths({path})
@@ -405,7 +405,7 @@ async def test_copy_paths_multiple(
 
     assert len(picked) >= 2, f"Need at least 2 paths, found {len(picked)}"
 
-    await copy_dst_store.stream_paths_with_info_from(src_store, picked)
+    await Store.stream_paths_with_info_store_to_store(src_store, copy_dst_store, picked)
 
     # Verify all arrived
     paths = {p.path for p in picked}
@@ -539,7 +539,9 @@ async def test_copy_paths_to_nixbuild(
         QueryClosureWithInfoRequest(paths={path}),
     )
 
-    await nixbuild_store.stream_paths_with_info_from(src_store, closure_resp.infos)
+    await Store.stream_paths_with_info_store_to_store(
+        src_store, nixbuild_store, closure_resp.infos
+    )
 
     # Verify it arrived
     valid = await nixbuild_store.query_valid_paths({path})
@@ -584,12 +586,14 @@ async def test_copy_paths_roundtrip_nixbuild(
         assert len(picked) >= 2, f"Need 2 paths, found {len(picked)}"
 
         # Push to nixbuild
-        await nixbuild_store.stream_paths_with_info_from(src_store, picked)
+        await Store.stream_paths_with_info_store_to_store(
+            src_store, nixbuild_store, picked
+        )
         log.info("pushed_paths_to_nixbuild", count=len(picked))
 
         # Pull back from nixbuild to fresh local store
-        await roundtrip_store_instance.stream_paths_with_info_from(
-            nixbuild_store, picked
+        await Store.stream_paths_with_info_store_to_store(
+            nixbuild_store, roundtrip_store_instance, picked
         )
         log.info("pulled_paths_from_nixbuild", count=len(picked))
 

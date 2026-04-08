@@ -238,7 +238,9 @@ class Scheduler:
             missing = build.required_paths - store.known_paths
             if missing:
                 log.debug("build_sending_inputs", build_id=build.id, store_id=store.id)
-                await store.stream_paths_from(self.local_store, missing)
+                await Store.stream_paths_store_to_store(
+                    self.local_store, store, missing
+                )
 
             # 2. Trigger build
             log.debug("build_executing", build_id=build.id, store_id=store.id)
@@ -254,7 +256,9 @@ class Scheduler:
                 log.info("pulling_paths", store_id=store.id, count=len(outputs))
                 for p in outputs.values():
                     log.debug("pulling_path", store_id=store.id, path=p)
-                await self.local_store.stream_paths_from(store, set(outputs.values()))
+                await Store.stream_paths_store_to_store(
+                    store, self.local_store, set(outputs.values())
+                )
                 log.debug(
                     "pulled_paths_into_local_store",
                     count=len(outputs),
@@ -292,7 +296,9 @@ class Scheduler:
                 log.debug("pulling_path", store_id=store.id, path=p)
             try:
                 # We pull from the build machine into our local store
-                await self.local_store.stream_paths_from(store, to_pull)
+                await Store.stream_paths_store_to_store(
+                    store, self.local_store, to_pull
+                )
                 log.debug(
                     "pulled_paths_into_local_store",
                     count=len(to_pull),

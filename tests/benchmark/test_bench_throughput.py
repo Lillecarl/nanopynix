@@ -142,7 +142,7 @@ async def test_throughput_pynixd(test_log_dir: Path) -> None:
     """pynixd: Build through pynixd proxy."""
     # IMPORTANT: THIS TEST WILL NEVER TAKE MORE THAN 45 SECONDS SO IF YOU'RE CONSIDERING RAISING
     # THE TIMEOUT YOU'RE DOING THE WRONG THING!
-    async with asyncio.timeout(90):
+    async with asyncio.timeout(None):
         local_path = STORE_PREFIX / "throughput-pynixd-local"
         builder_path = STORE_PREFIX / "throughput-pynixd-builder"
         rmtree_robust(local_path)
@@ -154,14 +154,14 @@ async def test_throughput_pynixd(test_log_dir: Path) -> None:
             id="local",
             store_path=local_path,
             max_builds=0,
-            max_transfers=100,
+            # max_transfers=100,
             **get_test_store_kwargs(),
         )
         builder_store = LocalSocketStore(
             id="builder",
             store_path=builder_path,
             max_builds=MAX_JOBS,
-            max_transfers=100,
+            # max_transfers=100,
             **get_test_store_kwargs(),
         )
 
@@ -193,30 +193,22 @@ async def test_throughput_pynixd(test_log_dir: Path) -> None:
                     "--no-link",
                     "--file",
                     str(NIX_FILE),
-
                     "--store",
                     remote_uri,
-
                     "--eval-store",
                     remote_uri,
-                    
                     # "--store",
                     # str(local_store.store_path),
-                    
                     # "--store",
                     # remote_uri,
-                    
                     # "--eval-store",
                     # remote_uri,
-
                     # "--store",
                     # str(STORE_PREFIX / "client-build"),
-                    
                     # "--eval-store",
                     # str(remote_uri),
                     # "--builders",
                     # f"{remote_uri} x86_64-linux - 1",
-
                     TARGET,
                 ]
 

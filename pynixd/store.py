@@ -21,6 +21,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 import asyncssh
@@ -54,6 +55,10 @@ pool_log = structlog.get_logger(f"{__name__}.pool")
 _DEFAULT_IDLE_TTL: float = 10.0
 _CB_THRESHOLD: int = 3  # failures before cooldown
 _CB_MAX_COOLDOWN: float = 300.0  # 5 min max
+
+# Per-store connection holder tracking via WeakKeyDictionary of task->True
+# Use contextvars for the re-entrant check since they naturally track per-task state
+nested_conns: ContextVar[int] = ContextVar("nested_conns", default=0)
 
 
 class Store(ABC):
@@ -96,6 +101,7 @@ class Store(ABC):
         self.supported_features: set[str] = set()
         self.probed = False
         self.signing_keys: dict[str, SecretKey] = {}
+        self._holder_task: asyncio.Task | None = None
 
     @property
     def db_enabled(self) -> bool:
@@ -252,70 +258,83 @@ class Store(ABC):
         if not infos_list:
             return
 
-        async with (
-            src_conn if src_conn else src.transfer_conn() as src_conn,
-            dst_conn if dst_conn else dst.transfer_conn() as dst_conn,
-        ):
-            log.info(
-                "stream_paths_with_info_store_to_store",
-                count=len(infos_list),
-            )
+        if (src_conn or dst_conn) and src_conn == dst_conn:
+            log.error("same_conn_transfer")
+            return
 
-            # 1. Stream to destination
+        log.info(
+            "stream_paths_with_info_store_to_store",
+            count=len(infos_list),
+        )
+
+        if src_conn and dst_conn:
+            await cls._stream_with_info_inner(
+                src_conn, dst_conn, infos_list, cancel_event
+            )
+        elif src_conn:
+            async with dst.transfer_conn() as dst_conn:
+                await cls._stream_with_info_inner(
+                    src_conn, dst_conn, infos_list, cancel_event
+                )
+        elif dst_conn:
+            async with src.transfer_conn() as src_conn:
+                await cls._stream_with_info_inner(
+                    src_conn, dst_conn, infos_list, cancel_event
+                )
+        else:
+            async with src.transfer_conn() as src_conn, dst.transfer_conn() as dst_conn:
+                await cls._stream_with_info_inner(
+                    src_conn, dst_conn, infos_list, cancel_event
+                )
+
+    @classmethod
+    async def _stream_with_info_inner(
+        cls,
+        src_conn: Connection,
+        dst_conn: Connection,
+        infos_list: list[PathInfo],
+        cancel_event: asyncio.Event | None,
+    ) -> None:
+        """Inner streaming logic assuming both connections are already acquired."""
+        dst_conn.op_log.append(
+            "AddMultipleToStore (stream_paths_with_info_store_to_store)"
+        )
+        req = AddMultipleToStoreRequest(
+            repair=0,
+            dont_check_sigs=1,
+        )
+        await req.to_writer(dst_conn.w, dst_conn.version)
+
+        fw = dst_conn.w.framed()
+        fw.write_uint64(len(infos_list))
+
+        for info in infos_list:
+            if cancel_event and cancel_event.is_set():
+                log.info("stream_paths_transfer_cancelled")
+                break
+
+            path = info.path
             dst_conn.op_log.append(
-                "AddMultipleToStore (stream_paths_with_info_store_to_store)"
+                "AddToStoreNar (stream_paths_with_info_store_to_store)"
             )
-            req = AddMultipleToStoreRequest(
-                repair=0,
-                dont_check_sigs=1,
+
+            await info.to_writer_keyed(fw)
+
+            from .operations.nar_from_path import NarFromPathRequest
+
+            await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
+            await src_conn.w.drain()
+            await src_conn.r.drain_stderr()
+
+            await wire.pipe_raw_to_framed_writer(
+                src_conn.r,
+                fw,
+                info.nar_size,
             )
-            await req.to_writer(dst_conn.w, dst_conn.version)
 
-            # Construct framedwriter that allows us to chunk NARs
-            fw = dst_conn.w.framed()
-            # Write how many paths we're looking to send
-            fw.write_uint64(len(infos_list))
-
-            for info in infos_list:
-                if cancel_event and cancel_event.is_set():
-                    log.info("stream_paths_transfer_cancelled")
-                    break
-
-                path = info.path
-                dst_conn.op_log.append(
-                    "AddToStoreNar (stream_paths_with_info_store_to_store)"
-                )
-
-                # Write PathInfo to the framed stream
-                await info.to_writer_keyed(fw)
-
-                from .operations.nar_from_path import NarFromPathRequest
-
-                # Send the NarFromPath request
-                await NarFromPathRequest(path=path).to_writer(
-                    src_conn.w, src_conn.version
-                )
-                await src_conn.w.drain()
-                # Throw away stderr
-                await src_conn.r.drain_stderr()
-
-                # Stream the NAR into the framedwriter
-                await wire.pipe_raw_to_framed_writer(
-                    src_conn.r,
-                    fw,
-                    info.nar_size,
-                )
-
-            # Send the final 0 size frame
-            await fw.finalize()
-
-            # Throw away destination stderr
-            await dst_conn.r.drain_stderr()
-            # Read the empty response to clean the connection
-            await req.response_type.from_reader(dst_conn.r, dst_conn.version)
-
-            # Update destination's known paths
-            dst.add_known_paths({info.path for info in infos_list})
+        await fw.finalize()
+        await dst_conn.r.drain_stderr()
+        await req.response_type.from_reader(dst_conn.r, dst_conn.version)
 
     @classmethod
     async def stream_paths_store_to_store(
@@ -323,6 +342,8 @@ class Store(ABC):
         src: Store,
         dst: Store,
         paths: Iterable[StorePath],
+        src_conn: Connection | None = None,
+        dst_conn: Connection | None = None,
         cancel_event: asyncio.Event | None = None,
     ) -> None:
         """Copy paths from src to dst via streaming, querying info first.
@@ -333,67 +354,45 @@ class Store(ABC):
         if not paths_set:
             return
 
-        async with (
-            dst.transfer_conn() as dst_conn,
-            src.transfer_conn() as src_conn,
-        ):
+        if (src_conn or dst_conn) and src_conn == dst_conn:
+            log.error("same_conn_transfer")
+            return
+
+        if src_conn and dst_conn:
             closure_resp = await src.execute(
                 QueryClosureWithInfoRequest(paths=paths_set),
-                client=None,  # No client forwarding for discovery
+                client=None,
             )
-
-            await cls.stream_paths_with_info_store_to_store(
-                src,
-                dst,
-                closure_resp.infos,
-                src_conn=src_conn,
-                dst_conn=dst_conn,
-                cancel_event=cancel_event,
+            await cls._stream_with_info_inner(
+                src_conn, dst_conn, list(closure_resp.infos), cancel_event
             )
-
-    async def stream_paths_with_info_to(
-        self,
-        dst: Store,
-        infos: Iterable[PathInfo],
-        cancel_event: asyncio.Event | None = None,
-    ) -> None:
-        """Copy paths from this store to dst store via streaming using PathInfos."""
-        await self.stream_paths_with_info_store_to_store(
-            self, dst, infos, cancel_event=cancel_event
-        )
-
-    async def stream_paths_with_info_from(
-        self,
-        src: Store,
-        infos: Iterable[PathInfo],
-        cancel_event: asyncio.Event | None = None,
-    ) -> None:
-        """Copy paths from src store to this store via streaming using PathInfos."""
-        await self.stream_paths_with_info_store_to_store(
-            src, self, infos, cancel_event=cancel_event
-        )
-
-    async def stream_paths_to(
-        self,
-        dst: Store,
-        paths: Iterable[StorePath],
-        cancel_event: asyncio.Event | None = None,
-    ) -> None:
-        """Copy multiple paths from this store to dst store via streaming."""
-        await self.stream_paths_store_to_store(
-            self, dst, paths, cancel_event=cancel_event
-        )
-
-    async def stream_paths_from(
-        self,
-        src: Store,
-        paths: Iterable[StorePath],
-        cancel_event: asyncio.Event | None = None,
-    ) -> None:
-        """Copy multiple paths from src store to this store via streaming."""
-        await self.stream_paths_store_to_store(
-            src, self, paths, cancel_event=cancel_event
-        )
+        elif src_conn:
+            async with dst.transfer_conn() as dst_conn:
+                closure_resp = await src.execute(
+                    QueryClosureWithInfoRequest(paths=paths_set),
+                    client=None,
+                )
+                await cls._stream_with_info_inner(
+                    src_conn, dst_conn, list(closure_resp.infos), cancel_event
+                )
+        elif dst_conn:
+            async with src.transfer_conn() as src_conn:
+                closure_resp = await src.execute(
+                    QueryClosureWithInfoRequest(paths=paths_set),
+                    client=None,
+                )
+                await cls._stream_with_info_inner(
+                    src_conn, dst_conn, list(closure_resp.infos), cancel_event
+                )
+        else:
+            async with src.transfer_conn() as src_conn, dst.transfer_conn() as dst_conn:
+                closure_resp = await src.execute(
+                    QueryClosureWithInfoRequest(paths=paths_set),
+                    client=None,
+                )
+                await cls._stream_with_info_inner(
+                    src_conn, dst_conn, list(closure_resp.infos), cancel_event
+                )
 
     async def pipe_nar_from(
         self,
@@ -585,11 +584,37 @@ class Store(ABC):
     ) -> AsyncIterator[Connection]:
         """Acquire a connection from the shared pool.
 
-        Blocks until the given semaphore allows entry, then pops an idle
-        connection or creates a new one.
+        If the same task that is already holding a connection tries to
+        acquire again (re-entry), a new connection is allocated outside
+        the semaphore to avoid deadlock. A warning is logged for investigation.
         """
-        if semaphore._value == 0:
-            kind = "build" if semaphore is self.build_semaphore else "transfer"
+        re_entrant = nested_conns.get() > 0 and semaphore.locked()
+        kind = "build" if semaphore is self.build_semaphore else "transfer"
+        if nested_conns.get() > 0:
+            pool_log.warning(
+                "store_reentrant_acquire",
+                store_id=self.id,
+                kind=kind,
+            )
+
+        if re_entrant:
+            conn = await self.create_conn()
+            self.all_conns.append(conn)
+            nested_conns.set(nested_conns.get() + 1)
+            try:
+                async with conn:
+                    yield conn
+            finally:
+                nested_conns.set(nested_conns.get() - 1)
+                if conn in self.all_conns:
+                    self.all_conns.remove(conn)
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
+            return
+
+        if semaphore.locked():
             limit = self.max_builds if kind == "build" else self.max_transfers
             pool_log.info(
                 "pool_all_slots_in_use",
@@ -601,9 +626,11 @@ class Store(ABC):
         conn: Connection | None = None
         try:
             conn = await self.get_or_create_conn()
+            nested_conns.set(nested_conns.get() + 1)
             async with conn:
                 yield conn
         finally:
+            nested_conns.set(nested_conns.get() - 1)
             if conn is not None:
                 if conn.dirty:
                     log.warning(

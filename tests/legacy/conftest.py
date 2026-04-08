@@ -115,7 +115,6 @@ structlog.configure(
         structlog.contextvars.merge_contextvars,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
         # Use a plain renderer for files, or ConsoleRenderer if we want colors in logs
         structlog.dev.ConsoleRenderer(colors=False),
     ],
