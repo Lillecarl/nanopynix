@@ -55,6 +55,8 @@ async def test_builders(test_log_dir: Path) -> None:
                 "simple",
                 "--no-link",
                 "--print-out-paths",
+                "--max-jobs",
+                "0",
             ]
             rc, stdout, stderr = await run_captured(cmd)
             assert rc == 0, f"""build failed:

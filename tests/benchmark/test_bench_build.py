@@ -30,6 +30,7 @@ from conftest import (
     _prune_client_processor,
     _record,
     rmtree_robust,
+    run_captured,
 )
 from environs import env
 from pyinstrument.renderers import ConsoleRenderer
@@ -41,7 +42,6 @@ if TYPE_CHECKING:
     pass
 
 log = structlog.get_logger(__name__)
-nixclient_log = structlog.get_logger("nixclient")
 
 aiosqlite_logger = logging.getLogger("aiosqlite")
 aiosqlite_logger.setLevel(logging.WARNING)
@@ -51,70 +51,6 @@ CLIENT_BINS: list[tuple[Path, str]] = [
     (NIX_BIN, "nix"),
     (LIX_BIN, "lix"),
 ]
-
-
-async def run_nix_build(
-    nix_file: Path,
-    target: str,
-    max_jobs: int,
-    client_bin: Path,
-    remote: str | None = None,
-    store: str | None = "daemon",
-    extra_env: dict[str, str] | None = None,
-) -> float:
-    """Run nix build and return elapsed time in seconds."""
-    build_env = os.environ.copy()
-    if remote:
-        build_env["NIX_REMOTE"] = remote
-    if extra_env:
-        build_env.update(extra_env)
-
-    cmd = [
-        str(client_bin),
-        "build",
-        "--max-jobs",
-        str(max_jobs),
-        "--no-link",
-        "--file",
-        str(nix_file),
-    ]
-    if store:
-        cmd.extend(["--store", store])
-    cmd.append(target)
-
-    log.info("starting_build", cmd=" ".join(cmd), nix_remote=remote)
-    start = time.perf_counter()
-
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        env=build_env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-    async def _stream(stream: asyncio.StreamReader) -> None:
-        while True:
-            line = await stream.readline()
-            if not line:
-                break
-            nixclient_log.info("nix_client_output", line=line.decode().rstrip())
-
-    assert proc.stdout is not None
-    assert proc.stderr is not None
-    await asyncio.gather(
-        _stream(proc.stdout),
-        _stream(proc.stderr),
-    )
-
-    rc = await proc.wait()
-    elapsed = time.perf_counter() - start
-
-    if rc != 0:
-        log.error("build_failed", rc=rc)
-        msg = f"Build failed with rc={rc}"
-        raise RuntimeError(msg)
-
-    return elapsed
 
 
 async def run_no_daemon(
@@ -134,14 +70,22 @@ async def run_no_daemon(
     local_store_path.mkdir(parents=True, exist_ok=True)
     try:
         log.info("running_baseline_local_store", store_path=str(local_store_path))
-        elapsed = await run_nix_build(
-            nix_file,
+        cmd = [
+            str(client_bin),
+            "build",
+            "--max-jobs",
+            str(max_jobs),
+            "--no-link",
+            "--file",
+            str(nix_file),
+            "--store",
+            str(local_store_path),
             target,
-            max_jobs=max_jobs,
-            client_bin=client_bin,
-            store=str(local_store_path),
-            extra_env=extra_env,
-        )
+        ]
+        start = time.perf_counter()
+        rc, stdout, stderr = await run_captured(cmd, env=extra_env)
+        elapsed = time.perf_counter() - start
+        assert rc == 0, f"Local baseline build failed:\n{stderr}"
         log.info("build_completed", elapsed=elapsed)
         return elapsed
     finally:
@@ -164,7 +108,9 @@ async def run_daemon(
     rmtree_robust(daemon_store_path)
     daemon_store_path.mkdir(parents=True, exist_ok=True)
 
-    baseline_socket = daemon_store_path / "nix" / "daemon-socket" / "socket"
+    baseline_socket = (
+        daemon_store_path / "nix" / "var" / "nix" / "daemon-socket" / "socket"
+    )
     baseline_socket.parent.mkdir(parents=True, exist_ok=True)
 
     log.info(
@@ -206,15 +152,22 @@ async def run_daemon(
                 await asyncio.sleep(0.1)
 
         log.info("running_baseline_daemon", client=client_label, jobs=max_jobs)
-        elapsed = await run_nix_build(
-            nix_file,
+        cmd = [
+            str(client_bin),
+            "build",
+            "--max-jobs",
+            str(max_jobs),
+            "--no-link",
+            "--file",
+            str(nix_file),
+            "--store",
+            f"unix://{baseline_socket}",
             target,
-            max_jobs=max_jobs,
-            client_bin=client_bin,
-            remote=f"unix://{baseline_socket}",
-            store="daemon",
-            extra_env=extra_env,
-        )
+        ]
+        start = time.perf_counter()
+        rc, stdout, stderr = await run_captured(cmd, env=extra_env)
+        elapsed = time.perf_counter() - start
+        assert rc == 0, f"Daemon baseline build failed:\n{stderr}"
         log.info("build_completed", elapsed=elapsed)
         return elapsed
     finally:
@@ -311,15 +264,22 @@ async def run_pynixd(
                 client=client_label,
                 jobs=max_jobs,
             )
-            elapsed = await run_nix_build(
-                nix_file,
+            cmd = [
+                str(client_bin),
+                "build",
+                "--max-jobs",
+                str(max_jobs),
+                "--no-link",
+                "--file",
+                str(nix_file),
+                "--store",
+                remote,
                 target,
-                max_jobs=max_jobs,
-                client_bin=client_bin,
-                remote=remote,
-                store="daemon",
-                extra_env=local_build_env,
-            )
+            ]
+            start = time.perf_counter()
+            rc, stdout, stderr = await run_captured(cmd, env=local_build_env)
+            elapsed = time.perf_counter() - start
+            assert rc == 0, f"pynixd bench build failed:\n{stderr}"
             log.info("build_completed", elapsed=elapsed)
         finally:
             profiler.stop()

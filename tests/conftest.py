@@ -100,7 +100,11 @@ def _prune_client_processor(frame, options):
         return None
 
     for child in list(frame.children):
-        if child.function and "run_nix_build" in child.function:
+        if child.function and (
+            "run_nix_build" in child.function
+            or "run_captured" in child.function
+            or "run_logged" in child.function
+        ):
             child.remove_from_parent()
         else:
             _prune_client_processor(child, options)
@@ -243,7 +247,7 @@ async def run_captured(cmd: list[str], **kwargs) -> tuple[int, str, str]:
             "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
         )
 
-    log.debug("run_captured", cmd=shlex.join(cmd))
+    log.debug("run_captured", cmd=shlex.join(cmd), env=run_env)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         env=run_env,
@@ -257,17 +261,16 @@ async def run_captured(cmd: list[str], **kwargs) -> tuple[int, str, str]:
 
 async def run_logged(cmd: list[str], **kwargs) -> int:
     """Run a command, streaming stdout/stderr through structlog in real-time."""
-    run_env = os.environ.copy()
-    run_env.update(kwargs.pop("env", {}))
+    run_env = kwargs.pop("env", {})
     if "NIX_SSHOPTS" not in run_env:
         run_env["NIX_SSHOPTS"] = (
             "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
         )
 
-    log.debug("run_logged", cmd=shlex.join(cmd))
+    log.debug("run_logged", cmd=shlex.join(cmd), env=run_env)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
-        env=run_env,
+        env=os.environ.copy() | run_env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         **kwargs,
