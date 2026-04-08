@@ -56,9 +56,12 @@ _DEFAULT_IDLE_TTL: float = 10.0
 _CB_THRESHOLD: int = 3  # failures before cooldown
 _CB_MAX_COOLDOWN: float = 300.0  # 5 min max
 
-# Per-store connection holder tracking via WeakKeyDictionary of task->True
-# Use contextvars for the re-entrant check since they naturally track per-task state
-nested_conns: ContextVar[int] = ContextVar("nested_conns", default=0)
+# Per-store connection holder tracking via ContextVar
+# Tracks nested connection count per (store_id, kind) tuple
+_nested_conns: ContextVar[dict[tuple[str, str], int]] = ContextVar(
+    "_nested_conns",
+    default={},  # type: ignore[arg-type]
+)
 
 
 class Store(ABC):
@@ -588,9 +591,11 @@ class Store(ABC):
         acquire again (re-entry), a new connection is allocated outside
         the semaphore to avoid deadlock. A warning is logged for investigation.
         """
-        re_entrant = nested_conns.get() > 0 and semaphore.locked()
         kind = "build" if semaphore is self.build_semaphore else "transfer"
-        if nested_conns.get() > 0:
+        key = (self.id, kind)
+        counts = dict(_nested_conns.get())  # Copy to avoid race with nested code
+        re_entrant = counts.get(key, 0) > 0 and semaphore.locked()
+        if counts.get(key, 0) > 0:
             pool_log.warning(
                 "store_reentrant_acquire",
                 store_id=self.id,
@@ -600,12 +605,15 @@ class Store(ABC):
         if re_entrant:
             conn = await self.create_conn()
             self.all_conns.append(conn)
-            nested_conns.set(nested_conns.get() + 1)
+            counts[key] = counts.get(key, 0) + 1
+            _nested_conns.set(counts)
             try:
                 async with conn:
                     yield conn
             finally:
-                nested_conns.set(nested_conns.get() - 1)
+                counts = dict(_nested_conns.get())
+                counts[key] = counts.get(key, 0) - 1
+                _nested_conns.set(counts)
                 if conn in self.all_conns:
                     self.all_conns.remove(conn)
                 try:
@@ -626,11 +634,15 @@ class Store(ABC):
         conn: Connection | None = None
         try:
             conn = await self.get_or_create_conn()
-            nested_conns.set(nested_conns.get() + 1)
+            counts = dict(_nested_conns.get())
+            counts[key] = counts.get(key, 0) + 1
+            _nested_conns.set(counts)
             async with conn:
                 yield conn
         finally:
-            nested_conns.set(nested_conns.get() - 1)
+            counts = dict(_nested_conns.get())
+            counts[key] = counts.get(key, 0) - 1
+            _nested_conns.set(counts)
             if conn is not None:
                 if conn.dirty:
                     log.warning(
