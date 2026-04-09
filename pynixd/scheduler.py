@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Iterator
+from dataclasses import dataclass
 
 import structlog
 
@@ -31,6 +32,36 @@ from .store import Store
 from .store_path import RequiredInput
 
 log = structlog.get_logger(__name__)
+
+
+@dataclass
+class RankedStore:
+    store_id: str
+    score: int
+    slots: int
+    store: Store
+
+
+class RankedStores:
+    def __init__(self, stores: list[RankedStore]) -> None:
+        self._stores = stores
+
+    def __iter__(self) -> Iterator[RankedStore]:
+        return iter(self._stores)
+
+    def __len__(self) -> int:
+        return len(self._stores)
+
+    def __bool__(self) -> bool:
+        return bool(self._stores)
+
+    def with_slots(self) -> RankedStores:
+        return RankedStores([s for s in self._stores if s.slots > 0])
+
+    def sort(self) -> RankedStores:
+        return RankedStores(
+            sorted(self._stores, key=lambda s: (s.score, s.slots), reverse=True)
+        )
 
 
 class Scheduler:
@@ -140,19 +171,17 @@ class Scheduler:
                 continue
 
             assigned = False
-            for store_id, score, _slots in ranked:
-                store = self.stores[store_id]
-                if store.available_slots > 0 and build.build_task is None:
+            for rs in ranked.with_slots():
+                if build.build_task is None:
                     log.debug(
                         "build_assigned_to_store",
                         build_id=build.id,
-                        store_id=store_id,
-                        score=score,
-                        effective_slots=store.available_slots,
+                        store_id=rs.store_id,
+                        score=rs.score,
+                        effective_slots=rs.slots,
                     )
-                    # Dispatch build!
                     build.build_task = asyncio.create_task(
-                        self.execute_build(build, store)
+                        self.execute_build(build, rs.store)
                     )
                     assigned = True
                     building.append(build.id)
@@ -172,20 +201,15 @@ class Scheduler:
                 continue
 
             if len(transferring) < 2:
-                # Re-rank stores to find one with slots (best store has no slots)
                 ranked = self.rank_stores(build)
-                for store_id, score, slots in ranked:
-                    store = self.stores[store_id]
-                    if store.available_slots > 0:
-                        # Found a store with slots
-                        missing = build.required_paths - store.known_paths
-                        if missing and store.has_all_paths(missing):
-                            # Transfer inputs to this store then start build
-                            build.transfer_task = asyncio.create_task(
-                                self.transfer_inputs(build, store, missing)
-                            )
-                            transferring.append(build.id)
-                        break
+                for rs in ranked.with_slots():
+                    missing = build.required_paths - rs.store.known_paths
+                    if missing and rs.store.has_all_paths(missing):
+                        build.transfer_task = asyncio.create_task(
+                            self.transfer_inputs(build, rs.store, missing)
+                        )
+                        transferring.append(build.id)
+                    break
 
         log.debug(
             "scheduling_pass_done",
@@ -197,9 +221,9 @@ class Scheduler:
             slots={s.id: s.available_slots for s in self.stores.values()},
         )
 
-    def rank_stores(self, build: QueuedBuild) -> list[tuple[str, int, int]]:
+    def rank_stores(self, build: QueuedBuild) -> RankedStores:
         """Rank stores for a build by path overlap, tiebreak by available slots."""
-        scores: list[tuple[str, int, int]] = []
+        stores = []
         for store_id, store in self.stores.items():
             if not store.is_healthy:
                 continue
@@ -209,9 +233,9 @@ class Scheduler:
                 continue
 
             score = store.count_common_paths(build.required_paths)
-            scores.append((store_id, score, store.available_slots))
+            stores.append(RankedStore(store_id, score, store.available_slots, store))
 
-        return sorted(scores, key=lambda x: (x[1], x[2]), reverse=True)
+        return RankedStores(stores).sort()
 
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
         """Execute build on a store, handling inputs and outputs."""
