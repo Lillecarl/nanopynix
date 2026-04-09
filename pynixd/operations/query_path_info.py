@@ -95,6 +95,12 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfoResponse:
+        # Check cache first before calling super().execute()
+        cached = store.get_path_info(self.path)
+        if cached is not None:
+            store.add_known_path(self.path)
+            return QueryPathInfoResponse(valid=True, info=cached)
+
         resp = await super().execute(store, client, suppress_last)
         if resp.valid:
             store.add_known_path(self.path)
