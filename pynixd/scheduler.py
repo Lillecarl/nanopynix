@@ -200,16 +200,15 @@ class Scheduler:
                 transferring.append(build.id)
                 continue
 
-            if len(transferring) < 2:
-                ranked = self.rank_stores(build)
-                for rs in ranked.with_slots():
-                    missing = build.required_paths - rs.store.known_paths
-                    if missing and rs.store.has_all_paths(missing):
-                        build.transfer_task = asyncio.create_task(
-                            self.transfer_inputs(build, rs.store, missing)
-                        )
-                        transferring.append(build.id)
-                    break
+            ranked = self.rank_stores(build)
+            for rs in ranked.with_slots().sort():
+                missing = build.required_paths - rs.store.known_paths
+                if missing and rs.store.has_all_paths(missing):
+                    build.transfer_task = asyncio.create_task(
+                        self.transfer_inputs(build, rs.store, missing)
+                    )
+                    transferring.append(build.id)
+                break
 
         log.debug(
             "scheduling_pass_done",
