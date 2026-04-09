@@ -201,26 +201,31 @@ class Scheduler:
                 )
                 waiting_slot.append(build)
 
-        # 3. Handle proactive transfers for waiting_dag
-        # We only start one proactive transfer task at a time to avoid
-        # overwhelming the local store / network.
+        # 3. Handle proactive transfers for waiting_slot builds
+        # Proactive transfer is for builds that are ready to run (all inputs in local_store)
+        # but the best builder has no free slots. We transfer inputs to a builder with slots
+        # so it can start building.
         transferring: list[int] = []
-        for build in waiting_dag:
+        for build in waiting_slot:
             if build.is_transferring:
                 transferring.append(build.id)
                 continue
 
             if len(transferring) < 2:
-                missing = build.required_paths - self.local_store.known_paths
-                if not missing:
-                    continue
-
-                best_source = self.find_best_source(missing)
-                if best_source and best_source.has_all_paths(missing):
-                    build.transfer_task = asyncio.create_task(
-                        self.transfer_inputs(build, best_source, missing)
-                    )
-                    transferring.append(build.id)
+                # Re-rank stores to find one with slots (best store has no slots)
+                ranked = self.rank_stores(build)
+                for store_id, score in ranked:
+                    store = self.stores[store_id]
+                    if store.available_slots > 0:
+                        # Found a store with slots
+                        missing = build.required_paths - store.known_paths
+                        if missing and store.has_all_paths(missing):
+                            # Transfer inputs to this store then start build
+                            build.transfer_task = asyncio.create_task(
+                                self.transfer_inputs(build, store, missing)
+                            )
+                            transferring.append(build.id)
+                        break
 
         log.debug(
             "scheduling_pass_done",
