@@ -46,7 +46,6 @@ class Scheduler:
         self.local_store = local_store
         self.trigger_event = asyncio.Event()
         self.running = False
-        self._retrigger_tasks: set[asyncio.Task[None]] = set()
 
     def trigger(self) -> None:
         """Signal that a scheduling pass is needed."""
@@ -89,9 +88,6 @@ class Scheduler:
         """Stop the scheduler and cancel all pending builds."""
         self.running = False
         self.trigger()
-        for task in self._retrigger_tasks:
-            task.cancel()
-        self._retrigger_tasks.clear()
 
     async def schedule(self) -> None:
         """The core scheduling logic.
@@ -107,23 +103,28 @@ class Scheduler:
 
         # 1. Identify builds ready to execute
         schedulable: list[QueuedBuild] = []
-        waiting_dag: list[QueuedBuild] = []
+        waiting_paths: list[QueuedBuild] = []
+        building: list[int] = []
+        transferring: list[int] = []
 
         for build in pending:
-            if build.is_building or build.is_transferring:
+            if build.is_building:
+                building.append(build.id)
+                continue
+            if build.is_transferring:
+                transferring.append(build.id)
                 continue
 
             # Check if all required paths are in local store
             if self.local_store.has_all_paths(build.required_paths):
                 schedulable.append(build)
             else:
-                waiting_dag.append(build)
+                waiting_paths.append(build)
 
         # 2. Assign schedulable builds to backends
         # Load balancing: prefer backends with the most relevant paths already present
         # and with free slots.
         waiting_slot: list[QueuedBuild] = []
-        building: list[int] = []
 
         for build in schedulable:
             # Rank stores for this build
@@ -188,26 +189,13 @@ class Scheduler:
 
         log.debug(
             "scheduling_pass_done",
-            total_builds=len(pending),
-            building=building,
-            transferring=transferring,
-            waiting_dag=[b.id for b in waiting_dag if b.id not in transferring],
-            waiting_slot=[b.id for b in waiting_slot],
+            pending=len(pending),
+            building=len(building),
+            transferring=len(transferring),
+            waiting_paths=len(waiting_paths),
+            waiting_slot=len(waiting_slot),
             slots={s.id: s.available_slots for s in self.stores.values()},
         )
-
-        # Re-trigger after 5s if there are pending builds that couldn't be scheduled
-        # This handles cases where builds are waiting for slots to free up or for
-        # DAG inputs to be pulled in by other builds.
-        if waiting_slot or waiting_dag:
-
-            async def retrigger_later():
-                await asyncio.sleep(5.0)
-                self.trigger()
-                self._retrigger_tasks.discard(task)
-
-            task = asyncio.create_task(retrigger_later())
-            self._retrigger_tasks.add(task)
 
     def rank_stores(self, build: QueuedBuild) -> list[tuple[str, int]]:
         """Rank stores for a build. Score = present_paths - (penalty if busy)."""
@@ -231,23 +219,6 @@ class Scheduler:
 
         # Sort descending by score
         return sorted(scores, key=lambda x: x[1], reverse=True)
-
-    def find_best_source(self, paths: set[RequiredInput]) -> Store | None:
-        """Find the store that has the most of the given paths."""
-        best_store: Store | None = None
-        max_count = -1
-
-        for store in self.stores.values():
-            if not store.is_healthy:
-                continue
-            count = store.count_common_paths(paths)
-            if count > max_count:
-                max_count = count
-                best_store = store
-
-        if max_count > 0:
-            return best_store
-        return None
 
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
         """Execute build on a store, handling inputs and outputs."""
