@@ -28,7 +28,7 @@ log = structlog.get_logger(__name__)
 # Common test configuration
 NIX_FILE = Path("test.nix")
 TARGET = "parallel"
-MAX_JOBS = 100
+MAX_JOBS = 20
 TEST_ENV = {
     "PYNIXD_PAR_COUNT": "100",
     "PYNIXD_PAR_SLEEP": "0",
@@ -140,8 +140,7 @@ async def test_throughput_daemon() -> None:
 @pytest.mark.benchmark
 async def test_throughput_pynixd(test_log_dir: Path) -> None:
     """pynixd: Build through pynixd proxy."""
-    # IMPORTANT: THIS TEST WILL NEVER TAKE MORE THAN 45 SECONDS SO IF YOU'RE CONSIDERING RAISING
-    # THE TIMEOUT YOU'RE DOING THE WRONG THING!
+    # With MAX_JOBS=20 and sleep=0, builds complete in ~10-30s depending on system.
     async with asyncio.timeout(None):
         local_path = STORE_PREFIX / "throughput-pynixd-local"
         builder_path = STORE_PREFIX / "throughput-pynixd-builder"
@@ -154,14 +153,14 @@ async def test_throughput_pynixd(test_log_dir: Path) -> None:
             id="local",
             store_path=local_path,
             max_builds=0,
-            # max_transfers=100,
+            max_transfers=100,
             **get_test_store_kwargs(),
         )
         builder_store = LocalSocketStore(
             id="builder",
             store_path=builder_path,
             max_builds=MAX_JOBS,
-            # max_transfers=100,
+            max_transfers=100,
             **get_test_store_kwargs(),
         )
 

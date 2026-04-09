@@ -26,6 +26,7 @@ from .operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )
+
 from .protocol import Op
 from .store import Store
 from .store_path import StorePath
@@ -103,12 +104,35 @@ class Scheduler:
         if not pending:
             return
 
+        # TODO TEMP DEBUG: Remove after debugging
+        log.warning(
+            "DEBUG_schedule_pending",
+            total=len(pending),
+            pending_build_ids=[b.id for b in pending],
+            pending_building=[b.id for b in pending if b.is_building],
+            pending_transferring=[b.id for b in pending if b.is_transferring],
+            pending_done=[b.id for b in pending if b.is_done],
+        )
+
         # 1. Identify builds ready to execute
         schedulable: list[QueuedBuild] = []
         waiting_dag: list[QueuedBuild] = []
 
         for build in pending:
             if build.is_building or build.is_transferring:
+                # TODO TEMP DEBUG: Remove after debugging
+                log.warning(
+                    "DEBUG_skip_build",
+                    build_id=build.id,
+                    is_building=build.is_building,
+                    is_transferring=build.is_transferring,
+                    build_task_done=build.build_task.done()
+                    if build.build_task
+                    else None,
+                    transfer_task_done=build.transfer_task.done()
+                    if build.transfer_task
+                    else None,
+                )
                 continue
 
             # Check if all required paths are in local store
@@ -139,7 +163,17 @@ class Scheduler:
             assigned = False
             for store_id, score in ranked:
                 store = self.stores[store_id]
-                if store.available_slots > 0:
+                # TODO TEMP DEBUG: Remove after debugging
+                log.warning(
+                    "DEBUG_rank_store",
+                    build_id=build.id,
+                    store_id=store_id,
+                    score=score,
+                    available_slots=store.available_slots,
+                    max_builds=store.max_builds,
+                    existing_task=build.build_task is not None,
+                )
+                if store.available_slots > 0 and build.build_task is None:
                     log.debug(
                         "build_assigned_to_store",
                         build_id=build.id,
@@ -156,6 +190,15 @@ class Scheduler:
                     break
 
             if not assigned:
+                # TODO TEMP DEBUG: Remove after debugging
+                log.warning(
+                    "DEBUG_waiting_slot",
+                    build_id=build.id,
+                    ranked_stores=[
+                        (sid, s.available_slots)
+                        for sid, s in [(sid, self.stores[sid]) for sid, _ in ranked]
+                    ],
+                )
                 waiting_slot.append(build)
 
         # 3. Handle proactive transfers for waiting_dag
@@ -190,6 +233,17 @@ class Scheduler:
             waiting_slot=[b.id for b in waiting_slot],
             slots={s.id: s.available_slots for s in self.stores.values()},
         )
+
+        # Re-trigger after 5s if there are pending builds that couldn't be scheduled
+        # This handles cases where builds are waiting for slots to free up or for
+        # DAG inputs to be pulled in by other builds.
+        if waiting_slot or waiting_dag:
+
+            async def retrigger_later():
+                await asyncio.sleep(5.0)
+                self.trigger()
+
+            asyncio.create_task(retrigger_later())
 
     def rank_stores(self, build: QueuedBuild) -> list[tuple[str, int]]:
         """Rank stores for a build. Score = present_paths - (penalty if busy)."""
@@ -233,41 +287,61 @@ class Scheduler:
 
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
         """Execute build on a store, handling inputs and outputs."""
+        # TODO TEMP DEBUG: Remove after debugging
+        log.warning("DEBUG_execute_build_START", build_id=build.id, store_id=store.id)
+        build_resp: BuildDerivationResponse | None = None
         try:
-            # 1. Ensure all inputs are present on the builder
-            missing = build.required_paths - store.known_paths
-            if missing:
-                log.debug("build_sending_inputs", build_id=build.id, store_id=store.id)
-                await Store.stream_paths_store_to_store(
-                    self.local_store, store, missing
+            # Acquire build connection with semaphore FIRST to limit concurrency
+            # This must be done before any async operations that might block
+            async with store.build_conn() as conn:
+                # 1. Ensure all inputs are present on the builder
+                missing = build.required_paths - store.known_paths
+                if missing:
+                    log.warning(
+                        "DEBUG_build_missing_inputs",
+                        build_id=build.id,
+                        missing_count=len(missing),
+                    )
+                    log.debug(
+                        "build_sending_inputs", build_id=build.id, store_id=store.id
+                    )
+                    await Store.stream_paths_store_to_store(
+                        self.local_store, store, missing
+                    )
+
+                # 2. Trigger build
+                log.warning(
+                    "DEBUG_build_executing", build_id=build.id, store_id=store.id
                 )
-
-            # 2. Trigger build
-            log.debug("build_executing", build_id=build.id, store_id=store.id)
-            build.started_at = time.monotonic()
-            resp = await store.execute(build.request, client=build.client)
-            log.debug("build_executed", build_id=build.id, status=resp.result.status)
-
-            # 3. Pull outputs back to local store if build succeeded
-            if resp.result.status == 0:
-                # Resolve drv to outputs
-                outputs = build.request.derivation.output_paths()
-                store.add_known_paths(set(outputs.values()))
-                log.info("pulling_paths", store_id=store.id, count=len(outputs))
-                for p in outputs.values():
-                    log.debug("pulling_path", store_id=store.id, path=p)
-                await Store.stream_paths_store_to_store(
-                    store, self.local_store, set(outputs.values())
+                log.debug("build_executing", build_id=build.id, store_id=store.id)
+                build.started_at = time.monotonic()
+                resp = await conn.call(build.request, client=build.client)
+                log.warning(
+                    "DEBUG_build_executed", build_id=build.id, status=resp.result.status
                 )
                 log.debug(
-                    "pulled_paths_into_local_store",
-                    count=len(outputs),
-                    store_id=store.id,
+                    "build_executed", build_id=build.id, status=resp.result.status
                 )
 
-            # 4. Finalize build
-            await self.queue.complete(build.id, resp)
-            self.trigger()
+                # 3. Pull outputs back to local store if build succeeded
+                if resp.result.status == 0:
+                    # Resolve drv to outputs
+                    outputs = build.request.derivation.output_paths()
+                    store.add_known_paths(set(outputs.values()))
+                    log.info("pulling_paths", store_id=store.id, count=len(outputs))
+                    for p in outputs.values():
+                        log.debug("pulling_path", store_id=store.id, path=p)
+                    await Store.stream_paths_store_to_store(
+                        store, self.local_store, set(outputs.values())
+                    )
+                    log.debug(
+                        "pulled_paths_into_local_store",
+                        count=len(outputs),
+                        store_id=store.id,
+                    )
+
+                # Capture response for completion AFTER semaphore is released
+                build_resp = resp
 
         except (BackendError, InfrastructureError) as e:
             log.warning("build_failed_retryable", build_id=build.id, error=str(e))
@@ -281,14 +355,29 @@ class Scheduler:
             await self.queue.fail(build.id, "Internal scheduler error")
             self.trigger()
 
+        # Release semaphore FIRST, then complete and trigger
+        # This allows new builds to start while we're finalizing
+        if build_resp is not None:
+            await self.queue.complete(build.id, build_resp)
+            self.trigger()
+
     async def transfer_inputs(
         self, build: QueuedBuild, store: Store, paths: set[StorePath]
     ) -> None:
         """Background task to proactively pull missing inputs for a build."""
+        # TODO TEMP DEBUG: Remove after debugging
+        log.warning(
+            "DEBUG_transfer_inputs_START",
+            build_id=build.id,
+            store_id=store.id,
+            path_count=len(paths),
+        )
         try:
             # Calculate which paths we *actually* need to pull (proactive)
             to_pull = paths - self.local_store.known_paths
             if not to_pull:
+                # TODO TEMP DEBUG: Remove after debugging
+                log.warning("DEBUG_transfer_inputs_skip_no_missing", build_id=build.id)
                 return
 
             log.info("pulling_paths", store_id=store.id, count=len(to_pull))
@@ -296,9 +385,15 @@ class Scheduler:
                 log.debug("pulling_path", store_id=store.id, path=p)
             try:
                 # We pull from the build machine into our local store
+                log.warning(
+                    "DEBUG_transfer_inputs_STREAMING",
+                    build_id=build.id,
+                    to_pull_count=len(to_pull),
+                )
                 await Store.stream_paths_store_to_store(
                     store, self.local_store, to_pull
                 )
+                log.warning("DEBUG_transfer_inputs_DONE", build_id=build.id)
                 log.debug(
                     "pulled_paths_into_local_store",
                     count=len(to_pull),
