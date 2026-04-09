@@ -210,15 +210,13 @@ class Scheduler:
                 transferring.append(build.id)
                 continue
 
-            # Check if we should start a transfer for this build
-            if len(transferring) < 2:  # Limit concurrent transfers
-                # Which store has the missing paths?
+            if len(transferring) < 2:
                 missing = build.required_paths - self.local_store.known_paths
                 if not missing:
                     continue
 
                 best_source = self.find_best_source(missing)
-                if best_source:
+                if best_source and best_source.has_all_paths(missing):
                     build.transfer_task = asyncio.create_task(
                         self.transfer_inputs(build, best_source, missing)
                     )
@@ -365,46 +363,36 @@ class Scheduler:
         self, build: QueuedBuild, store: Store, paths: set[StorePath]
     ) -> None:
         """Background task to proactively pull missing inputs for a build."""
-        # TODO TEMP DEBUG: Remove after debugging
-        log.warning(
-            "DEBUG_transfer_inputs_START",
-            build_id=build.id,
-            store_id=store.id,
-            path_count=len(paths),
-        )
+        to_pull: set[StorePath] = set()
         try:
-            # Calculate which paths we *actually* need to pull (proactive)
             to_pull = paths - self.local_store.known_paths
             if not to_pull:
-                # TODO TEMP DEBUG: Remove after debugging
-                log.warning("DEBUG_transfer_inputs_skip_no_missing", build_id=build.id)
                 return
 
             log.info("pulling_paths", store_id=store.id, count=len(to_pull))
             for p in to_pull:
                 log.debug("pulling_path", store_id=store.id, path=p)
-            try:
-                # We pull from the build machine into our local store
-                log.warning(
-                    "DEBUG_transfer_inputs_STREAMING",
-                    build_id=build.id,
-                    to_pull_count=len(to_pull),
-                )
-                await Store.stream_paths_store_to_store(
-                    store, self.local_store, to_pull
-                )
-                log.warning("DEBUG_transfer_inputs_DONE", build_id=build.id)
-                log.debug(
-                    "pulled_paths_into_local_store",
-                    count=len(to_pull),
-                    store_id=store.id,
-                )
-                self.trigger()
-            except Exception:
-                log.exception(
-                    "pull_paths_failed",
-                    count=len(to_pull),
-                    store_id=store.id,
-                )
+            await Store.stream_paths_store_to_store(store, self.local_store, to_pull)
+            log.debug(
+                "pulled_paths_into_local_store",
+                count=len(to_pull),
+                store_id=store.id,
+            )
+            self.trigger()
+        except ValueError as e:
+            log.warning(
+                "pull_paths_missing_inputs",
+                build_id=build.id,
+                error=str(e),
+                store_id=store.id,
+                count=len(to_pull),
+            )
+            self.trigger()
+        except Exception:
+            log.exception(
+                "pull_paths_failed",
+                count=len(to_pull),
+                store_id=store.id,
+            )
         finally:
             build.transfer_task = None
