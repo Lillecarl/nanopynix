@@ -104,49 +104,18 @@ class Scheduler:
         if not pending:
             return
 
-        # TODO TEMP DEBUG: Remove after debugging
-        log.warning(
-            "DEBUG_schedule_pending",
-            total=len(pending),
-            pending_build_ids=[b.id for b in pending],
-            pending_building=[b.id for b in pending if b.is_building],
-            pending_transferring=[b.id for b in pending if b.is_transferring],
-            pending_done=[b.id for b in pending if b.is_done],
-        )
-
         # 1. Identify builds ready to execute
         schedulable: list[QueuedBuild] = []
         waiting_dag: list[QueuedBuild] = []
 
         for build in pending:
             if build.is_building or build.is_transferring:
-                # TODO TEMP DEBUG: Remove after debugging
-                log.warning(
-                    "DEBUG_skip_build",
-                    build_id=build.id,
-                    is_building=build.is_building,
-                    is_transferring=build.is_transferring,
-                    build_task_done=build.build_task.done()
-                    if build.build_task
-                    else None,
-                    transfer_task_done=build.transfer_task.done()
-                    if build.transfer_task
-                    else None,
-                )
                 continue
 
             # Check if all required paths are in local store
             if self.local_store.has_all_paths(build.required_paths):
                 schedulable.append(build)
             else:
-                missing = build.required_paths - self.local_store.known_paths
-                log.warning(
-                    "DEBUG_waiting_paths",
-                    build_id=build.id,
-                    drv_path=str(build.request.drv_path),
-                    missing_count=len(missing),
-                    missing_paths=[repr(p) for p in missing][:10],
-                )
                 waiting_dag.append(build)
 
         # 2. Assign schedulable builds to backends
@@ -171,16 +140,6 @@ class Scheduler:
             assigned = False
             for store_id, score in ranked:
                 store = self.stores[store_id]
-                # TODO TEMP DEBUG: Remove after debugging
-                log.warning(
-                    "DEBUG_rank_store",
-                    build_id=build.id,
-                    store_id=store_id,
-                    score=score,
-                    available_slots=store.available_slots,
-                    max_builds=store.max_builds,
-                    existing_task=build.build_task is not None,
-                )
                 if store.available_slots > 0 and build.build_task is None:
                     log.debug(
                         "build_assigned_to_store",
@@ -198,15 +157,6 @@ class Scheduler:
                     break
 
             if not assigned:
-                # TODO TEMP DEBUG: Remove after debugging
-                log.warning(
-                    "DEBUG_waiting_slot",
-                    build_id=build.id,
-                    ranked_stores=[
-                        (sid, s.available_slots)
-                        for sid, s in [(sid, self.stores[sid]) for sid, _ in ranked]
-                    ],
-                )
                 waiting_slot.append(build)
 
         # 3. Handle proactive transfers for waiting_slot builds
@@ -298,8 +248,6 @@ class Scheduler:
 
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
         """Execute build on a store, handling inputs and outputs."""
-        # TODO TEMP DEBUG: Remove after debugging
-        log.warning("DEBUG_execute_build_START", build_id=build.id, store_id=store.id)
         build_resp: BuildDerivationResponse | None = None
         try:
             # Acquire build connection with semaphore FIRST to limit concurrency
@@ -308,11 +256,6 @@ class Scheduler:
                 # 1. Ensure all inputs are present on the builder
                 missing = build.required_paths - store.known_paths
                 if missing:
-                    log.warning(
-                        "DEBUG_build_missing_inputs",
-                        build_id=build.id,
-                        missing_count=len(missing),
-                    )
                     log.debug(
                         "build_sending_inputs", build_id=build.id, store_id=store.id
                     )
@@ -321,15 +264,9 @@ class Scheduler:
                     )
 
                 # 2. Trigger build
-                log.warning(
-                    "DEBUG_build_executing", build_id=build.id, store_id=store.id
-                )
                 log.debug("build_executing", build_id=build.id, store_id=store.id)
                 build.started_at = time.monotonic()
                 resp = await conn.call(build.request, client=build.client)
-                log.warning(
-                    "DEBUG_build_executed", build_id=build.id, status=resp.result.status
-                )
                 log.debug(
                     "build_executed", build_id=build.id, status=resp.result.status
                 )
