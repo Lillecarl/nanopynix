@@ -80,6 +80,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             proxy.local_store.add_known_paths(valid_resp.paths, update_regtime=False)
 
         from .query_closure import QueryClosureRequest
+        from .query_valid_paths import QueryValidPathsRequest
 
         existing_inputs = request.derivation.input_srcs & proxy.local_store.known_paths
         unbuilt_inputs = request.derivation.input_srcs - proxy.local_store.known_paths
@@ -87,6 +88,12 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         closure_resp = await proxy.local_store.execute(
             QueryClosureRequest(paths=existing_inputs)
         )
+
+        # Ensure pynixd knows about all paths in the closure (QueryValidPathsRequest.execute() adds them)
+        if closure_resp.paths:
+            await proxy.local_store.execute(
+                QueryValidPathsRequest(paths=closure_resp.paths)
+            )
 
         request.derivation.input_srcs = closure_resp.paths | unbuilt_inputs
 
