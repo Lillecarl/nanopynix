@@ -345,6 +345,9 @@ class Scheduler:
                     await Store.stream_paths_store_to_store(
                         store, self.local_store, set(outputs.values())
                     )
+                    # IMPORTANT: Update local_store's known_paths after streaming
+                    # because stream_paths_store_to_store bypasses the normal handle() path
+                    self.local_store.add_known_paths(set(outputs.values()))
                     log.debug(
                         "pulled_paths_into_local_store",
                         count=len(outputs),
@@ -386,6 +389,8 @@ class Scheduler:
             for p in to_pull:
                 log.debug("pulling_path", store_id=store.id, path=p)
             await Store.stream_paths_store_to_store(store, self.local_store, to_pull)
+            # IMPORTANT: Update local_store's known_paths after streaming
+            self.local_store.add_known_paths(to_pull)
             log.debug(
                 "pulled_paths_into_local_store",
                 count=len(to_pull),
