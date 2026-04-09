@@ -129,6 +129,7 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
             result = await super().execute(store, client, suppress_last)
             if not result.is_not_found:
                 store.add_known_paths({info.path for info in result.infos})
+                store.add_path_infos(result.infos)
                 return result
         except OpNotImplementedError:
             pass

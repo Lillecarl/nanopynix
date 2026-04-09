@@ -26,6 +26,7 @@ from pathlib import Path
 
 import asyncssh
 import structlog
+from cachetools import TTLCache
 from environs import env
 
 from . import wire
@@ -98,6 +99,9 @@ class Store(ABC):
         self.sweep_task: asyncio.Task[None] | None = None
         self.supported_systems = supported_systems or []
         self.known_paths: set[RequiredInput] = set()
+        self.path_info_cache: TTLCache[StorePath, PathInfo] = TTLCache(
+            maxsize=10000, ttl=300
+        )
         self.consecutive_failures: int = 0
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
@@ -241,6 +245,19 @@ class Store(ABC):
         self.known_paths.update(paths)  # type: ignore[arg-type]
         if update_regtime and self.db is not None:
             self.db.mark_paths(set(paths))
+
+    def add_path_info(self, info: PathInfo) -> None:
+        """Add PathInfo to the cache."""
+        self.path_info_cache[info.path] = info
+
+    def add_path_infos(self, infos: Iterable[PathInfo]) -> None:
+        """Add multiple PathInfos to the cache."""
+        for info in infos:
+            self.path_info_cache[info.path] = info
+
+    def get_path_info(self, path: StorePath) -> PathInfo | None:
+        """Get PathInfo from cache if available."""
+        return self.path_info_cache.get(path)
 
     @classmethod
     async def stream_paths_with_info_store_to_store(

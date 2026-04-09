@@ -100,4 +100,5 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
             store.add_known_path(self.path)
             if resp.info is not None:
                 resp.info.path = self.path
+                store.add_path_info(resp.info)
         return resp

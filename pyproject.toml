@@ -15,6 +15,7 @@ dependencies = [
     "pyinstrument",
     "structlog",
     "passlib",
+    "cachetools",
 ]
 
 [project.optional-dependencies]

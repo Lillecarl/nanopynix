@@ -121,6 +121,7 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
             suppress_last=suppress_last,
         )
 
+        store.add_path_info(self.info)
         return SignPathInfoResponse(info=self.info)
 
     @classmethod

@@ -74,6 +74,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
                 await proxy.local_store.execute(SignPathInfoRequest(resp.info))
             ).info
             proxy.local_store.add_known_path(resp.info.path)
+            proxy.local_store.add_path_info(resp.info)
             return resp
 
     @classmethod

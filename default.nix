@@ -35,6 +35,7 @@ let
       python.pkgs.environs
       python.pkgs.pynacl
       python.pkgs.passlib
+      python.pkgs.cachetools
     ];
 
     nativeCheckInputs = [

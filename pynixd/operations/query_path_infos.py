@@ -116,18 +116,35 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfosResponse:
-        # 1. Try DB or remote delegation via base class
+        # 1. Check cache first
+        cached: dict[StorePath, PathInfo] = {}
+        uncached: list[StorePath] = []
+        for path in self.paths:
+            cached_info = store.get_path_info(path)
+            if cached_info is not None:
+                cached[path] = cached_info
+            else:
+                uncached.append(path)
+
+        if not uncached:
+            store.add_path_infos(cached.values())
+            return QueryPathInfosResponse(infos=cached)
+
+        # 2. Try DB or remote delegation via base class
         try:
             result = await super().execute(store, client, suppress_last)
             if not result.is_not_found:
                 store.add_known_paths(set(result.infos.keys()))
+                store.add_path_infos(result.infos.values())
+                # Merge cached with result
+                result.infos.update(cached)
                 return result
         except OpNotImplementedError:
             pass
 
-        # 2. Decomposition fallback: try one by one
-        infos: dict[StorePath, PathInfo] = {}
-        for path in self.paths:
+        # 3. Decomposition fallback: try one by one
+        infos: dict[StorePath, PathInfo] = dict(cached)
+        for path in uncached:
             from .query_path_info import QueryPathInfoRequest
 
             resp = await store.execute(
@@ -137,6 +154,7 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
             )
             if resp.valid and resp.info:
                 infos[path] = resp.info
+                store.add_path_info(resp.info)
         return QueryPathInfosResponse(infos=infos)
 
     @classmethod
