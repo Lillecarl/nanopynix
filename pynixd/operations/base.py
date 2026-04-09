@@ -117,7 +117,9 @@ class OpRequest(ABC, Generic[Resp]):
         log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
         log.debug("received_op")
         request = await cls.from_reader(proxy.r, proxy.version)
-        return await proxy.execute(request)
+        result = await proxy.execute(request)
+        log.debug("sendOp")
+        return result
 
     async def execute(
         self,

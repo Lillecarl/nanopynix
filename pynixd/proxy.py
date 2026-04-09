@@ -146,8 +146,6 @@ class DaemonProxy:
             op_name = req_cls.name
             structlog.contextvars.bind_contextvars(operation=op_name)
 
-            log.debug("recvOp")
-
             try:
                 response = await self.dispatch(op_num)
 
@@ -156,7 +154,6 @@ class DaemonProxy:
                     self.w.write_uint64(wire.STDERR_LAST)
                     await response.to_writer(self.w, self.version)
                     await self.w.drain()
-                    log.debug("sendOp")
                 # else: already handled (streaming, error, etc.)
 
             except Exception:
