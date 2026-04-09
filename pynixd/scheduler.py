@@ -46,6 +46,7 @@ class Scheduler:
         self.local_store = local_store
         self.trigger_event = asyncio.Event()
         self.running = False
+        self._retrigger_tasks: set[asyncio.Task[None]] = set()
 
     def trigger(self) -> None:
         """Signal that a scheduling pass is needed."""
@@ -88,7 +89,9 @@ class Scheduler:
         """Stop the scheduler and cancel all pending builds."""
         self.running = False
         self.trigger()
-        # TODO: Cancel in-flight builds if needed
+        for task in self._retrigger_tasks:
+            task.cancel()
+        self._retrigger_tasks.clear()
 
     async def schedule(self) -> None:
         """The core scheduling logic.
@@ -201,8 +204,10 @@ class Scheduler:
             async def retrigger_later():
                 await asyncio.sleep(5.0)
                 self.trigger()
+                self._retrigger_tasks.discard(task)
 
-            asyncio.create_task(retrigger_later())
+            task = asyncio.create_task(retrigger_later())
+            self._retrigger_tasks.add(task)
 
     def rank_stores(self, build: QueuedBuild) -> list[tuple[str, int]]:
         """Rank stores for a build. Score = present_paths - (penalty if busy)."""

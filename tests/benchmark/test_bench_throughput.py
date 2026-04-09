@@ -173,9 +173,8 @@ async def test_throughput_pynixd(test_log_dir: Path) -> None:
             ssh_port=None,
         )
 
-        async with Server(config) as server:
+        async with Server(config):
             log.info("server_up_starting_profiler")
-            await server.start()
 
             profiler = pyinstrument.Profiler(async_mode="enabled")
             profiler.start()
@@ -241,5 +240,3 @@ async def test_throughput_pynixd(test_log_dir: Path) -> None:
                     with open(profile_path, "w") as f:
                         f.write(renderer.render(session))
                     log.info("profile_saved", path=str(profile_path))
-
-                await server.close()

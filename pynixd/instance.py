@@ -102,6 +102,7 @@ class Server:
         self.http_bound_port: int | None = None
         self.https_server: web.AppRunner | None = None
         self.https_bound_port: int | None = None
+        self._started = False
 
     @property
     def host(self) -> str:
@@ -164,6 +165,9 @@ class Server:
 
     async def start(self) -> None:
         """Start the server listeners and background tasks."""
+        if self._started:
+            raise RuntimeError("Server already started")
+        self._started = True
         local_store = self.config.local_store
         stores = self.config.stores
 
@@ -277,6 +281,9 @@ class Server:
 
     async def close(self) -> None:
         """Gracefully shut down the server."""
+        if not self._started:
+            raise RuntimeError("Server not started or already closed")
+        self._started = False
         log.info("server_shutting_down")
         if self.http_server:
             await self.http_server.cleanup()
