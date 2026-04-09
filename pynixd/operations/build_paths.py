@@ -174,11 +174,14 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
-        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        log.debug("received_op")
         request = await cls.from_reader(proxy.r, proxy.version)
         if proxy.scheduler is None:
             log.debug("handle_local_mode_fallback")
-            return await proxy.local_store.execute(request, client=proxy.client)
+            result = await proxy.local_store.execute(request, client=proxy.client)
+            log.debug("responded_op")
+            return result
 
         log.debug("BuildPaths len(paths)=%d", len(request.derived_paths))
         decomposed = await _decompose_build_paths(
@@ -189,6 +192,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         )
 
         if not decomposed:
+            log.debug("responded_op")
             return BuildPathsResponse(value=0)
 
         from .build_derivation import BuildDerivationResponse
@@ -199,8 +203,10 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         for resp in responses:
             if isinstance(resp, BuildDerivationResponse):
                 if resp.result.status != 0:
+                    log.debug("responded_op")
                     return BuildPathsResponse(value=1)
 
+        log.debug("responded_op")
         return BuildPathsResponse(value=0)
 
 
@@ -257,11 +263,14 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
-        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        log.debug("received_op")
         request = await cls.from_reader(proxy.r, proxy.version)
         if proxy.scheduler is None:
             log.debug("handle_local_mode_fallback")
-            return await proxy.local_store.execute(request, client=proxy.client)
+            result = await proxy.local_store.execute(request, client=proxy.client)
+            log.debug("responded_op")
+            return result
 
         log.debug(
             "build_paths_with_results_decomposed",
@@ -275,6 +284,7 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
         )
 
         if not decomposed:
+            log.debug("responded_op")
             return KeyedBuildResultsResponse(results=[])
 
         from .build_derivation import BuildDerivationResponse
@@ -304,4 +314,5 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
                         StderrNext(text=f"pynixd: {resp.result.error_msg}\n")
                     )
 
+        log.debug("responded_op")
         return KeyedBuildResultsResponse(results=keyed_results)

@@ -61,11 +61,14 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
-        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        log.debug("received_op")
         request = await cls.from_reader(proxy.r, proxy.version)
         if proxy.scheduler is None:
             log.debug("handle_local_mode_fallback")
-            return await proxy.local_store.execute(request, client=proxy.client)
+            result = await proxy.local_store.execute(request, client=proxy.client)
+            log.debug("responded_op")
+            return result
 
         # Discover paths that exist on the local store but aren't tracked.
         unknown = (
@@ -124,4 +127,5 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
                 proxy.client.queue.put_nowait(
                     StderrNext(text=f"pynixd: {response.result.error_msg}\n")
                 )
+        log.debug("responded_op")
         return response

@@ -22,7 +22,7 @@ from .operations.base import (
     OpResponse,
     Resp,
 )
-from .protocol import OptTrusted, op_log
+from .protocol import OptTrusted
 from .scheduler import Scheduler
 from .stderr import StderrError
 from .store import Store
@@ -144,7 +144,9 @@ class DaemonProxy:
                 continue
 
             op_name = req_cls.name
-            op_log(op_name).debug("recvOp", op=op_name, op_num=op_num)
+            structlog.contextvars.bind_contextvars(operation=op_name)
+
+            log.debug("recvOp")
 
             try:
                 response = await self.dispatch(op_num)
@@ -154,7 +156,7 @@ class DaemonProxy:
                     self.w.write_uint64(wire.STDERR_LAST)
                     await response.to_writer(self.w, self.version)
                     await self.w.drain()
-                    op_log(op_name).debug("sendOp", op=op_name)
+                    log.debug("sendOp")
                 # else: already handled (streaming, error, etc.)
 
             except Exception:

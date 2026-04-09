@@ -28,7 +28,6 @@ from .operations.base import (
     Resp,
     StderrBuffer,
 )
-from .protocol import op_log
 from .wire import (
     NixReader,
     NixWriter,
@@ -179,11 +178,7 @@ class Connection:
 
         self.op_log.append(op_name)
 
-        op_log(op_name).debug(
-            "send_op",
-            store_id=self.id,
-            op_name=op_name,
-        )
+        log.debug("send_op", store_id=self.id)
 
         await request.to_writer(self.w, self.version)
         await self.w.drain()
@@ -224,11 +219,7 @@ class Connection:
         response = await response_type.from_reader(self.r, self.version)
         response.stderr = msgs
 
-        op_log(op_name).debug(
-            "recv_op_done",
-            store_id=self.id,
-            op_name=op_name,
-        )
+        log.debug("recv_op_done", store_id=self.id)
         # response_type is ClassVar[type[OpResponse]] so from_reader
         # returns OpResponse, not Resp. The actual type is correct at
         # runtime — ClassVar can't reference a class type parameter.

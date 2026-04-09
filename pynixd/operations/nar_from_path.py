@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from .. import wire
-from ..protocol import op_log
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -92,19 +91,21 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     async def handle(cls, proxy: DaemonProxy) -> NarFromPathResponse | None:
         from .query_path_info import QueryPathInfoRequest
 
-        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        log.debug("received_op")
 
         request = await cls.from_reader(proxy.r, proxy.version)
         path = request.path
 
         info_resp = await proxy.local_store.execute(QueryPathInfoRequest(path=path))
         if not info_resp.valid or info_resp.info is None:
-            cls._log.warning("nar_not_in_local_store", path=path)
+            log.warning("nar_not_in_local_store", path=path)
+            log.debug("responded_op")
             return NarFromPathResponse(nar_data=b"")
 
         nar_size = info_resp.info.nar_size
 
-        op_log("NarFromPath").debug(
+        log.debug(
             "nar_from_path_streaming",
             path=path,
             size=nar_size,
@@ -133,4 +134,5 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
                 await wire.stream_parse_nar(conn.r, proxy.w)
 
         await proxy.w.drain()
+        log.debug("responded_op")
         return None
