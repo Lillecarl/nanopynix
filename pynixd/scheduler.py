@@ -140,7 +140,7 @@ class Scheduler:
                 continue
 
             assigned = False
-            for store_id, score in ranked:
+            for store_id, score, _slots in ranked:
                 store = self.stores[store_id]
                 if store.available_slots > 0 and build.build_task is None:
                     log.debug(
@@ -174,7 +174,7 @@ class Scheduler:
             if len(transferring) < 2:
                 # Re-rank stores to find one with slots (best store has no slots)
                 ranked = self.rank_stores(build)
-                for store_id, score in ranked:
+                for store_id, score, slots in ranked:
                     store = self.stores[store_id]
                     if store.available_slots > 0:
                         # Found a store with slots
@@ -197,9 +197,9 @@ class Scheduler:
             slots={s.id: s.available_slots for s in self.stores.values()},
         )
 
-    def rank_stores(self, build: QueuedBuild) -> list[tuple[str, int]]:
-        """Rank stores for a build. Score = present_paths - (penalty if busy)."""
-        scores: list[tuple[str, int]] = []
+    def rank_stores(self, build: QueuedBuild) -> list[tuple[str, int, int]]:
+        """Rank stores for a build by path overlap, tiebreak by available slots."""
+        scores: list[tuple[str, int, int]] = []
         for store_id, store in self.stores.items():
             if not store.is_healthy:
                 continue
@@ -208,17 +208,10 @@ class Scheduler:
             if store_id in build.failed_backends:
                 continue
 
-            # Base score: number of required paths already on this store
             score = store.count_common_paths(build.required_paths)
+            scores.append((store_id, score, store.available_slots))
 
-            # Busy penalty: prefer idle workers
-            if store.available_slots == 0:
-                score -= 1000
-
-            scores.append((store_id, score))
-
-        # Sort descending by score
-        return sorted(scores, key=lambda x: x[1], reverse=True)
+        return sorted(scores, key=lambda x: (x[1], x[2]), reverse=True)
 
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
         """Execute build on a store, handling inputs and outputs."""

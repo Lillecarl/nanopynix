@@ -160,7 +160,7 @@ class Server:
         await self.start()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb) -> None:
         await self.close()
 
     async def start(self) -> None:
