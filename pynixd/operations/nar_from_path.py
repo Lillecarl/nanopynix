@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from .. import wire
-from ..protocol import Op, op_log
+from ..protocol import op_log
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -45,7 +45,7 @@ class NarFromPathResponse(OpResponse):
 @dataclass
 class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     name: ClassVar[str] = "NarFromPath"
-    op: ClassVar[int] = Op.NarFromPath
+    op: ClassVar[int] = 38
     response_type: ClassVar[type[OpResponse]] = NarFromPathResponse
     is_query: ClassVar[bool] = True
     path: StorePath = StorePath("")

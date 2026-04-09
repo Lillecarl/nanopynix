@@ -9,7 +9,6 @@ import structlog
 
 from pynixd.operations.sign_path_info import SignPathInfoRequest
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import OpRequest, OpResponse, PathInfo
@@ -39,7 +38,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     """Prefix for AddToStore (framed NAR data follows)."""
 
     name: ClassVar[str] = "AddToStore"
-    op: ClassVar[int] = Op.AddToStore
+    op: ClassVar[int] = 7
     response_type: ClassVar[type[OpResponse]] = AddToStoreResponse
     path_name: str = ""
     cam: str = ""  # ContentAddressMethodWithAlgo
@@ -81,7 +80,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     @classmethod
     async def forward(cls, src: NixReader, dst: NixWriter) -> None:
         """Forward request prefix and stream framed NAR data from src to dst."""
-        dst.write_uint64(Op.AddToStore)
+        dst.write_uint64(7)
 
         name = await src.read_string()
         cam = await src.read_string()

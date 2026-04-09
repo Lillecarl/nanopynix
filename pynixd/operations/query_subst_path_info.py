@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, SubstPathInfo
 
@@ -32,7 +31,7 @@ class QuerySubstPathInfoResponse(OpResponse):
 @dataclass
 class QuerySubstPathInfoRequest(OpRequest[QuerySubstPathInfoResponse]):
     name: ClassVar[str] = "QuerySubstitutablePathInfo"
-    op: ClassVar[int] = Op.QuerySubstitutablePathInfo
+    op: ClassVar[int] = 21
     response_type: ClassVar[type[OpResponse]] = QuerySubstPathInfoResponse
     is_query: ClassVar[bool] = True
     path: str = ""

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
 
@@ -25,7 +24,7 @@ class OptimiseStoreResponse(OpResponse):
 @dataclass
 class OptimiseStoreRequest(OpRequest[OptimiseStoreResponse]):
     name: ClassVar[str] = "OptimiseStore"
-    op: ClassVar[int] = Op.OptimiseStore
+    op: ClassVar[int] = 34
     response_type: ClassVar[type[OpResponse]] = OptimiseStoreResponse
 
     @classmethod

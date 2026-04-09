@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
 
@@ -29,7 +28,7 @@ class AddPermRootResponse(OpResponse):
 @dataclass
 class AddPermRootRequest(OpRequest[AddPermRootResponse]):
     name: ClassVar[str] = "AddPermRoot"
-    op: ClassVar[int] = Op.AddPermRoot
+    op: ClassVar[int] = 47
     response_type: ClassVar[type[OpResponse]] = AddPermRootResponse
     store_path: str = ""
     gc_root: str = ""

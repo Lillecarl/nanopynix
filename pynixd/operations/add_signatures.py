@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -29,7 +28,7 @@ class AddSignaturesResponse(OpResponse):
 @dataclass
 class AddSignaturesRequest(OpRequest[AddSignaturesResponse]):
     name: ClassVar[str] = "AddSignatures"
-    op: ClassVar[int] = Op.AddSignatures
+    op: ClassVar[int] = 37
     response_type: ClassVar[type[OpResponse]] = AddSignaturesResponse
     path: str = ""
     sigs: set[str] = field(default_factory=set)

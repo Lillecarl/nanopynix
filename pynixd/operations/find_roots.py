@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
 
@@ -40,7 +39,7 @@ class FindRootsResponse(OpResponse):
 @dataclass
 class FindRootsRequest(OpRequest[FindRootsResponse]):
     name: ClassVar[str] = "FindRoots"
-    op: ClassVar[int] = Op.FindRoots
+    op: ClassVar[int] = 14
     response_type: ClassVar[type[OpResponse]] = FindRootsResponse
 
     @classmethod

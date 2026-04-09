@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, _nar_pad
 from .base import OpRequest, OpResponse
@@ -34,7 +33,7 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
     """Prefix for AddMultipleToStore (framed data follows)."""
 
     name: ClassVar[str] = "AddMultipleToStore"
-    op: ClassVar[int] = Op.AddMultipleToStore
+    op: ClassVar[int] = 44
     response_type: ClassVar[type[OpResponse]] = AddMultipleToStoreResponse
     repair: int = 0
     dont_check_sigs: int = 0
@@ -66,7 +65,7 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
     @classmethod
     async def forward(cls, src: NixReader, dst: NixWriter) -> list[StorePath]:
         """Forward AddMultipleToStore verbatim, snooping store paths."""
-        dst.write_uint64(Op.AddMultipleToStore)
+        dst.write_uint64(44)
 
         repair = await src.read_uint64()
         dont_check_sigs = await src.read_uint64()

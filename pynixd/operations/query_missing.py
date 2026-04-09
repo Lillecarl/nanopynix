@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import DerivedPath
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -45,7 +44,7 @@ class QueryMissingResponse(OpResponse):
 @dataclass
 class QueryMissingRequest(OpRequest[QueryMissingResponse]):
     name: ClassVar[str] = "QueryMissing"
-    op: ClassVar[int] = Op.QueryMissing
+    op: ClassVar[int] = 40
     response_type: ClassVar[type[OpResponse]] = QueryMissingResponse
     is_query: ClassVar[bool] = True
     derived_paths: set[DerivedPath] = field(default_factory=set)

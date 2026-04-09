@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -26,7 +25,7 @@ class AddTempRootResponse(OpResponse):
 @dataclass
 class AddTempRootRequest(OpRequest[AddTempRootResponse]):
     name: ClassVar[str] = "AddTempRoot"
-    op: ClassVar[int] = Op.AddTempRoot
+    op: ClassVar[int] = 11
     response_type: ClassVar[type[OpResponse]] = AddTempRootResponse
     path: StorePath = StorePath("")
 

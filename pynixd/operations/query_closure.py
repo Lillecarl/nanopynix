@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -52,7 +51,7 @@ class QueryClosureResponse(OpResponse):
 @dataclass
 class QueryClosureRequest(OpRequest[QueryClosureResponse]):
     name: ClassVar[str] = "QueryClosure"
-    op: ClassVar[int] = Op.QueryClosure
+    op: ClassVar[int] = 104
     response_type: ClassVar[type[OpResponse]] = QueryClosureResponse
     is_query: ClassVar[bool] = True
     paths: set[StorePath] = field(default_factory=set)

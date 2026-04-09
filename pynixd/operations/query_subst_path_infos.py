@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, SubstPathInfo
 
@@ -40,7 +39,7 @@ class QuerySubstPathInfosResponse(OpResponse):
 @dataclass
 class QuerySubstPathInfosRequest(OpRequest[QuerySubstPathInfosResponse]):
     name: ClassVar[str] = "QuerySubstitutablePathInfos"
-    op: ClassVar[int] = Op.QuerySubstitutablePathInfos
+    op: ClassVar[int] = 30
     response_type: ClassVar[type[OpResponse]] = QuerySubstPathInfosResponse
     is_query: ClassVar[bool] = True
     items: dict[str, str] = field(default_factory=dict)

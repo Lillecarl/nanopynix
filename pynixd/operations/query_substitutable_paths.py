@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -26,7 +25,7 @@ class QuerySubstitutablePathsResponse(OpResponse):
 @dataclass
 class QuerySubstitutablePathsRequest(OpRequest[QuerySubstitutablePathsResponse]):
     name: ClassVar[str] = "QuerySubstitutablePaths"
-    op: ClassVar[int] = Op.QuerySubstitutablePaths
+    op: ClassVar[int] = 32
     response_type: ClassVar[type[OpResponse]] = QuerySubstitutablePathsResponse
     is_query: ClassVar[bool] = True
     paths: set[StorePath] = field(default_factory=set)

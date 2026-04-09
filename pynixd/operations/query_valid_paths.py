@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from .. import wire
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -36,7 +35,7 @@ class QueryValidPathsResponse(OpResponse):
 @dataclass
 class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
     name: ClassVar[str] = "QueryValidPaths"
-    op: ClassVar[int] = Op.QueryValidPaths
+    op: ClassVar[int] = 31
     response_type: ClassVar[type[OpResponse]] = QueryValidPathsResponse
     is_query: ClassVar[bool] = True
     paths: set[StorePath] = field(default_factory=set)

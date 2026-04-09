@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
 
@@ -25,7 +24,7 @@ class VerifyStoreResponse(OpResponse):
 @dataclass
 class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
     name: ClassVar[str] = "VerifyStore"
-    op: ClassVar[int] = Op.VerifyStore
+    op: ClassVar[int] = 35
     response_type: ClassVar[type[OpResponse]] = VerifyStoreResponse
     check_contents: int = 0
     repair: int = 0

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import OpRequest, OpResponse, PathInfo
@@ -36,7 +35,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
     """Prefix for AddToStoreNar (framed NAR data follows)."""
 
     name: ClassVar[str] = "AddToStoreNar"
-    op: ClassVar[int] = Op.AddToStoreNar
+    op: ClassVar[int] = 39
     response_type: ClassVar[type[OpResponse]] = AddToStoreNarResponse
     info: PathInfo = field(default_factory=PathInfo)
     repair: int = 0
@@ -106,7 +105,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
     @classmethod
     async def forward(cls, src: NixReader, dst: NixWriter) -> StorePath:
         """Forward request prefix and stream framed NAR data. Returns store path."""
-        dst.write_uint64(Op.AddToStoreNar)
+        dst.write_uint64(39)
 
         path = await src.read_string(StorePath)
         deriver = await src.read_string(StorePath)

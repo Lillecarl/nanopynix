@@ -14,7 +14,6 @@ import json
 from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
     OpRequest,
@@ -48,7 +47,7 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     """
 
     name: ClassVar[str] = "RegisterDrvOutput"
-    op: ClassVar[int] = Op.RegisterDrvOutput
+    op: ClassVar[int] = 42
     response_type: ClassVar[type[OpResponse]] = RegisterDrvOutputResponse
     realisation: dict = field(default_factory=dict)
 
@@ -94,7 +93,7 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
     """Request to query the realisation of a derivation output."""
 
     name: ClassVar[str] = "QueryRealisation"
-    op: ClassVar[int] = Op.QueryRealisation
+    op: ClassVar[int] = 43
     response_type: ClassVar[type[OpResponse]] = QueryRealisationResponse
     drv_output: DrvOutput = ""
 

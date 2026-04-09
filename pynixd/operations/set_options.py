@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from .. import wire
-from ..protocol import Op
 from ..wire import NixReader, NixWriter
 from .base import (
     OpRequest,
@@ -35,7 +34,7 @@ class SetOptionsResponse(OpResponse):
 @dataclass
 class SetOptionsRequest(OpRequest[SetOptionsResponse]):
     name: ClassVar[str] = "SetOptions"
-    op: ClassVar[int] = Op.SetOptions
+    op: ClassVar[int] = 19
     response_type: ClassVar[type[OpResponse]] = SetOptionsResponse
     keep_failed: int = 0
     keep_going: int = 0

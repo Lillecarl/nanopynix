@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -26,7 +25,7 @@ class AddIndirectRootResponse(OpResponse):
 @dataclass
 class AddIndirectRootRequest(OpRequest[AddIndirectRootResponse]):
     name: ClassVar[str] = "AddIndirectRoot"
-    op: ClassVar[int] = Op.AddIndirectRoot
+    op: ClassVar[int] = 12
     response_type: ClassVar[type[OpResponse]] = AddIndirectRootResponse
     path: StorePath = StorePath("")
 

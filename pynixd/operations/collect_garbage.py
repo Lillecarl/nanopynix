@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -41,7 +40,7 @@ class CollectGarbageResponse(OpResponse):
 @dataclass
 class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
     name: ClassVar[str] = "CollectGarbage"
-    op: ClassVar[int] = Op.CollectGarbage
+    op: ClassVar[int] = 20
     response_type: ClassVar[type[OpResponse]] = CollectGarbageResponse
     action: int = 0
     paths_to_delete: set[StorePath] = field(default_factory=set)

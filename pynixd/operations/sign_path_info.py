@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar
 
 import structlog
 
-from ..protocol import Op
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
 from ..wire import NixReader, NixWriter
 from .add_signatures import AddSignaturesRequest
@@ -38,7 +37,7 @@ class SignPathInfoResponse(OpResponse):
 @dataclass
 class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
     name: ClassVar[str] = "SignPathInfo"
-    op: ClassVar[int] = Op.SignPathInfo
+    op: ClassVar[int] = 107
     response_type: ClassVar[type[OpResponse]] = SignPathInfoResponse
     info: PathInfo = field(default_factory=PathInfo)
     key: SecretKey | None = None

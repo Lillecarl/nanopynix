@@ -19,7 +19,6 @@ import structlog
 from .connection import ClientConn
 from .operations.base import BuildResult, BuildResultStatus
 from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
-from .protocol import Op
 from .store_path import RequiredInput, StorePath
 
 log = structlog.get_logger(__name__)
@@ -41,7 +40,6 @@ class QueuedBuild:
     """
 
     id: int  # Global incrementing ID
-    op: Op  # Always BuildDerivation
     request: BuildDerivationRequest  # The request to forward to the backend
     client: ClientConn | None  # Client connection for stderr forwarding
     required_paths: set[
@@ -167,7 +165,6 @@ class BuildQueue:
 
     async def enqueue(
         self,
-        op: Op,
         request: BuildDerivationRequest,
         client: ClientConn | None,
         required_paths: set[RequiredInput],
@@ -194,7 +191,6 @@ class BuildQueue:
             future: asyncio.Future[BuildDerivationResponse] = loop.create_future()
             build = QueuedBuild(
                 id=self.next_id,
-                op=op,
                 request=request,
                 client=client,
                 required_paths=required_paths,

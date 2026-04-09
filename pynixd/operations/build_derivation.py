@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..protocol import Op
 from ..store_path import RequiredInput, StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -39,7 +38,7 @@ class BuildDerivationResponse(OpResponse):
 @dataclass
 class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
     name: ClassVar[str] = "BuildDerivation"
-    op: ClassVar[int] = Op.BuildDerivation
+    op: ClassVar[int] = 36
     response_type: ClassVar[type[OpResponse]] = BuildDerivationResponse
     is_build: ClassVar[bool] = True
     drv_path: StorePath = field(default_factory=lambda: StorePath(""))
@@ -106,7 +105,6 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             RequiredInput(request.drv_path, f"drv_path of {drv_path_str}")
         )
         build_id, future = await proxy.scheduler.enqueue(
-            Op.BuildDerivation,
             request,
             proxy.client,
             required_paths,

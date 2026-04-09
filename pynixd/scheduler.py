@@ -27,7 +27,6 @@ from .operations.build_derivation import (
     BuildDerivationResponse,
 )
 
-from .protocol import Op
 from .store import Store
 from .store_path import RequiredInput
 
@@ -54,14 +53,13 @@ class Scheduler:
 
     async def enqueue(
         self,
-        op: Op,
         request: BuildDerivationRequest,
         client: ClientConn | None,
         required_paths: set[RequiredInput],
         platform: str = "",
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue and trigger the scheduler."""
-        res = await self.queue.enqueue(op, request, client, required_paths, platform)
+        res = await self.queue.enqueue(request, client, required_paths, platform)
         self.trigger()
         return res
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -32,7 +31,7 @@ class IsValidPathResponse(OpResponse):
 @dataclass
 class IsValidPathRequest(OpRequest[IsValidPathResponse]):
     name: ClassVar[str] = "IsValidPath"
-    op: ClassVar[int] = Op.IsValidPath
+    op: ClassVar[int] = 1
     response_type: ClassVar[type[OpResponse]] = IsValidPathResponse
     is_query: ClassVar[bool] = True
     path: StorePath = StorePath("")

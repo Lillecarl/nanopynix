@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -26,7 +25,7 @@ class QueryValidDeriversResponse(OpResponse):
 @dataclass
 class QueryValidDeriversRequest(OpRequest[QueryValidDeriversResponse]):
     name: ClassVar[str] = "QueryValidDerivers"
-    op: ClassVar[int] = Op.QueryValidDerivers
+    op: ClassVar[int] = 33
     response_type: ClassVar[type[OpResponse]] = QueryValidDeriversResponse
     is_query: ClassVar[bool] = True
     path: StorePath = StorePath("")

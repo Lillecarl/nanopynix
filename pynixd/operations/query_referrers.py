@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -26,7 +25,7 @@ class QueryReferrersResponse(OpResponse):
 @dataclass
 class QueryReferrersRequest(OpRequest[QueryReferrersResponse]):
     name: ClassVar[str] = "QueryReferrers"
-    op: ClassVar[int] = Op.QueryReferrers
+    op: ClassVar[int] = 6
     response_type: ClassVar[type[OpResponse]] = QueryReferrersResponse
     is_query: ClassVar[bool] = True
     path: StorePath = StorePath("")

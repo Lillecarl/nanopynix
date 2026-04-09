@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, PathInfo
@@ -48,7 +47,7 @@ class QueryPathInfoResponse(OpResponse):
 @dataclass
 class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
     name: ClassVar[str] = "QueryPathInfo"
-    op: ClassVar[int] = Op.QueryPathInfo
+    op: ClassVar[int] = 26
     response_type: ClassVar[type[OpResponse]] = QueryPathInfoResponse
     is_query: ClassVar[bool] = True
     path: StorePath = StorePath("")

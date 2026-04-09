@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -26,7 +25,7 @@ class AddBuildLogResponse(OpResponse):
 @dataclass
 class AddBuildLogRequest(OpRequest[AddBuildLogResponse]):
     name: ClassVar[str] = "AddBuildLog"
-    op: ClassVar[int] = Op.AddBuildLog
+    op: ClassVar[int] = 45
     response_type: ClassVar[type[OpResponse]] = AddBuildLogResponse
     path: StorePath = StorePath("")
 

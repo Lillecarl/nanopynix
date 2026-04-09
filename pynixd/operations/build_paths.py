@@ -10,7 +10,6 @@ import structlog
 
 from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file, to_basic_derivation
-from ..protocol import Op
 from ..store_path import RequiredInput, StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -121,7 +120,6 @@ async def _decompose_build_paths(
             RequiredInput(drv_request.drv_path, f"drv_path of {drv_path_str}")
         )
         build_id, future = await scheduler.enqueue(
-            Op.BuildDerivation,
             drv_request,
             client,
             required_paths,
@@ -156,7 +154,7 @@ class BuildPathsResponse(OpResponse):
 @dataclass
 class BuildPathsRequest(OpRequest[BuildPathsResponse]):
     name: ClassVar[str] = "BuildPaths"
-    op: ClassVar[int] = Op.BuildPaths
+    op: ClassVar[int] = 9
     response_type: ClassVar[type[OpResponse]] = BuildPathsResponse
     is_build: ClassVar[bool] = True
     derived_paths: set[DerivedPath] = field(default_factory=set)
@@ -239,7 +237,7 @@ class KeyedBuildResultsResponse(OpResponse):
 @dataclass
 class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
     name: ClassVar[str] = "BuildPathsWithResults"
-    op: ClassVar[int] = Op.BuildPathsWithResults
+    op: ClassVar[int] = 46
     response_type: ClassVar[type[OpResponse]] = KeyedBuildResultsResponse
     is_build: ClassVar[bool] = True
     derived_paths: set[DerivedPath] = field(default_factory=set)

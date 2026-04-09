@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
@@ -66,7 +65,7 @@ class DerivationOutputsBatchResponse(OpResponse):
 @dataclass
 class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchResponse]):
     name: ClassVar[str] = "QueryDerivationOutputsBatch"
-    op: ClassVar[int] = Op.QueryDerivationOutputsBatch
+    op: ClassVar[int] = 106
     response_type: ClassVar[type[OpResponse]] = DerivationOutputsBatchResponse
     is_query: ClassVar[bool] = True
     drv_paths: set[StorePath] = field(default_factory=set)
