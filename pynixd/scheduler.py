@@ -203,7 +203,7 @@ class Scheduler:
             ranked = self.rank_stores(build)
             for rs in ranked.with_slots().sort():
                 missing = build.required_paths - rs.store.known_paths
-                if missing:
+                if missing and self.local_store.has_all_paths(missing):
                     build.transfer_task = asyncio.create_task(
                         self.transfer_inputs(build, rs.store, missing)
                     )
