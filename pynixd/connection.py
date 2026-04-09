@@ -24,7 +24,6 @@ import structlog
 
 from . import stderr, wire
 from .operations.base import (
-    ByteCollector,
     OpRequest,
     Resp,
     StderrBuffer,
@@ -188,9 +187,7 @@ class Connection:
             op_value=op.value,
         )
 
-        buf = ByteCollector()
-        await request.to_writer(buf, self.version)
-        self.w.write(buf.getvalue())
+        await request.to_writer(self.w, self.version)
         await self.w.drain()
 
         msgs = StderrBuffer()

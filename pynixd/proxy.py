@@ -18,7 +18,6 @@ from .connection import ClientConn
 from .exceptions import BackendError, OpNotImplementedError
 from .operations import OP_REGISTRY
 from .operations.base import (
-    ByteCollector,
     OpRequest,
     OpResponse,
     Resp,
@@ -150,13 +149,9 @@ class DaemonProxy:
                 response = await self.dispatch(op)
 
                 if response is not None:
-                    # Flush any queued stderr before sending the response
                     await self.client.flush()
-                    # Buffer the entire response so it becomes one SSH write
-                    buf = ByteCollector()
-                    buf.write_uint64(wire.STDERR_LAST)
-                    await response.to_writer(buf, self.version)
-                    self.w.write(buf.getvalue())
+                    self.w.write_uint64(wire.STDERR_LAST)
+                    await response.to_writer(self.w, self.version)
                     await self.w.drain()
                     op_log(op.name).debug("sendOp", op=op.name)
                 # else: already handled (streaming, error, etc.)
