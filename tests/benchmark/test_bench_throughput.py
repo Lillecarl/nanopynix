@@ -140,6 +140,7 @@ async def test_throughput_daemon() -> None:
 @pytest.mark.benchmark
 async def test_throughput_pynixd(test_log_dir: Path) -> None:
     """pynixd: Build through pynixd proxy."""
+    # THIS TEST MUST COMPLETE WITHIN 120 SECONDS. If it takes longer, something is broken.
     # With MAX_JOBS=20 and sleep=0, builds complete in ~10-30s depending on system.
     async with asyncio.timeout(None):
         local_path = STORE_PREFIX / "throughput-pynixd-local"

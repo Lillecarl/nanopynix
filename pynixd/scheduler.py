@@ -143,6 +143,7 @@ class Scheduler:
                 log.warning(
                     "DEBUG_waiting_paths",
                     build_id=build.id,
+                    drv_path=str(build.request.drv_path),
                     missing_count=len(missing),
                     missing_paths=[str(p) for p in missing][:10],
                 )
