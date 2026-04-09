@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..exceptions import OpNotImplementedError
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
@@ -31,7 +30,6 @@ WHERE vp_referrer.path IN (SELECT value FROM json_each(?))
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
     from ..proxy import DaemonProxy
     from ..store import Store
 
@@ -73,42 +71,8 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         return cls(paths=await reader.read_string_set(StorePath))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        # NOTE: This is a custom operation, so we only write the opcode if specifically
-        # allowed or if we are implementing a wire protocol that supports it.
-        # For now, we follow the user's wish to write it here.
         writer.write_uint64(self.op)
         writer.write_string_set(self.paths)
-
-    async def execute_db(self, db: LocalStoreDB) -> QueryPathInfosResponse | None:
-        if not self.paths:
-            return QueryPathInfosResponse(infos={})
-
-        paths_json = json.dumps(list(self.paths))
-        async with db.acquire_conn() as conn:
-            async with conn.execute(QUERY_PATH_INFOS_BATCH, (paths_json,)) as cursor:
-                rows = await cursor.fetchall()
-            async with conn.execute(QUERY_REFERENCES_BATCH, (paths_json,)) as cursor:
-                ref_rows = await cursor.fetchall()
-
-        refs_map: dict[StorePath, set[StorePath]] = {}
-        for referrer, reference in ref_rows:
-            refs_map.setdefault(StorePath(referrer), set()).add(StorePath(reference))
-
-        infos: dict[StorePath, PathInfo] = {}
-        for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
-            p = StorePath(path)
-            infos[p] = PathInfo(
-                path=p,
-                deriver=StorePath(deriver or ""),
-                nar_hash=nar_hash,
-                references=refs_map.get(p, set()),
-                registration_time=reg_time,
-                nar_size=nar_size or 0,
-                ultimate=1 if ultimate else 0,
-                sigs=set(sigs.split()) if sigs else set(),
-                ca=ca or "",
-            )
-        return QueryPathInfosResponse(infos=infos)
 
     async def execute(
         self,
@@ -116,7 +80,9 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathInfosResponse:
-        # 1. Check cache first
+        if not self.paths:
+            return QueryPathInfosResponse(infos={})
+
         cached: dict[StorePath, PathInfo] = {}
         uncached: list[StorePath] = []
         for path in self.paths:
@@ -130,20 +96,44 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
             store.add_path_infos(cached.values())
             return QueryPathInfosResponse(infos=cached)
 
-        # 2. Try DB or remote delegation via base class
-        try:
-            result = await super().execute(store, client, suppress_last)
-            if not result.is_not_found:
-                store.add_known_paths(set(result.infos.keys()))
-                store.add_path_infos(result.infos.values())
-                # Merge cached with result
-                result.infos.update(cached)
-                return result
-        except OpNotImplementedError:
-            pass
-
-        # 3. Decomposition fallback: try one by one
         infos: dict[StorePath, PathInfo] = dict(cached)
+
+        if store.db is not None:
+            paths_json = json.dumps([str(p) for p in uncached])
+            async with store.db.acquire_conn() as conn:
+                async with conn.execute(
+                    QUERY_PATH_INFOS_BATCH, (paths_json,)
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                async with conn.execute(
+                    QUERY_REFERENCES_BATCH, (paths_json,)
+                ) as cursor:
+                    ref_rows = await cursor.fetchall()
+
+            refs_map: dict[StorePath, set[StorePath]] = {}
+            for referrer, reference in ref_rows:
+                refs_map.setdefault(StorePath(referrer), set()).add(
+                    StorePath(reference)
+                )
+
+            for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
+                p = StorePath(path)
+                infos[p] = PathInfo(
+                    path=p,
+                    deriver=StorePath(deriver or ""),
+                    nar_hash=nar_hash,
+                    references=refs_map.get(p, set()),
+                    registration_time=reg_time,
+                    nar_size=nar_size or 0,
+                    ultimate=1 if ultimate else 0,
+                    sigs=set(sigs.split()) if sigs else set(),
+                    ca=ca or "",
+                )
+
+            store.add_known_paths(set(infos.keys()))
+            store.add_path_infos(infos.values())
+            return QueryPathInfosResponse(infos=infos)
+
         for path in uncached:
             from .query_path_info import QueryPathInfoRequest
 

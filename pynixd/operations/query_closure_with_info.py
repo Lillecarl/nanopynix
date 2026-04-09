@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..exceptions import OpNotImplementedError
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
@@ -35,7 +34,6 @@ ORDER BY vp.id ASC
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
     from ..proxy import DaemonProxy
     from ..store import Store
 
@@ -79,62 +77,57 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
         writer.write_uint64(self.op)
         writer.write_string_set(self.paths)
 
-    async def execute_db(self, db: LocalStoreDB) -> QueryClosureWithInfoResponse | None:
-        if not self.paths:
-            return QueryClosureWithInfoResponse(infos=[])
-
-        seeds_json = json.dumps(list(self.paths))
-        async with db.acquire_conn() as conn:
-            async with conn.execute(QUERY_CLOSURE_WITH_INFO, (seeds_json,)) as cursor:
-                rows = await cursor.fetchall()
-
-        sorted_infos: list[PathInfo] = []
-        for (
-            path,
-            deriver,
-            nar_hash,
-            reg_time,
-            nar_size,
-            ultimate,
-            sigs,
-            ca,
-            refs_str,
-        ) in rows:
-            p = StorePath(path)
-            references = {StorePath(r) for r in refs_str.split()} if refs_str else set()
-            sorted_infos.append(
-                PathInfo(
-                    path=p,
-                    deriver=StorePath(deriver or ""),
-                    nar_hash=nar_hash,
-                    references=references,
-                    registration_time=reg_time,
-                    nar_size=nar_size or 0,
-                    ultimate=1 if ultimate else 0,
-                    sigs=set(sigs.split()) if sigs else set(),
-                    ca=ca or "",
-                )
-            )
-
-        return QueryClosureWithInfoResponse(infos=sorted_infos)
-
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryClosureWithInfoResponse:
-        # 1. Try DB or remote delegation via base class
-        try:
-            result = await super().execute(store, client, suppress_last)
-            if not result.is_not_found:
-                store.add_known_paths({info.path for info in result.infos})
-                store.add_path_infos(result.infos)
-                return result
-        except OpNotImplementedError:
-            pass
+        if not self.paths:
+            return QueryClosureWithInfoResponse(infos=[])
 
-        # 2. Decomposition fallback: build closure info by fetching metadata recursively
+        if store.db is not None:
+            seeds_json = json.dumps([str(p) for p in self.paths])
+            async with store.db.acquire_conn() as conn:
+                async with conn.execute(
+                    QUERY_CLOSURE_WITH_INFO, (seeds_json,)
+                ) as cursor:
+                    rows = await cursor.fetchall()
+
+            sorted_infos: list[PathInfo] = []
+            for (
+                path,
+                deriver,
+                nar_hash,
+                reg_time,
+                nar_size,
+                ultimate,
+                sigs,
+                ca,
+                refs_str,
+            ) in rows:
+                p = StorePath(path)
+                references = (
+                    {StorePath(r) for r in refs_str.split()} if refs_str else set()
+                )
+                sorted_infos.append(
+                    PathInfo(
+                        path=p,
+                        deriver=StorePath(deriver or ""),
+                        nar_hash=nar_hash,
+                        references=references,
+                        registration_time=reg_time,
+                        nar_size=nar_size or 0,
+                        ultimate=1 if ultimate else 0,
+                        sigs=set(sigs.split()) if sigs else set(),
+                        ca=ca or "",
+                    )
+                )
+
+            store.add_known_paths({info.path for info in sorted_infos})
+            store.add_path_infos(sorted_infos)
+            return QueryClosureWithInfoResponse(infos=sorted_infos)
+
         all_infos: dict[StorePath, PathInfo] = {}
         pending = self.paths
 
@@ -169,7 +162,7 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
         visited: set[StorePath] = set()
         visiting: set[StorePath] = set()
 
-        def visit(p: StorePath):
+        def visit(p: StorePath) -> None:
             if p in visited:
                 return
             if p in visiting:

@@ -18,7 +18,6 @@ QUERY_VALID_PATHS_BATCH = (
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
     from ..store import Store
 
 
@@ -56,27 +55,23 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
         if version >= wire.proto(1, 27):
             writer.write_uint64(self.substitute)
 
-    async def execute_db(self, db: LocalStoreDB) -> QueryValidPathsResponse | None:
-        paths_json = json.dumps(list(self.paths))
-        async with db.acquire_conn() as conn:
-            async with conn.execute(QUERY_VALID_PATHS_BATCH, (paths_json,)) as cursor:
-                rows = await cursor.fetchall()
-        return QueryValidPathsResponse(paths={StorePath(row[0]) for row in rows})
-
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryValidPathsResponse:
-        try:
-            result = await super().execute(store, client, suppress_last)
-            if not self.substitute or result.paths >= self.paths:
-                store.add_known_paths(result.paths)
-                return result
-        except Exception:
-            pass
+        if store.db is not None:
+            paths_json = json.dumps(list(self.paths))
+            async with store.db.acquire_conn() as conn:
+                async with conn.execute(
+                    QUERY_VALID_PATHS_BATCH, (paths_json,)
+                ) as cursor:
+                    rows = await cursor.fetchall()
+            result = QueryValidPathsResponse(paths={StorePath(row[0]) for row in rows})
+            store.add_known_paths(result.paths)
+            return result
 
-        resp = await super().execute(store, client, suppress_last)
+        resp = await store.call(self, client=client, suppress_last=suppress_last)
         store.add_known_paths(resp.paths)
         return resp

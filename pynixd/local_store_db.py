@@ -1,7 +1,8 @@
 """Direct SQLite access to the local Nix store database.
 
-Provides a connection pool and dispatcher for operation types that
-implement their own DB fast-paths via ``execute_db(db)``.
+Provides a connection pool for direct SQL queries against the local store DB.
+Operations that support fast-path SQL queries use ``store.db.acquire_conn()``
+directly rather than going through a dispatcher.
 
 Registration time updates are batched writes using Lix's recursive CTE
 that touches the full closure (references, derivers, deriver references)
@@ -25,11 +26,10 @@ from typing import TYPE_CHECKING
 import aiosqlite
 import structlog
 
-from .exceptions import OpNotImplementedError
 from .store_path import StorePath
 
 if TYPE_CHECKING:
-    from .operations.base import OpRequest, Resp
+    pass
 
 log = structlog.get_logger(__name__)
 
@@ -218,28 +218,6 @@ class LocalStoreDB:
                 read_only=True,
                 regtime_flush_interval=regtime_flush_interval,
             )
-
-    # ── Dispatcher ────────────────────────────────────────────────────
-
-    async def execute(self, request: OpRequest[Resp]) -> Resp | None:
-        """Dispatch a request to its DB handler.
-
-        Returns the response if the DB is active and the query succeeded,
-        or None if the DB is unavailable (caller should fall back to wire).
-
-        Raises OpNotImplementedError if the operation is not supported by DB.
-        """
-        if not self.active:
-            return None
-        try:
-            return await request.execute_db(self)
-        except OpNotImplementedError:
-            raise
-        except Exception:
-            log.debug(
-                "db_execute_failed", request=type(request).__name__, exc_info=True
-            )
-            return None
 
     # ── Internal utility queries ──────────────────────────────────────
     # These are not operation dispatches but internal helpers used by

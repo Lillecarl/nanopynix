@@ -10,6 +10,14 @@ from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
 
+QUERY_PATH_FROM_HASH_PART = """
+SELECT path FROM ValidPaths WHERE path >= ? AND path < ? LIMIT 1
+"""
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..store import Store
+
 
 @dataclass
 class QueryPathFromHashPartResponse(OpResponse):
@@ -38,39 +46,26 @@ class QueryPathFromHashPartRequest(OpRequest[QueryPathFromHashPartResponse]):
         writer.write_uint64(self.op)
         writer.write_string(self.path)
 
-    async def execute_db(
-        self, db: LocalStoreDB
-    ) -> QueryPathFromHashPartResponse | None:
-        prefix = f"/nix/store/{self.path}"
-        upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
-        async with db.acquire_conn() as conn:
-            # Actually, let's just use the constant here since we removed sql.py
-            # But the constant was QUERY_PATH_FROM_HASH_PART.
-            from .query_path_from_hash_part import QUERY_PATH_FROM_HASH_PART
-
-            async with conn.execute(
-                QUERY_PATH_FROM_HASH_PART, (prefix, upper)
-            ) as cursor:
-                row = await cursor.fetchone()
-        return QueryPathFromHashPartResponse(value=StorePath(row[0])) if row else None
-
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathFromHashPartResponse:
-        resp = await super().execute(store, client, suppress_last)
+        if store.db is not None:
+            prefix = f"/nix/store/{self.path}"
+            upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+            async with store.db.acquire_conn() as conn:
+                async with conn.execute(
+                    QUERY_PATH_FROM_HASH_PART, (prefix, upper)
+                ) as cursor:
+                    row = await cursor.fetchone()
+            if row:
+                result = QueryPathFromHashPartResponse(value=StorePath(row[0]))
+                store.add_known_path(result.value)
+                return result
+
+        resp = await store.call(self, client=client, suppress_last=suppress_last)
         if resp.value:
             store.add_known_path(StorePath(resp.value))
         return resp
-
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
-    from ..store import Store
-
-QUERY_PATH_FROM_HASH_PART = """
-SELECT path FROM ValidPaths WHERE path >= ? AND path < ? LIMIT 1
-"""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -11,6 +12,18 @@ from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
+
+QUERY_CLOSURE = """
+WITH RECURSIVE closure(id) AS (
+    SELECT id FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
+    UNION
+    SELECT r.reference
+    FROM closure c
+    JOIN Refs r ON c.id = r.referrer
+)
+SELECT vp.path FROM closure c
+JOIN ValidPaths vp ON c.id = vp.id
+"""
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -57,30 +70,18 @@ class QueryClosureRequest(OpRequest[QueryClosureResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryClosureResponse:
-        # Try DB first
-        if store.db:
-            from .query_closure_with_info import QueryClosureWithInfoRequest
+        if store.db is not None:
+            seeds_json = json.dumps([str(p) for p in self.paths])
+            async with store.db.acquire_conn() as conn:
+                async with conn.execute(QUERY_CLOSURE, (seeds_json,)) as cursor:
+                    rows = await cursor.fetchall()
+            result = QueryClosureResponse(paths={StorePath(row[0]) for row in rows})
+            store.add_known_paths(result.paths)
+            return result
 
-            res = await store.db.execute(QueryClosureWithInfoRequest(paths=self.paths))
-            if res:
-                store.add_known_paths({info.path for info in res.infos})
-                return QueryClosureResponse(paths={info.path for info in res.infos})
-
-        # Try native QueryClosure on the wire if available and QueryClosureWithInfo is NOT
-        async with store.transfer_conn() as conn:
-            if "QueryClosureWithInfo" not in conn.features:
-                # remote doesn't support our custom op, use native one
-                return await conn.call(self, client=client, suppress_last=suppress_last)
-
-        # remote supports QueryClosureWithInfo, use it to get metadata for cache
-        from .query_closure_with_info import QueryClosureWithInfoRequest
-
-        resp = await store.execute(
-            QueryClosureWithInfoRequest(paths=self.paths),
-            client=client,
-            suppress_last=suppress_last,
-        )
-        return QueryClosureResponse(paths={info.path for info in resp.infos})
+        resp = await store.call(self, client=client, suppress_last=suppress_last)
+        store.add_known_paths(resp.paths)
+        return resp
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> QueryClosureResponse:

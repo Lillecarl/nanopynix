@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..exceptions import OpNotImplementedError
 from ..protocol import Op
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
@@ -23,7 +22,6 @@ WHERE vp_drv.path IN (SELECT value FROM json_each(?))
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
     from ..proxy import DaemonProxy
     from ..store import Store
 
@@ -80,40 +78,30 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         writer.write_uint64(self.op)
         writer.write_string_set(self.drv_paths)
 
-    async def execute_db(
-        self, db: LocalStoreDB
-    ) -> DerivationOutputsBatchResponse | None:
-        if not self.drv_paths:
-            return DerivationOutputsBatchResponse(outputs={})
-
-        paths_json = json.dumps(list(self.drv_paths))
-        async with db.acquire_conn() as conn:
-            async with conn.execute(
-                QUERY_DERIVATION_OUTPUTS_BATCH, (paths_json,)
-            ) as cursor:
-                rows = await cursor.fetchall()
-
-        result: dict[StorePath, dict[str, StorePath]] = {}
-        for drv_path, output_name, output_path in rows:
-            result.setdefault(StorePath(drv_path), {})[output_name] = StorePath(
-                output_path
-            )
-        return DerivationOutputsBatchResponse(outputs=result)
-
     async def execute(
         self,
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> DerivationOutputsBatchResponse:
-        try:
-            result = await super().execute(store, client, suppress_last)
-            if not result.is_not_found:
-                return result
-        except OpNotImplementedError:
-            pass
+        if not self.drv_paths:
+            return DerivationOutputsBatchResponse(outputs={})
 
-        # Fallback: read each .drv file from disk
+        if store.db is not None:
+            paths_json = json.dumps([str(p) for p in self.drv_paths])
+            async with store.db.acquire_conn() as conn:
+                async with conn.execute(
+                    QUERY_DERIVATION_OUTPUTS_BATCH, (paths_json,)
+                ) as cursor:
+                    rows = await cursor.fetchall()
+
+            result: dict[StorePath, dict[str, StorePath]] = {}
+            for drv_path, output_name, output_path in rows:
+                result.setdefault(StorePath(drv_path), {})[output_name] = StorePath(
+                    output_path
+                )
+            return DerivationOutputsBatchResponse(outputs=result)
+
         outputs: dict[StorePath, dict[str, StorePath]] = {}
         for drv_path in self.drv_paths:
             try:

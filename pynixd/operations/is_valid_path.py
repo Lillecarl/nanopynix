@@ -10,12 +10,11 @@ from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
 
+IS_VALID_PATH = "SELECT 1 FROM ValidPaths WHERE path = ? LIMIT 1"
+
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
     from ..store import Store
-
-IS_VALID_PATH = "SELECT 1 FROM ValidPaths WHERE path = ? LIMIT 1"
 
 
 @dataclass
@@ -45,12 +44,6 @@ class IsValidPathRequest(OpRequest[IsValidPathResponse]):
         writer.write_uint64(self.op)
         writer.write_string(self.path)
 
-    async def execute_db(self, db: LocalStoreDB) -> IsValidPathResponse | None:
-        async with db.acquire_conn() as conn:
-            async with conn.execute(IS_VALID_PATH, (self.path,)) as cursor:
-                row = await cursor.fetchone()
-        return IsValidPathResponse(valid=row is not None)
-
     async def execute(
         self,
         store: Store,
@@ -60,7 +53,15 @@ class IsValidPathRequest(OpRequest[IsValidPathResponse]):
         if store.has_path(self.path):
             return IsValidPathResponse(valid=True)
 
-        resp = await super().execute(store, client, suppress_last)
+        if store.db is not None:
+            async with store.db.acquire_conn() as conn:
+                async with conn.execute(IS_VALID_PATH, (self.path,)) as cursor:
+                    row = await cursor.fetchone()
+            if row is not None:
+                store.add_known_path(self.path)
+                return IsValidPathResponse(valid=True)
+
+        resp = await store.call(self, client=client, suppress_last=suppress_last)
         if resp.valid:
             store.add_known_path(self.path)
         return resp

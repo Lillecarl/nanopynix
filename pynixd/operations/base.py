@@ -27,7 +27,6 @@ from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
     from ..proxy import DaemonProxy
     from ..stderr import StderrMsg
     from ..store import Store
@@ -130,24 +129,13 @@ class OpRequest(ABC, Generic[Resp]):
     ) -> Resp:
         """Execute this operation on a store and return a buffered response.
 
-        Tries the SQLite fast-path first if a database is available.
-        Otherwise, falls back to the wire protocol (standard ops only).
+        Falls back to the wire protocol (standard ops) or extension negotiation
+        for extension operations.
         """
-        if store.db:
-            try:
-                res = await store.db.execute(self)
-                if res is not None:
-                    return res
-            except OpNotImplementedError:
-                pass
-
         if self.is_extension:
-            # Ensure we've probed the store at least once to know its features.
             if not store.probed:
                 await store.probe_version()
 
-            # If the store explicitly supports this extension via feature negotiation,
-            # allow falling back to the wire.
             from ..protocol import Op
 
             try:
@@ -172,16 +160,6 @@ class OpRequest(ABC, Generic[Resp]):
             client=client,
             suppress_last=suppress_last,
         )
-
-    async def execute_db(self, db: LocalStoreDB) -> Resp | None:
-        """Execute this operation against the SQLite database.
-
-        Returns the response on success, or None to signal the caller
-        should fall back to the wire protocol (e.g. for dynamic logic).
-
-        Raises OpNotImplementedError if this operation has no DB handler.
-        """
-        raise OpNotImplementedError(f"{type(self).__name__} not implemented for DB")
 
     @classmethod
     @abstractmethod

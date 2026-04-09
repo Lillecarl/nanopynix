@@ -23,7 +23,6 @@ WHERE r.referrer = (SELECT id FROM ValidPaths WHERE path = ?)
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
     from ..store import Store
 
 
@@ -61,22 +60,31 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
         writer.write_uint64(self.op)
         writer.write_string(self.path)
 
-    async def execute_db(self, db: LocalStoreDB) -> QueryPathInfoResponse | None:
-        async with db.acquire_conn() as conn:
-            async with conn.execute(QUERY_PATH_INFO, (self.path,)) as cursor:
-                row = await cursor.fetchone()
-            if row is None:
-                return QueryPathInfoResponse(valid=False)
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> QueryPathInfoResponse:
+        cached = store.get_path_info(self.path)
+        if cached is not None:
+            store.add_known_path(self.path)
+            return QueryPathInfoResponse(valid=True, info=cached)
 
-            _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
+        if store.db is not None:
+            async with store.db.acquire_conn() as conn:
+                async with conn.execute(QUERY_PATH_INFO, (self.path,)) as cursor:
+                    row = await cursor.fetchone()
+                if row is None:
+                    return QueryPathInfoResponse(valid=False)
 
-            async with conn.execute(QUERY_REFERENCES, (self.path,)) as cursor:
-                ref_rows = await cursor.fetchall()
-            refs = {r[0] for r in ref_rows}
+                _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
 
-        return QueryPathInfoResponse(
-            valid=True,
-            info=PathInfo(
+                async with conn.execute(QUERY_REFERENCES, (self.path,)) as cursor:
+                    ref_rows = await cursor.fetchall()
+                refs = {r[0] for r in ref_rows}
+
+            info = PathInfo(
                 path=self.path,
                 deriver=StorePath(deriver or ""),
                 nar_hash=nar_hash,
@@ -86,22 +94,12 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
                 ultimate=1 if ultimate else 0,
                 sigs=set(sigs.split()) if sigs else set(),
                 ca=ca or "",
-            ),
-        )
-
-    async def execute(
-        self,
-        store: Store,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-    ) -> QueryPathInfoResponse:
-        # Check cache first before calling super().execute()
-        cached = store.get_path_info(self.path)
-        if cached is not None:
+            )
             store.add_known_path(self.path)
-            return QueryPathInfoResponse(valid=True, info=cached)
+            store.add_path_info(info)
+            return QueryPathInfoResponse(valid=True, info=info)
 
-        resp = await super().execute(store, client, suppress_last)
+        resp = await store.call(self, client=client, suppress_last=suppress_last)
         if resp.valid:
             store.add_known_path(self.path)
             if resp.info is not None:

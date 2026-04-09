@@ -14,7 +14,6 @@ QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..local_store_db import LocalStoreDB
     from ..store import Store
 
 
@@ -43,12 +42,6 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)
 
-    async def execute_db(self, db: LocalStoreDB) -> QueryAllValidPathsResponse | None:
-        async with db.acquire_conn() as conn:
-            async with conn.execute(QUERY_ALL_VALID_PATHS) as cursor:
-                rows = await cursor.fetchall()
-        return QueryAllValidPathsResponse(paths={StorePath(r[0]) for r in rows})
-
     async def execute(
         self,
         store: Store,
@@ -56,7 +49,18 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
         suppress_last: bool = False,
     ) -> QueryAllValidPathsResponse:
         try:
-            resp = await super().execute(store, client, suppress_last)
+            if store.db is not None:
+                async with store.db.acquire_conn() as conn:
+                    async with conn.execute(QUERY_ALL_VALID_PATHS) as cursor:
+                        rows = await cursor.fetchall()
+                resp = QueryAllValidPathsResponse(paths={StorePath(r[0]) for r in rows})
+                store.add_known_paths(resp.paths, update_regtime=False)
+                self._log.info(
+                    "sync_paths_complete", store_id=store.id, count=len(resp.paths)
+                )
+                return resp
+
+            resp = await store.call(self, client=client, suppress_last=suppress_last)
             store.add_known_paths(resp.paths, update_regtime=False)
             self._log.info(
                 "sync_paths_complete", store_id=store.id, count=len(resp.paths)
