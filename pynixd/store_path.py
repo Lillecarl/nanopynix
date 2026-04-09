@@ -36,3 +36,28 @@ class StorePath(str):
     def to_path(self) -> Path:
         """Convert to a pathlib.Path."""
         return Path(self)
+
+
+class RequiredInput(StorePath):
+    """A StorePath subclass that tracks where it was required from.
+
+    For debugging: __repr__ shows the path AND the source.
+    Uses a class-level dict to track sources (keyed by path string).
+    """
+
+    _sources: dict[str, str] = {}
+
+    def __new__(cls, path: StorePath | str, source: str) -> "RequiredInput":
+        instance = str.__new__(cls, path)
+        cls._sources[str(path)] = source
+        return instance
+
+    @property
+    def source(self) -> str:
+        return self._sources.get(str(self), "")
+
+    def __repr__(self) -> str:
+        return f"RequiredInput({str.__repr__(self)}, source={self.source!r})"
+
+    def to_store_path(self) -> StorePath:
+        return StorePath(str(self))

@@ -29,7 +29,7 @@ from .operations.build_derivation import (
 
 from .protocol import Op
 from .store import Store
-from .store_path import StorePath
+from .store_path import RequiredInput
 
 log = structlog.get_logger(__name__)
 
@@ -57,7 +57,7 @@ class Scheduler:
         op: Op,
         request: BuildDerivationRequest,
         client: ClientConn | None,
-        required_paths: set[StorePath],
+        required_paths: set[RequiredInput],
         platform: str = "",
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue and trigger the scheduler."""
@@ -145,7 +145,7 @@ class Scheduler:
                     build_id=build.id,
                     drv_path=str(build.request.drv_path),
                     missing_count=len(missing),
-                    missing_paths=[str(p) for p in missing][:10],
+                    missing_paths=[repr(p) for p in missing][:10],
                 )
                 waiting_dag.append(build)
 
@@ -279,7 +279,7 @@ class Scheduler:
         # Sort descending by score
         return sorted(scores, key=lambda x: x[1], reverse=True)
 
-    def find_best_source(self, paths: set[StorePath]) -> Store | None:
+    def find_best_source(self, paths: set[RequiredInput]) -> Store | None:
         """Find the store that has the most of the given paths."""
         best_store: Store | None = None
         max_count = -1
@@ -376,10 +376,10 @@ class Scheduler:
             self.trigger()
 
     async def transfer_inputs(
-        self, build: QueuedBuild, store: Store, paths: set[StorePath]
+        self, build: QueuedBuild, store: Store, paths: set[RequiredInput]
     ) -> None:
         """Background task to proactively pull missing inputs for a build."""
-        to_pull: set[StorePath] = set()
+        to_pull: set[RequiredInput] = set()
         try:
             to_pull = paths - self.local_store.known_paths
             if not to_pull:
@@ -390,7 +390,7 @@ class Scheduler:
                 log.debug("pulling_path", store_id=store.id, path=p)
             await Store.stream_paths_store_to_store(store, self.local_store, to_pull)
             # IMPORTANT: Update local_store's known_paths after streaming
-            self.local_store.add_known_paths(to_pull)
+            self.local_store.add_known_paths(to_pull)  # type: ignore[arg-type]
             log.debug(
                 "pulled_paths_into_local_store",
                 count=len(to_pull),

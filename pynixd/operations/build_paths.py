@@ -11,7 +11,7 @@ import structlog
 from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file, to_basic_derivation
 from ..protocol import Op
-from ..store_path import StorePath
+from ..store_path import RequiredInput, StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     BuildMode,
@@ -43,7 +43,6 @@ async def _decompose_build_paths(
     from .build_derivation import (
         BuildDerivationRequest,
     )
-    from .query_closure import QueryClosureRequest
     from .query_derivation_outputs_batch import QueryDerivationOutputsBatchRequest
     from .query_missing import QueryMissingRequest
     from .query_valid_paths import QueryValidPathsRequest
@@ -100,12 +99,6 @@ async def _decompose_build_paths(
         store.add_known_paths(valid_resp.paths, update_regtime=False)
 
     for dp, output_names, drv_request in resolved:
-        existing_inputs = drv_request.derivation.input_srcs - all_planned_outputs
-        unbuilt_inputs = drv_request.derivation.input_srcs & all_planned_outputs
-
-        closure_resp = await store.execute(QueryClosureRequest(paths=existing_inputs))
-        drv_request.derivation.input_srcs = closure_resp.paths | unbuilt_inputs
-
         # Enrich with .drv metadata
         if drv_request.drv_path in parsed_cache:
             drv_request.derivation.is_dynamic = parsed_cache[
@@ -120,7 +113,13 @@ async def _decompose_build_paths(
             except Exception:
                 pass
 
-        required_paths = set(drv_request.derivation.input_srcs) | {drv_request.drv_path}
+        drv_path_str = str(drv_request.drv_path)
+        required_paths: set[RequiredInput] = set()
+        for inp in drv_request.derivation.input_srcs:
+            required_paths.add(RequiredInput(inp, f"input_src of {drv_path_str}"))
+        required_paths.add(
+            RequiredInput(drv_request.drv_path, f"drv_path of {drv_path_str}")
+        )
         build_id, future = await scheduler.enqueue(
             Op.BuildDerivation,
             drv_request,

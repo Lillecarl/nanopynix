@@ -40,7 +40,7 @@ from .operations.base import (
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
 from .signing import SecretKey
-from .store_path import StorePath
+from .store_path import RequiredInput, StorePath
 from .wire import (
     SSHNixReader,
     SSHNixWriter,
@@ -97,7 +97,7 @@ class Store(ABC):
         self.conn_counter: int = 0
         self.sweep_task: asyncio.Task[None] | None = None
         self.supported_systems = supported_systems or []
-        self.known_paths: set[StorePath] = set()
+        self.known_paths: set[RequiredInput] = set()
         self.consecutive_failures: int = 0
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
@@ -168,10 +168,10 @@ class Store(ABC):
     def has_path(self, path: StorePath) -> bool:
         return path in self.known_paths
 
-    def has_all_paths(self, paths: set[StorePath]) -> bool:
+    def has_all_paths(self, paths: set[RequiredInput]) -> bool:
         return paths.issubset(self.known_paths)
 
-    def count_common_paths(self, paths: set[StorePath]) -> int:
+    def count_common_paths(self, paths: set[RequiredInput]) -> int:
         return len(paths & self.known_paths)
 
     async def call(
@@ -231,14 +231,14 @@ class Store(ABC):
         )
 
     def add_known_path(self, path: StorePath, *, update_regtime: bool = True) -> None:
-        self.known_paths.add(path)
+        self.known_paths.add(path)  # type: ignore[arg-type]
         if update_regtime and self.db is not None:
             self.db.mark_path(path)
 
     def add_known_paths(
         self, paths: set[StorePath], *, update_regtime: bool = True
     ) -> None:
-        self.known_paths.update(paths)
+        self.known_paths.update(paths)  # type: ignore[arg-type]
         if update_regtime and self.db is not None:
             self.db.mark_paths(set(paths))
 

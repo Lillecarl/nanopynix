@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from ..protocol import Op
-from ..store_path import StorePath
+from ..store_path import RequiredInput, StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     BasicDerivation,
@@ -90,7 +90,13 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         request.derivation.input_srcs = closure_resp.paths | unbuilt_inputs
 
-        required_paths = set(request.derivation.input_srcs) | {request.drv_path}
+        drv_path_str = str(request.drv_path)
+        required_paths: set[RequiredInput] = set()
+        for inp in request.derivation.input_srcs:
+            required_paths.add(RequiredInput(inp, f"input_src of {drv_path_str}"))
+        required_paths.add(
+            RequiredInput(request.drv_path, f"drv_path of {drv_path_str}")
+        )
         build_id, future = await proxy.scheduler.enqueue(
             Op.BuildDerivation,
             request,
