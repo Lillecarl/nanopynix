@@ -8,6 +8,8 @@ from functools import cache
 
 import structlog
 
+from .operations.base import OP_REGISTRY
+
 
 @cache
 def op_log(op_name: str):
@@ -19,18 +21,9 @@ def op_log(op_name: str):
     return structlog.get_logger(f"pynixd.op.{op_name}")
 
 
-EXTENSION_FEATURES: set[str] = {
-    "QueryPathInfos",
-    "QueryClosure",
-    "QueryClosureWithInfo",
-    "QueryDerivationOutputsBatch",
-    "SignPathInfo",
-}
-
-
 def get_extension_features() -> set[str]:
     """Return all pynixd extension operation names."""
-    return EXTENSION_FEATURES
+    return {cls.name for cls in OP_REGISTRY.values() if cls.is_extension}
 
 
 class OptTrusted(IntEnum):

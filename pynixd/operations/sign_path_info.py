@@ -38,6 +38,7 @@ class SignPathInfoResponse(OpResponse):
 class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
     name: ClassVar[str] = "SignPathInfo"
     op: ClassVar[int] = 107
+    is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = SignPathInfoResponse
     info: PathInfo = field(default_factory=PathInfo)
     key: SecretKey | None = None

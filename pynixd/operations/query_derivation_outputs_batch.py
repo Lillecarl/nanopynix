@@ -66,6 +66,7 @@ class DerivationOutputsBatchResponse(OpResponse):
 class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchResponse]):
     name: ClassVar[str] = "QueryDerivationOutputsBatch"
     op: ClassVar[int] = 106
+    is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = DerivationOutputsBatchResponse
     is_query: ClassVar[bool] = True
     drv_paths: set[StorePath] = field(default_factory=set)

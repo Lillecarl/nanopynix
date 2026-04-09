@@ -96,6 +96,7 @@ class OpRequest(ABC, Generic[Resp]):
     response_type: ClassVar[type[OpResponse]]
     is_query: ClassVar[bool] = False
     is_build: ClassVar[bool] = False
+    is_extension: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Runs when an OpRequest subclass is instantiated, registers
@@ -116,11 +117,6 @@ class OpRequest(ABC, Generic[Resp]):
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
         request = await cls.from_reader(proxy.r, proxy.version)
         return await proxy.execute(request)
-
-    @property
-    def is_extension(self) -> bool:
-        """True if this is a pynixd extension operation (not standard Nix)."""
-        return self.op >= 100
 
     async def execute(
         self,

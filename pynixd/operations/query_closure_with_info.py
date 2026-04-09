@@ -65,6 +65,7 @@ class QueryClosureWithInfoResponse(OpResponse):
 class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
     name: ClassVar[str] = "QueryClosureWithInfo"
     op: ClassVar[int] = 105
+    is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = QueryClosureWithInfoResponse
     is_query: ClassVar[bool] = True
     paths: set[StorePath] = field(default_factory=set)

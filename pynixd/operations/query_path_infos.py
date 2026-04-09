@@ -62,6 +62,7 @@ class QueryPathInfosResponse(OpResponse):
 class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
     name: ClassVar[str] = "QueryPathInfos"
     op: ClassVar[int] = 103
+    is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = QueryPathInfosResponse
     is_query: ClassVar[bool] = True
     paths: set[StorePath] = field(default_factory=set)
