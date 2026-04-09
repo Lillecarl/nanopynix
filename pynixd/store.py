@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import platform
 import shlex
+import subprocess
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
@@ -1213,8 +1215,6 @@ class SSHSocketStore(_SSHStoreMixin, Store):
 
 def get_current_system() -> str:
     """Return the current nix system string (e.g. x86_64-linux)."""
-    import subprocess
-
     try:
         return (
             subprocess.check_output(
@@ -1242,9 +1242,6 @@ def get_current_system() -> str:
                 .strip()
             )
         except Exception:
-            # Final fallback, though unlikely to work if nix is broken
-            import platform
-
             machine = platform.machine()
             system = platform.system().lower()
             if system == "darwin":

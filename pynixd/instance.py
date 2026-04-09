@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -119,8 +120,6 @@ class Server:
     @property
     def username(self) -> str:
         """SSH username."""
-        import os
-
         return os.environ.get("USER", "root")
 
     def uri(self, implementation: NixImplementation = NixImplementation.NIX) -> str:

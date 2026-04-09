@@ -15,6 +15,7 @@ logs a warning and becomes unavailable — callers fall back to the daemon.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from collections.abc import AsyncIterator
@@ -272,8 +273,6 @@ class LocalStoreDB:
         """Flush pending registration time updates to SQLite."""
         if not self.active or self.read_only or not self.pending_regtime:
             return
-
-        import json
 
         paths = self.pending_regtime
         self.pending_regtime = set()
