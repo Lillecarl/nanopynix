@@ -22,7 +22,7 @@ from .operations.base import (
     OpResponse,
     Resp,
 )
-from .protocol import OptTrusted
+from .protocol import OptTrusted, get_extension_features
 from .scheduler import Scheduler
 from .stderr import StderrError
 from .store import Store
@@ -108,8 +108,6 @@ class DaemonProxy:
         if self.version >= wire.proto(1, 38):
             client_features = await self.r.read_string_set()
             log.debug("client_features", client_features=client_features)
-            from .protocol import get_extension_features
-
             self.w.write_string_set(get_extension_features())  # our features
             await self.w.drain()
 

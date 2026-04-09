@@ -40,6 +40,7 @@ This document defines the foundational architectural patterns and engineering st
   - Use `from __future__ import annotations`.
   - NEVER use string type hints (e.g., `"Store"`). 
   - Use `if TYPE_CHECKING:` blocks for cross-module imports.
+  - **Imports**: All imports should be at the top of the file. Lazy imports inside functions are only acceptable to break circular import cycles.
 - **No-ops**: Restricted operations (like `SetOptions`, `AddPermRoot`, `AddIndirectRoot`) must be implemented as no-ops that return success (`0` or `EmptyResponse`) and log their status to stderr.
 - **HTTP Cache Streaming**: If a NAR transfer fails after the `200 OK` header is sent, the server MUST abruptly close the connection to signal failure to the client. Full buffering to avoid this is not supported due to memory constraints.
 - **pathlib.Path**: Use pathlib.Path when dealing with any strings that aren't Nix daemon protocol related. Convert to string as late as possible if needed

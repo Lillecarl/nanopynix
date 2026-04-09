@@ -23,11 +23,13 @@ from typing import cast
 import structlog
 
 from . import stderr, wire
+from .exceptions import BackendError, InfrastructureError
 from .operations.base import (
     OpRequest,
     Resp,
     StderrBuffer,
 )
+from .protocol import get_extension_features
 from .wire import (
     NixReader,
     NixWriter,
@@ -207,8 +209,6 @@ class Connection:
                     error_msg=msg.msg,
                 )
                 if raise_on_error:
-                    from .exceptions import BackendError
-
                     raise BackendError(f"Backend error: {msg.msg}")
 
         # If we are NOT suppressing last, and we have a client, we should
@@ -243,8 +243,6 @@ class Connection:
         server_version = await self.r.read_uint64()
         self.version = min(wire.PROTOCOL_VERSION, server_version)
         if self.version < wire.MINIMUM_REMOTE_PROTOCOL:
-            from .exceptions import InfrastructureError
-
             msg = (
                 f"Store {self.id} negotiated protocol {wire.proto_str(self.version)}, "
                 f"but we require >= {wire.proto_str(wire.MINIMUM_REMOTE_PROTOCOL)}"
@@ -261,8 +259,6 @@ class Connection:
 
         # Feature negotiation (1.38+) — before CPU/reserveSpace
         if self.version >= wire.proto(1, 38):
-            from .protocol import get_extension_features
-
             self.w.write_string_set(get_extension_features())  # our features
             await w.drain()
             self.features = await self.r.read_string_set()
