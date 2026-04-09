@@ -88,11 +88,10 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
 
         if store.db is not None:
             seeds_json = json.dumps([str(p) for p in self.paths])
-            async with store.db.acquire_conn() as conn:
-                async with conn.execute(
-                    QUERY_CLOSURE_WITH_INFO, (seeds_json,)
-                ) as cursor:
-                    rows = await cursor.fetchall()
+            async with store.db.execute(
+                QUERY_CLOSURE_WITH_INFO, (seeds_json,)
+            ) as cursor:
+                rows = await cursor.fetchall()
 
             sorted_infos: list[PathInfo] = []
             for (

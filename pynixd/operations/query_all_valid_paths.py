@@ -50,9 +50,8 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
     ) -> QueryAllValidPathsResponse:
         try:
             if store.db is not None:
-                async with store.db.acquire_conn() as conn:
-                    async with conn.execute(QUERY_ALL_VALID_PATHS) as cursor:
-                        rows = await cursor.fetchall()
+                async with store.db.execute(QUERY_ALL_VALID_PATHS) as cursor:
+                    rows = await cursor.fetchall()
                 resp = QueryAllValidPathsResponse(paths={StorePath(r[0]) for r in rows})
                 store.add_known_paths(resp.paths, update_regtime=False)
                 self._log.info(

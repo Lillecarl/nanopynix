@@ -54,9 +54,8 @@ class IsValidPathRequest(OpRequest[IsValidPathResponse]):
             return IsValidPathResponse(valid=True)
 
         if store.db is not None:
-            async with store.db.acquire_conn() as conn:
-                async with conn.execute(IS_VALID_PATH, (self.path,)) as cursor:
-                    row = await cursor.fetchone()
+            async with store.db.execute(IS_VALID_PATH, (self.path,)) as cursor:
+                row = await cursor.fetchone()
             if row is not None:
                 store.add_known_path(self.path)
                 return IsValidPathResponse(valid=True)

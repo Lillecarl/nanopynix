@@ -170,6 +170,26 @@ class LocalStoreDB:
                     self._idle_conns.append(conn)
             self._sem.release()
 
+    @asynccontextmanager
+    async def execute(
+        self,
+        query: str,
+        params: tuple = (),
+    ) -> AsyncIterator[aiosqlite.Cursor]:
+        """Execute a query and return the cursor.
+
+        Convenience method that acquires a connection, runs the query,
+        and returns the cursor. Usage::
+
+            async with db.execute("SELECT * FROM Foo WHERE id = ?", (id,)) as cursor:
+                row = await cursor.fetchone()
+
+        For multiple queries or complex flows, use acquire_conn() directly.
+        """
+        async with self.acquire_conn() as conn:
+            cursor = await conn.execute(query, params)
+            yield cursor
+
     @classmethod
     async def open(
         cls,
@@ -229,9 +249,8 @@ class LocalStoreDB:
             return None
         try:
             cutoff = int(time.time()) - max_age_seconds
-            async with self.acquire_conn() as conn:
-                async with conn.execute(QUERY_STALE_PATHS, (cutoff,)) as cursor:
-                    rows = await cursor.fetchall()
+            async with self.execute(QUERY_STALE_PATHS, (cutoff,)) as cursor:
+                rows = await cursor.fetchall()
             return {StorePath(r[0]) for r in rows}
         except Exception:
             log.debug("query_stale_paths_failed", exc_info=True)

@@ -72,9 +72,8 @@ class QueryClosureRequest(OpRequest[QueryClosureResponse]):
     ) -> QueryClosureResponse:
         if store.db is not None:
             seeds_json = json.dumps([str(p) for p in self.paths])
-            async with store.db.acquire_conn() as conn:
-                async with conn.execute(QUERY_CLOSURE, (seeds_json,)) as cursor:
-                    rows = await cursor.fetchall()
+            async with store.db.execute(QUERY_CLOSURE, (seeds_json,)) as cursor:
+                rows = await cursor.fetchall()
             result = QueryClosureResponse(paths={StorePath(row[0]) for row in rows})
             store.add_known_paths(result.paths)
             return result

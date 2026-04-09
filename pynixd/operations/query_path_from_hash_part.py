@@ -55,11 +55,10 @@ class QueryPathFromHashPartRequest(OpRequest[QueryPathFromHashPartResponse]):
         if store.db is not None:
             prefix = f"/nix/store/{self.path}"
             upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
-            async with store.db.acquire_conn() as conn:
-                async with conn.execute(
-                    QUERY_PATH_FROM_HASH_PART, (prefix, upper)
-                ) as cursor:
-                    row = await cursor.fetchone()
+            async with store.db.execute(
+                QUERY_PATH_FROM_HASH_PART, (prefix, upper)
+            ) as cursor:
+                row = await cursor.fetchone()
             if row:
                 result = QueryPathFromHashPartResponse(value=StorePath(row[0]))
                 store.add_known_path(result.value)

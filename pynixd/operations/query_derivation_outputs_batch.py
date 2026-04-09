@@ -89,11 +89,10 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
 
         if store.db is not None:
             paths_json = json.dumps([str(p) for p in self.drv_paths])
-            async with store.db.acquire_conn() as conn:
-                async with conn.execute(
-                    QUERY_DERIVATION_OUTPUTS_BATCH, (paths_json,)
-                ) as cursor:
-                    rows = await cursor.fetchall()
+            async with store.db.execute(
+                QUERY_DERIVATION_OUTPUTS_BATCH, (paths_json,)
+            ) as cursor:
+                rows = await cursor.fetchall()
 
             result: dict[StorePath, dict[str, StorePath]] = {}
             for drv_path, output_name, output_path in rows:

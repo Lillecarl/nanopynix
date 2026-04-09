@@ -63,11 +63,10 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
     ) -> QueryValidPathsResponse:
         if store.db is not None:
             paths_json = json.dumps(list(self.paths))
-            async with store.db.acquire_conn() as conn:
-                async with conn.execute(
-                    QUERY_VALID_PATHS_BATCH, (paths_json,)
-                ) as cursor:
-                    rows = await cursor.fetchall()
+            async with store.db.execute(
+                QUERY_VALID_PATHS_BATCH, (paths_json,)
+            ) as cursor:
+                rows = await cursor.fetchall()
             result = QueryValidPathsResponse(paths={StorePath(row[0]) for row in rows})
             store.add_known_paths(result.paths)
             return result

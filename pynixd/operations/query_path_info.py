@@ -72,17 +72,16 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
             return QueryPathInfoResponse(valid=True, info=cached)
 
         if store.db is not None:
-            async with store.db.acquire_conn() as conn:
-                async with conn.execute(QUERY_PATH_INFO, (self.path,)) as cursor:
-                    row = await cursor.fetchone()
-                if row is None:
-                    return QueryPathInfoResponse(valid=False)
+            async with store.db.execute(QUERY_PATH_INFO, (self.path,)) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                return QueryPathInfoResponse(valid=False)
 
-                _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
+            _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
 
-                async with conn.execute(QUERY_REFERENCES, (self.path,)) as cursor:
-                    ref_rows = await cursor.fetchall()
-                refs = {r[0] for r in ref_rows}
+            async with store.db.execute(QUERY_REFERENCES, (self.path,)) as cursor:
+                ref_rows = await cursor.fetchall()
+            refs = {r[0] for r in ref_rows}
 
             info = PathInfo(
                 path=self.path,

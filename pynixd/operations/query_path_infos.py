@@ -100,15 +100,14 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
 
         if store.db is not None:
             paths_json = json.dumps([str(p) for p in uncached])
-            async with store.db.acquire_conn() as conn:
-                async with conn.execute(
-                    QUERY_PATH_INFOS_BATCH, (paths_json,)
-                ) as cursor:
-                    rows = await cursor.fetchall()
-                async with conn.execute(
-                    QUERY_REFERENCES_BATCH, (paths_json,)
-                ) as cursor:
-                    ref_rows = await cursor.fetchall()
+            async with store.db.execute(
+                QUERY_PATH_INFOS_BATCH, (paths_json,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+            async with store.db.execute(
+                QUERY_REFERENCES_BATCH, (paths_json,)
+            ) as cursor:
+                ref_rows = await cursor.fetchall()
 
             refs_map: dict[StorePath, set[StorePath]] = {}
             for referrer, reference in ref_rows:
