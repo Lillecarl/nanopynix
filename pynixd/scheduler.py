@@ -139,6 +139,13 @@ class Scheduler:
             if self.local_store.has_all_paths(build.required_paths):
                 schedulable.append(build)
             else:
+                missing = build.required_paths - self.local_store.known_paths
+                log.warning(
+                    "DEBUG_waiting_paths",
+                    build_id=build.id,
+                    missing_count=len(missing),
+                    missing_paths=[str(p) for p in missing][:10],
+                )
                 waiting_dag.append(build)
 
         # 2. Assign schedulable builds to backends
