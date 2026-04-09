@@ -35,6 +35,7 @@ class AddToStoreNarResponse(OpResponse):
 class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
     """Prefix for AddToStoreNar (framed NAR data follows)."""
 
+    name: ClassVar[str] = "AddToStoreNar"
     op: ClassVar[int] = Op.AddToStoreNar
     response_type: ClassVar[type[OpResponse]] = AddToStoreNarResponse
     info: PathInfo = field(default_factory=PathInfo)

@@ -22,7 +22,7 @@ from .operations.base import (
     OpResponse,
     Resp,
 )
-from .protocol import Op, OptTrusted, op_log
+from .protocol import OptTrusted, op_log
 from .scheduler import Scheduler
 from .stderr import StderrError
 from .store import Store
@@ -137,29 +137,30 @@ class DaemonProxy:
             except (EOFError, asyncssh.misc.ConnectionLost):
                 break
 
-            try:
-                op = Op(op_num)
-                op_log(op.name).debug("recvOp", op=op.name, op_num=op_num)
-            except ValueError:
+            req_cls = OP_REGISTRY.get(op_num)
+            if req_cls is None:
                 log.warning("unknown_op", op_num=op_num)
                 await self.send_error(f"Unsupported operation: {op_num}")
                 continue
 
+            op_name = req_cls.name
+            op_log(op_name).debug("recvOp", op=op_name, op_num=op_num)
+
             try:
-                response = await self.dispatch(op)
+                response = await self.dispatch(op_num)
 
                 if response is not None:
                     await self.client.flush()
                     self.w.write_uint64(wire.STDERR_LAST)
                     await response.to_writer(self.w, self.version)
                     await self.w.drain()
-                    op_log(op.name).debug("sendOp", op=op.name)
+                    op_log(op_name).debug("sendOp", op=op_name)
                 # else: already handled (streaming, error, etc.)
 
             except Exception:
-                log.exception("handle_op_error", name=op.name)
+                log.exception("handle_op_error", name=op_name)
                 await self.client.flush()
-                await self.send_error(f"Internal error handling {op.name}")
+                await self.send_error(f"Internal error handling {op_name}")
 
     # ── Dispatch ─────────────────────────────────────────────────────
 
@@ -199,12 +200,12 @@ class DaemonProxy:
             "not supported by any configured store"
         )
 
-    async def dispatch(self, op: Op) -> OpResponse | None:
+    async def dispatch(self, op_num: int) -> OpResponse | None:
         """Route an operation to its request type's handle method."""
-        req_cls = OP_REGISTRY.get(op.value)
+        req_cls = OP_REGISTRY.get(op_num)
         if req_cls is None:
-            log.warning("unhandled_op", op=op.name, op_value=op.value)
-            await self.send_error(f"Unhandled operation: {op.name}")
+            log.warning("unhandled_op", op_num=op_num)
+            await self.send_error(f"Unhandled operation: {op_num}")
             return None
 
         try:

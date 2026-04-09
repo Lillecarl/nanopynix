@@ -31,6 +31,7 @@ class IsValidPathResponse(OpResponse):
 
 @dataclass
 class IsValidPathRequest(OpRequest[IsValidPathResponse]):
+    name: ClassVar[str] = "IsValidPath"
     op: ClassVar[int] = Op.IsValidPath
     response_type: ClassVar[type[OpResponse]] = IsValidPathResponse
     is_query: ClassVar[bool] = True

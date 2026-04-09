@@ -44,6 +44,7 @@ class QueryMissingResponse(OpResponse):
 
 @dataclass
 class QueryMissingRequest(OpRequest[QueryMissingResponse]):
+    name: ClassVar[str] = "QueryMissing"
     op: ClassVar[int] = Op.QueryMissing
     response_type: ClassVar[type[OpResponse]] = QueryMissingResponse
     is_query: ClassVar[bool] = True

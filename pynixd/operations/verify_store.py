@@ -24,6 +24,7 @@ class VerifyStoreResponse(OpResponse):
 
 @dataclass
 class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
+    name: ClassVar[str] = "VerifyStore"
     op: ClassVar[int] = Op.VerifyStore
     response_type: ClassVar[type[OpResponse]] = VerifyStoreResponse
     check_contents: int = 0

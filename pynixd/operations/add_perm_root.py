@@ -28,6 +28,7 @@ class AddPermRootResponse(OpResponse):
 
 @dataclass
 class AddPermRootRequest(OpRequest[AddPermRootResponse]):
+    name: ClassVar[str] = "AddPermRoot"
     op: ClassVar[int] = Op.AddPermRoot
     response_type: ClassVar[type[OpResponse]] = AddPermRootResponse
     store_path: str = ""

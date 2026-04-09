@@ -25,6 +25,7 @@ class EnsurePathResponse(OpResponse):
 
 @dataclass
 class EnsurePathRequest(OpRequest[EnsurePathResponse]):
+    name: ClassVar[str] = "EnsurePath"
     op: ClassVar[int] = Op.EnsurePath
     response_type: ClassVar[type[OpResponse]] = EnsurePathResponse
     path: StorePath = StorePath("")

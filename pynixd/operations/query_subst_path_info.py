@@ -31,6 +31,7 @@ class QuerySubstPathInfoResponse(OpResponse):
 
 @dataclass
 class QuerySubstPathInfoRequest(OpRequest[QuerySubstPathInfoResponse]):
+    name: ClassVar[str] = "QuerySubstitutablePathInfo"
     op: ClassVar[int] = Op.QuerySubstitutablePathInfo
     response_type: ClassVar[type[OpResponse]] = QuerySubstPathInfoResponse
     is_query: ClassVar[bool] = True

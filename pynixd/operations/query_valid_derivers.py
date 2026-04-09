@@ -25,6 +25,7 @@ class QueryValidDeriversResponse(OpResponse):
 
 @dataclass
 class QueryValidDeriversRequest(OpRequest[QueryValidDeriversResponse]):
+    name: ClassVar[str] = "QueryValidDerivers"
     op: ClassVar[int] = Op.QueryValidDerivers
     response_type: ClassVar[type[OpResponse]] = QueryValidDeriversResponse
     is_query: ClassVar[bool] = True

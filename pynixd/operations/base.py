@@ -92,6 +92,7 @@ class OpRequest(ABC, Generic[Resp]):
     """
 
     op: ClassVar[int]
+    name: ClassVar[str]
     response_type: ClassVar[type[OpResponse]]
     is_query: ClassVar[bool] = False
     is_build: ClassVar[bool] = False

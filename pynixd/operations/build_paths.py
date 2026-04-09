@@ -155,6 +155,7 @@ class BuildPathsResponse(OpResponse):
 
 @dataclass
 class BuildPathsRequest(OpRequest[BuildPathsResponse]):
+    name: ClassVar[str] = "BuildPaths"
     op: ClassVar[int] = Op.BuildPaths
     response_type: ClassVar[type[OpResponse]] = BuildPathsResponse
     is_build: ClassVar[bool] = True
@@ -237,6 +238,7 @@ class KeyedBuildResultsResponse(OpResponse):
 
 @dataclass
 class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
+    name: ClassVar[str] = "BuildPathsWithResults"
     op: ClassVar[int] = Op.BuildPathsWithResults
     response_type: ClassVar[type[OpResponse]] = KeyedBuildResultsResponse
     is_build: ClassVar[bool] = True

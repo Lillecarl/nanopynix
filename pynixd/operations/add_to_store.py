@@ -38,9 +38,10 @@ class AddToStoreResponse(OpResponse):
 class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     """Prefix for AddToStore (framed NAR data follows)."""
 
+    name: ClassVar[str] = "AddToStore"
     op: ClassVar[int] = Op.AddToStore
     response_type: ClassVar[type[OpResponse]] = AddToStoreResponse
-    name: str = ""
+    path_name: str = ""
     cam: str = ""  # ContentAddressMethodWithAlgo
     references: set[StorePath] = field(default_factory=set)
     repair: int = 0
@@ -48,7 +49,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
-            name=await reader.read_string(),
+            path_name=await reader.read_string(),
             cam=await reader.read_string(),
             references=await reader.read_string_set(StorePath),
             repair=await reader.read_uint64(),
@@ -56,7 +57,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)
-        writer.write_string(self.name)
+        writer.write_string(self.path_name)
         writer.write_string(self.cam)
         writer.write_string_set(self.references)
         writer.write_uint64(self.repair)

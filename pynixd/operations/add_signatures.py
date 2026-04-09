@@ -28,6 +28,7 @@ class AddSignaturesResponse(OpResponse):
 
 @dataclass
 class AddSignaturesRequest(OpRequest[AddSignaturesResponse]):
+    name: ClassVar[str] = "AddSignatures"
     op: ClassVar[int] = Op.AddSignatures
     response_type: ClassVar[type[OpResponse]] = AddSignaturesResponse
     path: str = ""

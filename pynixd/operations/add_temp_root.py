@@ -25,6 +25,7 @@ class AddTempRootResponse(OpResponse):
 
 @dataclass
 class AddTempRootRequest(OpRequest[AddTempRootResponse]):
+    name: ClassVar[str] = "AddTempRoot"
     op: ClassVar[int] = Op.AddTempRoot
     response_type: ClassVar[type[OpResponse]] = AddTempRootResponse
     path: StorePath = StorePath("")

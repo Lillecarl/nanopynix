@@ -34,6 +34,7 @@ class SetOptionsResponse(OpResponse):
 
 @dataclass
 class SetOptionsRequest(OpRequest[SetOptionsResponse]):
+    name: ClassVar[str] = "SetOptions"
     op: ClassVar[int] = Op.SetOptions
     response_type: ClassVar[type[OpResponse]] = SetOptionsResponse
     keep_failed: int = 0

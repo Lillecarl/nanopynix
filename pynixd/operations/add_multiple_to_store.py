@@ -33,6 +33,7 @@ class AddMultipleToStoreResponse(OpResponse):
 class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
     """Prefix for AddMultipleToStore (framed data follows)."""
 
+    name: ClassVar[str] = "AddMultipleToStore"
     op: ClassVar[int] = Op.AddMultipleToStore
     response_type: ClassVar[type[OpResponse]] = AddMultipleToStoreResponse
     repair: int = 0

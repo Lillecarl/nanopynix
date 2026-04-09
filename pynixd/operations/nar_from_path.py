@@ -44,6 +44,7 @@ class NarFromPathResponse(OpResponse):
 
 @dataclass
 class NarFromPathRequest(OpRequest[NarFromPathResponse]):
+    name: ClassVar[str] = "NarFromPath"
     op: ClassVar[int] = Op.NarFromPath
     response_type: ClassVar[type[OpResponse]] = NarFromPathResponse
     is_query: ClassVar[bool] = True

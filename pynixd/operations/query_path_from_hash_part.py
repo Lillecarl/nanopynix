@@ -33,6 +33,7 @@ class QueryPathFromHashPartResponse(OpResponse):
 
 @dataclass
 class QueryPathFromHashPartRequest(OpRequest[QueryPathFromHashPartResponse]):
+    name: ClassVar[str] = "QueryPathFromHashPart"
     op: ClassVar[int] = Op.QueryPathFromHashPart
     response_type: ClassVar[type[OpResponse]] = QueryPathFromHashPartResponse
     is_query: ClassVar[bool] = True

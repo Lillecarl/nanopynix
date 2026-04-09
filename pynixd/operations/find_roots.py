@@ -39,6 +39,7 @@ class FindRootsResponse(OpResponse):
 
 @dataclass
 class FindRootsRequest(OpRequest[FindRootsResponse]):
+    name: ClassVar[str] = "FindRoots"
     op: ClassVar[int] = Op.FindRoots
     response_type: ClassVar[type[OpResponse]] = FindRootsResponse
 

@@ -37,6 +37,7 @@ class SignPathInfoResponse(OpResponse):
 
 @dataclass
 class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
+    name: ClassVar[str] = "SignPathInfo"
     op: ClassVar[int] = Op.SignPathInfo
     response_type: ClassVar[type[OpResponse]] = SignPathInfoResponse
     info: PathInfo = field(default_factory=PathInfo)

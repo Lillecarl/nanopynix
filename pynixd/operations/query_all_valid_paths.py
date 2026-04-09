@@ -31,6 +31,7 @@ class QueryAllValidPathsResponse(OpResponse):
 
 @dataclass
 class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
+    name: ClassVar[str] = "QueryAllValidPaths"
     op: ClassVar[int] = Op.QueryAllValidPaths
     response_type: ClassVar[type[OpResponse]] = QueryAllValidPathsResponse
     is_query: ClassVar[bool] = True

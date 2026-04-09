@@ -34,6 +34,7 @@ class QueryDerivationOutputMapResponse(OpResponse):
 
 @dataclass
 class QueryDerivationOutputMapRequest(OpRequest[QueryDerivationOutputMapResponse]):
+    name: ClassVar[str] = "QueryDerivationOutputMap"
     op: ClassVar[int] = Op.QueryDerivationOutputMap
     response_type: ClassVar[type[OpResponse]] = QueryDerivationOutputMapResponse
     is_query: ClassVar[bool] = True

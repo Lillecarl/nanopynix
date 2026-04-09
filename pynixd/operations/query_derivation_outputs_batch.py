@@ -65,6 +65,7 @@ class DerivationOutputsBatchResponse(OpResponse):
 
 @dataclass
 class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchResponse]):
+    name: ClassVar[str] = "QueryDerivationOutputsBatch"
     op: ClassVar[int] = Op.QueryDerivationOutputsBatch
     response_type: ClassVar[type[OpResponse]] = DerivationOutputsBatchResponse
     is_query: ClassVar[bool] = True

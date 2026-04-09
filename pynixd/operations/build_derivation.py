@@ -38,6 +38,7 @@ class BuildDerivationResponse(OpResponse):
 
 @dataclass
 class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
+    name: ClassVar[str] = "BuildDerivation"
     op: ClassVar[int] = Op.BuildDerivation
     response_type: ClassVar[type[OpResponse]] = BuildDerivationResponse
     is_build: ClassVar[bool] = True

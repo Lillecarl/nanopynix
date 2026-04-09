@@ -24,6 +24,7 @@ class OptimiseStoreResponse(OpResponse):
 
 @dataclass
 class OptimiseStoreRequest(OpRequest[OptimiseStoreResponse]):
+    name: ClassVar[str] = "OptimiseStore"
     op: ClassVar[int] = Op.OptimiseStore
     response_type: ClassVar[type[OpResponse]] = OptimiseStoreResponse
 

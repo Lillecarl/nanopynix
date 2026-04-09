@@ -25,6 +25,7 @@ class QueryReferrersResponse(OpResponse):
 
 @dataclass
 class QueryReferrersRequest(OpRequest[QueryReferrersResponse]):
+    name: ClassVar[str] = "QueryReferrers"
     op: ClassVar[int] = Op.QueryReferrers
     response_type: ClassVar[type[OpResponse]] = QueryReferrersResponse
     is_query: ClassVar[bool] = True

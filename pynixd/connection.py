@@ -28,7 +28,7 @@ from .operations.base import (
     Resp,
     StderrBuffer,
 )
-from .protocol import Op, op_log
+from .protocol import op_log
 from .wire import (
     NixReader,
     NixWriter,
@@ -174,17 +174,15 @@ class Connection:
             raise RuntimeError(f"Connection {self.id!r} not connected")
 
         req_cls = type(request)
-        op_code = req_cls.op
         response_type = req_cls.response_type
+        op_name = req_cls.name
 
-        op = Op(op_code)
-        self.op_log.append(op.name)
+        self.op_log.append(op_name)
 
-        op_log(op.name).debug(
+        op_log(op_name).debug(
             "send_op",
             store_id=self.id,
-            op_name=op.name,
-            op_value=op.value,
+            op_name=op_name,
         )
 
         await request.to_writer(self.w, self.version)
@@ -226,10 +224,10 @@ class Connection:
         response = await response_type.from_reader(self.r, self.version)
         response.stderr = msgs
 
-        op_log(op.name).debug(
+        op_log(op_name).debug(
             "recv_op_done",
             store_id=self.id,
-            op_name=op.name,
+            op_name=op_name,
         )
         # response_type is ClassVar[type[OpResponse]] so from_reader
         # returns OpResponse, not Resp. The actual type is correct at

@@ -47,6 +47,7 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     Input: Realisation JSON string
     """
 
+    name: ClassVar[str] = "RegisterDrvOutput"
     op: ClassVar[int] = Op.RegisterDrvOutput
     response_type: ClassVar[type[OpResponse]] = RegisterDrvOutputResponse
     realisation: dict = field(default_factory=dict)
@@ -92,6 +93,7 @@ class QueryRealisationResponse(OpResponse):
 class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
     """Request to query the realisation of a derivation output."""
 
+    name: ClassVar[str] = "QueryRealisation"
     op: ClassVar[int] = Op.QueryRealisation
     response_type: ClassVar[type[OpResponse]] = QueryRealisationResponse
     drv_output: DrvOutput = ""

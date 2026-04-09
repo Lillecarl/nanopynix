@@ -51,6 +51,7 @@ class QueryClosureResponse(OpResponse):
 
 @dataclass
 class QueryClosureRequest(OpRequest[QueryClosureResponse]):
+    name: ClassVar[str] = "QueryClosure"
     op: ClassVar[int] = Op.QueryClosure
     response_type: ClassVar[type[OpResponse]] = QueryClosureResponse
     is_query: ClassVar[bool] = True

@@ -25,6 +25,7 @@ class AddIndirectRootResponse(OpResponse):
 
 @dataclass
 class AddIndirectRootRequest(OpRequest[AddIndirectRootResponse]):
+    name: ClassVar[str] = "AddIndirectRoot"
     op: ClassVar[int] = Op.AddIndirectRoot
     response_type: ClassVar[type[OpResponse]] = AddIndirectRootResponse
     path: StorePath = StorePath("")

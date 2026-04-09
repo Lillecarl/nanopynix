@@ -61,6 +61,7 @@ class QueryPathInfosResponse(OpResponse):
 
 @dataclass
 class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
+    name: ClassVar[str] = "QueryPathInfos"
     op: ClassVar[int] = Op.QueryPathInfos
     response_type: ClassVar[type[OpResponse]] = QueryPathInfosResponse
     is_query: ClassVar[bool] = True

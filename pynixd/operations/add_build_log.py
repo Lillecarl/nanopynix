@@ -25,6 +25,7 @@ class AddBuildLogResponse(OpResponse):
 
 @dataclass
 class AddBuildLogRequest(OpRequest[AddBuildLogResponse]):
+    name: ClassVar[str] = "AddBuildLog"
     op: ClassVar[int] = Op.AddBuildLog
     response_type: ClassVar[type[OpResponse]] = AddBuildLogResponse
     path: StorePath = StorePath("")

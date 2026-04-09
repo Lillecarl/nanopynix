@@ -40,6 +40,7 @@ class CollectGarbageResponse(OpResponse):
 
 @dataclass
 class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
+    name: ClassVar[str] = "CollectGarbage"
     op: ClassVar[int] = Op.CollectGarbage
     response_type: ClassVar[type[OpResponse]] = CollectGarbageResponse
     action: int = 0
