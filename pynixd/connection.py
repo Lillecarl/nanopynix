@@ -242,6 +242,15 @@ class Connection:
 
         server_version = await self.r.read_uint64()
         self.version = min(wire.PROTOCOL_VERSION, server_version)
+        if self.version < wire.MINIMUM_REMOTE_PROTOCOL:
+            from .exceptions import InfrastructureError
+
+            msg = (
+                f"Store {self.id} negotiated protocol {wire.proto_str(self.version)}, "
+                f"but we require >= {wire.proto_str(wire.MINIMUM_REMOTE_PROTOCOL)}"
+            )
+            log.error("protocol_version_too_low", store_id=self.id, error=msg)
+            raise InfrastructureError(msg)
         log.debug(
             "daemon_protocol_negotiated",
             server_version=wire.proto_str(server_version),
