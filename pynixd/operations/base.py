@@ -28,7 +28,7 @@ from ..wire import NixReader, NixWriter
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..proxy import DaemonProxy
-    from ..stderr import StderrMsg
+    from ..stderr import StderrError, StderrMsg
     from ..store import Store
 
 log = structlog.get_logger(__name__)
@@ -165,20 +165,41 @@ class OpRequest(ABC, Generic[Resp]):
 
 
 @dataclass
-class StderrBuffer:
-    """Buffer for collected stderr messages."""
+class OperationLogs:
+    """Container for stderr messages from an operation.
 
-    msgs: list[StderrMsg] = field(default_factory=list)
+    Collects all stderr messages (NEXT, START_ACTIVITY, STOP_ACTIVITY,
+    RESULT, ERROR) but NOT LAST — that's injected by to_writer.
+    """
+
+    messages: list[StderrMsg] = field(default_factory=list)
+
+    @property
+    def error(self) -> StderrError | None:
+        """First StderrError in messages, if any."""
+        for msg in self.messages:
+            if isinstance(msg, StderrError):
+                return msg
+        return None
+
+    @property
+    def has_error(self) -> bool:
+        """True if any StderrError in messages."""
+        return self.error is not None
+
+    def __bool__(self) -> bool:
+        """Falsy if has errors."""
+        return not self.has_error
 
     def add(self, msg: StderrMsg) -> None:
-        self.msgs.append(msg)
+        """Add a stderr message to the collection."""
+        self.messages.append(msg)
 
-    def to_writer(self, writer: NixWriter, suppress_last: bool = False) -> None:
-        """Write all buffered messages to the wire."""
-        for msg in self.msgs:
-            if suppress_last and msg.code == wire.STDERR_LAST:
-                continue
+    def to_writer(self, writer: NixWriter) -> None:
+        """Write all messages followed by STDERR_LAST."""
+        for msg in self.messages:
             msg.to_writer(writer)
+        writer.write_uint64(wire.STDERR_LAST)
 
 
 @dataclass
@@ -186,7 +207,7 @@ class OpResponse(ABC):
     """Base class for operation responses."""
 
     _log: ClassVar = structlog.get_logger(__name__)
-    stderr: StderrBuffer = field(default_factory=StderrBuffer)
+    logs: OperationLogs = field(default_factory=OperationLogs)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

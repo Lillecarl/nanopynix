@@ -26,8 +26,8 @@ from . import stderr, wire
 from .exceptions import BackendError, InfrastructureError
 from .operations.base import (
     OpRequest,
+    OperationLogs,
     Resp,
-    StderrBuffer,
 )
 from .protocol import get_extension_features
 from .wire import (
@@ -185,7 +185,7 @@ class Connection:
         await request.to_writer(self.w, self.version)
         await self.w.drain()
 
-        msgs = StderrBuffer()
+        msgs = OperationLogs()
         async for msg in self.r.read_stderr():
             msgs.add(msg)
 
@@ -217,7 +217,7 @@ class Connection:
         # So Connection.call should usually NOT forward the remote's LAST.
 
         response = await response_type.from_reader(self.r, self.version)
-        response.stderr = msgs
+        response.logs = msgs
 
         log.debug("recv_op_done", store_id=self.id)
         # response_type is ClassVar[type[OpResponse]] so from_reader
