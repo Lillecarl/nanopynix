@@ -21,20 +21,21 @@ class QuerySubstPathInfosResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         n = await reader.read_uint64()
         entries = []
         for _ in range(n):
             path = await reader.read_string()
             info = await SubstPathInfo.from_reader(reader, version)
             entries.append(SubstPathInfoEntry(path=path, info=info))
-        return cls(logs=await OperationLogs.from_reader(reader), entries=entries)
+        return cls(logs=logs, entries=entries)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_uint64(len(self.entries))
         for entry in self.entries:
             writer.write_string(entry.path)
             await entry.info.to_writer(writer, version)
-        self.logs.to_writer(writer)
 
 
 @dataclass

@@ -33,8 +33,8 @@ class AddToStoreResponse(OpResponse):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        await self.info.to_writer_keyed(writer)
         self.logs.to_writer(writer)
+        await self.info.to_writer_keyed(writer)
 
 
 @dataclass
@@ -72,7 +72,6 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         async with proxy.local_store.transfer_conn() as conn:
             await cls.forward(proxy.r, conn.w)
             await conn.w.drain()
-            await conn.r.drain_stderr()
             resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
             resp.info = (
                 await proxy.local_store.execute(SignPathInfoRequest(resp.info))

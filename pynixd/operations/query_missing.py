@@ -36,12 +36,12 @@ class QueryMissingResponse(OpResponse):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_string_set(self.will_build)
         writer.write_string_set(self.will_substitute)
         writer.write_string_set(self.unknown)
         writer.write_uint64(self.download_size)
         writer.write_uint64(self.nar_size)
-        self.logs.to_writer(writer)
 
 
 @dataclass

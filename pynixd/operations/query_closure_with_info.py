@@ -50,17 +50,18 @@ class QueryClosureWithInfoResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         n = await reader.read_uint64()
         infos = []
         for _ in range(n):
             infos.append(await PathInfo.from_reader_keyed(reader))
-        return cls(logs=await OperationLogs.from_reader(reader), infos=infos)
+        return cls(logs=logs, infos=infos)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_uint64(len(self.infos))
         for info in self.infos:
             await info.to_writer_keyed(writer)
-        self.logs.to_writer(writer)
 
 
 @dataclass

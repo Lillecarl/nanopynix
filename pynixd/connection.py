@@ -23,10 +23,9 @@ from typing import cast
 import structlog
 
 from . import stderr, wire
-from .exceptions import BackendError, InfrastructureError
+from .exceptions import InfrastructureError
 from .operations.base import (
     OpRequest,
-    OperationLogs,
     Resp,
 )
 from .protocol import get_extension_features
@@ -185,44 +184,9 @@ class Connection:
         await request.to_writer(self.w, self.version)
         await self.w.drain()
 
-        msgs = OperationLogs()
-        async for msg in self.r.read_stderr():
-            msgs.add(msg)
-
-            # Real-time forwarding if client is provided
-            if client is not None:
-                # Logic for suppress_last: don't forward STDERR_LAST to client
-                # (but it's already filtered out by read_stderr, which only
-                # yields messages BEFORE the last one).
-                # Actually, read_stderr yields until LAST but doesn't yield LAST.
-                # We need to decide if we inject a LAST into the queue.
-                # Nix protocol: stderr.read_stream stops BEFORE LAST.
-                # We usually want to forward everything EXCEPT the final LAST
-                # if we are doing a sub-operation.
-                client.queue.put_nowait(msg)
-
-            if isinstance(msg, stderr.StderrError):
-                stderr_log.warning(
-                    "daemon_error",
-                    store_id=self.id,
-                    error_type=msg.error_type,
-                    error_msg=msg.msg,
-                )
-                if raise_on_error:
-                    raise BackendError(f"Backend error: {msg.msg}")
-
-        # If we are NOT suppressing last, and we have a client, we should
-        # arguably put a LAST in the client queue?
-        # Actually, the proxy loop writes its own LAST after the response payload.
-        # So Connection.call should usually NOT forward the remote's LAST.
-
         response = await response_type.from_reader(self.r, self.version)
-        response.logs = msgs
 
         log.debug("recv_op_done", store_id=self.id)
-        # response_type is ClassVar[type[OpResponse]] so from_reader
-        # returns OpResponse, not Resp. The actual type is correct at
-        # runtime — ClassVar can't reference a class type parameter.
         return cast(Resp, response)
 
     # ── Handshake ───────────────────────────────────────────────────

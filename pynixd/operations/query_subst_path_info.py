@@ -16,17 +16,18 @@ class QuerySubstPathInfoResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         found = await reader.read_uint64() != 0
         info = None
         if found:
             info = await SubstPathInfo.from_reader(reader, version)
-        return cls(logs=await OperationLogs.from_reader(reader), found=found, info=info)
+        return cls(logs=logs, found=found, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_uint64(1 if self.found else 0)
         if self.found and self.info is not None:
             await self.info.to_writer(writer, version)
-        self.logs.to_writer(writer)
 
 
 @dataclass

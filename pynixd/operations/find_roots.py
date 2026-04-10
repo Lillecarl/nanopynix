@@ -21,20 +21,21 @@ class FindRootsResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         n = await reader.read_uint64()
         roots = []
         for _ in range(n):
             link = await reader.read_string()
             target = await reader.read_string()
             roots.append(FindRootsEntry(link=link, target=target))
-        return cls(logs=await OperationLogs.from_reader(reader), roots=roots)
+        return cls(logs=logs, roots=roots)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_uint64(len(self.roots))
         for root in self.roots:
             writer.write_string(root.link)
             writer.write_string(root.target)
-        self.logs.to_writer(writer)
 
 
 @dataclass

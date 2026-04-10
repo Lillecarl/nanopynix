@@ -16,20 +16,21 @@ class QueryDerivationOutputMapResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         n = await reader.read_uint64()
         items: dict[str, StorePath] = {}
         for _ in range(n):
             k = await reader.read_string()
             v = await reader.read_string(StorePath)
             items[k] = v
-        return cls(logs=await OperationLogs.from_reader(reader), items=items)
+        return cls(logs=logs, items=items)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_uint64(len(self.items))
         for k, v in self.items.items():
             writer.write_string(k)
             writer.write_string(v)
-        self.logs.to_writer(writer)
 
 
 @dataclass

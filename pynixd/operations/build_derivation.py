@@ -39,8 +39,8 @@ class BuildDerivationResponse(OpResponse):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        await self.result.to_writer(writer, version)
         self.logs.to_writer(writer)
+        await self.result.to_writer(writer, version)
 
 
 @dataclass

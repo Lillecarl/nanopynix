@@ -76,20 +76,19 @@ class QueryRealisationResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         n = await reader.read_uint64()
         realisations = []
         for _ in range(n):
             realisation_json = await reader.read_string()
             realisations.append(json.loads(realisation_json))
-        return cls(
-            logs=await OperationLogs.from_reader(reader), realisations=realisations
-        )
+        return cls(logs=logs, realisations=realisations)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_uint64(len(self.realisations))
         for r in self.realisations:
             writer.write_string(json.dumps(r))
-        self.logs.to_writer(writer)
 
 
 @dataclass

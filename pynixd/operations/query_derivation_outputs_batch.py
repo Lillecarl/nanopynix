@@ -40,6 +40,7 @@ class DerivationOutputsBatchResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         n = await reader.read_uint64()
         outputs: dict[StorePath, dict[str, StorePath]] = {}
         for _ in range(n):
@@ -51,9 +52,10 @@ class DerivationOutputsBatchResponse(OpResponse):
                 path = await reader.read_string(StorePath)
                 drv_outputs[name] = path
             outputs[drv_path] = drv_outputs
-        return cls(logs=await OperationLogs.from_reader(reader), outputs=outputs)
+        return cls(logs=logs, outputs=outputs)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_uint64(len(self.outputs))
         for drv_path, drv_outputs in self.outputs.items():
             writer.write_string(drv_path)
@@ -61,7 +63,6 @@ class DerivationOutputsBatchResponse(OpResponse):
             for name, path in drv_outputs.items():
                 writer.write_string(name)
                 writer.write_string(path)
-        self.logs.to_writer(writer)
 
 
 @dataclass

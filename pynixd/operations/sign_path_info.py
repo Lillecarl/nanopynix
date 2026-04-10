@@ -27,12 +27,13 @@ class SignPathInfoResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> SignPathInfoResponse:
+        logs = await OperationLogs.from_reader(reader)
         info = await PathInfo.from_reader_keyed(reader)
-        return cls(logs=await OperationLogs.from_reader(reader), info=info)
+        return cls(logs=logs, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        await self.info.to_writer_keyed(writer)
         self.logs.to_writer(writer)
+        await self.info.to_writer_keyed(writer)
 
 
 @dataclass

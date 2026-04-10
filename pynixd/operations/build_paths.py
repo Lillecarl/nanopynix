@@ -17,6 +17,7 @@ from .base import (
     BuildResult,
     OpRequest,
     OpResponse,
+    OperationLogs,
 )
 from .build_derivation import BuildDerivationRequest, BuildDerivationResponse
 from .query_derivation_outputs_batch import QueryDerivationOutputsBatchRequest
@@ -143,11 +144,11 @@ class BuildPathsResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(value=await reader.read_uint64())
+        return cls(logs=await OperationLogs.from_reader(reader), value=await reader.read_uint64())
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_uint64(self.value)
         self.logs.to_writer(writer)
+        writer.write_uint64(self.value)
 
 
 @dataclass
@@ -222,20 +223,21 @@ class KeyedBuildResultsResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         n = await reader.read_uint64()
         results = []
         for _ in range(n):
             derived_path = await reader.read_string(DerivedPath)
             result = await BuildResult.from_reader(reader, version)
             results.append(KeyedBuildResult(derived_path=derived_path, result=result))
-        return cls(results=results)
+        return cls(logs=logs, results=results)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_uint64(len(self.results))
         for entry in self.results:
             writer.write_string(entry.derived_path)
             await entry.result.to_writer(writer, version)
-        self.logs.to_writer(writer)
 
 
 @dataclass

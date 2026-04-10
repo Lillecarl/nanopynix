@@ -30,8 +30,8 @@ class QueryPathFromHashPartResponse(OpResponse):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string(self.value)
         self.logs.to_writer(writer)
+        writer.write_string(self.value)
 
 
 @dataclass

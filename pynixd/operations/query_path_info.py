@@ -32,17 +32,18 @@ class QueryPathInfoResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         valid = await reader.read_uint64() != 0
         info = None
         if valid:
             info = await PathInfo.from_reader_unkeyed(reader)
-        return cls(logs=await OperationLogs.from_reader(reader), valid=valid, info=info)
+        return cls(logs=logs, valid=valid, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_uint64(1 if self.valid else 0)
         if self.valid and self.info is not None:
             await self.info.to_writer_unkeyed(writer)
-        self.logs.to_writer(writer)
 
 
 @dataclass

@@ -26,18 +26,19 @@ class CollectGarbageResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
         return cls(
-            logs=await OperationLogs.from_reader(reader),
+            logs=logs,
             paths_deleted=await reader.read_string_set(StorePath),
             bytes_freed=await reader.read_uint64(),
             _obsolete=await reader.read_uint64(),
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logs.to_writer(writer)
         writer.write_string_set(self.paths_deleted)
         writer.write_uint64(self.bytes_freed)
         writer.write_uint64(self._obsolete)
-        self.logs.to_writer(writer)
 
 
 @dataclass
