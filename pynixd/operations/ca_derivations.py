@@ -36,7 +36,7 @@ class RegisterDrvOutputResponse(OpResponse):
         return cls()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        pass
+        self.logs.to_writer(writer)
 
 
 @dataclass
@@ -86,6 +86,7 @@ class QueryRealisationResponse(OpResponse):
         writer.write_uint64(len(self.realisations))
         for r in self.realisations:
             writer.write_string(json.dumps(r))
+        self.logs.to_writer(writer)
 
 
 @dataclass

@@ -35,6 +35,7 @@ class CollectGarbageResponse(OpResponse):
         writer.write_string_set(self.paths_deleted)
         writer.write_uint64(self.bytes_freed)
         writer.write_uint64(self._obsolete)
+        self.logs.to_writer(writer)
 
 
 @dataclass

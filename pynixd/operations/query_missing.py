@@ -40,6 +40,7 @@ class QueryMissingResponse(OpResponse):
         writer.write_string_set(self.unknown)
         writer.write_uint64(self.download_size)
         writer.write_uint64(self.nar_size)
+        self.logs.to_writer(writer)
 
 
 @dataclass

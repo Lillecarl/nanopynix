@@ -42,6 +42,7 @@ class QueryPathInfoResponse(OpResponse):
         writer.write_uint64(1 if self.valid else 0)
         if self.valid and self.info is not None:
             await self.info.to_writer_unkeyed(writer)
+        self.logs.to_writer(writer)
 
 
 @dataclass

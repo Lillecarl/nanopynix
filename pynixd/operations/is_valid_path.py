@@ -26,6 +26,7 @@ class IsValidPathResponse(OpResponse):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(1 if self.valid else 0)
+        self.logs.to_writer(writer)
 
 
 @dataclass

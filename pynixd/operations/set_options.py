@@ -28,7 +28,7 @@ class SetOptionsResponse(OpResponse):
         return cls()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        pass
+        self.logs.to_writer(writer)
 
 
 @dataclass

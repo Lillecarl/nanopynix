@@ -57,6 +57,7 @@ class QueryPathInfosResponse(OpResponse):
         writer.write_uint64(len(self.infos))
         for info in self.infos.values():
             await info.to_writer_keyed(writer)
+        self.logs.to_writer(writer)
 
 
 @dataclass

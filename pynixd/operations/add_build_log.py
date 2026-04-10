@@ -20,6 +20,7 @@ class AddBuildLogResponse(OpResponse):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.value)
+        self.logs.to_writer(writer)
 
 
 @dataclass

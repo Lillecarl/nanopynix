@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from ..store_path import StorePath
+from ..stderr import read_stream
 from ..wire import NixReader, NixWriter, forward_framed
-from .base import OpRequest, OpResponse, PathInfo
+from .base import OpRequest, OpResponse, OperationLogs, PathInfo
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -27,7 +28,7 @@ class AddToStoreNarResponse(OpResponse):
         return cls()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        pass
+        self.logs.to_writer(writer)
 
 
 @dataclass
@@ -97,10 +98,15 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         async with proxy.local_store.transfer_conn() as conn:
             path = await cls.forward(proxy.r, conn.w)
             await conn.w.drain()
-            await conn.r.drain_stderr()
-            await AddToStoreNarResponse.from_reader(conn.r, conn.version)
+
+            logs = OperationLogs()
+            async for msg in read_stream(conn.r):
+                logs.add(msg)
+
+            response = await AddToStoreNarResponse.from_reader(conn.r, conn.version)
+            response.logs = logs
             proxy.local_store.add_known_path(path)
-        return AddToStoreNarResponse()
+            return response
 
     @classmethod
     async def forward(cls, src: NixReader, dst: NixWriter) -> StorePath:

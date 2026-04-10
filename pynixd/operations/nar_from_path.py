@@ -10,11 +10,13 @@ import structlog
 
 from .. import wire
 from ..store_path import StorePath
+from ..stderr import read_stream
 from ..wire import NixReader, NixWriter, _CHUNK_SIZE
 from .base import (
     ByteCollector,
     OpRequest,
     OpResponse,
+    OperationLogs,
 )
 from .query_path_info import QueryPathInfoRequest
 
@@ -40,6 +42,7 @@ class NarFromPathResponse(OpResponse):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write(self.nar_data)
+        self.logs.to_writer(writer)
 
 
 @dataclass
@@ -108,15 +111,16 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
             size=nar_size,
         )
 
-        await proxy.client.flush()
-        proxy.w.write_uint64(wire.STDERR_LAST)
-
         async with proxy.local_store.transfer_conn() as conn:
-            # We explicitly write OpRequest fields here because handle is special.
-            # However, we can also just create a temporary request.
             await cls(path=path).to_writer(conn.w, conn.version)
             await conn.w.drain()
-            await conn.r.drain_stderr()
+
+            logs = OperationLogs()
+            async for msg in read_stream(conn.r):
+                logs.add(msg)
+
+            await proxy.client.flush()
+            logs.to_writer(proxy.w)
 
             if nar_size > 0:
                 remaining = nar_size

@@ -26,6 +26,7 @@ class QuerySubstPathInfoResponse(OpResponse):
         writer.write_uint64(1 if self.found else 0)
         if self.found and self.info is not None:
             await self.info.to_writer(writer, version)
+        self.logs.to_writer(writer)
 
 
 @dataclass

@@ -23,6 +23,7 @@ class AddPermRootResponse(OpResponse):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.gc_root)
+        self.logs.to_writer(writer)
 
 
 @dataclass

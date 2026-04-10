@@ -235,6 +235,7 @@ class KeyedBuildResultsResponse(OpResponse):
         for entry in self.results:
             writer.write_string(entry.derived_path)
             await entry.result.to_writer(writer, version)
+        self.logs.to_writer(writer)
 
 
 @dataclass

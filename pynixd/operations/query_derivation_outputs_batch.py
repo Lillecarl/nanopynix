@@ -61,6 +61,7 @@ class DerivationOutputsBatchResponse(OpResponse):
             for name, path in drv_outputs.items():
                 writer.write_string(name)
                 writer.write_string(path)
+        self.logs.to_writer(writer)
 
 
 @dataclass

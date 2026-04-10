@@ -34,6 +34,7 @@ class FindRootsResponse(OpResponse):
         for root in self.roots:
             writer.write_string(root.link)
             writer.write_string(root.target)
+        self.logs.to_writer(writer)
 
 
 @dataclass

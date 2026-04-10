@@ -34,6 +34,7 @@ class QuerySubstPathInfosResponse(OpResponse):
         for entry in self.entries:
             writer.write_string(entry.path)
             await entry.info.to_writer(writer, version)
+        self.logs.to_writer(writer)
 
 
 @dataclass

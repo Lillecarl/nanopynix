@@ -29,6 +29,7 @@ class QueryDerivationOutputMapResponse(OpResponse):
         for k, v in self.items.items():
             writer.write_string(k)
             writer.write_string(v)
+        self.logs.to_writer(writer)
 
 
 @dataclass

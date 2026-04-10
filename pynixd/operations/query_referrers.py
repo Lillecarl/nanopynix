@@ -20,6 +20,7 @@ class QueryReferrersResponse(OpResponse):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(self.paths)
+        self.logs.to_writer(writer)
 
 
 @dataclass

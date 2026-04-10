@@ -31,6 +31,7 @@ class AddToStoreResponse(OpResponse):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         await self.info.to_writer_keyed(writer)
+        self.logs.to_writer(writer)
 
 
 @dataclass
