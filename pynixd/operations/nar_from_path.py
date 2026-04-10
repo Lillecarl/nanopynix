@@ -38,7 +38,9 @@ class NarFromPathResponse(OpResponse):
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         collector = ByteCollector()
         await wire.stream_parse_nar(reader, collector, capture=False)
-        return cls(nar_data=collector.getvalue())
+        return cls(
+            logs=await OperationLogs.from_reader(reader), nar_data=collector.getvalue()
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write(self.nar_data)

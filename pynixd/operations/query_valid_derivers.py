@@ -7,7 +7,7 @@ from typing import ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 
 
 @dataclass
@@ -16,7 +16,10 @@ class QueryValidDeriversResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(paths=await reader.read_string_set(StorePath))
+        return cls(
+            logs=await OperationLogs.from_reader(reader),
+            paths=await reader.read_string_set(StorePath),
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(self.paths)

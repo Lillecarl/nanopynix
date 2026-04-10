@@ -10,6 +10,7 @@ from ..wire import NixReader, NixWriter
 from .base import (
     OpRequest,
     OpResponse,
+    OperationLogs,
 )
 
 if TYPE_CHECKING:
@@ -26,6 +27,7 @@ class CollectGarbageResponse(OpResponse):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
+            logs=await OperationLogs.from_reader(reader),
             paths_deleted=await reader.read_string_set(StorePath),
             bytes_freed=await reader.read_uint64(),
             _obsolete=await reader.read_uint64(),

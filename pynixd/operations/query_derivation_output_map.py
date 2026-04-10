@@ -7,7 +7,7 @@ from typing import ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 
 
 @dataclass
@@ -22,7 +22,7 @@ class QueryDerivationOutputMapResponse(OpResponse):
             k = await reader.read_string()
             v = await reader.read_string(StorePath)
             items[k] = v
-        return cls(items=items)
+        return cls(logs=await OperationLogs.from_reader(reader), items=items)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(len(self.items))

@@ -10,7 +10,7 @@ import structlog
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, PathInfo
+from .base import OpRequest, OpResponse, OperationLogs, PathInfo
 from .query_path_info import QueryPathInfoRequest
 
 QUERY_PATH_INFOS_BATCH = """
@@ -51,7 +51,7 @@ class QueryPathInfosResponse(OpResponse):
         for _ in range(n):
             info = await PathInfo.from_reader_keyed(reader)
             infos[info.path] = info
-        return cls(infos=infos)
+        return cls(logs=await OperationLogs.from_reader(reader), infos=infos)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(len(self.infos))

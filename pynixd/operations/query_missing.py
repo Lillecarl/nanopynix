@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..derived_path import DerivedPath
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 from .query_valid_paths import QueryValidPathsRequest
 
 if TYPE_CHECKING:
@@ -27,6 +27,7 @@ class QueryMissingResponse(OpResponse):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
+            logs=await OperationLogs.from_reader(reader),
             will_build=await reader.read_string_set(StorePath),
             will_substitute=await reader.read_string_set(StorePath),
             unknown=await reader.read_string_set(StorePath),

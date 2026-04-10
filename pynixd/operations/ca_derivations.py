@@ -18,6 +18,7 @@ from ..wire import NixReader, NixWriter
 from .base import (
     OpRequest,
     OpResponse,
+    OperationLogs,
 )
 
 # ── DrvOutput ──────────────────────────────────────────────────────────
@@ -33,7 +34,7 @@ DrvOutput = str
 class RegisterDrvOutputResponse(OpResponse):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls()
+        return cls(logs=await OperationLogs.from_reader(reader))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logs.to_writer(writer)
@@ -80,7 +81,9 @@ class QueryRealisationResponse(OpResponse):
         for _ in range(n):
             realisation_json = await reader.read_string()
             realisations.append(json.loads(realisation_json))
-        return cls(realisations=realisations)
+        return cls(
+            logs=await OperationLogs.from_reader(reader), realisations=realisations
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(len(self.realisations))

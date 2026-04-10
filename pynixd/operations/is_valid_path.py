@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 
 IS_VALID_PATH = "SELECT 1 FROM ValidPaths WHERE path = ? LIMIT 1"
 
@@ -22,7 +22,10 @@ class IsValidPathResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(valid=await reader.read_uint64() != 0)
+        return cls(
+            logs=await OperationLogs.from_reader(reader),
+            valid=await reader.read_uint64() != 0,
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(1 if self.valid else 0)

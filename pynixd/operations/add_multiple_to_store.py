@@ -10,7 +10,7 @@ import structlog
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, _nar_pad
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
@@ -22,7 +22,7 @@ log = structlog.get_logger(__name__)
 class AddMultipleToStoreResponse(OpResponse):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls()
+        return cls(logs=await OperationLogs.from_reader(reader))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logs.to_writer(writer)

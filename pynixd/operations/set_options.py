@@ -11,6 +11,7 @@ from ..wire import NixReader, NixWriter
 from .base import (
     OpRequest,
     OpResponse,
+    OperationLogs,
 )
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ logging.getLogger("pynixd.operations.SetOptionsRequest").setLevel(logging.WARNIN
 class SetOptionsResponse(OpResponse):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls()
+        return cls(logs=await OperationLogs.from_reader(reader))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logs.to_writer(writer)

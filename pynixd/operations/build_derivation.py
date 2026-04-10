@@ -15,6 +15,7 @@ from .base import (
     BuildResult,
     OpRequest,
     OpResponse,
+    OperationLogs,
 )
 from .query_closure import QueryClosureRequest
 from .query_valid_paths import QueryValidPathsRequest
@@ -32,7 +33,10 @@ class BuildDerivationResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(result=await BuildResult.from_reader(reader, version))
+        return cls(
+            logs=await OperationLogs.from_reader(reader),
+            result=await BuildResult.from_reader(reader, version),
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         await self.result.to_writer(writer, version)

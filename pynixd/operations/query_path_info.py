@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, PathInfo
+from .base import OpRequest, OpResponse, OperationLogs, PathInfo
 
 QUERY_PATH_INFO = """
 SELECT path, deriver, hash, registrationTime, narSize, ultimate, sigs, ca
@@ -36,7 +36,7 @@ class QueryPathInfoResponse(OpResponse):
         info = None
         if valid:
             info = await PathInfo.from_reader_unkeyed(reader)
-        return cls(valid=valid, info=info)
+        return cls(logs=await OperationLogs.from_reader(reader), valid=valid, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(1 if self.valid else 0)

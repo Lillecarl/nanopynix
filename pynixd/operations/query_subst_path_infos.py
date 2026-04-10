@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, SubstPathInfo
+from .base import OpRequest, OpResponse, OperationLogs, SubstPathInfo
 
 
 @dataclass
@@ -27,7 +27,7 @@ class QuerySubstPathInfosResponse(OpResponse):
             path = await reader.read_string()
             info = await SubstPathInfo.from_reader(reader, version)
             entries.append(SubstPathInfoEntry(path=path, info=info))
-        return cls(entries=entries)
+        return cls(logs=await OperationLogs.from_reader(reader), entries=entries)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(len(self.entries))

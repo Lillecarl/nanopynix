@@ -11,7 +11,7 @@ import structlog
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from ..drv_parser import read_drv_file
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 
 QUERY_DERIVATION_OUTPUTS_BATCH = """
 SELECT vp_drv.path, do.id, do.path
@@ -51,7 +51,7 @@ class DerivationOutputsBatchResponse(OpResponse):
                 path = await reader.read_string(StorePath)
                 drv_outputs[name] = path
             outputs[drv_path] = drv_outputs
-        return cls(outputs=outputs)
+        return cls(logs=await OperationLogs.from_reader(reader), outputs=outputs)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(len(self.outputs))

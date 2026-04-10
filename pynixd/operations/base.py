@@ -201,6 +201,16 @@ class OperationLogs:
             msg.to_writer(writer)
         writer.write_uint64(wire.STDERR_LAST)
 
+    @classmethod
+    async def from_reader(cls, reader: NixReader) -> Self:
+        """Read stderr messages until STDERR_LAST from reader."""
+        from ..stderr import read_stream
+
+        logs = cls()
+        async for msg in read_stream(reader):
+            logs.add(msg)
+        return logs
+
 
 @dataclass
 class OpResponse(ABC):

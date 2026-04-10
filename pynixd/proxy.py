@@ -150,7 +150,6 @@ class DaemonProxy:
                 if response is not None:
                     await self.client.flush()
                     await response.to_writer(self.w, self.version)
-                    response.logs.to_writer(self.w)
                     await self.w.drain()
                 # else: already handled (streaming, error, etc.)
 

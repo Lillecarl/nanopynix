@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 
 if TYPE_CHECKING:
     pass
@@ -19,7 +19,10 @@ class AddSignaturesResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(value=await reader.read_uint64())
+        return cls(
+            logs=await OperationLogs.from_reader(reader),
+            value=await reader.read_uint64(),
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.value)

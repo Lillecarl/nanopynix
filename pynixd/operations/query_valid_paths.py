@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from .. import wire
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 
 QUERY_VALID_PATHS_BATCH = (
     "SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))"
@@ -26,7 +26,10 @@ class QueryValidPathsResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(paths=await reader.read_string_set(StorePath))
+        return cls(
+            logs=await OperationLogs.from_reader(reader),
+            paths=await reader.read_string_set(StorePath),
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string_set(self.paths)

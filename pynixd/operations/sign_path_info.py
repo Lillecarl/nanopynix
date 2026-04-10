@@ -11,7 +11,7 @@ import structlog
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
 from ..wire import NixReader, NixWriter
 from .add_signatures import AddSignaturesRequest
-from .base import OpRequest, OpResponse, PathInfo
+from .base import OpRequest, OpResponse, OperationLogs, PathInfo
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -28,7 +28,7 @@ class SignPathInfoResponse(OpResponse):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> SignPathInfoResponse:
         info = await PathInfo.from_reader_keyed(reader)
-        return cls(info=info)
+        return cls(logs=await OperationLogs.from_reader(reader), info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         await self.info.to_writer_keyed(writer)

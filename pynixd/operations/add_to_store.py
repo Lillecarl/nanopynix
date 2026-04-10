@@ -11,7 +11,7 @@ from pynixd.operations.sign_path_info import SignPathInfoRequest
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
-from .base import OpRequest, OpResponse, PathInfo
+from .base import OpRequest, OpResponse, OperationLogs, PathInfo
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
@@ -27,7 +27,10 @@ class AddToStoreResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(info=await PathInfo.from_reader_keyed(reader))
+        return cls(
+            logs=await OperationLogs.from_reader(reader),
+            info=await PathInfo.from_reader_keyed(reader),
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         await self.info.to_writer_keyed(writer)

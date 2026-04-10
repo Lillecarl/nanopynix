@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -19,7 +19,10 @@ class AddPermRootResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(gc_root=await reader.read_string())
+        return cls(
+            logs=await OperationLogs.from_reader(reader),
+            gc_root=await reader.read_string(),
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.gc_root)

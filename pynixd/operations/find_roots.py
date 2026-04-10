@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse
+from .base import OpRequest, OpResponse, OperationLogs
 
 
 @dataclass
@@ -27,7 +27,7 @@ class FindRootsResponse(OpResponse):
             link = await reader.read_string()
             target = await reader.read_string()
             roots.append(FindRootsEntry(link=link, target=target))
-        return cls(roots=roots)
+        return cls(logs=await OperationLogs.from_reader(reader), roots=roots)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(len(self.roots))
