@@ -20,7 +20,7 @@ from tests.conftest import (
     _prune_client_processor,
     get_test_store_kwargs,
     rmtree_robust,
-    run_logged,
+    run_subproc,
 )
 
 log = structlog.get_logger(__name__)
@@ -59,7 +59,7 @@ async def test_throughput_local() -> None:
     ]
 
     start = time.perf_counter()
-    rc = await run_logged(cmd, env=TEST_ENV)
+    rc = await run_subproc(cmd, env=TEST_ENV)
     elapsed = time.perf_counter() - start
 
     assert rc == 0, "Local baseline build failed"
@@ -127,7 +127,7 @@ async def test_throughput_daemon() -> None:
         ]
 
         start = time.perf_counter()
-        rc = await run_logged(cmd, env=TEST_ENV | {"NIX_REMOTE": remote_uri})
+        rc = await run_subproc(cmd, env=TEST_ENV | {"NIX_REMOTE": remote_uri})
         elapsed = time.perf_counter() - start
 
         assert rc == 0, "Daemon baseline build failed"
@@ -212,7 +212,7 @@ async def test_throughput_pynixd(test_log_dir: Path) -> None:
                 ]
 
                 start = time.perf_counter()
-                rc = await run_logged(
+                rc = await run_subproc(
                     cmd,
                     env=TEST_ENV
                     | {

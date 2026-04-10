@@ -14,7 +14,7 @@ from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
-from tests.conftest import STORE_PREFIX, run_captured
+from tests.conftest import STORE_PREFIX, run_subproc
 
 log = structlog.get_logger(__name__)
 
@@ -123,7 +123,7 @@ async def test_cache_as_substituter() -> None:
             "false",
         ]
 
-        rc, stdout, stderr = await run_captured(cmd)
+        rc, stdout, stderr, _ = await run_subproc(cmd)
         assert rc == 0, f"Copy via cache failed:\n{stderr}"
 
         # Verify it exists in the new store
@@ -135,7 +135,7 @@ async def test_cache_as_substituter() -> None:
             f"file://{str(subst_store_path)}",
             str(target_path),
         ]
-        rc, stdout, stderr = await run_captured(cmd)
+        rc, stdout, stderr, _ = await run_subproc(cmd)
         assert rc == 0, f"path check failed:\n{stderr}"
 
 

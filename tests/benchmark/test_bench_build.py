@@ -30,7 +30,7 @@ from conftest import (
     _prune_client_processor,
     _record,
     rmtree_robust,
-    run_captured,
+    run_subproc,
 )
 from environs import env
 from pyinstrument.renderers import ConsoleRenderer
@@ -83,7 +83,7 @@ async def run_no_daemon(
             target,
         ]
         start = time.perf_counter()
-        rc, stdout, stderr = await run_captured(cmd, env=extra_env)
+        rc, stdout, stderr, _ = await run_subproc(cmd, env=extra_env)
         elapsed = time.perf_counter() - start
         assert rc == 0, f"Local baseline build failed:\n{stderr}"
         log.info("build_completed", elapsed=elapsed)
@@ -165,7 +165,7 @@ async def run_daemon(
             target,
         ]
         start = time.perf_counter()
-        rc, stdout, stderr = await run_captured(cmd, env=extra_env)
+        rc, stdout, stderr, _ = await run_subproc(cmd, env=extra_env)
         elapsed = time.perf_counter() - start
         assert rc == 0, f"Daemon baseline build failed:\n{stderr}"
         log.info("build_completed", elapsed=elapsed)
@@ -277,7 +277,7 @@ async def run_pynixd(
                 target,
             ]
             start = time.perf_counter()
-            rc, stdout, stderr = await run_captured(cmd, env=local_build_env)
+            rc, stdout, stderr, _ = await run_subproc(cmd, env=local_build_env)
             elapsed = time.perf_counter() - start
             assert rc == 0, f"pynixd bench build failed:\n{stderr}"
             log.info("build_completed", elapsed=elapsed)

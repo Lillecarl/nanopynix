@@ -16,7 +16,7 @@ from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
-    run_captured,
+    run_subproc,
     set_log_levels,
 )
 
@@ -58,7 +58,7 @@ async def test_builders(test_log_dir: Path) -> None:
                 "--max-jobs",
                 "0",
             ]
-            rc, stdout, stderr = await run_captured(cmd)
+            rc, stdout, stderr, _ = await run_subproc(cmd)
             assert rc == 0, f"""build failed:
 {stderr}"""
     finally:
@@ -109,7 +109,7 @@ async def test_store(test_log_dir: Path) -> None:
                     "--no-link",
                     "--print-out-paths",
                 ]
-                rc, stdout, stderr = await run_captured(cmd)
+                rc, stdout, stderr, _ = await run_subproc(cmd)
                 assert rc == 0, f"""build failed:
 {stderr}"""
     finally:

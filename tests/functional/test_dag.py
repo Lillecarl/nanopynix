@@ -14,7 +14,7 @@ from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
-    run_captured,
+    run_subproc,
     set_log_levels,
 )
 
@@ -50,7 +50,7 @@ async def test_dag_builders() -> None:
             "--no-link",
             "--print-out-paths",
         ]
-        rc, stdout, stderr = await run_captured(cmd)
+        rc, stdout, stderr, _ = await run_subproc(cmd)
         assert rc == 0, f"""build failed:
 {stderr}"""
 
@@ -89,6 +89,6 @@ async def test_dag_store() -> None:
                 "--no-link",
                 "--print-out-paths",
             ]
-            rc, stdout, stderr = await run_captured(cmd)
+            rc, stdout, stderr, _ = await run_subproc(cmd)
             assert rc == 0, f"""build failed:
 {stderr}"""

@@ -16,7 +16,7 @@ from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
 from pynixd.testing import get_test_value
-from tests.conftest import NIX_BIN, get_test_store_kwargs, run_captured
+from tests.conftest import NIX_BIN, get_test_store_kwargs, run_subproc
 
 log = structlog.get_logger(__name__)
 
@@ -45,7 +45,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
 
     # Add a path to store B
     cmd = [str(NIX_BIN), "store", "add-path", "--store", str(store_b_path), "README.md"]
-    rc, stdout, stderr = await run_captured(cmd)
+    rc, stdout, stderr, _ = await run_subproc(cmd)
     assert rc == 0
     path = StorePath(stdout.strip())
 

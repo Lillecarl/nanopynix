@@ -100,9 +100,7 @@ def _prune_client_processor(frame, options):
 
     for child in list(frame.children):
         if child.function and (
-            "run_nix_build" in child.function
-            or "run_captured" in child.function
-            or "run_logged" in child.function
+            "run_nix_build" in child.function or "run_subproc" in child.function
         ):
             child.remove_from_parent()
         else:
@@ -237,36 +235,28 @@ def cleanup_stores():
     yield
 
 
-async def run_captured(cmd: list[str], **kwargs) -> tuple[int, str, str]:
-    """Run a command and capture stdout/stderr."""
-    run_env = os.environ.copy()
-    run_env.update(kwargs.pop("env", {}))
-    if "NIX_SSHOPTS" not in run_env:
-        run_env["NIX_SSHOPTS"] = (
-            "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-        )
+async def run_subproc(
+    cmd: list[str],
+    print: bool = True,
+    **kwargs,
+) -> tuple[int, str, str, str]:
+    """Run a command, streaming stdout/stderr through structlog in real-time.
 
-    log.debug("run_captured", cmd=shlex.join(cmd), env=run_env)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        env=run_env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        **kwargs,
-    )
-    stdout, stderr = await proc.communicate()
-    return proc.returncode or 0, stdout.decode(), stderr.decode()
+    Args:
+        cmd: Command and arguments to run
+        print: If True, stream output to structlog in real-time
+        **kwargs: Additional arguments passed to create_subprocess_exec
 
-
-async def run_logged(cmd: list[str], **kwargs) -> int:
-    """Run a command, streaming stdout/stderr through structlog in real-time."""
+    Returns:
+        tuple of (returncode, stdout, stderr, combined)
+    """
     run_env = kwargs.pop("env", {})
     if "NIX_SSHOPTS" not in run_env:
         run_env["NIX_SSHOPTS"] = (
             "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
         )
 
-    log.debug("run_logged", cmd=shlex.join(cmd), env=run_env)
+    log.debug("run_subproc", cmd=shlex.join(cmd), env=run_env)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         env=os.environ.copy() | run_env,
@@ -275,18 +265,30 @@ async def run_logged(cmd: list[str], **kwargs) -> int:
         **kwargs,
     )
 
-    async def stream(name: str, pipe):
+    stdout: list[str] = []
+    stderr: list[str] = []
+    stdboth: list[str] = []
+
+    async def stream(name: str, accumulator: list[str], pipe) -> None:
         while True:
             line = await pipe.readline()
+            accumulator.append(line)
+            stdboth.append(line)
             if not line:
                 break
-            log.info(name, message=line.decode().rstrip())
+            if print:
+                log.info(name, message=line.decode().rstrip())
 
     await asyncio.gather(
-        stream("stdout", proc.stdout),
-        stream("stderr", proc.stderr),
+        stream("stdout", stdout, proc.stdout),
+        stream("stderr", stderr, proc.stderr),
     )
-    return proc.returncode or 0
+    return (
+        proc.returncode or 0,
+        "".join(stdout),
+        "".join(stderr),
+        "".join(stdboth),
+    )
 
 
 @pytest.fixture(scope="session")
