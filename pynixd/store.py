@@ -355,7 +355,6 @@ class Store(ABC):
             )
 
         await fw.finalize()
-        await dst_conn.r.drain_stderr()
         await req.response_type.from_reader(dst_conn.r, dst_conn.version)
 
     @classmethod
@@ -426,7 +425,6 @@ class Store(ABC):
         async with self.transfer_conn() as dst_conn, src.transfer_conn() as src_conn:
             await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
             await src_conn.w.drain()
-            await src_conn.r.drain_stderr()
 
             nar_request = AddToStoreNarRequest(
                 info=info,
@@ -441,7 +439,6 @@ class Store(ABC):
                 info.nar_size,
             )
 
-            await dst_conn.r.drain_stderr()
             await nar_request.response_type.from_reader(dst_conn.r, dst_conn.version)
 
     @property

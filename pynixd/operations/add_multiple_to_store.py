@@ -57,7 +57,6 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         async with proxy.local_store.transfer_conn() as conn:
             paths = await cls.forward(proxy.r, conn.w)
             await conn.w.drain()
-            await conn.r.drain_stderr()
             await AddMultipleToStoreResponse.from_reader(conn.r, conn.version)
             proxy.local_store.add_known_paths(set(paths))
         return AddMultipleToStoreResponse()

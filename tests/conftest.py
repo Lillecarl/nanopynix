@@ -272,12 +272,13 @@ async def run_subproc(
     async def stream(name: str, accumulator: list[str], pipe) -> None:
         while True:
             line = await pipe.readline()
-            accumulator.append(line)
-            stdboth.append(line)
+            decoded_line = line.decode()
+            accumulator.append(decoded_line)
+            stdboth.append(decoded_line)
             if not line:
                 break
             if print:
-                log.info(name, message=line.decode().rstrip())
+                log.info(name, message=decoded_line.rstrip())
 
     await asyncio.gather(
         stream("stdout", stdout, proc.stdout),

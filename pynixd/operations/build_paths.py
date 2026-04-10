@@ -144,7 +144,10 @@ class BuildPathsResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(logs=await OperationLogs.from_reader(reader), value=await reader.read_uint64())
+        return cls(
+            logs=await OperationLogs.from_reader(reader),
+            value=await reader.read_uint64(),
+        )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logs.to_writer(writer)
