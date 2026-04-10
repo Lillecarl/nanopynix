@@ -8,6 +8,7 @@ from pathlib import Path
 import pyinstrument
 import structlog
 from pyinstrument.renderers import ConsoleRenderer
+import asyncio
 
 from pynixd import Server
 from pynixd.instance import NixImplementation
@@ -93,25 +94,27 @@ async def test_store(test_log_dir: Path) -> None:
     # DEBUG output is NOT the cause of any test failure. Do NOT remove this
     # silencing unless you want to drown the AI in thousands of log lines.
     try:
-        with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
-            async with Server(
-                local_store=local_store, stores={"builder": builder_store}, ssh_port=0
-            ) as server:
-                uri = server.uri(implementation=NixImplementation.NIX)
-                cmd = [
-                    str(NIX_BIN),
-                    "build",
-                    "--store",
-                    uri,
-                    "--file",
-                    str(test_nix),
-                    "simple",
-                    "--no-link",
-                    "--print-out-paths",
-                ]
-                rc, stdout, stderr, _ = await run_subproc(cmd)
-                assert rc == 0, f"""build failed:
-{stderr}"""
+        async with asyncio.timeout(60):
+            with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
+                async with Server(
+                    local_store=local_store,
+                    stores={"builder": builder_store},
+                    ssh_port=0,
+                ) as server:
+                    uri = server.uri(implementation=NixImplementation.NIX)
+                    cmd = [
+                        str(NIX_BIN),
+                        "build",
+                        "--store",
+                        uri,
+                        "--file",
+                        str(test_nix),
+                        "simple",
+                        "--no-link",
+                        "--print-out-paths",
+                    ]
+                    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+                    assert rc == 0, f"build failed:\n{stdboth}"
     finally:
         profiler.stop()
         session = profiler.last_session
