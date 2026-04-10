@@ -28,10 +28,14 @@ from aiohttp import web
 from passlib.apache import HtpasswdFile
 
 from .local_store_db import LocalStoreDB
+from .operations.add_to_store_nar import AddToStoreNarRequest
+from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_path_from_hash_part import QueryPathFromHashPartRequest
 from .operations.query_path_info import QueryPathInfoRequest
+from .operations.base import PathInfo
 from .store import Store
 from .store_path import StorePath
+from .wire import NixWriter
 
 log = structlog.get_logger(__name__)
 
@@ -193,8 +197,6 @@ class BinaryCacheServer:
         await response.prepare(request)
 
         try:
-            from .operations.nar_from_path import NarFromPathRequest
-
             await self.store.execute(
                 NarFromPathRequest(
                     path=path,
@@ -252,8 +254,6 @@ class BinaryCacheServer:
 
         content = await request.text()
 
-        from .operations.base import PathInfo
-
         try:
             info = PathInfo.from_narinfo(content)
         except Exception as e:
@@ -290,9 +290,6 @@ class BinaryCacheServer:
             )
 
         # Now add it to the store
-        from .operations.add_to_store_nar import AddToStoreNarRequest
-        from .wire import NixWriter
-
         async def provide_nar(writer: NixWriter):
             # We need to wrap the raw NAR in Nix framing (framed NAR data)
             framed = writer.framed()

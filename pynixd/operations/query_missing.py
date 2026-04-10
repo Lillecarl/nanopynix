@@ -9,6 +9,7 @@ from ..derived_path import DerivedPath
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
+from .query_valid_paths import QueryValidPathsRequest
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -73,8 +74,6 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         if resp.will_substitute:
             try:
                 async with store.transfer_conn() as conn:
-                    from .query_valid_paths import QueryValidPathsRequest
-
                     valid = await conn.call(
                         QueryValidPathsRequest(
                             paths=resp.will_substitute,

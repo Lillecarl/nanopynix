@@ -16,6 +16,9 @@ from .base import (
     OpRequest,
     OpResponse,
 )
+from .query_closure import QueryClosureRequest
+from .query_valid_paths import QueryValidPathsRequest
+from ..stderr import StderrNext
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
@@ -75,15 +78,10 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             set(request.derivation.input_srcs) | {request.drv_path}
         ) - proxy.local_store.known_paths
         if unknown:
-            from .query_valid_paths import QueryValidPathsRequest
-
             valid_resp = await proxy.local_store.execute(
                 QueryValidPathsRequest(paths=unknown)
             )
             proxy.local_store.add_known_paths(valid_resp.paths, update_regtime=False)
-
-        from .query_closure import QueryClosureRequest
-        from .query_valid_paths import QueryValidPathsRequest
 
         existing_inputs = request.derivation.input_srcs & proxy.local_store.known_paths
         unbuilt_inputs = request.derivation.input_srcs - proxy.local_store.known_paths
@@ -122,8 +120,6 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         if isinstance(response, BuildDerivationResponse):
             if response.result.status != 0 and response.result.error_msg:
-                from ..stderr import StderrNext
-
                 proxy.client.queue.put_nowait(
                     StderrNext(text=f"pynixd: {response.result.error_msg}\n")
                 )

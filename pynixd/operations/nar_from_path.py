@@ -10,12 +10,13 @@ import structlog
 
 from .. import wire
 from ..store_path import StorePath
-from ..wire import NixReader, NixWriter
+from ..wire import NixReader, NixWriter, _CHUNK_SIZE
 from .base import (
     ByteCollector,
     OpRequest,
     OpResponse,
 )
+from .query_path_info import QueryPathInfoRequest
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -66,8 +67,6 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
         suppress_last: bool = False,
     ) -> NarFromPathResponse:
         if self.nar_size > 0:
-            from ..wire import _CHUNK_SIZE
-
             async with store.transfer_conn() as conn:
                 await self.to_writer(conn.w, conn.version)
                 await conn.w.drain()
@@ -89,8 +88,6 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> NarFromPathResponse | None:
-        from .query_path_info import QueryPathInfoRequest
-
         log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
         log.debug("received_op")
 
@@ -122,8 +119,6 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
             await conn.r.drain_stderr()
 
             if nar_size > 0:
-                from ..wire import _CHUNK_SIZE
-
                 remaining = nar_size
                 while remaining > 0:
                     to_read = min(remaining, _CHUNK_SIZE)

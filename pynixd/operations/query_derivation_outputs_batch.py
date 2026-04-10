@@ -10,6 +10,7 @@ import structlog
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
+from ..drv_parser import read_drv_file
 from .base import OpRequest, OpResponse
 
 QUERY_DERIVATION_OUTPUTS_BATCH = """
@@ -105,8 +106,6 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         outputs: dict[StorePath, dict[str, StorePath]] = {}
         for drv_path in self.drv_paths:
             try:
-                from ..drv_parser import read_drv_file
-
                 parsed = read_drv_file(store.store_path, drv_path)
                 outputs[drv_path] = parsed.output_paths()
             except FileNotFoundError:

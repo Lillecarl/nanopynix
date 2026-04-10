@@ -35,11 +35,13 @@ from . import wire
 from .connection import ClientConn, Connection
 from .local_store_db import LocalStoreDB
 from .operations.add_multiple_to_store import AddMultipleToStoreRequest
+from .operations.add_to_store_nar import AddToStoreNarRequest
 from .operations.base import (
     OpRequest,
     PathInfo,
     Resp,
 )
+from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
 from .signing import SecretKey
@@ -342,8 +344,6 @@ class Store(ABC):
 
             await info.to_writer_keyed(fw)
 
-            from .operations.nar_from_path import NarFromPathRequest
-
             await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
             await src_conn.w.drain()
             await src_conn.r.drain_stderr()
@@ -424,9 +424,6 @@ class Store(ABC):
     ) -> None:
         """Stream NAR from src store to this store."""
         async with self.transfer_conn() as dst_conn, src.transfer_conn() as src_conn:
-            from .operations.add_to_store_nar import AddToStoreNarRequest
-            from .operations.nar_from_path import NarFromPathRequest
-
             await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
             await src_conn.w.drain()
             await src_conn.r.drain_stderr()

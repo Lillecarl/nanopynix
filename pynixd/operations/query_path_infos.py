@@ -11,6 +11,7 @@ import structlog
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, PathInfo
+from .query_path_info import QueryPathInfoRequest
 
 QUERY_PATH_INFOS_BATCH = """
 SELECT vp.path, vp.deriver, vp.hash, registrationTime, narSize,
@@ -135,8 +136,6 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
             return QueryPathInfosResponse(infos=infos)
 
         for path in uncached:
-            from .query_path_info import QueryPathInfoRequest
-
             resp = await store.execute(
                 QueryPathInfoRequest(path=path),
                 client=client,

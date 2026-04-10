@@ -18,6 +18,11 @@ from .base import (
     OpRequest,
     OpResponse,
 )
+from .build_derivation import BuildDerivationRequest, BuildDerivationResponse
+from .query_derivation_outputs_batch import QueryDerivationOutputsBatchRequest
+from .query_missing import QueryMissingRequest
+from .query_valid_paths import QueryValidPathsRequest
+from ..stderr import StderrNext
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -39,13 +44,6 @@ async def _decompose_build_paths(
     client: ClientConn,
 ) -> list[tuple[DerivedPath, set[str], asyncio.Future]]:
     """Decompose high-level build requests into individual BuildDerivation futures."""
-    from .build_derivation import (
-        BuildDerivationRequest,
-    )
-    from .query_derivation_outputs_batch import QueryDerivationOutputsBatchRequest
-    from .query_missing import QueryMissingRequest
-    from .query_valid_paths import QueryValidPathsRequest
-
     missing_resp = await store.execute(
         QueryMissingRequest(derived_paths=request.derived_paths)
     )
@@ -195,8 +193,6 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
             log.debug("responded_op")
             return BuildPathsResponse(value=0)
 
-        from .build_derivation import BuildDerivationResponse
-
         futures = [f for _, _, f in decomposed]
         responses = await asyncio.gather(*futures)
 
@@ -287,8 +283,6 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
             log.debug("responded_op")
             return KeyedBuildResultsResponse(results=[])
 
-        from .build_derivation import BuildDerivationResponse
-
         futures = [f for _, _, f in decomposed]
         responses = await asyncio.gather(*futures)
 
@@ -308,8 +302,6 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
                         error_msg=resp.result.error_msg,
                     )
                 if resp.result.status != 0 and resp.result.error_msg and proxy.client:
-                    from ..stderr import StderrNext
-
                     proxy.client.queue.put_nowait(
                         StderrNext(text=f"pynixd: {resp.result.error_msg}\n")
                     )

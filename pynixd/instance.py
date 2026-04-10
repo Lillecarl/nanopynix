@@ -20,9 +20,10 @@ from . import wire
 from .gc import GarbageCollector
 from .http_cache import BinaryCacheServer
 from .local_store_db import LocalStoreDB
+from .operations.query_all_valid_paths import QueryAllValidPathsRequest
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
-from .store import Store
+from .store import LocalSocketStore, Store, get_current_system
 from .unix_server import start_unix_server
 
 log = structlog.get_logger(__name__)
@@ -72,8 +73,6 @@ class Server:
             # Merge dict with kwargs to instantiate PynixdConfig
             merged = {**config, **kwargs}
             if not merged.get("local_store"):
-                from .store import LocalSocketStore
-
                 merged["local_store"] = LocalSocketStore(
                     id="local", store_path=Path("/")
                 )
@@ -81,8 +80,6 @@ class Server:
         elif config is None:
             # If nothing is passed, use kwargs
             if not kwargs.get("local_store"):
-                from .store import LocalSocketStore
-
                 kwargs["local_store"] = LocalSocketStore(
                     id="local", store_path=Path("/")
                 )
@@ -139,8 +136,6 @@ class Server:
         implementation: NixImplementation = NixImplementation.NIX,
     ) -> str:
         """Builder spec for --builders."""
-        from .store import get_current_system
-
         system = get_current_system()
         return f"{self.uri(implementation)} {system} - {max_jobs}"
 
@@ -190,8 +185,6 @@ class Server:
             local_store.db = None
 
         for store in stores.values():
-            from .operations.query_all_valid_paths import QueryAllValidPathsRequest
-
             try:
                 await store.execute(QueryAllValidPathsRequest())
             except Exception:

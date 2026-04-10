@@ -11,6 +11,7 @@ import structlog
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, PathInfo
+from .query_path_infos import QueryPathInfosRequest
 
 QUERY_CLOSURE_WITH_INFO = """
 WITH RECURSIVE closure(id) AS (
@@ -135,8 +136,6 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
             to_fetch = {p for p in pending if p not in all_infos}
             if not to_fetch:
                 break
-
-            from .query_path_infos import QueryPathInfosRequest
 
             resp = await store.execute(
                 QueryPathInfosRequest(paths=to_fetch),
