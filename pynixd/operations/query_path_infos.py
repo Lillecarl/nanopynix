@@ -52,9 +52,11 @@ class QueryPathInfosResponse(OpResponse):
         for _ in range(n):
             info = await PathInfo.from_reader_keyed(reader)
             infos[info.path] = info
+        cls.logger.debug("from_reader", info_count=n)
         return cls(logs=logs, infos=infos)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", info_count=len(self.infos))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.infos))
         for info in self.infos.values():

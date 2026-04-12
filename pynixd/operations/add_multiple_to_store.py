@@ -22,9 +22,12 @@ log = structlog.get_logger(__name__)
 class AddMultipleToStoreResponse(OpResponse):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(logs=await OperationLogs.from_reader(reader))
+        logs = await OperationLogs.from_reader(reader)
+        cls.logger.debug("from_reader")
+        return cls(logs=logs)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer")
         self.logs.to_writer(writer)
 
 

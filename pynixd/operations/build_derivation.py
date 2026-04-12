@@ -33,12 +33,13 @@ class BuildDerivationResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(
-            logs=await OperationLogs.from_reader(reader),
-            result=await BuildResult.from_reader(reader, version),
-        )
+        logs = await OperationLogs.from_reader(reader)
+        result = await BuildResult.from_reader(reader, version)
+        cls.logger.debug("from_reader", result=result)
+        return cls(logs=logs, result=result)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", result=self.result)
         self.logs.to_writer(writer)
         await self.result.to_writer(writer, version)
 

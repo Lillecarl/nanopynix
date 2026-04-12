@@ -28,9 +28,11 @@ class FindRootsResponse(OpResponse):
             link = await reader.read_string()
             target = await reader.read_string()
             roots.append(FindRootsEntry(link=link, target=target))
+        cls.logger.debug("from_reader", root_count=len(roots))
         return cls(logs=logs, roots=roots)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", root_count=len(self.roots))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.roots))
         for root in self.roots:

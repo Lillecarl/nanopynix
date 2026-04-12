@@ -21,9 +21,11 @@ class QuerySubstPathInfoResponse(OpResponse):
         info = None
         if found:
             info = await SubstPathInfo.from_reader(reader, version)
+        cls.logger.debug("from_reader", found=found)
         return cls(logs=logs, found=found, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", found=self.found)
         self.logs.to_writer(writer)
         writer.write_uint64(1 if self.found else 0)
         if self.found and self.info is not None:

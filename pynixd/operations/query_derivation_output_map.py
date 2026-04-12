@@ -23,9 +23,11 @@ class QueryDerivationOutputMapResponse(OpResponse):
             k = await reader.read_string()
             v = await reader.read_string(StorePath)
             items[k] = v
+        cls.logger.debug("from_reader", item_count=n)
         return cls(logs=logs, items=items)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", item_count=len(self.items))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.items))
         for k, v in self.items.items():

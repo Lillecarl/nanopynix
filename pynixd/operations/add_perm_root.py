@@ -19,12 +19,13 @@ class AddPermRootResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(
-            logs=await OperationLogs.from_reader(reader),
-            gc_root=await reader.read_string(),
-        )
+        logs = await OperationLogs.from_reader(reader)
+        gc_root = await reader.read_string()
+        cls.logger.debug("from_reader", gc_root=gc_root)
+        return cls(logs=logs, gc_root=gc_root)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", gc_root=self.gc_root)
         self.logs.to_writer(writer)
         writer.write_string(self.gc_root)
 

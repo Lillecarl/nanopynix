@@ -55,9 +55,11 @@ class QueryClosureWithInfoResponse(OpResponse):
         infos = []
         for _ in range(n):
             infos.append(await PathInfo.from_reader_keyed(reader))
+        cls.logger.debug("from_reader", info_count=n)
         return cls(logs=logs, infos=infos)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", info_count=len(self.infos))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.infos))
         for info in self.infos:

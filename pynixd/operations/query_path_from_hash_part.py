@@ -24,12 +24,16 @@ class QueryPathFromHashPartResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
+        value = await reader.read_string(StorePath)
+        cls.logger.debug("from_reader", value=value)
         return cls(
-            logs=await OperationLogs.from_reader(reader),
-            value=await reader.read_string(StorePath),
+            logs=logs,
+            value=value,
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", value=self.value)
         self.logs.to_writer(writer)
         writer.write_string(self.value)
 

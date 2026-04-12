@@ -16,12 +16,16 @@ class QuerySubstitutablePathsResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        logs = await OperationLogs.from_reader(reader)
+        paths = await reader.read_string_set(StorePath)
+        cls.logger.debug("from_reader", paths=paths)
         return cls(
-            logs=await OperationLogs.from_reader(reader),
-            paths=await reader.read_string_set(StorePath),
+            logs=logs,
+            paths=paths,
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", paths=self.paths)
         self.logs.to_writer(writer)
         writer.write_string_set(self.paths)
 
