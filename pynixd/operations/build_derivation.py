@@ -35,7 +35,6 @@ class BuildDerivationResponse(OpResponse):
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         logs = await OperationLogs.from_reader(reader)
         result = await BuildResult.from_reader(reader, version)
-        cls.logger.debug("from_reader", result=result)
         return cls(logs=logs, result=result)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -56,10 +55,14 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        drv_path = await reader.read_string(StorePath)
+        derivation = await BasicDerivation.from_reader(reader, version)
+        build_mode = BuildMode(await reader.read_uint64())
+        cls.logger.debug("from_reader", drv_path=drv_path, build_mode=build_mode)
         return cls(
-            drv_path=await reader.read_string(StorePath),
-            derivation=await BasicDerivation.from_reader(reader, version),
-            build_mode=BuildMode(await reader.read_uint64()),
+            drv_path=drv_path,
+            derivation=derivation,
+            build_mode=build_mode,
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

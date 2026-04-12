@@ -26,7 +26,6 @@ class QueryPathFromHashPartResponse(OpResponse):
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         logs = await OperationLogs.from_reader(reader)
         value = await reader.read_string(StorePath)
-        cls.logger.debug("from_reader", value=value)
         return cls(
             logs=logs,
             value=value,
@@ -48,7 +47,9 @@ class QueryPathFromHashPartRequest(OpRequest[QueryPathFromHashPartResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(path=await reader.read_string())
+        path = await reader.read_string()
+        cls.logger.debug("from_reader", path=path)
+        return cls(path=path)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)

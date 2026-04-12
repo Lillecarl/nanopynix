@@ -52,7 +52,6 @@ class DerivationOutputsBatchResponse(OpResponse):
                 path = await reader.read_string(StorePath)
                 drv_outputs[name] = path
             outputs[drv_path] = drv_outputs
-        cls.logger.debug("from_reader", drv_path_count=n)
         return cls(logs=logs, outputs=outputs)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -78,7 +77,9 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(drv_paths=await reader.read_string_set(StorePath))
+        drv_paths = await reader.read_string_set(StorePath)
+        cls.logger.debug("from_reader", drv_paths=drv_paths)
+        return cls(drv_paths=drv_paths)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)

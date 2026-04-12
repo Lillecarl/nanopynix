@@ -28,7 +28,6 @@ class FindRootsResponse(OpResponse):
             link = await reader.read_string()
             target = await reader.read_string()
             roots.append(FindRootsEntry(link=link, target=target))
-        cls.logger.debug("from_reader", root_count=len(roots))
         return cls(logs=logs, roots=roots)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -48,6 +47,7 @@ class FindRootsRequest(OpRequest[FindRootsResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        cls.logger.debug("from_reader")
         return cls()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

@@ -21,7 +21,6 @@ class AddPermRootResponse(OpResponse):
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         logs = await OperationLogs.from_reader(reader)
         gc_root = await reader.read_string()
-        cls.logger.debug("from_reader", gc_root=gc_root)
         return cls(logs=logs, gc_root=gc_root)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -40,9 +39,12 @@ class AddPermRootRequest(OpRequest[AddPermRootResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        store_path = await reader.read_string()
+        gc_root = await reader.read_string()
+        cls.logger.debug("from_reader", store_path=store_path, gc_root=gc_root)
         return cls(
-            store_path=await reader.read_string(),
-            gc_root=await reader.read_string(),
+            store_path=store_path,
+            gc_root=gc_root,
         )
 
     async def execute(

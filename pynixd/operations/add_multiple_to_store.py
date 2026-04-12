@@ -23,7 +23,6 @@ class AddMultipleToStoreResponse(OpResponse):
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         logs = await OperationLogs.from_reader(reader)
-        cls.logger.debug("from_reader")
         return cls(logs=logs)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -43,9 +42,12 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        repair = await reader.read_uint64()
+        dont_check_sigs = await reader.read_uint64()
+        cls.logger.debug("from_reader", repair=repair, dont_check_sigs=dont_check_sigs)
         return cls(
-            repair=await reader.read_uint64(),
-            dont_check_sigs=await reader.read_uint64(),
+            repair=repair,
+            dont_check_sigs=dont_check_sigs,
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

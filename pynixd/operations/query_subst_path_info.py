@@ -21,7 +21,6 @@ class QuerySubstPathInfoResponse(OpResponse):
         info = None
         if found:
             info = await SubstPathInfo.from_reader(reader, version)
-        cls.logger.debug("from_reader", found=found)
         return cls(logs=logs, found=found, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -42,7 +41,9 @@ class QuerySubstPathInfoRequest(OpRequest[QuerySubstPathInfoResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(path=await reader.read_string())
+        path = await reader.read_string()
+        cls.logger.debug("from_reader", path=path)
+        return cls(path=path)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)

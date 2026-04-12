@@ -30,9 +30,6 @@ class CollectGarbageResponse(OpResponse):
         paths_deleted = await reader.read_string_set(StorePath)
         bytes_freed = await reader.read_uint64()
         _obsolete = await reader.read_uint64()
-        cls.logger.debug(
-            "from_reader", paths_deleted=paths_deleted, bytes_freed=bytes_freed
-        )
         return cls(
             logs=logs,
             paths_deleted=paths_deleted,
@@ -65,14 +62,28 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        action = await reader.read_uint64()
+        paths_to_delete = await reader.read_string_set(StorePath)
+        ignore_liveness = await reader.read_uint64()
+        max_freed = await reader.read_uint64()
+        _obsolete1 = await reader.read_uint64()
+        _obsolete2 = await reader.read_uint64()
+        _obsolete3 = await reader.read_uint64()
+        cls.logger.debug(
+            "from_reader",
+            action=action,
+            paths_to_delete=paths_to_delete,
+            ignore_liveness=ignore_liveness,
+            max_freed=max_freed,
+        )
         return cls(
-            action=await reader.read_uint64(),
-            paths_to_delete=await reader.read_string_set(StorePath),
-            ignore_liveness=await reader.read_uint64(),
-            max_freed=await reader.read_uint64(),
-            _obsolete1=await reader.read_uint64(),
-            _obsolete2=await reader.read_uint64(),
-            _obsolete3=await reader.read_uint64(),
+            action=action,
+            paths_to_delete=paths_to_delete,
+            ignore_liveness=ignore_liveness,
+            max_freed=max_freed,
+            _obsolete1=_obsolete1,
+            _obsolete2=_obsolete2,
+            _obsolete3=_obsolete3,
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

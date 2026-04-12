@@ -17,7 +17,6 @@ class OptimiseStoreResponse(OpResponse):
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         logs = await OperationLogs.from_reader(reader)
         value = await reader.read_uint64()
-        cls.logger.debug("from_reader", value=value)
         return cls(
             logs=logs,
             value=value,
@@ -37,6 +36,7 @@ class OptimiseStoreRequest(OpRequest[OptimiseStoreResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        cls.logger.debug("from_reader")
         return cls()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

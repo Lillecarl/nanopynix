@@ -21,7 +21,6 @@ class AddSignaturesResponse(OpResponse):
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         logs = await OperationLogs.from_reader(reader)
         value = await reader.read_uint64()
-        cls.logger.debug("from_reader", value=value)
         return cls(logs=logs, value=value)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -40,9 +39,12 @@ class AddSignaturesRequest(OpRequest[AddSignaturesResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        path = await reader.read_string(StorePath)
+        sigs = await reader.read_string_set()
+        cls.logger.debug("from_reader", path=path, sigs=sigs)
         return cls(
-            path=await reader.read_string(StorePath),
-            sigs=await reader.read_string_set(),
+            path=path,
+            sigs=sigs,
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

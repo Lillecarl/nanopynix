@@ -40,7 +40,6 @@ class NarFromPathResponse(OpResponse):
         collector = ByteCollector()
         await wire.stream_parse_nar(reader, collector, capture=False)
         nar_data = collector.getvalue()
-        cls.logger.debug("from_reader", nar_size=len(nar_data))
         return cls(logs=logs, nar_data=nar_data)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -61,7 +60,9 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(path=await reader.read_string(StorePath))
+        path = await reader.read_string(StorePath)
+        cls.logger.debug("from_reader", path=path)
+        return cls(path=path)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)

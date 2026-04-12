@@ -28,7 +28,6 @@ class QuerySubstPathInfosResponse(OpResponse):
             path = await reader.read_string()
             info = await SubstPathInfo.from_reader(reader, version)
             entries.append(SubstPathInfoEntry(path=path, info=info))
-        cls.logger.debug("from_reader", entry_count=n)
         return cls(logs=logs, entries=entries)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -56,6 +55,7 @@ class QuerySubstPathInfosRequest(OpRequest[QuerySubstPathInfosResponse]):
             k = await reader.read_string()
             v = await reader.read_string()
             items[k] = v
+        cls.logger.debug("from_reader", item_count=n)
         return cls(items=items)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

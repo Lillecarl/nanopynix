@@ -24,7 +24,6 @@ class QueryAllValidPathsResponse(OpResponse):
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         logs = await OperationLogs.from_reader(reader)
         paths = await reader.read_string_set(StorePath)
-        cls.logger.debug("from_reader", paths=paths)
         return cls(logs=logs, paths=paths)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -42,6 +41,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        cls.logger.debug("from_reader")
         return cls()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

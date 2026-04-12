@@ -17,7 +17,6 @@ class VerifyStoreResponse(OpResponse):
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         logs = await OperationLogs.from_reader(reader)
         value = await reader.read_uint64()
-        cls.logger.debug("from_reader", value=value)
         return cls(
             logs=logs,
             value=value,
@@ -39,9 +38,12 @@ class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        check_contents = await reader.read_uint64()
+        repair = await reader.read_uint64()
+        cls.logger.debug("from_reader", check_contents=check_contents, repair=repair)
         return cls(
-            check_contents=await reader.read_uint64(),
-            repair=await reader.read_uint64(),
+            check_contents=check_contents,
+            repair=repair,
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

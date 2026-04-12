@@ -23,7 +23,6 @@ class QueryDerivationOutputMapResponse(OpResponse):
             k = await reader.read_string()
             v = await reader.read_string(StorePath)
             items[k] = v
-        cls.logger.debug("from_reader", item_count=n)
         return cls(logs=logs, items=items)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -45,7 +44,9 @@ class QueryDerivationOutputMapRequest(OpRequest[QueryDerivationOutputMapResponse
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(path=await reader.read_string(StorePath))
+        path = await reader.read_string(StorePath)
+        cls.logger.debug("from_reader", path=path)
+        return cls(path=path)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)

@@ -166,9 +166,14 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        derived_paths = await reader.read_string_set(DerivedPath)
+        build_mode = BuildMode(await reader.read_uint64())
+        cls.logger.debug(
+            "from_reader", derived_paths=derived_paths, build_mode=build_mode
+        )
         return cls(
-            derived_paths=await reader.read_string_set(DerivedPath),
-            build_mode=BuildMode(await reader.read_uint64()),
+            derived_paths=derived_paths,
+            build_mode=build_mode,
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
