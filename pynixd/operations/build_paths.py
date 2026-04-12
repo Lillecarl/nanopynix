@@ -150,6 +150,7 @@ class BuildPathsResponse(OpResponse):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", self.value)
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
 
@@ -221,7 +222,7 @@ class KeyedBuildResult:
 
 
 @dataclass
-class KeyedBuildResultsResponse(OpResponse):
+class BuildPathsWithResultsResponse(OpResponse):
     results: list[KeyedBuildResult] = field(default_factory=list)
 
     @classmethod
@@ -236,6 +237,7 @@ class KeyedBuildResultsResponse(OpResponse):
         return cls(logs=logs, results=results)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", self.results)
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.results))
         for entry in self.results:
@@ -244,19 +246,25 @@ class KeyedBuildResultsResponse(OpResponse):
 
 
 @dataclass
-class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
+class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
     name: ClassVar[str] = "BuildPathsWithResults"
     op: ClassVar[int] = 46
-    response_type: ClassVar[type[OpResponse]] = KeyedBuildResultsResponse
+    response_type: ClassVar[type[OpResponse]] = BuildPathsWithResultsResponse
     is_build: ClassVar[bool] = True
     derived_paths: set[DerivedPath] = field(default_factory=set)
     build_mode: BuildMode = BuildMode.NORMAL
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        derived_paths = await reader.read_string_set(DerivedPath)
+        build_mode = BuildMode(await reader.read_uint64())
+
+        cls.logger.debug(
+            "from_reader", derived_paths=derived_paths, build_mode=build_mode
+        )
         return cls(
-            derived_paths=await reader.read_string_set(DerivedPath),
-            build_mode=BuildMode(await reader.read_uint64()),
+            derived_paths=derived_paths,
+            build_mode=build_mode,
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -288,7 +296,7 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
 
         if not decomposed:
             log.debug("responded_op")
-            return KeyedBuildResultsResponse(results=[])
+            return BuildPathsWithResultsResponse(results=[])
 
         futures = [f for _, _, f in decomposed]
         responses = await asyncio.gather(*futures)
@@ -314,4 +322,4 @@ class BuildPathsWithResultsRequest(OpRequest[KeyedBuildResultsResponse]):
                     )
 
         log.debug("responded_op")
-        return KeyedBuildResultsResponse(results=keyed_results)
+        return BuildPathsWithResultsResponse(results=keyed_results)

@@ -200,25 +200,23 @@ class Store(ABC):
         # Use build_conn for builds, transfer_conn for queries/mutations
         if request.is_build:
             pool = self.build_conn
-            pool_name = "build"
         else:
             pool = self.transfer_conn
-            pool_name = "transfer"
 
-        log.debug("acquiring_connection", pool=pool_name, op=request.__class__.__name__)
+        # log.debug("acquiring_connection", pool=pool_name, op=request.__class__.__name__)
         async with pool() as conn:
-            log.debug(
-                "connection_acquired", pool=pool_name, op=request.__class__.__name__
-            )
+            # log.debug(
+            #     "connection_acquired", pool=pool_name, op=request.__class__.__name__
+            # )
             res = await conn.call(
                 request,
                 client=client,
                 suppress_last=suppress_last,
                 raise_on_error=raise_on_error,
             )
-            log.debug(
-                "connection_releasing", pool=pool_name, op=request.__class__.__name__
-            )
+            # log.debug(
+            #     "connection_releasing", pool=pool_name, op=request.__class__.__name__
+            # )
             return res
 
     async def execute(

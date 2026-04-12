@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -19,7 +18,7 @@ if TYPE_CHECKING:
     from ..store import Store
 
 # Silence SetOptions by default — it's extremely verbose
-logging.getLogger("pynixd.operations.SetOptionsRequest").setLevel(logging.WARNING)
+# logging.getLogger("pynixd.operations.SetOptionsRequest").setLevel(logging.WARNING)
 
 
 @dataclass
@@ -29,6 +28,7 @@ class SetOptionsResponse(OpResponse):
         return cls(logs=await OperationLogs.from_reader(reader))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer")
         self.logs.to_writer(writer)
 
 
@@ -90,8 +90,8 @@ class SetOptionsRequest(OpRequest[SetOptionsResponse]):
             overrides=overrides,
         )
 
-        cls._log.debug(
-            "set_options_from_reader",
+        cls.logger.debug(
+            "from_reader",
             keep_failed=keep_failed,
             keep_going=keep_going,
             try_fallback=try_fallback,

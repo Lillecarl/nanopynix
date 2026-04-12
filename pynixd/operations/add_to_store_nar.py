@@ -28,6 +28,7 @@ class AddToStoreNarResponse(OpResponse):
         return cls(logs=await OperationLogs.from_reader(reader))
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer")
         self.logs.to_writer(writer)
 
 
@@ -56,6 +57,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
             sigs=await reader.read_string_set(),
             ca=await reader.read_string(),
         )
+        cls.logger.debug("from_reader", info=info)
         return cls(
             info=info,
             repair=await reader.read_uint64(),
@@ -113,30 +115,36 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         """Forward request prefix and stream framed NAR data. Returns store path."""
         dst.write_uint64(39)
 
-        path = await src.read_string(StorePath)
-        deriver = await src.read_string(StorePath)
-        nar_hash = await src.read_string()
-        refs = await src.read_string_set(StorePath)
-        reg_time = await src.read_uint64()
-        nar_size = await src.read_uint64()
-        ultimate = await src.read_uint64()
-        sigs = await src.read_string_set()
-        ca = await src.read_string()
+        info = PathInfo(
+            path=await src.read_string(StorePath),
+            deriver=await src.read_string(StorePath),
+            nar_hash=await src.read_string(),
+            references=await src.read_string_set(StorePath),
+            registration_time=await src.read_uint64(),
+            nar_size=await src.read_uint64(),
+            ultimate=await src.read_uint64(),
+            sigs=await src.read_string_set(),
+            ca=await src.read_string(),
+        )
         repair = await src.read_uint64()
         dont_check_sigs = await src.read_uint64()
 
-        dst.write_string(path)
-        dst.write_string(deriver)
-        dst.write_string(nar_hash)
-        dst.write_string_set(refs)
-        dst.write_uint64(reg_time)
-        dst.write_uint64(nar_size)
-        dst.write_uint64(ultimate)
-        dst.write_string_set(sigs)
-        dst.write_string(ca)
+        cls.logger.debug(
+            "forward", info=info, repair=repair, dont_check_sigs=dont_check_sigs
+        )
+
+        dst.write_string(info.path)
+        dst.write_string(info.deriver)
+        dst.write_string(info.nar_hash)
+        dst.write_string_set(info.references)
+        dst.write_uint64(info.registration_time)
+        dst.write_uint64(info.nar_size)
+        dst.write_uint64(info.ultimate)
+        dst.write_string_set(info.sigs)
+        dst.write_string(info.ca)
         dst.write_uint64(repair)
         dst.write_uint64(dont_check_sigs)
 
         await forward_framed(src, dst)
 
-        return path
+        return info.path

@@ -10,7 +10,7 @@ import structlog
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, _nar_pad
-from .base import OpRequest, OpResponse, OperationLogs
+from .base import OpRequest, OpResponse, OperationLogs, PathInfo
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
@@ -53,7 +53,6 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> AddMultipleToStoreResponse:
         """Override handle because this is a streaming operation."""
-        structlog.contextvars.bind_contextvars(operation=cls.__name__)
         async with proxy.local_store.transfer_conn() as conn:
             paths = await cls.forward(proxy.r, conn.w)
             await conn.w.drain()
@@ -145,22 +144,38 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
             for _ in range(count):
                 await _skip_string()
 
+        async def _read_string_set() -> set[str]:
+            count = await _read_uint64()
+            paths: set[str] = set()
+            for _ in range(count):
+                paths.add(await _read_string())
+            return paths
+
+        async def _read_path_set() -> set[StorePath]:
+            count = await _read_uint64()
+            paths: set[StorePath] = set()
+            for _ in range(count):
+                paths.add(await _read_store_path())
+            return paths
+
         count = await _read_uint64()
 
         paths: list[StorePath] = []
         for _ in range(count):
-            path = await _read_store_path()
-            paths.append(path)
+            info = PathInfo(
+                path=await _read_store_path(),
+                deriver=await _read_store_path(),
+                nar_hash=await _read_string(),
+                references=await _read_path_set(),
+                registration_time=await _read_uint64(),
+                nar_size=await _read_uint64(),
+                ultimate=await _read_uint64(),
+                sigs=await _read_string_set(),
+                ca=await _read_string(),
+            )
+            paths.append(info.path)
 
-            await _skip_string()  # deriver
-            await _skip_string()  # nar_hash
-            await _skip_string_set()  # references
-            await _skip(8)  # registration_time
-            nar_size = await _read_uint64()
-            await _skip(8)  # ultimate
-            await _skip_string_set()  # sigs
-            await _skip_string()  # ca
-            await _skip(nar_size)  # raw NAR (not padded in framed)
+        cls.logger.debug("forward", paths=paths)
 
         # Forward any remaining frames
         if not eof:

@@ -179,14 +179,11 @@ class Connection:
 
         self.op_log.append(op_name)
 
-        log.debug("send_op", store_id=self.id)
-
         await request.to_writer(self.w, self.version)
         await self.w.drain()
 
         response = await response_type.from_reader(self.r, self.version)
 
-        log.debug("recv_op_done", store_id=self.id)
         return cast(Resp, response)
 
     # ── Handshake ───────────────────────────────────────────────────

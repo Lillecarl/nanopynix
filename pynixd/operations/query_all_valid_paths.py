@@ -58,18 +58,18 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                     rows = await cursor.fetchall()
                 resp = QueryAllValidPathsResponse(paths={StorePath(r[0]) for r in rows})
                 store.add_known_paths(resp.paths, update_regtime=False)
-                self._log.info(
+                self.logger.info(
                     "sync_paths_complete", store_id=store.id, count=len(resp.paths)
                 )
                 return resp
 
             resp = await store.call(self, client=client, suppress_last=suppress_last)
             store.add_known_paths(resp.paths, update_regtime=False)
-            self._log.info(
+            self.logger.info(
                 "sync_paths_complete", store_id=store.id, count=len(resp.paths)
             )
             return resp
         except Exception:
-            self._log.warning("sync_paths_failed", store_id=store.id)
+            self.logger.warning("sync_paths_failed", store_id=store.id)
             store.known_paths = set()
             return QueryAllValidPathsResponse(paths=set())

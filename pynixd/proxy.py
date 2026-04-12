@@ -143,6 +143,7 @@ class DaemonProxy:
 
             op_name = req_cls.name
             structlog.contextvars.bind_contextvars(operation=op_name)
+            log.debug("received")
 
             try:
                 response = await self.dispatch(op_num)

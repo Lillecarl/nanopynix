@@ -33,6 +33,7 @@ class AddToStoreResponse(OpResponse):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", info=self.info)
         self.logs.to_writer(writer)
         await self.info.to_writer_keyed(writer)
 
@@ -51,12 +52,18 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(
-            path_name=await reader.read_string(),
-            cam=await reader.read_string(),
-            references=await reader.read_string_set(StorePath),
-            repair=await reader.read_uint64(),
+        path_name = await reader.read_string()
+        cam = await reader.read_string()
+        references = await reader.read_string_set(StorePath)
+        repair = await reader.read_uint64()
+        cls.logger.debug(
+            "from_reader",
+            path_name=path_name,
+            cam=cam,
+            references=references,
+            repair=repair,
         )
+        return cls(path_name=path_name, cam=cam, references=references, repair=repair)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)
@@ -85,14 +92,21 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         """Forward request prefix and stream framed NAR data from src to dst."""
         dst.write_uint64(7)
 
-        name = await src.read_string()
+        path_name = await src.read_string()
         cam = await src.read_string()
-        refs = await src.read_string_set(StorePath)
+        references = await src.read_string_set(StorePath)
         repair = await src.read_uint64()
+        cls.logger.debug(
+            "forward",
+            path_name=path_name,
+            cam=cam,
+            references=references,
+            repair=repair,
+        )
 
-        dst.write_string(name)
+        dst.write_string(path_name)
         dst.write_string(cam)
-        dst.write_string_set(refs)
+        dst.write_string_set(references)
         dst.write_uint64(repair)
 
         await forward_framed(src, dst)

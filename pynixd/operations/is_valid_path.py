@@ -28,6 +28,7 @@ class IsValidPathResponse(OpResponse):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", valid=self.valid)
         self.logs.to_writer(writer)
         writer.write_uint64(1 if self.valid else 0)
 
@@ -42,7 +43,9 @@ class IsValidPathRequest(OpRequest[IsValidPathResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(path=await reader.read_string(StorePath))
+        path = await reader.read_string(StorePath)
+        cls.logger.debug("from_reader", path=path)
+        return cls(path=path)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)

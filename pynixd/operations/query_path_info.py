@@ -40,6 +40,7 @@ class QueryPathInfoResponse(OpResponse):
         return cls(logs=logs, valid=valid, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug("to_writer", valid=self.valid, info=self.info)
         self.logs.to_writer(writer)
         writer.write_uint64(1 if self.valid else 0)
         if self.valid and self.info is not None:
@@ -56,7 +57,9 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(path=await reader.read_string(StorePath))
+        path = await reader.read_string(StorePath)
+        cls.logger.debug("from_reader", path=path)
+        return cls(path=path)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)

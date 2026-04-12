@@ -97,6 +97,9 @@ class OpRequest(ABC, Generic[Resp]):
     is_query: ClassVar[bool] = False
     is_build: ClassVar[bool] = False
     is_extension: ClassVar[bool] = False
+    logger: ClassVar[structlog.BoundLogger] = structlog.get_logger(
+        f"pynixd.operations.{__name__}"
+    )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Runs when an OpRequest subclass is instantiated, registers
@@ -104,8 +107,7 @@ class OpRequest(ABC, Generic[Resp]):
         super().__init_subclass__(**kwargs)
         if "op" in cls.__dict__:
             OP_REGISTRY[cls.op] = cls
-            # Each operation gets its own logger for fine-grained control
-            cls._log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+            cls.logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
 
     @classmethod
     async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
@@ -114,11 +116,8 @@ class OpRequest(ABC, Generic[Resp]):
         Decodes the request and delegates execution to the stores.
         Streaming operations should override this method.
         """
-        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
-        log.debug("received_op")
         request = await cls.from_reader(proxy.r, proxy.version)
         result = await proxy.execute(request)
-        log.debug("sendOp")
         return result
 
     async def execute(
@@ -217,11 +216,14 @@ class OpResponse(ABC):
     """Base class for operation responses."""
 
     _log: ClassVar = structlog.get_logger(__name__)
+    logger: ClassVar[structlog.BoundLogger] = structlog.get_logger(
+        f"pynixd.operations.{__name__}"
+    )
     logs: OperationLogs = field(default_factory=OperationLogs)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        cls._log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        cls.logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
 
     @property
     def is_not_found(self) -> bool:

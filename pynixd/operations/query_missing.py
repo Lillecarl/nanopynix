@@ -36,6 +36,12 @@ class QueryMissingResponse(OpResponse):
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self.logger.debug(
+            "to_writer",
+            will_build=self.will_build,
+            will_substitute=self.will_substitute,
+            unknown=self.unknown,
+        )
         self.logs.to_writer(writer)
         writer.write_string_set(self.will_build)
         writer.write_string_set(self.will_substitute)
@@ -54,7 +60,9 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(derived_paths=await reader.read_string_set(DerivedPath))
+        derived_paths = await reader.read_string_set(DerivedPath)
+        cls.logger.debug("from_reader", derived_paths=derived_paths)
+        return cls(derived_paths=derived_paths)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)
@@ -84,7 +92,7 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
                     )
                     store.add_known_paths(valid.paths)
             except Exception:
-                self._log.debug(
+                self.logger.debug(
                     "verify_substitutable_failed",
                     paths=len(resp.will_substitute),
                     exc_info=True,
