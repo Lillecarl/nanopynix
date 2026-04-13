@@ -79,6 +79,9 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
                 await self.to_writer(conn.w, conn.version)
                 await conn.w.drain()
 
+                # Drain logs from backend before reading payload
+                await conn.r.drain_stderr()
+
                 if self.async_callback:
                     remaining = self.nar_size
                     while remaining > 0:

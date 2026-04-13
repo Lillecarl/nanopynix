@@ -84,7 +84,7 @@ class Store(ABC):
         id: str,
         store_path: Path = Path("/"),
         max_builds: int = 2,
-        max_transfers: int = 4,
+        max_transfers: int = 16,
         idle_ttl: float = _DEFAULT_IDLE_TTL,
         supported_systems: list[str] | None = None,
     ) -> None:
@@ -203,11 +203,7 @@ class Store(ABC):
         else:
             pool = self.transfer_conn
 
-        # log.debug("acquiring_connection", pool=pool_name, op=request.__class__.__name__)
         async with pool() as conn:
-            # log.debug(
-            #     "connection_acquired", pool=pool_name, op=request.__class__.__name__
-            # )
             res = await conn.call(
                 request,
                 client=client,

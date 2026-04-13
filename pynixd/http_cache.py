@@ -196,10 +196,16 @@ class BinaryCacheServer:
         )
         await response.prepare(request)
 
+        async def provide_nar(chunk: bytes):
+            await response.write(chunk)
+
         try:
             await self.store.execute(
-                NarFromPathRequest(path=path),
-                client=NixWriter(response),  # type: ignore[arg-type]
+                NarFromPathRequest(
+                    path=path,
+                    nar_size=vinfo.nar_size,
+                    async_callback=provide_nar,
+                ),
             )
         except Exception:
             log.exception("nar_from_path_streaming_failed", path=path)
@@ -320,11 +326,29 @@ class BinaryCacheServer:
     # ── Path resolution helpers ───────────────────────────────────────
 
     async def resolve_path(self, hash_part: str) -> StorePath | None:
-        """Resolve a store hash to a full store path."""
+        """Resolve a store hash or NAR hash to a full store path."""
+        # 1. Try resolving as a NAR hash (SHA256, 64 chars) if we have a DB
+        if len(hash_part) == 64 and self.db is not None:
+            # Nix stores NAR hashes as 'sha256:...' in the DB
+            # but sometimes they are stored without the prefix or with a different one.
+            # We try both.
+            for prefix in ["sha256:", ""]:
+                full_hash = f"{prefix}{hash_part}"
+                async with self.db.execute(
+                    "SELECT path FROM ValidPaths WHERE hash = ?", (full_hash,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if row:
+                    return StorePath(row[0])
+
+        # 2. Fall back to standard QueryPathFromHashPart (for 32-char store path hashes)
         resp = await self.store.execute(
             QueryPathFromHashPartRequest(path=StorePath(hash_part))
         )
-        return StorePath(resp.value) if resp.value else None
+        if resp.value:
+            return StorePath(resp.value)
+
+        return None
 
     async def get_path_info(self, path: StorePath) -> ValidPathInfo | None:
         """Get ValidPathInfo for a store path. Returns ValidPathInfo or None."""
