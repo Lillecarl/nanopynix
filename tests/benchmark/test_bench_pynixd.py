@@ -88,13 +88,16 @@ async def _get_test_paths(n: int = 100) -> list[StorePath]:
 
 
 @pytest.mark.benchmark
-async def test_bench_query_all_valid_paths(bench_store: Store) -> None:
+async def test_bench_query_all_valid_paths(
+    request: pytest.FixtureRequest, bench_store: Store
+) -> None:
     """Measure latency of QueryAllValidPaths."""
     start = time.perf_counter()
     resp = await bench_store.execute(QueryAllValidPathsRequest())
     elapsed = time.perf_counter() - start
 
     _record(
+        request,
         "query_all_valid_paths",
         store=bench_store.id,
         count=len(resp.paths),
@@ -103,7 +106,9 @@ async def test_bench_query_all_valid_paths(bench_store: Store) -> None:
 
 
 @pytest.mark.benchmark
-async def test_bench_query_path_info_latency(bench_store: Store) -> None:
+async def test_bench_query_path_info_latency(
+    request: pytest.FixtureRequest, bench_store: Store
+) -> None:
     """Measure latency of QueryPathInfo for 100 random paths."""
     paths = await _get_test_paths(100)
 
@@ -115,6 +120,7 @@ async def test_bench_query_path_info_latency(bench_store: Store) -> None:
 
     avg_latency = sum(latencies) / len(latencies)
     _record(
+        request,
         "query_path_info_latency",
         store=bench_store.id,
         avg_ms=avg_latency * 1000,
@@ -123,7 +129,9 @@ async def test_bench_query_path_info_latency(bench_store: Store) -> None:
 
 
 @pytest.mark.benchmark
-async def test_bench_is_valid_path_throughput(bench_store: Store) -> None:
+async def test_bench_is_valid_path_throughput(
+    request: pytest.FixtureRequest, bench_store: Store
+) -> None:
     """Measure throughput of IsValidPath (ops/s)."""
     paths = await _get_test_paths(500)
 
@@ -135,6 +143,7 @@ async def test_bench_is_valid_path_throughput(bench_store: Store) -> None:
 
     ops_per_s = len(paths) / elapsed
     _record(
+        request,
         "is_valid_path_throughput",
         store=bench_store.id,
         ops_per_s=ops_per_s,
@@ -142,7 +151,9 @@ async def test_bench_is_valid_path_throughput(bench_store: Store) -> None:
 
 
 @pytest.mark.benchmark
-async def test_bench_is_valid_path_parallel(bench_store: Store) -> None:
+async def test_bench_is_valid_path_parallel(
+    request: pytest.FixtureRequest, bench_store: Store
+) -> None:
     """Measure throughput of IsValidPath with 10 parallel tasks."""
     paths = await _get_test_paths(1000)
 
@@ -153,6 +164,7 @@ async def test_bench_is_valid_path_parallel(bench_store: Store) -> None:
 
     ops_per_s = len(paths) / elapsed
     _record(
+        request,
         "is_valid_path_parallel",
         store=bench_store.id,
         parallel_tasks=10,
@@ -161,7 +173,7 @@ async def test_bench_is_valid_path_parallel(bench_store: Store) -> None:
 
 
 @pytest.mark.benchmark
-async def test_bench_local_socket_overhead() -> None:
+async def test_bench_local_socket_overhead(request: pytest.FixtureRequest) -> None:
     """Compare direct Unix socket vs pynixd LocalSocketStore."""
     path = (await _get_test_paths(1))[0]
 
@@ -191,6 +203,7 @@ async def test_bench_local_socket_overhead() -> None:
     await managed_store.close()
 
     _record(
+        request,
         "local_overhead",
         direct_avg_ms=(sum(latencies_direct) / 100) * 1000,
         managed_avg_ms=(sum(latencies_managed) / 100) * 1000,

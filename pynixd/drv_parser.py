@@ -575,15 +575,14 @@ def to_basic_derivation(
         output_cache: Optional {drv_path: {output_name: output_path}} cache
             from the DB to skip reading input .drv files from disk.
     """
-    outputs = [
-        DerivationOutput(
-            name=o.name,
+    outputs = {
+        o.name: DerivationOutput(
             path=o.path,
             method=o.hash_algo,
             hash_digest=o.hash_value,
         )
         for o in parsed.outputs
-    ]
+    }
 
     # Start with the explicit input sources
     input_srcs: set[StorePath] = set(parsed.input_srcs)

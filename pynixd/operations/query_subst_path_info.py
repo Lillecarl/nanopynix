@@ -6,13 +6,13 @@ from dataclasses import dataclass
 from typing import ClassVar, Self
 
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs, SubstPathInfo
+from .base import OpRequest, OpResponse, OperationLogs, SubstitutablePathInfo
 
 
 @dataclass
-class QuerySubstPathInfoResponse(OpResponse):
+class QuerySubstitutablePathInfoResponse(OpResponse):
     found: bool = False
-    info: SubstPathInfo | None = None
+    info: SubstitutablePathInfo | None = None
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
@@ -20,7 +20,7 @@ class QuerySubstPathInfoResponse(OpResponse):
         found = await reader.read_uint64() != 0
         info = None
         if found:
-            info = await SubstPathInfo.from_reader(reader, version)
+            info = await SubstitutablePathInfo.from_reader(reader, version)
         return cls(logs=logs, found=found, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -32,10 +32,10 @@ class QuerySubstPathInfoResponse(OpResponse):
 
 
 @dataclass
-class QuerySubstPathInfoRequest(OpRequest[QuerySubstPathInfoResponse]):
+class QuerySubstitutablePathInfoRequest(OpRequest[QuerySubstitutablePathInfoResponse]):
     name: ClassVar[str] = "QuerySubstitutablePathInfo"
     op: ClassVar[int] = 21
-    response_type: ClassVar[type[OpResponse]] = QuerySubstPathInfoResponse
+    response_type: ClassVar[type[OpResponse]] = QuerySubstitutablePathInfoResponse
     is_query: ClassVar[bool] = True
     path: str = ""
 

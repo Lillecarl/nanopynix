@@ -27,6 +27,7 @@ from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..derived_path import DerivedPath
     from ..proxy import DaemonProxy
     from ..stderr import StderrError, StderrMsg
     from ..store import Store
@@ -443,7 +444,6 @@ class OutputKind(Enum):
 
 @dataclass
 class DerivationOutput:
-    name: str = ""
     path: str = ""
     method: str = ""
     hash_digest: str = ""
@@ -504,7 +504,7 @@ class DerivationOutput:
 
 @dataclass
 class BasicDerivation:
-    outputs: list[DerivationOutput] = field(default_factory=list)
+    outputs: dict[str, DerivationOutput] = field(default_factory=dict)
     input_srcs: set[StorePath] = field(default_factory=set)
     platform: str = ""
     builder: str = ""
@@ -533,20 +533,18 @@ class BasicDerivation:
 
     def output_paths(self) -> dict[str, StorePath]:
         """Return {output_name: output_path} for all outputs."""
-        return {o.name: StorePath(o.path) for o in self.outputs}
+        return {name: StorePath(o.path) for name, o in self.outputs.items()}
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> BasicDerivation:
         n = await reader.read_uint64()
-        outputs = []
+        outputs: dict[str, DerivationOutput] = {}
         for _ in range(n):
-            outputs.append(
-                DerivationOutput(
-                    name=await reader.read_string(),
-                    path=await reader.read_string(),
-                    method=await reader.read_string(),
-                    hash_digest=await reader.read_string(),
-                )
+            name = await reader.read_string()
+            outputs[name] = DerivationOutput(
+                path=await reader.read_string(),
+                method=await reader.read_string(),
+                hash_digest=await reader.read_string(),
             )
         input_srcs = await reader.read_string_set(StorePath)
         platform = await reader.read_string()
@@ -569,8 +567,8 @@ class BasicDerivation:
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(len(self.outputs))
-        for out in self.outputs:
-            writer.write_string(out.name)
+        for name, out in self.outputs.items():
+            writer.write_string(name)
             writer.write_string(out.path)
             writer.write_string(out.method)
             writer.write_string(out.hash_digest)
@@ -599,7 +597,7 @@ class BasicDerivation:
         """
         if self.is_dynamic:
             return False
-        for out in self.outputs:
+        for out in self.outputs.values():
             kind = out.kind
             if kind == OutputKind.DEFERRED:
                 return False
@@ -614,32 +612,34 @@ class BasicDerivation:
     @property
     def has_ca_floating(self) -> bool:
         """True if any output is floating CA (CAFloating, not text-hashed)."""
-        return any(o.is_floating_ca and not o.is_text_hashed for o in self.outputs)
+        return any(
+            o.is_floating_ca and not o.is_text_hashed for o in self.outputs.values()
+        )
 
     @property
     def has_deferred(self) -> bool:
         """True if any output is deferred (depends on CA derivation)."""
-        return any(o.is_deferred for o in self.outputs)
+        return any(o.is_deferred for o in self.outputs.values())
 
     @property
     def has_impure(self) -> bool:
         """True if any output is impure."""
-        return any(o.is_impure for o in self.outputs)
+        return any(o.is_impure for o in self.outputs.values())
 
     @property
     def has_text_hashed(self) -> bool:
         """True if any output uses text ingestion (any kind)."""
-        return any(o.is_text_hashed for o in self.outputs)
+        return any(o.is_text_hashed for o in self.outputs.values())
 
     @property
     def has_dynamic_outputs(self) -> bool:
         """True if any output is text-hashed without pre-computed hash."""
-        return any(o.is_dynamic_output for o in self.outputs)
+        return any(o.is_dynamic_output for o in self.outputs.values())
 
 
 @dataclass
-class SubstPathInfo:
-    """Substitutable path info (deriver, refs, sizes)."""
+class SubstitutablePathInfo:
+    """Metadata for a substitutable path (missing but available)."""
 
     deriver: StorePath = field(default_factory=lambda: StorePath(""))
     references: set[StorePath] = field(default_factory=set)
@@ -647,7 +647,9 @@ class SubstPathInfo:
     nar_size: int = 0
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> SubstPathInfo:
+    async def from_reader(
+        cls, reader: NixReader, version: int
+    ) -> SubstitutablePathInfo:
         return cls(
             deriver=await reader.read_string(StorePath),
             references=await reader.read_string_set(StorePath),
@@ -818,6 +820,26 @@ class BuildResult:
 
 # Silence BuildResult debug logs — verbose in hot paths
 logging.getLogger("pynixd.operations.BuildResult").setLevel(logging.WARNING)
+
+
+@dataclass
+class KeyedBuildResult:
+    """A build result associated with its derived path."""
+
+    derived_path: DerivedPath = field(default_factory=lambda: StorePath(""))  # type: ignore
+    result: BuildResult = field(default_factory=BuildResult)
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        from ..derived_path import DerivedPath
+
+        derived_path = await reader.read_string(DerivedPath)
+        result = await BuildResult.from_reader(reader, version)
+        return cls(derived_path=derived_path, result=result)
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string(self.derived_path)
+        await self.result.to_writer(writer, version)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

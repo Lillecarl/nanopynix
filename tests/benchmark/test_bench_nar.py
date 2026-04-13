@@ -130,7 +130,10 @@ async def _get_small_paths(n: int = 1000) -> list[StorePath]:
 @pytest.mark.benchmark
 @pytest.mark.parametrize("chunk_size_kb", _CHUNK_SIZES_KB)
 async def test_bench_nar_big_throughput(
-    bench_store: Store, dst_store: LocalSocketStore, chunk_size_kb: int
+    request: pytest.FixtureRequest,
+    bench_store: Store,
+    dst_store: LocalSocketStore,
+    chunk_size_kb: int,
 ) -> None:
     """Measure throughput for a large NAR transfer."""
     path = await _get_big_path()
@@ -146,6 +149,7 @@ async def test_bench_nar_big_throughput(
 
     mb_per_s = (info.nar_size / 1e6) / elapsed
     _record(
+        request,
         "nar_throughput",
         store=bench_store.id,
         chunk_kb=chunk_size_kb,
@@ -157,7 +161,10 @@ async def test_bench_nar_big_throughput(
 @pytest.mark.benchmark
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
 async def test_bench_nar_small_pipe(
-    bench_store: Store, dst_store: LocalSocketStore, concurrency: int
+    request: pytest.FixtureRequest,
+    bench_store: Store,
+    dst_store: LocalSocketStore,
+    concurrency: int,
 ) -> None:
     """Measure overhead for piping many small NARs one-by-one."""
     paths = (await _get_small_paths(100))[:100]  # Smaller sample for speed
@@ -181,6 +188,7 @@ async def test_bench_nar_small_pipe(
 
     ops_per_s = len(infos) / elapsed
     _record(
+        request,
         "nar_pipe_overhead",
         store=bench_store.id,
         concurrency=concurrency,
@@ -190,7 +198,7 @@ async def test_bench_nar_small_pipe(
 
 @pytest.mark.benchmark
 async def test_bench_nar_small_batch(
-    bench_store: Store, dst_store: LocalSocketStore
+    request: pytest.FixtureRequest, bench_store: Store, dst_store: LocalSocketStore
 ) -> None:
     """Measure overhead for batched AddMultipleToStore."""
     paths = await _get_small_paths(100)
@@ -209,6 +217,7 @@ async def test_bench_nar_small_batch(
 
     ops_per_s = len(infos) / elapsed
     _record(
+        request,
         "nar_batch_overhead",
         store=bench_store.id,
         ops_per_s=ops_per_s,
@@ -217,7 +226,9 @@ async def test_bench_nar_small_batch(
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
-async def test_bench_nar_serve(bench_store: Store, concurrency: int) -> None:
+async def test_bench_nar_serve(
+    request: pytest.FixtureRequest, bench_store: Store, concurrency: int
+) -> None:
     """Measure how fast a store can serve NARs via nar_from_path."""
     paths = await _get_small_paths(100)
     infos = []
@@ -254,6 +265,7 @@ async def test_bench_nar_serve(bench_store: Store, concurrency: int) -> None:
 
     ops_per_s = len(infos) / elapsed
     _record(
+        request,
         "nar_serve_overhead",
         store=bench_store.id,
         concurrency=concurrency,

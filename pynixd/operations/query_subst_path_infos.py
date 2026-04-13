@@ -6,18 +6,18 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs, SubstPathInfo
+from .base import OpRequest, OpResponse, OperationLogs, SubstitutablePathInfo
 
 
 @dataclass
-class SubstPathInfoEntry:
+class SubstitutablePathInfoEntry:
     path: str = ""
-    info: SubstPathInfo = field(default_factory=SubstPathInfo)
+    info: SubstitutablePathInfo = field(default_factory=SubstitutablePathInfo)
 
 
 @dataclass
-class QuerySubstPathInfosResponse(OpResponse):
-    entries: list[SubstPathInfoEntry] = field(default_factory=list)
+class QuerySubstitutablePathInfosResponse(OpResponse):
+    entries: list[SubstitutablePathInfoEntry] = field(default_factory=list)
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
@@ -26,8 +26,8 @@ class QuerySubstPathInfosResponse(OpResponse):
         entries = []
         for _ in range(n):
             path = await reader.read_string()
-            info = await SubstPathInfo.from_reader(reader, version)
-            entries.append(SubstPathInfoEntry(path=path, info=info))
+            info = await SubstitutablePathInfo.from_reader(reader, version)
+            entries.append(SubstitutablePathInfoEntry(path=path, info=info))
         return cls(logs=logs, entries=entries)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -40,10 +40,12 @@ class QuerySubstPathInfosResponse(OpResponse):
 
 
 @dataclass
-class QuerySubstPathInfosRequest(OpRequest[QuerySubstPathInfosResponse]):
+class QuerySubstitutablePathInfosRequest(
+    OpRequest[QuerySubstitutablePathInfosResponse]
+):
     name: ClassVar[str] = "QuerySubstitutablePathInfos"
     op: ClassVar[int] = 30
-    response_type: ClassVar[type[OpResponse]] = QuerySubstPathInfosResponse
+    response_type: ClassVar[type[OpResponse]] = QuerySubstitutablePathInfosResponse
     is_query: ClassVar[bool] = True
     items: dict[str, str] = field(default_factory=dict)
 

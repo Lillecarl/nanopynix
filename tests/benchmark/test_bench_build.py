@@ -47,7 +47,7 @@ aiosqlite_logger = logging.getLogger("aiosqlite")
 aiosqlite_logger.setLevel(logging.WARNING)
 
 
-CLIENT_BINS: list[tuple[Path, str]] = [
+CLIENT_BINS: list[tuple[str, str]] = [
     (NIX_BIN, "nix"),
     (LIX_BIN, "lix"),
 ]

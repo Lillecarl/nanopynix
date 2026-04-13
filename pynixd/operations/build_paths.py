@@ -14,7 +14,7 @@ from ..store_path import RequiredInput, StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     BuildMode,
-    BuildResult,
+    KeyedBuildResult,
     OpRequest,
     OpResponse,
     OperationLogs,
@@ -221,12 +221,6 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 
 
 @dataclass
-class KeyedBuildResult:
-    derived_path: DerivedPath = field(default_factory=lambda: DerivedPath(""))
-    result: BuildResult = field(default_factory=BuildResult)
-
-
-@dataclass
 class BuildPathsWithResultsResponse(OpResponse):
     results: list[KeyedBuildResult] = field(default_factory=list)
 
@@ -236,9 +230,7 @@ class BuildPathsWithResultsResponse(OpResponse):
         n = await reader.read_uint64()
         results = []
         for _ in range(n):
-            derived_path = await reader.read_string(DerivedPath)
-            result = await BuildResult.from_reader(reader, version)
-            results.append(KeyedBuildResult(derived_path=derived_path, result=result))
+            results.append(await KeyedBuildResult.from_reader(reader, version))
         return cls(logs=logs, results=results)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -246,8 +238,7 @@ class BuildPathsWithResultsResponse(OpResponse):
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.results))
         for entry in self.results:
-            writer.write_string(entry.derived_path)
-            await entry.result.to_writer(writer, version)
+            await entry.to_writer(writer, version)
 
 
 @dataclass
