@@ -58,14 +58,15 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
     async def handle(cls, proxy: DaemonProxy) -> AddMultipleToStoreResponse:
         """Override handle because this is a streaming operation."""
         async with proxy.local_store.transfer_conn() as conn:
-            paths = await cls.forward(proxy.r, conn.w)
+            infos = await cls.forward(proxy.r, conn.w)
             resp = await AddMultipleToStoreResponse.from_reader(conn.r, conn.version)
-            proxy.local_store.add_known_paths(set(paths))
+            proxy.local_store.add_path_infos(infos)
+            proxy.local_store.add_known_paths({i.path for i in infos})
         return resp
 
     @classmethod
-    async def forward(cls, src: NixReader, dst: NixWriter) -> list[StorePath]:
-        """Forward AddMultipleToStore verbatim, snooping store paths."""
+    async def forward(cls, src: NixReader, dst: NixWriter) -> set[PathInfo]:
+        """Forward AddMultipleToStore verbatim, snooping PathInfos."""
         dst.write_uint64(44)
 
         repair = await src.read_uint64()
@@ -81,10 +82,10 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         cls.logger.info(f"forward: expected {expected} paths")
         fdst.write_uint64(expected)
 
-        paths = []
+        infos: set[PathInfo] = set()
         for i in range(expected):
             info = await PathInfo.from_reader_keyed(fsrc)
-            paths.append(info.path)
+            infos.add(info)
             cls.logger.info(f"forward: path {info.path} nar_size={info.nar_size}")
             fdst.write(info.to_bytes())
             sent_bytes = 0
@@ -96,4 +97,4 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
             cls.logger.info(f"forward: sent {sent_bytes} bytes for {info.path}")
 
         await fdst.finalize()
-        return paths
+        return infos
