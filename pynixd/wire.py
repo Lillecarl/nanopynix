@@ -38,74 +38,10 @@ def _nar_pad(n: int) -> int:
 class NixReader:
     """Wraps AsyncReader with wire protocol methods and dirty checking."""
 
-    def __init__(self) -> None:
-        self._buf = bytearray()
-        self._pos = 0
-
-    def _compact(self) -> None:
-        if self._pos > 0:
-            del self._buf[: self._pos]
-            self._pos = 0
-
     async def readexactly(self, n: int) -> bytes:
-        # Fast path: serve entirely from local buffer
-        if len(self._buf) - self._pos >= n:
-            result = bytes(self._buf[self._pos : self._pos + n])
-            self._pos += n
-            if self._pos > 64 * 1024:
-                self._compact()
-            return result
-        return await self._read_more(n)
-
-    async def _read_more(self, n: int) -> bytes:
-        # Need more data from the stream
-        needed = n - (len(self._buf) - self._pos)
-        read_ahead = self._get_read_ahead()
-
-        if needed <= read_ahead:
-            # Small read: try to grab extra data to fill future reads
-            data = await self._read_from_transport(max(needed, read_ahead))
-            if not data:
-                raise EOFError("Stream closed")
-            self._buf.extend(data)
-            # May still not have enough if stream had less available
-            while len(self._buf) - self._pos < n:
-                data = await self._readexactly_from_transport(
-                    n - (len(self._buf) - self._pos)
-                )
-                self._buf.extend(data)
-            result = bytes(self._buf[self._pos : self._pos + n])
-            self._pos += n
-            if self._pos > 64 * 1024:
-                self._compact()
-            return result
-        else:
-            # Large read (NAR data etc.): read exactly what's needed
-            if len(self._buf) - self._pos > 0:
-                already_have = bytes(self._buf[self._pos :])
-                self._buf = bytearray()
-                self._pos = 0
-                needed = n - len(already_have)
-                return already_have + await self._readexactly_from_transport(needed)
-
-            return await self._readexactly_from_transport(n)
-
-    def _get_read_ahead(self) -> int:
-        return 0
-
-    async def _read_from_transport(self, n: int) -> bytes:
-        return await self._readexactly_from_transport(n)
-
-    async def _readexactly_from_transport(self, n: int) -> bytes:
         raise NotImplementedError
 
     async def read_uint64(self) -> int:
-        if len(self._buf) - self._pos >= 8:
-            val = _UINT64_STRUCT.unpack_from(self._buf, self._pos)[0]
-            self._pos += 8
-            if self._pos > 64 * 1024:
-                self._compact()
-            return val
         return _UINT64_STRUCT.unpack(await self.readexactly(8))[0]
 
     async def read_bool(self) -> bool:
@@ -118,17 +54,6 @@ class NixReader:
         return await self.read_uint64()
 
     async def read_bytes(self) -> bytes:
-        if len(self._buf) - self._pos >= 8:
-            length = _UINT64_STRUCT.unpack_from(self._buf, self._pos)[0]
-            pad = _nar_pad(length)
-            total = 8 + length + pad
-            if len(self._buf) - self._pos >= total:
-                data = bytes(self._buf[self._pos + 8 : self._pos + 8 + length])
-                self._pos += total
-                if self._pos > 64 * 1024:
-                    self._compact()
-                return data
-
         length = await self.read_uint64()
         data = await self.readexactly(length)
         pad = _nar_pad(length)
@@ -160,8 +85,6 @@ class NixReader:
         return stderr.read_stream(self)
 
     async def is_dirty(self) -> bool:
-        if len(self._buf) - self._pos > 0:
-            return True
         return self._transport_is_dirty()
 
     def _transport_is_dirty(self) -> bool:
@@ -176,16 +99,7 @@ class SSHNixReader(NixReader):
         super().__init__()
         self.reader = reader
 
-    def _get_read_ahead(self) -> int:
-        return _SSH_READ_AHEAD
-
-    async def _read_from_transport(self, n: int) -> bytes:
-        try:
-            return await self.reader.read(n)
-        except asyncssh.misc.ConnectionLost:
-            raise EOFError("SSH connection lost")
-
-    async def _readexactly_from_transport(self, n: int) -> bytes:
+    async def readexactly(self, n: int) -> bytes:
         try:
             return await self.reader.readexactly(n)
         except asyncssh.misc.ConnectionLost:
@@ -217,66 +131,30 @@ class UnixNixReader(NixReader):
         super().__init__()
         self.reader = reader
 
-    def _get_read_ahead(self) -> int:
-        return _UNIX_READ_AHEAD
-
-    async def _read_from_transport(self, n: int) -> bytes:
-        return await self.reader.read(n)
-
-    async def _readexactly_from_transport(self, n: int) -> bytes:
+    async def readexactly(self, n: int) -> bytes:
         return await self.reader.readexactly(n)
 
     def _transport_is_dirty(self) -> bool:
-        # Check internal buffer without consuming data
         return len(self.reader._buffer) > 0  # type: ignore[attr-defined]
 
 
 class NixWriter:
     """Wraps AsyncWriter with wire protocol methods."""
 
-    def __init__(self) -> None:
-        self._buf = bytearray()
-
     def write(self, data: bytes) -> None:
-        """Write raw bytes, utilizing buffering if configured."""
-        chunk_size = self._get_chunk_size()
-        read_ahead = self._get_read_ahead()
-
-        if chunk_size and len(data) >= chunk_size:
-            if self._buf:
-                self._write_to_transport(bytes(self._buf))
-                self._buf.clear()
-            self._write_to_transport(data)
-        else:
-            self._buf.extend(data)
-            if read_ahead and len(self._buf) >= read_ahead:
-                self._write_to_transport(bytes(self._buf))
-                self._buf.clear()
+        self._write_to_transport(data)
 
     async def drain(self) -> None:
-        """Flush writer."""
-        if self._buf:
-            self._write_to_transport(bytes(self._buf))
-            self._buf.clear()
         await self._drain_transport()
 
     async def is_dirty(self) -> bool:
-        """Check if writer has un-drained data."""
-        if self._buf:
-            return True
         return self._transport_is_dirty()
 
-    def _get_chunk_size(self) -> int:
-        return 0
-
-    def _get_read_ahead(self) -> int:
-        return 0
-
     def _write_to_transport(self, data: bytes) -> None:
-        pass
+        raise NotImplementedError
 
     async def _drain_transport(self) -> None:
-        pass
+        raise NotImplementedError
 
     def _transport_is_dirty(self) -> bool:
         return False
@@ -321,21 +199,15 @@ class NixWriter:
     def write_string_set(self, items: Iterable[str]) -> None:
         self.write_string_list(items)
 
-    def framed(self, chunk_size: int = _CHUNK_SIZE) -> FramedWriter:
+    def framed(self) -> FramedWriter:
         """Create a FramedWriter that writes framed data to this writer."""
-        return FramedWriter(self, chunk_size)
+        return FramedWriter(self)
 
 
 class SSHNixWriter(NixWriter):
     def __init__(self, writer: asyncssh.SSHWriter) -> None:
         super().__init__()
         self.writer = writer
-
-    def _get_chunk_size(self) -> int:
-        return _CHUNK_SIZE
-
-    def _get_read_ahead(self) -> int:
-        return _SSH_READ_AHEAD
 
     def _write_to_transport(self, data: bytes) -> None:
         self.writer.write(data)
@@ -355,12 +227,6 @@ class UnixNixWriter(NixWriter):
     def __init__(self, writer: asyncio.StreamWriter) -> None:
         super().__init__()
         self.writer = writer
-
-    def _get_chunk_size(self) -> int:
-        return _CHUNK_SIZE
-
-    def _get_read_ahead(self) -> int:
-        return _UNIX_READ_AHEAD
 
     def _write_to_transport(self, data: bytes) -> None:
         self.writer.write(data)
@@ -547,28 +413,29 @@ class FramedReader(NixReader):
     def __init__(self, src: NixReader) -> None:
         super().__init__()
         self._src = src
+        self._buf = bytearray()
+        self._pos = 0
         self._eof = False
 
-    async def _fill(self, needed: int) -> None:
-        """Read framed chunks until buffer has at least `needed` bytes."""
-        while (len(self._buf) - self._pos) < needed:
+    def _compact(self) -> None:
+        if self._pos > 0:
+            del self._buf[: self._pos]
+            self._pos = 0
+
+    async def readexactly(self, n: int) -> bytes:
+        while (len(self._buf) - self._pos) < n:
             if self._eof:
                 have = len(self._buf) - self._pos
-                raise EOFError(f"Framed stream ended, need {needed} bytes, have {have}")
+                raise EOFError(f"Framed stream ended, need {n} bytes, have {have}")
             size = await self._src.read_uint64()
             if size == 0:
                 self._eof = True
                 have = len(self._buf) - self._pos
-                if have < needed:
-                    raise EOFError(
-                        f"Framed stream ended, need {needed} bytes, have {have}"
-                    )
-                return
+                if have < n:
+                    raise EOFError(f"Framed stream ended, need {n} bytes, have {have}")
+                break
             data = await self._src.readexactly(size)
             self._buf.extend(data)
-
-    async def _read_more(self, n: int) -> bytes:
-        await self._fill(n)
         result = bytes(self._buf[self._pos : self._pos + n])
         self._pos += n
         if self._pos > 64 * 1024:
@@ -584,17 +451,6 @@ class FramedReader(NixReader):
     def at_eof(self) -> bool:
         return self._eof and (len(self._buf) - self._pos) == 0
 
-    async def drain_remaining(self) -> None:
-        """Discard remaining framed data (if stream wasn't fully consumed)."""
-        if self._eof:
-            return
-        while True:
-            size = await self._src.read_uint64()
-            if size == 0:
-                self._eof = True
-                return
-            await self._src.readexactly(size)
-
 
 class FramedWriter(NixWriter):
     """Buffers writes and emits framed chunks to an underlying writer.
@@ -606,30 +462,15 @@ class FramedWriter(NixWriter):
     def __init__(
         self,
         dst: NixWriter,
-        chunk_size: int = _CHUNK_SIZE,
     ) -> None:
         super().__init__()
         self._dst = dst
-        self._chunk_size = chunk_size
 
     def write(self, data: bytes) -> None:
-        self._buf.extend(data)
-        while len(self._buf) >= self._chunk_size:
-            chunk = bytes(self._buf[: self._chunk_size])
-            self._dst.write_uint64(self._chunk_size)
-            self._dst.write(chunk)
-            del self._buf[: self._chunk_size]
-
-    async def drain(self) -> None:
-        """No-op — actual flushing happens in write() and finalize()."""
-        pass
+        self._dst.write_uint64(len(data))
+        self._dst.write_bytes(data)
 
     async def finalize(self) -> None:
-        """Flush remaining buffer and write framing terminator."""
-        if self._buf:
-            self._dst.write_uint64(len(self._buf))
-            self._dst.write(bytes(self._buf))
-            self._buf = bytearray()
         self._dst.write_uint64(0)  # terminator
         await self._dst.drain()
 
@@ -704,7 +545,7 @@ async def copy_nar_to_framed(
     Framed output: [uint64 size][data]... [uint64 0] (terminator).
     Memory bound: ~chunk_size buffered at a time.
     """
-    fw = FramedWriter(dst, chunk_size)
+    fw = FramedWriter(dst)
     await stream_nar(src, fw, chunk_size)
     await fw.finalize()
 

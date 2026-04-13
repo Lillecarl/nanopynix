@@ -290,7 +290,7 @@ class PathInfo:
         path = await reader.read_string(StorePath)
         return await cls.from_reader_unkeyed(reader, path)
 
-    async def to_writer_unkeyed(self, writer: NixWriter) -> None:
+    def to_writer_unkeyed(self, writer: NixWriter) -> None:
         """Write UnkeyedValidPathInfo (no path prefix) to wire."""
         writer.write_string(self.deriver)
         writer.write_string(self.nar_hash)
@@ -301,10 +301,10 @@ class PathInfo:
         writer.write_string_set(self.sigs)
         writer.write_string(self.ca)
 
-    async def to_writer_keyed(self, writer: NixWriter) -> None:
+    def to_writer_keyed(self, writer: NixWriter) -> None:
         """Write ValidPathInfo (path + UnkeyedValidPathInfo) to wire."""
         writer.write_string(self.path)
-        await self.to_writer_unkeyed(writer)
+        self.to_writer_unkeyed(writer)
 
     @classmethod
     def from_narinfo(cls, content: str) -> PathInfo:
