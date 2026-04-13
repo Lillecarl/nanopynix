@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
+from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -145,6 +146,12 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
             store.add_known_paths(set(infos.keys()))
             store.add_path_infos(infos.values())
             return QueryPathInfosResponse(infos=infos)
+
+        # Try delegation via wire (if talking to another pynixd)
+        try:
+            return await super().execute(store, client, suppress_last)
+        except OpNotImplementedError:
+            pass  # Backend doesn't support the extension, fall back to decomposition
 
         for path in uncached:
             resp = await store.execute(

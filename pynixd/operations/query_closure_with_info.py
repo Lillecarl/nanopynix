@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
+from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -137,6 +138,12 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
             store.add_known_paths({info.path for info in sorted_infos})
             store.add_path_infos(sorted_infos)
             return QueryClosureWithInfoResponse(infos=sorted_infos)
+
+        # Try delegation via wire (if talking to another pynixd)
+        try:
+            return await super().execute(store, client, suppress_last)
+        except OpNotImplementedError:
+            pass  # Backend doesn't support the extension, fall back to manual walk
 
         all_infos: dict[StorePath, ValidPathInfo] = {}
         pending = self.paths

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
+from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from ..drv_parser import read_drv_file
@@ -107,6 +108,12 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
                     output_path
                 )
             return DerivationOutputsBatchResponse(outputs=result)
+
+        # Try delegation via wire (if talking to another pynixd)
+        try:
+            return await super().execute(store, client, suppress_last)
+        except OpNotImplementedError:
+            pass  # Backend doesn't support the extension, fall back to local file reading
 
         outputs: dict[StorePath, dict[str, StorePath]] = {}
         for drv_path in self.drv_paths:

@@ -44,7 +44,14 @@ async def test_extension_delegation(tmp_path: Path) -> None:
     await store_b.ensure_daemon()
 
     # Add a path to store B
-    cmd = [str(NIX_BIN), "store", "add-path", "--store", str(store_b_path), "README.md"]
+    cmd = [
+        str(NIX_BIN),
+        "store",
+        "add-path",
+        "--store",
+        str(store_b_path),
+        "README.md",
+    ]
     rc, stdout, stderr, _ = await run_subproc(cmd)
     assert rc == 0
     path = StorePath(stdout.strip())
@@ -71,7 +78,10 @@ async def test_extension_delegation(tmp_path: Path) -> None:
 
         # Server A's local store doesn't have a DB and doesn't support extensions
         store_a = LocalSocketStore(
-            id="a-local", store_path=Path("/"), use_db=False, **get_test_store_kwargs()
+            id="a-local",
+            store_path=Path("/"),
+            use_db=False,
+            **get_test_store_kwargs(),
         )
 
         unix_path_a = tmp_path / "server-a.sock"
