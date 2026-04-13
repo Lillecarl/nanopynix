@@ -59,7 +59,6 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         """Override handle because this is a streaming operation."""
         async with proxy.local_store.transfer_conn() as conn:
             paths = await cls.forward(proxy.r, conn.w)
-            await conn.w.drain()
             await AddMultipleToStoreResponse.from_reader(conn.r, conn.version)
             proxy.local_store.add_known_paths(set(paths))
         return AddMultipleToStoreResponse()
@@ -79,17 +78,19 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         fdst = FramedWriter(dst)
 
         expected = await fsrc.read_uint64()
+        cls.logger.info(f"forward: expected {expected} paths")
 
         for i in range(expected):
             info = await PathInfo.from_reader_keyed(fsrc)
-            info.to_writer_keyed(fdst)
+            cls.logger.info(f"forward: path {info.path} nar_size={info.nar_size}")
+            info.to_writer_keyed(dst)
             sent_bytes = 0
             while sent_bytes < info.nar_size:
                 read = min(info.nar_size - sent_bytes, 1024 * 1024)
                 data = await fsrc.readexactly(read)
-                fdst.write_bytes(data)
+                fdst.write(data)
                 sent_bytes += len(data)
+            cls.logger.info(f"forward: sent {sent_bytes} bytes for {info.path}")
 
         await fdst.finalize()
-        await dst.drain()
         return []

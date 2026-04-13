@@ -204,6 +204,23 @@ class NixWriter:
         return FramedWriter(self)
 
 
+class BytesWriter(NixWriter):
+    """A NixWriter that writes to a bytearray."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._buf = bytearray()
+
+    def write(self, data: bytes) -> None:
+        self._buf.extend(data)
+
+    async def drain(self) -> None:
+        pass
+
+    def get_bytes(self) -> bytes:
+        return bytes(self._buf)
+
+
 class SSHNixWriter(NixWriter):
     def __init__(self, writer: asyncssh.SSHWriter) -> None:
         super().__init__()
@@ -466,9 +483,12 @@ class FramedWriter(NixWriter):
         super().__init__()
         self._dst = dst
 
+    def write_bytes(self, data: bytes) -> None:
+        self._dst.write(data)
+
     def write(self, data: bytes) -> None:
         self._dst.write_uint64(len(data))
-        self._dst.write_bytes(data)
+        self._dst.write(data)
 
     async def finalize(self) -> None:
         self._dst.write_uint64(0)  # terminator

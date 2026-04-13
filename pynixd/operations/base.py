@@ -306,6 +306,12 @@ class PathInfo:
         writer.write_string(self.path)
         self.to_writer_unkeyed(writer)
 
+    def to_bytes(self) -> bytes:
+        """Serialize ValidPathInfo to wire format as bytes."""
+        buf = wire.BytesWriter()
+        self.to_writer_keyed(buf)
+        return buf.get_bytes()
+
     @classmethod
     def from_narinfo(cls, content: str) -> PathInfo:
         """Parse PathInfo from .narinfo file content."""
