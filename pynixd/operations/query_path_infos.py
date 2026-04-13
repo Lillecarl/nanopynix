@@ -10,7 +10,13 @@ import structlog
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs, PathInfo
+from .base import (
+    OpRequest,
+    OpResponse,
+    OperationLogs,
+    ValidPathInfo,
+    UnkeyedValidPathInfo,
+)
 from .query_path_info import QueryPathInfoRequest
 
 QUERY_PATH_INFOS_BATCH = """
@@ -38,7 +44,7 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class QueryPathInfosResponse(OpResponse):
-    infos: dict[StorePath, PathInfo] = field(default_factory=dict)
+    infos: dict[StorePath, ValidPathInfo] = field(default_factory=dict)
 
     @property
     def is_not_found(self) -> bool:
@@ -50,7 +56,7 @@ class QueryPathInfosResponse(OpResponse):
         n = await reader.read_uint64()
         infos = {}
         for _ in range(n):
-            info = await PathInfo.from_reader_keyed(reader)
+            info = await ValidPathInfo.from_reader(reader)
             infos[info.path] = info
         return cls(logs=logs, infos=infos)
 
@@ -59,7 +65,7 @@ class QueryPathInfosResponse(OpResponse):
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.infos))
         for info in self.infos.values():
-            await info.to_writer_keyed(writer)
+            info.to_writer(writer)
 
 
 @dataclass
@@ -90,7 +96,7 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
         if not self.paths:
             return QueryPathInfosResponse(infos={})
 
-        cached: dict[StorePath, PathInfo] = {}
+        cached: dict[StorePath, ValidPathInfo] = {}
         uncached: list[StorePath] = []
         for path in self.paths:
             cached_info = store.get_path_info(path)
@@ -103,7 +109,7 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
             store.add_path_infos(cached.values())
             return QueryPathInfosResponse(infos=cached)
 
-        infos: dict[StorePath, PathInfo] = dict(cached)
+        infos: dict[StorePath, ValidPathInfo] = dict(cached)
 
         if store.db is not None:
             paths_json = json.dumps([str(p) for p in uncached])
@@ -124,8 +130,7 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
 
             for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
                 p = StorePath(path)
-                infos[p] = PathInfo(
-                    path=p,
+                uinfo = UnkeyedValidPathInfo(
                     deriver=StorePath(deriver or ""),
                     nar_hash=nar_hash,
                     references=refs_map.get(p, set()),
@@ -135,6 +140,7 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
                     sigs=set(sigs.split()) if sigs else set(),
                     ca=ca or "",
                 )
+                infos[p] = uinfo.with_path(p)
 
             store.add_known_paths(set(infos.keys()))
             store.add_path_infos(infos.values())
@@ -147,8 +153,9 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
                 suppress_last=suppress_last,
             )
             if resp.valid and resp.info:
-                infos[path] = resp.info
-                store.add_path_info(resp.info)
+                vinfo = resp.info.with_path(path)
+                infos[path] = vinfo
+                store.add_path_info(vinfo)
         return QueryPathInfosResponse(infos=infos)
 
     @classmethod

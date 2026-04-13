@@ -19,7 +19,7 @@ from environs import env
 from .store_path import StorePath
 
 if TYPE_CHECKING:
-    from .operations.base import PathInfo
+    from .operations.base import ValidPathInfo
 
 
 # Nix32 alphabet (base-32 encoding used by Nix for hashes)
@@ -122,7 +122,7 @@ def fingerprint(
 
 def sign_path_info(
     key: SecretKey,
-    info: PathInfo,
+    info: ValidPathInfo,
 ) -> str:
     """Sign a path info and return the signature string.
 

@@ -11,7 +11,7 @@ from pynixd.operations.sign_path_info import SignPathInfoRequest
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
-from .base import OpRequest, OpResponse, OperationLogs, PathInfo
+from .base import OpRequest, OpResponse, OperationLogs, ValidPathInfo
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
@@ -23,19 +23,20 @@ log = structlog.get_logger(__name__)
 class AddToStoreResponse(OpResponse):
     """Response: ValidPathInfo (path + UnkeyedValidPathInfo)."""
 
-    info: PathInfo = field(default_factory=PathInfo)
+    info: ValidPathInfo | None = None
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
         return cls(
             logs=await OperationLogs.from_reader(reader),
-            info=await PathInfo.from_reader_keyed(reader),
+            info=await ValidPathInfo.from_reader(reader),
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger.debug("to_writer", info=self.info)
         self.logs.to_writer(writer)
-        await self.info.to_writer_keyed(writer)
+        if self.info is not None:
+            self.info.to_writer(writer)
 
 
 @dataclass
@@ -80,11 +81,13 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
             await cls.forward(proxy.r, conn.w)
             await conn.w.drain()
             resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
-            resp.info = (
-                await proxy.local_store.execute(SignPathInfoRequest(resp.info))
-            ).info
-            proxy.local_store.add_known_path(resp.info.path)
-            proxy.local_store.add_path_info(resp.info)
+            if resp.info is not None:
+                resp.info = (
+                    await proxy.local_store.execute(SignPathInfoRequest(resp.info))
+                ).info
+                if resp.info is not None:
+                    proxy.local_store.add_known_path(resp.info.path)
+                    proxy.local_store.add_path_info(resp.info)
             return resp
 
     @classmethod

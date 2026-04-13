@@ -32,7 +32,7 @@ from .operations.add_to_store_nar import AddToStoreNarRequest
 from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_path_from_hash_part import QueryPathFromHashPartRequest
 from .operations.query_path_info import QueryPathInfoRequest
-from .operations.base import PathInfo
+from .operations.base import ValidPathInfo
 from .store import Store
 from .store_path import StorePath
 from .wire import NixWriter
@@ -113,8 +113,8 @@ class BinaryCacheServer:
             )
 
         try:
-            decoded = base64.b64decode(auth_header[6:]).decode()
-            user, passwd = decoded.split(":", 1)
+            auth_decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            user, passwd = auth_decoded.split(":", 1)
         except Exception:
             return web.Response(
                 status=HTTPStatus.UNAUTHORIZED, text="Malformed credentials\n"
@@ -152,11 +152,11 @@ class BinaryCacheServer:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
         # Get path info
-        info = await self.get_path_info(path)
-        if info is None:
+        vinfo = await self.get_path_info(path)
+        if vinfo is None:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
-        narinfo = info.to_narinfo()
+        narinfo = vinfo.to_narinfo()
 
         if self.db is not None:
             self.db.mark_path(path)
@@ -183,26 +183,23 @@ class BinaryCacheServer:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
         # Get path info for NAR size (needed for Content-Length and streaming)
-        info = await self.get_path_info(path)
-        if info is None:
+        vinfo = await self.get_path_info(path)
+        if vinfo is None:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
         response = web.StreamResponse(
             status=HTTPStatus.OK,
             headers={
                 "Content-Type": "application/x-nix-nar",
-                "Content-Length": str(info.nar_size),
+                "Content-Length": str(vinfo.nar_size),
             },
         )
         await response.prepare(request)
 
         try:
             await self.store.execute(
-                NarFromPathRequest(
-                    path=path,
-                    nar_size=info.nar_size,
-                    async_callback=response.write,
-                )
+                NarFromPathRequest(path=path),
+                client=NixWriter(response),  # type: ignore[arg-type]
             )
         except Exception:
             log.exception("nar_from_path_streaming_failed", path=path)
@@ -255,7 +252,7 @@ class BinaryCacheServer:
         content = await request.text()
 
         try:
-            info = PathInfo.from_narinfo(content)
+            vinfo = ValidPathInfo.from_narinfo(content)
         except Exception as e:
             log.warning("invalid_narinfo_upload", error=str(e))
             return web.Response(
@@ -282,7 +279,7 @@ class BinaryCacheServer:
         nar_temp_path = self.upload_dir / f"{nar_hash_part}.nar"
         if not nar_temp_path.exists():
             log.warning(
-                "nar_missing_for_narinfo", nar_hash=nar_hash_part, path=info.path
+                "nar_missing_for_narinfo", nar_hash=nar_hash_part, path=vinfo.path
             )
             return web.Response(
                 status=HTTPStatus.NOT_FOUND,
@@ -301,12 +298,12 @@ class BinaryCacheServer:
                     framed.write(chunk)
             await framed.finalize()
 
-        log.info("finalizing_upload_to_store", path=info.path)
+        log.info("finalizing_upload_to_store", path=vinfo.path)
         try:
-            req = AddToStoreNarRequest(info=info, async_provider=provide_nar)
+            req = AddToStoreNarRequest(info=vinfo, async_provider=provide_nar)
             await self.store.execute(req)
         except Exception as e:
-            log.exception("finalize_upload_failed", path=info.path)
+            log.exception("finalize_upload_failed", path=vinfo.path)
             return web.Response(
                 status=HTTPStatus.INTERNAL_SERVER_ERROR, text=f"Finalize failed: {e}\n"
             )
@@ -317,7 +314,7 @@ class BinaryCacheServer:
             except OSError:
                 pass
 
-        log.info("upload_to_store_complete", path=info.path)
+        log.info("upload_to_store_complete", path=vinfo.path)
         return web.Response(status=HTTPStatus.OK, text="ok\n")
 
     # ── Path resolution helpers ───────────────────────────────────────
@@ -329,10 +326,12 @@ class BinaryCacheServer:
         )
         return StorePath(resp.value) if resp.value else None
 
-    async def get_path_info(self, path: StorePath):
-        """Get PathInfo for a store path. Returns PathInfo or None."""
+    async def get_path_info(self, path: StorePath) -> ValidPathInfo | None:
+        """Get ValidPathInfo for a store path. Returns ValidPathInfo or None."""
         resp = await self.store.execute(QueryPathInfoRequest(path=path))
-        return resp.info if resp.valid else None
+        if resp.valid and resp.info:
+            return resp.info.with_path(path)
+        return None
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 

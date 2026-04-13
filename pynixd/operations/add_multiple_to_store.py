@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, FramedReader, FramedWriter
-from .base import OpRequest, OpResponse, OperationLogs, PathInfo
+from .base import OpRequest, OpResponse, OperationLogs, ValidPathInfo
 
 if TYPE_CHECKING:
     from ..proxy import DaemonProxy
@@ -65,8 +64,8 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         return resp
 
     @classmethod
-    async def forward(cls, src: NixReader, dst: NixWriter) -> set[PathInfo]:
-        """Forward AddMultipleToStore verbatim, snooping PathInfos."""
+    async def forward(cls, src: NixReader, dst: NixWriter) -> set[ValidPathInfo]:
+        """Forward AddMultipleToStore verbatim, snooping ValidPathInfos."""
         dst.write_uint64(44)
 
         repair = await src.read_uint64()
@@ -82,9 +81,9 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         cls.logger.info(f"forward: expected {expected} paths")
         fdst.write_uint64(expected)
 
-        infos: set[PathInfo] = set()
+        infos: set[ValidPathInfo] = set()
         for i in range(expected):
-            info = await PathInfo.from_reader_keyed(fsrc)
+            info = await ValidPathInfo.from_reader(fsrc)
             infos.add(info)
             cls.logger.info(f"forward: path {info.path} nar_size={info.nar_size}")
             fdst.write(info.to_bytes())

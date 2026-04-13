@@ -1,21 +1,20 @@
-"""SignPathInfo operation - sign a PathInfo with configured secret keys.
+"""SignPathInfo operation - sign a ValidPathInfo with configured secret keys.
 This is a custom operation."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
 from ..wire import NixReader, NixWriter
 from .add_signatures import AddSignaturesRequest
-from .base import OpRequest, OpResponse, OperationLogs, PathInfo
+from .base import OpRequest, OpResponse, OperationLogs, ValidPathInfo
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..proxy import DaemonProxy
     from ..store import Store
 
 log = structlog.get_logger(__name__)
@@ -23,18 +22,19 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class SignPathInfoResponse(OpResponse):
-    info: PathInfo = field(default_factory=PathInfo)
+    info: ValidPathInfo | None = None
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> SignPathInfoResponse:
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
         logs = await OperationLogs.from_reader(reader)
-        info = await PathInfo.from_reader_keyed(reader)
+        info = await ValidPathInfo.from_reader(reader)
         return cls(logs=logs, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger.debug("to_writer", info=self.info)
         self.logs.to_writer(writer)
-        await self.info.to_writer_keyed(writer)
+        if self.info is not None:
+            self.info.to_writer(writer)
 
 
 @dataclass
@@ -43,22 +43,25 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
     op: ClassVar[int] = 107
     is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = SignPathInfoResponse
-    info: PathInfo = field(default_factory=PathInfo)
+    info: ValidPathInfo | None = None
     key: SecretKey | None = None
 
     def has_signature(self, key_name: str) -> bool:
+        if self.info is None:
+            return False
         prefix = f"{key_name}:"
         return any(sig.startswith(prefix) for sig in self.info.sigs)
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> SignPathInfoRequest:
-        info = await PathInfo.from_reader_keyed(reader)
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        info = await ValidPathInfo.from_reader(reader)
         cls.logger.debug("from_reader", path=info.path)
         return cls(info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)
-        await self.info.to_writer_keyed(writer)
+        if self.info is not None:
+            self.info.to_writer(writer)
 
     async def execute(
         self,
@@ -66,6 +69,9 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> SignPathInfoResponse:
+        if self.info is None:
+            return SignPathInfoResponse(info=None)
+
         key = self.key or get_default_signing_key()
         if key is None:
             return SignPathInfoResponse(info=self.info)
@@ -99,15 +105,4 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
             client=client,
             suppress_last=suppress_last,
         )
-
-        store.add_path_info(self.info)
         return SignPathInfoResponse(info=self.info)
-
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> SignPathInfoResponse:
-        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
-        log.debug("received_op")
-        request = await cls.from_reader(proxy.r, proxy.version)
-        result = await proxy.execute(request)
-        log.debug("responded_op")
-        return result

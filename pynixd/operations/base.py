@@ -244,10 +244,9 @@ class OpResponse(ABC):
 
 
 @dataclass
-class PathInfo:
-    """Metadata for a store path."""
+class UnkeyedValidPathInfo:
+    """Metadata for a store path (without the path itself)."""
 
-    path: StorePath = field(default_factory=lambda: StorePath(""))
     deriver: StorePath = field(default_factory=lambda: StorePath(""))
     nar_hash: str = ""
     references: set[StorePath] = field(default_factory=set)
@@ -257,23 +256,10 @@ class PathInfo:
     sigs: set[str] = field(default_factory=set)
     ca: str = ""
 
-    def __hash__(self) -> int:
-        return hash(self.path)
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, PathInfo):
-            return False
-        return self.path == other.path
-
     @classmethod
-    async def from_reader_unkeyed(
-        cls,
-        reader: NixReader,
-        path: StorePath = field(default_factory=lambda: StorePath("")),
-    ) -> PathInfo:
-        """Read UnkeyedValidPathInfo (no path prefix) from wire."""
+    async def from_reader(cls, reader: NixReader) -> Self:
+        """Read UnkeyedValidPathInfo from wire."""
         return cls(
-            path=path,
             deriver=await reader.read_string(StorePath),
             nar_hash=await reader.read_string(),
             references=await reader.read_string_set(StorePath),
@@ -284,14 +270,8 @@ class PathInfo:
             ca=await reader.read_string(),
         )
 
-    @classmethod
-    async def from_reader_keyed(cls, reader: NixReader) -> PathInfo:
-        """Read ValidPathInfo (path + UnkeyedValidPathInfo) from wire."""
-        path = await reader.read_string(StorePath)
-        return await cls.from_reader_unkeyed(reader, path)
-
-    def to_writer_unkeyed(self, writer: NixWriter) -> None:
-        """Write UnkeyedValidPathInfo (no path prefix) to wire."""
+    def to_writer(self, writer: NixWriter) -> None:
+        """Write UnkeyedValidPathInfo to wire."""
         writer.write_string(self.deriver)
         writer.write_string(self.nar_hash)
         writer.write_string_set(self.references)
@@ -301,20 +281,56 @@ class PathInfo:
         writer.write_string_set(self.sigs)
         writer.write_string(self.ca)
 
-    def to_writer_keyed(self, writer: NixWriter) -> None:
+    def with_path(self, path: StorePath) -> ValidPathInfo:
+        """Create a ValidPathInfo by adding a path to this metadata."""
+        return ValidPathInfo(
+            path=path,
+            deriver=self.deriver,
+            nar_hash=self.nar_hash,
+            references=self.references,
+            registration_time=self.registration_time,
+            nar_size=self.nar_size,
+            ultimate=self.ultimate,
+            sigs=self.sigs,
+            ca=self.ca,
+        )
+
+
+@dataclass
+class ValidPathInfo(UnkeyedValidPathInfo):
+    """Metadata for a store path (including the path)."""
+
+    path: StorePath = field(default_factory=lambda: StorePath(""))
+
+    def __hash__(self) -> int:
+        return hash(self.path)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ValidPathInfo):
+            return False
+        return self.path == other.path
+
+    @classmethod
+    async def from_reader(cls, reader: NixReader) -> Self:
+        """Read ValidPathInfo (path + UnkeyedValidPathInfo) from wire."""
+        path = await reader.read_string(StorePath)
+        info = await UnkeyedValidPathInfo.from_reader(reader)
+        return info.with_path(path)  # type: ignore[return-value]
+
+    def to_writer(self, writer: NixWriter) -> None:
         """Write ValidPathInfo (path + UnkeyedValidPathInfo) to wire."""
         writer.write_string(self.path)
-        self.to_writer_unkeyed(writer)
+        super().to_writer(writer)
 
     def to_bytes(self) -> bytes:
         """Serialize ValidPathInfo to wire format as bytes."""
         buf = wire.BytesWriter()
-        self.to_writer_keyed(buf)
+        self.to_writer(buf)
         return buf.get_bytes()
 
     @classmethod
-    def from_narinfo(cls, content: str) -> PathInfo:
-        """Parse PathInfo from .narinfo file content."""
+    def from_narinfo(cls, content: str) -> ValidPathInfo:
+        """Parse ValidPathInfo from .narinfo file content."""
         data: dict[str, Any] = {
             "references": set(),
             "sigs": set(),
@@ -364,7 +380,7 @@ class PathInfo:
         )
 
     def to_narinfo(self) -> str:
-        """Format PathInfo as .narinfo file content."""
+        """Format ValidPathInfo as .narinfo file content."""
         # Ensure NarHash has sha256: prefix (expected by Nix)
         nar_hash = self.nar_hash
         if not nar_hash.startswith("sha256:"):

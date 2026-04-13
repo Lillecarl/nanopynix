@@ -47,7 +47,7 @@ async def test_http_upload(tmp_path: Path) -> None:
     # Get its NAR and narinfo
     info_resp = await root_store.execute(QueryPathInfoRequest(path=path))
     assert info_resp.valid and info_resp.info
-    info = info_resp.info
+    vinfo = info_resp.info.with_path(path)
 
     nar_data = bytearray()
 
@@ -56,11 +56,11 @@ async def test_http_upload(tmp_path: Path) -> None:
 
     await root_store.execute(
         NarFromPathRequest(
-            path=path, nar_size=info.nar_size, async_callback=collect_nar
+            path=path, nar_size=vinfo.nar_size, async_callback=collect_nar
         )
     )
 
-    narinfo = info.to_narinfo()
+    narinfo = vinfo.to_narinfo()
 
     # 2. Target store (temp) is empty
     target_store_path = STORE_PREFIX / "http-upload-target-direct"
@@ -83,7 +83,7 @@ async def test_http_upload(tmp_path: Path) -> None:
             # 3. PUT NAR
             # Nix uses nar/<narhash>.nar
             # We'll use the nar_hash from info (strip sha256: if present)
-            nar_hash_part = info.nar_hash.split(":")[-1]
+            nar_hash_part = vinfo.nar_hash.split(":")[-1]
             log.info("uploading_nar", hash=nar_hash_part, size=len(nar_data))
             async with session.put(
                 f"{base_url}/nar/{nar_hash_part}.nar", data=nar_data
@@ -105,6 +105,7 @@ async def test_http_upload(tmp_path: Path) -> None:
             f"Path {path} should be valid in target store after upload"
         )
         assert info_resp.info is not None
-        assert info_resp.info.path == path
-        assert info_resp.info.nar_hash.split(":")[-1] == info.nar_hash.split(":")[-1]
-        assert info_resp.info.nar_size == info.nar_size
+        vinfo_target = info_resp.info.with_path(path)
+        assert vinfo_target.path == path
+        assert vinfo_target.nar_hash.split(":")[-1] == vinfo.nar_hash.split(":")[-1]
+        assert vinfo_target.nar_size == vinfo.nar_size

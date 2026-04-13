@@ -38,8 +38,8 @@ from .operations.add_multiple_to_store import AddMultipleToStoreRequest
 from .operations.add_to_store_nar import AddToStoreNarRequest
 from .operations.base import (
     OpRequest,
-    PathInfo,
     Resp,
+    ValidPathInfo,
 )
 from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
@@ -103,7 +103,7 @@ class Store(ABC):
         self.sweep_task: asyncio.Task[None] | None = None
         self.supported_systems = supported_systems or []
         self.known_paths: set[RequiredInput] = set()
-        self.path_info_cache: TTLCache[StorePath, PathInfo] = TTLCache(
+        self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
             maxsize=10000, ttl=300
         )
         self.consecutive_failures: int = 0
@@ -248,17 +248,17 @@ class Store(ABC):
         if update_regtime and self.db is not None:
             self.db.mark_paths(set(paths))
 
-    def add_path_info(self, info: PathInfo) -> None:
-        """Add PathInfo to the cache."""
+    def add_path_info(self, info: ValidPathInfo) -> None:
+        """Add ValidPathInfo to the cache."""
         self.path_info_cache[info.path] = info
 
-    def add_path_infos(self, infos: Iterable[PathInfo]) -> None:
-        """Add multiple PathInfos to the cache."""
+    def add_path_infos(self, infos: Iterable[ValidPathInfo]) -> None:
+        """Add multiple ValidPathInfos to the cache."""
         for info in infos:
             self.path_info_cache[info.path] = info
 
-    def get_path_info(self, path: StorePath) -> PathInfo | None:
-        """Get PathInfo from cache if available."""
+    def get_path_info(self, path: StorePath) -> ValidPathInfo | None:
+        """Get ValidPathInfo from cache if available."""
         return self.path_info_cache.get(path)
 
     @classmethod
@@ -266,12 +266,12 @@ class Store(ABC):
         cls,
         src: Store,
         dst: Store,
-        infos: Iterable[PathInfo],
+        infos: Iterable[ValidPathInfo],
         src_conn: Connection | None = None,
         dst_conn: Connection | None = None,
         cancel_event: asyncio.Event | None = None,
     ) -> None:
-        """Copy paths from src to dst via streaming using pre-resolved PathInfo.
+        """Copy paths from src to dst via streaming using pre-resolved ValidPathInfo.
 
         The infos should be topologically sorted to ensure valid insertion order
         at the destination.
@@ -314,7 +314,7 @@ class Store(ABC):
         cls,
         src_conn: Connection,
         dst_conn: Connection,
-        infos_list: list[PathInfo],
+        infos_list: list[ValidPathInfo],
         cancel_event: asyncio.Event | None,
     ) -> None:
         """Inner streaming logic assuming both connections are already acquired."""
@@ -340,7 +340,7 @@ class Store(ABC):
                 "AddToStoreNar (stream_paths_with_info_store_to_store)"
             )
 
-            await info.to_writer_keyed(fw)
+            info.to_writer(fw)
 
             await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
             await src_conn.w.drain()
@@ -417,7 +417,7 @@ class Store(ABC):
         self,
         src: Store,
         path: StorePath,
-        info: PathInfo,
+        info: ValidPathInfo,
     ) -> None:
         """Stream NAR from src store to this store."""
         async with self.transfer_conn() as dst_conn, src.transfer_conn() as src_conn:

@@ -1,7 +1,9 @@
 default:
     @just --list
 
-check: fmt
+check:
+    ruff check pynixd
+    ruff check tests
     pyright pynixd
     pyright tests/conftest.py tests/functional
 
@@ -23,4 +25,4 @@ test:
 #     echo "Logfile: $logfile"
 
 # Run all checks
-precommit: check test
+precommit: check fmt test

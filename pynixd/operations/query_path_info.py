@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs, PathInfo
+from .base import (
+    OpRequest,
+    OpResponse,
+    OperationLogs,
+    UnkeyedValidPathInfo,
+)
 
 QUERY_PATH_INFO = """
 SELECT path, deriver, hash, registrationTime, narSize, ultimate, sigs, ca
@@ -28,7 +33,7 @@ if TYPE_CHECKING:
 @dataclass
 class QueryPathInfoResponse(OpResponse):
     valid: bool = False
-    info: PathInfo | None = None
+    info: UnkeyedValidPathInfo | None = None
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
@@ -36,7 +41,7 @@ class QueryPathInfoResponse(OpResponse):
         valid = await reader.read_uint64() != 0
         info = None
         if valid:
-            info = await PathInfo.from_reader_unkeyed(reader)
+            info = await UnkeyedValidPathInfo.from_reader(reader)
         return cls(logs=logs, valid=valid, info=info)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -44,7 +49,7 @@ class QueryPathInfoResponse(OpResponse):
         self.logs.to_writer(writer)
         writer.write_uint64(1 if self.valid else 0)
         if self.valid and self.info is not None:
-            await self.info.to_writer_unkeyed(writer)
+            self.info.to_writer(writer)
 
 
 @dataclass
@@ -88,8 +93,7 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
                 ref_rows = await cursor.fetchall()
             refs = {r[0] for r in ref_rows}
 
-            info = PathInfo(
-                path=self.path,
+            info = UnkeyedValidPathInfo(
                 deriver=StorePath(deriver or ""),
                 nar_hash=nar_hash,
                 references={StorePath(r) for r in refs},
@@ -100,13 +104,12 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
                 ca=ca or "",
             )
             store.add_known_path(self.path)
-            store.add_path_info(info)
+            store.add_path_info(info.with_path(self.path))
             return QueryPathInfoResponse(valid=True, info=info)
 
         resp = await store.call(self, client=client, suppress_last=suppress_last)
         if resp.valid:
             store.add_known_path(self.path)
             if resp.info is not None:
-                resp.info.path = self.path
-                store.add_path_info(resp.info)
+                store.add_path_info(resp.info.with_path(self.path))
         return resp

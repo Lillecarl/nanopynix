@@ -10,7 +10,13 @@ import structlog
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs, PathInfo
+from .base import (
+    OpRequest,
+    OpResponse,
+    OperationLogs,
+    ValidPathInfo,
+    UnkeyedValidPathInfo,
+)
 from .query_path_infos import QueryPathInfosRequest
 
 QUERY_CLOSURE_WITH_INFO = """
@@ -42,7 +48,7 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class QueryClosureWithInfoResponse(OpResponse):
-    infos: list[PathInfo] = field(default_factory=list)
+    infos: list[ValidPathInfo] = field(default_factory=list)
 
     @property
     def is_not_found(self) -> bool:
@@ -54,7 +60,7 @@ class QueryClosureWithInfoResponse(OpResponse):
         n = await reader.read_uint64()
         infos = []
         for _ in range(n):
-            infos.append(await PathInfo.from_reader_keyed(reader))
+            infos.append(await ValidPathInfo.from_reader(reader))
         return cls(logs=logs, infos=infos)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -62,7 +68,7 @@ class QueryClosureWithInfoResponse(OpResponse):
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.infos))
         for info in self.infos:
-            await info.to_writer_keyed(writer)
+            info.to_writer(writer)
 
 
 @dataclass
@@ -100,7 +106,7 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
             ) as cursor:
                 rows = await cursor.fetchall()
 
-            sorted_infos: list[PathInfo] = []
+            sorted_infos: list[ValidPathInfo] = []
             for (
                 path,
                 deriver,
@@ -116,25 +122,23 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
                 references = (
                     {StorePath(r) for r in refs_str.split()} if refs_str else set()
                 )
-                sorted_infos.append(
-                    PathInfo(
-                        path=p,
-                        deriver=StorePath(deriver or ""),
-                        nar_hash=nar_hash,
-                        references=references,
-                        registration_time=reg_time,
-                        nar_size=nar_size or 0,
-                        ultimate=1 if ultimate else 0,
-                        sigs=set(sigs.split()) if sigs else set(),
-                        ca=ca or "",
-                    )
+                uinfo = UnkeyedValidPathInfo(
+                    deriver=StorePath(deriver or ""),
+                    nar_hash=nar_hash,
+                    references=references,
+                    registration_time=reg_time,
+                    nar_size=nar_size or 0,
+                    ultimate=1 if ultimate else 0,
+                    sigs=set(sigs.split()) if sigs else set(),
+                    ca=ca or "",
                 )
+                sorted_infos.append(uinfo.with_path(p))
 
             store.add_known_paths({info.path for info in sorted_infos})
             store.add_path_infos(sorted_infos)
             return QueryClosureWithInfoResponse(infos=sorted_infos)
 
-        all_infos: dict[StorePath, PathInfo] = {}
+        all_infos: dict[StorePath, ValidPathInfo] = {}
         pending = self.paths
 
         while pending:
@@ -162,7 +166,7 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
                         next_pending.add(ref)
             pending = next_pending
 
-        sorted_infos: list[PathInfo] = []
+        sorted_infos: list[ValidPathInfo] = []
         visited: set[StorePath] = set()
         visiting: set[StorePath] = set()
 

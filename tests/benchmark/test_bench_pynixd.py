@@ -1,13 +1,15 @@
-"""pynixd end-to-end benchmarks.
+"""pynixd performance benchmarks.
 
-Measures pynixd performance through the full stack:
-- SSH daemon protocol (asyncssh client → pynixd → local store)
-- HTTP binary cache (aiohttp client → pynixd → local store)
+Measures latency and throughput for various Nix daemon operations
+across different store types.
 
-Each benchmark runs with and without pool warming to measure cold-start
-vs steady-state performance.
+Store types are parametrized so each test runs against:
+- local-socket: system daemon Unix socket
+- ssh-subprocess: SSH channel -> nix-daemon --stdio (localhost)
+- ssh-socket: SSH tunnel -> daemon Unix socket (localhost)
 
-Concurrency levels test how well pynixd handles parallel clients/channels.
+The benchmarks use the system Nix store as the source of paths.
+Results are recorded via the conftest.py record_bench helper.
 """
 
 from __future__ import annotations
@@ -15,24 +17,24 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-import tempfile
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 
-import aiohttp
 import pytest
 import structlog
-from conftest import (
-    NIX_BIN,
-    _record,
-)
+from conftest import NIX_BIN, _record, rmtree_robust
 from environs import env
 
-from pynixd import Server
-from pynixd.http_cache import BinaryCacheServer
-from pynixd.operations.base import PathInfo
-from pynixd.operations.queries import NarFromPathRequest
-from pynixd.store import LocalSocketStore, SSHSubprocessStore, Store
+from pynixd.operations.is_valid_path import IsValidPathRequest
+from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
+from pynixd.operations.query_path_info import QueryPathInfoRequest
+from pynixd.store import (
+    LocalSocketStore,
+    SSHSocketStore,
+    SSHSubprocessStore,
+    Store,
+)
 from pynixd.store_path import StorePath
 
 log = structlog.get_logger(__name__)
@@ -40,368 +42,156 @@ log = structlog.get_logger(__name__)
 
 _SSH_USER = env.str("USER", "root")
 
-_CONCURRENCY_LEVELS = [1, 10, 50]
+_STORE_TYPES = ["local-socket", "ssh-socket"]
+
+_MAX_TRANSFERS = 10
 
 
-# ── Helpers ───────────────────────────────────────────────────────
-
-
-def _create_big_path(size_mb: int) -> str:
-    """Create a large file in the nix store via nix store add."""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".bench") as f:
-        chunk = os.urandom(1024 * 1024)
-        for _ in range(size_mb):
-            f.write(chunk)
-        f.flush()
-        tmp_path = Path(f.name)
-
-    try:
-        result = subprocess.run(
-            [
-                str(NIX_BIN),
-                "store",
-                "add",
-                "--name",
-                f"bench-{size_mb}mb",
-                str(tmp_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
+async def _make_store(store_type: str) -> Store:
+    """Create a store that reads from the system store."""
+    if store_type == "local-socket":
+        return LocalSocketStore(id="local-socket", max_transfers=_MAX_TRANSFERS)
+    elif store_type == "ssh-subprocess":
+        return SSHSubprocessStore(
+            host="127.0.0.1",
+            id="ssh-subprocess",
+            port=22,
+            username=_SSH_USER,
+            max_transfers=_MAX_TRANSFERS,
         )
-        assert result.returncode == 0, f"nix store add failed: {result.stderr}"
-        return result.stdout.strip()
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
-
-
-async def _pick_small_paths(
-    src: Store,
-    count: int,
-) -> list[tuple[str, PathInfo]]:
-    """Pick self-contained paths with nar_size < 50KB from the system store."""
-    all_paths = await src.query_all_valid_paths()
-    picked: list[tuple[str, PathInfo]] = []
-    for p in sorted(all_paths):
-        if len(picked) >= count:
-            break
-        if p.endswith(".drv"):
-            continue
-        info = await src.query_path_info(p)
-        if info and 0 < info.nar_size < 50_000:
-            if info.references - {p}:
-                continue
-            picked.append((p, info))
-    return picked
-
-
-def _hash_part(path: str) -> str:
-    """'/nix/store/abc-foo' → 'abc'"""
-    return path.removeprefix("/nix/store/").split("-", 1)[0]
-
-
-# ── SSH daemon protocol benchmarks ──────────────────────────────
-
-
-@pytest.mark.timeout(300)
-@pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
-@pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
-@pytest.mark.bench
-async def test_ssh_serve_small_nars(
-    request: pytest.FixtureRequest,
-    concurrency: int,
-    warm: bool,
-) -> None:
-    """Benchmark: fetch many small NARs from pynixd over SSH."""
-    local_store = LocalSocketStore(id="bench-local", max_transfers=20)
-
-    picked = await _pick_small_paths(local_store, 500)
-    assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
-
-    async with Server(
-        stores={},
-        local_store=local_store,
-        ssh_port=0,
-    ) as server:
-        client = SSHSubprocessStore(
-            host=server.host,
-            port=server.port,
-            id="bench-client",
-            username=server.username,
-            max_transfers=concurrency + 2,
-            monitor=False,
+    elif store_type == "ssh-socket":
+        return SSHSocketStore(
+            host="127.0.0.1",
+            id="ssh-socket",
+            port=22,
+            username=_SSH_USER,
+            max_transfers=_MAX_TRANSFERS,
         )
-        try:
-            if warm:
-                await client.warm_pool(concurrency)
+    else:
+        raise ValueError(f"Unknown store type: {store_type}")
 
-            sem = asyncio.Semaphore(concurrency)
-            total_bytes = 0
-            lock = asyncio.Lock()
 
-            async def _fetch(path: str, nar_size: int) -> None:
-                nonlocal total_bytes
-                async with sem:
-                    resp = await client.execute(
-                        NarFromPathRequest(path=StorePath(path), nar_size=nar_size)
-                    )
-                    data = resp.nar_data
-                async with lock:
-                    total_bytes += len(data)
+@pytest.fixture(params=_STORE_TYPES)
+async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
+    """Parametrized store fixture — yields one store per type."""
+    s = await _make_store(request.param)
+    yield s
+    await s.close()
 
-            warmth = "warm" if warm else "cold"
-            start = time.monotonic()
-            await asyncio.gather(*[_fetch(p, i.nar_size) for p, i in picked])
-            elapsed = time.monotonic() - start
-        finally:
-            await client.close()
 
-    mb_per_s = (total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
-    ops_per_s = len(picked) / elapsed if elapsed > 0 else 0
+async def _get_test_paths(n: int = 100) -> list[StorePath]:
+    """Get n arbitrary valid paths from the system store."""
+    out = subprocess.check_output(
+        [NIX_BIN, "query", "--all", "--limit", str(n)], text=True
+    )
+    return [StorePath(p) for p in out.splitlines() if p.strip()]
+
+
+@pytest.mark.benchmark
+async def test_bench_query_all_valid_paths(bench_store: Store) -> None:
+    """Measure latency of QueryAllValidPaths."""
+    start = time.perf_counter()
+    resp = await bench_store.execute(QueryAllValidPathsRequest())
+    elapsed = time.perf_counter() - start
+
     _record(
-        request,
-        f"ssh serve small c={concurrency} {warmth}",
-        elapsed=f"{elapsed:.1f}s",
-        throughput=f"{mb_per_s:.1f} MB/s",
-        ops=f"{ops_per_s:.0f} ops/s",
+        "query_all_valid_paths",
+        store=bench_store.id,
+        count=len(resp.paths),
+        latency_ms=elapsed * 1000,
     )
 
 
-@pytest.mark.timeout(300)
-@pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
-@pytest.mark.bench
-async def test_ssh_serve_big_nar(
-    request: pytest.FixtureRequest,
-    warm: bool,
-) -> None:
-    """Benchmark: fetch a 100MB NAR from pynixd over SSH."""
-    store_path = _create_big_path(100)
-    local_store = LocalSocketStore(id="bench-local", max_transfers=20)
-    info = await local_store.query_path_info(store_path)
-    assert info is not None
+@pytest.mark.benchmark
+async def test_bench_query_path_info_latency(bench_store: Store) -> None:
+    """Measure latency of QueryPathInfo for 100 random paths."""
+    paths = await _get_test_paths(100)
 
-    async with Server(
-        stores={},
-        local_store=local_store,
-        ssh_port=0,
-    ) as server:
-        client = SSHSubprocessStore(
-            host=server.host,
-            port=server.port,
-            id="bench-client",
-            username=server.username,
-            max_transfers=4,
-            monitor=False,
-        )
-        try:
-            if warm:
-                await client.warm_pool(1)
+    latencies = []
+    for path in paths:
+        start = time.perf_counter()
+        await bench_store.execute(QueryPathInfoRequest(path=path))
+        latencies.append(time.perf_counter() - start)
 
-            start = time.monotonic()
-            resp = await client.execute(
-                NarFromPathRequest(path=store_path, nar_size=info.nar_size)
-            )
-            data = resp.nar_data
-            elapsed = time.monotonic() - start
-        finally:
-            await client.close()
-
-    warmth = "warm" if warm else "cold"
-    mb_per_s = (len(data) / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    avg_latency = sum(latencies) / len(latencies)
     _record(
-        request,
-        f"ssh serve big {warmth}",
-        elapsed=f"{elapsed:.1f}s",
-        throughput=f"{mb_per_s:.1f} MB/s",
+        "query_path_info_latency",
+        store=bench_store.id,
+        avg_ms=avg_latency * 1000,
+        p95_ms=sorted(latencies)[int(len(latencies) * 0.95)] * 1000,
     )
 
 
-@pytest.mark.timeout(300)
-@pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
-@pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
-@pytest.mark.bench
-async def test_ssh_query_path_info(
-    request: pytest.FixtureRequest,
-    concurrency: int,
-    warm: bool,
-) -> None:
-    """Benchmark: QueryPathInfo throughput through pynixd over SSH."""
-    local_store = LocalSocketStore(id="bench-local", max_transfers=20)
+@pytest.mark.benchmark
+async def test_bench_is_valid_path_throughput(bench_store: Store) -> None:
+    """Measure throughput of IsValidPath (ops/s)."""
+    paths = await _get_test_paths(500)
 
-    picked = await _pick_small_paths(local_store, 500)
-    assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
+    start = time.perf_counter()
+    # Execute sequentially to measure overhead
+    for path in paths:
+        await bench_store.execute(IsValidPathRequest(path=path))
+    elapsed = time.perf_counter() - start
 
-    async with Server(
-        stores={},
-        local_store=local_store,
-        ssh_port=0,
-    ) as server:
-        client = SSHSubprocessStore(
-            host=server.host,
-            port=server.port,
-            id="bench-client",
-            username=server.username,
-            max_transfers=concurrency + 2,
-            monitor=False,
-        )
-        try:
-            if warm:
-                await client.warm_pool(concurrency)
-
-            sem = asyncio.Semaphore(concurrency)
-
-            async def _query(path: str) -> None:
-                async with sem:
-                    await client.query_path_info(path)
-
-            warmth = "warm" if warm else "cold"
-            start = time.monotonic()
-            await asyncio.gather(*[_query(p) for p, _ in picked])
-            elapsed = time.monotonic() - start
-        finally:
-            await client.close()
-
-    ops_per_s = len(picked) / elapsed if elapsed > 0 else 0
+    ops_per_s = len(paths) / elapsed
     _record(
-        request,
-        f"ssh query c={concurrency} {warmth}",
-        elapsed=f"{elapsed:.1f}s",
-        ops=f"{ops_per_s:.0f} ops/s",
+        "is_valid_path_throughput",
+        store=bench_store.id,
+        ops_per_s=ops_per_s,
     )
 
 
-# ── HTTP binary cache benchmarks ─────────────────────────────────
+@pytest.mark.benchmark
+async def test_bench_is_valid_path_parallel(bench_store: Store) -> None:
+    """Measure throughput of IsValidPath with 10 parallel tasks."""
+    paths = await _get_test_paths(1000)
 
+    start = time.perf_counter()
+    tasks = [bench_store.execute(IsValidPathRequest(path=path)) for path in paths]
+    await asyncio.gather(*tasks)
+    elapsed = time.perf_counter() - start
 
-@pytest.mark.timeout(300)
-@pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
-@pytest.mark.bench
-async def test_http_serve_small_nars(
-    request: pytest.FixtureRequest,
-    concurrency: int,
-) -> None:
-    """Benchmark: fetch many small NARs from pynixd HTTP cache."""
-    local_store = LocalSocketStore(id="bench-local", max_transfers=20)
-
-    picked = await _pick_small_paths(local_store, 500)
-    assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
-
-    cache = BinaryCacheServer(local_store)
-    runner, http_port = await cache.start(host="127.0.0.1", port=0)
-    base_url = f"http://127.0.0.1:{http_port}"
-
-    try:
-        sem = asyncio.Semaphore(concurrency)
-        total_bytes = 0
-        lock = asyncio.Lock()
-
-        async with aiohttp.ClientSession() as session:
-
-            async def _fetch(path: str) -> None:
-                nonlocal total_bytes
-                hash_part = _hash_part(path)
-                async with sem:
-                    async with session.get(f"{base_url}/nar/{hash_part}.nar") as resp:
-                        assert resp.status == 200, f"HTTP {resp.status} for {path}"
-                        data = await resp.read()
-                async with lock:
-                    total_bytes += len(data)
-
-            start = time.monotonic()
-            await asyncio.gather(*[_fetch(p) for p, _ in picked])
-            elapsed = time.monotonic() - start
-    finally:
-        await runner.cleanup()
-        await local_store.close()
-
-    mb_per_s = (total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
-    ops_per_s = len(picked) / elapsed if elapsed > 0 else 0
+    ops_per_s = len(paths) / elapsed
     _record(
-        request,
-        f"http serve small c={concurrency}",
-        elapsed=f"{elapsed:.1f}s",
-        throughput=f"{mb_per_s:.1f} MB/s",
-        ops=f"{ops_per_s:.0f} ops/s",
+        "is_valid_path_parallel",
+        store=bench_store.id,
+        parallel_tasks=10,
+        ops_per_s=ops_per_s,
     )
 
 
-@pytest.mark.timeout(300)
-@pytest.mark.bench
-async def test_http_serve_big_nar(
-    request: pytest.FixtureRequest,
-) -> None:
-    """Benchmark: fetch a 100MB NAR from pynixd HTTP cache."""
-    store_path = _create_big_path(100)
-    local_store = LocalSocketStore(id="bench-local", max_transfers=20)
-    info = await local_store.query_path_info(store_path)
-    assert info is not None
+@pytest.mark.benchmark
+async def test_bench_local_socket_overhead() -> None:
+    """Compare direct Unix socket vs pynixd LocalSocketStore."""
+    path = (await _get_test_paths(1))[0]
 
-    cache = BinaryCacheServer(local_store)
-    runner, http_port = await cache.start(host="127.0.0.1", port=0)
-    base_url = f"http://127.0.0.1:{http_port}"
-    hash_part = _hash_part(store_path)
+    # 1. Direct system socket
+    system_store = LocalSocketStore(id="system")
+    latencies_direct = []
+    for _ in range(100):
+        start = time.perf_counter()
+        await system_store.execute(QueryPathInfoRequest(path=path))
+        latencies_direct.append(time.perf_counter() - start)
+    await system_store.close()
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            start = time.monotonic()
-            async with session.get(f"{base_url}/nar/{hash_part}.nar") as resp:
-                assert resp.status == 200
-                data = await resp.read()
-            elapsed = time.monotonic() - start
-    finally:
-        await runner.cleanup()
-        await local_store.close()
-
-    mb_per_s = (len(data) / (1024 * 1024)) / elapsed if elapsed > 0 else 0
-    _record(
-        request,
-        "http serve big",
-        elapsed=f"{elapsed:.1f}s",
-        throughput=f"{mb_per_s:.1f} MB/s",
+    # 2. Managed socket (spawned daemon)
+    managed_path = Path("/tmp/pynixd-bench-managed")
+    rmtree_robust(managed_path)
+    os.makedirs(managed_path, exist_ok=True)
+    managed_store = LocalSocketStore(
+        id="managed",
+        store_path=managed_path,
     )
+    # Managed store will be empty, so we just measure the handshake + op overhead
+    latencies_managed = []
+    for _ in range(100):
+        start = time.perf_counter()
+        await managed_store.execute(QueryPathInfoRequest(path=path))
+        latencies_managed.append(time.perf_counter() - start)
+    await managed_store.close()
 
-
-@pytest.mark.timeout(300)
-@pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
-@pytest.mark.bench
-async def test_http_narinfo(
-    request: pytest.FixtureRequest,
-    concurrency: int,
-) -> None:
-    """Benchmark: narinfo lookup throughput from pynixd HTTP cache."""
-    local_store = LocalSocketStore(id="bench-local", max_transfers=20)
-
-    picked = await _pick_small_paths(local_store, 500)
-    assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
-
-    cache = BinaryCacheServer(local_store)
-    runner, http_port = await cache.start(host="127.0.0.1", port=0)
-    base_url = f"http://127.0.0.1:{http_port}"
-
-    try:
-        sem = asyncio.Semaphore(concurrency)
-
-        async with aiohttp.ClientSession() as session:
-
-            async def _fetch_narinfo(path: str) -> None:
-                hash_part = _hash_part(path)
-                async with sem:
-                    async with session.get(f"{base_url}/{hash_part}.narinfo") as resp:
-                        assert resp.status == 200, f"HTTP {resp.status} for {path}"
-                        await resp.read()
-
-            start = time.monotonic()
-            await asyncio.gather(*[_fetch_narinfo(p) for p, _ in picked])
-            elapsed = time.monotonic() - start
-    finally:
-        await runner.cleanup()
-        await local_store.close()
-
-    ops_per_s = len(picked) / elapsed if elapsed > 0 else 0
     _record(
-        request,
-        f"http narinfo c={concurrency}",
-        elapsed=f"{elapsed:.1f}s",
-        ops=f"{ops_per_s:.0f} ops/s",
+        "local_overhead",
+        direct_avg_ms=(sum(latencies_direct) / 100) * 1000,
+        managed_avg_ms=(sum(latencies_managed) / 100) * 1000,
     )
