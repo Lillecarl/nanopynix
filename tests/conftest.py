@@ -284,8 +284,11 @@ async def run_subproc(
         stream("stdout", stdout, proc.stdout),
         stream("stderr", stderr, proc.stderr),
     )
+    rc = proc.returncode or 0
+    if rc != 0:
+        raise RuntimeError(f"Command failed with rc={rc}:\n{''.join(stdboth)}")
     return (
-        proc.returncode or 0,
+        rc,
         "".join(stdout),
         "".join(stderr),
         "".join(stdboth),
