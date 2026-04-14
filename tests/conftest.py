@@ -208,7 +208,7 @@ def pytest_runtest_makereport(item: pytest.Item, call):
                     f.write(report.capstderr)
 
             # Replace longrepr with short message for console
-            report.longrepr = f"FAILED (see log file: {log_file / f'{safe_name}.log'})"
+            report.longrepr = f"FAILED (see log file: {log_file})"
 
 
 def rmtree_robust(path: str | Path) -> None:
