@@ -17,13 +17,20 @@ Supports optional basic auth and TLS.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import bz2
+import gzip
+import lzma
 import os
 import ssl
 from http import HTTPStatus
 from pathlib import Path
 
+import brotli
+import lz4.frame
 import structlog
+import zstandard as zstd
 from aiohttp import web
 from passlib.apache import HtpasswdFile
 
@@ -231,8 +238,17 @@ class BinaryCacheServer:
 
         filename = request.match_info["filename"]
         # Standard format is /nar/<hash>.nar[.comp]
+        # Strip all extensions to get the hash part
         hash_part = filename.split(".", 1)[0]
-        temp_path = self.upload_dir / f"{hash_part}.nar"
+
+        # Determine compression from extension
+        ext = ""
+        for known_ext in [".xz", ".bz2", ".gz", ".zst", ".lz4", ".br"]:
+            if filename.endswith(known_ext):
+                ext = known_ext
+                break
+
+        temp_path = self.upload_dir / f"{hash_part}.nar{ext}"
 
         if ".nar" not in filename:
             log.warning("invalid_nar_upload_name", filename=filename)
@@ -240,10 +256,17 @@ class BinaryCacheServer:
                 status=HTTPStatus.BAD_REQUEST, text="Filename must contain .nar\n"
             )
 
-        log.info("receiving_nar_upload", hash=hash_part, path=str(temp_path))
+        log.info(
+            "receiving_nar_upload",
+            hash=hash_part,
+            path=str(temp_path),
+            filename=filename,
+        )
+        loop = asyncio.get_running_loop()
+        # Ensure we use run_in_executor for the file write to keep event loop non-blocking
         with open(temp_path, "wb") as f:
             async for chunk in request.content.iter_any():
-                f.write(chunk)
+                await loop.run_in_executor(None, f.write, chunk)
 
         log.info("nar_upload_complete", hash=hash_part, size=temp_path.stat().st_size)
         return web.Response(status=HTTPStatus.OK, text="ok\n")
@@ -281,9 +304,15 @@ class BinaryCacheServer:
         nar_filename = nar_url.split("/")[-1]
         nar_hash_part = nar_filename.split(".", 1)[0]
 
-        # Check if the NAR exists
-        nar_temp_path = self.upload_dir / f"{nar_hash_part}.nar"
-        if not nar_temp_path.exists():
+        # Check for any compressed variant
+        nar_temp_path = None
+        for ext in ["", ".xz", ".bz2", ".gz", ".zst", ".lz4", ".br"]:
+            p = self.upload_dir / f"{nar_hash_part}.nar{ext}"
+            if p.exists():
+                nar_temp_path = p
+                break
+
+        if not nar_temp_path:
             log.warning(
                 "nar_missing_for_narinfo", nar_hash=nar_hash_part, path=vinfo.path
             )
@@ -297,15 +326,61 @@ class BinaryCacheServer:
             log.debug("provide_nar_start", path=nar_temp_path)
             # We need to wrap the raw NAR in Nix framing (framed NAR data)
             framed = writer.framed()
+            loop = asyncio.get_running_loop()
+
+            def decompress_gen(path: Path):
+                if path.name.endswith(".xz"):
+                    f = lzma.open(path, "rb")
+                elif path.name.endswith(".bz2"):
+                    f = bz2.open(path, "rb")
+                elif path.name.endswith(".gz"):
+                    f = gzip.open(path, "rb")
+                elif path.name.endswith(".zst"):
+                    dctx = zstd.ZstdDecompressor()
+                    f = dctx.stream_reader(open(path, "rb"))
+                elif path.name.endswith(".lz4"):
+                    f = lz4.frame.open(path, "rb")
+                elif path.name.endswith(".br"):
+                    d = brotli.Decompressor()
+                    with open(path, "rb") as bf:
+                        while True:
+                            chunk = bf.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            yield d.process(chunk)
+                    return
+                else:
+                    f = open(path, "rb")
+
+                try:
+                    with f:
+                        while True:
+                            chunk = f.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            yield chunk
+                except Exception as e:
+                    log.error("decompression_failed", path=path, error=str(e))
+                    raise
+
+            gen = decompress_gen(nar_temp_path)
             sent_bytes = 0
-            with open(nar_temp_path, "rb") as f:
-                while True:
-                    chunk = f.read(1024 * 1024)
-                    if not chunk:
-                        break
+
+            while True:
+                try:
+                    # Get next chunk from generator in a thread
+                    chunk = await loop.run_in_executor(None, next, gen)
+                except StopIteration:
+                    break
+
+                if chunk:
+                    # Ensure chunk is bytes for type safety
+                    if not isinstance(chunk, bytes):
+                        raise TypeError(f"Expected bytes, got {type(chunk)}")
                     framed.write(chunk)
                     sent_bytes += len(chunk)
                     log.debug("provide_nar_progress", sent_bytes=sent_bytes)
+
             log.debug("provide_nar_finalizing", total_bytes=sent_bytes)
             await framed.finalize()
             log.debug("provide_nar_done")

@@ -36,6 +36,9 @@ let
       python.pkgs.pynacl
       python.pkgs.passlib
       python.pkgs.cachetools
+      python.pkgs.zstandard
+      python.pkgs.lz4
+      python.pkgs.brotli
     ];
 
     nativeCheckInputs = [
