@@ -364,22 +364,27 @@ class BinaryCacheServer:
                     raise
 
             gen = decompress_gen(nar_temp_path)
-            sent_bytes = 0
 
-            while True:
+            def get_next_chunk(g):
                 try:
-                    # Get next chunk from generator in a thread
-                    chunk = await loop.run_in_executor(None, next, gen)
+                    return next(g)
                 except StopIteration:
+                    return None
+
+            sent_bytes = 0
+            while True:
+                # Get next chunk from generator in a thread to keep event loop free
+                chunk = await loop.run_in_executor(None, get_next_chunk, gen)
+                if chunk is None:
                     break
 
-                if chunk:
-                    # Ensure chunk is bytes for type safety
-                    if not isinstance(chunk, bytes):
-                        raise TypeError(f"Expected bytes, got {type(chunk)}")
-                    framed.write(chunk)
-                    sent_bytes += len(chunk)
-                    log.debug("provide_nar_progress", sent_bytes=sent_bytes)
+                # Ensure chunk is bytes for type safety
+                if not isinstance(chunk, bytes):
+                    raise TypeError(f"Expected bytes, got {type(chunk)}")
+
+                framed.write(chunk)
+                sent_bytes += len(chunk)
+                log.debug("provide_nar_progress", sent_bytes=sent_bytes)
 
             log.debug("provide_nar_finalizing", total_bytes=sent_bytes)
             await framed.finalize()
