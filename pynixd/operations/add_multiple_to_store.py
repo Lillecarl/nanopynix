@@ -95,5 +95,6 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
                 sent_bytes += len(data)
             cls.logger.info(f"forward: sent {sent_bytes} bytes for {info.path}")
 
+        await fsrc.ensure_eof()
         await fdst.finalize()
         return infos

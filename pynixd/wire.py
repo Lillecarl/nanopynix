@@ -459,6 +459,25 @@ class FramedReader(NixReader):
             self._compact()
         return result
 
+    async def ensure_eof(self) -> None:
+        """Read until the end of the framed stream (size=0).
+
+        Discards any remaining data in the current framed stream.
+        This is important to ensure the underlying reader is positioned
+        correctly for the next operation.
+        """
+        if self._eof:
+            # We already saw the 0 frame, but there might be unread data in _buf.
+            # However, for protocol sync, seeing the 0 frame from _src is what matters.
+            return
+
+        while True:
+            size = await self._src.read_uint64()
+            if size == 0:
+                self._eof = True
+                break
+            await self._src.readexactly(size)
+
     async def is_dirty(self) -> bool:
         if len(self._buf) - self._pos > 0:
             return True
