@@ -274,7 +274,11 @@ class UnkeyedValidPathInfo:
     def to_writer(self, writer: NixWriter) -> None:
         """Write UnkeyedValidPathInfo to wire."""
         writer.write_string(self.deriver)
-        writer.write_string(self.nar_hash)
+        # Strip sha256: prefix if present (Nix expects hex or nix32 without prefix)
+        nar_hash = self.nar_hash
+        if nar_hash.startswith("sha256:"):
+            nar_hash = nar_hash[7:]
+        writer.write_string(nar_hash)
         writer.write_string_set(self.references)
         writer.write_uint64(self.registration_time)
         writer.write_uint64(self.nar_size)

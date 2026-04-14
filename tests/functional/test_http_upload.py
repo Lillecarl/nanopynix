@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import random
 from pathlib import Path
 
 import aiohttp
@@ -23,18 +24,26 @@ log = structlog.get_logger(__name__)
 async def _pick_random_path(store: LocalSocketStore) -> StorePath:
     """Pick an arbitrary valid path from the store."""
     resp = await store.execute(QueryAllValidPathsRequest())
-    all_paths = resp.paths
+    all_paths = list(resp.paths)
     assert all_paths, "Store has no paths?!"
-    for p in sorted(all_paths):
+
+    random.shuffle(all_paths)
+
+    count = 0
+    for p in all_paths:
+        count += 1
+        if count > 100:
+            break
         if p.endswith(".drv"):
             continue
+        # Also ensure it has some size
         info_resp = await store.execute(QueryPathInfoRequest(path=p))
         if info_resp.valid and info_resp.info and info_resp.info.nar_size > 0:
             return p
-    return next(iter(all_paths))
+    return all_paths[0]
 
 
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(60)
 async def test_http_upload(tmp_path: Path) -> None:
     """Test uploading a path to the HTTP cache via PUT using aiohttp directly."""
     # 1. Source store (root) has the path

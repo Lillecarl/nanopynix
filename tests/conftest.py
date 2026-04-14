@@ -64,7 +64,14 @@ def get_test_store_kwargs(**kwargs) -> dict[str, Any]:
 
     Includes --extra-substituters "/" to speed up tests by using the root store.
     """
-    extra_args = ["--option", "extra-substituters", "/"]
+    extra_args = [
+        "--option",
+        "extra-substituters",
+        "/",
+        "--option",
+        "require-sigs",
+        "false",
+    ]
     if "extra_args" in kwargs:
         extra_args.extend(kwargs.pop("extra_args"))
 

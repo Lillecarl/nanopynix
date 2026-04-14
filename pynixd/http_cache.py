@@ -294,15 +294,21 @@ class BinaryCacheServer:
 
         # Now add it to the store
         async def provide_nar(writer: NixWriter):
+            log.debug("provide_nar_start", path=nar_temp_path)
             # We need to wrap the raw NAR in Nix framing (framed NAR data)
             framed = writer.framed()
+            sent_bytes = 0
             with open(nar_temp_path, "rb") as f:
                 while True:
                     chunk = f.read(1024 * 1024)
                     if not chunk:
                         break
                     framed.write(chunk)
+                    sent_bytes += len(chunk)
+                    log.debug("provide_nar_progress", sent_bytes=sent_bytes)
+            log.debug("provide_nar_finalizing", total_bytes=sent_bytes)
             await framed.finalize()
+            log.debug("provide_nar_done")
 
         log.info("finalizing_upload_to_store", path=vinfo.path)
         try:

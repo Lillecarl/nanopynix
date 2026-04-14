@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
@@ -77,10 +78,43 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         if self.async_provider:
             async with store.transfer_conn() as conn:
                 await self.to_writer(conn.w, conn.version)
-                await self.async_provider(conn.w)
                 await conn.w.drain()
-                await conn.r.drain_stderr()
-                return await AddToStoreNarResponse.from_reader(conn.r, conn.version)
+
+                logs = OperationLogs()
+                error = None
+
+                async def read_stderr():
+                    nonlocal error
+                    from ..stderr import read_stream, StderrError
+                    from ..exceptions import BackendError
+
+                    try:
+                        async for msg in read_stream(conn.r):
+                            logs.add(msg)
+                            if isinstance(msg, StderrError):
+                                error = BackendError(f"Backend error: {msg.msg}")
+                                return
+                            if client:
+                                client.queue.put_nowait(msg)
+                    except Exception as e:
+                        error = e
+
+                stderr_task = asyncio.create_task(read_stderr())
+
+                try:
+                    await self.async_provider(conn.w)
+                    await conn.w.drain()
+                except Exception as e:
+                    if not error:
+                        error = e
+
+                await stderr_task
+
+                if error:
+                    raise error
+
+                return AddToStoreNarResponse(logs=logs)
+
         return await super().execute(store, client, suppress_last)
 
     @classmethod
