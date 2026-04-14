@@ -62,12 +62,16 @@ LIX_BIN = env.str("LIX_BIN", "nix")
 def get_test_store_kwargs(**kwargs) -> dict[str, Any]:
     """Return common kwargs for LocalSocketStore in tests.
 
-    Includes --extra-substituters "/" to speed up tests by using the root store.
+    Uses ssh-ng://127.0.0.1:22 as an extra substituter to fetch missing paths
+    from the system store without triggering permission issues or chroot bugs.
     """
+    username = os.environ.get("USER", "root")
+    substituter = f"ssh-ng://{username}@127.0.0.1:22"
+
     extra_args = [
         "--option",
         "extra-substituters",
-        "/",
+        substituter,
         "--option",
         "require-sigs",
         "false",
@@ -75,9 +79,18 @@ def get_test_store_kwargs(**kwargs) -> dict[str, Any]:
     if "extra_args" in kwargs:
         extra_args.extend(kwargs.pop("extra_args"))
 
+    # Ensure the managed daemon has NIX_SSHOPTS so it can connect back to
+    # the system store via SSH if needed.
+    extra_env = kwargs.pop("extra_env", {})
+    if "NIX_SSHOPTS" not in extra_env:
+        extra_env["NIX_SSHOPTS"] = (
+            "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        )
+
     res = {
         "nix_bin": str(NIX_BIN),
         "extra_args": extra_args,
+        "extra_env": extra_env,
     }
     res.update(kwargs)
     return res

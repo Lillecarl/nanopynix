@@ -129,6 +129,7 @@ Host pynixd-dag-store-ssh
 
                     # Use --eval-store auto to evaluate against the system store,
                     # but build on the remote store via --store.
+                    substituter = f"ssh-ng://{username}@127.0.0.1:22"
                     cmd = [
                         str(NIX_BIN),
                         "build",
@@ -138,7 +139,7 @@ Host pynixd-dag-store-ssh
                         "dag",
                         "--no-link",
                         "--print-out-paths",
-                        "--option", "extra-substituters", "/",
+                        "--option", "extra-substituters", substituter,
                     ]
                     rc, stdout, stderr, stdboth = await run_subproc(
                         cmd, env={"NIX_SSHOPTS": ssh_opts}

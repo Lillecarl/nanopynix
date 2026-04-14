@@ -147,7 +147,14 @@ class Server:
             return self.uri(implementation)
         elif uri_format == "unix":
             # For unix-server tests
-            return f"unix://{self.config.unix_path}" if self.config.unix_path else ""
+            if not self.config.unix_path:
+                return ""
+            uri = f"unix://{self.config.unix_path}"
+            # Add ?root= if we have an alt-store path, ensuring Nix client
+            # looks for NARs in the right physical location.
+            if self.config.local_store.store_path:
+                uri += f"?root={self.config.local_store.store_path}"
+            return uri
         return self.uri(implementation)
 
     async def __aenter__(self) -> Server:
