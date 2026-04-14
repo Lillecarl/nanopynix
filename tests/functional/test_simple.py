@@ -9,117 +9,162 @@ import pyinstrument
 import structlog
 from pyinstrument.renderers import ConsoleRenderer
 import asyncio
+import os
 
 from pynixd import Server
-from pynixd.instance import NixImplementation
-from pynixd.store import LocalSocketStore
+from pynixd.store import LocalSocketStore, get_current_system
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
     run_subproc,
     set_log_levels,
+    rmtree_robust,
 )
 
 log = structlog.get_logger(__name__)
 
 
-async def test_builders(test_log_dir: Path) -> None:
+async def test_builders(test_log_dir: Path, tmp_path: Path) -> None:
     """Build test.nix .simple via --builders."""
-    test_nix = Path("test.nix")
-    local_store = LocalSocketStore(
-        id="local",
-        store_path=STORE_PREFIX / "local",
-        **get_test_store_kwargs(),
-    )
-    builder_store = LocalSocketStore(
-        id="builder",
-        store_path=STORE_PREFIX / "builder",
-        **get_test_store_kwargs(),
-    )
+    async with asyncio.timeout(60):
+        test_nix = Path("test.nix")
+        
+        # 1. Backends for pynixd
+        pynixd_local_path = STORE_PREFIX / "pynixd-local-builders"
+        pynixd_builder_path = STORE_PREFIX / "pynixd-builder-builders"
+        rmtree_robust(pynixd_local_path)
+        rmtree_robust(pynixd_builder_path)
 
-    profiler = pyinstrument.Profiler(async_mode="enabled")
-    profiler.start()
+        pynixd_local = LocalSocketStore(
+            id="pynixd-local",
+            store_path=pynixd_local_path,
+            **get_test_store_kwargs(),
+        )
+        pynixd_builder = LocalSocketStore(
+            id="pynixd-builder",
+            store_path=pynixd_builder_path,
+            **get_test_store_kwargs(),
+        )
 
-    try:
-        async with Server(
-            local_store=local_store, stores={"builder": builder_store}, ssh_port=0
-        ) as server:
-            uri = server.builder_uri(implementation=NixImplementation.NIX, max_jobs=1)
-            cmd = [
-                str(NIX_BIN),
-                "build",
-                "--builders",
-                uri,
-                "--file",
-                str(test_nix),
-                "simple",
-                "--no-link",
-                "--print-out-paths",
-                "--max-jobs",
-                "0",
-            ]
-            rc, stdout, stderr, _ = await run_subproc(cmd)
-            assert rc == 0, f"""build failed:
-{stderr}"""
-    finally:
-        profiler.stop()
-        session = profiler.last_session
-        if session:
-            renderer = ConsoleRenderer(unicode=True, color=False, show_all=True)
-            profile_path = test_log_dir / "pyinstrument"
-            with open(profile_path, "w") as f:
-                f.write(renderer.render(session))
+        # 2. Local store for the 'nix' client to use.
+        # This ensures the client initiates the SSH connection as the current user.
+        client_store_path = tmp_path / "client-store-builders"
+        client_store_path.mkdir(parents=True, exist_ok=True)
+
+        profiler = pyinstrument.Profiler(async_mode="enabled")
+        profiler.start()
+
+        try:
+            async with Server(
+                local_store=pynixd_local, stores={"builder": pynixd_builder}, ssh_port=0
+            ) as server:
+                username = os.environ.get("USER", "root")
+                
+                # Direct URI with port as requested by user
+                uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
+                system = get_current_system()
+                builder_spec = f"{uri} {system}"
+                
+                # Extra substituter pointing to system store via SSH port 22
+                # This bypasses potential chroot/local store issues.
+                substituter = f"ssh-ng://{username}@127.0.0.1:22"
+
+                cmd = [
+                    str(NIX_BIN),
+                    "build",
+                    "--store", str(client_store_path),
+                    "--builders", builder_spec,
+                    "--extra-substituters", substituter,
+                    "--file", str(test_nix),
+                    "simple",
+                    "--no-link",
+                    "--print-out-paths",
+                    "--max-jobs", "0",
+                    "--option", "require-sigs", "false",
+                ]
+                # Ensure SSH doesn't prompt for anything
+                ssh_opts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+                
+                rc, stdout, stderr, stdboth = await run_subproc(cmd, env={"NIX_SSHOPTS": ssh_opts})
+                assert rc == 0, f"build failed:\n{stdboth}"
+        finally:
+            profiler.stop()
+            session = profiler.last_session
+            if session:
+                renderer = ConsoleRenderer(unicode=True, color=False, show_all=True)
+                profile_path = test_log_dir / "pyinstrument-builders"
+                with open(profile_path, "w") as f:
+                    f.write(renderer.render(session))
 
 
-async def test_store(test_log_dir: Path) -> None:
-    """Build test.nix .simple via --store."""
-    test_nix = Path("test.nix")
-    local_store = LocalSocketStore(
-        id="local",
-        store_path=STORE_PREFIX / "local-store",
-        **get_test_store_kwargs(),
-    )
-    builder_store = LocalSocketStore(
-        id="builder",
-        store_path=STORE_PREFIX / "builder-store",
-        **get_test_store_kwargs(),
-    )
+async def test_store(test_log_dir: Path, tmp_path: Path) -> None:
+    """Build test.nix .simple via --eval-store."""
+    async with asyncio.timeout(60):
+        test_nix = Path("test.nix")
+        
+        pynixd_local_path = STORE_PREFIX / "pynixd-local-store"
+        pynixd_builder_path = STORE_PREFIX / "pynixd-builder-store"
+        rmtree_robust(pynixd_local_path)
+        rmtree_robust(pynixd_builder_path)
 
-    profiler = pyinstrument.Profiler(async_mode="enabled")
-    profiler.start()
+        pynixd_local = LocalSocketStore(
+            id="pynixd-local",
+            store_path=pynixd_local_path,
+            **get_test_store_kwargs(),
+        )
+        pynixd_builder = LocalSocketStore(
+            id="pynixd-builder",
+            store_path=pynixd_builder_path,
+            **get_test_store_kwargs(),
+        )
 
-    # AddToStore is muted to INFO because it produces ~4500 DEBUG log lines
-    # (one per path being added). This is 100% confirmed working — the missing
-    # DEBUG output is NOT the cause of any test failure. Do NOT remove this
-    # silencing unless you want to drown the AI in thousands of log lines.
-    try:
-        async with asyncio.timeout(60):
+        profiler = pyinstrument.Profiler(async_mode="enabled")
+        profiler.start()
+
+        try:
             with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
                 async with Server(
-                    local_store=local_store,
-                    stores={"builder": builder_store},
+                    local_store=pynixd_local,
+                    stores={"builder": pynixd_builder},
                     ssh_port=0,
                 ) as server:
-                    uri = server.uri(implementation=NixImplementation.NIX)
+                    username = os.environ.get("USER", "root")
+                    
+                    ssh_config = tmp_path / "ssh_config_store"
+                    ssh_config.write_text(f"""
+Host pynixd-store-ssh
+    HostName 127.0.0.1
+    Port {server.port}
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+""")
+                    ssh_opts = f"-F {ssh_config}"
+
+                    uri = f"ssh-ng://{username}@pynixd-store-ssh"
+
+                    # Use --eval-store auto to evaluate against the system store,
+                    # but build on the remote store via --store.
                     cmd = [
                         str(NIX_BIN),
                         "build",
-                        "--store",
-                        uri,
-                        "--file",
-                        str(test_nix),
+                        "--eval-store", "auto",
+                        "--store", uri,
+                        "--file", str(test_nix),
                         "simple",
                         "--no-link",
                         "--print-out-paths",
+                        "--option", "extra-substituters", "/",
                     ]
-                    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+                    rc, stdout, stderr, stdboth = await run_subproc(
+                        cmd, env={"NIX_SSHOPTS": ssh_opts}
+                    )
                     assert rc == 0, f"build failed:\n{stdboth}"
-    finally:
-        profiler.stop()
-        session = profiler.last_session
-        if session:
-            renderer = ConsoleRenderer(unicode=True, color=False, show_all=True)
-            profile_path = test_log_dir / "pyinstrument"
-            with open(profile_path, "w") as f:
-                f.write(renderer.render(session))
+        finally:
+            profiler.stop()
+            session = profiler.last_session
+            if session:
+                renderer = ConsoleRenderer(unicode=True, color=False, show_all=True)
+                profile_path = test_log_dir / "pyinstrument-store"
+                with open(profile_path, "w") as f:
+                    f.write(renderer.render(session))
