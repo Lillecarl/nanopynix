@@ -29,7 +29,7 @@ from .operations.build_derivation import (
 )
 
 from .store import Store
-from .store_path import RequiredInput
+from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -86,7 +86,7 @@ class Scheduler:
         self,
         request: BuildDerivationRequest,
         client: ClientConn | None,
-        required_paths: set[RequiredInput],
+        required_paths: set[StorePath],
         platform: str = "",
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue and trigger the scheduler."""
@@ -272,9 +272,6 @@ class Scheduler:
                     await Store.stream_paths_store_to_store(
                         store, self.local_store, set(outputs.values())
                     )
-                    # IMPORTANT: Update local_store's known_paths after streaming
-                    # because stream_paths_store_to_store bypasses the normal handle() path
-                    self.local_store.add_known_paths(set(outputs.values()))
                     log.debug(
                         "pulled_paths_into_local_store",
                         count=len(outputs),
@@ -303,10 +300,10 @@ class Scheduler:
             self.trigger()
 
     async def transfer_inputs(
-        self, build: QueuedBuild, store: Store, paths: set[RequiredInput]
+        self, build: QueuedBuild, store: Store, paths: set[StorePath]
     ) -> None:
         """Background task to proactively pull missing inputs for a build."""
-        to_pull: set[RequiredInput] = set()
+        to_pull: set[StorePath] = set()
         try:
             to_pull = paths - self.local_store.known_paths
             if not to_pull:
@@ -316,8 +313,6 @@ class Scheduler:
             for p in to_pull:
                 log.debug("pulling_path", store_id=store.id, path=p)
             await Store.stream_paths_store_to_store(store, self.local_store, to_pull)
-            # IMPORTANT: Update local_store's known_paths after streaming
-            self.local_store.add_known_paths(to_pull)  # type: ignore[arg-type]
             log.debug(
                 "pulled_paths_into_local_store",
                 count=len(to_pull),

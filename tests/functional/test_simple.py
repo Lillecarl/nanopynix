@@ -33,8 +33,11 @@ async def test_builders(test_log_dir: Path, tmp_path: Path) -> None:
         # 1. Backends for pynixd
         pynixd_local_path = STORE_PREFIX / "pynixd-local-builders"
         pynixd_builder_path = STORE_PREFIX / "pynixd-builder-builders"
+        client_store_path = STORE_PREFIX / "client-store-builders"
+        # client_store_path.mkdir(parents=True, exist_ok=True)
         rmtree_robust(pynixd_local_path)
         rmtree_robust(pynixd_builder_path)
+        rmtree_robust(client_store_path)
 
         pynixd_local = LocalSocketStore(
             id="pynixd-local",
@@ -49,8 +52,6 @@ async def test_builders(test_log_dir: Path, tmp_path: Path) -> None:
 
         # 2. Local store for the 'nix' client to use.
         # This ensures the client initiates the SSH connection as the current user.
-        client_store_path = tmp_path / "client-store-builders"
-        client_store_path.mkdir(parents=True, exist_ok=True)
 
         profiler = pyinstrument.Profiler(async_mode="enabled")
         profiler.start()

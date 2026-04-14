@@ -45,7 +45,7 @@ from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
 from .signing import SecretKey
-from .store_path import RequiredInput, StorePath
+from .store_path import StorePath
 from .wire import (
     SSHNixReader,
     SSHNixWriter,
@@ -102,7 +102,7 @@ class Store(ABC):
         self.conn_counter: int = 0
         self.sweep_task: asyncio.Task[None] | None = None
         self.supported_systems = supported_systems or []
-        self.known_paths: set[RequiredInput] = set()
+        self.known_paths: set[StorePath] = set()
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
             maxsize=10000, ttl=300
         )
@@ -176,10 +176,10 @@ class Store(ABC):
     def has_path(self, path: StorePath) -> bool:
         return path in self.known_paths
 
-    def has_all_paths(self, paths: set[RequiredInput]) -> bool:
+    def has_all_paths(self, paths: set[StorePath]) -> bool:
         return paths.issubset(self.known_paths)
 
-    def count_common_paths(self, paths: set[RequiredInput]) -> int:
+    def count_common_paths(self, paths: set[StorePath]) -> int:
         return len(paths & self.known_paths)
 
     async def call(
@@ -258,166 +258,87 @@ class Store(ABC):
         return self.path_info_cache.get(path)
 
     @classmethod
-    async def stream_paths_with_info_store_to_store(
-        cls,
-        src: Store,
-        dst: Store,
-        infos: Iterable[ValidPathInfo],
-        src_conn: Connection | None = None,
-        dst_conn: Connection | None = None,
-        cancel_event: asyncio.Event | None = None,
-    ) -> None:
-        """Copy paths from src to dst via streaming using pre-resolved ValidPathInfo.
-
-        The infos should be topologically sorted to ensure valid insertion order
-        at the destination.
-        """
-        infos_list = list(infos)
-        if not infos_list:
-            return
-
-        if (src_conn or dst_conn) and src_conn == dst_conn:
-            log.error("same_conn_transfer")
-            return
-
-        log.info(
-            "stream_paths_with_info_store_to_store",
-            count=len(infos_list),
-        )
-
-        if src_conn and dst_conn:
-            await cls._stream_with_info_inner(
-                src_conn, dst_conn, infos_list, cancel_event
-            )
-        elif src_conn:
-            async with dst.transfer_conn() as dst_conn:
-                await cls._stream_with_info_inner(
-                    src_conn, dst_conn, infos_list, cancel_event
-                )
-        elif dst_conn:
-            async with src.transfer_conn() as src_conn:
-                await cls._stream_with_info_inner(
-                    src_conn, dst_conn, infos_list, cancel_event
-                )
-        else:
-            async with src.transfer_conn() as src_conn, dst.transfer_conn() as dst_conn:
-                await cls._stream_with_info_inner(
-                    src_conn, dst_conn, infos_list, cancel_event
-                )
-
-    @classmethod
-    async def _stream_with_info_inner(
-        cls,
-        src_conn: Connection,
-        dst_conn: Connection,
-        infos_list: list[ValidPathInfo],
-        cancel_event: asyncio.Event | None,
-    ) -> None:
-        """Inner streaming logic assuming both connections are already acquired."""
-        dst_conn.op_log.append(
-            "AddMultipleToStore (stream_paths_with_info_store_to_store)"
-        )
-        req = AddMultipleToStoreRequest(
-            repair=0,
-            dont_check_sigs=1,
-        )
-        await req.to_writer(dst_conn.w, dst_conn.version)
-        await dst_conn.w.drain()
-
-        fw = dst_conn.w.framed()
-        fw.write_uint64(len(infos_list))
-
-        for info in infos_list:
-            if cancel_event and cancel_event.is_set():
-                log.info("stream_paths_transfer_cancelled")
-                break
-
-            path = info.path
-            dst_conn.op_log.append(
-                "AddToStoreNar (stream_paths_with_info_store_to_store)"
-            )
-
-            # Use info.to_bytes() to send metadata as a single frame,
-            # matching AddMultipleToStore's forward() logic.
-            fw.write(info.to_bytes())
-
-            # Request NAR from source
-            await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
-            await src_conn.w.drain()
-
-            # Source will send stderr logs followed by STDERR_LAST before NAR data
-            await src_conn.r.drain_stderr()
-
-            # Pipe raw NAR data from source into the destination's framed stream
-            await wire.pipe_raw_to_framed_writer(
-                src_conn.r,
-                fw,
-                info.nar_size,
-            )
-            # Drain periodically to avoid overwhelming buffers
-            await dst_conn.w.drain()
-
-        await fw.finalize()
-        await dst_conn.w.drain()
-        await req.response_type.from_reader(dst_conn.r, dst_conn.version)
-
-    @classmethod
     async def stream_paths_store_to_store(
         cls,
         src: Store,
         dst: Store,
         paths: Iterable[StorePath],
-        src_conn: Connection | None = None,
-        dst_conn: Connection | None = None,
         cancel_event: asyncio.Event | None = None,
     ) -> None:
-        """Copy paths from src to dst via streaming, querying info first.
+        """Copy paths from src to dst via streaming, querying closure first.
 
-        Acquires connections once and reuses them for both metadata and data.
+        Bypasses the normal handle() path, so we update dst knowledge manually.
+        Only transfers paths that dst doesn't already have.
         """
         paths_set: set[StorePath] = {StorePath(p) for p in paths}
         if not paths_set:
             return
 
-        if (src_conn or dst_conn) and src_conn == dst_conn:
-            log.error("same_conn_transfer")
+        # 1. Get closure from source
+        closure_resp = await src.execute(
+            QueryClosureWithInfoRequest(paths=paths_set),
+            client=None,
+        )
+        if not closure_resp.infos:
             return
 
-        if src_conn and dst_conn:
-            closure_resp = await src.execute(
-                QueryClosureWithInfoRequest(paths=paths_set),
-                client=None,
+        # 2. Filter out paths already in destination
+        to_transfer: list[ValidPathInfo] = [
+            info for info in closure_resp.infos if info.path not in dst.known_paths
+        ]
+        if not to_transfer:
+            return
+
+        # 3. Stream the missing paths
+        async with src.transfer_conn() as src_conn, dst.transfer_conn() as dst_conn:
+            dst_conn.op_log.append(
+                "AddMultipleToStore (stream_paths_store_to_store)"
             )
-            await cls._stream_with_info_inner(
-                src_conn, dst_conn, list(closure_resp.infos), cancel_event
+            req = AddMultipleToStoreRequest(
+                repair=0,
+                dont_check_sigs=1,
             )
-        elif src_conn:
-            async with dst.transfer_conn() as dst_conn:
-                closure_resp = await src.execute(
-                    QueryClosureWithInfoRequest(paths=paths_set),
-                    client=None,
+            await req.to_writer(dst_conn.w, dst_conn.version)
+            await dst_conn.w.drain()
+
+            fw = dst_conn.w.framed()
+            fw.write_uint64(len(to_transfer))
+
+            for info in to_transfer:
+                if cancel_event and cancel_event.is_set():
+                    log.info("stream_paths_transfer_cancelled")
+                    break
+
+                path = info.path
+                dst_conn.op_log.append(
+                    "AddToStoreNar (stream_paths_store_to_store)"
                 )
-                await cls._stream_with_info_inner(
-                    src_conn, dst_conn, list(closure_resp.infos), cancel_event
+
+                # Use info.to_bytes() to send metadata as a single frame
+                fw.write(info.to_bytes())
+
+                # Request NAR from source
+                await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
+                await src_conn.w.drain()
+
+                # Source will send stderr logs followed by STDERR_LAST before NAR data
+                await src_conn.r.drain_stderr()
+
+                # Pipe raw NAR data from source into the destination's framed stream
+                await wire.pipe_raw_to_framed_writer(
+                    src_conn.r,
+                    fw,
+                    info.nar_size,
                 )
-        elif dst_conn:
-            async with src.transfer_conn() as src_conn:
-                closure_resp = await src.execute(
-                    QueryClosureWithInfoRequest(paths=paths_set),
-                    client=None,
-                )
-                await cls._stream_with_info_inner(
-                    src_conn, dst_conn, list(closure_resp.infos), cancel_event
-                )
-        else:
-            async with src.transfer_conn() as src_conn, dst.transfer_conn() as dst_conn:
-                closure_resp = await src.execute(
-                    QueryClosureWithInfoRequest(paths=paths_set),
-                    client=None,
-                )
-                await cls._stream_with_info_inner(
-                    src_conn, dst_conn, list(closure_resp.infos), cancel_event
-                )
+                await dst_conn.w.drain()
+
+            await fw.finalize()
+            await dst_conn.w.drain()
+            await req.response_type.from_reader(dst_conn.r, dst_conn.version)
+
+        # 4. Update destination store's knowledge
+        dst.add_path_infos(set(to_transfer))
+        dst.add_known_paths({i.path for i in to_transfer})
 
     async def pipe_nar_from(
         self,

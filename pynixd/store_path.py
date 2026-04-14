@@ -5,15 +5,23 @@ StorePath: a str subclass for Nix store paths with helpers.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Self
 
 
 class StorePath(str):
     """A str subclass representing a Nix store path.
 
     Provides helpers for basename, derivation checking, etc.
+    Can store optional 'extrainfo' for debugging (e.g. why this path is required).
     """
 
-    __slots__ = ()
+    __slots__ = ("extrainfo",)
+
+    def __new__(cls, value: str | StorePath, extrainfo: Any = None) -> Self:
+        instance = str.__new__(cls, value)
+        # Use getattr if value is already a StorePath to preserve existing info if not overridden
+        instance.extrainfo = extrainfo or getattr(value, "extrainfo", None)
+        return instance
 
     @property
     def name(self) -> str:
@@ -37,27 +45,7 @@ class StorePath(str):
         """Convert to a pathlib.Path."""
         return Path(self)
 
-
-class RequiredInput(StorePath):
-    """A StorePath subclass that tracks where it was required from.
-
-    For debugging: __repr__ shows the path AND the source.
-    Uses a class-level dict to track sources (keyed by path string).
-    """
-
-    _sources: dict[str, str] = {}
-
-    def __new__(cls, path: StorePath | str, source: str) -> "RequiredInput":
-        instance = str.__new__(cls, path)
-        cls._sources[str(path)] = source
-        return instance
-
-    @property
-    def source(self) -> str:
-        return self._sources.get(str(self), "")
-
     def __repr__(self) -> str:
-        return f"RequiredInput({str.__repr__(self)}, source={self.source!r})"
-
-    def to_store_path(self) -> StorePath:
-        return StorePath(str(self))
+        if self.extrainfo:
+            return f"StorePath({str.__repr__(self)}, info={self.extrainfo!r})"
+        return f"StorePath({str.__repr__(self)})"

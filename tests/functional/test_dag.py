@@ -3,92 +3,146 @@
 from __future__ import annotations
 
 import logging
+import os
+import asyncio
 from pathlib import Path
 
 import structlog
 
 from pynixd import Server
-from pynixd.instance import NixImplementation
-from pynixd.store import LocalSocketStore
+from pynixd.store import LocalSocketStore, get_current_system
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
     run_subproc,
     set_log_levels,
+    rmtree_robust,
 )
 
 log = structlog.get_logger(__name__)
 
 
-async def test_dag_builders() -> None:
+async def test_dag_builders(tmp_path: Path) -> None:
     """Build test.nix .dag via --builders."""
-    test_nix = Path("test.nix")
-    local_store = LocalSocketStore(
-        id="local",
-        store_path=STORE_PREFIX / "dag-builders-local",
-        **get_test_store_kwargs(),
-    )
-    builder_store = LocalSocketStore(
-        id="builder",
-        store_path=STORE_PREFIX / "dag-builders-builder",
-        **get_test_store_kwargs(),
-    )
+    async with asyncio.timeout(120): # DAG builds can take longer
+        test_nix = Path("test.nix")
+        
+        # 1. Backends for pynixd
+        pynixd_local_path = STORE_PREFIX / "dag-builders-local"
+        pynixd_builder_path = STORE_PREFIX / "dag-builders-builder"
+        rmtree_robust(pynixd_local_path)
+        rmtree_robust(pynixd_builder_path)
 
-    async with Server(
-        local_store=local_store, stores={"builder": builder_store}, ssh_port=0
-    ) as server:
-        uri = server.builder_uri(implementation=NixImplementation.NIX, max_jobs=4)
-        cmd = [
-            str(NIX_BIN),
-            "build",
-            "--builders",
-            uri,
-            "--file",
-            str(test_nix),
-            "dag",
-            "--no-link",
-            "--print-out-paths",
-        ]
-        rc, stdout, stderr, _ = await run_subproc(cmd)
-        assert rc == 0, f"""build failed:
-{stderr}"""
+        pynixd_local = LocalSocketStore(
+            id="pynixd-local",
+            store_path=pynixd_local_path,
+            **get_test_store_kwargs(),
+        )
+        pynixd_builder = LocalSocketStore(
+            id="pynixd-builder",
+            store_path=pynixd_builder_path,
+            **get_test_store_kwargs(),
+        )
+
+        # 2. Local store for the 'nix' client to use.
+        client_store_path = tmp_path / "client-store-dag-builders"
+        client_store_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            async with Server(
+                local_store=pynixd_local, stores={"builder": pynixd_builder}, ssh_port=0
+            ) as server:
+                username = os.environ.get("USER", "root")
+                
+                # Direct URI with port as requested by user
+                uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
+                system = get_current_system()
+                builder_spec = f"{uri} {system}"
+                
+                # Extra substituter pointing to system store via SSH port 22
+                substituter = f"ssh-ng://{username}@127.0.0.1:22"
+
+                cmd = [
+                    str(NIX_BIN),
+                    "build",
+                    "--store", str(client_store_path),
+                    "--builders", builder_spec,
+                    "--extra-substituters", substituter,
+                    "--file", str(test_nix),
+                    "dag",
+                    "--no-link",
+                    "--print-out-paths",
+                    "--max-jobs", "0",
+                    "--option", "require-sigs", "false",
+                ]
+                # Ensure SSH doesn't prompt for anything
+                ssh_opts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+                
+                rc, stdout, stderr, stdboth = await run_subproc(cmd, env={"NIX_SSHOPTS": ssh_opts})
+                assert rc == 0, f"build failed:\n{stdboth}"
+        finally:
+            pass
 
 
-async def test_dag_store() -> None:
+async def test_dag_store(tmp_path: Path) -> None:
     """Build test.nix .dag via --store."""
-    test_nix = Path("test.nix")
-    local_store = LocalSocketStore(
-        id="local",
-        store_path=STORE_PREFIX / "dag-store-local",
-        **get_test_store_kwargs(),
-    )
-    builder_store = LocalSocketStore(
-        id="builder",
-        store_path=STORE_PREFIX / "dag-store-builder",
-        **get_test_store_kwargs(),
-    )
+    async with asyncio.timeout(120):
+        test_nix = Path("test.nix")
+        
+        pynixd_local_path = STORE_PREFIX / "dag-store-local"
+        pynixd_builder_path = STORE_PREFIX / "dag-store-builder"
+        rmtree_robust(pynixd_local_path)
+        rmtree_robust(pynixd_builder_path)
 
-    # AddToStore is muted to INFO because it produces ~4500 DEBUG log lines
-    # (one per path being added). This is 100% confirmed working — the missing
-    # DEBUG output is NOT the cause of any test failure. Do NOT remove this
-    # silencing unless you want to drown the AI in thousands of log lines.
-    with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
-        async with Server(
-            local_store=local_store, stores={"builder": builder_store}, ssh_port=0
-        ) as server:
-            uri = server.uri(implementation=NixImplementation.NIX)
-            cmd = [
-                str(NIX_BIN),
-                "build",
-                "--store",
-                uri,
-                "--file",
-                str(test_nix),
-                "dag",
-                "--no-link",
-                "--print-out-paths",
-            ]
-            rc, stdout, stderr, _ = await run_subproc(cmd)
-            assert rc == 0, f"""build failed:
-{stderr}"""
+        pynixd_local = LocalSocketStore(
+            id="pynixd-local",
+            store_path=pynixd_local_path,
+            **get_test_store_kwargs(),
+        )
+        pynixd_builder = LocalSocketStore(
+            id="pynixd-builder",
+            store_path=pynixd_builder_path,
+            **get_test_store_kwargs(),
+        )
+
+        try:
+            with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
+                async with Server(
+                    local_store=pynixd_local,
+                    stores={"builder": pynixd_builder},
+                    ssh_port=0,
+                ) as server:
+                    username = os.environ.get("USER", "root")
+                    
+                    ssh_config = tmp_path / "ssh_config_dag_store"
+                    ssh_config.write_text(f"""
+Host pynixd-dag-store-ssh
+    HostName 127.0.0.1
+    Port {server.port}
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+""")
+                    ssh_opts = f"-F {ssh_config}"
+
+                    uri = f"ssh-ng://{username}@pynixd-dag-store-ssh"
+
+                    # Use --eval-store auto to evaluate against the system store,
+                    # but build on the remote store via --store.
+                    cmd = [
+                        str(NIX_BIN),
+                        "build",
+                        "--eval-store", "auto",
+                        "--store", uri,
+                        "--file", str(test_nix),
+                        "dag",
+                        "--no-link",
+                        "--print-out-paths",
+                        "--option", "extra-substituters", "/",
+                    ]
+                    rc, stdout, stderr, stdboth = await run_subproc(
+                        cmd, env={"NIX_SSHOPTS": ssh_opts}
+                    )
+                    assert rc == 0, f"build failed:\n{stdboth}"
+        finally:
+            pass

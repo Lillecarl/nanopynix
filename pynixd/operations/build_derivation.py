@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..store_path import RequiredInput, StorePath
+from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     BasicDerivation,
@@ -17,8 +17,6 @@ from .base import (
     OpResponse,
     OperationLogs,
 )
-from .query_closure import QueryClosureRequest
-from .query_valid_paths import QueryValidPathsRequest
 from ..stderr import StderrNext
 
 if TYPE_CHECKING:
@@ -82,38 +80,18 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             log.debug("responded_op")
             return result
 
-        # Discover paths that exist on the local store but aren't tracked.
-        unknown = (
-            set(request.derivation.input_srcs) | {request.drv_path}
-        ) - proxy.local_store.known_paths
-        if unknown:
-            valid_resp = await proxy.local_store.execute(
-                QueryValidPathsRequest(paths=unknown)
-            )
-            proxy.local_store.add_known_paths(valid_resp.paths, update_regtime=False)
-
-        existing_inputs = request.derivation.input_srcs & proxy.local_store.known_paths
-        unbuilt_inputs = request.derivation.input_srcs - proxy.local_store.known_paths
-
-        closure_resp = await proxy.local_store.execute(
-            QueryClosureRequest(paths=existing_inputs)
-        )
-
-        # Ensure pynixd knows about all paths in the closure (QueryValidPathsRequest.execute() adds them)
-        if closure_resp.paths:
-            await proxy.local_store.execute(
-                QueryValidPathsRequest(paths=closure_resp.paths)
-            )
-
-        request.derivation.input_srcs = closure_resp.paths | unbuilt_inputs
-
+        # The client provides a complete build recipe in BuildDerivation.
+        # input_srcs contains all required dependencies (sources and other .drvs).
+        # We don't need to perform extra discovery or closure expansion.
         drv_path_str = str(request.drv_path)
-        required_paths: set[RequiredInput] = set()
-        for inp in request.derivation.input_srcs:
-            required_paths.add(RequiredInput(inp, f"input_src of {drv_path_str}"))
-        required_paths.add(
-            RequiredInput(request.drv_path, f"drv_path of {drv_path_str}")
-        )
+        required_paths: set[StorePath] = {
+            StorePath(inp, extrainfo=f"input_src of {drv_path_str}")
+            for inp in request.derivation.input_srcs
+        }
+
+        # We DO NOT add request.drv_path to required_paths because the client
+        # provides the derivation contents over the wire and often doesn't
+        # upload the .drv file itself to the remote builder.
         build_id, future = await proxy.scheduler.enqueue(
             request,
             proxy.client,
@@ -124,6 +102,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             "build_derivation_enqueued",
             build_id=build_id,
             drv_path=request.drv_path,
+            required_count=len(required_paths),
         )
         response = await future
 

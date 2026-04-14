@@ -10,7 +10,7 @@ import structlog
 
 from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file, to_basic_derivation
-from ..store_path import RequiredInput, StorePath
+from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     BuildMode,
@@ -112,11 +112,11 @@ async def _decompose_build_paths(
                 pass
 
         drv_path_str = str(drv_request.drv_path)
-        required_paths: set[RequiredInput] = set()
+        required_paths: set[StorePath] = set()
         for inp in drv_request.derivation.input_srcs:
-            required_paths.add(RequiredInput(inp, f"input_src of {drv_path_str}"))
+            required_paths.add(StorePath(inp, extrainfo=f"input_src of {drv_path_str}"))
         required_paths.add(
-            RequiredInput(drv_request.drv_path, f"drv_path of {drv_path_str}")
+            StorePath(drv_request.drv_path, extrainfo=f"drv_path of {drv_path_str}")
         )
         build_id, future = await scheduler.enqueue(
             drv_request,

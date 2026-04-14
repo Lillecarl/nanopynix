@@ -202,20 +202,14 @@ async def test_bench_nar_small_batch(
 ) -> None:
     """Measure overhead for batched AddMultipleToStore."""
     paths = await _get_small_paths(100)
-    infos = []
-    for p in paths:
-        resp = await bench_store.execute(QueryPathInfoRequest(path=p))
-        if resp.valid and resp.info:
-            infos.append(resp.info.with_path(p))
-
-    log.info("starting_small_nar_batch_bench", count=len(infos))
+    log.info("starting_small_nar_batch_bench", count=len(paths))
 
     start = time.perf_counter()
-    # stream_paths_with_info handles topological sort and batching
-    await Store.stream_paths_with_info_store_to_store(bench_store, dst_store, infos)
+    # stream_paths_store_to_store handles closure and batching
+    await Store.stream_paths_store_to_store(bench_store, dst_store, paths)
     elapsed = time.perf_counter() - start
 
-    ops_per_s = len(infos) / elapsed
+    ops_per_s = len(paths) / elapsed
     _record(
         request,
         "nar_batch_overhead",

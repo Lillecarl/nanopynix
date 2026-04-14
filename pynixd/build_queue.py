@@ -19,7 +19,7 @@ import structlog
 from .connection import ClientConn
 from .operations.base import BuildResult, BuildResultStatus
 from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
-from .store_path import RequiredInput, StorePath
+from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -42,9 +42,8 @@ class QueuedBuild:
     id: int  # Global incrementing ID
     request: BuildDerivationRequest  # The request to forward to the backend
     client: ClientConn | None  # Client connection for stderr forwarding
-    required_paths: set[
-        RequiredInput
-    ]  # All paths the backend needs (input_srcs for BuildDerivation)
+    required_paths: set[StorePath]
+  # All paths the backend needs (input_srcs for BuildDerivation)
     future: asyncio.Future[BuildDerivationResponse]  # Resolved when done
     platform: str = ""  # Derivation platform (for backend filtering)
     enqueued_at: float = field(default_factory=time.monotonic)
@@ -167,7 +166,8 @@ class BuildQueue:
         self,
         request: BuildDerivationRequest,
         client: ClientConn | None,
-        required_paths: set[RequiredInput],
+        required_paths: set[StorePath]
+,
         platform: str = "",
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue (deduplicates if already present).

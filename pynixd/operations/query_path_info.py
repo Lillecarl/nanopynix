@@ -47,9 +47,12 @@ class QueryPathInfoResponse(OpResponse):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger.debug("to_writer", valid=self.valid, info=self.info)
         self.logs.to_writer(writer)
-        writer.write_uint64(1 if self.valid else 0)
+        writer.write_uint64(1 if self.valid and self.info is not None else 0)
         if self.valid and self.info is not None:
-            self.info.to_writer(writer)
+            # Explicitly use the base class method to avoid writing the path
+            # (which ValidPathInfo.to_writer would do).
+            from .base import UnkeyedValidPathInfo
+            UnkeyedValidPathInfo.to_writer(self.info, writer)
 
 
 @dataclass
