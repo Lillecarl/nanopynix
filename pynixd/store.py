@@ -322,6 +322,7 @@ class Store(ABC):
             dont_check_sigs=1,
         )
         await req.to_writer(dst_conn.w, dst_conn.version)
+        await dst_conn.w.drain()
 
         fw = dst_conn.w.framed()
         fw.write_uint64(len(infos_list))
@@ -336,19 +337,28 @@ class Store(ABC):
                 "AddToStoreNar (stream_paths_with_info_store_to_store)"
             )
 
-            info.to_writer(fw)
+            # Use info.to_bytes() to send metadata as a single frame,
+            # matching AddMultipleToStore's forward() logic.
+            fw.write(info.to_bytes())
 
+            # Request NAR from source
             await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
             await src_conn.w.drain()
+
+            # Source will send stderr logs followed by STDERR_LAST before NAR data
             await src_conn.r.drain_stderr()
 
+            # Pipe raw NAR data from source into the destination's framed stream
             await wire.pipe_raw_to_framed_writer(
                 src_conn.r,
                 fw,
                 info.nar_size,
             )
+            # Drain periodically to avoid overwhelming buffers
+            await dst_conn.w.drain()
 
         await fw.finalize()
+        await dst_conn.w.drain()
         await req.response_type.from_reader(dst_conn.r, dst_conn.version)
 
     @classmethod
