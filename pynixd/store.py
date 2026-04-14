@@ -1009,6 +1009,10 @@ class LocalSocketStore(Store):
         env = os.environ.copy()
         env.update(self.extra_env)
         env["NIX_DAEMON_SOCKET_PATH"] = str(self.socket_path)
+        env["NIX_DATA_DIR"] = str(self.store_path / "share")
+        env["NIX_LOG_DIR"] = str(self.store_path / "var/log/nix")
+        env["NIX_STATE_DIR"] = str(self.store_path / "var/nix")
+        # env["NIX_STORE_DIR"] = str(self.store_path / "store") # this one is evil and should not be changed
 
         self.daemon_proc = await asyncio.create_subprocess_exec(
             *cmd,

@@ -29,12 +29,11 @@ async def test_builders(test_log_dir: Path, tmp_path: Path) -> None:
     """Build test.nix .simple via --builders."""
     async with asyncio.timeout(60):
         test_nix = Path("test.nix")
-        
+
         # 1. Backends for pynixd
         pynixd_local_path = STORE_PREFIX / "pynixd-local-builders"
         pynixd_builder_path = STORE_PREFIX / "pynixd-builder-builders"
         client_store_path = STORE_PREFIX / "client-store-builders"
-        # client_store_path.mkdir(parents=True, exist_ok=True)
         rmtree_robust(pynixd_local_path)
         rmtree_robust(pynixd_builder_path)
         rmtree_robust(client_store_path)
@@ -50,9 +49,6 @@ async def test_builders(test_log_dir: Path, tmp_path: Path) -> None:
             **get_test_store_kwargs(),
         )
 
-        # 2. Local store for the 'nix' client to use.
-        # This ensures the client initiates the SSH connection as the current user.
-
         profiler = pyinstrument.Profiler(async_mode="enabled")
         profiler.start()
 
@@ -61,12 +57,12 @@ async def test_builders(test_log_dir: Path, tmp_path: Path) -> None:
                 local_store=pynixd_local, stores={"builder": pynixd_builder}, ssh_port=0
             ) as server:
                 username = os.environ.get("USER", "root")
-                
+
                 # Direct URI with port as requested by user
                 uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
                 system = get_current_system()
                 builder_spec = f"{uri} {system}"
-                
+
                 # Extra substituter pointing to system store via SSH port 22
                 # This bypasses potential chroot/local store issues.
                 substituter = f"ssh-ng://{username}@127.0.0.1:22"
@@ -74,20 +70,26 @@ async def test_builders(test_log_dir: Path, tmp_path: Path) -> None:
                 cmd = [
                     str(NIX_BIN),
                     "build",
-                    "--store", str(client_store_path),
-                    "--builders", builder_spec,
-                    "--extra-substituters", substituter,
-                    "--file", str(test_nix),
+                    "--store",
+                    str(client_store_path),
+                    "--builders",
+                    builder_spec,
+                    "--extra-substituters",
+                    substituter,
+                    "--file",
+                    str(test_nix),
                     "simple",
                     "--no-link",
                     "--print-out-paths",
-                    "--max-jobs", "0",
-                    "--option", "require-sigs", "false",
+                    "--max-jobs",
+                    "0",
+                    "--option",
+                    "require-sigs",
+                    "false",
                 ]
-                # Ensure SSH doesn't prompt for anything
-                ssh_opts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-                
-                rc, stdout, stderr, stdboth = await run_subproc(cmd, env={"NIX_SSHOPTS": ssh_opts})
+                rc, stdout, stderr, stdboth = await run_subproc(
+                    cmd, env={"NIX_STATE_DIR": str(client_store_path / "var/nix")}
+                )
                 assert rc == 0, f"build failed:\n{stdboth}"
         finally:
             profiler.stop()
@@ -103,7 +105,7 @@ async def test_store(test_log_dir: Path, tmp_path: Path) -> None:
     """Build test.nix .simple via --eval-store."""
     async with asyncio.timeout(60):
         test_nix = Path("test.nix")
-        
+
         pynixd_local_path = STORE_PREFIX / "pynixd-local-store"
         pynixd_builder_path = STORE_PREFIX / "pynixd-builder-store"
         rmtree_robust(pynixd_local_path)
@@ -131,35 +133,28 @@ async def test_store(test_log_dir: Path, tmp_path: Path) -> None:
                     ssh_port=0,
                 ) as server:
                     username = os.environ.get("USER", "root")
-                    
-                    ssh_config = tmp_path / "ssh_config_store"
-                    ssh_config.write_text(f"""
-Host pynixd-store-ssh
-    HostName 127.0.0.1
-    Port {server.port}
-    StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null
-""")
-                    ssh_opts = f"-F {ssh_config}"
 
-                    uri = f"ssh-ng://{username}@pynixd-store-ssh"
+                    uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
 
                     # Use --eval-store auto to evaluate against the system store,
                     # but build on the remote store via --store.
                     cmd = [
                         str(NIX_BIN),
                         "build",
-                        "--eval-store", "auto",
-                        "--store", uri,
-                        "--file", str(test_nix),
+                        "--eval-store",
+                        "auto",
+                        "--store",
+                        uri,
+                        "--file",
+                        str(test_nix),
                         "simple",
                         "--no-link",
                         "--print-out-paths",
-                        "--option", "extra-substituters", "/",
+                        "--option",
+                        "extra-substituters",
+                        "/",
                     ]
-                    rc, stdout, stderr, stdboth = await run_subproc(
-                        cmd, env={"NIX_SSHOPTS": ssh_opts}
-                    )
+                    rc, stdout, stderr, stdboth = await run_subproc(cmd)
                     assert rc == 0, f"build failed:\n{stdboth}"
         finally:
             profiler.stop()
