@@ -245,6 +245,7 @@ def cleanup_stores():
 async def run_subproc(
     cmd: list[str],
     print: bool = True,
+    expected_retcode: int | None = 0,
     **kwargs,
 ) -> tuple[int, str, str, str]:
     """Run a command, streaming stdout/stderr through structlog in real-time.
@@ -252,6 +253,7 @@ async def run_subproc(
     Args:
         cmd: Command and arguments to run
         print: If True, stream output to structlog in real-time
+        expected_retcode: If not None, raise if return code doesn't match. Defaults to 0.
         **kwargs: Additional arguments passed to create_subprocess_exec
 
     Returns:
@@ -291,9 +293,9 @@ async def run_subproc(
         stream("stdout", stdout, proc.stdout),
         stream("stderr", stderr, proc.stderr),
     )
-    rc = proc.returncode or 0
-    if rc != 0:
-        raise RuntimeError(f"Command failed with rc={rc}:\n{''.join(stdboth)}")
+    rc = proc.returncode if proc.returncode is not None else 0
+    if expected_retcode is not None and rc != expected_retcode:
+        raise RuntimeError(f"Command failed with rc={rc} (expected {expected_retcode}):\n{''.join(stdboth)}")
     return (
         rc,
         "".join(stdout),

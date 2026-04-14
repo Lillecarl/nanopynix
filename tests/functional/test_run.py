@@ -10,14 +10,11 @@ class TestRunSubproc:
 
     async def test_success(self):
         rc, stdout, stderr, _ = await run_subproc(["echo", "hello"])
-        assert rc == 0
         assert stdout.strip() == "hello"
 
     async def test_failure(self):
-        rc, stdout, stderr, _ = await run_subproc(["false"])
-        assert rc == 1
+        rc, stdout, stderr, _ = await run_subproc(["false"], expected_retcode=1)
 
     async def test_stderr(self):
         rc, stdout, stderr, _ = await run_subproc(["sh", "-c", "echo error >&2"])
-        assert rc == 0
         assert stderr.strip() == "error"

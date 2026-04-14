@@ -6,7 +6,6 @@ from pynixd.store_path import StorePath
 import asyncio
 from pathlib import Path
 
-import pytest
 from pynixd import Server
 from pynixd.store import LocalSocketStore
 from pynixd.operations.query_path_info import QueryPathInfoRequest
