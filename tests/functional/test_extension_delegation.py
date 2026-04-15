@@ -16,7 +16,13 @@ from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
 from pynixd.testing import get_test_value
-from tests.conftest import NIX_BIN, get_test_store_kwargs, run_subproc
+from tests.conftest import (
+    NIX_BIN,
+    STORE_PREFIX,
+    get_test_store_kwargs,
+    rmtree_robust,
+    run_subproc,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -36,8 +42,9 @@ async def test_extension_delegation(tmp_path: Path) -> None:
     # 0. Setup SSH keys and stores
     key = asyncssh.generate_private_key("ssh-rsa")
 
-    store_b_path = tmp_path / "store-b"
-    store_b_path.mkdir()
+    store_b_path = STORE_PREFIX / "extension-delegation-store-b"
+    rmtree_robust(store_b_path)
+    store_b_path.mkdir(parents=True, exist_ok=True)
     store_b = LocalSocketStore(
         id="b-local", store_path=store_b_path, **get_test_store_kwargs()
     )

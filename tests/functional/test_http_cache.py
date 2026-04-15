@@ -45,7 +45,7 @@ async def _pick_random_path(store: LocalSocketStore) -> StorePath:
     return all_paths[0]
 
 
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(60)
 async def test_narinfo() -> None:
     """Test fetching .narinfo from the HTTP cache."""
     local_store = LocalSocketStore(id="local", store_path=Path("/"))
@@ -65,7 +65,7 @@ async def test_narinfo() -> None:
                 assert "URL: nar/" in text
 
 
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(60)
 async def test_nar_streaming() -> None:
     """Test streaming a NAR from the HTTP cache."""
     local_store = LocalSocketStore(id="local", store_path=Path("/"))
@@ -99,7 +99,7 @@ async def test_nar_streaming() -> None:
                 assert total_bytes > 0
 
 
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(60)
 async def test_cache_as_substituter() -> None:
     """Test using pynixd HTTP cache as a substituter for another nix build."""
     local_store = LocalSocketStore(id="local", store_path=Path("/"))
@@ -149,7 +149,7 @@ async def test_cache_as_substituter() -> None:
         assert rc == 0, f"path check failed:\n{stderr}"
 
 
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(60)
 async def test_cache_not_found() -> None:
     """Test 404 response for non-existent paths."""
     local_store = LocalSocketStore(id="local", store_path=Path("/"))

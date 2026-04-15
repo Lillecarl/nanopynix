@@ -46,7 +46,10 @@ async def test_dag_builders(tmp_path: Path) -> None:
         )
 
         # 2. Local store for the 'nix' client to use.
-        client_store_path = tmp_path / "client-store-dag-builders"
+        client_store_path = STORE_PREFIX / "client-store-dag-builders"
+        rmtree_robust(pynixd_local_path)
+        rmtree_robust(pynixd_builder_path)
+        rmtree_robust(client_store_path)
         client_store_path.mkdir(parents=True, exist_ok=True)
 
         try:
