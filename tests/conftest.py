@@ -63,16 +63,9 @@ LIX_BIN = env.str("LIX_BIN", "nix")
 def get_test_store_kwargs(**kwargs) -> dict[str, Any]:
     """Return common kwargs for LocalSocketStore in tests.
 
-    Uses ssh-ng://127.0.0.1:22 as an extra substituter to fetch missing paths
-    from the system store without triggering permission issues or chroot bugs.
+    Sets require-sigs to false and ensures NIX_SSHOPTS are set.
     """
-    username = os.environ.get("USER", "root")
-    substituter = f"ssh-ng://{username}@127.0.0.1:22"
-
     extra_args = [
-        "--option",
-        "extra-substituters",
-        substituter,
         "--option",
         "require-sigs",
         "false",
@@ -87,6 +80,10 @@ def get_test_store_kwargs(**kwargs) -> dict[str, Any]:
         extra_env["NIX_SSHOPTS"] = (
             "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
         )
+
+    # Use the same default NIX_CONFIG as run_subproc for consistency
+    if "NIX_CONFIG" not in extra_env:
+        extra_env["NIX_CONFIG"] = "substituters = https://cache.nixos.org daemon"
 
     res = {
         "nix_bin": str(NIX_BIN),
@@ -181,14 +178,16 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         default_timeout = 120.0
 
     for item in items:
-        if asyncio.iscoroutinefunction(item.obj):
+        # pytest.Item doesn't officially expose 'obj' in its type definition,
+        # but it exists for Function nodes.
+        if isinstance(item, pytest.Function) and asyncio.iscoroutinefunction(item.obj):
             # Check if already wrapped to avoid double-wrapping
             if not getattr(item.obj, "_pynixd_timeout_wrapped", False):
                 item.obj = _wrap_with_asyncio_timeout(item, default_timeout)
                 setattr(item.obj, "_pynixd_timeout_wrapped", True)
 
 
-def _wrap_with_asyncio_timeout(item: pytest.Item, default_timeout: float):
+def _wrap_with_asyncio_timeout(item: pytest.Function, default_timeout: float):
     original_func = item.obj
 
     @functools.wraps(original_func)
@@ -322,6 +321,7 @@ async def run_subproc(
     cmd: list[str],
     print: bool = True,
     expected_retcode: int | None = 0,
+    nix_config: dict[str, str] | None = None,
     **kwargs,
 ) -> tuple[int, str, str, str]:
     """Run a command, streaming stdout/stderr through structlog in real-time.
@@ -330,6 +330,7 @@ async def run_subproc(
         cmd: Command and arguments to run
         print: If True, stream output to structlog in real-time
         expected_retcode: If not None, raise if return code doesn't match. Defaults to 0.
+        nix_config: Additional Nix configuration as a dictionary, rendered to NIX_CONFIG env var.
         **kwargs: Additional arguments passed to create_subprocess_exec
 
     Returns:
@@ -340,6 +341,16 @@ async def run_subproc(
         run_env["NIX_SSHOPTS"] = (
             "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
         )
+
+    # Default Nix configuration
+    default_config = {"substituters": "https://cache.nixos.org daemon"}
+    nix_config_final = default_config | (nix_config or {})
+
+    config_str = "\n".join(f"{k} = {v}" for k, v in nix_config_final.items())
+    if "NIX_CONFIG" in run_env:
+        run_env["NIX_CONFIG"] = f"{run_env['NIX_CONFIG']}\n{config_str}"
+    else:
+        run_env["NIX_CONFIG"] = config_str
 
     log.debug("run_subproc", cmd=shlex.join(cmd), env=run_env)
     proc = await asyncio.create_subprocess_exec(

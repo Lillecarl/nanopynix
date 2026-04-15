@@ -63,10 +63,6 @@ async def test_builders(test_log_dir: Path, tmp_path: Path) -> None:
                 system = get_current_system()
                 builder_spec = f"{uri} {system}"
 
-                # Extra substituter pointing to system store via SSH port 22
-                # This bypasses potential chroot/local store issues.
-                substituter = f"ssh-ng://{username}@127.0.0.1:22"
-
                 cmd = [
                     str(NIX_BIN),
                     "build",
@@ -74,8 +70,6 @@ async def test_builders(test_log_dir: Path, tmp_path: Path) -> None:
                     str(client_store_path),
                     "--builders",
                     builder_spec,
-                    "--extra-substituters",
-                    substituter,
                     "--file",
                     str(test_nix),
                     "simple",
@@ -138,7 +132,6 @@ async def test_store(test_log_dir: Path, tmp_path: Path) -> None:
 
                     # Use --eval-store auto to evaluate against the system store,
                     # but build on the remote store via --store.
-                    substituter = f"ssh-ng://{username}@127.0.0.1:22"
                     cmd = [
                         str(NIX_BIN),
                         "build",
@@ -151,9 +144,6 @@ async def test_store(test_log_dir: Path, tmp_path: Path) -> None:
                         "simple",
                         "--no-link",
                         "--print-out-paths",
-                        "--option",
-                        "extra-substituters",
-                        substituter,
                     ]
                     rc, stdout, stderr, stdboth = await run_subproc(cmd)
                     assert rc == 0, f"build failed:\n{stdboth}"
