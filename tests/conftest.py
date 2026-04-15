@@ -60,6 +60,9 @@ NIX_BIN = env.str("NIX_BIN", "nix")
 LIX_BIN = env.str("LIX_BIN", "nix")
 
 
+DEFAULT_SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+
 def get_test_store_kwargs(**kwargs) -> dict[str, Any]:
     """Return common kwargs for LocalSocketStore in tests.
 
@@ -77,13 +80,13 @@ def get_test_store_kwargs(**kwargs) -> dict[str, Any]:
     # the system store via SSH if needed.
     extra_env = kwargs.pop("extra_env", {})
     if "NIX_SSHOPTS" not in extra_env:
-        extra_env["NIX_SSHOPTS"] = (
-            "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-        )
+        extra_env["NIX_SSHOPTS"] = DEFAULT_SSH_OPTS
 
     # Use the same default NIX_CONFIG as run_subproc for consistency
     if "NIX_CONFIG" not in extra_env:
-        extra_env["NIX_CONFIG"] = "substituters = https://cache.nixos.org daemon"
+        extra_env["NIX_CONFIG"] = (
+            "substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/"
+        )
 
     res = {
         "nix_bin": str(NIX_BIN),
@@ -338,12 +341,12 @@ async def run_subproc(
     """
     run_env = kwargs.pop("env", {})
     if "NIX_SSHOPTS" not in run_env:
-        run_env["NIX_SSHOPTS"] = (
-            "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-        )
+        run_env["NIX_SSHOPTS"] = DEFAULT_SSH_OPTS
 
     # Default Nix configuration
-    default_config = {"substituters": "https://cache.nixos.org daemon"}
+    default_config = {
+        "substituters": "https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/"
+    }
     nix_config_final = default_config | (nix_config or {})
 
     config_str = "\n".join(f"{k} = {v}" for k, v in nix_config_final.items())
@@ -396,8 +399,4 @@ async def run_subproc(
 @pytest.fixture(scope="session")
 def nix_env() -> dict[str, str]:
     """Environment variables for nix subprocess calls."""
-    result = os.environ.copy()
-    result["NIX_SSHOPTS"] = (
-        "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-    )
-    return result
+    return os.environ.copy()

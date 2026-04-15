@@ -365,6 +365,9 @@ async def nix_build_store_only(
     return await builder.store(uri).file(nix_file or TEST_NIX, target).arg(*args).run()
 
 
+DEFAULT_SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+
 @dataclass
 class NixCommandBuilder:
     """Abstract base builder for constructing and running Nix commands."""
@@ -427,9 +430,7 @@ class NixCommandBuilder:
 
         # Ensure SSH opts are set if not already in env
         if "NIX_SSHOPTS" not in self._env:
-            self._env["NIX_SSHOPTS"] = (
-                "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-            )
+            self._env["NIX_SSHOPTS"] = DEFAULT_SSH_OPTS
 
         log.debug("nix_command_run", cmd=shlex.join(cmd))
         res = await asyncio.create_subprocess_exec(
@@ -581,8 +582,4 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 @pytest.fixture(scope="session")
 def nix_env() -> dict[str, str]:
     """Environment variables for nix subprocess calls."""
-    result = os.environ.copy()
-    result["NIX_SSHOPTS"] = (
-        "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-    )
-    return result
+    return os.environ.copy()

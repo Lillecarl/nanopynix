@@ -61,7 +61,7 @@ async def test_builders(tmp_path: Path) -> None:
                 # Direct URI with port as requested by user
                 uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
                 system = get_current_system()
-                builder_spec = f"{uri} {system}"
+                builder_spec = f"{uri} {system} - 100"
 
                 cmd = [
                     str(NIX_BIN),
@@ -81,12 +81,8 @@ async def test_builders(tmp_path: Path) -> None:
                     "require-sigs",
                     "false",
                 ]
-                # Ensure SSH doesn't prompt for anything
-                ssh_opts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
-                rc, stdout, stderr, stdboth = await run_subproc(
-                    cmd, env={"NIX_SSHOPTS": ssh_opts}
-                )
+                rc, stdout, stderr, stdboth = await run_subproc(cmd)
                 assert rc == 0, f"build failed:\n{stdboth}"
         finally:
             pass
@@ -139,7 +135,7 @@ async def test_store(tmp_path: Path) -> None:
                         "--no-link",
                         "--print-out-paths",
                     ]
-                    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+                    rc, _, _, stdboth = await run_subproc(cmd)
                     assert rc == 0, f"build failed:\n{stdboth}"
         finally:
             pass
