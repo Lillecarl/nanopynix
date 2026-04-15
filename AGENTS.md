@@ -5,6 +5,7 @@ This document defines the foundational architectural patterns and engineering st
 ## 1. Version Control: Jujutsu (jj)
 - **Tool**: Use `jj` (Jujutsu), NOT `git`.
 - **Committing**: Prefer `jj commit -m "..."` to finish a task. It creates a new revision and provides a clean working copy.
+- **Squashing**: If your changes are a fixup for the last commit, prefer `jj squash --use-destination-message` to keep the commit message or `jj squash -m "..."` to update the commit message
 - **Paging**: Always include `--no-pager` in all `jj` commands to ensure non-interactive execution.
 
 ## 2. Core Architectural Pattern: Request-Driven Execution
@@ -35,7 +36,7 @@ This document defines the foundational architectural patterns and engineering st
 - **Transparency**: No-op or cached operations MUST inject a `StderrNext` message (e.g., `"pynixd: IsValidPath (SQLite hit)"`) into the buffer for transparency.
 
 ## 4. Engineering Standards
-- **Validation**: ALWAYS run `just check` before committing. This runs `ruff` (formatting/linting) and `pyright` (type checking).
+- **Validation**: ALWAYS run `just precommit` before committing. This runs `ruff` (formatting/linting), `pyright` (type checking) and functionality tests.
 - **Type Safety**:
   - Use `from __future__ import annotations`.
   - NEVER use string type hints (e.g., `"Store"`). 
