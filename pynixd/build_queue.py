@@ -43,7 +43,7 @@ class QueuedBuild:
     request: BuildDerivationRequest  # The request to forward to the backend
     client: ClientConn | None  # Client connection for stderr forwarding
     required_paths: set[StorePath]
-  # All paths the backend needs (input_srcs for BuildDerivation)
+    # All paths the backend needs (input_srcs for BuildDerivation)
     future: asyncio.Future[BuildDerivationResponse]  # Resolved when done
     platform: str = ""  # Derivation platform (for backend filtering)
     enqueued_at: float = field(default_factory=time.monotonic)
@@ -166,8 +166,7 @@ class BuildQueue:
         self,
         request: BuildDerivationRequest,
         client: ClientConn | None,
-        required_paths: set[StorePath]
-,
+        required_paths: set[StorePath],
         platform: str = "",
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue (deduplicates if already present).

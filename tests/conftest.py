@@ -308,7 +308,9 @@ async def run_subproc(
     )
     rc = proc.returncode if proc.returncode is not None else 0
     if expected_retcode is not None and rc != expected_retcode:
-        raise RuntimeError(f"Command failed with rc={rc} (expected {expected_retcode}):\n{''.join(stdboth)}")
+        raise RuntimeError(
+            f"Command failed with rc={rc} (expected {expected_retcode}):\n{''.join(stdboth)}"
+        )
     return (
         rc,
         "".join(stdout),

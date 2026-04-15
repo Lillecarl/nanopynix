@@ -291,9 +291,7 @@ class Store(ABC):
 
         # 3. Stream the missing paths
         async with src.transfer_conn() as src_conn, dst.transfer_conn() as dst_conn:
-            dst_conn.op_log.append(
-                "AddMultipleToStore (stream_paths_store_to_store)"
-            )
+            dst_conn.op_log.append("AddMultipleToStore (stream_paths_store_to_store)")
             req = AddMultipleToStoreRequest(
                 repair=0,
                 dont_check_sigs=1,
@@ -310,15 +308,15 @@ class Store(ABC):
                     break
 
                 path = info.path
-                dst_conn.op_log.append(
-                    "AddToStoreNar (stream_paths_store_to_store)"
-                )
+                dst_conn.op_log.append("AddToStoreNar (stream_paths_store_to_store)")
 
                 # Use info.to_bytes() to send metadata as a single frame
                 fw.write(info.to_bytes())
 
                 # Request NAR from source
-                await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
+                await NarFromPathRequest(path=path).to_writer(
+                    src_conn.w, src_conn.version
+                )
                 await src_conn.w.drain()
 
                 # Source will send stderr logs followed by STDERR_LAST before NAR data

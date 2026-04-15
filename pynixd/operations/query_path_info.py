@@ -52,6 +52,7 @@ class QueryPathInfoResponse(OpResponse):
             # Explicitly use the base class method to avoid writing the path
             # (which ValidPathInfo.to_writer would do).
             from .base import UnkeyedValidPathInfo
+
             UnkeyedValidPathInfo.to_writer(self.info, writer)
 
 

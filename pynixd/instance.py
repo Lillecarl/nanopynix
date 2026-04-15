@@ -150,10 +150,9 @@ class Server:
             if not self.config.unix_path:
                 return ""
             uri = f"unix://{self.config.unix_path}"
-            # Add ?root= if we have an alt-store path, ensuring Nix client
-            # looks for NARs in the right physical location.
-            if self.config.local_store.store_path:
-                uri += f"?root={self.config.local_store.store_path}"
+            # Always add ?root= to ensure Nix client looks for NARs in the physical
+            # location managed by this server.
+            uri += f"?root={self.config.local_store.store_path}"
             return uri
         return self.uri(implementation)
 
