@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import glob
 import logging
 import os
@@ -155,6 +156,68 @@ def pytest_terminal_summary(
     log_dir = config.stash.get(_log_dir_key, None)
     if log_dir:
         terminalreporter.write_line(f"\nIMPORTANT: Test run logs: {log_dir}")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]):
+    """Automatically wrap async tests in asyncio.timeout.
+
+    This provides better diagnostic information (asyncio tracebacks) than the
+    nuclear 'pytest-timeout' option by triggering 5s earlier.
+    """
+    # Prefer merged value from pytest-timeout if available
+    try:
+        default_timeout = config.getvalue("timeout")
+    except (AttributeError, ValueError):
+        default_timeout = None
+
+    if default_timeout is None:
+        default_timeout = os.environ.get("PYTEST_TIMEOUT")
+    if default_timeout is None:
+        default_timeout = config.getini("timeout")
+
+    try:
+        default_timeout = float(default_timeout) if default_timeout else 120.0
+    except ValueError:
+        default_timeout = 120.0
+
+    for item in items:
+        if asyncio.iscoroutinefunction(item.obj):
+            # Check if already wrapped to avoid double-wrapping
+            if not getattr(item.obj, "_pynixd_timeout_wrapped", False):
+                item.obj = _wrap_with_asyncio_timeout(item, default_timeout)
+                setattr(item.obj, "_pynixd_timeout_wrapped", True)
+
+
+def _wrap_with_asyncio_timeout(item: pytest.Item, default_timeout: float):
+    original_func = item.obj
+
+    @functools.wraps(original_func)
+    async def wrapped(*args, **kwargs):
+        timeout_mark = item.get_closest_marker("timeout")
+        seconds = float(timeout_mark.args[0] if timeout_mark else default_timeout)
+
+        # Skip if timeout is 0 (disabled)
+        if seconds <= 0:
+            return await original_func(*args, **kwargs)
+
+        # Wrap in asyncio.timeout with a 5s buffer to trigger before pytest-timeout.
+        # Ensure we have at least 1s if the original timeout was very short.
+        timeout_val = max(1.0, seconds - 5.0)
+
+        try:
+            async with asyncio.timeout(timeout_val):
+                return await original_func(*args, **kwargs)
+        except asyncio.TimeoutError:
+            log.error(
+                "test_timeout_triggered",
+                test=item.nodeid,
+                timeout=seconds,
+                effective=timeout_val,
+            )
+            # Re-raise to let pytest handle the failure
+            raise
+
+    return wrapped
 
 
 @pytest.fixture(autouse=True)
