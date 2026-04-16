@@ -10,14 +10,12 @@ from pathlib import Path
 import pyinstrument
 import pytest
 import structlog
-from pyinstrument.renderers import ConsoleRenderer
 
-from pynixd.instance import PynixdConfig, Server
+from pynixd.instance import Server
 from pynixd.store import LocalSocketStore
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
-    _prune_client_processor,
     get_test_store_kwargs,
     rmtree_robust,
     run_subproc,
@@ -59,10 +57,10 @@ async def test_throughput_local() -> None:
     ]
 
     start = time.perf_counter()
-    rc = await run_subproc(cmd, env=TEST_ENV)
+    rc, _, _, stdboth = await run_subproc(cmd, env=TEST_ENV)
     elapsed = time.perf_counter() - start
 
-    assert rc == 0, "Local baseline build failed"
+    assert rc == 0, f"Local baseline build failed:\n{stdboth}"
     log.info("local_baseline_finished", elapsed=f"{elapsed:.2f}s")
 
 
@@ -127,10 +125,12 @@ async def test_throughput_daemon() -> None:
         ]
 
         start = time.perf_counter()
-        rc = await run_subproc(cmd, env=TEST_ENV | {"NIX_REMOTE": remote_uri})
+        rc, _, _, stdboth = await run_subproc(
+            cmd, env=TEST_ENV | {"NIX_REMOTE": remote_uri}
+        )
         elapsed = time.perf_counter() - start
 
-        assert rc == 0, "Daemon baseline build failed"
+        assert rc == 0, f"Daemon baseline build failed:\n{stdboth}"
         log.info("daemon_baseline_finished", elapsed=f"{elapsed:.2f}s")
     finally:
         proc.terminate()
@@ -138,17 +138,22 @@ async def test_throughput_daemon() -> None:
 
 
 @pytest.mark.benchmark
-async def test_throughput_pynixd(test_log_dir: Path) -> None:
+async def test_throughput_pynixd(profiler: pyinstrument.Profiler) -> None:
     """pynixd: Build through pynixd proxy."""
     # THIS TEST MUST COMPLETE WITHIN 120 SECONDS. If it takes longer, something is broken.
     # With MAX_JOBS=20 and sleep=0, builds complete in ~10-30s depending on system.
     async with asyncio.timeout(None):
         local_path = STORE_PREFIX / "throughput-pynixd-local"
         builder_path = STORE_PREFIX / "throughput-pynixd-builder"
+        client_path = STORE_PREFIX / "throughput-pynixd-client"
+
         rmtree_robust(local_path)
         rmtree_robust(builder_path)
+        rmtree_robust(client_path)
+
         local_path.mkdir(parents=True, exist_ok=True)
         builder_path.mkdir(parents=True, exist_ok=True)
+        client_path.mkdir(parents=True, exist_ok=True)
 
         local_store = LocalSocketStore(
             id="local",
@@ -165,78 +170,46 @@ async def test_throughput_pynixd(test_log_dir: Path) -> None:
             **get_test_store_kwargs(),
         )
 
-        socket_path = local_path / "pynixd.socket"
-        config = PynixdConfig(
+        async with Server(
             local_store=local_store,
             stores={"builder": builder_store},
-            unix_path=socket_path,
-            ssh_port=None,
-        )
-
-        async with Server(config):
-            log.info("server_up_starting_profiler")
-
-            profiler = pyinstrument.Profiler(async_mode="enabled")
-            profiler.start()
+            ssh_port=0,
+        ) as server:
+            log.info("server_up_resetting_profiler")
+            profiler.reset()
 
             try:
-                # remote_uri = f"unix://{socket_path}"
-                # remote_uri = f"unix://{socket_path}?root={local_store.store_path}&real={local_store.store_path / "nix/store"}&state={local_store.store_path / "nix/var"}"
-                remote_uri = f"unix://{socket_path}?root={local_store.store_path}"
+                builder_spec = server.builder_uri(max_jobs=MAX_JOBS)
 
                 cmd = [
                     str(NIX_BIN),
                     "build",
+                    "--store",
+                    str(client_path),
+                    "--builders",
+                    builder_spec,
                     "--max-jobs",
-                    str(MAX_JOBS),
+                    "0",
                     "--no-link",
                     "--file",
                     str(NIX_FILE),
-                    "--store",
-                    remote_uri,
-                    "--eval-store",
-                    remote_uri,
-                    # "--store",
-                    # str(local_store.store_path),
-                    # "--store",
-                    # remote_uri,
-                    # "--eval-store",
-                    # remote_uri,
-                    # "--store",
-                    # str(STORE_PREFIX / "client-build"),
-                    # "--eval-store",
-                    # str(remote_uri),
-                    # "--builders",
-                    # f"{remote_uri} x86_64-linux - 1",
+                    "--option",
+                    "require-sigs",
+                    "false",
                     TARGET,
                 ]
 
                 start = time.perf_counter()
-                rc = await run_subproc(
+                rc, _, _, stdboth = await run_subproc(
                     cmd,
-                    env=TEST_ENV
-                    | {
-                        # "NIX_REMOTE": remote_uri,
-                        # "NIX_DATA_DIR": str(local_store.store_path / "nix/share"),
-                        # "NIX_CONF_DIR": str(local_store.store_path / "nix/etc/nix"),
-                        # "NIX_LOG_DIR": str(local_store.store_path / "nix/var/log"),
-                        # "NIX_STATE_DIR": str(local_store.store_path / "nix/var"),
-                        # "NIX_STORE_DIR": str(local_store.store_path / "nix/store"),
+                    env={
+                        "NIX_STATE_DIR": str(client_path / "var/nix"),
+                        **TEST_ENV,
                     },
                 )
                 elapsed = time.perf_counter() - start
 
-                assert rc == 0, "pynixd throughput build failed"
+                assert rc == 0, f"pynixd throughput build failed:\n{stdboth}"
                 log.info("pynixd_throughput_finished", elapsed=f"{elapsed:.2f}s")
             finally:
-                profiler.stop()
-                log.info("build_finished_stopping_profiler")
-
-                session = profiler.last_session
-                if session:
-                    renderer = ConsoleRenderer(unicode=True, color=False, show_all=True)
-                    renderer.processors.insert(0, _prune_client_processor)
-                    profile_path = test_log_dir / "pyinstrument"
-                    with open(profile_path, "w") as f:
-                        f.write(renderer.render(session))
-                    log.info("profile_saved", path=str(profile_path))
+                log.info("build_finished")

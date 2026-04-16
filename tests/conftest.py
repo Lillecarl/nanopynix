@@ -251,9 +251,10 @@ def test_log_dir(request: pytest.FixtureRequest) -> Path:
     return request.session.config.stash[_log_dir_key]
 
 
-def _get_log_file_path(log_dir: Path, item: Any) -> Path:
+def get_log_file_path(log_dir: Path, item: Any) -> Path:
     """Generate a consistent log file path: log_dir/test_file::test_func.log"""
     file_stem = item.path.stem
+    # Only replace "/" as it's the path separator
     safe_name = item.name.replace("/", "_")
     return log_dir / f"{file_stem}::{safe_name}.log"
 
@@ -261,7 +262,7 @@ def _get_log_file_path(log_dir: Path, item: Any) -> Path:
 @pytest.fixture(autouse=True)
 def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
     """Redirect all structlog output for this test to its own log file."""
-    log_file = _get_log_file_path(test_log_dir, request.node)
+    log_file = get_log_file_path(test_log_dir, request.node)
 
     structlog.contextvars.bind_contextvars(test_start_time=time.monotonic())
 
@@ -282,6 +283,32 @@ def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
     handler.close()
 
 
+@pytest.fixture(autouse=True)
+async def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
+    """Profile every test and save to a .pyinstrument file."""
+    from pyinstrument import Profiler
+    from pyinstrument.renderers import ConsoleRenderer
+
+    p = Profiler(async_mode="enabled")
+    p.start()
+
+    yield p
+
+    if p.is_running:
+        p.stop()
+
+    session = p.last_session
+    if session:
+        log_file = get_log_file_path(test_log_dir, request.node)
+        profile_file = log_file.with_suffix(".pyinstrument")
+
+        renderer = ConsoleRenderer(unicode=True, color=False)
+        renderer.processors.insert(0, _prune_client_processor)
+
+        with open(profile_file, "w") as f:
+            f.write(renderer.render(session))
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call):
     """
@@ -293,7 +320,7 @@ def pytest_runtest_makereport(item: pytest.Item, call):
     if report.when == "call" and report.failed:
         log_dir = item.config.stash.get(_log_dir_key, None)
         if log_dir:
-            log_file = _get_log_file_path(log_dir, item)
+            log_file = get_log_file_path(log_dir, item)
             with open(log_file, "a") as f:
                 if report.longrepr:
                     f.write("\n--- Failure details ---\n")

@@ -25,4 +25,4 @@ test:
 #     echo "Logfile: $logfile"
 
 # Run all checks
-precommit: check fmt test
+precommit: fmt check test
