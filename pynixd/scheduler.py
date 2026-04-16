@@ -90,7 +90,20 @@ class Scheduler:
         platform: str = "",
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue and trigger the scheduler."""
-        res = await self.queue.enqueue(request, client, required_paths, platform)
+        # 1. Fetch expected duration hint if DB is active
+        hint = None
+        if self.local_store.db:
+            pname = request.derivation.env.get("pname", "")
+            if pname:
+                serialized = request.derivation.serialize_for_stats()
+                hint = await self.local_store.db.get_build_stats_hint(
+                    pname, platform, serialized
+                )
+
+        # 2. Enqueue with hint
+        res = await self.queue.enqueue(
+            request, client, required_paths, platform, expected_duration=hint
+        )
         self.trigger()
         return res
 
@@ -151,6 +164,15 @@ class Scheduler:
                 schedulable.append(build)
             else:
                 waiting_paths.append(build)
+
+        # 1.5 Sort schedulable builds by expected duration (Fast-track small builds)
+        # Unknown duration (None) is treated as "medium" priority (infinity/2).
+        def duration_key(b: QueuedBuild) -> float:
+            if b.expected_duration is not None:
+                return float(b.expected_duration)
+            return 600000.0  # 10 minutes default for unknown
+
+        schedulable.sort(key=duration_key)
 
         # 2. Assign schedulable builds to backends
         # Load balancing: prefer backends with the most relevant paths already present
@@ -277,6 +299,21 @@ class Scheduler:
                         count=len(outputs),
                         store_id=store.id,
                     )
+
+                    # 4. Record build statistics
+                    if self.local_store.db:
+                        pname = build.request.derivation.env.get("pname")
+                        if pname:
+                            duration = int((time.monotonic() - build.started_at) * 1000)
+                            await self.local_store.db.record_build_stats(
+                                pname=pname,
+                                version=build.request.derivation.env.get("version", ""),
+                                platform=build.request.derivation.platform,
+                                serialized_drv=build.request.derivation.serialize_for_stats(),
+                                cpu_user_us=resp.result.cpu_user,
+                                cpu_system_us=resp.result.cpu_system,
+                                duration_ms=duration,
+                            )
 
                 # Capture response for completion AFTER semaphore is released
                 build_resp = resp

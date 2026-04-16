@@ -46,6 +46,7 @@ class QueuedBuild:
     # All paths the backend needs (input_srcs for BuildDerivation)
     future: asyncio.Future[BuildDerivationResponse]  # Resolved when done
     platform: str = ""  # Derivation platform (for backend filtering)
+    expected_duration: int | None = None  # Predicted duration in ms from DB
     enqueued_at: float = field(default_factory=time.monotonic)
     started_at: float | None = field(default=None, repr=False)
     finished_at: float | None = field(default=None, repr=False)
@@ -168,6 +169,7 @@ class BuildQueue:
         client: ClientConn | None,
         required_paths: set[StorePath],
         platform: str = "",
+        expected_duration: int | None = None,
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue (deduplicates if already present).
 
@@ -195,6 +197,7 @@ class BuildQueue:
                 required_paths=required_paths,
                 future=future,
                 platform=platform,
+                expected_duration=expected_duration,
             )
             self.next_id += 1
             heapq.heappush(self.queue, build)

@@ -86,7 +86,46 @@ GET_KNOWN_PATHS = """
 SELECT path FROM PynixdKnownPaths WHERE storeId = ?
 """
 
+INSERT_BUILD_STATS = """
+INSERT OR REPLACE INTO DerivationStats
+(pname, version, platform, serialized_drv, cpu_user_us, cpu_system_us, duration_ms, last_built_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
+"""
+
+QUERY_BUILD_STATS_HINT = """
+WITH matching_pname AS (
+    SELECT * FROM DerivationStats
+    WHERE pname = ? AND platform = ?
+)
+SELECT duration_ms FROM matching_pname
+ORDER BY levenshtein(serialized_drv, ?) ASC
+LIMIT 1
+"""
+
+QUERY_BUILD_STATS_CROSS_PLATFORM = """
+SELECT AVG(duration_ms) FROM DerivationStats
+WHERE pname = ?
+"""
+
 _DEFAULT_REGTIME_FLUSH_INTERVAL = 5.0
+
+
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """Simple Levenshtein distance implementation for SQLite matching."""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if not s2:
+        return len(s1)
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
 
 
 class LocalStoreDB:
@@ -148,6 +187,7 @@ class LocalStoreDB:
                 mode = "ro" if self.read_only else "rw"
                 uri = f"file:{self.db_path}?mode={mode}"
                 conn = await aiosqlite.connect(uri, uri=True)
+                await conn.create_function("levenshtein", 2, levenshtein_distance)
                 async with self._pool_lock:
                     self._all_conns.append(conn)
                 _db_nested_conns.set(_db_nested_conns.get() + 1)
@@ -177,6 +217,7 @@ class LocalStoreDB:
                 mode = "ro" if self.read_only else "rw"
                 uri = f"file:{self.db_path}?mode={mode}"
                 conn = await aiosqlite.connect(uri, uri=True)
+                await conn.create_function("levenshtein", 2, levenshtein_distance)
                 async with self._pool_lock:
                     self._all_conns.append(conn)
 
@@ -245,6 +286,22 @@ class LocalStoreDB:
                         "storeId TEXT, "
                         "path TEXT, "
                         "PRIMARY KEY (storeId, path))"
+                    )
+                    await db.execute(
+                        "CREATE TABLE IF NOT EXISTS DerivationStats ("
+                        "pname TEXT, "
+                        "version TEXT, "
+                        "platform TEXT, "
+                        "serialized_drv TEXT, "
+                        "cpu_user_us INTEGER, "
+                        "cpu_system_us INTEGER, "
+                        "duration_ms INTEGER, "
+                        "last_built_at INTEGER, "
+                        "PRIMARY KEY (pname, version, platform, serialized_drv))"
+                    )
+                    await db.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_drv_stats_lookup "
+                        "ON DerivationStats(pname, platform)"
                     )
                 await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
 
@@ -321,6 +378,63 @@ class LocalStoreDB:
         except Exception:
             log.warning("get_known_paths_failed", store_id=store_id, exc_info=True)
             return set()
+
+    async def record_build_stats(
+        self,
+        pname: str,
+        version: str,
+        platform: str,
+        serialized_drv: str,
+        cpu_user_us: int | None,
+        cpu_system_us: int | None,
+        duration_ms: int,
+    ) -> None:
+        """Record build statistics for a derivation."""
+        if not self.active or self.read_only:
+            return
+        try:
+            async with self.acquire_conn() as db:
+                await db.execute(
+                    INSERT_BUILD_STATS,
+                    (
+                        pname,
+                        version,
+                        platform,
+                        serialized_drv,
+                        cpu_user_us,
+                        cpu_system_us,
+                        duration_ms,
+                    ),
+                )
+                await db.commit()
+        except Exception:
+            log.warning("record_build_stats_failed", pname=pname, exc_info=True)
+
+    async def get_build_stats_hint(
+        self, pname: str, platform: str, serialized_drv: str
+    ) -> int | None:
+        """Get an expected duration hint for a derivation (in ms)."""
+        if not self.active:
+            return None
+        try:
+            # 1. Try exact match or closest Levenshtein on same platform
+            async with self.execute(
+                QUERY_BUILD_STATS_HINT, (pname, platform, serialized_drv)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return int(row[0])
+
+            # 2. Fallback to platform-agnostic average for this pname
+            async with self.execute(
+                QUERY_BUILD_STATS_CROSS_PLATFORM, (pname,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row[0] is not None:
+                    return int(row[0])
+        except Exception:
+            log.debug("get_build_stats_hint_failed", pname=pname, exc_info=True)
+        return None
 
     async def flush_regtime(self) -> None:
         """Flush pending registration time updates to SQLite."""

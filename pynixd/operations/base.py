@@ -539,6 +539,26 @@ class BasicDerivation:
         """Return {output_name: output_path} for all outputs."""
         return {name: StorePath(o.path) for name, o in self.outputs.items()}
 
+    def serialize_for_stats(self) -> str:
+        """Serialize derivation to a canonical string for stats matching.
+
+        Includes builder, args, and a subset of stable environment variables.
+        """
+        # Exclude common noisy variables like out, bin, dev etc.
+        # which change with every rebuild but don't affect complexity.
+        noisy = {"out", "bin", "dev", "lib", "include", "man", "doc"}
+        env_stable = {
+            k: v
+            for k, v in self.env.items()
+            if k not in noisy and not k.startswith("NIX_")
+        }
+        parts = [
+            f"B:{self.builder}",
+            f"A:{' '.join(self.args)}",
+            f"E:{json.dumps(env_stable, sort_keys=True)}",
+        ]
+        return "|".join(parts)
+
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> BasicDerivation:
         n = await reader.read_uint64()
