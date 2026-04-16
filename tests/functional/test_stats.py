@@ -14,6 +14,7 @@ from pynixd.operations.base import BuildResult, BuildResultStatus
 from pynixd.operations.build_derivation import (
     BuildDerivationRequest,
 )
+from pynixd.psi import CpuUtil
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import STORE_PREFIX, get_test_store_kwargs, rmtree_robust
@@ -317,3 +318,97 @@ async def test_levenshtein_sql(tmp_path: Path) -> None:
     assert hint == 100
     log.info("levenshtein_sql_verified")
     await db.close()
+
+
+class CpuUtilTestStore(StatsTestStore):
+    """StatsTestStore with a settable cpu_util for scheduler testing."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cpu_util: CpuUtil | None = None
+
+    @property
+    def cpu_util(self) -> CpuUtil | None:
+        return self._cpu_util
+
+    @cpu_util.setter
+    def cpu_util(self, value: CpuUtil | None) -> None:
+        self._cpu_util = value
+
+
+@pytest.mark.asyncio
+async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
+    """Verify scheduler skips stores at >99% CPU utilization."""
+    async with asyncio.timeout(30):
+        pynixd_local_path = STORE_PREFIX / "cpu-util-local"
+        pynixd_busy_path = STORE_PREFIX / "cpu-util-busy"
+        pynixd_free_path = STORE_PREFIX / "cpu-util-free"
+        rmtree_robust(pynixd_local_path)
+        rmtree_robust(pynixd_busy_path)
+        rmtree_robust(pynixd_free_path)
+
+        pynixd_local = LocalSocketStore(
+            id="local",
+            store_path=pynixd_local_path,
+            **get_test_store_kwargs(),
+        )
+        pynixd_busy = CpuUtilTestStore(
+            id="busy",
+            store_path=pynixd_busy_path,
+            max_builds=1,
+            **get_test_store_kwargs(),
+        )
+        pynixd_busy._cpu_util = CpuUtil(utilization=99.5, cores=2.0, throttled_pct=10.0)
+        pynixd_busy.build_delays["test-pkg"] = 0.05
+
+        pynixd_free = CpuUtilTestStore(
+            id="free",
+            store_path=pynixd_free_path,
+            max_builds=1,
+            **get_test_store_kwargs(),
+        )
+        pynixd_free._cpu_util = CpuUtil(utilization=50.0, cores=2.0, throttled_pct=0.0)
+        pynixd_free.build_delays["test-pkg"] = 0.05
+
+        async with Server(
+            local_store=pynixd_local,
+            stores={"busy": pynixd_busy, "free": pynixd_free},
+            ssh_port=None,
+            unix_path=pynixd_local_path / "socket",
+        ) as server:
+            from pynixd.build_queue import QueuedBuild
+            from pynixd.operations.base import BasicDerivation
+
+            scheduler = server.scheduler
+            assert scheduler is not None
+
+            drv = BasicDerivation(platform="x86_64-linux", env={"pname": "test-pkg"})
+            req = BuildDerivationRequest(
+                drv_path=StorePath(
+                    "/nix/store/00000000000000000000000000000000-test-pkg.drv"
+                ),
+                derivation=drv,
+            )
+
+            loop = asyncio.get_event_loop()
+            build = QueuedBuild(
+                id=1,
+                request=req,
+                client=None,
+                required_paths=set(),
+                future=loop.create_future(),
+                platform="x86_64-linux",
+                failed_backends=[],
+            )
+
+            ranked = scheduler.rank_stores(build)
+            store_ids = [rs.store_id for rs in ranked]
+            assert "busy" not in store_ids
+            assert "free" in store_ids
+
+            pynixd_busy._cpu_util = CpuUtil(
+                utilization=98.0, cores=2.0, throttled_pct=5.0
+            )
+            ranked2 = scheduler.rank_stores(build)
+            store_ids2 = [rs.store_id for rs in ranked2]
+            assert "busy" in store_ids2

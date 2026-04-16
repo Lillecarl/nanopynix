@@ -1,15 +1,15 @@
 """PSI (Pressure Stall Information) and system stats data model and parsing.
 
-Reads /proc/pressure/{cpu,memory,io} and /proc/meminfo to gauge system load
-and available resources on Linux backends.
+Reads cgroupv2 PSI, cpu.stat, cpu.max, and memory.current/max to gauge system
+load and available resources on Linux backends. All paths are under
+/sys/fs/cgroup/ — cgroupv2 is required, no fallback to procfs.
 
 Future directions:
 - Event-driven PSI: instead of polling, run a persistent SSH process that
-  opens /proc/pressure/* with O_RDWR, writes trigger thresholds (e.g.
-  "some 150000 1000000"), and poll()s on the fds. On trigger fire, read
-  current PSI state and print to stdout. This would let us gate builder
-  admission instantly when a backend starts stalling. A python3 one-liner
-  on the remote end is the simplest approach since shell can't do poll().
+  opens /sys/fs/cgroup/{cpu,memory,io}.pressure with O_RDWR, writes trigger
+  thresholds (e.g. "some 150000 1000000"), and poll()s on the fds. On trigger
+  fire, read current PSI state and print to stdout. This would let us gate
+  builder admission instantly when a backend starts stalling.
 - Derivation attributes could specify resource requirements (min memory,
   cpu count, etc.) to filter eligible builders before scheduling.
 """
@@ -95,6 +95,110 @@ class MemInfo:
     @property
     def total_mb(self) -> int:
         return self.mem_total // 1024
+
+
+@dataclass
+class CgroupCpuStat:
+    """Parsed /sys/fs/cgroup/cpu.stat."""
+
+    usage_usec: int = 0
+    user_usec: int = 0
+    system_usec: int = 0
+    nr_periods: int = 0
+    nr_throttled: int = 0
+    throttled_usec: int = 0
+    timestamp: float = 0.0
+
+
+@dataclass
+class CpuUtil:
+    """CPU utilization derived from cgroupv2 cpu.stat + cpu.max deltas."""
+
+    utilization: float
+    cores: float
+    throttled_pct: float
+
+
+def parse_cpu_stat(text: str) -> CgroupCpuStat:
+    """Parse /sys/fs/cgroup/cpu.stat output."""
+    fields: dict[str, int] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            try:
+                fields[parts[0]] = int(parts[1])
+            except ValueError:
+                pass
+    return CgroupCpuStat(
+        usage_usec=fields.get("usage_usec", 0),
+        user_usec=fields.get("user_usec", 0),
+        system_usec=fields.get("system_usec", 0),
+        nr_periods=fields.get("nr_periods", 0),
+        nr_throttled=fields.get("nr_throttled", 0),
+        throttled_usec=fields.get("throttled_usec", 0),
+        timestamp=time.monotonic(),
+    )
+
+
+def parse_cpu_max(text: str) -> float | None:
+    """Parse /sys/fs/cgroup/cpu.max -> core count.
+
+    Format: 'quota period' or 'max period'. Returns cores as float.
+    'max' means unlimited (returns None).
+    """
+    parts = text.strip().split()
+    if len(parts) != 2:
+        return None
+    quota_str, period_str = parts
+    if quota_str == "max":
+        return None
+    try:
+        quota = int(quota_str)
+        period = int(period_str)
+    except ValueError:
+        return None
+    if period == 0:
+        return None
+    return quota / period
+
+
+def count_cpus_from_proc_stat(text: str) -> int:
+    """Count CPU cores from /proc/stat by counting 'cpuN' lines."""
+    count = 0
+    for line in text.splitlines():
+        parts = line.split()
+        if parts and parts[0].startswith("cpu") and parts[0][3:].isdigit():
+            count += 1
+    return max(count, 1)
+
+
+def compute_cpu_util(
+    prev: CgroupCpuStat,
+    curr: CgroupCpuStat,
+    cores: float | None,
+) -> CpuUtil | None:
+    """Compute CPU utilization between two cpu.stat snapshots.
+
+    Uses the monotonic timestamp delta for wall-clock elapsed time,
+    giving utilization as (cpu_time / wall_time * cores_capacity).
+    """
+    delta_usec = curr.usage_usec - prev.usage_usec
+    if delta_usec <= 0:
+        return None
+    elapsed_wall_sec = curr.timestamp - prev.timestamp
+    if elapsed_wall_sec <= 0:
+        return None
+    elapsed_wall_usec = int(elapsed_wall_sec * 1_000_000)
+    total_capacity_usec = elapsed_wall_usec * (cores if cores is not None else 1.0)
+    utilization = min((delta_usec / total_capacity_usec) * 100.0, 100.0)
+    throttled_pct = (
+        (curr.nr_throttled / curr.nr_periods * 100.0) if curr.nr_periods > 0 else 0.0
+    )
+    return CpuUtil(
+        utilization=utilization,
+        cores=cores if cores is not None else 1.0,
+        throttled_pct=throttled_pct,
+    )
 
 
 def parse_meminfo(text: str) -> MemInfo:

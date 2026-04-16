@@ -256,6 +256,10 @@ class Scheduler:
             waiting_paths=len(waiting_paths),
             waiting_slot=len(waiting_slot),
             slots={s.id: s.available_slots for s in self.stores.values()},
+            cpu_util={
+                s.id: f"{s.cpu_util.utilization:.1f}%" if s.cpu_util else None
+                for s in self.stores.values()
+            },
         )
 
     def rank_stores(self, build: QueuedBuild) -> RankedStores:
@@ -267,6 +271,8 @@ class Scheduler:
             if not store.supports_system(build.platform):
                 continue
             if store_id in build.failed_backends:
+                continue
+            if store.cpu_util is not None and store.cpu_util.utilization > 99.0:
                 continue
 
             score = store.tracker.count_common_paths(build.required_paths)

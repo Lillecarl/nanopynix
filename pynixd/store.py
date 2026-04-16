@@ -43,7 +43,17 @@ from .operations.base import (
 )
 from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
-from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
+from .psi import (
+    CgroupCpuStat,
+    CpuUtil,
+    MemInfo,
+    PsiSnapshot,
+    compute_cpu_util,
+    count_cpus_from_proc_stat,
+    parse_cpu_max,
+    parse_cpu_stat,
+    parse_psi_output,
+)
 from .signing import SecretKey
 from .path_tracker import PathTrackerInstance
 from .store_path import StorePath
@@ -407,6 +417,11 @@ class Store(ABC):
         return None
 
     @property
+    def cpu_util(self) -> CpuUtil | None:
+        """CPU utilization from cgroupv2, or None if unavailable."""
+        return None
+
+    @property
     def in_flight(self) -> int:
         return self.max_builds - self.build_semaphore._value
 
@@ -680,6 +695,10 @@ class _SSHStoreMixin:
         self.client_keys = client_keys
         self.psi_data: PsiSnapshot | None = None
         self.meminfo_data: MemInfo | None = None
+        self.cpu_stat_prev: CgroupCpuStat | None = None
+        self.cpu_stat_curr: CgroupCpuStat | None = None
+        self.cpu_cores: float | None = None
+        self.cpu_util_data: CpuUtil | None = None
         self.psi_task: asyncio.Task[None] | None = None
 
     def start_psi_polling(self) -> None:
@@ -690,13 +709,17 @@ class _SSHStoreMixin:
             self.psi_task = asyncio.create_task(self.psi_poll_loop())
 
     PSI_FILES: tuple[str, ...] = (
-        "/proc/pressure/cpu",
-        "/proc/pressure/memory",
-        "/proc/pressure/io",
+        "/sys/fs/cgroup/cpu.pressure",
+        "/sys/fs/cgroup/memory.pressure",
+        "/sys/fs/cgroup/io.pressure",
     )
 
     async def psi_poll_loop(self) -> None:
-        """Periodically read PSI and meminfo data over SFTP."""
+        """Periodically read PSI, meminfo, and cpu stats over SFTP.
+
+        All paths are cgroupv2 under /sys/fs/cgroup/. If cgroupv2 is not
+        available, polling stops gracefully.
+        """
         while True:
             try:
                 conn = self.conn
@@ -704,17 +727,85 @@ class _SSHStoreMixin:
                     await asyncio.sleep(self.PSI_INTERVAL)
                     continue
                 async with conn.start_sftp_client() as sftp:
+                    # Read cpu.max once — the quota rarely changes
+                    # Fall back to /proc/stat for nproc if no cpu.max (root cgroup)
+                    if self.cpu_cores is None:
+                        try:
+                            async with sftp.open("/sys/fs/cgroup/cpu.max", "r") as f:
+                                self.cpu_cores = parse_cpu_max(await f.read())
+                        except asyncssh.SFTPError:
+                            pass
+                        if self.cpu_cores is None:
+                            try:
+                                async with sftp.open("/proc/stat", "r") as f:
+                                    self.cpu_cores = float(
+                                        count_cpus_from_proc_stat(await f.read())
+                                    )
+                            except asyncssh.SFTPError:
+                                pass
+
                     while True:
                         parts = []
                         for path in self.PSI_FILES:
                             async with sftp.open(path, "r") as f:
                                 parts.append(await f.read())
                         self.psi_data = parse_psi_output("".join(parts))
+
                         try:
-                            async with sftp.open("/proc/meminfo", "r") as f:
-                                self.meminfo_data = parse_meminfo(await f.read())
+                            async with sftp.open("/sys/fs/cgroup/cpu.stat", "r") as f:
+                                stat = parse_cpu_stat(await f.read())
+                            self.cpu_stat_prev = self.cpu_stat_curr
+                            self.cpu_stat_curr = stat
+                            if (
+                                self.cpu_stat_prev is not None
+                                and self.cpu_stat_curr is not None
+                            ):
+                                self.cpu_util_data = compute_cpu_util(
+                                    self.cpu_stat_prev,
+                                    self.cpu_stat_curr,
+                                    self.cpu_cores,
+                                )
                         except asyncssh.SFTPError:
-                            pass  # meminfo optional
+                            pass
+
+                        try:
+                            async with sftp.open(
+                                "/sys/fs/cgroup/memory.current", "r"
+                            ) as f:
+                                mem_current = int((await f.read()).strip())
+                            async with sftp.open("/sys/fs/cgroup/memory.max", "r") as f:
+                                mem_max_raw = (await f.read()).strip()
+                            mem_max = None if mem_max_raw == "max" else int(mem_max_raw)
+                            try:
+                                async with sftp.open(
+                                    "/sys/fs/cgroup/swap.current", "r"
+                                ) as f:
+                                    swap_current = int((await f.read()).strip())
+                            except asyncssh.SFTPError:
+                                swap_current = 0
+                            try:
+                                async with sftp.open(
+                                    "/sys/fs/cgroup/swap.max", "r"
+                                ) as f:
+                                    swap_max_raw = (await f.read()).strip()
+                                swap_max = (
+                                    None if swap_max_raw == "max" else int(swap_max_raw)
+                                )
+                            except asyncssh.SFTPError:
+                                swap_max = None
+                            self.meminfo_data = MemInfo(
+                                mem_total=mem_max if mem_max else 0,
+                                mem_available=(mem_max - mem_current if mem_max else 0),
+                                swap_total=(swap_max if swap_max is not None else 0),
+                                swap_free=(
+                                    (swap_max - swap_current)
+                                    if swap_max is not None
+                                    else 0
+                                ),
+                            )
+                        except asyncssh.SFTPError:
+                            pass
+
                         await asyncio.sleep(self.PSI_INTERVAL)
             except asyncio.CancelledError:
                 return
@@ -763,6 +854,11 @@ class _SSHStoreMixin:
     def meminfo(self) -> MemInfo | None:
         """System memory info, or None if unavailable."""
         return self.meminfo_data
+
+    @property
+    def cpu_util(self) -> CpuUtil | None:
+        """CPU utilization from cgroupv2, or None if unavailable."""
+        return self.cpu_util_data
 
     async def ensure_ssh(self) -> asyncssh.SSHClientConnection:
         if self.conn is not None:
