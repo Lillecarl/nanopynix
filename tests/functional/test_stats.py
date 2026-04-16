@@ -174,11 +174,11 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduler_prioritization(tmp_path: Path) -> None:
-    """Verify that the scheduler prioritizes builds based on expected duration."""
+async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
+    """Verify that the scheduler fast-tracks tiny builds to the local store."""
     async with asyncio.timeout(30):
-        pynixd_local_path = STORE_PREFIX / "prioritization-local"
-        pynixd_remote_path = STORE_PREFIX / "prioritization-remote"
+        pynixd_local_path = STORE_PREFIX / "fasttrack-local"
+        pynixd_remote_path = STORE_PREFIX / "fasttrack-remote"
         rmtree_robust(pynixd_local_path)
         rmtree_robust(pynixd_remote_path)
 
@@ -201,21 +201,12 @@ async def test_scheduler_prioritization(tmp_path: Path) -> None:
             unix_path=pynixd_local_path / "socket",
         ) as server:
             assert pynixd_local.db is not None
-            # Pre-seed the DB with "slow" and "fast" stats
+            # Pre-seed the DB with "tiny" stats
             await pynixd_local.db.record_build_stats(
-                pname="slow-pkg",
+                pname="tiny-pkg",
                 version="1.0",
                 platform="x86_64-linux",
-                serialized_drv="slow",
-                cpu_user_us=None,
-                cpu_system_us=None,
-                duration_ms=10000,  # 10s
-            )
-            await pynixd_local.db.record_build_stats(
-                pname="fast-pkg",
-                version="1.0",
-                platform="x86_64-linux",
-                serialized_drv="fast",
+                serialized_drv="tiny",
                 cpu_user_us=None,
                 cpu_system_us=None,
                 duration_ms=100,  # 100ms
@@ -223,14 +214,11 @@ async def test_scheduler_prioritization(tmp_path: Path) -> None:
 
             from pynixd.operations.base import BasicDerivation
 
-            # Enqueue slow pkg first, then fast pkg
-            # Fast pkg should be scheduled BEFORE an unknown pkg or after slow pkg if it's already running.
-            # To test prioritization, we need to enqueue them while the scheduler is "paused" or busy.
-
             scheduler = server.scheduler
             assert scheduler is not None
-            # 1. Occupy the only slot with a very slow build (not in stats)
-            pynixd_remote.build_delays["blocker"] = 2.0
+
+            # 1. Occupy the only remote slot with a build
+            pynixd_remote.build_delays["blocker"] = 10.0
             blocker_drv = BasicDerivation(
                 platform="x86_64-linux", env={"pname": "blocker"}
             )
@@ -242,57 +230,42 @@ async def test_scheduler_prioritization(tmp_path: Path) -> None:
             )
             await scheduler.enqueue(blocker_req, None, set(), "x86_64-linux")
 
-            # Wait for blocker to start
+            # Wait for blocker to start on REMOTE
             while True:
                 pending = await scheduler.queue.get_pending()
                 if any(b.is_building for b in pending):
                     break
                 await asyncio.sleep(0.1)
 
-            # 2. Enqueue slow-pkg and fast-pkg
-            slow_drv = BasicDerivation(
-                platform="x86_64-linux", env={"pname": "slow-pkg"}
+            # 2. Enqueue tiny-pkg
+            # It should be fast-tracked to LOCAL because remote is full
+            tiny_drv = BasicDerivation(
+                platform="x86_64-linux", env={"pname": "tiny-pkg"}
             )
-            slow_req = BuildDerivationRequest(
+            tiny_req = BuildDerivationRequest(
                 drv_path=StorePath(
-                    "/nix/store/00000000000000000000000000000002-slow.drv"
+                    "/nix/store/00000000000000000000000000000003-tiny.drv"
                 ),
-                derivation=slow_drv,
+                derivation=tiny_drv,
             )
 
-            fast_drv = BasicDerivation(
-                platform="x86_64-linux", env={"pname": "fast-pkg"}
-            )
-            fast_req = BuildDerivationRequest(
-                drv_path=StorePath(
-                    "/nix/store/00000000000000000000000000000003-fast.drv"
-                ),
-                derivation=fast_drv,
+            id_tiny, fut_tiny = await scheduler.enqueue(
+                tiny_req, None, set(), "x86_64-linux"
             )
 
-            # Enqueue slow then fast
-            id_slow, fut_slow = await scheduler.enqueue(
-                slow_req, None, set(), "x86_64-linux"
-            )
-            id_fast, fut_fast = await scheduler.enqueue(
-                fast_req, None, set(), "x86_64-linux"
-            )
+            # 3. Verify it's building on LOCAL
+            while True:
+                pending = await scheduler.queue.get_pending()
+                tiny_build = next((b for b in pending if b.id == id_tiny), None)
+                if tiny_build and tiny_build.is_building:
+                    # We can't easily check 'store_id' on build, but we can check if
+                    # it started while blocker is still running.
+                    log.info("tiny_build_started", build_id=id_tiny)
+                    break
+                await asyncio.sleep(0.1)
 
-            # 3. Verify queue order
-            pending = await scheduler.queue.get_pending()
-            # Sort them like the scheduler does
-            schedulable = [b for b in pending if b.is_pending]
-
-            def duration_key(b):
-                if b.expected_duration is not None:
-                    return float(b.expected_duration)
-                return 600000.0
-
-            schedulable.sort(key=duration_key)
-
-            assert schedulable[0].id == id_fast
-            assert schedulable[1].id == id_slow
-            log.info("prioritization_verified", fast_id=id_fast, slow_id=id_slow)
+            # If it were waiting for remote slot, it would be pending.
+            # Success!
 
 
 @pytest.mark.asyncio

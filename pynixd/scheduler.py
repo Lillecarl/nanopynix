@@ -64,6 +64,10 @@ class RankedStores:
         )
 
 
+# Duration threshold for "tiny" builds that can be fast-tracked to the local store (2.5s)
+TINY_BUILD_THRESHOLD_MS = 2500
+
+
 class Scheduler:
     """Schedules builds across stores based on locality and DAG deps."""
 
@@ -165,22 +169,34 @@ class Scheduler:
             else:
                 waiting_paths.append(build)
 
-        # 1.5 Sort schedulable builds by expected duration (Fast-track small builds)
-        # Unknown duration (None) is treated as "medium" priority (infinity/2).
-        def duration_key(b: QueuedBuild) -> float:
-            if b.expected_duration is not None:
-                return float(b.expected_duration)
-            return 600000.0  # 10 minutes default for unknown
-
-        schedulable.sort(key=duration_key)
-
         # 2. Assign schedulable builds to backends
         # Load balancing: prefer backends with the most relevant paths already present
         # and with free slots.
         waiting_slot: list[QueuedBuild] = []
 
         for build in schedulable:
-            # Rank stores for this build
+            # 1. Check for "Tiny Build" fast-track to local store
+            # We only do this if it's explicitly tiny, not just unknown.
+            if (
+                build.expected_duration is not None
+                and build.expected_duration <= TINY_BUILD_THRESHOLD_MS
+                and self.local_store.supports_system(build.platform)
+            ):
+                # Is local store available? (We don't want to swamp it either)
+                # But tiny builds are "free" enough that we can be liberal.
+                if self.local_store.available_slots > 0:
+                    log.info(
+                        "build_fasttracked_local",
+                        build_id=build.id,
+                        duration=build.expected_duration,
+                    )
+                    build.build_task = asyncio.create_task(
+                        self.execute_build(build, self.local_store)
+                    )
+                    building.append(build.id)
+                    continue
+
+            # 2. Standard remote backend assignment
             ranked = self.rank_stores(build)
 
             # If NO store will ever support this platform, fail it statelessly
