@@ -78,14 +78,16 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         fdst = FramedWriter(dst)
 
         expected = await fsrc.read_uint64()
-        cls.logger.info(f"forward: expected {expected} paths")
+        cls.logger.info("forward", expected_paths=expected)
         fdst.write_uint64(expected)
 
         infos: set[ValidPathInfo] = set()
-        for i in range(expected):
+        for _ in range(expected):
             info = await ValidPathInfo.from_reader(fsrc)
             infos.add(info)
-            cls.logger.info(f"forward: path {info.path} nar_size={info.nar_size}")
+            cls.logger.info(
+                "forward_path_start", path=info.path, nar_size=info.nar_size
+            )
             fdst.write(info.to_bytes())
             sent_bytes = 0
             while sent_bytes < info.nar_size:
@@ -93,7 +95,7 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
                 data = await fsrc.readexactly(read)
                 fdst.write(data)
                 sent_bytes += len(data)
-            cls.logger.info(f"forward: sent {sent_bytes} bytes for {info.path}")
+            cls.logger.info("forward_path_sent", sent_bytes=sent_bytes, path=info.path)
 
         await fsrc.ensure_eof()
         await fdst.finalize()

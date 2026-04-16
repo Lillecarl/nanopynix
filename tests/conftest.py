@@ -19,13 +19,27 @@ import structlog
 from environs import env
 
 # Structlog configuration
+_session_start_time = time.monotonic()
+
+
+def relative_time_stamper(logger: Any, method_name: str, event_dict: Any) -> Any:
+    """Custom processor to show time since test (or session) start."""
+    # Use test start time if available in contextvars, otherwise session start
+    start = event_dict.pop("test_start_time", _session_start_time)
+    elapsed = time.monotonic() - start
+    seconds = int(elapsed)
+    milliseconds = int((elapsed - seconds) * 1000)
+    event_dict["timestamp"] = f"{seconds:03d}.{milliseconds:03d}"
+    return event_dict
+
+
 structlog.configure(
     processors=[
         structlog.stdlib.filter_by_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
         structlog.contextvars.merge_contextvars,
-        structlog.processors.TimeStamper(fmt="iso"),
+        relative_time_stamper,
         structlog.processors.StackInfoRenderer(),
         structlog.dev.ConsoleRenderer(colors=False),
     ],
@@ -243,6 +257,8 @@ def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
     node = request.node
     safe_name = node.name.replace("/", "_")
     log_file = test_log_dir / f"{safe_name}.log"
+
+    structlog.contextvars.bind_contextvars(test_start_time=time.monotonic())
 
     handler = logging.FileHandler(log_file)
     handler.setLevel(logging.DEBUG)
