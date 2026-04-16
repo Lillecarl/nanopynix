@@ -49,6 +49,20 @@ async def _decompose_build_paths(
         QueryMissingRequest(derived_paths=request.derived_paths)
     )
 
+    if missing_resp.will_substitute:
+        log.info(
+            "substituting_paths",
+            count=len(missing_resp.will_substitute),
+        )
+        async with store.transfer_conn() as conn:
+            valid = await conn.call(
+                QueryValidPathsRequest(
+                    paths=missing_resp.will_substitute,
+                    substitute=1,
+                )
+            )
+            store.tracker.add_known_paths(valid.paths)
+
     results: list[tuple[DerivedPath, set[str], asyncio.Future]] = []
 
     parsed_cache: dict[StorePath, ParsedDerivation] = {}

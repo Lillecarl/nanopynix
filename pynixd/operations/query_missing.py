@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import ClassVar, Self
 
 from ..derived_path import DerivedPath
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, OperationLogs
-from .query_valid_paths import QueryValidPathsRequest
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..store import Store
 
 
 @dataclass
@@ -67,30 +62,3 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)
-
-    async def execute(
-        self,
-        store: Store,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-    ) -> QueryMissingResponse:
-        resp = await super().execute(store, client, suppress_last)
-
-        if resp.will_substitute:
-            try:
-                async with store.transfer_conn() as conn:
-                    valid = await conn.call(
-                        QueryValidPathsRequest(
-                            paths=resp.will_substitute,
-                            substitute=1,
-                        )
-                    )
-                    store.tracker.add_known_paths(valid.paths)
-            except Exception:
-                self.logger.debug(
-                    "verify_substitutable_failed",
-                    paths=len(resp.will_substitute),
-                    exc_info=True,
-                )
-
-        return resp
