@@ -13,6 +13,7 @@ from pathlib import Path
 
 import structlog
 
+from .operations.base import Role
 from .proxy import DaemonProxy
 from .scheduler import Scheduler
 from .store import Store
@@ -51,6 +52,8 @@ async def start_unix_server(
                 UnixNixWriter(writer),
                 local_store=local_store,
                 scheduler=scheduler,
+                role=Role.ADMIN,
+                username="local",
             )
             await proxy.run()
         except Exception:

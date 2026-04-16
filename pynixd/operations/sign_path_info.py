@@ -11,7 +11,14 @@ import structlog
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
 from ..wire import NixReader, NixWriter
 from .add_signatures import AddSignaturesRequest
-from .base import OpRequest, OpResponse, OperationLogs, ValidPathInfo
+from .base import (
+    OperationLogs,
+    OpRequest,
+    OpResponse,
+    RequestContext,
+    Role,
+    ValidPathInfo,
+)
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -62,6 +69,25 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         writer.write_uint64(self.op)
         if self.info is not None:
             self.info.to_writer(writer)
+
+    @classmethod
+    async def handle(cls, ctx: RequestContext) -> SignPathInfoResponse | None:
+        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        log.debug("received_op")
+
+        # Must always consume the request to keep protocol in sync
+        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+
+        if ctx.role < Role.ADMIN:
+            log.warning("access_denied", user=ctx.username, role=ctx.role.name)
+            await ctx.proxy.send_error(
+                f"Operation '{cls.name}' requires administrative privileges."
+            )
+            return None
+
+        result = await ctx.proxy.execute(request)
+        log.debug("responded_op")
+        return result
 
     async def execute(
         self,

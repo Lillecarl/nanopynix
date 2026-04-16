@@ -23,7 +23,6 @@ WHERE vp_drv.path IN (SELECT value FROM json_each(?))
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..proxy import DaemonProxy
     from ..store import Store
 
 log = structlog.get_logger(__name__)
@@ -123,12 +122,3 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
             except FileNotFoundError:
                 pass
         return DerivationOutputsBatchResponse(outputs=outputs)
-
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> DerivationOutputsBatchResponse:
-        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
-        log.debug("received_op")
-        request = await cls.from_reader(proxy.r, proxy.version)
-        result = await proxy.execute(request)
-        log.debug("responded_op")
-        return result

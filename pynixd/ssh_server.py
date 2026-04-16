@@ -14,6 +14,7 @@ import asyncssh
 import structlog
 
 from . import wire
+from .operations.base import Role
 from .proxy import DaemonProxy
 from .scheduler import Scheduler
 from .store import Store
@@ -49,6 +50,7 @@ async def start_ssh_server(
     host: str = "127.0.0.1",
     port: int = 0,
     host_key_path: Path | None = None,
+    admin_users: set[str] | None = None,
 ) -> asyncssh.SSHAcceptor:
     """Start the SSH server.
 
@@ -87,12 +89,17 @@ async def start_ssh_server(
             high=wire._SSH_WINDOW_SIZE, low=wire._SSH_WINDOW_SIZE // 4
         )
         exit_code = 0
+        username = str(process.get_extra_info("username", "unknown"))
+        is_admin = admin_users and username in admin_users
+        role = Role.ADMIN if is_admin else Role.USER
         try:
             proxy = DaemonProxy(
                 SSHNixReader(process.stdin),
                 SSHNixWriter(process.stdout),
                 local_store=local_store,
                 scheduler=scheduler,
+                role=role,
+                username=username,
             )
             await proxy.run()
         except Exception:

@@ -11,10 +11,16 @@ from pynixd.operations.sign_path_info import SignPathInfoRequest
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
-from .base import OpRequest, OpResponse, OperationLogs, ValidPathInfo
+from .base import (
+    OperationLogs,
+    OpRequest,
+    OpResponse,
+    RequestContext,
+    ValidPathInfo,
+)
 
 if TYPE_CHECKING:
-    from ..proxy import DaemonProxy
+    pass
 
 log = structlog.get_logger(__name__)
 
@@ -74,20 +80,20 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         writer.write_uint64(self.repair)
 
     @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> AddToStoreResponse:
+    async def handle(cls, ctx: RequestContext) -> AddToStoreResponse:
         """Override handle because this is a streaming operation."""
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
-        async with proxy.local_store.transfer_conn() as conn:
-            await cls.forward(proxy.r, conn.w)
+        async with ctx.proxy.local_store.transfer_conn() as conn:
+            await cls.forward(ctx.proxy.r, conn.w)
             await conn.w.drain()
             resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
             if resp.info is not None:
                 resp.info = (
-                    await proxy.local_store.execute(SignPathInfoRequest(resp.info))
+                    await ctx.proxy.local_store.execute(SignPathInfoRequest(resp.info))
                 ).info
                 if resp.info is not None:
-                    proxy.local_store.add_known_path(resp.info.path)
-                    proxy.local_store.add_path_info(resp.info)
+                    ctx.proxy.local_store.add_known_path(resp.info.path)
+                    ctx.proxy.local_store.add_path_info(resp.info)
             return resp
 
     @classmethod

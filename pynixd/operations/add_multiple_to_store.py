@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..wire import NixReader, NixWriter, FramedReader, FramedWriter
-from .base import OpRequest, OpResponse, OperationLogs, ValidPathInfo
+from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
+from .base import OperationLogs, OpRequest, OpResponse, RequestContext, ValidPathInfo
 
 if TYPE_CHECKING:
-    from ..proxy import DaemonProxy
+    pass
 
 log = structlog.get_logger(__name__)
 
@@ -54,26 +54,23 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         writer.write_uint64(self.dont_check_sigs)
 
     @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> AddMultipleToStoreResponse:
+    async def handle(cls, ctx: RequestContext) -> AddMultipleToStoreResponse:
         """Override handle because this is a streaming operation."""
-        async with proxy.local_store.transfer_conn() as conn:
-            infos = await cls.forward(proxy.r, conn.w)
+        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        async with ctx.proxy.local_store.transfer_conn() as conn:
+            # Re-write the request prefix to the backend
+            await request.to_writer(conn.w, conn.version)
+            await conn.w.drain()
+
+            infos = await cls.forward_stream(ctx.proxy.r, conn.w)
             resp = await AddMultipleToStoreResponse.from_reader(conn.r, conn.version)
-            proxy.local_store.add_path_infos(infos)
-            proxy.local_store.add_known_paths({i.path for i in infos})
+            ctx.proxy.local_store.add_path_infos(infos)
+            ctx.proxy.local_store.add_known_paths({i.path for i in infos})
         return resp
 
     @classmethod
-    async def forward(cls, src: NixReader, dst: NixWriter) -> set[ValidPathInfo]:
-        """Forward AddMultipleToStore verbatim, snooping ValidPathInfos."""
-        dst.write_uint64(44)
-
-        repair = await src.read_uint64()
-        dont_check_sigs = await src.read_uint64()
-
-        dst.write_uint64(repair)
-        dst.write_uint64(dont_check_sigs)
-
+    async def forward_stream(cls, src: NixReader, dst: NixWriter) -> set[ValidPathInfo]:
+        """Forward AddMultipleToStore payload verbatim, snooping ValidPathInfos."""
         fsrc = FramedReader(src)
         fdst = FramedWriter(dst)
 

@@ -20,7 +20,9 @@ from .operations import OP_REGISTRY
 from .operations.base import (
     OpRequest,
     OpResponse,
+    RequestContext,
     Resp,
+    Role,
 )
 from .protocol import OptTrusted, get_extension_features
 from .scheduler import Scheduler
@@ -47,6 +49,8 @@ class DaemonProxy:
         client_w: NixWriter,
         local_store: Store,
         scheduler: Scheduler | None = None,
+        role: Role = Role.USER,
+        username: str = "unknown",
     ) -> None:
         self.r = client_r
         self.w = client_w
@@ -54,6 +58,8 @@ class DaemonProxy:
         self.local_store = local_store
         self.scheduler = scheduler
         self.version: int = wire.PROTOCOL_VERSION
+        self.role: Role = role
+        self.username: str = username
 
     @property
     def build_queue(self) -> BuildQueue | None:
@@ -205,8 +211,16 @@ class DaemonProxy:
             await self.send_error(f"Unhandled operation: {op_num}")
             return None
 
+        # Build request context
+        ctx = RequestContext(
+            proxy=self,
+            role=self.role,
+            version=self.version,
+            username=self.username,
+        )
+
         try:
-            return await req_cls.handle(self)
+            return await req_cls.handle(ctx)
         except BackendError:
             return None
 

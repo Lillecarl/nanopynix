@@ -41,7 +41,6 @@ ORDER BY vp.id ASC
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..proxy import DaemonProxy
     from ..store import Store
 
 log = structlog.get_logger(__name__)
@@ -193,12 +192,3 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
             visit(p)
 
         return QueryClosureWithInfoResponse(infos=sorted_infos)
-
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> QueryClosureWithInfoResponse:
-        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
-        log.debug("received_op")
-        request = await cls.from_reader(proxy.r, proxy.version)
-        result = await proxy.execute(request)
-        log.debug("responded_op")
-        return result

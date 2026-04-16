@@ -76,6 +76,23 @@ class BuildMode(IntEnum):
     CHECK = 2
 
 
+class Role(IntEnum):
+    """Client authorization roles."""
+
+    USER = 0
+    ADMIN = 1
+
+
+@dataclass(frozen=True)
+class RequestContext:
+    """Context passed to operation handlers."""
+
+    proxy: DaemonProxy
+    role: Role
+    version: int
+    username: str
+
+
 # ── Base classes ─────────────────────────────────────────────────────
 
 Resp = TypeVar("Resp", bound="OpResponse")
@@ -111,14 +128,14 @@ class OpRequest(ABC, Generic[Resp]):
             cls.logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
 
     @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+    async def handle(cls, ctx: RequestContext) -> OpResponse | None:
         """Handle this operation from a client.
 
         Decodes the request and delegates execution to the stores.
         Streaming operations should override this method.
         """
-        request = await cls.from_reader(proxy.r, proxy.version)
-        result = await proxy.execute(request)
+        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        result = await ctx.proxy.execute(request)
         return result
 
     async def execute(

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
+
+import structlog
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs
+from .base import OpRequest, OpResponse, OperationLogs, RequestContext, Role
+
+if TYPE_CHECKING:
+    pass
 
 
 @dataclass
@@ -45,3 +50,22 @@ class AddBuildLogRequest(OpRequest[AddBuildLogResponse]):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(self.op)
         writer.write_string(self.path)
+
+    @classmethod
+    async def handle(cls, ctx: RequestContext) -> AddBuildLogResponse | None:
+        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        log.debug("received_op")
+
+        # Must always consume the request to keep protocol in sync
+        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+
+        if ctx.role < Role.ADMIN:
+            log.warning("access_denied", user=ctx.username, role=ctx.role.name)
+            await ctx.proxy.send_error(
+                f"Operation '{cls.name}' requires administrative privileges."
+            )
+            return None
+
+        result = await ctx.proxy.execute(request)
+        log.debug("responded_op")
+        return result

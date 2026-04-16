@@ -10,25 +10,25 @@ import structlog
 
 from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file, to_basic_derivation
+from ..stderr import StderrNext
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     BuildMode,
     KeyedBuildResult,
+    OperationLogs,
     OpRequest,
     OpResponse,
-    OperationLogs,
+    RequestContext,
 )
 from .build_derivation import BuildDerivationRequest, BuildDerivationResponse
 from .query_derivation_outputs_batch import QueryDerivationOutputsBatchRequest
 from .query_missing import QueryMissingRequest
 from .query_valid_paths import QueryValidPathsRequest
-from ..stderr import StderrNext
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..drv_parser import ParsedDerivation
-    from ..proxy import DaemonProxy
     from ..scheduler import Scheduler
     from ..store import Store
 
@@ -182,22 +182,26 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         writer.write_uint64(self.build_mode)
 
     @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+    async def handle(cls, ctx: RequestContext) -> OpResponse | None:
         log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
         log.debug("received_op")
-        request = await cls.from_reader(proxy.r, proxy.version)
-        if proxy.scheduler is None:
+
+        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+
+        if ctx.proxy.scheduler is None:
             log.debug("handle_local_mode_fallback")
-            result = await proxy.local_store.execute(request, client=proxy.client)
+            result = await ctx.proxy.local_store.execute(
+                request, client=ctx.proxy.client
+            )
             log.debug("responded_op")
             return result
 
         log.debug("BuildPaths len(paths)=%d", len(request.derived_paths))
         decomposed = await _decompose_build_paths(
             request,
-            proxy.local_store,
-            proxy.scheduler,
-            client=proxy.client,
+            ctx.proxy.local_store,
+            ctx.proxy.scheduler,
+            client=ctx.proxy.client,
         )
 
         if not decomposed:
@@ -269,13 +273,17 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
         writer.write_uint64(self.build_mode)
 
     @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> OpResponse | None:
+    async def handle(cls, ctx: RequestContext) -> OpResponse | None:
         log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
         log.debug("received_op")
-        request = await cls.from_reader(proxy.r, proxy.version)
-        if proxy.scheduler is None:
+
+        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+
+        if ctx.proxy.scheduler is None:
             log.debug("handle_local_mode_fallback")
-            result = await proxy.local_store.execute(request, client=proxy.client)
+            result = await ctx.proxy.local_store.execute(
+                request, client=ctx.proxy.client
+            )
             log.debug("responded_op")
             return result
 
@@ -285,9 +293,9 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
         )
         decomposed = await _decompose_build_paths(
             request,
-            proxy.local_store,
-            proxy.scheduler,
-            client=proxy.client,
+            ctx.proxy.local_store,
+            ctx.proxy.scheduler,
+            client=ctx.proxy.client,
         )
 
         if not decomposed:
@@ -312,8 +320,12 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
                         status=resp.result.status,
                         error_msg=resp.result.error_msg,
                     )
-                if resp.result.status != 0 and resp.result.error_msg and proxy.client:
-                    proxy.client.queue.put_nowait(
+                if (
+                    resp.result.status != 0
+                    and resp.result.error_msg
+                    and ctx.proxy.client
+                ):
+                    ctx.proxy.client.queue.put_nowait(
                         StderrNext(text=f"pynixd: {resp.result.error_msg}\n")
                     )
 

@@ -12,16 +12,16 @@ import structlog
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import (
+    OperationLogs,
     OpRequest,
     OpResponse,
-    OperationLogs,
-    ValidPathInfo,
+    RequestContext,
     UnkeyedValidPathInfo,
+    ValidPathInfo,
 )
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..proxy import DaemonProxy
     from ..store import Store
 
 log = structlog.get_logger(__name__)
@@ -85,8 +85,8 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
 
                 async def read_stderr():
                     nonlocal error
-                    from ..stderr import read_stream, StderrError
                     from ..exceptions import BackendError
+                    from ..stderr import StderrError, read_stream
 
                     try:
                         async for msg in read_stream(conn.r):
@@ -118,13 +118,13 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         return await super().execute(store, client, suppress_last)
 
     @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> AddToStoreNarResponse:
+    async def handle(cls, ctx: RequestContext) -> AddToStoreNarResponse:
         """Override handle because this is a streaming operation."""
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
-        async with proxy.local_store.transfer_conn() as conn:
-            path = await cls.forward(proxy.r, conn.w)
+        async with ctx.proxy.local_store.transfer_conn() as conn:
+            path = await cls.forward(ctx.proxy.r, conn.w)
             resp = await AddToStoreNarResponse.from_reader(conn.r, conn.version)
-            proxy.local_store.add_known_path(path)
+            ctx.proxy.local_store.add_known_path(path)
         return resp
 
     @classmethod

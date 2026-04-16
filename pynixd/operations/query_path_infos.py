@@ -37,7 +37,6 @@ WHERE vp_referrer.path IN (SELECT value FROM json_each(?))
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..proxy import DaemonProxy
     from ..store import Store
 
 log = structlog.get_logger(__name__)
@@ -160,12 +159,3 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
                 infos[path] = vinfo
                 store.add_path_info(vinfo)
         return QueryPathInfosResponse(infos=infos)
-
-    @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> QueryPathInfosResponse:
-        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
-        log.debug("received_op")
-        request = await cls.from_reader(proxy.r, proxy.version)
-        result = await proxy.execute(request)
-        log.debug("responded_op")
-        return result

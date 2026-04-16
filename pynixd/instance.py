@@ -64,6 +64,9 @@ class PynixdConfig:
     https_cert: Path | None = None
     https_key: Path | None = None
 
+    # Maintenance Access
+    admin_users: set[str] = field(default_factory=set)
+
 
 class Server:
     """Programmatic pynixd server instance."""
@@ -226,6 +229,7 @@ class Server:
                 host=self.config.ssh_host,
                 port=self.config.ssh_port,
                 host_key_path=self.config.ssh_host_key,
+                admin_users=self.config.admin_users,
             )
 
         if self.config.unix_path:

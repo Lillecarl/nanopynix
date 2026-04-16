@@ -9,20 +9,20 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from .. import wire
-from ..store_path import StorePath
 from ..stderr import read_stream
-from ..wire import NixReader, NixWriter, _CHUNK_SIZE
+from ..store_path import StorePath
+from ..wire import _CHUNK_SIZE, NixReader, NixWriter
 from .base import (
     ByteCollector,
+    OperationLogs,
     OpRequest,
     OpResponse,
-    OperationLogs,
+    RequestContext,
 )
 from .query_path_info import QueryPathInfoRequest
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..proxy import DaemonProxy
     from ..store import Store
 
 log = structlog.get_logger(__name__)
@@ -97,14 +97,14 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
         return await super().execute(store, client, suppress_last)
 
     @classmethod
-    async def handle(cls, proxy: DaemonProxy) -> NarFromPathResponse | None:
+    async def handle(cls, ctx: RequestContext) -> NarFromPathResponse | None:
         log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
         log.debug("received_op")
 
-        request = await cls.from_reader(proxy.r, proxy.version)
+        request = await cls.from_reader(ctx.proxy.r, ctx.version)
         path = request.path
 
-        info_resp = await proxy.local_store.execute(QueryPathInfoRequest(path=path))
+        info_resp = await ctx.proxy.local_store.execute(QueryPathInfoRequest(path=path))
         if not info_resp.valid or info_resp.info is None:
             log.warning("nar_not_in_local_store", path=path)
             log.debug("responded_op")
@@ -118,7 +118,7 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
             size=nar_size,
         )
 
-        async with proxy.local_store.transfer_conn() as conn:
+        async with ctx.proxy.local_store.transfer_conn() as conn:
             await cls(path=path).to_writer(conn.w, conn.version)
             await conn.w.drain()
 
@@ -126,19 +126,19 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
             async for msg in read_stream(conn.r):
                 logs.add(msg)
 
-            await proxy.client.flush()
-            logs.to_writer(proxy.w)
+            await ctx.proxy.client.flush()
+            logs.to_writer(ctx.proxy.w)
 
             if nar_size > 0:
                 remaining = nar_size
                 while remaining > 0:
                     to_read = min(remaining, _CHUNK_SIZE)
                     chunk = await conn.r.readexactly(to_read)
-                    proxy.w.write(chunk)
+                    ctx.proxy.w.write(chunk)
                     remaining -= to_read
             else:
-                await wire.stream_parse_nar(conn.r, proxy.w)
+                await wire.stream_parse_nar(conn.r, ctx.proxy.w)
 
-        await proxy.w.drain()
+        await ctx.proxy.w.drain()
         log.debug("responded_op")
         return None
