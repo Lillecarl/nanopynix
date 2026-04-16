@@ -61,12 +61,10 @@ class QueryPathFromHashPartRequest(OpRequest[QueryPathFromHashPartResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryPathFromHashPartResponse:
-        if store.db is not None:
+        if (db := store.native_db) is not None:
             prefix = f"/nix/store/{self.path}"
             upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
-            async with store.db.execute(
-                QUERY_PATH_FROM_HASH_PART, (prefix, upper)
-            ) as cursor:
+            async with db.execute(QUERY_PATH_FROM_HASH_PART, (prefix, upper)) as cursor:
                 row = await cursor.fetchone()
             if row:
                 result = QueryPathFromHashPartResponse(value=StorePath(row[0]))

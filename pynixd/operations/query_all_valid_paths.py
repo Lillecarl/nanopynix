@@ -54,22 +54,48 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
         suppress_last: bool = False,
     ) -> QueryAllValidPathsResponse:
         try:
-            if store.db is not None:
-                async with store.db.execute(QUERY_ALL_VALID_PATHS) as cursor:
+            if (db := store.native_db) is not None:
+                async with db.execute(QUERY_ALL_VALID_PATHS) as cursor:
                     rows = await cursor.fetchall()
                 resp = QueryAllValidPathsResponse(paths={StorePath(r[0]) for r in rows})
-                store.add_known_paths(resp.paths, update_regtime=False)
+                # Use set_known_paths to ensure the in-memory cache is fully synced with DB
+                store.set_known_paths(resp.paths, update_regtime=False)
                 self.logger.info(
                     "sync_paths_complete", store_id=store.id, count=len(resp.paths)
                 )
                 return resp
 
-            resp = await store.call(self, client=client, suppress_last=suppress_last)
-            store.add_known_paths(resp.paths, update_regtime=False)
-            self.logger.info(
-                "sync_paths_complete", store_id=store.id, count=len(resp.paths)
-            )
-            return resp
+            # Remote store or no native DB: try the wire first.
+            try:
+                resp = await store.call(
+                    self, client=client, suppress_last=suppress_last
+                )
+                # Success: Overwrite path tracker data (source of truth)
+                store.set_known_paths(resp.paths, update_regtime=False)
+                self.logger.info(
+                    "sync_paths_complete", store_id=store.id, count=len(resp.paths)
+                )
+                return resp
+            except Exception as e:
+                if store.known_paths:
+                    # If we already have paths (e.g. from DB on startup), verify them
+                    # since the full sync failed.
+                    self.logger.info(
+                        "verifying_cached_paths",
+                        store_id=store.id,
+                        error=str(e),
+                        count=len(store.known_paths),
+                    )
+                    from .query_valid_paths import QueryValidPathsRequest
+
+                    verified = await store.execute(
+                        QueryValidPathsRequest(paths=store.known_paths),
+                        client=client,
+                        suppress_last=suppress_last,
+                    )
+                    store.set_known_paths(verified.paths, update_regtime=False)
+                    return QueryAllValidPathsResponse(paths=verified.paths)
+                raise
         except Exception:
             self.logger.warning("sync_paths_failed", store_id=store.id)
             store.known_paths = set()

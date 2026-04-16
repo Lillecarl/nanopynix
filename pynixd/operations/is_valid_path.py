@@ -60,8 +60,8 @@ class IsValidPathRequest(OpRequest[IsValidPathResponse]):
         if store.has_path(self.path):
             return IsValidPathResponse(valid=True)
 
-        if store.db is not None:
-            async with store.db.execute(IS_VALID_PATH, (self.path,)) as cursor:
+        if (db := store.native_db) is not None:
+            async with db.execute(IS_VALID_PATH, (self.path,)) as cursor:
                 row = await cursor.fetchone()
             if row is not None:
                 store.add_known_path(self.path)

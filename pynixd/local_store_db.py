@@ -72,6 +72,20 @@ WHERE id IN (
 );
 """
 
+INSERT_KNOWN_PATHS = """
+INSERT OR IGNORE INTO PynixdKnownPaths (storeId, path)
+SELECT ?, value FROM json_each(?)
+"""
+
+REMOVE_KNOWN_PATHS = """
+DELETE FROM PynixdKnownPaths
+WHERE storeId = ? AND path IN (SELECT value FROM json_each(?))
+"""
+
+GET_KNOWN_PATHS = """
+SELECT path FROM PynixdKnownPaths WHERE storeId = ?
+"""
+
 _DEFAULT_REGTIME_FLUSH_INTERVAL = 5.0
 
 
@@ -87,15 +101,19 @@ class LocalStoreDB:
     def __init__(
         self,
         db_path: Path | None,
+        store_path: Path | None,
         read_only: bool,
         regtime_flush_interval: float,
         max_conns: int = 8,
     ) -> None:
         self.db_path = db_path
+        self.store_path = store_path
         self.read_only: bool = read_only
         self.regtime_flush_interval = regtime_flush_interval
 
         self.pending_regtime: set[StorePath] = set()
+        self.pending_known_paths: dict[str, set[StorePath]] = {}
+        self.pending_removed_known_paths: dict[str, set[StorePath]] = {}
         self.flush_task: asyncio.Task[None] | None = None
 
         self._all_conns: list[aiosqlite.Connection] = []
@@ -202,6 +220,7 @@ class LocalStoreDB:
         if db_path is None:
             return cls(
                 db_path=None,
+                store_path=store_path,
                 read_only=True,
                 regtime_flush_interval=regtime_flush_interval,
             )
@@ -213,6 +232,7 @@ class LocalStoreDB:
         try:
             instance = cls(
                 db_path=db_path,
+                store_path=store_path,
                 read_only=read_only,
                 regtime_flush_interval=regtime_flush_interval,
             )
@@ -220,6 +240,12 @@ class LocalStoreDB:
             async with instance.acquire_conn() as db:
                 if not read_only:
                     await db.execute("PRAGMA journal_mode=WAL")
+                    await db.execute(
+                        "CREATE TABLE IF NOT EXISTS PynixdKnownPaths ("
+                        "storeId TEXT, "
+                        "path TEXT, "
+                        "PRIMARY KEY (storeId, path))"
+                    )
                 await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
 
             log.info(
@@ -236,6 +262,7 @@ class LocalStoreDB:
             )
             return cls(
                 db_path=None,
+                store_path=store_path,
                 read_only=True,
                 regtime_flush_interval=regtime_flush_interval,
             )
@@ -269,28 +296,73 @@ class LocalStoreDB:
         if self.active and not self.read_only:
             self.pending_regtime.update(paths)
 
+    def mark_known_paths(self, store_id: str, paths: set[StorePath]) -> None:
+        """Queue paths to be recorded as known on a specific store."""
+        if self.active and not self.read_only:
+            if store_id not in self.pending_known_paths:
+                self.pending_known_paths[store_id] = set()
+            self.pending_known_paths[store_id].update(paths)
+
+    def mark_removed_known_paths(self, store_id: str, paths: set[StorePath]) -> None:
+        """Queue paths to be removed from the known paths for a store."""
+        if self.active and not self.read_only:
+            if store_id not in self.pending_removed_known_paths:
+                self.pending_removed_known_paths[store_id] = set()
+            self.pending_removed_known_paths[store_id].update(paths)
+
+    async def get_known_paths(self, store_id: str) -> set[StorePath]:
+        """Fetch all known paths for a store from the DB."""
+        if not self.active:
+            return set()
+        try:
+            async with self.execute(GET_KNOWN_PATHS, (store_id,)) as cursor:
+                rows = await cursor.fetchall()
+            return {StorePath(r[0]) for r in rows}
+        except Exception:
+            log.warning("get_known_paths_failed", store_id=store_id, exc_info=True)
+            return set()
+
     async def flush_regtime(self) -> None:
         """Flush pending registration time updates to SQLite."""
-        if not self.active or self.read_only or not self.pending_regtime:
+        if not self.active or self.read_only:
+            return
+        if (
+            not self.pending_regtime
+            and not self.pending_known_paths
+            and not self.pending_removed_known_paths
+        ):
             return
 
         paths = self.pending_regtime
         self.pending_regtime = set()
 
+        known_paths = self.pending_known_paths
+        self.pending_known_paths = {}
+
+        removed_known_paths = self.pending_removed_known_paths
+        self.pending_removed_known_paths = {}
+
         try:
-            paths_json = json.dumps(list(paths))
             t0 = time.monotonic()
             async with self.acquire_conn() as db:
-                await db.execute(UPDATE_REGTIME, (paths_json,))
+                if paths:
+                    paths_json = json.dumps(list(paths))
+                    await db.execute(UPDATE_REGTIME, (paths_json,))
+                for sid, pths in known_paths.items():
+                    await db.execute(INSERT_KNOWN_PATHS, (sid, json.dumps(list(pths))))
+                for sid, pths in removed_known_paths.items():
+                    await db.execute(REMOVE_KNOWN_PATHS, (sid, json.dumps(list(pths))))
                 await db.commit()
             elapsed = time.monotonic() - t0
             log.debug(
-                "registration_time_updated",
-                seed_count=len(paths),
+                "db_flush_complete",
+                regtime_count=len(paths),
+                known_stores=len(known_paths),
+                removed_stores=len(removed_known_paths),
                 elapsed_ms=elapsed * 1000,
             )
         except Exception:
-            log.exception("registration_time_update_failed")
+            log.exception("db_flush_failed")
             await self.close_db_pool()
 
     def start(self) -> None:

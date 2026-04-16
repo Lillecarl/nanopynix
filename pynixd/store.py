@@ -120,6 +120,13 @@ class Store(ABC):
         return True
 
     @property
+    def native_db(self) -> LocalStoreDB | None:
+        """The local SQLite DB if it is the native database for this store root."""
+        if self.db is not None and self.db.store_path == self.store_path:
+            return self.db
+        return None
+
+    @property
     def signing_key_names(self) -> list[str]:
         """List of signing key names configured on this store."""
         return list(self.signing_keys.keys())
@@ -236,6 +243,8 @@ class Store(ABC):
         self.known_paths.add(path)  # type: ignore[arg-type]
         if update_regtime and self.db is not None:
             self.db.mark_path(path)
+            if self.db.store_path != self.store_path:
+                self.db.mark_known_paths(self.id, {path})
 
     def add_known_paths(
         self, paths: set[StorePath], *, update_regtime: bool = True
@@ -243,6 +252,25 @@ class Store(ABC):
         self.known_paths.update(paths)  # type: ignore[arg-type]
         if update_regtime and self.db is not None:
             self.db.mark_paths(set(paths))
+            if self.db.store_path != self.store_path:
+                self.db.mark_known_paths(self.id, set(paths))
+
+    def set_known_paths(
+        self, paths: set[StorePath], *, update_regtime: bool = True
+    ) -> None:
+        """Replace the current known paths with a new set."""
+        removed = self.known_paths - paths
+        added = paths - self.known_paths
+        self.known_paths = set(paths)  # type: ignore[assignment]
+
+        if self.db is not None:
+            if update_regtime and added:
+                self.db.mark_paths(added)
+            if self.db.store_path != self.store_path:
+                if added:
+                    self.db.mark_known_paths(self.id, added)
+                if removed:
+                    self.db.mark_removed_known_paths(self.id, removed)
 
     def add_path_info(self, info: ValidPathInfo) -> None:
         """Add ValidPathInfo to the cache."""

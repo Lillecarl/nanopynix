@@ -112,15 +112,11 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
 
         infos: dict[StorePath, ValidPathInfo] = dict(cached)
 
-        if store.db is not None:
+        if (db := store.native_db) is not None:
             paths_json = json.dumps([str(p) for p in uncached])
-            async with store.db.execute(
-                QUERY_PATH_INFOS_BATCH, (paths_json,)
-            ) as cursor:
+            async with db.execute(QUERY_PATH_INFOS_BATCH, (paths_json,)) as cursor:
                 rows = await cursor.fetchall()
-            async with store.db.execute(
-                QUERY_REFERENCES_BATCH, (paths_json,)
-            ) as cursor:
+            async with db.execute(QUERY_REFERENCES_BATCH, (paths_json,)) as cursor:
                 ref_rows = await cursor.fetchall()
 
             refs_map: dict[StorePath, set[StorePath]] = {}

@@ -190,6 +190,15 @@ class Server:
         else:
             local_store.db = None
 
+        # Link all stores to the central DB for persistent path tracking
+        for store in stores.values():
+            store.db = local_store.db
+            if local_store.db:
+                paths = await local_store.db.get_known_paths(store.id)
+                if paths:
+                    store.add_known_paths(paths, update_regtime=False)
+                    log.info("loaded_cached_paths", store_id=store.id, count=len(paths))
+
         for store in stores.values():
             try:
                 await store.execute(QueryAllValidPathsRequest())

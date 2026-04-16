@@ -11,9 +11,9 @@ from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, OperationLogs
 
-QUERY_VALID_PATHS_BATCH = (
-    "SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))"
-)
+QUERY_VALID_PATHS = """
+SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
+"""
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -26,11 +26,9 @@ class QueryValidPathsResponse(OpResponse):
 
     @classmethod
     async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        paths = await reader.read_string_set(StorePath)
         return cls(
-            logs=logs,
-            paths=paths,
+            logs=await OperationLogs.from_reader(reader),
+            paths=await reader.read_string_set(StorePath),
         )
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -69,15 +67,16 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryValidPathsResponse:
-        if store.db is not None:
-            paths_json = json.dumps(list(self.paths))
-            async with store.db.execute(
-                QUERY_VALID_PATHS_BATCH, (paths_json,)
+        if (db := store.native_db) is not None:
+            paths_json = json.dumps([str(p) for p in self.paths])
+            async with db.execute(
+                QUERY_VALID_PATHS,
+                (paths_json,),
             ) as cursor:
                 rows = await cursor.fetchall()
-            result = QueryValidPathsResponse(paths={StorePath(row[0]) for row in rows})
-            store.add_known_paths(result.paths)
-            return result
+            resp = QueryValidPathsResponse(paths={StorePath(r[0]) for r in rows})
+            store.add_known_paths(resp.paths)
+            return resp
 
         resp = await store.call(self, client=client, suppress_last=suppress_last)
         store.add_known_paths(resp.paths)

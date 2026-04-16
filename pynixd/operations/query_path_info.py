@@ -85,15 +85,15 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
             store.add_known_path(self.path)
             return QueryPathInfoResponse(valid=True, info=cached)
 
-        if store.db is not None:
-            async with store.db.execute(QUERY_PATH_INFO, (self.path,)) as cursor:
+        if (db := store.native_db) is not None:
+            async with db.execute(QUERY_PATH_INFO, (self.path,)) as cursor:
                 row = await cursor.fetchone()
             if row is None:
                 return QueryPathInfoResponse(valid=False)
 
             _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
 
-            async with store.db.execute(QUERY_REFERENCES, (self.path,)) as cursor:
+            async with db.execute(QUERY_REFERENCES, (self.path,)) as cursor:
                 ref_rows = await cursor.fetchall()
             refs = {r[0] for r in ref_rows}
 
