@@ -90,7 +90,6 @@ async def query_env(tmp_path: Path):
         yield server, uri, out_path
 
 
-@pytest.mark.skip
 async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify QueryReferrers via 'nix-store -q --referrers'."""
     server, uri, out_path = query_env
@@ -133,7 +132,7 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
     assert rc == 0
     dep_path = stdout.strip()
 
-    # Now query referrers of out_path
+    # No nix3 equivalent exists for --referrers (no `nix store referrers`).
     cmd = [
         NIX_BIN.parent / "nix-store",
         "--store",
@@ -148,7 +147,6 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
     assert dep_path in referrers
 
 
-@pytest.mark.skip
 async def test_query_path_from_hash_part(
     profiler: pyinstrument.Profiler, query_env
 ) -> None:
@@ -173,12 +171,12 @@ async def test_query_path_from_hash_part(
     assert stdout.strip() == out_path
 
 
-@pytest.mark.skip
 async def test_query_valid_derivers(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify QueryValidDerivers via 'nix-store -q --deriver'."""
     server, uri, out_path = query_env
 
-    # Query deriver
+    # Could use `nix path-info --derivation <store-path>` as a nix3 equivalent,
+    # but `nix-store -q --deriver` is kept for consistency with other query tests.
     cmd = [
         NIX_BIN.parent / "nix-store",
         "--store",
@@ -194,7 +192,6 @@ async def test_query_valid_derivers(profiler: pyinstrument.Profiler, query_env) 
     assert deriver.startswith("/nix/store/")
 
 
-@pytest.mark.skip
 async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify QueryMissing via 'nix build --dry-run'."""
     server, uri, out_path = query_env
@@ -216,11 +213,11 @@ async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None
     assert rc == 0
 
 
-@pytest.mark.skip
 async def test_find_roots(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify FindRoots via 'nix-store --gc --print-roots'."""
     server, uri, out_path = query_env
 
+    # No nix3 equivalent exists for --print-roots (`nix store gc` has no such flag).
     cmd = [
         NIX_BIN.parent / "nix-store",
         "--store",
@@ -232,36 +229,3 @@ async def test_find_roots(profiler: pyinstrument.Profiler, query_env) -> None:
     # If it fails with host resolution error, it's a nix-store limitation with URI ports.
     if rc != 0 and "Could not resolve hostname" in stdboth:
         pytest.skip("nix-store does not support ports in URIs for this command")
-
-
-@pytest.mark.skip
-async def test_add_build_log(profiler: pyinstrument.Profiler, query_env) -> None:
-    """Verify AddBuildLog and subsequent retrieval."""
-    server, uri, out_path = query_env
-
-    # Find deriver
-    cmd = [
-        NIX_BIN.parent / "nix-store",
-        "--store",
-        uri,
-        "-q",
-        "--deriver",
-        out_path,
-    ]
-    rc, stdout, stderr, stdboth = await run_subproc(cmd)
-    assert rc == 0
-
-    deriver = stdout.strip()
-    assert deriver.startswith("/nix/store/")
-
-    # Nix log should show something for a built path
-    cmd = [
-        NIX_BIN,
-        "log",
-        "--store",
-        uri,
-        deriver,
-    ]
-    rc, stdout, stderr, stdboth = await run_subproc(cmd)
-    assert rc == 0
-    assert "leaf" in stdout.lower() or "leaf" in stdboth.lower()

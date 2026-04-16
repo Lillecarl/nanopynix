@@ -76,11 +76,6 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
     ) -> QueryMissingResponse:
         resp = await super().execute(store, client, suppress_last)
 
-        if store.store_path:
-            for dp in self.derived_paths:
-                outputs = dp.to_outputs(store.store_path)
-                store.tracker.add_known_paths(outputs)
-
         if resp.will_substitute:
             try:
                 async with store.transfer_conn() as conn:
