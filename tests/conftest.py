@@ -251,12 +251,17 @@ def test_log_dir(request: pytest.FixtureRequest) -> Path:
     return request.session.config.stash[_log_dir_key]
 
 
+def _get_log_file_path(log_dir: Path, item: Any) -> Path:
+    """Generate a consistent log file path: log_dir/test_file::test_func.log"""
+    file_stem = item.path.stem
+    safe_name = item.name.replace("/", "_")
+    return log_dir / f"{file_stem}::{safe_name}.log"
+
+
 @pytest.fixture(autouse=True)
 def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
     """Redirect all structlog output for this test to its own log file."""
-    node = request.node
-    safe_name = node.name.replace("/", "_")
-    log_file = test_log_dir / f"{safe_name}.log"
+    log_file = _get_log_file_path(test_log_dir, request.node)
 
     structlog.contextvars.bind_contextvars(test_start_time=time.monotonic())
 
@@ -288,8 +293,7 @@ def pytest_runtest_makereport(item: pytest.Item, call):
     if report.when == "call" and report.failed:
         log_dir = item.config.stash.get(_log_dir_key, None)
         if log_dir:
-            safe_name = item.name.replace("/", "_")
-            log_file = log_dir / f"{safe_name}.log"
+            log_file = _get_log_file_path(log_dir, item)
             with open(log_file, "a") as f:
                 if report.longrepr:
                     f.write("\n--- Failure details ---\n")
