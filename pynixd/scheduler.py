@@ -164,7 +164,7 @@ class Scheduler:
                 continue
 
             # Check if all required paths are in local store
-            if self.local_store.has_all_paths(build.required_paths):
+            if self.local_store.tracker.has_all_paths(build.required_paths):
                 schedulable.append(build)
             else:
                 waiting_paths.append(build)
@@ -240,8 +240,8 @@ class Scheduler:
 
             ranked = self.rank_stores(build)
             for rs in ranked.with_slots().sort():
-                missing = build.required_paths - rs.store.known_paths
-                if missing and self.local_store.has_all_paths(missing):
+                missing = build.required_paths - rs.store.tracker.known_paths
+                if missing and self.local_store.tracker.has_all_paths(missing):
                     build.transfer_task = asyncio.create_task(
                         self.transfer_inputs(build, rs.store, missing)
                     )
@@ -269,7 +269,7 @@ class Scheduler:
             if store_id in build.failed_backends:
                 continue
 
-            score = store.count_common_paths(build.required_paths)
+            score = store.tracker.count_common_paths(build.required_paths)
             stores.append(RankedStore(store_id, score, store.available_slots, store))
 
         return RankedStores(stores).sort()
@@ -282,7 +282,7 @@ class Scheduler:
             # This must be done before any async operations that might block
             async with store.build_conn() as conn:
                 # 1. Ensure all inputs are present on the builder
-                missing = build.required_paths - store.known_paths
+                missing = build.required_paths - store.tracker.known_paths
                 if missing:
                     log.debug(
                         "build_sending_inputs", build_id=build.id, store_id=store.id
@@ -303,7 +303,7 @@ class Scheduler:
                 if resp.result.status == 0:
                     # Resolve drv to outputs
                     outputs = build.request.derivation.output_paths()
-                    store.add_known_paths(set(outputs.values()))
+                    store.tracker.add_known_paths(set(outputs.values()))
                     log.info("pulling_paths", store_id=store.id, count=len(outputs))
                     for p in outputs.values():
                         log.debug("pulling_path", store_id=store.id, path=p)
@@ -358,7 +358,7 @@ class Scheduler:
         """Background task to proactively pull missing inputs for a build."""
         to_pull: set[StorePath] = set()
         try:
-            to_pull = paths - self.local_store.known_paths
+            to_pull = paths - self.local_store.tracker.known_paths
             if not to_pull:
                 return
 

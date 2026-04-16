@@ -65,7 +65,7 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
             infos = await cls.forward_stream(ctx.proxy.r, conn.w)
             resp = await AddMultipleToStoreResponse.from_reader(conn.r, conn.version)
             ctx.proxy.local_store.add_path_infos(infos)
-            ctx.proxy.local_store.add_known_paths({i.path for i in infos})
+            ctx.proxy.local_store.tracker.add_known_paths({i.path for i in infos})
         return resp
 
     @classmethod

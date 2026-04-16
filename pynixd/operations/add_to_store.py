@@ -92,7 +92,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
                     await ctx.proxy.local_store.execute(SignPathInfoRequest(resp.info))
                 ).info
                 if resp.info is not None:
-                    ctx.proxy.local_store.add_known_path(resp.info.path)
+                    ctx.proxy.local_store.tracker.add_known_path(resp.info.path)
                     ctx.proxy.local_store.add_path_info(resp.info)
             return resp
 

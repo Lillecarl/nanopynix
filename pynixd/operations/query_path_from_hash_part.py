@@ -68,10 +68,10 @@ class QueryPathFromHashPartRequest(OpRequest[QueryPathFromHashPartResponse]):
                 row = await cursor.fetchone()
             if row:
                 result = QueryPathFromHashPartResponse(value=StorePath(row[0]))
-                store.add_known_path(result.value)
+                store.tracker.add_known_path(result.value)
                 return result
 
         resp = await store.call(self, client=client, suppress_last=suppress_last)
         if resp.value:
-            store.add_known_path(StorePath(resp.value))
+            store.tracker.add_known_path(StorePath(resp.value))
         return resp

@@ -45,6 +45,7 @@ from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .psi import MemInfo, PsiSnapshot, parse_meminfo, parse_psi_output
 from .signing import SecretKey
+from .path_tracker import PathTrackerInstance
 from .store_path import StorePath
 from .wire import (
     SSHNixReader,
@@ -102,7 +103,7 @@ class Store(ABC):
         self.conn_counter: int = 0
         self.sweep_task: asyncio.Task[None] | None = None
         self.supported_systems = supported_systems or []
-        self.known_paths: set[StorePath] = set()
+        self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
             maxsize=10000, ttl=300
         )
@@ -181,13 +182,13 @@ class Store(ABC):
     # ── Known paths tracking ────────────────────────────────────────
 
     def has_path(self, path: StorePath) -> bool:
-        return path in self.known_paths
+        return path in self.tracker.known_paths
 
     def has_all_paths(self, paths: set[StorePath]) -> bool:
-        return paths.issubset(self.known_paths)
+        return paths.issubset(self.tracker.known_paths)
 
     def count_common_paths(self, paths: set[StorePath]) -> int:
-        return len(paths & self.known_paths)
+        return len(paths & self.tracker.known_paths)
 
     async def call(
         self,
@@ -239,39 +240,6 @@ class Store(ABC):
             suppress_last=suppress_last,
         )
 
-    def add_known_path(self, path: StorePath, *, update_regtime: bool = True) -> None:
-        self.known_paths.add(path)  # type: ignore[arg-type]
-        if update_regtime and self.db is not None:
-            self.db.mark_path(path)
-            if self.db.store_path != self.store_path:
-                self.db.mark_known_paths(self.id, {path})
-
-    def add_known_paths(
-        self, paths: set[StorePath], *, update_regtime: bool = True
-    ) -> None:
-        self.known_paths.update(paths)  # type: ignore[arg-type]
-        if update_regtime and self.db is not None:
-            self.db.mark_paths(set(paths))
-            if self.db.store_path != self.store_path:
-                self.db.mark_known_paths(self.id, set(paths))
-
-    def set_known_paths(
-        self, paths: set[StorePath], *, update_regtime: bool = True
-    ) -> None:
-        """Replace the current known paths with a new set."""
-        removed = self.known_paths - paths
-        added = paths - self.known_paths
-        self.known_paths = set(paths)  # type: ignore[assignment]
-
-        if self.db is not None:
-            if update_regtime and added:
-                self.db.mark_paths(added)
-            if self.db.store_path != self.store_path:
-                if added:
-                    self.db.mark_known_paths(self.id, added)
-                if removed:
-                    self.db.mark_removed_known_paths(self.id, removed)
-
     def add_path_info(self, info: ValidPathInfo) -> None:
         """Add ValidPathInfo to the cache."""
         self.path_info_cache[info.path] = info
@@ -312,7 +280,9 @@ class Store(ABC):
 
         # 2. Filter out paths already in destination
         to_transfer: list[ValidPathInfo] = [
-            info for info in closure_resp.infos if info.path not in dst.known_paths
+            info
+            for info in closure_resp.infos
+            if info.path not in dst.tracker.known_paths
         ]
         if not to_transfer:
             return
@@ -364,7 +334,7 @@ class Store(ABC):
 
         # 4. Update destination store's knowledge
         dst.add_path_infos(set(to_transfer))
-        dst.add_known_paths({i.path for i in to_transfer})
+        dst.tracker.add_known_paths({i.path for i in to_transfer})
 
     async def pipe_nar_from(
         self,

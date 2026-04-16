@@ -132,7 +132,7 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
                 )
                 sorted_infos.append(uinfo.with_path(p))
 
-            store.add_known_paths({info.path for info in sorted_infos})
+            store.tracker.add_known_paths({info.path for info in sorted_infos})
             store.add_path_infos(sorted_infos)
             return QueryClosureWithInfoResponse(infos=sorted_infos)
 

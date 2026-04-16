@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -20,7 +19,7 @@ from . import wire
 from .gc import GarbageCollector
 from .http_cache import BinaryCacheServer
 from .local_store_db import LocalStoreDB
-from .operations.query_all_valid_paths import QueryAllValidPathsRequest
+from .path_tracker import PathTracker
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
 from .store import LocalSocketStore, Store, get_current_system
@@ -39,7 +38,7 @@ class PynixdConfig:
     """Configuration for a pynixd instance."""
 
     local_store: Store
-    stores: Mapping[str, Store] = field(default_factory=dict)
+    stores: dict[str, Store] = field(default_factory=dict)
 
     # SSH Server
     ssh_host: str = "127.0.0.1"
@@ -103,7 +102,29 @@ class Server:
         self.http_bound_port: int | None = None
         self.https_server: web.AppRunner | None = None
         self.https_bound_port: int | None = None
+        self.path_tracker: PathTracker = PathTracker(db=None)
         self._started = False
+
+    async def add_store(self, store: Store) -> None:
+        """Add a remote store to the server, linking it to the central DB and path tracker."""
+        from .operations.query_all_valid_paths import QueryAllValidPathsRequest
+
+        local_store = self.config.local_store
+        store.db = local_store.db
+        store.tracker = self.path_tracker.get_instance(store.id, is_local=False)
+
+        if local_store.db is not None:
+            paths = await local_store.db.get_known_paths(store.id)
+            if paths:
+                store.tracker.add_known_paths(paths, update_regtime=False)
+                log.info("loaded_cached_paths", store_id=store.id, count=len(paths))
+
+        self.config.stores[store.id] = store
+
+        try:
+            await store.execute(QueryAllValidPathsRequest())
+        except Exception:
+            log.exception("sync_paths_failed", id=store.id)
 
     @property
     def host(self) -> str:
@@ -190,23 +211,22 @@ class Server:
             local_store.db = await LocalStoreDB.open(
                 local_store.store_path or Path("/")
             )
+            self.path_tracker.db = local_store.db
         else:
             local_store.db = None
+            self.path_tracker.db = None
+
+        # Link local store to tracker first
+        local_store.tracker = self.path_tracker.get_instance(
+            local_store.id, is_local=True
+        )
 
         # Link all stores to the central DB for persistent path tracking
-        for store in stores.values():
-            store.db = local_store.db
-            if local_store.db:
-                paths = await local_store.db.get_known_paths(store.id)
-                if paths:
-                    store.add_known_paths(paths, update_regtime=False)
-                    log.info("loaded_cached_paths", store_id=store.id, count=len(paths))
+        stores_to_add = list(self.config.stores.values())
+        self.config.stores.clear()
 
-        for store in stores.values():
-            try:
-                await store.execute(QueryAllValidPathsRequest())
-            except Exception:
-                log.exception("sync_paths_failed", id=store.id)
+        for store in stores_to_add:
+            await self.add_store(store)
 
         # Start background services
         if self.scheduler:

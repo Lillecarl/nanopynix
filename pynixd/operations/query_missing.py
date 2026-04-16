@@ -79,7 +79,7 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         if store.store_path:
             for dp in self.derived_paths:
                 outputs = dp.to_outputs(store.store_path)
-                store.add_known_paths(outputs)
+                store.tracker.add_known_paths(outputs)
 
         if resp.will_substitute:
             try:
@@ -90,7 +90,7 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
                             substitute=1,
                         )
                     )
-                    store.add_known_paths(valid.paths)
+                    store.tracker.add_known_paths(valid.paths)
             except Exception:
                 self.logger.debug(
                     "verify_substitutable_failed",

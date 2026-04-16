@@ -91,10 +91,10 @@ async def _decompose_build_paths(
         resolved.append((dp, dp.output_names, drv_request))
         all_input_srcs.update(basic.input_srcs)
 
-    unknown = all_input_srcs - store.known_paths
+    unknown = all_input_srcs - store.tracker.known_paths
     if unknown:
         valid_resp = await store.execute(QueryValidPathsRequest(paths=unknown))
-        store.add_known_paths(valid_resp.paths, update_regtime=False)
+        store.tracker.add_known_paths(valid_resp.paths, update_regtime=False)
 
     for dp, output_names, drv_request in resolved:
         # Enrich with .drv metadata

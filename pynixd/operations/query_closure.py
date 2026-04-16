@@ -84,9 +84,9 @@ class QueryClosureRequest(OpRequest[QueryClosureResponse]):
             async with db.execute(QUERY_CLOSURE, (seeds_json,)) as cursor:
                 rows = await cursor.fetchall()
             result = QueryClosureResponse(paths={StorePath(row[0]) for row in rows})
-            store.add_known_paths(result.paths)
+            store.tracker.add_known_paths(result.paths)
             return result
 
         resp = await store.call(self, client=client, suppress_last=suppress_last)
-        store.add_known_paths(resp.paths)
+        store.tracker.add_known_paths(resp.paths)
         return resp

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Self, cast
+from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
@@ -126,5 +126,5 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
         suppress_last: bool = False,
     ) -> CollectGarbageResponse:
         resp = await super().execute(store, client, suppress_last)
-        store.known_paths -= resp.paths_deleted
+        store.tracker.known_paths -= resp.paths_deleted
         return resp

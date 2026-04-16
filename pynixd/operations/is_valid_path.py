@@ -57,17 +57,17 @@ class IsValidPathRequest(OpRequest[IsValidPathResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> IsValidPathResponse:
-        if store.has_path(self.path):
+        if store.tracker.has_path(self.path):
             return IsValidPathResponse(valid=True)
 
         if (db := store.native_db) is not None:
             async with db.execute(IS_VALID_PATH, (self.path,)) as cursor:
                 row = await cursor.fetchone()
             if row is not None:
-                store.add_known_path(self.path)
+                store.tracker.add_known_path(self.path)
                 return IsValidPathResponse(valid=True)
 
         resp = await store.call(self, client=client, suppress_last=suppress_last)
         if resp.valid:
-            store.add_known_path(self.path)
+            store.tracker.add_known_path(self.path)
         return resp

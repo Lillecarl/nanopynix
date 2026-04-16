@@ -124,7 +124,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         async with ctx.proxy.local_store.transfer_conn() as conn:
             path = await cls.forward(ctx.proxy.r, conn.w)
             resp = await AddToStoreNarResponse.from_reader(conn.r, conn.version)
-            ctx.proxy.local_store.add_known_path(path)
+            ctx.proxy.local_store.tracker.add_known_path(path)
         return resp
 
     @classmethod

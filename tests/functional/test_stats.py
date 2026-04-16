@@ -133,7 +133,7 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
             from pynixd.operations.base import BasicDerivation, DerivationOutput
 
             out_path = StorePath("/nix/store/00000000000000000000000000000004-fast-pkg")
-            pynixd_local.add_known_path(out_path)
+            pynixd_local.tracker.add_known_path(out_path)
 
             drv = BasicDerivation(
                 platform="x86_64-linux",

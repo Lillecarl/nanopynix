@@ -74,13 +74,13 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
         ):
             # Manually add a path to the remote store
             # This should trigger recording to the local DB
-            pynixd_remote.add_known_path(test_path)
+            pynixd_remote.tracker.add_known_path(test_path)
 
             # Wait for flush
             assert pynixd_local.db is not None
             await pynixd_local.db.flush_regtime()
 
-            assert test_path in pynixd_remote.known_paths
+            assert test_path in pynixd_remote.tracker.known_paths
 
         # 2. Restart server with a store that FAILS QueryAllValidPaths
         # It should load the path from the DB and VERIFY it via QueryValidPaths.
@@ -103,7 +103,7 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
             ssh_port=None,
         ):
             # Check if the path was loaded from DB and verified
-            assert test_path in pynixd_remote_2.known_paths
+            assert test_path in pynixd_remote_2.tracker.known_paths
             log.info("persistence_verified", path=test_path)
 
 
@@ -136,8 +136,8 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
             stores={"remote": pynixd_remote},
             ssh_port=None,
         ):
-            pynixd_remote.add_known_path(path_valid)
-            pynixd_remote.add_known_path(path_stale)
+            pynixd_remote.tracker.add_known_path(path_valid)
+            pynixd_remote.tracker.add_known_path(path_stale)
             assert pynixd_local.db is not None
             await pynixd_local.db.flush_regtime()
 
@@ -172,8 +172,8 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
             ssh_port=None,
         ):
             # path_stale should be gone from memory
-            assert path_valid in pynixd_remote_2.known_paths
-            assert path_stale not in pynixd_remote_2.known_paths
+            assert path_valid in pynixd_remote_2.tracker.known_paths
+            assert path_stale not in pynixd_remote_2.tracker.known_paths
 
             # Flush removals to DB
             assert pynixd_local_2.db is not None
