@@ -11,6 +11,7 @@ import shlex
 import stat
 import time
 from contextlib import contextmanager
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -70,8 +71,8 @@ def set_log_levels(levels: dict[str, int]):
             logging.getLogger(name).setLevel(level)
 
 
-NIX_BIN = env.str("NIX_BIN", "nix")
-LIX_BIN = env.str("LIX_BIN", "nix")
+NIX_BIN = env.path("NIX_BIN")
+LIX_BIN = env.path("LIX_BIN")
 
 
 DEFAULT_SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
@@ -368,7 +369,7 @@ def cleanup_stores():
 
 
 async def run_subproc(
-    cmd: list[str],
+    cmd: Sequence[str | Path],
     print: bool = True,
     expected_retcode: int | None = 0,
     nix_config: dict[str, str] | None = None,
@@ -402,9 +403,10 @@ async def run_subproc(
     else:
         run_env["NIX_CONFIG"] = config_str
 
-    log.debug("run_subproc", cmd=shlex.join(cmd), env=run_env)
+    str_cmd = [str(c) for c in cmd]
+    log.debug("run_subproc", cmd=shlex.join(str_cmd), env=run_env)
     proc = await asyncio.create_subprocess_exec(
-        *cmd,
+        *str_cmd,
         env=os.environ.copy() | run_env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
