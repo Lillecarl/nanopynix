@@ -220,6 +220,7 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
 
     The caller reads the response payload after this iterator is exhausted.
     Raises if too many consecutive unknown msg_types are seen (protocol desync).
+    Stops after StderrError — the daemon sends no STDERR_LAST after an error.
     """
     unknown_streak = 0
     while True:
@@ -242,6 +243,8 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
         unknown_streak = 0
         msg = await parser().from_reader(r)
         yield msg
+        if isinstance(msg, StderrError):
+            return
 
 
 async def drain(

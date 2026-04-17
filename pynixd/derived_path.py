@@ -73,13 +73,15 @@ class DerivedPath(StorePath):
         Returns:
             Set of store paths for the outputs requested by this derived path.
             Returns empty set if the .drv cannot be read.
+            Note: For CA floating derivations, static paths may be empty
+            and need dynamic resolution via QueryDerivationOutputMap.
         """
         names = self.output_names
         try:
             parsed = self.to_derivation(store_path)
         except (FileNotFoundError, OSError):
             return set()
-        all_outputs = parsed.output_paths()  # {name: StorePath}
+        all_outputs = parsed.output_paths()
         if "*" in names:
-            return set(all_outputs.values())
-        return {p for n, p in all_outputs.items() if n in names}
+            return {p for p in all_outputs.values() if p != StorePath("")}
+        return {p for n, p in all_outputs.items() if n in names and p != StorePath("")}

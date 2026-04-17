@@ -218,11 +218,18 @@ class OperationLogs:
         writer.write_uint64(wire.STDERR_LAST)
 
     async def from_reader(self, reader: NixReader) -> Self:
-        """Read stderr messages until STDERR_LAST from reader."""
-        from ..stderr import read_stream
+        """Read stderr messages until STDERR_LAST from reader.
+
+        Raises BackendError if a StderrError is received from the daemon,
+        since the daemon sends no response payload after an error.
+        """
+        from ..exceptions import BackendError
+        from ..stderr import StderrError, read_stream
 
         async for msg in read_stream(reader):
             self.add(msg)
+            if isinstance(msg, StderrError):
+                raise BackendError(f"Daemon error ({msg.error_type}): {msg.msg}")
         return self
 
 

@@ -73,7 +73,9 @@ async def _decompose_build_paths(
             continue
 
         parsed_cache[StorePath(dp.drv_path)] = parsed
-        all_planned_outputs.update(parsed.output_paths().values())
+        for p in parsed.output_paths().values():
+            if p != StorePath(""):
+                all_planned_outputs.add(p)
         all_input_drvs.update(parsed.input_drvs.keys())
 
     output_cache = None

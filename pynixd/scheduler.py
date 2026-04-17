@@ -27,6 +27,7 @@ from .operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )
+from .operations.ca_derivations import RegisterDrvOutputRequest
 
 from .store import Store
 from .store_path import StorePath
@@ -307,20 +308,54 @@ class Scheduler:
 
                 # 3. Pull outputs back to local store if build succeeded
                 if resp.result.status == 0:
-                    # Resolve drv to outputs
+                    ca_output_paths: set[StorePath] = set()
+                    if resp.result.built_outputs:
+                        for (
+                            drv_output_str,
+                            realisation,
+                        ) in resp.result.built_outputs.items():
+                            out_path = realisation.get("outPath")
+                            if out_path:
+                                ca_output_paths.add(
+                                    StorePath(out_path).with_store_prefix()
+                                )
                     outputs = build.request.derivation.output_paths()
-                    store.tracker.add_known_paths(set(outputs.values()))
-                    log.info("pulling_paths", store_id=store.id, count=len(outputs))
-                    for p in outputs.values():
+                    static_paths = {p for p in outputs.values() if p != StorePath("")}
+                    all_output_paths = static_paths | ca_output_paths
+                    store.tracker.add_known_paths(all_output_paths)
+                    log.info(
+                        "pulling_paths", store_id=store.id, count=len(all_output_paths)
+                    )
+                    for p in all_output_paths:
                         log.debug("pulling_path", store_id=store.id, path=p)
                     await Store.stream_paths_store_to_store(
-                        store, self.local_store, set(outputs.values())
+                        store, self.local_store, all_output_paths
                     )
                     log.debug(
                         "pulled_paths_into_local_store",
-                        count=len(outputs),
+                        count=len(all_output_paths),
                         store_id=store.id,
                     )
+
+                    # Register CA realisations after outputs are in local store
+                    if resp.result.built_outputs:
+                        for (
+                            drv_output_str,
+                            realisation,
+                        ) in resp.result.built_outputs.items():
+                            try:
+                                reg_req = RegisterDrvOutputRequest(
+                                    realisation=realisation
+                                )
+                                await self.local_store.execute(
+                                    reg_req, suppress_last=True
+                                )
+                            except Exception:
+                                log.warning(
+                                    "register_drv_output_failed",
+                                    drv_output=drv_output_str,
+                                    exc_info=True,
+                                )
 
                     # 4. Record build statistics
                     if self.local_store.db:

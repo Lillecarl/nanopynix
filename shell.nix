@@ -21,13 +21,13 @@ pkgs.mkShell {
     pkgs.just
     pkgs.pyright
     pkgs.ruff
-    pkgs.ty
+    pkgs.sqlite
   ];
   shellHook = ''
     export PYNIXD_TEST_NIX=${./test.nix}
     export PYTHONPATH="$PWD:${python}/${python.sitePackages}:$PYTHONPATH"
     export LIX_BIN=${lib.getExe pkgs.lix}
     export NIX_BIN=${lib.getExe pkgs.nix}
-    export NIX_BIN=/home/lillecarl/Code/nix/build/src/nix/nix
+    # export NIX_BIN=/home/lillecarl/Code/nix/build/src/nix/nix
   '';
 }

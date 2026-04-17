@@ -45,6 +45,16 @@ class StorePath(str):
         """Convert to a pathlib.Path."""
         return Path(self)
 
+    def with_store_prefix(self) -> StorePath:
+        """Return a StorePath with the /nix/store/ prefix guaranteed.
+
+        If the path already starts with /nix/store/, returns self unchanged.
+        If it's a bare basename (e.g. hash-name), prepends /nix/store/.
+        """
+        if self.startswith("/nix/store/"):
+            return self
+        return StorePath(f"/nix/store/{self}", extrainfo=self.extrainfo)
+
     def __repr__(self) -> str:
         if self.extrainfo:
             return f"StorePath({str.__repr__(self)}, info={self.extrainfo!r})"
