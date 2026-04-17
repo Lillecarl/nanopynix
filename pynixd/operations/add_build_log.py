@@ -19,16 +19,14 @@ if TYPE_CHECKING:
 class AddBuildLogResponse(OpResponse):
     value: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        value = await reader.read_uint64()
-        return cls(
-            logs=logs,
-            value=value,
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.value = await reader.read_uint64()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", value=self.value)
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
@@ -41,13 +39,14 @@ class AddBuildLogRequest(OpRequest[AddBuildLogResponse]):
     response_type: ClassVar[type[OpResponse]] = AddBuildLogResponse
     path: StorePath = StorePath("")
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        path = await reader.read_string(StorePath)
-        cls.logger.debug("from_reader", path=path)
-        return cls(path=path)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.path = await reader.read_string(StorePath)
+        self.logger.debug("from_reader", path=self.path)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.path)
 
@@ -57,7 +56,7 @@ class AddBuildLogRequest(OpRequest[AddBuildLogResponse]):
         log.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        request = await cls().from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.role < Role.ADMIN:
             log.warning("access_denied", user=ctx.username, role=ctx.role.name)

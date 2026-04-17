@@ -38,11 +38,11 @@ class DerivationOutputsBatchResponse(OpResponse):
     def is_not_found(self) -> bool:
         return not self.outputs
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
-        outputs: dict[StorePath, dict[str, StorePath]] = {}
+        self.outputs = {}
         for _ in range(n):
             drv_path = await reader.read_string(StorePath)
             m = await reader.read_uint64()
@@ -51,10 +51,11 @@ class DerivationOutputsBatchResponse(OpResponse):
                 name = await reader.read_string()
                 path = await reader.read_string(StorePath)
                 drv_outputs[name] = path
-            outputs[drv_path] = drv_outputs
-        return cls(logs=logs, outputs=outputs)
+            self.outputs[drv_path] = drv_outputs
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", drv_path_count=len(self.outputs))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.outputs))
@@ -75,13 +76,14 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
     is_query: ClassVar[bool] = True
     drv_paths: set[StorePath] = field(default_factory=set)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        drv_paths = await reader.read_string_set(StorePath)
-        cls.logger.debug("from_reader", drv_paths=drv_paths)
-        return cls(drv_paths=drv_paths)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.drv_paths = await reader.read_string_set(StorePath)
+        self.logger.debug("from_reader", drv_paths=self.drv_paths)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string_set(self.drv_paths)
 

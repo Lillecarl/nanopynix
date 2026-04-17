@@ -31,14 +31,14 @@ class AddToStoreResponse(OpResponse):
 
     info: ValidPathInfo | None = None
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(
-            logs=await OperationLogs.from_reader(reader),
-            info=await ValidPathInfo.from_reader(reader),
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.info = await ValidPathInfo().from_reader(reader)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", info=self.info)
         self.logs.to_writer(writer)
         if self.info is not None:
@@ -57,22 +57,23 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     references: set[StorePath] = field(default_factory=set)
     repair: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        path_name = await reader.read_string()
-        cam = await reader.read_string()
-        references = await reader.read_string_set(StorePath)
-        repair = await reader.read_uint64()
-        cls.logger.debug(
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.path_name = await reader.read_string()
+        self.cam = await reader.read_string()
+        self.references = await reader.read_string_set(StorePath)
+        self.repair = await reader.read_uint64()
+        self.logger.debug(
             "from_reader",
-            path_name=path_name,
-            cam=cam,
-            references=references,
-            repair=repair,
+            path_name=self.path_name,
+            cam=self.cam,
+            references=self.references,
+            repair=self.repair,
         )
-        return cls(path_name=path_name, cam=cam, references=references, repair=repair)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.path_name)
         writer.write_string(self.cam)
@@ -86,7 +87,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         async with ctx.proxy.local_store.transfer_conn() as conn:
             await cls.forward(ctx.proxy.r, conn.w)
             await conn.w.drain()
-            resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
+            resp = await AddToStoreResponse().from_reader(conn.r, conn.version)
             if resp.info is not None:
                 resp.info = (
                     await ctx.proxy.local_store.execute(SignPathInfoRequest(resp.info))
@@ -105,7 +106,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         cam = await src.read_string()
         references = await src.read_string_set(StorePath)
         repair = await src.read_uint64()
-        cls.logger.debug(
+        cls._logger.debug(
             "forward",
             path_name=path_name,
             cam=cam,

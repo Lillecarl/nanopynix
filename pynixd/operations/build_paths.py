@@ -156,14 +156,14 @@ async def _decompose_build_paths(
 class BuildPathsResponse(OpResponse):
     value: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(
-            logs=await OperationLogs.from_reader(reader),
-            value=await reader.read_uint64(),
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.value = await reader.read_uint64()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", self.value)
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
@@ -178,19 +178,17 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
     derived_paths: set[DerivedPath] = field(default_factory=set)
     build_mode: BuildMode = BuildMode.NORMAL
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        derived_paths = await reader.read_string_set(DerivedPath)
-        build_mode = BuildMode(await reader.read_uint64())
-        cls.logger.debug(
-            "from_reader", derived_paths=derived_paths, build_mode=build_mode
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.derived_paths = await reader.read_string_set(DerivedPath)
+        self.build_mode = BuildMode(await reader.read_uint64())
+        self.logger.debug(
+            "from_reader", derived_paths=self.derived_paths, build_mode=self.build_mode
         )
-        return cls(
-            derived_paths=derived_paths,
-            build_mode=build_mode,
-        )
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)
         writer.write_uint64(self.build_mode)
@@ -200,7 +198,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
         log.debug("received_op")
 
-        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        request = await cls().from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.proxy.scheduler is None:
             log.debug("handle_local_mode_fallback")
@@ -242,16 +240,17 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 class BuildPathsWithResultsResponse(OpResponse):
     results: list[KeyedBuildResult] = field(default_factory=list)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
-        results = []
+        self.results = []
         for _ in range(n):
-            results.append(await KeyedBuildResult.from_reader(reader, version))
-        return cls(logs=logs, results=results)
+            self.results.append(await KeyedBuildResult().from_reader(reader, version))
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", self.results)
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.results))
@@ -268,20 +267,18 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
     derived_paths: set[DerivedPath] = field(default_factory=set)
     build_mode: BuildMode = BuildMode.NORMAL
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        derived_paths = await reader.read_string_set(DerivedPath)
-        build_mode = BuildMode(await reader.read_uint64())
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.derived_paths = await reader.read_string_set(DerivedPath)
+        self.build_mode = BuildMode(await reader.read_uint64())
 
-        cls.logger.debug(
-            "from_reader", derived_paths=derived_paths, build_mode=build_mode
+        self.logger.debug(
+            "from_reader", derived_paths=self.derived_paths, build_mode=self.build_mode
         )
-        return cls(
-            derived_paths=derived_paths,
-            build_mode=build_mode,
-        )
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)
         writer.write_uint64(self.build_mode)
@@ -291,7 +288,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
         log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
         log.debug("received_op")
 
-        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        request = await cls().from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.proxy.scheduler is None:
             log.debug("handle_local_mode_fallback")

@@ -115,9 +115,18 @@ class OpRequest(ABC, Generic[Resp]):
     is_query: ClassVar[bool] = False
     is_build: ClassVar[bool] = False
     is_extension: ClassVar[bool] = False
-    logger: ClassVar[structlog.BoundLogger] = structlog.get_logger(
+    _read_identifier: str = field(default="unknown", init=False)
+    _write_identifier: str = field(default="unknown", init=False)
+    _logger: ClassVar[structlog.BoundLogger] = structlog.get_logger(
         f"pynixd.operations.{__name__}"
     )
+
+    @property
+    def logger(self) -> structlog.BoundLogger:
+        return type(self)._logger.bind(
+            read_identifier=self._read_identifier,
+            write_identifier=self._write_identifier,
+        )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Runs when an OpRequest subclass is instantiated, registers
@@ -125,7 +134,7 @@ class OpRequest(ABC, Generic[Resp]):
         super().__init_subclass__(**kwargs)
         if "op" in cls.__dict__:
             OP_REGISTRY[cls.op] = cls
-            cls.logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+            cls._logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
 
     @classmethod
     async def handle(cls, ctx: RequestContext) -> OpResponse | None:
@@ -134,7 +143,7 @@ class OpRequest(ABC, Generic[Resp]):
         Decodes the request and delegates execution to the stores.
         Streaming operations should override this method.
         """
-        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        request = await cls().from_reader(ctx.proxy.r, ctx.version)
         result = await ctx.proxy.execute(request)
         return result
 
@@ -173,9 +182,8 @@ class OpRequest(ABC, Generic[Resp]):
             suppress_last=suppress_last,
         )
 
-    @classmethod
     @abstractmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self: ...
+    async def from_reader(self, reader: NixReader, version: int) -> Self: ...
 
     @abstractmethod
     async def to_writer(self, writer: NixWriter, version: int) -> None: ...
@@ -218,15 +226,13 @@ class OperationLogs:
             msg.to_writer(writer)
         writer.write_uint64(wire.STDERR_LAST)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader) -> Self:
+    async def from_reader(self, reader: NixReader) -> Self:
         """Read stderr messages until STDERR_LAST from reader."""
         from ..stderr import read_stream
 
-        logs = cls()
         async for msg in read_stream(reader):
-            logs.add(msg)
-        return logs
+            self.add(msg)
+        return self
 
 
 @dataclass
@@ -234,14 +240,24 @@ class OpResponse(ABC):
     """Base class for operation responses."""
 
     _log: ClassVar = structlog.get_logger(__name__)
-    logger: ClassVar[structlog.BoundLogger] = structlog.get_logger(
+    _read_identifier: str = field(default="unknown", init=False)
+    _write_identifier: str = field(default="unknown", init=False)
+    _logger: ClassVar[structlog.BoundLogger] = structlog.get_logger(
         f"pynixd.operations.{__name__}"
     )
+
+    @property
+    def logger(self) -> structlog.BoundLogger:
+        return type(self)._logger.bind(
+            read_identifier=self._read_identifier,
+            write_identifier=self._write_identifier,
+        )
+
     logs: OperationLogs = field(default_factory=OperationLogs)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        cls.logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        cls._logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
 
     @property
     def is_not_found(self) -> bool:
@@ -250,9 +266,8 @@ class OpResponse(ABC):
         """
         return False
 
-    @classmethod
     @abstractmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self: ...
+    async def from_reader(self, reader: NixReader, version: int) -> Self: ...
 
     @abstractmethod
     async def to_writer(self, writer: NixWriter, version: int) -> None: ...
@@ -274,19 +289,17 @@ class UnkeyedValidPathInfo:
     sigs: set[str] = field(default_factory=set)
     ca: str = ""
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader) -> Self:
+    async def from_reader(self, reader: NixReader) -> Self:
         """Read UnkeyedValidPathInfo from wire."""
-        return cls(
-            deriver=await reader.read_string(StorePath),
-            nar_hash=await reader.read_string(),
-            references=await reader.read_string_set(StorePath),
-            registration_time=await reader.read_uint64(),
-            nar_size=await reader.read_uint64(),
-            ultimate=await reader.read_uint64(),
-            sigs=await reader.read_string_set(),
-            ca=await reader.read_string(),
-        )
+        self.deriver = await reader.read_string(StorePath)
+        self.nar_hash = await reader.read_string()
+        self.references = await reader.read_string_set(StorePath)
+        self.registration_time = await reader.read_uint64()
+        self.nar_size = await reader.read_uint64()
+        self.ultimate = await reader.read_uint64()
+        self.sigs = await reader.read_string_set()
+        self.ca = await reader.read_string()
+        return self
 
     def to_writer(self, writer: NixWriter) -> None:
         """Write UnkeyedValidPathInfo to wire."""
@@ -332,11 +345,10 @@ class ValidPathInfo(UnkeyedValidPathInfo):
             return False
         return self.path == other.path
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader) -> Self:
+    async def from_reader(self, reader: NixReader) -> Self:
         """Read ValidPathInfo (path + UnkeyedValidPathInfo) from wire."""
         path = await reader.read_string(StorePath)
-        info = await UnkeyedValidPathInfo.from_reader(reader)
+        info = await UnkeyedValidPathInfo().from_reader(reader)
         return info.with_path(path)  # type: ignore[return-value]
 
     def to_writer(self, writer: NixWriter) -> None:
@@ -576,35 +588,32 @@ class BasicDerivation:
         ]
         return "|".join(parts)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> BasicDerivation:
+    @property
+    def has_dynamic_outputs(self) -> bool:
+        """True if any output is text-hashed without pre-computed hash."""
+        return any(o.is_dynamic_output for o in self.outputs.values())
+
+    async def from_reader(self, reader: NixReader, version: int) -> BasicDerivation:
         n = await reader.read_uint64()
-        outputs: dict[str, DerivationOutput] = {}
+        self.outputs = {}
         for _ in range(n):
             name = await reader.read_string()
-            outputs[name] = DerivationOutput(
+            self.outputs[name] = DerivationOutput(
                 path=await reader.read_string(),
                 method=await reader.read_string(),
                 hash_digest=await reader.read_string(),
             )
-        input_srcs = await reader.read_string_set(StorePath)
-        platform = await reader.read_string()
-        builder = await reader.read_string()
-        args = await reader.read_string_list()
+        self.input_srcs = await reader.read_string_set(StorePath)
+        self.platform = await reader.read_string()
+        self.builder = await reader.read_string()
+        self.args = await reader.read_string_list()
         n_env = await reader.read_uint64()
-        env: dict[str, str] = {}
+        self.env = {}
         for _ in range(n_env):
             k = await reader.read_string()
             v = await reader.read_string()
-            env[k] = v
-        return cls(
-            outputs=outputs,
-            input_srcs=input_srcs,
-            platform=platform,
-            builder=builder,
-            args=args,
-            env=env,
-        )
+            self.env[k] = v
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(len(self.outputs))
@@ -672,11 +681,6 @@ class BasicDerivation:
         """True if any output uses text ingestion (any kind)."""
         return any(o.is_text_hashed for o in self.outputs.values())
 
-    @property
-    def has_dynamic_outputs(self) -> bool:
-        """True if any output is text-hashed without pre-computed hash."""
-        return any(o.is_dynamic_output for o in self.outputs.values())
-
 
 @dataclass
 class SubstitutablePathInfo:
@@ -687,16 +691,12 @@ class SubstitutablePathInfo:
     download_size: int = 0
     nar_size: int = 0
 
-    @classmethod
-    async def from_reader(
-        cls, reader: NixReader, version: int
-    ) -> SubstitutablePathInfo:
-        return cls(
-            deriver=await reader.read_string(StorePath),
-            references=await reader.read_string_set(StorePath),
-            download_size=await reader.read_uint64(),
-            nar_size=await reader.read_uint64(),
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self.deriver = await reader.read_string(StorePath)
+        self.references = await reader.read_string_set(StorePath)
+        self.download_size = await reader.read_uint64()
+        self.nar_size = await reader.read_uint64()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.deriver)
@@ -784,53 +784,41 @@ class BuildResult:
     # built_outputs maps DrvOutput -> Realisation (parsed JSON dict)
     built_outputs: dict[str, dict] = field(default_factory=dict)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> BuildResult:
-        status = BuildResultStatus(await reader.read_uint64())
-        error_msg = await reader.read_string()
+    async def from_reader(self, reader: NixReader, version: int) -> BuildResult:
+        self.status = BuildResultStatus(await reader.read_uint64())
+        self.error_msg = await reader.read_string()
 
-        times_built = 0
-        is_non_deterministic = 0
-        start_time = 0
-        stop_time = 0
+        self.times_built = 0
+        self.is_non_deterministic = 0
+        self.start_time = 0
+        self.stop_time = 0
         if version >= wire.proto(1, 29):
-            times_built = await reader.read_uint64()
-            is_non_deterministic = await reader.read_uint64()
-            start_time = await reader.read_uint64()
-            stop_time = await reader.read_uint64()
+            self.times_built = await reader.read_uint64()
+            self.is_non_deterministic = await reader.read_uint64()
+            self.start_time = await reader.read_uint64()
+            self.stop_time = await reader.read_uint64()
 
-        cpu_user: int | None = None
-        cpu_system: int | None = None
+        self.cpu_user = None
+        self.cpu_system = None
         if version >= wire.proto(1, 37):
-            cpu_user = await reader.read_optional_uint64()
-            cpu_system = await reader.read_optional_uint64()
+            self.cpu_user = await reader.read_optional_uint64()
+            self.cpu_system = await reader.read_optional_uint64()
 
-        built_outputs: dict[str, dict] = {}
+        self.built_outputs = {}
         if version >= wire.proto(1, 28):
             n = await reader.read_uint64()
             for _ in range(n):
                 drv_output = await reader.read_string()
                 realisation_json = await reader.read_string()
-                built_outputs[drv_output] = json.loads(realisation_json)
+                self.built_outputs[drv_output] = json.loads(realisation_json)
 
-        result = cls(
-            status=status,
-            error_msg=error_msg,
-            times_built=times_built,
-            is_non_deterministic=is_non_deterministic,
-            start_time=start_time,
-            stop_time=stop_time,
-            cpu_user=cpu_user,
-            cpu_system=cpu_system,
-            built_outputs=built_outputs,
-        )
-        cls._log.debug(
+        type(self)._log.debug(
             "build_result_from_reader",
-            status=status,
-            error_msg=error_msg,
-            built_outputs=built_outputs,
+            status=self.status,
+            error_msg=self.error_msg,
+            built_outputs=self.built_outputs,
         )
-        return result
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self._log.debug(
@@ -870,13 +858,12 @@ class KeyedBuildResult:
     derived_path: DerivedPath = field(default_factory=lambda: StorePath(""))  # type: ignore
     result: BuildResult = field(default_factory=BuildResult)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
         from ..derived_path import DerivedPath
 
-        derived_path = await reader.read_string(DerivedPath)
-        result = await BuildResult.from_reader(reader, version)
-        return cls(derived_path=derived_path, result=result)
+        self.derived_path = await reader.read_string(DerivedPath)
+        self.result = await BuildResult().from_reader(reader, version)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.derived_path)

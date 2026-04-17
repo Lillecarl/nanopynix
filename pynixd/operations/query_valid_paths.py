@@ -24,14 +24,14 @@ if TYPE_CHECKING:
 class QueryValidPathsResponse(OpResponse):
     paths: set[StorePath] = field(default_factory=set)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(
-            logs=await OperationLogs.from_reader(reader),
-            paths=await reader.read_string_set(StorePath),
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.paths = await reader.read_string_set(StorePath)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", paths=self.paths)
         self.logs.to_writer(writer)
         writer.write_string_set(self.paths)
@@ -46,16 +46,17 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
     paths: set[StorePath] = field(default_factory=set)
     substitute: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        paths = await reader.read_string_set(StorePath)
-        substitute = 0
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.paths = await reader.read_string_set(StorePath)
+        self.substitute = 0
         if version >= wire.proto(1, 27):
-            substitute = await reader.read_uint64()
-        cls.logger.debug("from_reader", paths=paths, substitute=substitute)
-        return cls(paths=paths, substitute=substitute)
+            self.substitute = await reader.read_uint64()
+        self.logger.debug("from_reader", paths=self.paths, substitute=self.substitute)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string_set(self.paths)
         if version >= wire.proto(1, 27):

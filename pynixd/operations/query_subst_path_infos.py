@@ -19,18 +19,19 @@ class SubstitutablePathInfoEntry:
 class QuerySubstitutablePathInfosResponse(OpResponse):
     entries: list[SubstitutablePathInfoEntry] = field(default_factory=list)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
-        entries = []
+        self.entries = []
         for _ in range(n):
             path = await reader.read_string()
-            info = await SubstitutablePathInfo.from_reader(reader, version)
-            entries.append(SubstitutablePathInfoEntry(path=path, info=info))
-        return cls(logs=logs, entries=entries)
+            info = await SubstitutablePathInfo().from_reader(reader, version)
+            self.entries.append(SubstitutablePathInfoEntry(path=path, info=info))
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", entry_count=len(self.entries))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.entries))
@@ -49,18 +50,19 @@ class QuerySubstitutablePathInfosRequest(
     is_query: ClassVar[bool] = True
     items: dict[str, str] = field(default_factory=dict)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
         n = await reader.read_uint64()
-        items: dict[str, str] = {}
+        self.items = {}
         for _ in range(n):
             k = await reader.read_string()
             v = await reader.read_string()
-            items[k] = v
-        cls.logger.debug("from_reader", item_count=n)
-        return cls(items=items)
+            self.items[k] = v
+        self.logger.debug("from_reader", item_count=n)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_uint64(len(self.items))
         for k, v in self.items.items():

@@ -9,21 +9,21 @@ from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, OperationLogs
 
 if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..store import Store
+    pass
 
 
 @dataclass
 class AddPermRootResponse(OpResponse):
     gc_root: str = ""
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        gc_root = await reader.read_string()
-        return cls(logs=logs, gc_root=gc_root)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.gc_root = await reader.read_string()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", gc_root=self.gc_root)
         self.logs.to_writer(writer)
         writer.write_string(self.gc_root)
@@ -37,27 +37,17 @@ class AddPermRootRequest(OpRequest[AddPermRootResponse]):
     store_path: str = ""
     gc_root: str = ""
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        store_path = await reader.read_string()
-        gc_root = await reader.read_string()
-        cls.logger.debug("from_reader", store_path=store_path, gc_root=gc_root)
-        return cls(
-            store_path=store_path,
-            gc_root=gc_root,
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.store_path = await reader.read_string()
+        self.gc_root = await reader.read_string()
+        self.logger.debug(
+            "from_reader", store_path=self.store_path, gc_root=self.gc_root
         )
-
-    async def execute(
-        self,
-        store: Store,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-    ) -> AddPermRootResponse:
-        # No-op: don't create permanent roots on the host.
-        # Just return the requested root path as "success".
-        return AddPermRootResponse(gc_root=self.gc_root)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.store_path)
         writer.write_string(self.gc_root)

@@ -29,11 +29,13 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class AddToStoreNarResponse(OpResponse):
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(logs=await OperationLogs.from_reader(reader))
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer")
         self.logs.to_writer(writer)
 
@@ -50,19 +52,18 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
     dont_check_sigs: int = 0
     async_provider: Callable[[NixWriter], Awaitable[None]] | None = None
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
         path = await reader.read_string(StorePath)
-        unkeyed_info = await UnkeyedValidPathInfo.from_reader(reader)
-        info = unkeyed_info.with_path(path)
-        cls.logger.debug("from_reader", info=info)
-        return cls(
-            info=info,
-            repair=await reader.read_uint64(),
-            dont_check_sigs=await reader.read_uint64(),
-        )
+        unkeyed_info = await UnkeyedValidPathInfo().from_reader(reader)
+        self.info = unkeyed_info.with_path(path)
+        self.repair = await reader.read_uint64()
+        self.dont_check_sigs = await reader.read_uint64()
+        self.logger.debug("from_reader", info=self.info)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         if self.info is not None:
             self.info.to_writer(writer)
@@ -123,7 +124,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         structlog.contextvars.bind_contextvars(operation=cls.__name__)
         async with ctx.proxy.local_store.transfer_conn() as conn:
             path = await cls.forward(ctx.proxy.r, conn.w)
-            resp = await AddToStoreNarResponse.from_reader(conn.r, conn.version)
+            resp = await AddToStoreNarResponse().from_reader(conn.r, conn.version)
             ctx.proxy.local_store.tracker.add_known_path(path)
         return resp
 
@@ -133,13 +134,13 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         dst.write_uint64(39)
 
         path = await src.read_string(StorePath)
-        unkeyed_info = await UnkeyedValidPathInfo.from_reader(src)
+        unkeyed_info = await UnkeyedValidPathInfo().from_reader(src)
         info = unkeyed_info.with_path(path)
 
         repair = await src.read_uint64()
         dont_check_sigs = await src.read_uint64()
 
-        cls.logger.debug(
+        cls._logger.debug(
             "forward", info=info, repair=repair, dont_check_sigs=dont_check_sigs
         )
 

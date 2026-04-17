@@ -17,13 +17,14 @@ if TYPE_CHECKING:
 class AddSignaturesResponse(OpResponse):
     value: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        value = await reader.read_uint64()
-        return cls(logs=logs, value=value)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.value = await reader.read_uint64()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", value=self.value)
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
@@ -37,17 +38,15 @@ class AddSignaturesRequest(OpRequest[AddSignaturesResponse]):
     path: str = ""
     sigs: set[str] = field(default_factory=set)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        path = await reader.read_string(StorePath)
-        sigs = await reader.read_string_set()
-        cls.logger.debug("from_reader", path=path, sigs=sigs)
-        return cls(
-            path=path,
-            sigs=sigs,
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.path = await reader.read_string(StorePath)
+        self.sigs = await reader.read_string_set()
+        self.logger.debug("from_reader", path=self.path, sigs=self.sigs)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.path)
         writer.write_string_set(self.sigs)

@@ -182,7 +182,7 @@ class Connection:
         await request.to_writer(self.w, self.version)
         await self.w.drain()
 
-        response = await response_type.from_reader(self.r, self.version)
+        response = await response_type().from_reader(self.r, self.version)
 
         return cast(Resp, response)
 

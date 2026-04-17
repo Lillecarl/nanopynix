@@ -19,18 +19,18 @@ class QueryMissingResponse(OpResponse):
     download_size: int = 0
     nar_size: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(
-            logs=await OperationLogs.from_reader(reader),
-            will_build=await reader.read_string_set(StorePath),
-            will_substitute=await reader.read_string_set(StorePath),
-            unknown=await reader.read_string_set(StorePath),
-            download_size=await reader.read_uint64(),
-            nar_size=await reader.read_uint64(),
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.will_build = await reader.read_string_set(StorePath)
+        self.will_substitute = await reader.read_string_set(StorePath)
+        self.unknown = await reader.read_string_set(StorePath)
+        self.download_size = await reader.read_uint64()
+        self.nar_size = await reader.read_uint64()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug(
             "to_writer",
             will_build=self.will_build,
@@ -53,12 +53,13 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
     is_query: ClassVar[bool] = True
     derived_paths: set[DerivedPath] = field(default_factory=set)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        derived_paths = await reader.read_string_set(DerivedPath)
-        cls.logger.debug("from_reader", derived_paths=derived_paths)
-        return cls(derived_paths=derived_paths)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.derived_paths = await reader.read_string_set(DerivedPath)
+        self.logger.debug("from_reader", derived_paths=self.derived_paths)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)

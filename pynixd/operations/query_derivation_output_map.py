@@ -14,18 +14,19 @@ from .base import OpRequest, OpResponse, OperationLogs
 class QueryDerivationOutputMapResponse(OpResponse):
     items: dict[str, StorePath] = field(default_factory=dict)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
-        items: dict[str, StorePath] = {}
+        self.items = {}
         for _ in range(n):
             k = await reader.read_string()
             v = await reader.read_string(StorePath)
-            items[k] = v
-        return cls(logs=logs, items=items)
+            self.items[k] = v
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", item_count=len(self.items))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.items))
@@ -42,12 +43,13 @@ class QueryDerivationOutputMapRequest(OpRequest[QueryDerivationOutputMapResponse
     is_query: ClassVar[bool] = True
     path: StorePath = StorePath("")
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        path = await reader.read_string(StorePath)
-        cls.logger.debug("from_reader", path=path)
-        return cls(path=path)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.path = await reader.read_string(StorePath)
+        self.logger.debug("from_reader", path=self.path)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.path)

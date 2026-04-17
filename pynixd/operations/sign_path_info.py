@@ -31,13 +31,14 @@ log = structlog.get_logger(__name__)
 class SignPathInfoResponse(OpResponse):
     info: ValidPathInfo | None = None
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        info = await ValidPathInfo.from_reader(reader)
-        return cls(logs=logs, info=info)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.info = await ValidPathInfo().from_reader(reader)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", info=self.info)
         self.logs.to_writer(writer)
         if self.info is not None:
@@ -59,13 +60,14 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         prefix = f"{key_name}:"
         return any(sig.startswith(prefix) for sig in self.info.sigs)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        info = await ValidPathInfo.from_reader(reader)
-        cls.logger.debug("from_reader", path=info.path)
-        return cls(info=info)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.info = await ValidPathInfo().from_reader(reader)
+        self.logger.debug("from_reader", path=self.info.path)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         if self.info is not None:
             self.info.to_writer(writer)
@@ -76,7 +78,7 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         log.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        request = await cls().from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.role < Role.ADMIN:
             log.warning("access_denied", user=ctx.username, role=ctx.role.name)

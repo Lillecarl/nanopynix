@@ -18,16 +18,14 @@ if TYPE_CHECKING:
 class VerifyStoreResponse(OpResponse):
     value: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        value = await reader.read_uint64()
-        return cls(
-            logs=logs,
-            value=value,
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.value = await reader.read_uint64()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", value=self.value)
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
@@ -41,17 +39,17 @@ class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
     check_contents: int = 0
     repair: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        check_contents = await reader.read_uint64()
-        repair = await reader.read_uint64()
-        cls.logger.debug("from_reader", check_contents=check_contents, repair=repair)
-        return cls(
-            check_contents=check_contents,
-            repair=repair,
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.check_contents = await reader.read_uint64()
+        self.repair = await reader.read_uint64()
+        self.logger.debug(
+            "from_reader", check_contents=self.check_contents, repair=self.repair
         )
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_uint64(self.check_contents)
         writer.write_uint64(self.repair)
@@ -62,7 +60,7 @@ class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
         log.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        request = await cls().from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.role < Role.ADMIN:
             log.warning("access_denied", user=ctx.username, role=ctx.role.name)

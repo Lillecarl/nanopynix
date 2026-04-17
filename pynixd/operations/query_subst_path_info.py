@@ -14,16 +14,17 @@ class QuerySubstitutablePathInfoResponse(OpResponse):
     found: bool = False
     info: SubstitutablePathInfo | None = None
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        found = await reader.read_uint64() != 0
-        info = None
-        if found:
-            info = await SubstitutablePathInfo.from_reader(reader, version)
-        return cls(logs=logs, found=found, info=info)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.found = await reader.read_uint64() != 0
+        self.info = None
+        if self.found:
+            self.info = await SubstitutablePathInfo().from_reader(reader, version)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", found=self.found)
         self.logs.to_writer(writer)
         writer.write_uint64(1 if self.found else 0)
@@ -39,12 +40,13 @@ class QuerySubstitutablePathInfoRequest(OpRequest[QuerySubstitutablePathInfoResp
     is_query: ClassVar[bool] = True
     path: str = ""
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        path = await reader.read_string()
-        cls.logger.debug("from_reader", path=path)
-        return cls(path=path)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.path = await reader.read_string()
+        self.logger.debug("from_reader", path=self.path)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.path)

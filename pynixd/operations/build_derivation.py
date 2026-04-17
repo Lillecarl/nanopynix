@@ -30,13 +30,14 @@ log = structlog.get_logger(__name__)
 class BuildDerivationResponse(OpResponse):
     result: BuildResult = field(default_factory=BuildResult)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        result = await BuildResult.from_reader(reader, version)
-        return cls(logs=logs, result=result)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.result = await BuildResult().from_reader(reader, version)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", result=self.result)
         self.logs.to_writer(writer)
         await self.result.to_writer(writer, version)
@@ -52,19 +53,18 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
     derivation: BasicDerivation = field(default_factory=BasicDerivation)
     build_mode: BuildMode = BuildMode.NORMAL
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        drv_path = await reader.read_string(StorePath)
-        derivation = await BasicDerivation.from_reader(reader, version)
-        build_mode = BuildMode(await reader.read_uint64())
-        cls.logger.debug("from_reader", drv_path=drv_path, build_mode=build_mode)
-        return cls(
-            drv_path=drv_path,
-            derivation=derivation,
-            build_mode=build_mode,
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.drv_path = await reader.read_string(StorePath)
+        self.derivation = await BasicDerivation().from_reader(reader, version)
+        self.build_mode = BuildMode(await reader.read_uint64())
+        self.logger.debug(
+            "from_reader", drv_path=self.drv_path, build_mode=self.build_mode
         )
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.drv_path)
         await self.derivation.to_writer(writer, version)
@@ -75,7 +75,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
         log.debug("received_op")
 
-        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        request = await cls().from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.proxy.scheduler is None:
             log.debug("handle_local_mode_fallback")

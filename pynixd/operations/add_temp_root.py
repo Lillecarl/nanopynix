@@ -14,14 +14,14 @@ from .base import OpRequest, OpResponse, OperationLogs
 class AddTempRootResponse(OpResponse):
     value: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        return cls(
-            logs=await OperationLogs.from_reader(reader),
-            value=await reader.read_uint64(),
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.value = await reader.read_uint64()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logs.to_writer(writer)
         self.logger.debug("to_writer", value=self.value)
         writer.write_uint64(self.value)
@@ -34,12 +34,13 @@ class AddTempRootRequest(OpRequest[AddTempRootResponse]):
     response_type: ClassVar[type[OpResponse]] = AddTempRootResponse
     path: StorePath = StorePath("")
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        path = await reader.read_string(StorePath)
-        cls.logger.debug("from_reader", path=path)
-        return cls(path=path)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.path = await reader.read_string(StorePath)
+        self.logger.debug("from_reader", path=self.path)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.path)

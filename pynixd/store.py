@@ -340,7 +340,7 @@ class Store(ABC):
 
             await fw.finalize()
             await dst_conn.w.drain()
-            await req.response_type.from_reader(dst_conn.r, dst_conn.version)
+            await req.response_type().from_reader(dst_conn.r, dst_conn.version)
 
         # 4. Update destination store's knowledge
         dst.add_path_infos(set(to_transfer))
@@ -370,7 +370,7 @@ class Store(ABC):
                 info.nar_size,
             )
 
-            await nar_request.response_type.from_reader(dst_conn.r, dst_conn.version)
+            await nar_request.response_type().from_reader(dst_conn.r, dst_conn.version)
 
     @property
     def available_transfer_slots(self) -> int:

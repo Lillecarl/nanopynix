@@ -19,18 +19,19 @@ class FindRootsEntry:
 class FindRootsResponse(OpResponse):
     roots: list[FindRootsEntry] = field(default_factory=list)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
-        roots = []
+        self.roots = []
         for _ in range(n):
             link = await reader.read_string()
             target = await reader.read_string()
-            roots.append(FindRootsEntry(link=link, target=target))
-        return cls(logs=logs, roots=roots)
+            self.roots.append(FindRootsEntry(link=link, target=target))
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", root_count=len(self.roots))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.roots))
@@ -45,10 +46,11 @@ class FindRootsRequest(OpRequest[FindRootsResponse]):
     op: ClassVar[int] = 14
     response_type: ClassVar[type[OpResponse]] = FindRootsResponse
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        cls.logger.debug("from_reader")
-        return cls()
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logger.debug("from_reader")
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)

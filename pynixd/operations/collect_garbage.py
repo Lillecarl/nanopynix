@@ -28,20 +28,16 @@ class CollectGarbageResponse(OpResponse):
     bytes_freed: int = 0
     _obsolete: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        paths_deleted = await reader.read_string_set(StorePath)
-        bytes_freed = await reader.read_uint64()
-        _obsolete = await reader.read_uint64()
-        return cls(
-            logs=logs,
-            paths_deleted=paths_deleted,
-            bytes_freed=bytes_freed,
-            _obsolete=_obsolete,
-        )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        self.paths_deleted = await reader.read_string_set(StorePath)
+        self.bytes_freed = await reader.read_uint64()
+        self._obsolete = await reader.read_uint64()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug(
             "to_writer", paths_deleted=self.paths_deleted, bytes_freed=self.bytes_freed
         )
@@ -64,33 +60,26 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
     _obsolete2: int = 0
     _obsolete3: int = 0
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        action = await reader.read_uint64()
-        paths_to_delete = await reader.read_string_set(StorePath)
-        ignore_liveness = await reader.read_uint64()
-        max_freed = await reader.read_uint64()
-        _obsolete1 = await reader.read_uint64()
-        _obsolete2 = await reader.read_uint64()
-        _obsolete3 = await reader.read_uint64()
-        cls.logger.debug(
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.action = await reader.read_uint64()
+        self.paths_to_delete = await reader.read_string_set(StorePath)
+        self.ignore_liveness = await reader.read_uint64()
+        self.max_freed = await reader.read_uint64()
+        self._obsolete1 = await reader.read_uint64()
+        self._obsolete2 = await reader.read_uint64()
+        self._obsolete3 = await reader.read_uint64()
+        self.logger.debug(
             "from_reader",
-            action=action,
-            paths_to_delete=paths_to_delete,
-            ignore_liveness=ignore_liveness,
-            max_freed=max_freed,
+            action=self.action,
+            paths_to_delete=self.paths_to_delete,
+            ignore_liveness=self.ignore_liveness,
+            max_freed=self.max_freed,
         )
-        return cls(
-            action=action,
-            paths_to_delete=paths_to_delete,
-            ignore_liveness=ignore_liveness,
-            max_freed=max_freed,
-            _obsolete1=_obsolete1,
-            _obsolete2=_obsolete2,
-            _obsolete3=_obsolete3,
-        )
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_uint64(self.action)
         writer.write_string_set(self.paths_to_delete)
@@ -106,7 +95,7 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
         log.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        request = await cls().from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.role < Role.ADMIN:
             log.warning("access_denied", user=ctx.username, role=ctx.role.name)

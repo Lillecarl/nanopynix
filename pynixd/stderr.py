@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import structlog
@@ -58,11 +58,11 @@ class StderrNext:
     """STDERR_NEXT — a log line from the daemon."""
 
     code: ClassVar[int] = wire.STDERR_NEXT
-    text: str
+    text: str = ""
 
-    @classmethod
-    async def from_reader(cls, r: NixReader) -> StderrNext:
-        return cls(text=await r.read_string())
+    async def from_reader(self, r: NixReader) -> StderrNext:
+        self.text = await r.read_string()
+        return self
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -74,23 +74,21 @@ class StderrStartActivity:
     """STDERR_START_ACTIVITY — begin a tracked activity."""
 
     code: ClassVar[int] = wire.STDERR_START_ACTIVITY
-    act_id: int
-    level: int
-    type: int
-    text: str
-    fields: list[Field]
-    parent: int
+    act_id: int = 0
+    level: int = 0
+    type: int = 0
+    text: str = ""
+    fields: list[Field] = field(default_factory=list)
+    parent: int = 0
 
-    @classmethod
-    async def from_reader(cls, r: NixReader) -> StderrStartActivity:
-        return cls(
-            act_id=await r.read_uint64(),
-            level=await r.read_uint64(),
-            type=await r.read_uint64(),
-            text=await r.read_string(),
-            fields=await read_fields(r),
-            parent=await r.read_uint64(),
-        )
+    async def from_reader(self, r: NixReader) -> StderrStartActivity:
+        self.act_id = await r.read_uint64()
+        self.level = await r.read_uint64()
+        self.type = await r.read_uint64()
+        self.text = await r.read_string()
+        self.fields = await read_fields(r)
+        self.parent = await r.read_uint64()
+        return self
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -107,11 +105,11 @@ class StderrStopActivity:
     """STDERR_STOP_ACTIVITY — end a tracked activity."""
 
     code: ClassVar[int] = wire.STDERR_STOP_ACTIVITY
-    act_id: int
+    act_id: int = 0
 
-    @classmethod
-    async def from_reader(cls, r: NixReader) -> StderrStopActivity:
-        return cls(act_id=await r.read_uint64())
+    async def from_reader(self, r: NixReader) -> StderrStopActivity:
+        self.act_id = await r.read_uint64()
+        return self
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -123,17 +121,15 @@ class StderrResult:
     """STDERR_RESULT — result data for an activity."""
 
     code: ClassVar[int] = wire.STDERR_RESULT
-    act_id: int
-    result_type: int
-    fields: list[Field]
+    act_id: int = 0
+    result_type: int = 0
+    fields: list[Field] = field(default_factory=list)
 
-    @classmethod
-    async def from_reader(cls, r: NixReader) -> StderrResult:
-        return cls(
-            act_id=await r.read_uint64(),
-            result_type=await r.read_uint64(),
-            fields=await read_fields(r),
-        )
+    async def from_reader(self, r: NixReader) -> StderrResult:
+        self.act_id = await r.read_uint64()
+        self.result_type = await r.read_uint64()
+        self.fields = await read_fields(r)
+        return self
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -147,34 +143,26 @@ class StderrError:
     """STDERR_ERROR — the daemon is reporting an error."""
 
     code: ClassVar[int] = wire.STDERR_ERROR
-    error_type: str
-    level: int
-    name: str
-    msg: str
-    have_pos: int
-    traces: list[tuple[int, str]]
+    error_type: str = ""
+    level: int = 0
+    name: str = ""
+    msg: str = ""
+    have_pos: int = 0
+    traces: list[tuple[int, str]] = field(default_factory=list)
 
-    @classmethod
-    async def from_reader(cls, r: NixReader) -> StderrError:
-        error_type = await r.read_string()
-        level = await r.read_uint64()
-        name = await r.read_string()
-        msg = await r.read_string()
-        have_pos = await r.read_uint64()
+    async def from_reader(self, r: NixReader) -> StderrError:
+        self.error_type = await r.read_string()
+        self.level = await r.read_uint64()
+        self.name = await r.read_string()
+        self.msg = await r.read_string()
+        self.have_pos = await r.read_uint64()
         n = await r.read_uint64()
-        traces = []
+        self.traces = []
         for _ in range(n):
             t_pos = await r.read_uint64()
             t_hint = await r.read_string()
-            traces.append((t_pos, t_hint))
-        return cls(
-            error_type=error_type,
-            level=level,
-            name=name,
-            msg=msg,
-            have_pos=have_pos,
-            traces=traces,
-        )
+            self.traces.append((t_pos, t_hint))
+        return self
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -252,7 +240,7 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
             continue
 
         unknown_streak = 0
-        msg = await parser.from_reader(r)
+        msg = await parser().from_reader(r)
         yield msg
 
 

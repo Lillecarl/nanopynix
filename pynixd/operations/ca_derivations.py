@@ -32,12 +32,13 @@ DrvOutput = str
 
 @dataclass
 class RegisterDrvOutputResponse(OpResponse):
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
-        return cls(logs=logs)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer")
         self.logs.to_writer(writer)
 
@@ -54,14 +55,15 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     response_type: ClassVar[type[OpResponse]] = RegisterDrvOutputResponse
     realisation: dict = field(default_factory=dict)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
         realisation_json = await reader.read_string()
-        realisation = json.loads(realisation_json)
-        cls.logger.debug("from_reader", realisation=realisation)
-        return cls(realisation=realisation)
+        self.realisation = json.loads(realisation_json)
+        self.logger.debug("from_reader", realisation=self.realisation)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(json.dumps(self.realisation))
 
@@ -78,17 +80,18 @@ class QueryRealisationResponse(OpResponse):
 
     realisations: list[dict] = field(default_factory=list)
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
-        realisations = []
+        self.realisations = []
         for _ in range(n):
             realisation_json = await reader.read_string()
-            realisations.append(json.loads(realisation_json))
-        return cls(logs=logs, realisations=realisations)
+            self.realisations.append(json.loads(realisation_json))
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", realisation_count=len(self.realisations))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.realisations))
@@ -105,12 +108,13 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
     response_type: ClassVar[type[OpResponse]] = QueryRealisationResponse
     drv_output: DrvOutput = ""
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        drv_output = await reader.read_string()
-        cls.logger.debug("from_reader", drv_output=drv_output)
-        return cls(drv_output=drv_output)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.drv_output = await reader.read_string()
+        self.logger.debug("from_reader", drv_output=self.drv_output)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.drv_output)

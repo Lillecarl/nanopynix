@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from .. import wire
-from ..stderr import read_stream
 from ..store_path import StorePath
 from ..wire import _CHUNK_SIZE, NixReader, NixWriter
 from .base import (
@@ -34,15 +33,16 @@ class NarFromPathResponse(OpResponse):
 
     nar_data: bytes = b""
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        logs = await OperationLogs.from_reader(reader)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.logs = await OperationLogs().from_reader(reader)
         collector = ByteCollector()
         await wire.stream_parse_nar(reader, collector, capture=False)
-        nar_data = collector.getvalue()
-        return cls(logs=logs, nar_data=nar_data)
+        self.nar_data = collector.getvalue()
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         self.logger.debug("to_writer", nar_size=len(self.nar_data))
         self.logs.to_writer(writer)
         writer.write(self.nar_data)
@@ -58,13 +58,14 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     nar_size: int = 0
     async_callback: Callable[[bytes], Awaitable[None]] | None = None
 
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        path = await reader.read_string(StorePath)
-        cls.logger.debug("from_reader", path=path)
-        return cls(path=path)
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        self._read_identifier = reader.identifier
+        self.path = await reader.read_string(StorePath)
+        self.logger.debug("from_reader", path=self.path)
+        return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        self._write_identifier = writer.identifier
         writer.write_uint64(self.op)
         writer.write_string(self.path)
 
@@ -101,7 +102,7 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
         log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
         log.debug("received_op")
 
-        request = await cls.from_reader(ctx.proxy.r, ctx.version)
+        request = await cls().from_reader(ctx.proxy.r, ctx.version)
         path = request.path
 
         info_resp = await ctx.proxy.local_store.execute(QueryPathInfoRequest(path=path))
@@ -122,9 +123,7 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
             await cls(path=path).to_writer(conn.w, conn.version)
             await conn.w.drain()
 
-            logs = OperationLogs()
-            async for msg in read_stream(conn.r):
-                logs.add(msg)
+            logs = await OperationLogs().from_reader(conn.r)
 
             await ctx.proxy.client.flush()
             logs.to_writer(ctx.proxy.w)
