@@ -61,11 +61,17 @@ async def _decompose_build_paths(
 
     results: list[tuple[DerivedPath, set[str], asyncio.Future]] = []
 
+    drv_to_derived: dict[str, DerivedPath] = {}
+    for dp in request.derived_paths:
+        if isinstance(dp, DerivedPath):
+            drv_to_derived.setdefault(dp.drv_path, dp)
+
     parsed_cache: dict[StorePath, ParsedDerivation] = {}
     all_planned_outputs: set[StorePath] = set()
     all_input_drvs: set[StorePath] = set()
 
-    for dp in (DerivedPath(p) for p in missing_resp.will_build):
+    for sp in missing_resp.will_build | missing_resp.unknown:
+        dp = drv_to_derived.get(str(sp), DerivedPath(sp))
         try:
             parsed = dp.to_derivation(store.store_path)
         except FileNotFoundError:
@@ -88,7 +94,8 @@ async def _decompose_build_paths(
     resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []
     all_input_srcs: set[StorePath] = set()
 
-    for dp in (DerivedPath(p) for p in missing_resp.will_build):
+    for sp in missing_resp.will_build | missing_resp.unknown:
+        dp = drv_to_derived.get(str(sp), DerivedPath(sp))
         drv_path = StorePath(dp.drv_path)
         parsed = parsed_cache.get(drv_path)
         if parsed is None:

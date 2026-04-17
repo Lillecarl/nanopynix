@@ -274,6 +274,166 @@ async def test_ca_simple_via_pynixd(profiler: pyinstrument.Profiler, ca_env) -> 
         assert rc == 0, f"CA simple build via pynixd failed:\n{stdboth}"
 
 
+async def test_ca_multi_output_via_pynixd(
+    profiler: pyinstrument.Profiler, ca_env
+) -> None:
+    """Build a CA derivation with multiple outputs through pynixd."""
+    async with asyncio.timeout(120):
+        server, uri = ca_env
+
+        cmd = [
+            str(NIX_BIN),
+            "build",
+            "--eval-store",
+            "auto",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations",
+            "--file",
+            str(TEST_CA_NIX),
+            "ca_multi_output",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(
+            cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        )
+        log.info("ca_multi_output_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
+        assert rc == 0, f"CA multi-output build via pynixd failed:\n{stdboth}"
+        paths = stdout.strip().splitlines()
+        assert len(paths) == 2, f"Expected 2 outputs, got {len(paths)}: {paths}"
+
+
+async def test_ca_depends_on_ca_via_pynixd(
+    profiler: pyinstrument.Profiler, ca_env
+) -> None:
+    """Build a CA derivation that depends on another CA derivation through pynixd."""
+    async with asyncio.timeout(120):
+        server, uri = ca_env
+
+        cmd = [
+            str(NIX_BIN),
+            "build",
+            "--eval-store",
+            "auto",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations",
+            "--file",
+            str(TEST_CA_NIX),
+            "ca_depends_on_ca",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(
+            cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        )
+        log.info("ca_depends_on_ca_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
+        assert rc == 0, f"CA depends-on-CA build via pynixd failed:\n{stdboth}"
+        assert stdout.strip().startswith("/nix/store/"), f"Unexpected output: {stdout}"
+
+
+@pytest.mark.xfail(
+    reason="deferred derivations need CA dependency realisations registered on builder before build"
+)
+async def test_non_ca_depends_on_ca_via_pynixd(
+    profiler: pyinstrument.Profiler, ca_env
+) -> None:
+    """Build a deferred (non-CA) derivation that depends on a CA derivation through pynixd."""
+    async with asyncio.timeout(120):
+        server, uri = ca_env
+
+        cmd = [
+            str(NIX_BIN),
+            "build",
+            "--eval-store",
+            "auto",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations",
+            "--file",
+            str(TEST_CA_NIX),
+            "non_ca_depends_on_ca",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(
+            cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        )
+        log.info("non_ca_depends_on_ca_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
+        assert rc == 0, f"Non-CA depends-on-CA build via pynixd failed:\n{stdboth}"
+        assert stdout.strip().startswith("/nix/store/"), f"Unexpected output: {stdout}"
+
+
+async def test_ca_query_derivation_output_map_via_pynixd(
+    profiler: pyinstrument.Profiler, ca_env
+) -> None:
+    """Build CA derivation through pynixd then query its output map."""
+    async with asyncio.timeout(120):
+        server, uri = ca_env
+
+        # Build the CA derivation first
+        build_cmd = [
+            str(NIX_BIN),
+            "build",
+            "--eval-store",
+            "auto",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations",
+            "--file",
+            str(TEST_CA_NIX),
+            "ca_simple",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(
+            build_cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        )
+        assert rc == 0, f"CA build via pynixd failed:\n{stdboth}"
+
+        # Get the .drv path
+        eval_cmd = [
+            str(NIX_BIN),
+            "eval",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations",
+            "--file",
+            str(TEST_CA_NIX),
+            "ca_simple.drvPath",
+            "--raw",
+        ]
+        rc, drv_out, _, _ = await run_subproc(eval_cmd, nix_config=CA_NIX_CONFIG)
+        assert rc == 0, f"CA drvPath eval failed:\n{_}"
+        drv_path = drv_out.strip()
+
+        # Query the output map — exercises QueryDerivationOutputMap (op 41)
+        info_cmd = [
+            str(NIX_BIN),
+            "path-info",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations",
+            "--json",
+            f"{drv_path}^*",
+        ]
+        rc, info_out, _, _ = await run_subproc(info_cmd, nix_config=CA_NIX_CONFIG)
+        assert rc == 0, f"path-info failed:\n{_}"
+        import json
+
+        info = json.loads(info_out)
+        assert len(info) > 0, f"No output paths found for {drv_path}"
+        for path, data in info.items():
+            assert "ca" in data, f"Expected 'ca' field in {data}"
+
+
 async def test_ca_query_derivation_output_map_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
