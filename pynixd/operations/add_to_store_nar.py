@@ -24,18 +24,16 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
 
-log = structlog.get_logger(__name__)
-
 
 @dataclass
 class AddToStoreNarResponse(OpResponse):
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer")
         self.logs.to_writer(writer)
 
@@ -53,7 +51,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
     async_provider: Callable[[NixWriter], Awaitable[None]] | None = None
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         path = await reader.read_string(StorePath)
         unkeyed_info = await UnkeyedValidPathInfo().from_reader(reader)
         self.info = unkeyed_info.with_path(path)
@@ -63,7 +61,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         if self.info is not None:
             self.info.to_writer(writer)
@@ -118,19 +116,18 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
 
         return await super().execute(store, client, suppress_last)
 
-    @classmethod
-    async def handle(cls, ctx: RequestContext) -> AddToStoreNarResponse:
+    async def handle(self, ctx: RequestContext) -> AddToStoreNarResponse:
         """Override handle because this is a streaming operation."""
-        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        structlog.contextvars.bind_contextvars(operation=type(self).__name__)
         async with ctx.proxy.local_store.transfer_conn() as conn:
-            path = await cls.forward(ctx.proxy.r, conn.w)
+            path = await self.forward(ctx.proxy.r, conn.w)
             resp = await AddToStoreNarResponse().from_reader(conn.r, conn.version)
             ctx.proxy.local_store.tracker.add_known_path(path)
         return resp
 
-    @classmethod
-    async def forward(cls, src: NixReader, dst: NixWriter) -> StorePath:
+    async def forward(self, src: NixReader, dst: NixWriter) -> StorePath:
         """Forward request prefix and stream framed NAR data. Returns store path."""
+        self.logger = self.logger.bind(identifier=src.identifier)
         dst.write_uint64(39)
 
         path = await src.read_string(StorePath)
@@ -140,7 +137,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         repair = await src.read_uint64()
         dont_check_sigs = await src.read_uint64()
 
-        cls._logger.debug(
+        self.logger.debug(
             "forward", info=info, repair=repair, dont_check_sigs=dont_check_sigs
         )
 

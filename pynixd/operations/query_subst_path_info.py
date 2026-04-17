@@ -15,7 +15,7 @@ class QuerySubstitutablePathInfoResponse(OpResponse):
     info: SubstitutablePathInfo | None = None
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         self.found = await reader.read_uint64() != 0
         self.info = None
@@ -24,7 +24,7 @@ class QuerySubstitutablePathInfoResponse(OpResponse):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", found=self.found)
         self.logs.to_writer(writer)
         writer.write_uint64(1 if self.found else 0)
@@ -41,12 +41,12 @@ class QuerySubstitutablePathInfoRequest(OpRequest[QuerySubstitutablePathInfoResp
     path: str = ""
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.path = await reader.read_string()
         self.logger.debug("from_reader", path=self.path)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.path)

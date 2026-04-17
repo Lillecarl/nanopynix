@@ -6,11 +6,9 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-import structlog
 
 from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file, to_basic_derivation
-from ..stderr import StderrNext
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
@@ -32,8 +30,6 @@ if TYPE_CHECKING:
     from ..scheduler import Scheduler
     from ..store import Store
 
-log = structlog.get_logger(__name__)
-
 
 # ── Decomposition (private) ──────────────────────────────────────────
 
@@ -50,7 +46,7 @@ async def _decompose_build_paths(
     )
 
     if missing_resp.will_substitute:
-        log.info(
+        request.logger.info(
             "substituting_paths",
             count=len(missing_resp.will_substitute),
         )
@@ -73,7 +69,7 @@ async def _decompose_build_paths(
         try:
             parsed = dp.to_derivation(store.store_path)
         except FileNotFoundError:
-            log.warning("drv_read_failed", drv_path=dp.drv_path)
+            request.logger.warning("drv_read_failed", drv_path=dp.drv_path)
             continue
 
         parsed_cache[StorePath(dp.drv_path)] = parsed
@@ -138,7 +134,7 @@ async def _decompose_build_paths(
             required_paths,
             platform=drv_request.derivation.platform,
         )
-        log.info(
+        request.logger.info(
             "build_derivation_enqueued",
             build_id=build_id,
             drv_path=drv_request.drv_path,
@@ -157,14 +153,15 @@ class BuildPathsResponse(OpResponse):
     value: int = 0
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         self.value = await reader.read_uint64()
+        self.logger.debug("from_reader", value=self.value)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
-        self.logger.debug("to_writer", self.value)
+        self.logger = self.logger.bind(identifier=writer.identifier)
+        self.logger.debug("to_writer", value=self.value)
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
 
@@ -179,7 +176,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
     build_mode: BuildMode = BuildMode.NORMAL
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.derived_paths = await reader.read_string_set(DerivedPath)
         self.build_mode = BuildMode(await reader.read_uint64())
         self.logger.debug(
@@ -188,36 +185,32 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)
-        writer.write_uint64(self.build_mode)
+        writer.write_uint64(self.build_mode.value)
 
-    @classmethod
-    async def handle(cls, ctx: RequestContext) -> OpResponse | None:
-        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
-        log.debug("received_op")
+    async def handle(self, ctx: RequestContext) -> OpResponse | None:
+        self.logger.debug("received_op")
 
-        request = await cls().from_reader(ctx.proxy.r, ctx.version)
+        await self.from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.proxy.scheduler is None:
-            log.debug("handle_local_mode_fallback")
-            result = await ctx.proxy.local_store.execute(
-                request, client=ctx.proxy.client
-            )
-            log.debug("responded_op")
+            self.logger.debug("handle_local_mode_fallback")
+            result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
+            self.logger.debug("responded_op")
             return result
 
-        log.debug("BuildPaths len(paths)=%d", len(request.derived_paths))
+        self.logger.debug("BuildPaths len(paths)=%d", len(self.derived_paths))
         decomposed = await _decompose_build_paths(
-            request,
+            self,
             ctx.proxy.local_store,
             ctx.proxy.scheduler,
             client=ctx.proxy.client,
         )
 
         if not decomposed:
-            log.debug("responded_op")
+            self.logger.debug("responded_op")
             return BuildPathsResponse(value=0)
 
         futures = [f for _, _, f in decomposed]
@@ -226,10 +219,10 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         for resp in responses:
             if isinstance(resp, BuildDerivationResponse):
                 if resp.result.status != 0:
-                    log.debug("responded_op")
-                    return BuildPathsResponse(value=1)
+                    self.logger.debug("responded_op")
+                    return BuildPathsResponse(value=0)
 
-        log.debug("responded_op")
+        self.logger.debug("responded_op")
         return BuildPathsResponse(value=0)
 
 
@@ -241,7 +234,7 @@ class BuildPathsWithResultsResponse(OpResponse):
     results: list[KeyedBuildResult] = field(default_factory=list)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
         self.results = []
@@ -250,7 +243,7 @@ class BuildPathsWithResultsResponse(OpResponse):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", self.results)
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.results))
@@ -268,7 +261,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
     build_mode: BuildMode = BuildMode.NORMAL
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.derived_paths = await reader.read_string_set(DerivedPath)
         self.build_mode = BuildMode(await reader.read_uint64())
 
@@ -278,39 +271,35 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)
-        writer.write_uint64(self.build_mode)
+        writer.write_uint64(self.build_mode.value)
 
-    @classmethod
-    async def handle(cls, ctx: RequestContext) -> OpResponse | None:
-        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
-        log.debug("received_op")
+    async def handle(self, ctx: RequestContext) -> OpResponse | None:
+        self.logger.debug("received_op")
 
-        request = await cls().from_reader(ctx.proxy.r, ctx.version)
+        await self.from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.proxy.scheduler is None:
-            log.debug("handle_local_mode_fallback")
-            result = await ctx.proxy.local_store.execute(
-                request, client=ctx.proxy.client
-            )
-            log.debug("responded_op")
+            self.logger.debug("handle_local_mode_fallback")
+            result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
+            self.logger.debug("responded_op")
             return result
 
-        log.debug(
+        self.logger.debug(
             "build_paths_with_results_decomposed",
-            num_derivations=len(request.derived_paths),
+            num_derivations=len(self.derived_paths),
         )
         decomposed = await _decompose_build_paths(
-            request,
+            self,
             ctx.proxy.local_store,
             ctx.proxy.scheduler,
             client=ctx.proxy.client,
         )
 
         if not decomposed:
-            log.debug("responded_op")
+            self.logger.debug("responded_op")
             return BuildPathsWithResultsResponse(results=[])
 
         futures = [f for _, _, f in decomposed]
@@ -326,19 +315,11 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
                     )
                 )
                 if resp.result.status not in (0, 1, 2):
-                    log.warning(
+                    self.logger.warning(
                         "unexpected_build_paths_with_results_status",
                         status=resp.result.status,
                         error_msg=resp.result.error_msg,
                     )
-                if (
-                    resp.result.status != 0
-                    and resp.result.error_msg
-                    and ctx.proxy.client
-                ):
-                    ctx.proxy.client.queue.put_nowait(
-                        StderrNext(text=f"pynixd: {resp.result.error_msg}\n")
-                    )
 
-        log.debug("responded_op")
+        self.logger.debug("responded_op")
         return BuildPathsWithResultsResponse(results=keyed_results)

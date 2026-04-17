@@ -220,7 +220,8 @@ class DaemonProxy:
         )
 
         try:
-            return await req_cls.handle(ctx)
+            request = req_cls()
+            return await request.handle(ctx)
         except BackendError:
             return None
 

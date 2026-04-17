@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-import structlog
 
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
@@ -25,8 +24,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
 
-log = structlog.get_logger(__name__)
-
 
 @dataclass
 class DerivationOutputsBatchResponse(OpResponse):
@@ -39,7 +36,7 @@ class DerivationOutputsBatchResponse(OpResponse):
         return not self.outputs
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
         self.outputs = {}
@@ -55,7 +52,7 @@ class DerivationOutputsBatchResponse(OpResponse):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", drv_path_count=len(self.outputs))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.outputs))
@@ -77,13 +74,13 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
     drv_paths: set[StorePath] = field(default_factory=set)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.drv_paths = await reader.read_string_set(StorePath)
         self.logger.debug("from_reader", drv_paths=self.drv_paths)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string_set(self.drv_paths)
 

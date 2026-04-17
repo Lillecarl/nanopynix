@@ -20,7 +20,7 @@ class FindRootsResponse(OpResponse):
     roots: list[FindRootsEntry] = field(default_factory=list)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
         self.roots = []
@@ -31,7 +31,7 @@ class FindRootsResponse(OpResponse):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", root_count=len(self.roots))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.roots))
@@ -47,10 +47,10 @@ class FindRootsRequest(OpRequest[FindRootsResponse]):
     response_type: ClassVar[type[OpResponse]] = FindRootsResponse
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logger.debug("from_reader")
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)

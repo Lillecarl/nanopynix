@@ -20,7 +20,7 @@ class QuerySubstitutablePathInfosResponse(OpResponse):
     entries: list[SubstitutablePathInfoEntry] = field(default_factory=list)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
         self.entries = []
@@ -31,7 +31,7 @@ class QuerySubstitutablePathInfosResponse(OpResponse):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", entry_count=len(self.entries))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.entries))
@@ -51,7 +51,7 @@ class QuerySubstitutablePathInfosRequest(
     items: dict[str, str] = field(default_factory=dict)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         n = await reader.read_uint64()
         self.items = {}
         for _ in range(n):
@@ -62,7 +62,7 @@ class QuerySubstitutablePathInfosRequest(
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_uint64(len(self.items))
         for k, v in self.items.items():

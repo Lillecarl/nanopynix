@@ -115,18 +115,10 @@ class OpRequest(ABC, Generic[Resp]):
     is_query: ClassVar[bool] = False
     is_build: ClassVar[bool] = False
     is_extension: ClassVar[bool] = False
-    _read_identifier: str = field(default="unknown", init=False)
-    _write_identifier: str = field(default="unknown", init=False)
-    _logger: ClassVar[structlog.BoundLogger] = structlog.get_logger(
-        f"pynixd.operations.{__name__}"
-    )
-
-    @property
-    def logger(self) -> structlog.BoundLogger:
-        return type(self)._logger.bind(
-            read_identifier=self._read_identifier,
-            write_identifier=self._write_identifier,
-        )
+    # logger is set per-subclass by __init_subclass__; instances override it
+    # via self.logger = self.logger.bind(identifier=...) in from_reader/to_writer.
+    # Declared without type annotation so dataclass ignores it.
+    logger = structlog.get_logger("pynixd.operations.base")
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Runs when an OpRequest subclass is instantiated, registers
@@ -134,17 +126,16 @@ class OpRequest(ABC, Generic[Resp]):
         super().__init_subclass__(**kwargs)
         if "op" in cls.__dict__:
             OP_REGISTRY[cls.op] = cls
-            cls._logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        cls.logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
 
-    @classmethod
-    async def handle(cls, ctx: RequestContext) -> OpResponse | None:
+    async def handle(self, ctx: RequestContext) -> OpResponse | None:
         """Handle this operation from a client.
 
         Decodes the request and delegates execution to the stores.
         Streaming operations should override this method.
         """
-        request = await cls().from_reader(ctx.proxy.r, ctx.version)
-        result = await ctx.proxy.execute(request)
+        await self.from_reader(ctx.proxy.r, ctx.version)
+        result = await ctx.proxy.execute(self)
         return result
 
     async def execute(
@@ -239,25 +230,15 @@ class OperationLogs:
 class OpResponse(ABC):
     """Base class for operation responses."""
 
-    _log: ClassVar = structlog.get_logger(__name__)
-    _read_identifier: str = field(default="unknown", init=False)
-    _write_identifier: str = field(default="unknown", init=False)
-    _logger: ClassVar[structlog.BoundLogger] = structlog.get_logger(
-        f"pynixd.operations.{__name__}"
-    )
-
-    @property
-    def logger(self) -> structlog.BoundLogger:
-        return type(self)._logger.bind(
-            read_identifier=self._read_identifier,
-            write_identifier=self._write_identifier,
-        )
-
     logs: OperationLogs = field(default_factory=OperationLogs)
+    # logger is set per-subclass by __init_subclass__; instances override it
+    # via self.logger = self.logger.bind(identifier=...) in from_reader/to_writer.
+    # Declared without type annotation so dataclass ignores it.
+    logger = structlog.get_logger("pynixd.operations.base")
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        cls._logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
+        cls.logger = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
 
     @property
     def is_not_found(self) -> bool:

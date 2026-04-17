@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-import structlog
 
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
@@ -39,8 +38,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
 
-log = structlog.get_logger(__name__)
-
 
 @dataclass
 class QueryPathInfosResponse(OpResponse):
@@ -51,7 +48,7 @@ class QueryPathInfosResponse(OpResponse):
         return not self.infos
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
         self.infos = {}
@@ -61,7 +58,7 @@ class QueryPathInfosResponse(OpResponse):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", info_count=len(self.infos))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.infos))
@@ -79,13 +76,13 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
     paths: set[StorePath] = field(default_factory=set)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.paths = await reader.read_string_set(StorePath)
         self.logger.debug("from_reader", paths=self.paths)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string_set(self.paths)
 

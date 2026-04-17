@@ -20,7 +20,7 @@ class QueryMissingResponse(OpResponse):
     nar_size: int = 0
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         self.will_build = await reader.read_string_set(StorePath)
         self.will_substitute = await reader.read_string_set(StorePath)
@@ -30,7 +30,7 @@ class QueryMissingResponse(OpResponse):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug(
             "to_writer",
             will_build=self.will_build,
@@ -54,12 +54,12 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
     derived_paths: set[DerivedPath] = field(default_factory=set)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.derived_paths = await reader.read_string_set(DerivedPath)
         self.logger.debug("from_reader", derived_paths=self.derived_paths)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)

@@ -22,8 +22,6 @@ from .base import (
 if TYPE_CHECKING:
     pass
 
-log = structlog.get_logger(__name__)
-
 
 @dataclass
 class AddToStoreResponse(OpResponse):
@@ -32,13 +30,13 @@ class AddToStoreResponse(OpResponse):
     info: ValidPathInfo | None = None
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         self.info = await ValidPathInfo().from_reader(reader)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", info=self.info)
         self.logs.to_writer(writer)
         if self.info is not None:
@@ -58,7 +56,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     repair: int = 0
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.path_name = await reader.read_string()
         self.cam = await reader.read_string()
         self.references = await reader.read_string_set(StorePath)
@@ -73,40 +71,41 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.path_name)
         writer.write_string(self.cam)
         writer.write_string_set(self.references)
         writer.write_uint64(self.repair)
 
-    @classmethod
-    async def handle(cls, ctx: RequestContext) -> AddToStoreResponse:
+    async def handle(self, ctx: RequestContext) -> AddToStoreResponse:
         """Override handle because this is a streaming operation."""
-        structlog.contextvars.bind_contextvars(operation=cls.__name__)
+        structlog.contextvars.bind_contextvars(operation=type(self).__name__)
         async with ctx.proxy.local_store.transfer_conn() as conn:
-            await cls.forward(ctx.proxy.r, conn.w)
+            await self.forward(ctx.proxy.r, conn.w)
             await conn.w.drain()
             resp = await AddToStoreResponse().from_reader(conn.r, conn.version)
             if resp.info is not None:
                 resp.info = (
-                    await ctx.proxy.local_store.execute(SignPathInfoRequest(resp.info))
+                    await ctx.proxy.local_store.execute(
+                        SignPathInfoRequest(info=resp.info)
+                    )
                 ).info
                 if resp.info is not None:
                     ctx.proxy.local_store.tracker.add_known_path(resp.info.path)
                     ctx.proxy.local_store.add_path_info(resp.info)
             return resp
 
-    @classmethod
-    async def forward(cls, src: NixReader, dst: NixWriter) -> None:
+    async def forward(self, src: NixReader, dst: NixWriter) -> None:
         """Forward request prefix and stream framed NAR data from src to dst."""
+        self.logger = self.logger.bind(identifier=src.identifier)
         dst.write_uint64(7)
 
         path_name = await src.read_string()
         cam = await src.read_string()
         references = await src.read_string_set(StorePath)
         repair = await src.read_uint64()
-        cls._logger.debug(
+        self.logger.debug(
             "forward",
             path_name=path_name,
             cam=cam,

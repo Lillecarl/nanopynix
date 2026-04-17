@@ -33,12 +33,12 @@ DrvOutput = str
 @dataclass
 class RegisterDrvOutputResponse(OpResponse):
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer")
         self.logs.to_writer(writer)
 
@@ -56,14 +56,14 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     realisation: dict = field(default_factory=dict)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         realisation_json = await reader.read_string()
         self.realisation = json.loads(realisation_json)
         self.logger.debug("from_reader", realisation=self.realisation)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(json.dumps(self.realisation))
 
@@ -81,7 +81,7 @@ class QueryRealisationResponse(OpResponse):
     realisations: list[dict] = field(default_factory=list)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
         self.realisations = []
@@ -91,7 +91,7 @@ class QueryRealisationResponse(OpResponse):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", realisation_count=len(self.realisations))
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.realisations))
@@ -109,12 +109,12 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
     drv_output: DrvOutput = ""
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.drv_output = await reader.read_string()
         self.logger.debug("from_reader", drv_output=self.drv_output)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.drv_output)

@@ -24,12 +24,12 @@ if TYPE_CHECKING:
 @dataclass
 class SetOptionsResponse(OpResponse):
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer")
         self.logs.to_writer(writer)
 
@@ -54,7 +54,7 @@ class SetOptionsRequest(OpRequest[SetOptionsResponse]):
     overrides: dict[str, str] = field(default_factory=dict)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.keep_failed = await reader.read_uint64()
         self.keep_going = await reader.read_uint64()
         self.try_fallback = await reader.read_uint64()
@@ -102,7 +102,7 @@ class SetOptionsRequest(OpRequest[SetOptionsResponse]):
         return SetOptionsResponse()
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_uint64(self.keep_failed)
         writer.write_uint64(self.keep_going)

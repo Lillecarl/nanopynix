@@ -6,8 +6,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-import structlog
-
 from .. import wire
 from ..store_path import StorePath
 from ..wire import _CHUNK_SIZE, NixReader, NixWriter
@@ -24,8 +22,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
 
-log = structlog.get_logger(__name__)
-
 
 @dataclass
 class NarFromPathResponse(OpResponse):
@@ -34,7 +30,7 @@ class NarFromPathResponse(OpResponse):
     nar_data: bytes = b""
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         collector = ByteCollector()
         await wire.stream_parse_nar(reader, collector, capture=False)
@@ -42,7 +38,7 @@ class NarFromPathResponse(OpResponse):
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", nar_size=len(self.nar_data))
         self.logs.to_writer(writer)
         writer.write(self.nar_data)
@@ -59,13 +55,13 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     async_callback: Callable[[bytes], Awaitable[None]] | None = None
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self._read_identifier = reader.identifier
+        self.logger = self.logger.bind(identifier=reader.identifier)
         self.path = await reader.read_string(StorePath)
         self.logger.debug("from_reader", path=self.path)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self._write_identifier = writer.identifier
+        self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.path)
 
@@ -97,30 +93,28 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
 
         return await super().execute(store, client, suppress_last)
 
-    @classmethod
-    async def handle(cls, ctx: RequestContext) -> NarFromPathResponse | None:
-        log = structlog.get_logger(f"pynixd.operations.{cls.__name__}")
-        log.debug("received_op")
-
-        request = await cls().from_reader(ctx.proxy.r, ctx.version)
-        path = request.path
+    async def handle(self, ctx: RequestContext) -> NarFromPathResponse | None:
+        """Override handle because this is a streaming operation."""
+        self.logger = self.logger.bind(identifier=ctx.proxy.r.identifier)
+        self.path = await ctx.proxy.r.read_string(StorePath)
+        path = self.path
 
         info_resp = await ctx.proxy.local_store.execute(QueryPathInfoRequest(path=path))
         if not info_resp.valid or info_resp.info is None:
-            log.warning("nar_not_in_local_store", path=path)
-            log.debug("responded_op")
+            self.logger.warning("nar_not_in_local_store", path=path)
+            self.logger.debug("responded_op")
             return NarFromPathResponse(nar_data=b"")
 
         nar_size = info_resp.info.nar_size
 
-        log.debug(
+        self.logger.debug(
             "nar_from_path_streaming",
             path=path,
             size=nar_size,
         )
 
         async with ctx.proxy.local_store.transfer_conn() as conn:
-            await cls(path=path).to_writer(conn.w, conn.version)
+            await NarFromPathRequest(path=path).to_writer(conn.w, conn.version)
             await conn.w.drain()
 
             logs = await OperationLogs().from_reader(conn.r)
@@ -139,5 +133,5 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
                 await wire.stream_parse_nar(conn.r, ctx.proxy.w)
 
         await ctx.proxy.w.drain()
-        log.debug("responded_op")
+        self.logger.debug("responded_op")
         return None
