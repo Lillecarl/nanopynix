@@ -889,7 +889,8 @@ class KeyedBuildResult:
 class ByteCollector(NixWriter):
     """NixWriter that collects bytes into a buffer."""
 
-    def __init__(self) -> None:
+    def __init__(self, identifier: str = "memory") -> None:
+        super().__init__(identifier=identifier)
         self._buf = bytearray()
 
     def write(self, data: bytes) -> None:

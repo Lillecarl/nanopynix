@@ -94,8 +94,8 @@ async def start_ssh_server(
         role = Role.ADMIN if is_admin else Role.USER
         try:
             proxy = DaemonProxy(
-                SSHNixReader(process.stdin),
-                SSHNixWriter(process.stdout),
+                SSHNixReader(process.stdin, identifier="client"),
+                SSHNixWriter(process.stdout, identifier="client"),
                 local_store=local_store,
                 scheduler=scheduler,
                 role=role,

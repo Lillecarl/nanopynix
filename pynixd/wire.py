@@ -38,6 +38,9 @@ def _nar_pad(n: int) -> int:
 class NixReader:
     """Wraps AsyncReader with wire protocol methods and dirty checking."""
 
+    def __init__(self, identifier: str = "unknown") -> None:
+        self.identifier = identifier
+
     async def readexactly(self, n: int) -> bytes:
         raise NotImplementedError
 
@@ -95,8 +98,8 @@ _SSH_READ_AHEAD = 16 * 1024  # read-ahead size to amortize asyncssh lock overhea
 
 
 class SSHNixReader(NixReader):
-    def __init__(self, reader: asyncssh.SSHReader) -> None:
-        super().__init__()
+    def __init__(self, reader: asyncssh.SSHReader, identifier: str = "unknown") -> None:
+        super().__init__(identifier=identifier)
         self.reader = reader
 
     async def readexactly(self, n: int) -> bytes:
@@ -127,8 +130,10 @@ _UINT64_STRUCT = struct.Struct("<Q")
 
 
 class UnixNixReader(NixReader):
-    def __init__(self, reader: asyncio.StreamReader) -> None:
-        super().__init__()
+    def __init__(
+        self, reader: asyncio.StreamReader, identifier: str = "unknown"
+    ) -> None:
+        super().__init__(identifier=identifier)
         self.reader = reader
 
     async def readexactly(self, n: int) -> bytes:
@@ -140,6 +145,9 @@ class UnixNixReader(NixReader):
 
 class NixWriter:
     """Wraps AsyncWriter with wire protocol methods."""
+
+    def __init__(self, identifier: str = "unknown") -> None:
+        self.identifier = identifier
 
     def write(self, data: bytes) -> None:
         self._write_to_transport(data)
@@ -207,8 +215,8 @@ class NixWriter:
 class BytesWriter(NixWriter):
     """A NixWriter that writes to a bytearray."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, identifier: str = "memory") -> None:
+        super().__init__(identifier=identifier)
         self._buf = bytearray()
 
     def write(self, data: bytes) -> None:
@@ -222,8 +230,8 @@ class BytesWriter(NixWriter):
 
 
 class SSHNixWriter(NixWriter):
-    def __init__(self, writer: asyncssh.SSHWriter) -> None:
-        super().__init__()
+    def __init__(self, writer: asyncssh.SSHWriter, identifier: str = "unknown") -> None:
+        super().__init__(identifier=identifier)
         self.writer = writer
 
     def _write_to_transport(self, data: bytes) -> None:
@@ -241,8 +249,10 @@ class SSHNixWriter(NixWriter):
 
 
 class UnixNixWriter(NixWriter):
-    def __init__(self, writer: asyncio.StreamWriter) -> None:
-        super().__init__()
+    def __init__(
+        self, writer: asyncio.StreamWriter, identifier: str = "unknown"
+    ) -> None:
+        super().__init__(identifier=identifier)
         self.writer = writer
 
     def _write_to_transport(self, data: bytes) -> None:
@@ -499,7 +509,7 @@ class FramedWriter(NixWriter):
         self,
         dst: NixWriter,
     ) -> None:
-        super().__init__()
+        super().__init__(identifier=dst.identifier)
         self._dst = dst
 
     def write_bytes(self, data: bytes) -> None:

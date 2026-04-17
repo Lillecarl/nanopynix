@@ -48,8 +48,8 @@ async def start_unix_server(
         log.info("unix_client_connected", peer=peer)
         try:
             proxy = DaemonProxy(
-                UnixNixReader(reader),
-                UnixNixWriter(writer),
+                UnixNixReader(reader, identifier="client"),
+                UnixNixWriter(writer, identifier="client"),
                 local_store=local_store,
                 scheduler=scheduler,
                 role=Role.ADMIN,

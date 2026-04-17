@@ -989,7 +989,11 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
             high=wire._SSH_WINDOW_SIZE, low=wire._SSH_WINDOW_SIZE // 4
         )
 
-        conn = Connection(SSHNixReader(proc.stdout), SSHNixWriter(proc.stdin), conn_id)
+        conn = Connection(
+            SSHNixReader(proc.stdout, identifier=conn_id),
+            SSHNixWriter(proc.stdin, identifier=conn_id),
+            conn_id,
+        )
         await conn.connect()
         return conn
 
@@ -1152,7 +1156,10 @@ class LocalSocketStore(Store):
         )
         r, w = await asyncio.open_unix_connection(str(self.socket_path))
         conn = Connection(
-            UnixNixReader(r), UnixNixWriter(w), conn_id, store_path=self.store_path
+            UnixNixReader(r, identifier=conn_id),
+            UnixNixWriter(w, identifier=conn_id),
+            conn_id,
+            store_path=self.store_path,
         )
         await conn.connect()
         return conn
@@ -1218,7 +1225,11 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         except Exception:
             self.invalidate_ssh()
             raise
-        conn = Connection(SSHNixReader(r), SSHNixWriter(w), conn_id)
+        conn = Connection(
+            SSHNixReader(r, identifier=conn_id),
+            SSHNixWriter(w, identifier=conn_id),
+            conn_id,
+        )
         await conn.connect()
         return conn
 
