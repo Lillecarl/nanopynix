@@ -13,7 +13,6 @@ Exercises the full dynamic derivation lifecycle against a root Nix store:
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
