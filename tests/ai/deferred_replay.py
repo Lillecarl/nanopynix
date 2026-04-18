@@ -15,7 +15,6 @@ Exercises the exact code path that pynixd's scheduler will use:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -36,8 +35,7 @@ from pynixd.operations.query_derivation_output_map import (
 from pynixd.operations.query_derivation_outputs_batch import (
     QueryDerivationOutputsBatchRequest,
 )
-from pynixd.operations.add_to_store_nar import AddToStoreNarRequest
-from pynixd.operations.query_path_info import QueryPathInfoRequest
+from pynixd.operations.add_to_store import AddToStoreRequest
 from pynixd.wire import FramedWriter
 from tests.conftest import (
     NIX_BIN,
@@ -52,75 +50,37 @@ CA_EXTRA_ARGS = ["--option", "extra-experimental-features", "ca-derivations"]
 CA_NIX_CONFIG = {"extra-experimental-features": "ca-derivations"}
 
 
-def make_nar_regular_file(content: bytes) -> bytes:
-    """Create a NAR archive for a single regular file with the given content."""
-    parts = []
-    parts.append(b"(\n")
-    parts.append(b"type")
-    parts.append(b"regular")
-    if b"\x00" in content:
-        parts.append(b"executable")
-        parts.append(b"")
-    parts.append(b"contents")
-    parts.append(len(content).to_bytes(8, "little"))
-    parts.append(content)
-    pad = 8 - (len(content) % 8)
-    if pad < 8:
-        parts.append(b"\x00" * pad)
-    parts.append(b")")
-    return b"".join(parts)
-
-
-def nar_hash_and_size(content: bytes) -> tuple[str, int]:
-    """Compute SHA-256 hash and size of a NAR for a regular file with given content."""
-    nar = make_nar_regular_file(content)
-    h = hashlib.sha256(nar).hexdigest()
-    return f"sha256:{h}", len(nar)
-
-
-async def add_resolved_drv_via_nar(
+async def add_text_to_store(
     store: LocalSocketStore,
-    drv_path: StorePath,
-    resolved_aterm: bytes,
-) -> bool:
-    """Overwrite a .drv file's content on a store via AddToStoreNar.
+    name: str,
+    content: bytes,
+    references: set[StorePath],
+) -> StorePath | None:
+    """Add a text file to a store via AddToStore(text:sha256) and return its path."""
 
-    This replaces the existing file content at drv_path with the resolved ATerm.
-    The daemon accepts AddToStoreNar for paths it already knows about (with repair=1).
-    """
-    nar_hash, nar_size = nar_hash_and_size(resolved_aterm)
-
-    info = ValidPathInfo(
-        path=drv_path,
-        deriver=StorePath(""),
-        nar_hash=nar_hash,
-        references=set(),
-        registration_time=0,
-        nar_size=nar_size,
-        ultimate=0,
-        sigs=set(),
-        ca="",
-    )
-
-    async def provide_nar(writer):
+    async def provide_content(writer):
         fw = writer.framed()
-        nar = make_nar_regular_file(resolved_aterm)
-        fw.write(nar)
+        fw.write(content)
         await fw.finalize()
 
-    req = AddToStoreNarRequest(
-        info=info,
-        repair=1,
-        dont_check_sigs=1,
-        async_provider=provide_nar,
+    req = AddToStoreRequest(
+        path_name=name,
+        cam="text:sha256",
+        references=references,
+        repair=0,
+        async_provider=provide_content,
     )
     try:
         resp = await req.execute(store, suppress_last=True)
-        print(f"  AddToStoreNar succeeded for {drv_path}")
-        return True
+        if resp.info is not None:
+            store.tracker.add_known_path(resp.info.path)
+            store.add_path_info(resp.info)
+            return resp.info.path
+        print(f"  AddToStore returned no path info! logs={resp.logs.messages}")
+        return None
     except Exception as e:
-        print(f"  AddToStoreNar FAILED: {type(e).__name__}: {e}")
-        return False
+        print(f"  AddToStore FAILED: {type(e).__name__}: {e}")
+        return None
 
 
 async def main() -> None:
@@ -291,12 +251,10 @@ async def main() -> None:
         except Exception as e:
             print(f"Registration FAILED: {e}")
 
-    # -- Step 4b: Resolve and replace BEFORE any BuildDerivation --
-    # This must happen BEFORE the builder daemon has a chance to cache
-    # the unresolved .drv content.
+    # -- Step 4b: Resolve and add resolved .drv via AddToStore --
     print()
     print("=" * 70)
-    print("Step 4b: Early resolve and replace .drv content")
+    print("Step 4b: Resolve derivation and add to stores via AddToStore")
     print("=" * 70)
 
     resolved_output_paths_early: dict[str, StorePath] = {
@@ -307,57 +265,50 @@ async def main() -> None:
     )
     resolved_aterm_early = _unparse_basic_derivation(resolved_early, mask_outputs=False)
 
-    # Local store: overwrite filesystem
-    drv_rel = str(deferred_drv_path).lstrip("/")
-    local_fs_path = root_store.store_path / drv_rel
-    if local_fs_path.exists():
-        local_fs_path.chmod(0o644)
-    with open(local_fs_path, "w") as f:
-        f.write(resolved_aterm_early)
-    print(
-        f"Wrote resolved .drv to local store filesystem ({len(resolved_aterm_early)} chars)"
+    # Use the same name as the original drv — Nix keeps the .drv suffix
+    # The hash changes because the content is different, giving a new path.
+    drv_basename = str(deferred_drv_path).rsplit("/", 1)[-1]
+    drv_name_for_add = drv_basename  # e.g. "66jcl4...-non-ca-depends-on-ca.drv"
+    print(f"Adding resolved .drv via AddToStore text:sha256 name={drv_name_for_add}")
+    print(f"  References: {sorted(str(p) for p in resolved_early.input_srcs)}")
+
+    local_resolved_path = await add_text_to_store(
+        root_store,
+        drv_name_for_add,
+        resolved_aterm_early.encode("utf-8"),
+        resolved_early.input_srcs,
     )
+    print(f"Local store resolved .drv: {local_resolved_path}")
 
-    # Builder store: overwrite filesystem
-    builder_fs_path = builder_store.store_path / drv_rel
-    if builder_fs_path.exists():
-        builder_fs_path.chmod(0o644)
-    with open(builder_fs_path, "w") as f:
-        f.write(resolved_aterm_early)
-    print(
-        f"Wrote resolved .drv to builder store filesystem ({len(resolved_aterm_early)} chars)"
+    builder_resolved_path = await add_text_to_store(
+        builder_store,
+        drv_name_for_add,
+        resolved_aterm_early.encode("utf-8"),
+        resolved_early.input_srcs,
     )
+    print(f"Builder store resolved .drv: {builder_resolved_path}")
 
-    # Restart builder daemon to clear any cached derivation parse
-    print("Restarting builder daemon to clear caches...")
-    await builder_store.close()
-    builder_store = LocalSocketStore(
-        id="deferred-replay-builder", store_path=builder_path, **builder_kwargs
-    )
-    await builder_store.ensure_daemon()
-    print("Builder daemon restarted.")
+    if not local_resolved_path or not builder_resolved_path:
+        print("\nAddToStore FAILED — cannot proceed with build")
+        await root_store.close()
+        await builder_store.close()
+        return
 
-    # Re-register CA realisation after daemon restart
-    if realisation_to_register:
-        try:
-            reg_req2 = RegisterDrvOutputRequest(realisation=realisation_to_register)
-            await builder_store.call(reg_req2, suppress_last=True)
-            print("CA realisation re-registered after restart!")
-        except Exception as e:
-            print(f"Re-registration FAILED: {e}")
+    if local_resolved_path != builder_resolved_path:
+        print(f"\nWARNING: resolved .drv paths differ!")
 
-    # -- Step 5: BuildDerivation with original path + resolved BasicDerivation --
+    # -- Step 5: BuildDerivation with RESOLVED .drv path --
     print()
     print("=" * 70)
-    print("Step 5: BuildDerivation with original path + resolved derivation")
+    print("Step 5: BuildDerivation with resolved .drv path")
     print("=" * 70)
 
     build_req = BuildDerivationRequest(
-        drv_path=deferred_drv_path,
+        drv_path=local_resolved_path,
         derivation=resolved_early,
     )
 
-    print(f"Sending BuildDerivation for {deferred_drv_path}")
+    print(f"Sending BuildDerivation for {local_resolved_path}")
     print(f"  outputs: {[(n, o.path) for n, o in resolved_early.outputs.items()]}")
 
     try:
