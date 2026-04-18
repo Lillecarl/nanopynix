@@ -23,24 +23,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
-from pynixd.drv_parser import read_drv_file, to_basic_derivation
+from pynixd.drv_parser import read_drv_file
 from pynixd.derivation_resolution import (
     resolve_derivation,
     _unparse_basic_derivation,
     _nix_drv_name,
 )
-from pynixd.operations.base import BuildMode, ValidPathInfo, UnkeyedValidPathInfo
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest
-from pynixd.operations.query_derivation_output_map import (
-    QueryDerivationOutputMapRequest,
-)
-from pynixd.operations.query_derivation_outputs_batch import (
-    QueryDerivationOutputsBatchRequest,
-)
 from pynixd.operations.add_to_store import AddToStoreRequest
-from pynixd.wire import FramedWriter
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
@@ -309,7 +301,7 @@ async def main() -> None:
         return
 
     if local_resolved_path != builder_resolved_path:
-        print(f"\nWARNING: resolved .drv paths differ!")
+        print("\nWARNING: resolved .drv paths differ!")
 
     # -- Step 5: BuildDerivation with RESOLVED .drv path --
     print()

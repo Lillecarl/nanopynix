@@ -22,17 +22,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from pynixd.drv_parser import ParsedDerivation, read_drv_file, parse_drv
-from pynixd.operations.base import BasicDerivation, BuildMode, DerivationOutput
+from pynixd.drv_parser import ParsedDerivation, read_drv_file
+from pynixd.operations.base import BasicDerivation, DerivationOutput
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import (
-    QueryRealisationRequest,
     RegisterDrvOutputRequest,
 )
-from pynixd.operations.query_derivation_output_map import (
-    QueryDerivationOutputMapRequest,
-)
-from pynixd.operations.query_valid_paths import QueryValidPathsRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
@@ -413,7 +408,7 @@ async def main() -> None:
     print(f"Deferred .drv path: {deferred_drv_path}")
 
     deferred_parsed = read_drv_file(root_store.store_path, deferred_drv_path)
-    ca_parsed = read_drv_file(root_store.store_path, ca_drv_path)
+    read_drv_file(root_store.store_path, ca_drv_path)
 
     print(f"\nDeferred .drv outputs: {deferred_parsed.output_paths()}")
     print(f"Deferred .drv input_drvs: {list(deferred_parsed.input_drvs.keys())}")
@@ -457,11 +452,11 @@ async def main() -> None:
         deferred_parsed, deferred_drv_path, resolved_output_paths
     )
 
-    print(f"\nResolved BasicDerivation:")
+    print("\nResolved BasicDerivation:")
     print(f"  input_srcs ({len(resolved.input_srcs)}):")
     for p in sorted(str(p) for p in resolved.input_srcs):
         print(f"    {p}")
-    print(f"  outputs:")
+    print("  outputs:")
     for name, o in resolved.outputs.items():
         print(f"    {name}: path={o.path!r} method={o.method!r} hash={o.hash_digest!r}")
     print(f"  env['out'] = {resolved.env.get('out', '!MISSING')!r}")
@@ -480,7 +475,7 @@ async def main() -> None:
 
     # Also compare the resolved .drv ATerm with what Nix produced
     resolved_aterm = _unparse_basic_derivation(resolved, mask_outputs=False)
-    print(f"\n  Our resolved ATerm:")
+    print("\n  Our resolved ATerm:")
     print(f"    {resolved_aterm}")
 
     # Read Nix's resolved .drv from root store
@@ -494,11 +489,11 @@ async def main() -> None:
 
     if resolved_rows:
         nix_resolved_drv_path = StorePath(resolved_rows[0][0])
-        nix_resolved = read_drv_file(root_store.store_path, nix_resolved_drv_path)
+        read_drv_file(root_store.store_path, nix_resolved_drv_path)
         nix_aterm_path = root_store.store_path / str(nix_resolved_drv_path).lstrip("/")
         with open(nix_aterm_path) as f:
             nix_aterm = f.read().strip()
-        print(f"\n  Nix's resolved ATerm:")
+        print("\n  Nix's resolved ATerm:")
         print(f"    {nix_aterm}")
         aterm_match = resolved_aterm == nix_aterm
         print(f"  ATerm match: {'YES' if aterm_match else 'NO'}")
@@ -598,7 +593,7 @@ async def main() -> None:
             derivation=resolved,
         )
 
-        print(f"\nSending BuildDerivation with RESOLVED .drv path")
+        print("\nSending BuildDerivation with RESOLVED .drv path")
         print(f"  drv_path: {nix_resolved_drv_path}")
         print(f"  output path: {resolved.outputs['out'].path}")
         try:

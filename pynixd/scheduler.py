@@ -481,7 +481,11 @@ class Scheduler:
         local and builder stores via AddToStore so the daemon reads matching
         content from the new resolved .drv path.
         """
-        from .derivation_resolution import resolve_derivation, _unparse_basic_derivation
+        from .derivation_resolution import (
+            resolve_derivation,
+            _unparse_basic_derivation,
+            _nix_drv_name,
+        )
         from .drv_parser import read_drv_file
         from .operations.add_to_store import AddToStoreRequest
         from .operations.base import OutputKind
@@ -540,10 +544,8 @@ class Scheduler:
 
         resolved_aterm = _unparse_basic_derivation(resolved, mask_outputs=False)
 
-        drv_name = str(drv_path).rsplit("/", 1)[-1]
-        if drv_name.endswith(".drv"):
-            drv_name = drv_name[:-4]
-        name_for_add = drv_name + "-resolved.drv"
+        drv_name = _nix_drv_name(drv_path)
+        name_for_add = drv_name + ".drv"
 
         async def provide_resolved_drv(writer):
             fw = writer.framed()
@@ -588,12 +590,12 @@ class Scheduler:
         build.request.drv_path = resolved_drv_path
         build.request.derivation = resolved
 
+        build.required_paths.add(resolved_drv_path)
+        for inp in resolved.input_srcs:
+            build.required_paths.add(StorePath(inp))
         for name, o in resolved.outputs.items():
             if o.path:
-                sp = StorePath(o.path)
-                build.required_paths.add(sp)
-                if sp not in build.request.derivation.input_srcs:
-                    build.request.derivation.input_srcs.add(sp)
+                build.required_paths.add(StorePath(o.path))
 
         log.info(
             "resolved_deferred_derivation",
