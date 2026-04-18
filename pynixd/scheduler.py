@@ -308,13 +308,7 @@ class Scheduler:
                 # derivation output paths.
                 if build.depends_on:
                     await self._register_dep_realisations(build, store)
-                    # For deferred derivations, also patch the
-                    # BuildDerivation request's input_srcs with resolved
-                    # CA output paths from dependency builds. The wire
-                    # protocol's BasicDerivation has no inputDrvs, so the
-                    # daemon can't resolve CA deps on its own. We must
-                    # inject the resolved output paths into input_srcs.
-                    self._patch_deferred_inputs(build)
+                    await self._resolve_deferred_derivation(build, store)
 
                 # 1. Ensure all inputs are present on the builder
                 missing = build.required_paths - store.tracker.known_paths
@@ -470,23 +464,26 @@ class Scheduler:
                         error=str(exc),
                     )
 
-    def _patch_deferred_inputs(self, build: QueuedBuild) -> None:
-        """Patch a deferred derivation's BuildDerivation with resolved CA output paths
-        and ensure the .drv closure is available on the builder.
+    async def _resolve_deferred_derivation(
+        self, build: QueuedBuild, store: Store
+    ) -> None:
+        """Resolve a deferred derivation before building.
 
-        The BuildDerivation wire protocol only sends BasicDerivation (no
-        inputDrvs), so the daemon can't resolve CA dependency references on
-        its own. For deferred derivations that depend on CA derivations, we:
+        Only needed for builds decomposed from BuildPaths, where pynixd
+        creates BuildDerivation from .drv files. Client-sent BuildDerivation
+        via --builders should already be resolved by the local Nix daemon.
 
-        1. Inject the resolved CA output paths into input_srcs (sandbox needs them)
-        2. Add the current .drv path to input_srcs so the daemon finds it via
-           isValidPath() in queryPartialDerivationOutputMap(), which then reads
-           the full Derivation (with inputDrvs) from disk and can resolve
-           deferred outputs via registered realisations.
-        3. Add all input_drvs .drv paths to input_srcs so the daemon can
-           recursively resolve them via readInvalidDerivation().
+        The BuildDerivation wire protocol sends BasicDerivation (no inputDrvs).
+        The daemon cannot resolve deferred derivations because it reads the
+        .drv from disk, and for a deferred .drv queryPartialDerivationOutputMap
+        returns None. We resolve the derivation ourselves: compute placeholder
+        rewrites, derive output paths, then add the resolved .drv to both the
+        local and builder stores via AddToStore so the daemon reads matching
+        content from the new resolved .drv path.
         """
+        from .derivation_resolution import resolve_derivation, _unparse_basic_derivation
         from .drv_parser import read_drv_file
+        from .operations.add_to_store import AddToStoreRequest
         from .operations.base import OutputKind
 
         if not any(
@@ -495,61 +492,116 @@ class Scheduler:
         ):
             return
 
-        added: set[StorePath] = set()
         drv_path = build.request.drv_path
 
-        # Add the current .drv file path to input_srcs — the daemon's
-        # queryPartialDerivationOutputMap() checks isValidPath(drvPath)
-        # and reads the full Derivation from disk if found.
-        if drv_path not in build.request.derivation.input_srcs:
-            build.request.derivation.input_srcs.add(drv_path)
-            added.add(drv_path)
-
-        # Read the .drv file from the local store to discover input_drvs
         try:
             parsed = read_drv_file(self.local_store.store_path, drv_path)
         except FileNotFoundError:
             log.warning(
-                "patch_deferred_drv_not_found",
+                "resolve_deferred_drv_not_found",
                 build_id=build.id,
                 drv_path=drv_path,
             )
-        else:
-            # Add all input_drvs .drv paths — the daemon needs these
-            # registered too so queryPartialDerivationOutputMap can
-            # recursively call readInvalidDerivation on dependency .drvs.
-            for input_drv in parsed.input_drvs:
-                if input_drv not in build.request.derivation.input_srcs:
-                    build.request.derivation.input_srcs.add(input_drv)
-                    added.add(input_drv)
+            return
 
-        # Add resolved CA output paths from completed dependency builds
+        if not parsed.input_drvs:
+            return
+
+        resolved_output_paths: dict[str, StorePath] = {}
         for dep_id in build.depends_on:
             dep_build = self.queue.by_id.get(dep_id)
             if dep_build is None or not dep_build.ca_realisations:
                 continue
             for realisation in dep_build.ca_realisations:
                 out_path = realisation.get("outPath", "")
+                output_name = realisation.get("id", "").rsplit("!", 1)[-1] or "out"
                 if out_path:
-                    sp = StorePath(out_path).with_store_prefix()
-                    if sp not in build.request.derivation.input_srcs:
-                        build.request.derivation.input_srcs.add(sp)
-                        added.add(sp)
+                    resolved_output_paths[output_name] = StorePath(
+                        out_path
+                    ).with_store_prefix()
 
-        if added:
-            for sp in added:
-                build.required_paths.add(
-                    StorePath(
-                        sp, extrainfo=f"resolved CA dep of {build.request.drv_path}"
-                    )
-                )
-            log.debug(
-                "patched_deferred_inputs",
+        if not resolved_output_paths:
+            log.warning(
+                "resolve_deferred_no_output_paths",
                 build_id=build.id,
-                drv_path=build.request.drv_path,
-                added_paths=len(added),
-                added_detail=sorted(str(p) for p in added),
+                drv_path=drv_path,
             )
+            return
+
+        try:
+            resolved = resolve_derivation(parsed, drv_path, resolved_output_paths)
+        except Exception:
+            log.exception(
+                "resolve_derivation_failed",
+                build_id=build.id,
+                drv_path=drv_path,
+            )
+            return
+
+        resolved_aterm = _unparse_basic_derivation(resolved, mask_outputs=False)
+
+        drv_name = str(drv_path).rsplit("/", 1)[-1]
+        if drv_name.endswith(".drv"):
+            drv_name = drv_name[:-4]
+        name_for_add = drv_name + "-resolved.drv"
+
+        async def provide_resolved_drv(writer):
+            fw = writer.framed()
+            data = resolved_aterm.encode("utf-8")
+            fw.write(data)
+            await fw.finalize()
+
+        resolved_drv_path: StorePath | None = None
+        for target_store in {self.local_store, store}:
+            add_req = AddToStoreRequest(
+                path_name=name_for_add,
+                cam="text:sha256",
+                references=resolved.input_srcs,
+                repair=0,
+                async_provider=provide_resolved_drv,
+            )
+            try:
+                resp = await add_req.execute(target_store, suppress_last=True)
+                if resp.info is not None:
+                    target_store.tracker.add_known_path(resp.info.path)
+                    target_store.add_path_info(resp.info)
+                    if resolved_drv_path is None:
+                        resolved_drv_path = resp.info.path
+                    log.debug(
+                        "resolved_drv_added_to_store",
+                        build_id=build.id,
+                        store_id=target_store.id,
+                        resolved_drv_path=resp.info.path,
+                    )
+            except Exception:
+                log.warning(
+                    "resolved_drv_add_to_store_failed",
+                    build_id=build.id,
+                    store_id=target_store.id,
+                    exc_info=True,
+                )
+
+        if resolved_drv_path is None:
+            log.error("resolve_deferred_add_failed", build_id=build.id)
+            return
+
+        build.request.drv_path = resolved_drv_path
+        build.request.derivation = resolved
+
+        for name, o in resolved.outputs.items():
+            if o.path:
+                sp = StorePath(o.path)
+                build.required_paths.add(sp)
+                if sp not in build.request.derivation.input_srcs:
+                    build.request.derivation.input_srcs.add(sp)
+
+        log.info(
+            "resolved_deferred_derivation",
+            build_id=build.id,
+            drv_path=drv_path,
+            resolved_drv_path=resolved_drv_path,
+            output_paths={n: o.path for n, o in resolved.outputs.items()},
+        )
 
     async def transfer_inputs(
         self, build: QueuedBuild, store: Store, paths: set[StorePath]

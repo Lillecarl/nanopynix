@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -20,7 +21,8 @@ from .base import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from ..connection import ClientConn
+    from ..store import Store
 
 
 @dataclass
@@ -54,6 +56,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     cam: str = ""  # ContentAddressMethodWithAlgo
     references: set[StorePath] = field(default_factory=set)
     repair: int = 0
+    async_provider: Callable[[NixWriter], Awaitable[None]] | None = None
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
@@ -77,6 +80,30 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         writer.write_string(self.cam)
         writer.write_string_set(self.references)
         writer.write_uint64(self.repair)
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> AddToStoreResponse:
+        if self.async_provider:
+            async with store.transfer_conn() as conn:
+                await self.to_writer(conn.w, conn.version)
+                await conn.w.drain()
+
+                try:
+                    await self.async_provider(conn.w)
+                    await conn.w.drain()
+                except Exception as e:
+                    from ..exceptions import BackendError
+
+                    raise BackendError(f"Failed to send store content: {e}") from e
+
+                resp = await AddToStoreResponse().from_reader(conn.r, conn.version)
+                return resp
+
+        return await super().execute(store, client, suppress_last)
 
     async def handle(self, ctx: RequestContext) -> AddToStoreResponse:
         """Override handle because this is a streaming operation."""
