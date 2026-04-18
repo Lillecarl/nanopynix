@@ -324,6 +324,7 @@ class _Parser:
                 raise ValueError(
                     f"Expected '[' or '(' at pos {self._pos}, got {self._peek()!r}"
                 )
+            self._expect(")")
             self._skip_ws()
         self._expect("]")
         return simple, dynamic
