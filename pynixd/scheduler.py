@@ -106,9 +106,10 @@ class Scheduler:
         client: ClientConn | None,
         required_paths: set[StorePath],
         platform: str = "",
+        scheduler_request_id: int | None = None,
+        derived_paths_for_request: set[DerivedPath] | None = None,
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue and trigger the scheduler."""
-        # 1. Fetch expected duration hint if DB is active
         hint = None
         if self.local_store.db:
             pname = request.derivation.env.get("pname", None)
@@ -118,9 +119,14 @@ class Scheduler:
                     pname, platform, serialized
                 )
 
-        # 2. Enqueue with hint
         res = await self.queue.enqueue(
-            request, client, required_paths, platform, expected_duration=hint
+            request,
+            client,
+            required_paths,
+            platform,
+            expected_duration=hint,
+            scheduler_request_id=scheduler_request_id,
+            derived_paths_for_request=derived_paths_for_request,
         )
         self.trigger()
         return res
@@ -137,8 +143,24 @@ class Scheduler:
         Returns a BuildPathsWithResultsResponse — callers that don't need
         per-key results (BuildPaths) can just check for failures.
         """
+        _req_id, sched_req = await self.queue.create_request(
+            derived_paths, build_mode, client
+        )
+
+        # For nested DerivedPaths (e.g., a.drv^out^out), QueryMissing
+        # doesn't understand them. Extract the outermost .drv path for
+        # the initial build phase — the nested chain will be handled by
+        # the trampoline.
+        flat_derived_paths: set[DerivedPath] = set()
+        for dp in derived_paths:
+            if isinstance(dp, DerivedPath) and dp.is_nested:
+                outer_dp = DerivedPath(dp.drv_path)
+                flat_derived_paths.add(outer_dp)
+            else:
+                flat_derived_paths.add(dp)
+
         missing_resp = await self.local_store.execute(
-            QueryMissingRequest(derived_paths=derived_paths)
+            QueryMissingRequest(derived_paths=flat_derived_paths)
         )
 
         if missing_resp.will_substitute:
@@ -239,17 +261,20 @@ class Scheduler:
             required_paths.add(
                 StorePath(drv_request.drv_path, extrainfo=f"drv_path of {drv_path_str}")
             )
-            build_id, future = await self.build_derivation(
+            build_id, _future = await self.build_derivation(
                 drv_request,
                 client,
                 required_paths,
                 platform=drv_request.derivation.platform,
+                scheduler_request_id=sched_req.id,
+                derived_paths_for_request={dp},
             )
             drv_to_build_id[drv_path_str] = build_id
             log.info(
                 "build_derivation_enqueued",
                 build_id=build_id,
                 drv_path=drv_request.drv_path,
+                scheduler_request_id=sched_req.id,
             )
 
         for dp, output_names, drv_request in resolved:
@@ -269,27 +294,16 @@ class Scheduler:
                 await self.queue.set_depends_on(build_id, depends_on)
 
         if not resolved:
-            return BuildPathsWithResultsResponse(results=[])
-
-        futures = []
-        dp_list = []
-        for dp, output_names, drv_request in resolved:
-            build_id = drv_to_build_id[str(drv_request.drv_path)]
-            build = self.queue.by_id[build_id]
-            futures.append(build.future)
-            dp_list.append(dp)
-
-        responses = await asyncio.gather(*futures)
+            result_map = await sched_req.future
+        else:
+            result_map = await sched_req.future
 
         keyed_results: list[KeyedBuildResult] = []
-        for dp, resp in zip(dp_list, responses):
-            if isinstance(resp, BuildDerivationResponse):
-                keyed_results.append(
-                    KeyedBuildResult(
-                        derived_path=dp,
-                        result=resp.result,
-                    )
-                )
+        for dp in derived_paths:
+            if isinstance(dp, DerivedPath):
+                br = result_map.get(dp)
+                if br is not None:
+                    keyed_results.append(KeyedBuildResult(derived_path=dp, result=br))
 
         return BuildPathsWithResultsResponse(results=keyed_results)
 
@@ -590,12 +604,16 @@ class Scheduler:
         except Exception:
             log.exception("build_crashed", build_id=build.id)
             await self.queue.fail(build.id, "Internal scheduler error")
+            if build.scheduler_request_id is not None:
+                await self._on_build_complete_failed(build, "Internal scheduler error")
             self.trigger()
 
         # Release semaphore FIRST, then complete and trigger
         # This allows new builds to start while we're finalizing
         if build_resp is not None:
             await self.queue.complete(build.id, build_resp)
+            if build.scheduler_request_id is not None:
+                await self._on_build_complete(build, build_resp)
             self.trigger()
 
     async def _register_dep_realisations(
@@ -785,6 +803,174 @@ class Scheduler:
             resolved_drv_path=resolved_drv_path,
             output_paths={n: o.path for n, o in resolved.outputs.items()},
         )
+
+    async def _on_build_complete(
+        self,
+        build: QueuedBuild,
+        build_resp: BuildDerivationResponse,
+    ) -> None:
+        """Handle build completion within a SchedulerBuildRequest.
+
+        For non-dynamic builds, records the result directly and checks if
+        the request is complete. For dynamic builds (has_dynamic_outputs),
+        detects .drv outputs and enqueues inner builds (trampoline).
+        """
+
+        if build.scheduler_request_id is None:
+            return
+        sched_req = self.queue.requests.get(build.scheduler_request_id)
+        if sched_req is None:
+            return
+
+        parent_dps = sched_req.build_to_derived.get(build.id, set())
+
+        derivation = build.request.derivation
+        is_dynamic = derivation.has_dynamic_outputs
+        has_nested_dp = any(dp.is_nested for dp in parent_dps)
+
+        drv_outputs = build_resp.result.built_outputs
+        trampolined_dps: set[DerivedPath] = set()
+
+        if (
+            is_dynamic
+            and has_nested_dp
+            and build_resp.result.status == 0
+            and drv_outputs
+        ):
+            for _drv_output_str, realisation in drv_outputs.items():
+                out_path = realisation.get("outPath", "")
+                output_name = realisation.get("id", "").rsplit("!", 1)[-1] or "out"
+                if not out_path:
+                    continue
+
+                out_sp = StorePath(out_path).with_store_prefix()
+                if not out_sp.is_derivation():
+                    continue
+
+                log.info(
+                    "trampoline_detected",
+                    build_id=build.id,
+                    output_name=output_name,
+                    inner_drv_path=out_sp,
+                )
+
+                try:
+                    inner_parsed = read_drv_file(self.local_store.store_path, out_sp)
+                except FileNotFoundError:
+                    log.warning(
+                        "trampoline_drv_not_found",
+                        build_id=build.id,
+                        inner_drv_path=out_sp,
+                    )
+                    continue
+                except Exception:
+                    log.exception(
+                        "trampoline_drv_parse_failed",
+                        build_id=build.id,
+                        inner_drv_path=out_sp,
+                    )
+                    continue
+
+                inner_basic = to_basic_derivation(
+                    inner_parsed, self.local_store.store_path
+                )
+
+                unknown_srcs = (
+                    inner_basic.input_srcs - self.local_store.tracker.known_paths
+                )
+                if unknown_srcs:
+                    try:
+                        valid_resp = await self.local_store.execute(
+                            QueryValidPathsRequest(paths=unknown_srcs)
+                        )
+                        self.local_store.tracker.add_known_paths(
+                            valid_resp.paths, update_regtime=False
+                        )
+                    except Exception:
+                        log.warning(
+                            "trampoline_unknown_srcs_check_failed",
+                            build_id=build.id,
+                            inner_drv_path=out_sp,
+                        )
+
+                inner_req = BuildDerivationRequest(
+                    drv_path=out_sp,
+                    derivation=inner_basic,
+                    build_mode=sched_req.build_mode,
+                )
+
+                required_paths: set[StorePath] = set()
+                for inp in inner_basic.input_srcs:
+                    required_paths.add(StorePath(inp))
+                required_paths.add(out_sp)
+
+                inner_build_id, _inner_future = await self.build_derivation(
+                    inner_req,
+                    sched_req.client,
+                    required_paths,
+                    platform=inner_basic.platform,
+                    scheduler_request_id=sched_req.id,
+                    derived_paths_for_request=parent_dps,
+                )
+
+                log.info(
+                    "trampoline_build_enqueued",
+                    parent_build_id=build.id,
+                    inner_build_id=inner_build_id,
+                    inner_drv_path=out_sp,
+                    scheduler_request_id=sched_req.id,
+                    original_derived_paths=[str(dp) for dp in parent_dps],
+                )
+
+                trampolined_dps.update(parent_dps)
+
+        # Record results for DerivedPaths that are NOT being trampolined.
+        # Trampolined DerivedPaths will get their result from the inner build.
+        non_trampolined_dps = parent_dps - trampolined_dps
+        for dp in non_trampolined_dps:
+            sched_req.results[dp] = build_resp.result
+
+        sched_req.build_completed(build.id)
+
+        if sched_req.resolve_if_done():
+            log.info(
+                "scheduler_request_resolved",
+                request_id=sched_req.id,
+                results=len(sched_req.results),
+            )
+
+        self.trigger()
+
+    async def _on_build_complete_failed(
+        self,
+        build: QueuedBuild,
+        error_msg: str,
+    ) -> None:
+        """Handle build failure within a SchedulerBuildRequest."""
+        from .operations.base import BuildResult, BuildResultStatus
+
+        if build.scheduler_request_id is None:
+            return
+        sched_req = self.queue.requests.get(build.scheduler_request_id)
+        if sched_req is None:
+            return
+
+        parent_dps = sched_req.build_to_derived.get(build.id, set())
+        failed_result = BuildResult(
+            status=BuildResultStatus.MISC_FAILURE, error_msg=error_msg
+        )
+        for dp in parent_dps:
+            sched_req.results[dp] = failed_result
+        sched_req.build_completed(build.id)
+
+        if sched_req.resolve_if_done():
+            log.info(
+                "scheduler_request_resolved_with_failure",
+                request_id=sched_req.id,
+                error_msg=error_msg,
+            )
+
+        self.trigger()
 
     async def transfer_inputs(
         self, build: QueuedBuild, store: Store, paths: set[StorePath]

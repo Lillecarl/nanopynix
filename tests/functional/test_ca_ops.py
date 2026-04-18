@@ -445,74 +445,122 @@ async def test_ca_query_derivation_output_map_root_store(
             **_ca_test_store_kwargs(),
         )
 
-        try:
-            await store.ensure_daemon()
+        await store.ensure_daemon()
 
-            # Build the CA derivation
-            cmd = [
-                str(NIX_BIN),
-                "build",
-                "--store",
-                str(store_path),
-                "--extra-experimental-features",
-                "ca-derivations",
-                "--file",
-                str(TEST_CA_NIX),
-                "ca_simple",
-                "--no-link",
-                "--print-out-paths",
-            ]
-            rc, stdout, stderr, stdboth = await run_subproc(
-                cmd, nix_config=CA_NIX_CONFIG
-            )
-            assert rc == 0, f"CA build failed:\n{stdboth}"
-            out_path = stdout.strip()
-            assert out_path.startswith("/nix/store/")
+        # Build the CA derivation
+        cmd = [
+            str(NIX_BIN),
+            "build",
+            "--store",
+            str(store_path),
+            "--extra-experimental-features",
+            "ca-derivations",
+            "--file",
+            str(TEST_CA_NIX),
+            "ca_simple",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(cmd, nix_config=CA_NIX_CONFIG)
+        assert rc == 0, f"CA build failed:\n{stdboth}"
+        out_path = stdout.strip()
+        assert out_path.startswith("/nix/store/")
 
-            # Get the .drv path
-            cmd = [
-                str(NIX_BIN),
-                "eval",
-                "--store",
-                str(store_path),
-                "--extra-experimental-features",
-                "ca-derivations",
-                "--file",
-                str(TEST_CA_NIX),
-                "ca_simple.drvPath",
-                "--raw",
-            ]
-            rc, drv_out, stderr, stdboth = await run_subproc(
-                cmd, nix_config=CA_NIX_CONFIG
-            )
-            assert rc == 0, f"CA drvPath eval failed:\n{stdboth}"
-            drv_path = drv_out.strip()
+        # Get the .drv path
+        cmd = [
+            str(NIX_BIN),
+            "eval",
+            "--store",
+            str(store_path),
+            "--extra-experimental-features",
+            "ca-derivations",
+            "--file",
+            str(TEST_CA_NIX),
+            "ca_simple.drvPath",
+            "--raw",
+        ]
+        rc, drv_out, stderr, stdboth = await run_subproc(cmd, nix_config=CA_NIX_CONFIG)
+        assert rc == 0, f"CA drvPath eval failed:\n{stdboth}"
+        drv_path = drv_out.strip()
 
-            # Query the CA derivation's output map via nix path-info.
-            # This exercises QueryDerivationOutputMap (op 41) and RegisterDrvOutput (op 42).
-            cmd = [
-                str(NIX_BIN),
-                "path-info",
-                "--store",
-                str(store_path),
-                "--extra-experimental-features",
-                "ca-derivations",
-                "--json",
-                f"{drv_path}^*",
-            ]
-            rc, stdout, stderr, stdboth = await run_subproc(
-                cmd, nix_config=CA_NIX_CONFIG
-            )
-            assert rc == 0, f"path-info failed:\n{stderr}"
-            import json
+        # Query the CA derivation's output map via nix path-info.
+        # This exercises QueryDerivationOutputMap (op 41) and RegisterDrvOutput (op 42).
+        cmd = [
+            str(NIX_BIN),
+            "path-info",
+            "--store",
+            str(store_path),
+            "--extra-experimental-features",
+            "ca-derivations",
+            "--json",
+            f"{drv_path}^*",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(cmd, nix_config=CA_NIX_CONFIG)
+        assert rc == 0, f"path-info failed:\n{stderr}"
+        import json
 
-            info = json.loads(stdout)
-            assert out_path in info, f"Expected {out_path} in {info}"
-            # CA derivations have a "ca" field in their output info
-            assert "ca" in info[out_path], f"Expected 'ca' field in {info[out_path]}"
+        info = json.loads(stdout)
+        assert out_path in info, f"Expected {out_path} in {info}"
+        assert "ca" in info[out_path], f"Expected 'ca' field in {info[out_path]}"
 
-        finally:
-            await store.close()
+
+async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) -> None:
+    """Build a nested dynamic derivation (producingDrv^out^out) through pynixd.
+
+    This exercises the trampoline: producingDrv's output is hello.drv,
+    and the scheduler should detect this and automatically build the
+    inner hello derivation. The final output should be hello's store
+    path, not the intermediate .drv.
+    """
+    async with asyncio.timeout(120):
+        server, uri = dyn_env
+
+        # First, get producingDrv's .drv path
+        eval_cmd = [
+            str(NIX_BIN),
+            "eval",
+            "--option",
+            "builders",
+            "",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations dynamic-derivations",
+            "--impure",
+            "--file",
+            str(DYN_NIX),
+            "producingDrv.drvPath",
+            "--raw",
+        ]
+        rc, drv_out, _, _ = await run_subproc(eval_cmd, nix_config=DYN_NIX_CONFIG)
+        assert rc == 0, "drvPath eval failed"
+        drv_path = drv_out.strip()
+
+        # Build producingDrv^out^out (nested: the out output of the
+        # out output's .drv)
+        build_cmd = [
+            str(NIX_BIN),
+            "build",
+            "--option",
+            "builders",
+            "",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations dynamic-derivations",
+            f"{drv_path}^out^out",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(
+            build_cmd, nix_config=DYN_NIX_CONFIG, expected_retcode=None
+        )
+        assert rc == 0, f"Dynamic trampoline build failed:\n{stdboth}"
+        out_path = stdout.strip()
+        assert out_path.startswith("/nix/store/"), f"Unexpected output: {out_path}"
+        assert not out_path.endswith(".drv"), (
+            f"Expected non-.drv output from trampoline, got: {out_path}"
+        )
 
 
 DYN_NIX = Path("test-dyn-drv.nix")

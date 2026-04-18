@@ -159,7 +159,9 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
             scheduler = server.scheduler
             assert scheduler is not None
 
-            build_id, future = await scheduler.enqueue(req, None, set(), "x86_64-linux")
+            build_id, future = await scheduler.build_derivation(
+                req, None, set(), "x86_64-linux"
+            )
             await future
 
             # 2. Check the DB
@@ -229,7 +231,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
                 ),
                 derivation=blocker_drv,
             )
-            await scheduler.enqueue(blocker_req, None, set(), "x86_64-linux")
+            await scheduler.build_derivation(blocker_req, None, set(), "x86_64-linux")
 
             # Wait for blocker to start on REMOTE
             while True:
@@ -250,7 +252,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
                 derivation=tiny_drv,
             )
 
-            id_tiny, fut_tiny = await scheduler.enqueue(
+            id_tiny, fut_tiny = await scheduler.build_derivation(
                 tiny_req, None, set(), "x86_64-linux"
             )
 

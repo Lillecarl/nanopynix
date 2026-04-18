@@ -17,7 +17,8 @@ from typing import Self
 import structlog
 
 from .connection import ClientConn
-from .operations.base import BuildResult, BuildResultStatus
+from .derived_path import DerivedPath
+from .operations.base import BuildMode, BuildResult, BuildResultStatus
 from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
 from .store_path import StorePath
 
@@ -72,6 +73,11 @@ class QueuedBuild:
     # The store that was assigned to execute this build, set when
     # execute_build begins.
     assigned_store_id: str | None = field(default=None)
+
+    # Back-reference to the SchedulerBuildRequest this build belongs to.
+    # Set when the build is enqueued via build_derived_paths().
+    # None for standalone build_derivation() calls.
+    scheduler_request_id: int | None = field(default=None)
 
     # For heap ordering
     def __lt__(self, other: Self) -> bool:
@@ -168,6 +174,49 @@ class BuildKey:
         )
 
 
+@dataclass
+class SchedulerBuildRequest:
+    """Tracks the full lifecycle of a build_derived_paths() call.
+
+    Individual QueuedBuilds come and go (completing, spawning trampoline
+    inner builds), but the SchedulerBuildRequest persists until all
+    transitive builds are done.
+
+    The future resolves with a dict mapping each original DerivedPath
+    to its terminal BuildResult (innermost build for dynamic chains).
+    """
+
+    id: int
+    derived_paths: set[DerivedPath]
+    build_mode: BuildMode
+    client: ClientConn | None
+    future: asyncio.Future[dict[DerivedPath, BuildResult]]
+    results: dict[DerivedPath, BuildResult] = field(default_factory=dict)
+    active_build_ids: set[int] = field(default_factory=set)
+    all_build_ids: set[int] = field(default_factory=set)
+    # Maps build_id -> DerivedPath(s) it ultimately satisfies.
+    # For trampoline builds, the inner build inherits the same DerivedPath.
+    build_to_derived: dict[int, set[DerivedPath]] = field(default_factory=dict)
+
+    def add_build(self, build_id: int, derived_paths: set[DerivedPath]) -> None:
+        """Track a new build as part of this request."""
+        self.active_build_ids.add(build_id)
+        self.all_build_ids.add(build_id)
+        self.build_to_derived[build_id] = derived_paths
+
+    def build_completed(self, build_id: int) -> bool:
+        """Remove build from active set. Returns True if request is complete."""
+        self.active_build_ids.discard(build_id)
+        return len(self.active_build_ids) == 0
+
+    def resolve_if_done(self) -> bool:
+        """Resolve the future if all active builds are done."""
+        if len(self.active_build_ids) == 0 and not self.future.done():
+            self.future.set_result(dict(self.results))
+            return True
+        return False
+
+
 class BuildQueue:
     """Global queue for build operations with deduplication."""
 
@@ -175,8 +224,31 @@ class BuildQueue:
         self.queue: list[QueuedBuild] = []
         self.by_key: dict[BuildKey, QueuedBuild] = {}  # For deduplication
         self.by_id: dict[int, QueuedBuild] = {}  # For DAG lookups
+        self.requests: dict[int, SchedulerBuildRequest] = {}
         self.next_id: int = 1
+        self.next_request_id: int = 1
         self.lock: asyncio.Lock = asyncio.Lock()
+
+    async def create_request(
+        self,
+        derived_paths: set[DerivedPath],
+        build_mode: BuildMode,
+        client: ClientConn | None,
+    ) -> tuple[int, SchedulerBuildRequest]:
+        """Create a SchedulerBuildRequest and return it."""
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[dict[DerivedPath, BuildResult]] = loop.create_future()
+        async with self.lock:
+            req = SchedulerBuildRequest(
+                id=self.next_request_id,
+                derived_paths=derived_paths,
+                build_mode=build_mode,
+                client=client,
+                future=future,
+            )
+            self.next_request_id += 1
+            self.requests[req.id] = req
+            return req.id, req
 
     async def enqueue(
         self,
@@ -185,11 +257,17 @@ class BuildQueue:
         required_paths: set[StorePath],
         platform: str = "",
         expected_duration: int | None = None,
+        scheduler_request_id: int | None = None,
+        derived_paths_for_request: set[DerivedPath] | None = None,
     ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue (deduplicates if already present).
 
         Returns (build_id, future) - caller awaits the future for the response.
         Dedup only applies to builds that are still pending (not building/done).
+
+        If scheduler_request_id is set, the build is tracked as part of that
+        SchedulerBuildRequest. derived_paths_for_request maps this build to
+        the original DerivedPaths it satisfies.
         """
         key = BuildKey.from_request(request)
 
@@ -199,6 +277,17 @@ class BuildQueue:
                 existing = self.by_key[key]
                 if not existing.is_done:
                     log.debug("build_deduped", id=existing.id)
+                    if (
+                        scheduler_request_id is not None
+                        and existing.scheduler_request_id is None
+                    ):
+                        existing.scheduler_request_id = scheduler_request_id
+                        if derived_paths_for_request:
+                            sched_req = self.requests.get(scheduler_request_id)
+                            if sched_req is not None:
+                                sched_req.add_build(
+                                    existing.id, derived_paths_for_request
+                                )
                     return existing.id, existing.future
                 # else: done, create new entry
 
@@ -213,17 +302,24 @@ class BuildQueue:
                 future=future,
                 platform=platform,
                 expected_duration=expected_duration,
+                scheduler_request_id=scheduler_request_id,
             )
             self.next_id += 1
             heapq.heappush(self.queue, build)
             self.by_key[key] = build
             self.by_id[build.id] = build
 
+            if scheduler_request_id is not None and derived_paths_for_request:
+                sched_req = self.requests.get(scheduler_request_id)
+                if sched_req is not None:
+                    sched_req.add_build(build.id, derived_paths_for_request)
+
             log.info(
                 "build_enqueued",
                 build_id=build.id,
                 description=build.description,
                 required_paths=len(required_paths),
+                scheduler_request_id=scheduler_request_id,
             )
             return build.id, future
 

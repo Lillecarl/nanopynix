@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import ClassVar, Self
 
 
 from ..derived_path import DerivedPath
