@@ -153,6 +153,7 @@ class Scheduler:
         # 1. Identify builds ready to execute
         schedulable: list[QueuedBuild] = []
         waiting_paths: list[QueuedBuild] = []
+        waiting_deps: list[QueuedBuild] = []
         building: list[int] = []
         transferring: list[int] = []
 
@@ -163,6 +164,18 @@ class Scheduler:
             if build.is_transferring:
                 transferring.append(build.id)
                 continue
+
+            # Check if all DAG dependencies are satisfied
+            if build.depends_on:
+                unfinished_deps = {
+                    dep_id
+                    for dep_id in build.depends_on
+                    if dep_id in self.queue.by_id
+                    and not self.queue.by_id[dep_id].is_done
+                }
+                if unfinished_deps:
+                    waiting_deps.append(build)
+                    continue
 
             # Check if all required paths are in local store
             if self.local_store.tracker.has_all_paths(build.required_paths):
@@ -255,6 +268,7 @@ class Scheduler:
             building=len(building),
             transferring=len(transferring),
             waiting_paths=len(waiting_paths),
+            waiting_deps=len(waiting_deps),
             waiting_slot=len(waiting_slot),
             slots={s.id: s.available_slots for s in self.stores.values()},
             cpu_util={
@@ -283,11 +297,25 @@ class Scheduler:
 
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
         """Execute build on a store, handling inputs and outputs."""
+        build.assigned_store_id = store.id
         build_resp: BuildDerivationResponse | None = None
         try:
             # Acquire build connection with semaphore FIRST to limit concurrency
             # This must be done before any async operations that might block
             async with store.build_conn() as conn:
+                # 0. Register CA realisations from completed dependency builds
+                # on the target builder store so it can resolve deferred
+                # derivation output paths.
+                if build.depends_on:
+                    await self._register_dep_realisations(build, store)
+                    # For deferred derivations, also patch the
+                    # BuildDerivation request's input_srcs with resolved
+                    # CA output paths from dependency builds. The wire
+                    # protocol's BasicDerivation has no inputDrvs, so the
+                    # daemon can't resolve CA deps on its own. We must
+                    # inject the resolved output paths into input_srcs.
+                    self._patch_deferred_inputs(build)
+
                 # 1. Ensure all inputs are present on the builder
                 missing = build.required_paths - store.tracker.known_paths
                 if missing:
@@ -319,6 +347,8 @@ class Scheduler:
                                 ca_output_paths.add(
                                     StorePath(out_path).with_store_prefix()
                                 )
+                        build.ca_realisations = list(resp.result.built_outputs.values())
+
                     outputs = build.request.derivation.output_paths()
                     static_paths = {p for p in outputs.values() if p != StorePath("")}
                     all_output_paths = static_paths | ca_output_paths
@@ -392,6 +422,134 @@ class Scheduler:
         if build_resp is not None:
             await self.queue.complete(build.id, build_resp)
             self.trigger()
+
+    async def _register_dep_realisations(
+        self, build: QueuedBuild, store: Store
+    ) -> None:
+        """Register CA realisations from completed dependency builds on the
+        target builder store so it can resolve deferred output paths.
+
+        This is essential for building non-CA derivations that depend on CA
+        derivations: the builder daemon needs the realisation registered so
+        it can resolve the deferred output's $out path.
+        """
+        for dep_id in build.depends_on:
+            dep_build = self.queue.by_id.get(dep_id)
+            if dep_build is None or not dep_build.ca_realisations:
+                continue
+
+            if store is self.local_store:
+                # Realisations already registered on local store during
+                # the dependency build's completion
+                continue
+
+            for realisation in dep_build.ca_realisations:
+                try:
+                    reg_req = RegisterDrvOutputRequest(realisation=realisation)
+                    log.debug(
+                        "registering_dep_realisation_on_builder",
+                        build_id=build.id,
+                        dep_build_id=dep_id,
+                        store_id=store.id,
+                        realisation=realisation,
+                    )
+                    await store.call(reg_req, suppress_last=True)
+                    log.debug(
+                        "registered_dep_realisation_on_builder",
+                        build_id=build.id,
+                        dep_build_id=dep_id,
+                        store_id=store.id,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "register_dep_realisation_failed",
+                        build_id=build.id,
+                        dep_build_id=dep_id,
+                        store_id=store.id,
+                        exc_info=True,
+                        error=str(exc),
+                    )
+
+    def _patch_deferred_inputs(self, build: QueuedBuild) -> None:
+        """Patch a deferred derivation's BuildDerivation with resolved CA output paths
+        and ensure the .drv closure is available on the builder.
+
+        The BuildDerivation wire protocol only sends BasicDerivation (no
+        inputDrvs), so the daemon can't resolve CA dependency references on
+        its own. For deferred derivations that depend on CA derivations, we:
+
+        1. Inject the resolved CA output paths into input_srcs (sandbox needs them)
+        2. Add the current .drv path to input_srcs so the daemon finds it via
+           isValidPath() in queryPartialDerivationOutputMap(), which then reads
+           the full Derivation (with inputDrvs) from disk and can resolve
+           deferred outputs via registered realisations.
+        3. Add all input_drvs .drv paths to input_srcs so the daemon can
+           recursively resolve them via readInvalidDerivation().
+        """
+        from .drv_parser import read_drv_file
+        from .operations.base import OutputKind
+
+        if not any(
+            o.kind == OutputKind.DEFERRED
+            for o in build.request.derivation.outputs.values()
+        ):
+            return
+
+        added: set[StorePath] = set()
+        drv_path = build.request.drv_path
+
+        # Add the current .drv file path to input_srcs — the daemon's
+        # queryPartialDerivationOutputMap() checks isValidPath(drvPath)
+        # and reads the full Derivation from disk if found.
+        if drv_path not in build.request.derivation.input_srcs:
+            build.request.derivation.input_srcs.add(drv_path)
+            added.add(drv_path)
+
+        # Read the .drv file from the local store to discover input_drvs
+        try:
+            parsed = read_drv_file(self.local_store.store_path, drv_path)
+        except FileNotFoundError:
+            log.warning(
+                "patch_deferred_drv_not_found",
+                build_id=build.id,
+                drv_path=drv_path,
+            )
+        else:
+            # Add all input_drvs .drv paths — the daemon needs these
+            # registered too so queryPartialDerivationOutputMap can
+            # recursively call readInvalidDerivation on dependency .drvs.
+            for input_drv in parsed.input_drvs:
+                if input_drv not in build.request.derivation.input_srcs:
+                    build.request.derivation.input_srcs.add(input_drv)
+                    added.add(input_drv)
+
+        # Add resolved CA output paths from completed dependency builds
+        for dep_id in build.depends_on:
+            dep_build = self.queue.by_id.get(dep_id)
+            if dep_build is None or not dep_build.ca_realisations:
+                continue
+            for realisation in dep_build.ca_realisations:
+                out_path = realisation.get("outPath", "")
+                if out_path:
+                    sp = StorePath(out_path).with_store_prefix()
+                    if sp not in build.request.derivation.input_srcs:
+                        build.request.derivation.input_srcs.add(sp)
+                        added.add(sp)
+
+        if added:
+            for sp in added:
+                build.required_paths.add(
+                    StorePath(
+                        sp, extrainfo=f"resolved CA dep of {build.request.drv_path}"
+                    )
+                )
+            log.debug(
+                "patched_deferred_inputs",
+                build_id=build.id,
+                drv_path=build.request.drv_path,
+                added_paths=len(added),
+                added_detail=sorted(str(p) for p in added),
+            )
 
     async def transfer_inputs(
         self, build: QueuedBuild, store: Store, paths: set[StorePath]

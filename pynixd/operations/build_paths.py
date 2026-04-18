@@ -115,6 +115,9 @@ async def _decompose_build_paths(
         valid_resp = await store.execute(QueryValidPathsRequest(paths=unknown))
         store.tracker.add_known_paths(valid_resp.paths, update_regtime=False)
 
+    # Map drv_path -> build_id for DAG dependency tracking
+    drv_to_build_id: dict[str, int] = {}
+
     for dp, output_names, drv_request in resolved:
         # Enrich with .drv metadata
         if drv_request.drv_path in parsed_cache:
@@ -143,6 +146,7 @@ async def _decompose_build_paths(
             required_paths,
             platform=drv_request.derivation.platform,
         )
+        drv_to_build_id[drv_path_str] = build_id
         request.logger.info(
             "build_derivation_enqueued",
             build_id=build_id,
@@ -150,6 +154,24 @@ async def _decompose_build_paths(
         )
 
         results.append((dp, output_names, future))
+
+    # Link build dependencies: if a build's .drv has input_drvs that are
+    # also in this build batch, it depends on those builds.
+    for dp, output_names, drv_request in resolved:
+        drv_path_str = str(drv_request.drv_path)
+        parsed = parsed_cache.get(drv_request.drv_path)
+        if parsed is None:
+            continue
+
+        depends_on: set[int] = set()
+        for input_drv in parsed.input_drvs:
+            dep_id = drv_to_build_id.get(str(input_drv))
+            if dep_id is not None and dep_id != drv_to_build_id.get(drv_path_str):
+                depends_on.add(dep_id)
+
+        if depends_on:
+            build_id = drv_to_build_id[drv_path_str]
+            await scheduler.queue.set_depends_on(build_id, depends_on)
 
     return results
 

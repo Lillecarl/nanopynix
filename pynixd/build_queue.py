@@ -59,6 +59,20 @@ class QueuedBuild:
         default=None, repr=False
     )  # cached runtime closure
 
+    # Build DAG: build IDs this build depends on (must complete before this
+    # can be scheduled). Populated during decomposition for CA dependency
+    # ordering.
+    depends_on: set[int] = field(default_factory=set)
+
+    # CA realisations from this build's outputs, populated after successful
+    # build completion. Used to register realisations on builder stores
+    # before building dependent (deferred) derivations.
+    ca_realisations: list[dict] = field(default_factory=list, repr=False)
+
+    # The store that was assigned to execute this build, set when
+    # execute_build begins.
+    assigned_store_id: str | None = field(default=None)
+
     # For heap ordering
     def __lt__(self, other: Self) -> bool:
         return self.id < other.id
@@ -160,6 +174,7 @@ class BuildQueue:
     def __init__(self) -> None:
         self.queue: list[QueuedBuild] = []
         self.by_key: dict[BuildKey, QueuedBuild] = {}  # For deduplication
+        self.by_id: dict[int, QueuedBuild] = {}  # For DAG lookups
         self.next_id: int = 1
         self.lock: asyncio.Lock = asyncio.Lock()
 
@@ -202,6 +217,7 @@ class BuildQueue:
             self.next_id += 1
             heapq.heappush(self.queue, build)
             self.by_key[key] = build
+            self.by_id[build.id] = build
 
             log.info(
                 "build_enqueued",
@@ -218,6 +234,16 @@ class BuildQueue:
                 [b for b in self.queue if not b.is_done],
                 key=lambda b: b.id,
             )
+
+    async def set_depends_on(self, build_id: int, depends_on: set[int]) -> None:
+        """Set the build DAG dependencies for a build.
+
+        Called after decomposition to link inter-drv dependencies.
+        """
+        async with self.lock:
+            build = self.by_id.get(build_id)
+            if build is not None:
+                build.depends_on = depends_on
 
     async def complete(
         self,
@@ -261,6 +287,7 @@ class BuildQueue:
         async with self.lock:
             before = len(self.queue)
             self.queue = [b for b in self.queue if not b.is_done]
-            # Rebuild by_key
+            # Rebuild by_key and by_id
             self.by_key = {BuildKey.from_request(b.request): b for b in self.queue}
+            self.by_id = {b.id: b for b in self.queue}
             return before - len(self.queue)

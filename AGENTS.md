@@ -11,6 +11,11 @@ This document defines the foundational architectural patterns and engineering st
 ## 2. Core Architectural Pattern: Request-Driven Execution
 `pynixd` follows a strict three-tier execution pattern to separate protocol IO from business logic.
 
+Important Nix protocol version support matrix:
+Builder stores: >= 1.32 (nixbuild.net is 1.32)
+Local stores: >= 1.35 (Lix is 1.35)
+Pynixd will adversise 1.38 support even if local_store is 1.35 and translate where appropriate
+
 1. **Server Dispatch** (`OpRequest.handle(proxy)`): 
    - Entry point for the `DaemonProxy`.
    - Decodes the request from the client wire.

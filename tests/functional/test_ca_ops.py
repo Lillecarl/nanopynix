@@ -335,9 +335,6 @@ async def test_ca_depends_on_ca_via_pynixd(
         assert stdout.strip().startswith("/nix/store/"), f"Unexpected output: {stdout}"
 
 
-@pytest.mark.xfail(
-    reason="deferred derivations need CA dependency realisations registered on builder before build"
-)
 async def test_non_ca_depends_on_ca_via_pynixd(
     profiler: pyinstrument.Profiler, ca_env
 ) -> None:
