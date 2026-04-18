@@ -26,7 +26,7 @@ from .connection import ClientConn
 from .derived_path import DerivedPath
 from .drv_parser import read_drv_file, to_basic_derivation
 from .exceptions import BackendError, InfrastructureError
-from .operations.base import BuildMode, KeyedBuildResult
+from .operations.base import BasicDerivation, BuildMode, KeyedBuildResult
 from .operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
@@ -288,6 +288,22 @@ class Scheduler:
                 dep_id = drv_to_build_id.get(str(input_drv))
                 if dep_id is not None and dep_id != drv_to_build_id.get(drv_path_str):
                     depends_on.add(dep_id)
+
+            # Dynamic input derivations: add depends_on edges to the
+            # outer build. When the trampoline fires and creates inner
+            # builds, _on_build_complete will add edges to those too.
+            for dyn_drv in parsed.dynamic_input_drvs:
+                dep_id = drv_to_build_id.get(str(dyn_drv))
+                if dep_id is not None and dep_id != drv_to_build_id.get(drv_path_str):
+                    depends_on.add(dep_id)
+
+            # Store dynamic_input_drvs on the QueuedBuild so the
+            # trampoline can use it later.
+            build_id = drv_to_build_id.get(drv_path_str)
+            if build_id is not None and parsed.dynamic_input_drvs:
+                build = self.queue.by_id.get(build_id)
+                if build is not None:
+                    build.dynamic_input_drvs = parsed.dynamic_input_drvs
 
             if depends_on:
                 build_id = drv_to_build_id[drv_path_str]
@@ -922,6 +938,12 @@ class Scheduler:
                     original_derived_paths=[str(dp) for dp in parent_dps],
                 )
 
+                # Link dependent builds to the inner build via DAG.
+                # Builds with dynamic_input_drvs referencing the outer
+                # build's drv need to depend on the inner build too,
+                # and need its output paths in required_paths.
+                self._link_dynamic_deps(build, inner_build_id, inner_basic)
+
                 trampolined_dps.update(parent_dps)
 
         # Record results for DerivedPaths that are NOT being trampolined.
@@ -971,6 +993,57 @@ class Scheduler:
             )
 
         self.trigger()
+
+    def _link_dynamic_deps(
+        self,
+        outer_build: QueuedBuild,
+        inner_build_id: int,
+        inner_derivation: BasicDerivation,
+    ) -> None:
+        """After trampoline enqueues an inner build, add DAG edges from
+        dependent builds to the inner build, and add the inner build's
+        output paths to their required_paths.
+
+        This ensures that builds with dynamic_input_drvs referencing
+        the outer build wait for the inner build and have its outputs
+        available when they execute.
+        """
+        outer_drv_path = StorePath(outer_build.request.drv_path)
+        inner_outputs = inner_derivation.output_paths()
+        inner_output_paths: set[StorePath] = {
+            p for p in inner_outputs.values() if p != StorePath("")
+        }
+
+        for _bid, other_build in self.queue.by_id.items():
+            if other_build.is_done:
+                continue
+            if not other_build.dynamic_input_drvs:
+                continue
+
+            # Does this build depend on the outer build's drv path
+            # via dynamic_input_drvs?
+            if outer_drv_path not in other_build.dynamic_input_drvs:
+                continue
+
+            # Add depends_on edge to the inner build
+            if inner_build_id not in other_build.depends_on:
+                other_build.depends_on.add(inner_build_id)
+                log.info(
+                    "dynamic_dep_linked",
+                    dependent_build_id=other_build.id,
+                    inner_build_id=inner_build_id,
+                    outer_build_id=outer_build.id,
+                )
+
+            # Add inner build's output paths to required_paths
+            for p in inner_output_paths:
+                if p not in other_build.required_paths:
+                    other_build.required_paths.add(p)
+                    log.debug(
+                        "dynamic_dep_required_path_added",
+                        dependent_build_id=other_build.id,
+                        path=p,
+                    )
 
     async def transfer_inputs(
         self, build: QueuedBuild, store: Store, paths: set[StorePath]

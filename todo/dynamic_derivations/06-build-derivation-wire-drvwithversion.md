@@ -1,6 +1,6 @@
 # 06 — BuildDerivation wire format for DrvWithVersion
 
-**Status**: Not started  
+**Status**: Deferred  
 **Depends on**: 05 (resolution — resolved derivations won't need this)  
 **Priority**: Low — if we always resolve before sending, this isn't needed
 
@@ -20,10 +20,3 @@ Only if we want to send an **unresolved** dynamic derivation to a builder daemon
 ## Recommendation
 
 **Skip for now.** Always resolve dynamic derivations before building (task 05 handles this). This task becomes relevant only if we want to optimize by letting the daemon resolve instead of pynixd.
-
-## If implemented
-
-1. Add `_unparse_dynamic_derivation()` to `derivation_resolution.py`
-2. In `BasicDerivation.to_writer()`, check `is_dynamic` and serialize accordingly
-3. Handle the nested `inputDrvs` format with `childMap` entries
-4. Add protocol version check — only send `DrvWithVersion` to >= 1.36 daemons

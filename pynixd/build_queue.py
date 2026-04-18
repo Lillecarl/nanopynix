@@ -79,6 +79,14 @@ class QueuedBuild:
     # None for standalone build_derivation() calls.
     scheduler_request_id: int | None = field(default=None)
 
+    # Dynamic input derivations from DrvWithVersion .drv files.
+    # {drv_path: {output_name: [nested_output_name, ...], ...}}
+    # Used by the trampoline to add depends_on edges and required_paths
+    # to this build when a dynamic dep's inner build is enqueued.
+    dynamic_input_drvs: dict[StorePath, dict[str, list[str]]] = field(
+        default_factory=dict, repr=False
+    )
+
     # For heap ordering
     def __lt__(self, other: Self) -> bool:
         return self.id < other.id

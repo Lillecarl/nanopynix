@@ -1,7 +1,7 @@
-# 01 — Fix QueryRealisation ANSI escape bug
+# 07 — Fix QueryRealisation wire format
 
 **Status**: Not started  
-**Blocks**: Verification of dynamic derivation realisation queries  
+**Priority**: Low — cosmetic, not blocking dynamic derivation progress
 
 ## Problem
 
@@ -10,17 +10,14 @@
 BackendError: Daemon error (Error): unknown hash algorithm '/nix/store/wsfdgkf6905rn06lq7x5445i594a1j88', expect 'blake3', 'md5', 'sha1', 'sha256', or 'sha512'
 ```
 
-The daemon response includes ANSI color escape codes (e.g., `\x1b[35;1m`) around the drv path, indicating the pynixd reader isn't stripping them properly. The daemon's error messages include ANSI formatting when connected to a terminal-like stream.
+The daemon is parsing a store path as a hash algorithm. The actual bug is likely that `QueryRealisationRequest.to_writer()` sends a bare store path instead of the `drvPath!outputName` format the daemon expects for realisation IDs.
+
+## Note on ANSI escapes
+
+The daemon's error messages may include ANSI escape codes when connected to a pty-like stream. This is normal Nix daemon behavior — stderr is interleaved with the protocol response. It's not a pynixd bug.
 
 ## Steps
 
-1. Investigate `QueryRealisationRequest.to_writer()` — verify the drv output string format matches what the daemon expects (`drvPath!outputName`, not a bare drv path)
-2. Check if the daemon's stderr is leaking ANSI codes into the response stream
-3. Check if `QueryRealisationResponse.from_reader()` is reading the wrong fields or mis-parsing
-4. Fix and verify with `tests/ai/dynamic_drv.py` Step 8
-
-## Verification
-
-```bash
-python tests/ai/dynamic_drv.py  # Step 8 should succeed
-```
+1. Check `QueryRealisationRequest.to_writer()` — verify the realisation ID format matches what the daemon expects
+2. Check `QueryDerivationOutputMapRequest` for comparison (that one works for text-hashed CA)
+3. Fix the wire format and verify
