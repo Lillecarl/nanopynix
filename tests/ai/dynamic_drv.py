@@ -152,7 +152,7 @@ async def main() -> None:
     assert rc == 0
     producing_drv_path = StorePath(stdout.strip())
     print(f"producingDrv .drv path: {producing_drv_path}")
-    producing_out_sp = StorePath(producing_out).with_store_prefix()
+    # producing_out_sp = StorePath(producing_out).with_store_prefix()
 
     # Step 3: Inspect producingDrv .drv
     print()
