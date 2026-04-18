@@ -513,3 +513,268 @@ async def test_ca_query_derivation_output_map_root_store(
 
         finally:
             await store.close()
+
+
+DYN_NIX = Path("test-dyn-drv.nix")
+
+DYN_EXTRA_ARGS = [
+    "--option",
+    "extra-experimental-features",
+    "ca-derivations dynamic-derivations",
+]
+
+DYN_NIX_CONFIG = {
+    "extra-experimental-features": "ca-derivations dynamic-derivations",
+}
+
+
+@pytest.fixture
+async def dyn_env(tmp_path: Path):
+    """Set up a pynixd server with dynamic-derivations enabled.
+
+    Does NOT use the root store as a substituter so builds actually
+    go through pynixd's scheduler instead of being substituted.
+    """
+    async with asyncio.timeout(120):
+        pynixd_local_path = STORE_PREFIX / "pynixd-local-dyn"
+        pynixd_builder_path = STORE_PREFIX / "pynixd-builder-dyn"
+        rmtree_robust(pynixd_local_path)
+        rmtree_robust(pynixd_builder_path)
+
+        dyn_kwargs = get_test_store_kwargs(
+            extra_args=DYN_EXTRA_ARGS,
+            extra_env={
+                "NIX_CONFIG": "extra-experimental-features = ca-derivations dynamic-derivations",
+            },
+        )
+
+        pynixd_local = LocalSocketStore(
+            id="pynixd-local-dyn",
+            store_path=pynixd_local_path,
+            **dyn_kwargs,
+        )
+        pynixd_builder = LocalSocketStore(
+            id="pynixd-builder-dyn",
+            store_path=pynixd_builder_path,
+            **dyn_kwargs,
+        )
+
+        async with Server(
+            local_store=pynixd_local,
+            stores={"builder": pynixd_builder},
+            ssh_port=0,
+        ) as server:
+            username = os.environ.get("USER", "root")
+            uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
+            yield server, uri
+
+
+async def test_dynamic_drv_producing_via_pynixd(
+    profiler: pyinstrument.Profiler, dyn_env
+) -> None:
+    """Build producingDrv (text-hashed CA whose output IS a .drv) through pynixd.
+
+    producingDrv is a text-hashed CA derivation: its outputHashMode is "text"
+    and the output content IS a .drv file. This tests that pynixd correctly
+    handles the full lifecycle: build, realisation registration, and
+    QueryDerivationOutputMap for text-hashed CA derivations.
+    """
+    async with asyncio.timeout(120):
+        server, uri = dyn_env
+
+        # Build producingDrv + hello together (both needed for producingDrv's input_srcs)
+        build_cmd = [
+            str(NIX_BIN),
+            "build",
+            "--option",
+            "builders",
+            "",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations dynamic-derivations",
+            "--impure",
+            "--file",
+            str(DYN_NIX),
+            "producingDrv",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(
+            build_cmd, nix_config=DYN_NIX_CONFIG, expected_retcode=None
+        )
+        assert rc == 0, f"producingDrv build via pynixd failed:\n{stdboth}"
+        producing_out = stdout.strip()
+        assert producing_out.startswith("/nix/store/"), (
+            f"Unexpected output path: {producing_out}"
+        )
+
+        # The output of producingDrv IS a .drv file
+        assert producing_out.endswith(".drv"), (
+            f"Expected .drv output, got: {producing_out}"
+        )
+
+        # Verify it's parseable as a derivation
+        pynixd_local_path = STORE_PREFIX / "pynixd-local-dyn"
+        full_path = pynixd_local_path / producing_out.lstrip("/")
+        if full_path.exists():
+            content = full_path.read_text()
+            assert content.startswith("Derive("), (
+                f"Output should be derivation ATerm, got: {content[:80]}"
+            )
+
+        # Query the derivation output map to verify realisation registration
+        eval_cmd = [
+            str(NIX_BIN),
+            "eval",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations dynamic-derivations",
+            "--impure",
+            "--file",
+            str(DYN_NIX),
+            "producingDrv.drvPath",
+            "--raw",
+        ]
+        rc, drv_out, _, _ = await run_subproc(eval_cmd, nix_config=DYN_NIX_CONFIG)
+        assert rc == 0, "producingDrv drvPath eval failed"
+        drv_path = drv_out.strip()
+
+        info_cmd = [
+            str(NIX_BIN),
+            "path-info",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations dynamic-derivations",
+            "--json",
+            f"{drv_path}^*",
+        ]
+        rc, info_out, _, _ = await run_subproc(info_cmd, nix_config=DYN_NIX_CONFIG)
+        assert rc == 0, "path-info for producingDrv failed"
+        import json
+
+        info = json.loads(info_out)
+        assert producing_out in info, (
+            f"Expected {producing_out} in output map, got: {list(info.keys())}"
+        )
+
+        log.info("producingDrv_via_pynixd", output=producing_out)
+
+
+async def test_text_hashed_ca_build_root_store(
+    profiler: pyinstrument.Profiler,
+) -> None:
+    """Build a text-hashed CA derivation (outputHashMode=text) directly."""
+    async with asyncio.timeout(120):
+        store_path = STORE_PREFIX / "ca-root-text"
+        rmtree_robust(store_path)
+
+        store = LocalSocketStore(
+            id="ca-root-text",
+            store_path=store_path,
+            **_ca_test_store_kwargs(),
+        )
+
+        try:
+            await store.ensure_daemon()
+
+            cmd = [
+                str(NIX_BIN),
+                "build",
+                "--store",
+                str(store_path),
+                "--extra-experimental-features",
+                "ca-derivations dynamic-derivations",
+                "--file",
+                str(TEST_CA_NIX),
+                "ca_text_hashed",
+                "--no-link",
+                "--print-out-paths",
+            ]
+            rc, stdout, stderr, stdboth = await run_subproc(
+                cmd, nix_config=CA_NIX_CONFIG
+            )
+            assert rc == 0, f"Text-hashed CA build failed:\n{stdboth}"
+            out_path = stdout.strip()
+            assert out_path.startswith("/nix/store/"), (
+                f"Unexpected output path: {out_path}"
+            )
+            log.info("text_hashed_ca_output", path=out_path)
+
+            full_path = store_path / out_path.lstrip("/")
+            assert full_path.exists(), f"Output file missing: {full_path}"
+            content = full_path.read_text().strip()
+            assert content == "text-content", f"Unexpected content: {content!r}"
+        finally:
+            await store.close()
+
+
+async def test_text_hashed_ca_build_via_pynixd(
+    profiler: pyinstrument.Profiler, ca_env
+) -> None:
+    """Build a text-hashed CA derivation through pynixd proxy."""
+    async with asyncio.timeout(120):
+        server, uri = ca_env
+
+        build_cmd = [
+            str(NIX_BIN),
+            "build",
+            "--option",
+            "builders",
+            "",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations dynamic-derivations",
+            "--file",
+            str(TEST_CA_NIX),
+            "ca_text_hashed",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(
+            build_cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        )
+        assert rc == 0, f"Text-hashed CA build via pynixd failed:\n{stdboth}"
+        out_path = stdout.strip()
+        assert out_path.startswith("/nix/store/"), f"Unexpected output path: {out_path}"
+        log.info("text_hashed_ca_via_pynixd", path=out_path)
+
+        # Get the .drv path
+        eval_cmd = [
+            str(NIX_BIN),
+            "eval",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations dynamic-derivations",
+            "--file",
+            str(TEST_CA_NIX),
+            "ca_text_hashed.drvPath",
+            "--raw",
+        ]
+        rc, drv_out, _, _ = await run_subproc(eval_cmd, nix_config=CA_NIX_CONFIG)
+        assert rc == 0, "CA drvPath eval failed"
+        drv_path = drv_out.strip()
+
+        # Query the output map — exercises QueryDerivationOutputMap for text-hashed CA
+        info_cmd = [
+            str(NIX_BIN),
+            "path-info",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations dynamic-derivations",
+            "--json",
+            f"{drv_path}^*",
+        ]
+        rc, info_out, _, _ = await run_subproc(info_cmd, nix_config=CA_NIX_CONFIG)
+        assert rc == 0, "path-info failed"
+        import json
+
+        info = json.loads(info_out)
+        assert len(info) > 0, f"No output paths found for {drv_path}"
+        assert out_path in info, f"Expected {out_path} in {info}"
+        assert "ca" in info[out_path], f"Expected 'ca' field in {info[out_path]}"

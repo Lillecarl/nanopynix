@@ -60,6 +60,12 @@ let
     name = "non-ca-depends-on-ca";
     buildCommand = "echo dep-on-${ca_simple} > $out";
   };
+
+  ca_text_hashed = mkCADrv {
+    name = "ca-text.txt";
+    hashMode = "text";
+    buildCommand = "echo text-content > $out";
+  };
 in
 {
   inherit
@@ -67,5 +73,6 @@ in
     ca_multi_output
     ca_depends_on_ca
     non_ca_depends_on_ca
+    ca_text_hashed
     ;
 }
