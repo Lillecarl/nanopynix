@@ -24,7 +24,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from pynixd.drv_parser import read_drv_file, to_basic_derivation
-from pynixd.derivation_resolution import resolve_derivation, _unparse_basic_derivation
+from pynixd.derivation_resolution import (
+    resolve_derivation,
+    _unparse_basic_derivation,
+    _nix_drv_name,
+)
 from pynixd.operations.base import BuildMode, ValidPathInfo, UnkeyedValidPathInfo
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
@@ -265,16 +269,18 @@ async def main() -> None:
     )
     resolved_aterm_early = _unparse_basic_derivation(resolved_early, mask_outputs=False)
 
-    # Use the same name as the original drv — Nix keeps the .drv suffix
-    # The hash changes because the content is different, giving a new path.
-    drv_basename = str(deferred_drv_path).rsplit("/", 1)[-1]
-    drv_name_for_add = drv_basename  # e.g. "66jcl4...-non-ca-depends-on-ca.drv"
-    print(f"Adding resolved .drv via AddToStore text:sha256 name={drv_name_for_add}")
+    # Nix uses the derivation's "name" field (from env), not the store path name.
+    # The suffix for AddToStore is: drv.name + ".drv"
+    # Our resolve_derivation computes outputs using outputPathName(drv.name, id)
+    # which for "out" just returns drv.name.
+    drv_name = _nix_drv_name(deferred_drv_path)  # "non-ca-depends-on-ca"
+    name_for_add = drv_name + ".drv"  # "non-ca-depends-on-ca.drv"
+    print(f"Adding resolved .drv via AddToStore text:sha256 name={name_for_add}")
     print(f"  References: {sorted(str(p) for p in resolved_early.input_srcs)}")
 
     local_resolved_path = await add_text_to_store(
         root_store,
-        drv_name_for_add,
+        name_for_add,
         resolved_aterm_early.encode("utf-8"),
         resolved_early.input_srcs,
     )
@@ -282,7 +288,15 @@ async def main() -> None:
 
     builder_resolved_path = await add_text_to_store(
         builder_store,
-        drv_name_for_add,
+        name_for_add,
+        resolved_aterm_early.encode("utf-8"),
+        resolved_early.input_srcs,
+    )
+    print(f"Local store resolved .drv: {local_resolved_path}")
+
+    builder_resolved_path = await add_text_to_store(
+        builder_store,
+        name_for_add,
         resolved_aterm_early.encode("utf-8"),
         resolved_early.input_srcs,
     )
