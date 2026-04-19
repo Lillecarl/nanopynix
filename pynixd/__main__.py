@@ -1,121 +1,31 @@
 """Entry point: python -m pynixd
 
-All configuration is via environment variables:
+All configuration is via environment variables and/or a JSON config file:
 
-General:
-  PYNIXD_HOST          Listen address for SSH (default: 127.0.0.1)
-  PYNIXD_CONFIG        JSON file containing pynixd configuration
-  PYNIXD_DEV           Dev mode: spawn N local builders (default: 0)
+  PYNIXD_CONFIG        JSON config file path (also read for settings fields)
   PYNIXD_LOG_LEVEL     Log level: DEBUG, INFO, WARNING, ERROR (default: WARNING)
 
-SSH Server:
-  PYNIXD_SSH_PORT      SSH listen port (default: 2234, 0 to disable)
-  PYNIXD_HOST_KEY      Path to SSH host key (generated if absent)
-
-Unix Server:
-  PYNIXD_UNIX_PATH     Path for Unix domain socket (disabled if empty)
-
-HTTP Binary Cache:
-  PYNIXD_HTTP_PORT     HTTP binary cache port (0 to disable, default: 0)
-  PYNIXD_HTTP_HOST     HTTP listen address (default: 0.0.0.0)
-  PYNIXD_HTTP_USER     HTTP basic auth username
-  PYNIXD_HTTP_PASS     HTTP basic auth password
-  PYNIXD_HTTP_HTPASSWD Path to htpasswd file for authentication
-  PYNIXD_HTTP_PRIORITY HTTP cache priority (default: 30)
-  PYNIXD_HTTP_UPLOAD_DIR Path for temporary NAR uploads to enable PUT
-
-
-HTTPS Binary Cache:
-  PYNIXD_HTTPS_PORT    HTTPS binary cache port (0 to disable, default: 0)
-  PYNIXD_HTTPS_CERT    TLS certificate path
-  PYNIXD_HTTPS_KEY     TLS private key path
-
-See also: gc.py, psi.py, scheduler.py for additional env vars.
+All other settings use PYNIXD_<FIELD_NAME> env vars (e.g. PYNIXD_SSH_PORT).
+See PynixdSettings for the full list.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 
 import structlog
 from environs import env
 
-from .config import PynixdConfigFile
-from .instance import PynixdConfig, Server
-from .store import LocalSocketStore, Store
-
-log = structlog.get_logger(__name__)
-
-
-def load_config_from_file(path: Path) -> dict[str, Store]:
-    """Load store definitions from a PYNIXD_CONFIG JSON file."""
-    config = PynixdConfigFile.from_file(path)
-    stores: dict[str, Store] = {}
-    for spec in config.stores:
-        store = spec.to_store()
-        stores[store.id] = store
-    return stores
+from .config import PynixdSettings
+from .instance import Server
 
 
 async def async_main() -> None:
-    dev_mode = env.int("PYNIXD_DEV", 0)
-    stores: dict[str, Store] = {}
+    settings = PynixdSettings()
+    local_store, stores = settings.to_stores()
 
-    if dev_mode > 0:
-        log.info("dev_mode", count=dev_mode)
-
-        for i in range(dev_mode):
-            store = LocalSocketStore(
-                store_path=Path(f"/tmp/pynixd-{i}"),
-                id=f"builder{i}",
-                max_builds=2,
-            )
-            stores[store.id] = store
-
-        local_store: Store = LocalSocketStore(
-            store_path=Path("/tmp/pynixdlocal"),
-            id="local",
-        )
-
-    else:
-        config_file = env.path("PYNIXD_CONFIG", None)
-        if config_file:
-            if not config_file.exists():
-                raise FileNotFoundError(f"Config file not found: {config_file}")
-            log.info("loading_config", path=str(config_file))
-            stores = load_config_from_file(config_file)
-        else:
-            log.info("no_config_file", mode="local-only")
-            stores = {}
-
-        if "local" in stores:
-            local_store = stores.pop("local")
-            log.info("using_local_from_config")
-        else:
-            local_store = LocalSocketStore(id="local", store_path=Path("/"))
-
-    config = PynixdConfig(
-        local_store=local_store,
-        stores=stores,
-        ssh_host=env.str("PYNIXD_HOST", "127.0.0.1"),
-        ssh_port=env.int("PYNIXD_SSH_PORT", 2234),
-        ssh_host_key=env.path("PYNIXD_HOST_KEY", None),
-        unix_path=env.path("PYNIXD_UNIX_PATH", None),
-        http_host=env.str("PYNIXD_HTTP_HOST", "0.0.0.0"),
-        http_port=env.int("PYNIXD_HTTP_PORT", None),
-        http_user=env.str("PYNIXD_HTTP_USER", None),
-        http_pass=env.str("PYNIXD_HTTP_PASS", None),
-        http_htpasswd=env.path("PYNIXD_HTTP_HTPASSWD", None),
-        http_priority=env.int("PYNIXD_HTTP_PRIORITY", 30),
-        http_upload_dir=env.path("PYNIXD_HTTP_UPLOAD_DIR", None),
-        https_port=env.int("PYNIXD_HTTPS_PORT", None),
-        https_cert=env.path("PYNIXD_HTTPS_CERT", None),
-        https_key=env.path("PYNIXD_HTTPS_KEY", None),
-    )
-
-    server = Server(config)
+    server = Server(local_store=local_store, stores=stores, settings=settings)
     try:
         await server.start()
         await server.wait_finished()

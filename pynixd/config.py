@@ -1,12 +1,17 @@
-"""Pydantic models for the PYNIXD_CONFIG JSON file."""
+"""Pydantic-settings model for the PYNIXD_CONFIG JSON file and env vars."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 if TYPE_CHECKING:
     from .store import Store
@@ -145,13 +150,86 @@ StoreSpec = Annotated[
 ]
 
 
-class PynixdConfigFile(BaseModel):
-    """Top-level model for the PYNIXD_CONFIG JSON file."""
+class _ConfigFileSource(PydanticBaseSettingsSource):
+    """Read settings fields from a JSON config file (PYNIXD_CONFIG)."""
 
-    stores: list[StoreSpec] = Field(default_factory=list)
+    def __init__(self, settings_cls: type[BaseSettings]) -> None:
+        super().__init__(settings_cls)
 
-    @classmethod
-    def from_file(cls, path: Path) -> PynixdConfigFile:
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        config_path = self.settings_cls.model_fields.get("config")
+        if config_path is None:
+            return {}
+        env_val = self.current_state.get("config")
+        if env_val is None:
+            return {}
+        path = Path(env_val)
+        if not path.exists():
+            return {}
         with open(path) as f:
             data = json.load(f)
-        return cls.model_validate(data)
+        return {k: v for k, v in data.items() if k in self.settings_cls.model_fields}
+
+
+class PynixdSettings(BaseSettings):
+    """Unified configuration from env vars (priority) and config file.
+
+    Env var mapping: PYNIXD_<FIELD_NAME> (e.g. PYNIXD_SSH_PORT → ssh_port).
+    Config file fields (lower priority) are loaded from the JSON file at
+    PYNIXD_CONFIG (if it points to an existing path).
+    """
+
+    model_config = SettingsConfigDict(env_prefix="PYNIXD_")
+
+    config: Path | None = None
+    stores: list[StoreSpec] = Field(default_factory=list)
+
+    ssh_host: str = "127.0.0.1"
+    ssh_port: int | None = 2234
+    ssh_host_key: Path | None = None
+
+    unix_path: Path | None = None
+
+    http_host: str = "0.0.0.0"
+    http_port: int | None = None
+    http_user: str | None = None
+    http_pass: str | None = None
+    http_htpasswd: Path | None = None
+    http_priority: int = 30
+    http_upload_dir: Path | None = None
+
+    https_port: int | None = None
+    https_cert: Path | None = None
+    https_key: Path | None = None
+
+    admin_users: set[str] = Field(default_factory=set)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (init_settings, env_settings, _ConfigFileSource(settings_cls))
+
+    def to_stores(self) -> tuple[Store, dict[str, Store]]:
+        """Convert all store specs to live Store instances, separating out 'local'."""
+        from .store import LocalSocketStore
+
+        stores: dict[str, Store] = {}
+        for spec in self.stores:
+            store = spec.to_store()
+            stores[store.id] = store
+
+        if "local" in stores:
+            local_store = stores.pop("local")
+        else:
+            local_store = LocalSocketStore(id="local", store_path=Path("/"))
+
+        return local_store, stores

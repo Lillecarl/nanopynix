@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,6 +15,7 @@ if TYPE_CHECKING:
     from aiohttp import web
 
 from . import wire
+from .config import PynixdSettings
 from .gc import GarbageCollector
 from .http_cache import BinaryCacheServer
 from .local_store_db import LocalStoreDB
@@ -33,65 +33,31 @@ class NixImplementation(Enum):
     LIX = auto()
 
 
-@dataclass
-class PynixdConfig:
-    """Configuration for a pynixd instance."""
-
-    local_store: Store
-    stores: dict[str, Store] = field(default_factory=dict)
-
-    # SSH Server
-    ssh_host: str = "127.0.0.1"
-    ssh_port: int | None = None  # None to disable, 0 for random
-    ssh_host_key: Path | None = None
-
-    # Unix Server
-    unix_path: Path | None = None
-
-    # HTTP Binary Cache
-    http_host: str = "0.0.0.0"
-    http_port: int | None = None
-    http_user: str | None = None
-    http_pass: str | None = None
-    http_htpasswd: Path | None = None
-    http_priority: int = 30
-    http_upload_dir: Path | str | None = None
-
-    # HTTPS Binary Cache
-
-    https_port: int | None = None
-    https_cert: Path | None = None
-    https_key: Path | None = None
-
-    # Maintenance Access
-    admin_users: set[str] = field(default_factory=set)
-
-
 class Server:
-    """Programmatic pynixd server instance."""
+    """Programmatic pynixd server instance.
 
-    def __init__(self, config: PynixdConfig | dict | None = None, **kwargs) -> None:
-        if isinstance(config, dict):
-            # Merge dict with kwargs to instantiate PynixdConfig
-            merged = {**config, **kwargs}
-            if not merged.get("local_store"):
-                merged["local_store"] = LocalSocketStore(
-                    id="local", store_path=Path("/")
-                )
-            config = PynixdConfig(**merged)
-        elif config is None:
-            # If nothing is passed, use kwargs
-            if not kwargs.get("local_store"):
-                kwargs["local_store"] = LocalSocketStore(
-                    id="local", store_path=Path("/")
-                )
-            config = PynixdConfig(**kwargs)
+    Accepts either a ``PynixdSettings`` object (from config file + env vars)
+    or individual kwargs for programmatic/test use.
+    """
 
-        self.config: PynixdConfig = config
-        if self.config.stores:
-            self.scheduler: Scheduler | None = Scheduler(
-                self.config.stores, self.config.local_store
-            )
+    def __init__(
+        self,
+        local_store: Store | None = None,
+        stores: dict[str, Store] | None = None,
+        settings: PynixdSettings | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if local_store is None:
+            local_store = LocalSocketStore(id="local", store_path=Path("/"))
+        if stores is None:
+            stores = {}
+
+        self.local_store: Store = local_store
+        self.stores: dict[str, Store] = stores
+        self.settings: PynixdSettings = settings or PynixdSettings(**kwargs)
+
+        if stores:
+            self.scheduler: Scheduler | None = Scheduler(stores, local_store)
         else:
             self.scheduler = None
 
@@ -111,7 +77,7 @@ class Server:
 
         await store.probe()
 
-        local_store = self.config.local_store
+        local_store = self.local_store
         store.db = local_store.db
         store.tracker = self.path_tracker.get_instance(store.id, is_local=False)
 
@@ -121,7 +87,7 @@ class Server:
                 store.tracker.add_known_paths(paths, update_regtime=False)
                 log.info("loaded_cached_paths", store_id=store.id, count=len(paths))
 
-        self.config.stores[store.id] = store
+        self.stores[store.id] = store
 
         try:
             await store.execute(QueryAllValidPathsRequest())
@@ -130,19 +96,16 @@ class Server:
 
     @property
     def host(self) -> str:
-        """SSH listen host."""
-        return self.config.ssh_host
+        return self.settings.ssh_host
 
     @property
     def port(self) -> int:
-        """SSH listen port (actual port if 0 was passed)."""
         if self.ssh_server and self.ssh_server.sockets:
             return self.ssh_server.sockets[0].getsockname()[1]
-        return self.config.ssh_port or 0
+        return self.settings.ssh_port or 0
 
     @property
     def username(self) -> str:
-        """SSH username."""
         return os.environ.get("USER", "root")
 
     def uri(self, implementation: NixImplementation = NixImplementation.NIX) -> str:
@@ -172,13 +135,10 @@ class Server:
         if uri_format == "ssh-ng":
             return self.uri(implementation)
         elif uri_format == "unix":
-            # For unix-server tests
-            if not self.config.unix_path:
+            if not self.settings.unix_path:
                 return ""
-            uri = f"unix://{self.config.unix_path}"
-            # Always add ?root= to ensure Nix client looks for NARs in the physical
-            # location managed by this server.
-            uri += f"?root={self.config.local_store.store_path}"
+            uri = f"unix://{self.settings.unix_path}"
+            uri += f"?root={self.local_store.store_path}"
             return uri
         return self.uri(implementation)
 
@@ -194,14 +154,11 @@ class Server:
         if self._started:
             raise RuntimeError("Server already started")
         self._started = True
-        local_store = self.config.local_store
-        stores = self.config.stores
+        local_store = self.local_store
+        stores = self.stores
 
         await local_store.probe()
 
-        # Enforce minimum protocol version for the local store.
-        # 1.35 is required for reliable operation and modern field support.
-        # Remote stores (like nixbuild.net) can still use 1.32.
         if local_store.version < wire.proto(1, 35):
             raise RuntimeError(
                 f"Local store {local_store.id} uses protocol {wire.proto_str(local_store.version)}, "
@@ -218,20 +175,17 @@ class Server:
             local_store.db = None
             self.path_tracker.db = None
 
-        # Link local store to tracker first
         local_store.tracker = self.path_tracker.get_instance(
             local_store.id, is_local=True
         )
 
-        # Link all stores to the central DB for persistent path tracking
-        stores_to_add = list(self.config.stores.values())
-        self.config.stores.clear()
+        stores_to_add = list(self.stores.values())
+        self.stores.clear()
 
         for store in stores_to_add:
             await store.probe()
             await self.add_store(store)
 
-        # Start background services
         if self.scheduler:
             scheduler_task = asyncio.create_task(self.scheduler.start())
             self.background_tasks.append(scheduler_task)
@@ -243,52 +197,48 @@ class Server:
             if gc.task:
                 self.background_tasks.append(gc.task)
 
-        # Start listeners
-        if self.config.ssh_port is not None:
+        s = self.settings
+        if s.ssh_port is not None:
             self.ssh_server = await start_ssh_server(
                 stores=stores,
                 local_store=local_store,
                 scheduler=self.scheduler,
-                host=self.config.ssh_host,
-                port=self.config.ssh_port,
-                host_key_path=self.config.ssh_host_key,
-                admin_users=self.config.admin_users,
+                host=s.ssh_host,
+                port=s.ssh_port,
+                host_key_path=s.ssh_host_key,
+                admin_users=s.admin_users,
             )
 
-        if self.config.unix_path:
+        if s.unix_path:
             self.unix_server = await start_unix_server(
                 stores=stores,
                 local_store=local_store,
                 scheduler=self.scheduler,
-                socket_path=self.config.unix_path,
+                socket_path=s.unix_path,
             )
 
-        if self.config.http_port is not None or self.config.https_port is not None:
+        if s.http_port is not None or s.https_port is not None:
             cache = BinaryCacheServer(
                 local_store,
-                username=self.config.http_user,
-                password=self.config.http_pass,
-                htpasswd_path=self.config.http_htpasswd,
-                priority=self.config.http_priority,
-                upload_dir=self.config.http_upload_dir,
+                username=s.http_user,
+                password=s.http_pass,
+                htpasswd_path=s.http_htpasswd,
+                priority=s.http_priority,
+                upload_dir=s.http_upload_dir,
             )
-            if self.config.http_port is not None:
+            if s.http_port is not None:
                 runner, port = await cache.start(
-                    host=self.config.http_host,
-                    port=self.config.http_port,
+                    host=s.http_host,
+                    port=s.http_port,
                 )
                 self.http_server = runner
                 self.http_bound_port = port
-            if self.config.https_port is not None:
+            if s.https_port is not None:
                 runner, port = await cache.start(
-                    host=self.config.http_host,
-                    port=self.config.https_port,
-                    ssl_cert=str(self.config.https_cert)
-                    if self.config.https_cert
-                    else None,
-                    ssl_key=str(self.config.https_key)
-                    if self.config.https_key
-                    else None,
+                    host=s.http_host,
+                    port=s.https_port,
+                    ssl_cert=str(s.https_cert) if s.https_cert else None,
+                    ssl_key=str(s.https_key) if s.https_key else None,
                 )
                 self.https_server = runner
                 self.https_bound_port = port
@@ -309,7 +259,6 @@ class Server:
         if wait_tasks:
             await asyncio.gather(*wait_tasks)
         elif self.http_server or self.https_server:
-            # Only HTTP runners, wait forever (until cancelled)
             while True:
                 await asyncio.sleep(3600)
 
@@ -329,17 +278,16 @@ class Server:
         if self.unix_server:
             self.unix_server.close()
 
-        # Stop scheduler gracefully (cancels builds etc)
         if self.scheduler:
             await self.scheduler.stop()
 
         for task in self.background_tasks:
             task.cancel()
 
-        local_store = self.config.local_store
+        local_store = self.local_store
         if local_store.db:
             await local_store.db.close()
 
         await local_store.close()
-        for store in self.config.stores.values():
+        for store in self.stores.values():
             await store.close()
