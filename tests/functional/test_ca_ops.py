@@ -886,3 +886,49 @@ async def test_text_hashed_ca_build_via_pynixd(
         assert len(info) > 0, f"No output paths found for {drv_path}"
         assert out_path in info, f"Expected {out_path} in {info}"
         assert "ca" in info[out_path], f"Expected 'ca' field in {info[out_path]}"
+
+
+async def test_dynamic_drv_wrapper_via_pynixd(
+    profiler: pyinstrument.Profiler, dyn_env
+) -> None:
+    """Build the wrapper derivation (depends on dynamic drv^out^out) through pynixd.
+
+    The wrapper derivation uses DrvWithVersion format with dynamic_input_drvs.
+    Its env contains a DownstreamPlaceholder that must be resolved to the
+    actual output path after the inner build completes.
+
+    Store operations triggered:
+    - BuildPaths: Builds wrapper + producingDrv + hello chain
+    - All operations from test_dynamic_drv_trampoline
+    - Derivation resolution for DownstreamPlaceholder replacement
+    - AddToStore: Resolved wrapper .drv written to both stores
+    """
+    server, uri = dyn_env
+    async with asyncio.timeout(120):
+        build_cmd = [
+            str(NIX_BIN),
+            "build",
+            "--option",
+            "builders",
+            "",
+            "--store",
+            uri,
+            "--extra-experimental-features",
+            "ca-derivations dynamic-derivations",
+            "--file",
+            str(DYN_NIX),
+            "wrapper",
+            "--no-link",
+            "--print-out-paths",
+        ]
+        rc, stdout, stderr, stdboth = await run_subproc(
+            build_cmd, nix_config=DYN_NIX_CONFIG, expected_retcode=None
+        )
+        assert rc == 0, f"Wrapper build via pynixd failed:\n{stdboth}"
+        out_path = stdout.strip()
+        assert out_path.startswith("/nix/store/"), f"Unexpected output: {out_path}"
+        assert not out_path.endswith(".drv"), (
+            f"Wrapper output should not be a .drv, got: {out_path}"
+        )
+
+        log.info("wrapper_via_pynixd", path=out_path)

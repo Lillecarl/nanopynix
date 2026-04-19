@@ -183,7 +183,23 @@ class Scheduler:
         all_planned_outputs: set[StorePath] = set()
         all_input_drvs: set[StorePath] = set()
 
+        # Collect all derivations that need to be built, including
+        # those referenced via dynamic_input_drvs.
+        to_build: set[StorePath] = set()
         for sp in missing_resp.will_build | missing_resp.unknown:
+            to_build.add(StorePath(sp))
+
+        # Expand to_build with dynamic_input_drvs targets.
+        # A wrapper's dynamic deps (producingDrv) may not appear in
+        # will_build because the .drv file is a valid path but its
+        # outputs haven't been built yet.
+        queue = list(to_build)
+        visited: set[StorePath] = set()
+        while queue:
+            sp = queue.pop(0)
+            if sp in visited:
+                continue
+            visited.add(sp)
             dp = drv_to_derived.get(str(sp), DerivedPath(sp))
             try:
                 parsed = dp.to_derivation(self.local_store.store_path)
@@ -197,6 +213,30 @@ class Scheduler:
                     all_planned_outputs.add(p)
             all_input_drvs.update(parsed.input_drvs.keys())
 
+            # Add dynamic_input_drvs targets to the build queue.
+            # These are derivations whose outputs are needed but may
+            # not be in will_build (their .drv files are valid paths
+            # but their outputs aren't built yet).
+            for dyn_drv_path in parsed.dynamic_input_drvs:
+                if dyn_drv_path not in to_build:
+                    # Check if this dynamic dep's outputs are already available
+                    try:
+                        dyn_parsed = read_drv_file(
+                            self.local_store.store_path, dyn_drv_path
+                        )
+                    except FileNotFoundError:
+                        continue
+                    dyn_outputs = dyn_parsed.output_paths()
+                    has_unbuilt = any(
+                        p == StorePath("") or not self.local_store.tracker.has_path(p)
+                        for p in dyn_outputs.values()
+                    )
+                    if has_unbuilt:
+                        to_build.add(dyn_drv_path)
+                        queue.append(dyn_drv_path)
+                        parsed_cache[dyn_drv_path] = dyn_parsed
+                        all_input_drvs.update(dyn_parsed.input_drvs.keys())
+
         output_cache = None
         if all_input_drvs:
             resp = await self.local_store.execute(
@@ -207,7 +247,7 @@ class Scheduler:
         resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []
         all_input_srcs: set[StorePath] = set()
 
-        for sp in missing_resp.will_build | missing_resp.unknown:
+        for sp in to_build:
             dp = drv_to_derived.get(str(sp), DerivedPath(sp))
             drv_path = StorePath(dp.drv_path)
             parsed = parsed_cache.get(drv_path)
@@ -520,6 +560,7 @@ class Scheduler:
                 if build.depends_on:
                     await self._register_dep_realisations(build, store)
                     await self._resolve_deferred_derivation(build, store)
+                    await self._resolve_dynamic_derivation(build, store)
 
                 # 1. Ensure all inputs are present on the builder
                 missing = build.required_paths - store.tracker.known_paths
@@ -820,6 +861,184 @@ class Scheduler:
             output_paths={n: o.path for n, o in resolved.outputs.items()},
         )
 
+    async def _resolve_dynamic_derivation(
+        self, build: QueuedBuild, store: Store
+    ) -> None:
+        """Resolve a dynamic (DrvWithVersion) wrapper derivation before building.
+
+        Wrapper derivations have dynamic_input_drvs referencing dynamic
+        outputs (drv^out^out). Their env/args contain DownstreamPlaceholder
+        strings that must be rewritten to actual store paths.
+
+        The resolution flow mirrors _resolve_deferred_derivation but uses
+        resolve_dynamic_derivation() which handles nested placeholders.
+        """
+        from .derivation_resolution import (
+            resolve_dynamic_derivation,
+            _unparse_basic_derivation,
+            _nix_drv_name,
+        )
+        from .drv_parser import read_drv_file
+        from .operations.add_to_store import AddToStoreRequest
+
+        if not build.dynamic_input_drvs:
+            return
+
+        drv_path = build.request.drv_path
+
+        try:
+            parsed = read_drv_file(self.local_store.store_path, drv_path)
+        except FileNotFoundError:
+            log.warning(
+                "resolve_dynamic_drv_not_found",
+                build_id=build.id,
+                drv_path=drv_path,
+            )
+            return
+
+        # Build the dynamic_output_paths map from dependency builds:
+        # {(outer_drv_path, outer_output, inner_output): actual_store_path}
+        dynamic_output_paths: dict[tuple[StorePath, str, str], StorePath] = {}
+
+        # First, collect all dep build realisations, keyed by drv_path
+        dep_realisations: dict[StorePath, dict[str, StorePath]] = {}
+        for dep_id in build.depends_on:
+            dep_build = self.queue.by_id.get(dep_id)
+            if dep_build is None or not dep_build.ca_realisations:
+                continue
+            dep_drv_path = StorePath(dep_build.request.drv_path)
+            for realisation in dep_build.ca_realisations:
+                out_path = realisation.get("outPath", "")
+                output_name = realisation.get("id", "").rsplit("!", 1)[-1] or "out"
+                if out_path:
+                    dep_realisations.setdefault(dep_drv_path, {})[output_name] = (
+                        StorePath(out_path).with_store_prefix()
+                    )
+
+        for dyn_drv_path, output_deps in build.dynamic_input_drvs.items():
+            # Level 1: outer drv's outputs (e.g., producingDrv^out = .drv path)
+            outer_outputs = dep_realisations.get(dyn_drv_path, {})
+
+            for outer_output, inner_outputs in output_deps.items():
+                level1_path = outer_outputs.get(outer_output)
+                if level1_path is None:
+                    log.warning(
+                        "resolve_dynamic_no_outer_output",
+                        build_id=build.id,
+                        drv_path=dyn_drv_path,
+                        output=outer_output,
+                    )
+                    continue
+
+                # The level-1 output is a .drv — find its build's realisations
+                for inner_output_name in inner_outputs:
+                    if level1_path.is_derivation():
+                        inner_outputs_map = dep_realisations.get(level1_path, {})
+                        actual_path = inner_outputs_map.get(inner_output_name)
+                        if actual_path is not None:
+                            dynamic_output_paths[
+                                (dyn_drv_path, outer_output, inner_output_name)
+                            ] = actual_path
+                    else:
+                        dynamic_output_paths[
+                            (dyn_drv_path, outer_output, inner_output_name)
+                        ] = level1_path
+
+        if not dynamic_output_paths:
+            log.warning(
+                "resolve_dynamic_no_output_paths",
+                build_id=build.id,
+                drv_path=drv_path,
+            )
+            return
+
+        try:
+            resolved = resolve_dynamic_derivation(
+                parsed, drv_path, dynamic_output_paths
+            )
+        except Exception:
+            log.exception(
+                "resolve_dynamic_derivation_failed",
+                build_id=build.id,
+                drv_path=drv_path,
+            )
+            return
+
+        resolved_aterm = _unparse_basic_derivation(resolved, mask_outputs=False)
+
+        log.debug(
+            "resolve_dynamic_derivation_debug",
+            build_id=build.id,
+            drv_path=drv_path,
+            dynamic_output_paths={
+                str(k): str(v) for k, v in dynamic_output_paths.items()
+            },
+            resolved_outputs={n: o.path for n, o in resolved.outputs.items()},
+            resolved_input_srcs=[str(p) for p in resolved.input_srcs],
+            resolved_aterm_len=len(resolved_aterm),
+        )
+
+        drv_name = _nix_drv_name(drv_path)
+        name_for_add = drv_name + ".drv"
+
+        async def provide_resolved_drv(writer):
+            fw = writer.framed()
+            data = resolved_aterm.encode("utf-8")
+            fw.write(data)
+            await fw.finalize()
+
+        resolved_drv_path: StorePath | None = None
+        for target_store in {self.local_store, store}:
+            add_req = AddToStoreRequest(
+                path_name=name_for_add,
+                cam="text:sha256",
+                references=resolved.input_srcs,
+                repair=0,
+                async_provider=provide_resolved_drv,
+            )
+            try:
+                resp = await add_req.execute(target_store, suppress_last=True)
+                if resp.info is not None:
+                    target_store.tracker.add_known_path(resp.info.path)
+                    target_store.add_path_info(resp.info)
+                    if resolved_drv_path is None:
+                        resolved_drv_path = resp.info.path
+                    log.debug(
+                        "resolved_dynamic_drv_added_to_store",
+                        build_id=build.id,
+                        store_id=target_store.id,
+                        resolved_drv_path=resp.info.path,
+                    )
+            except Exception:
+                log.warning(
+                    "resolved_dynamic_drv_add_to_store_failed",
+                    build_id=build.id,
+                    store_id=target_store.id,
+                    exc_info=True,
+                )
+
+        if resolved_drv_path is None:
+            log.error("resolve_dynamic_add_failed", build_id=build.id)
+            return
+
+        build.request.drv_path = resolved_drv_path
+        build.request.derivation = resolved
+
+        build.required_paths.add(resolved_drv_path)
+        for inp in resolved.input_srcs:
+            build.required_paths.add(StorePath(inp))
+        for name, o in resolved.outputs.items():
+            if o.path:
+                build.required_paths.add(StorePath(o.path))
+
+        log.info(
+            "resolved_dynamic_derivation",
+            build_id=build.id,
+            drv_path=drv_path,
+            resolved_drv_path=resolved_drv_path,
+            output_paths={n: o.path for n, o in resolved.outputs.items()},
+        )
+
     async def _on_build_complete(
         self,
         build: QueuedBuild,
@@ -847,9 +1066,34 @@ class Scheduler:
         drv_outputs = build_resp.result.built_outputs
         trampolined_dps: set[DerivedPath] = set()
 
+        has_drv_output = False
+        has_dynamic_dependent = False
+        if is_dynamic and build_resp.result.status == 0 and drv_outputs:
+            for _drv_output_str, realisation in drv_outputs.items():
+                out_path = realisation.get("outPath", "")
+                if out_path:
+                    out_sp = StorePath(out_path).with_store_prefix()
+                    if out_sp.is_derivation():
+                        has_drv_output = True
+                        break
+
+        # Check if any queued build has dynamic_input_drvs referencing
+        # this build's drv path — those builds need the inner .drv's
+        # outputs resolved, so we must trampoline.
+        if has_drv_output and not has_nested_dp:
+            build_drv_path = StorePath(build.request.drv_path)
+            for _bid, other_build in self.queue.by_id.items():
+                if other_build.is_done:
+                    continue
+                if not other_build.dynamic_input_drvs:
+                    continue
+                if build_drv_path in other_build.dynamic_input_drvs:
+                    has_dynamic_dependent = True
+                    break
+
         if (
             is_dynamic
-            and has_nested_dp
+            and (has_nested_dp or has_dynamic_dependent)
             and build_resp.result.status == 0
             and drv_outputs
         ):

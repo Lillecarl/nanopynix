@@ -1,15 +1,20 @@
-"""Derivation resolution for deferred (non-CA) derivations that depend on CA derivations.
+"""Derivation resolution for deferred and dynamic derivations.
 
 When a deferred derivation depends on a CA derivation, the BuildDerivation
 wire protocol sends a BasicDerivation (no inputDrvs) which the daemon cannot
 resolve. This module implements the Nix `tryResolve` + `rewriteDerivation`
 algorithm to resolve deferred derivations before sending them to the daemon.
 
+For dynamic derivations (DrvWithVersion), wrapper derivations contain
+DownstreamPlaceholder references for nested dynamic outputs (drv^out^out).
+These must be resolved to actual store paths after the trampoline build
+completes, using the unknownDerivation placeholder variant.
+
 The resolution flow:
-1. Compute DownstreamPlaceholder for each input CA derivation output
+1. Compute DownstreamPlaceholder for each input derivation output
 2. Build a placeholder -> actual_path rewrite map
 3. Apply rewrites to builder, args, and env
-4. Move inputDrv outputs into inputSrcs
+4. Move inputDrv/dynamicInputDrv outputs into inputSrcs
 5. Compute hashDerivationModulo on the resolved derivation (masked)
 6. Derive output paths via makeOutputPath
 7. Convert Deferred outputs to InputAddressed
@@ -75,6 +80,66 @@ def downstream_placeholder(drv_path: StorePath, output_name: str) -> str:
     return "/" + nix32_encode(h)
 
 
+def downstream_placeholder_from_chain(
+    chain: list[tuple[StorePath, str]],
+) -> str:
+    """Compute a DownstreamPlaceholder from a derivation output chain.
+
+    Given a chain like [(producingDrv, "out")] for producingDrv^out,
+    or [(producingDrv, "out"), (None, "out")] for producingDrv^out^out,
+    recursively computes the placeholder.
+
+    The first element is the base drv path + output name (unknownCaOutput).
+    Subsequent elements represent unknownDerivation layers (drv_path is None).
+
+    Corresponds to Nix's DownstreamPlaceholder::fromSingleDerivedPathBuilt().
+    """
+    if not chain:
+        raise ValueError("Empty chain")
+
+    base_drv, base_output = chain[0]
+    hash_part = str(base_drv).rsplit("/", 1)[-1].split("-", 1)[0]
+    drv_name = _nix_drv_name(base_drv)
+    clear_text = (
+        f"nix-upstream-output:{hash_part}:{_output_path_name(drv_name, base_output)}"
+    )
+    current_hash = hashlib.sha256(clear_text.encode()).digest()
+
+    for _, output_name in chain[1:]:
+        current_hash = downstream_placeholder_unknown_derivation_raw(
+            current_hash, output_name
+        )
+
+    return "/" + nix32_encode(current_hash)
+
+
+def downstream_placeholder_unknown_derivation(
+    parent_placeholder_hash: bytes, output_name: str
+) -> str:
+    """DownstreamPlaceholder::unknownDerivation — for nested dynamic outputs.
+
+    When a derivation output is itself a .drv (dynamic derivation), and
+    we reference an output of that inner .drv, we compute the placeholder
+    by hashing the parent placeholder (compressed) with the output name.
+
+    Corresponds to Nix's DownstreamPlaceholder::unknownDerivation().
+    """
+    return "/" + nix32_encode(
+        downstream_placeholder_unknown_derivation_raw(
+            parent_placeholder_hash, output_name
+        )
+    )
+
+
+def downstream_placeholder_unknown_derivation_raw(
+    parent_placeholder_hash: bytes, output_name: str
+) -> bytes:
+    """Raw hash for DownstreamPlaceholder::unknownDerivation."""
+    compressed = _compress_hash(parent_placeholder_hash, 20)
+    clear_text = f"nix-computed-output:{nix32_encode(compressed)}:{output_name}"
+    return hashlib.sha256(clear_text.encode()).digest()
+
+
 def _compress_hash(data: bytes, new_size: int) -> bytes:
     result = bytearray(new_size)
     for i in range(len(data)):
@@ -99,29 +164,42 @@ def _make_output_path(
     return _make_store_path(f"output:{output_id}", hash_modulo, name, store_dir)
 
 
+def _aterm_escape(s: str) -> str:
+    s = s.replace("\\", "\\\\")
+    s = s.replace('"', '\\"')
+    s = s.replace("\n", "\\n")
+    s = s.replace("\r", "\\r")
+    s = s.replace("\t", "\\t")
+    return s
+
+
 def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -> str:
     parts: list[str] = ["Derive("]
 
     out_parts: list[str] = []
     for name, o in sorted(drv.outputs.items()):
         path = "" if mask_outputs else o.path
-        out_parts.append(f'("{name}","{path}","{o.method}","{o.hash_digest}")')
+        out_parts.append(
+            f'("{name}","{_aterm_escape(path)}","{_aterm_escape(o.method)}","{_aterm_escape(o.hash_digest)}")'
+        )
     parts.append(f"[{','.join(out_parts)}],")
 
     parts.append("[],")
 
-    srcs = ",".join(f'"{p}"' for p in sorted(str(p) for p in drv.input_srcs))
+    srcs = ",".join(
+        f'"{_aterm_escape(str(p))}"' for p in sorted(str(p) for p in drv.input_srcs)
+    )
     parts.append(f"[{srcs}],")
 
-    parts.append(f'"{drv.platform}",')
-    parts.append(f'"{drv.builder}",')
+    parts.append(f'"{_aterm_escape(drv.platform)}",')
+    parts.append(f'"{_aterm_escape(drv.builder)}",')
 
-    args = ",".join(f'"{a}"' for a in drv.args)
+    args = ",".join(f'"{_aterm_escape(a)}"' for a in drv.args)
     parts.append(f"[{args}],")
 
     env_parts: list[str] = []
     for k, v in sorted(drv.env.items()):
-        env_parts.append(f'("{k}","{v}")')
+        env_parts.append(f'("{_aterm_escape(k)}","{_aterm_escape(v)}")')
     parts.append(f"[{','.join(env_parts)}]")
 
     parts.append(")")
@@ -175,6 +253,116 @@ def resolve_derivation(
                 raise ValueError(f"No resolved path for {input_drv_path}!{output_name}")
             rewrites[placeholder] = str(actual_path)
             new_input_srcs.add(StorePath(str(actual_path)))
+
+    resolved = BasicDerivation(
+        outputs={
+            o.name: DerivationOutput(
+                path=o.path,
+                method=o.hash_algo,
+                hash_digest=o.hash_value,
+            )
+            for o in drv.outputs
+        },
+        input_srcs=new_input_srcs,
+        platform=drv.platform,
+        builder=_rewrite_strings(drv.builder, rewrites),
+        args=[_rewrite_strings(a, rewrites) for a in drv.args],
+        env={k: _rewrite_strings(v, rewrites) for k, v in drv.env.items()},
+        is_dynamic=drv.is_dynamic,
+    )
+
+    hash_modulo = _hash_derivation_modulo(resolved, mask_outputs=True)
+
+    new_outputs: dict[str, DerivationOutput] = {}
+    for name, o in resolved.outputs.items():
+        if o.path == "" and o.method == "" and o.hash_digest == "":
+            h = hash_modulo[name]
+            out_path = _make_output_path(name, h, drv_name)
+            new_outputs[name] = DerivationOutput(
+                path=out_path, method="", hash_digest=""
+            )
+            resolved.env[name] = out_path
+        else:
+            new_outputs[name] = o
+
+    resolved.outputs = new_outputs
+    return resolved
+
+
+def resolve_dynamic_derivation(
+    drv: ParsedDerivation,
+    drv_path: StorePath,
+    dynamic_output_paths: dict[tuple[StorePath, str, str], StorePath],
+) -> BasicDerivation:
+    """Resolve a dynamic (DrvWithVersion) wrapper derivation.
+
+    Like resolve_derivation but handles dynamic_input_drvs which encode
+    nested output references (drv^outer^inner). Each nested reference
+    produces a DownstreamPlaceholder computed via unknownCaOutput then
+    unknownDerivation chain.
+
+    Args:
+        drv: The parsed derivation (with dynamic_input_drvs)
+        drv_path: The .drv store path (for computing output names)
+        dynamic_output_paths: {(outer_drv, outer_output, inner_output): actual_path}
+            Maps each nested dynamic output reference to its resolved store path.
+            E.g., {(producingDrv, "out", "out"): StorePath("/nix/store/...-hello")}
+
+    Returns:
+        A resolved BasicDerivation with placeholders rewritten and
+        Deferred outputs converted to InputAddressed.
+    """
+    drv_name = _nix_drv_name(drv_path)
+
+    rewrites: dict[str, str] = {}
+    new_input_srcs: set[StorePath] = set(drv.input_srcs)
+
+    # Handle regular input_drvs (same as resolve_derivation)
+    for input_drv_path, output_names in drv.input_drvs.items():
+        for output_name in output_names:
+            placeholder = downstream_placeholder(input_drv_path, output_name)
+            actual_path = dynamic_output_paths.get((input_drv_path, "", output_name))
+            if actual_path is None:
+                raise ValueError(f"No resolved path for {input_drv_path}!{output_name}")
+            rewrites[placeholder] = str(actual_path)
+            new_input_srcs.add(StorePath(str(actual_path)))
+
+    # Handle dynamic_input_drvs: {drv_path: {outer_output: [inner_outputs]}}
+    for dyn_drv_path, output_deps in drv.dynamic_input_drvs.items():
+        hash_part = str(dyn_drv_path).rsplit("/", 1)[-1].split("-", 1)[0]
+        dyn_drv_name = _nix_drv_name(dyn_drv_path)
+
+        for outer_output, inner_outputs in output_deps.items():
+            # Compute level-1 placeholder hash (unknownCaOutput)
+            outer_clear = (
+                f"nix-upstream-output:{hash_part}:"
+                f"{_output_path_name(dyn_drv_name, outer_output)}"
+            )
+            outer_hash = hashlib.sha256(outer_clear.encode()).digest()
+            outer_placeholder = "/" + nix32_encode(outer_hash)
+
+            # The level-1 output is the .drv itself — add to input_srcs if known
+            level1_path = dynamic_output_paths.get(
+                (dyn_drv_path, outer_output, outer_output)
+            )
+            if level1_path is not None:
+                rewrites[outer_placeholder] = str(level1_path)
+                new_input_srcs.add(StorePath(str(level1_path)))
+
+            # Compute level-2+ placeholders (unknownDerivation)
+            for inner_output in inner_outputs:
+                inner_placeholder = downstream_placeholder_unknown_derivation(
+                    outer_hash, inner_output
+                )
+                actual_path = dynamic_output_paths.get(
+                    (dyn_drv_path, outer_output, inner_output)
+                )
+                if actual_path is None:
+                    raise ValueError(
+                        f"No resolved path for {dyn_drv_path}^{outer_output}^{inner_output}"
+                    )
+                rewrites[inner_placeholder] = str(actual_path)
+                new_input_srcs.add(StorePath(str(actual_path)))
 
     resolved = BasicDerivation(
         outputs={
