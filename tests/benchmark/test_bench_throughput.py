@@ -193,9 +193,6 @@ async def test_throughput_pynixd(profiler: pyinstrument.Profiler) -> None:
                     "--no-link",
                     "--file",
                     str(NIX_FILE),
-                    "--option",
-                    "require-sigs",
-                    "false",
                     TARGET,
                 ]
 

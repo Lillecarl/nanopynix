@@ -168,9 +168,6 @@ async def test_nix_copy_to_http(tmp_path: Path) -> None:
                 "--to",
                 base_url,
                 str(path),
-                "--option",
-                "require-sigs",
-                "false",
             ]
             rc, stdout, stderr, _ = await run_subproc(cmd)
             assert rc == 0, f"nix copy failed:\n{stderr}"

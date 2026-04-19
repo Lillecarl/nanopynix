@@ -140,9 +140,6 @@ async def test_cache_as_substituter() -> None:
             "--from",
             base_url,
             str(target_path),
-            "--option",
-            "require-sigs",
-            "false",
         ]
 
         rc, stdout, stderr, _ = await run_subproc(cmd)

@@ -80,9 +80,6 @@ async def test_builders(profiler: pyinstrument.Profiler, tmp_path: Path) -> None
                 "--print-out-paths",
                 "--max-jobs",
                 "0",
-                "--option",
-                "require-sigs",
-                "false",
             ]
             rc, stdout, stderr, stdboth = await run_subproc(
                 cmd, env={"NIX_STATE_DIR": str(client_store_path / "var/nix")}
