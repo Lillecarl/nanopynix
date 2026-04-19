@@ -25,7 +25,15 @@ log = structlog.get_logger(__name__)
 
 
 async def test_builders(profiler: pyinstrument.Profiler, tmp_path: Path) -> None:
-    """Build test.nix .simple via --builders."""
+    """Build test.nix .simple via --builders.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryValidPaths: Queries valid paths
+    """
     async with asyncio.timeout(60):
         test_nix = Path("test.nix")
 
@@ -83,7 +91,15 @@ async def test_builders(profiler: pyinstrument.Profiler, tmp_path: Path) -> None
 
 
 async def test_store(profiler: pyinstrument.Profiler, tmp_path: Path) -> None:
-    """Build test.nix .simple via --eval-store."""
+    """Build test.nix .simple via --eval-store.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryValidPaths: Queries valid paths
+    """
     async with asyncio.timeout(60):
         test_nix = Path("test.nix")
 

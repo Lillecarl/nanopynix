@@ -24,7 +24,15 @@ log = structlog.get_logger(__name__)
 
 
 async def test_builders(tmp_path: Path) -> None:
-    """Build test.nix .dag via --builders."""
+    """Build test.nix .dag via --builders.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildDerivation: Builds derivation
+    - NarFromPath: Gets NAR from path
+    - QueryPathInfo: Queries path info
+    - QueryValidPaths: Queries valid paths
+    """
     async with asyncio.timeout(120):  # DAG builds can take longer
         test_nix = Path("test.nix")
 
@@ -89,7 +97,15 @@ async def test_builders(tmp_path: Path) -> None:
 
 
 async def test_store(tmp_path: Path) -> None:
-    """Build test.nix .dag via --store."""
+    """Build test.nix .dag via --store.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryValidPaths: Queries valid paths
+    """
     async with asyncio.timeout(120):
         test_nix = Path("test.nix")
 

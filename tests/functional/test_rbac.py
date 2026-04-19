@@ -21,7 +21,11 @@ log = structlog.get_logger(__name__)
 
 @pytest.mark.asyncio
 async def test_rbac_ssh_admin_vs_user(tmp_path: Path) -> None:
-    """Verify that SSH admin can GC, but SSH user cannot."""
+    """Verify that SSH admin can GC, but SSH user cannot.
+
+    Store operations triggered:
+    - None: This test only checks RBAC authentication/authorization without triggering Store operations
+    """
     async with asyncio.timeout(30):
         pynixd_local_path = STORE_PREFIX / "rbac-ssh-local"
         rmtree_robust(pynixd_local_path)
@@ -60,7 +64,11 @@ async def test_rbac_ssh_admin_vs_user(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_rbac_unix_implicit_admin(tmp_path: Path) -> None:
-    """Verify that Unix socket connections are implicit admins."""
+    """Verify that Unix socket connections are implicit admins.
+
+    Store operations triggered:
+    - None: This test only checks RBAC authentication/authorization without triggering Store operations
+    """
     async with asyncio.timeout(30):
         pynixd_local_path = STORE_PREFIX / "rbac-unix-local"
         rmtree_robust(pynixd_local_path)

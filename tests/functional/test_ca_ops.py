@@ -248,7 +248,15 @@ async def test_non_ca_depends_on_ca_root_store(
 
 
 async def test_ca_simple_via_pynixd(profiler: pyinstrument.Profiler, ca_env) -> None:
-    """Build a CA floating derivation through pynixd."""
+    """Build a CA floating derivation through pynixd.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryValidPaths: Queries valid paths
+    """
     async with asyncio.timeout(120):
         server, uri = ca_env
 
@@ -277,7 +285,15 @@ async def test_ca_simple_via_pynixd(profiler: pyinstrument.Profiler, ca_env) -> 
 async def test_ca_multi_output_via_pynixd(
     profiler: pyinstrument.Profiler, ca_env
 ) -> None:
-    """Build a CA derivation with multiple outputs through pynixd."""
+    """Build a CA derivation with multiple outputs through pynixd.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryValidPaths: Queries valid paths
+    """
     async with asyncio.timeout(120):
         server, uri = ca_env
 
@@ -308,7 +324,15 @@ async def test_ca_multi_output_via_pynixd(
 async def test_ca_depends_on_ca_via_pynixd(
     profiler: pyinstrument.Profiler, ca_env
 ) -> None:
-    """Build a CA derivation that depends on another CA derivation through pynixd."""
+    """Build a CA derivation that depends on another CA derivation through pynixd.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryValidPaths: Queries valid paths
+    """
     async with asyncio.timeout(120):
         server, uri = ca_env
 
@@ -338,7 +362,15 @@ async def test_ca_depends_on_ca_via_pynixd(
 async def test_non_ca_depends_on_ca_via_pynixd(
     profiler: pyinstrument.Profiler, ca_env
 ) -> None:
-    """Build a deferred (non-CA) derivation that depends on a CA derivation through pynixd."""
+    """Build a deferred (non-CA) derivation that depends on a CA derivation through pynixd.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryValidPaths: Queries valid paths
+    """
     async with asyncio.timeout(120):
         server, uri = ca_env
 
@@ -368,7 +400,20 @@ async def test_non_ca_depends_on_ca_via_pynixd(
 async def test_ca_query_derivation_output_map_via_pynixd(
     profiler: pyinstrument.Profiler, ca_env
 ) -> None:
-    """Build CA derivation through pynixd then query its output map."""
+    """Build CA derivation through pynixd then query its output map.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - AddTempRoot: Adds temporary root
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - IsValidPath: Checks if path exists
+    - NarFromPath: Gets NAR from path
+    - QueryDerivationOutputMap: Queries derivation output map
+    - QueryMissing: Queries missing paths
+    - QueryPathInfo: Queries path info
+    - QueryValidPaths: Queries valid paths
+    """
     async with asyncio.timeout(120):
         server, uri = ca_env
 
@@ -511,6 +556,17 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
     and the scheduler should detect this and automatically build the
     inner hello derivation. The final output should be hello's store
     path, not the intermediate .drv.
+
+    Store operations triggered:
+    - AddTempRoot: Adds temporary root
+    - AddToStore: Adds to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - IsValidPath: Checks if path exists
+    - NarFromPath: Gets NAR from path
+    - QueryDerivationOutputMap: Queries derivation output map
+    - QueryMissing: Queries missing paths
+    - QueryPathInfo: Queries path info
     """
     async with asyncio.timeout(120):
         server, uri = dyn_env
@@ -626,6 +682,17 @@ async def test_dynamic_drv_producing_via_pynixd(
     and the output content IS a .drv file. This tests that pynixd correctly
     handles the full lifecycle: build, realisation registration, and
     QueryDerivationOutputMap for text-hashed CA derivations.
+
+    Store operations triggered:
+    - AddTempRoot: Adds temporary root
+    - AddToStore: Adds to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - IsValidPath: Checks if path exists
+    - NarFromPath: Gets NAR from path
+    - QueryDerivationOutputMap: Queries derivation output map
+    - QueryMissing: Queries missing paths
+    - QueryPathInfo: Queries path info
     """
     async with asyncio.timeout(120):
         server, uri = dyn_env
@@ -762,7 +829,19 @@ async def test_text_hashed_ca_build_root_store(
 async def test_text_hashed_ca_build_via_pynixd(
     profiler: pyinstrument.Profiler, ca_env
 ) -> None:
-    """Build a text-hashed CA derivation through pynixd proxy."""
+    """Build a text-hashed CA derivation through pynixd proxy.
+
+    Store operations triggered:
+    - AddTempRoot: Adds temporary root
+    - AddToStore: Adds to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - IsValidPath: Checks if path exists
+    - NarFromPath: Gets NAR from path
+    - QueryDerivationOutputMap: Queries derivation output map
+    - QueryMissing: Queries missing paths
+    - QueryPathInfo: Queries path info
+    """
     async with asyncio.timeout(120):
         server, uri = ca_env
 

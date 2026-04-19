@@ -91,7 +91,17 @@ async def query_env(tmp_path: Path):
 
 
 async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> None:
-    """Verify QueryReferrers via 'nix-store -q --referrers'."""
+    """Verify QueryReferrers via 'nix-store -q --referrers'.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryPathInfo: Queries path info
+    - QueryReferrers: Queries referrers
+    - QueryValidPaths: Queries valid paths
+    """
     server, uri, out_path = query_env
     test_nix = Path("test-minimal.nix")
 
@@ -150,7 +160,16 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
 async def test_query_path_from_hash_part(
     profiler: pyinstrument.Profiler, query_env
 ) -> None:
-    """Verify QueryPathFromHashPart via 'nix store path-from-hash-part'."""
+    """Verify QueryPathFromHashPart via 'nix store path-from-hash-part'.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryPathFromHashPart: Queries path from hash part
+    - QueryValidPaths: Queries valid paths
+    """
     server, uri, out_path = query_env
 
     # out_path is like /nix/store/hash-name
@@ -172,7 +191,16 @@ async def test_query_path_from_hash_part(
 
 
 async def test_query_valid_derivers(profiler: pyinstrument.Profiler, query_env) -> None:
-    """Verify QueryValidDerivers via 'nix-store -q --deriver'."""
+    """Verify QueryValidDerivers via 'nix-store -q --deriver'.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryPathInfo: Queries path info
+    - QueryValidPaths: Queries valid paths
+    """
     server, uri, out_path = query_env
 
     # Could use `nix path-info --derivation <store-path>` as a nix3 equivalent,
@@ -193,7 +221,15 @@ async def test_query_valid_derivers(profiler: pyinstrument.Profiler, query_env) 
 
 
 async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None:
-    """Verify QueryMissing via 'nix build --dry-run'."""
+    """Verify QueryMissing via 'nix build --dry-run'.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - BuildPaths: Builds derivation paths
+    - BuildPathsWithResults: Builds derivation paths with results
+    - QueryMissing: Queries missing paths
+    - QueryValidPaths: Queries valid paths
+    """
     server, uri, out_path = query_env
 
     test_nix = Path("test-minimal.nix")
@@ -214,7 +250,11 @@ async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None
 
 
 async def test_find_roots(profiler: pyinstrument.Profiler, query_env) -> None:
-    """Verify FindRoots via 'nix-store --gc --print-roots'."""
+    """Verify FindRoots via 'nix-store --gc --print-roots'.
+
+    Store operations triggered:
+    - None: This test only checks roots without triggering Store operations
+    """
     server, uri, out_path = query_env
 
     # No nix3 equivalent exists for --print-roots (`nix store gc` has no such flag).

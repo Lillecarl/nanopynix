@@ -47,7 +47,11 @@ async def _pick_random_path(store: LocalSocketStore) -> StorePath:
 
 @pytest.mark.timeout(60)
 async def test_narinfo() -> None:
-    """Test fetching .narinfo from the HTTP cache."""
+    """Test fetching .narinfo from the HTTP cache.
+
+    Store operations triggered:
+    - QueryAllValidPaths: Queries all valid paths for cache synchronization
+    """
     local_store = LocalSocketStore(id="local", store_path=Path("/"))
 
     async with Server(local_store=local_store, http_port=0) as server:
@@ -67,7 +71,11 @@ async def test_narinfo() -> None:
 
 @pytest.mark.timeout(60)
 async def test_nar_streaming() -> None:
-    """Test streaming a NAR from the HTTP cache."""
+    """Test streaming a NAR from the HTTP cache.
+
+    Store operations triggered:
+    - QueryAllValidPaths: Queries all valid paths for cache synchronization
+    """
     local_store = LocalSocketStore(id="local", store_path=Path("/"))
 
     async with Server(local_store=local_store, http_port=0) as server:
@@ -101,7 +109,11 @@ async def test_nar_streaming() -> None:
 
 @pytest.mark.timeout(60)
 async def test_cache_as_substituter() -> None:
-    """Test using pynixd HTTP cache as a substituter for another nix build."""
+    """Test using pynixd HTTP cache as a substituter for another nix build.
+
+    Store operations triggered:
+    - QueryAllValidPaths: Queries all valid paths for cache synchronization
+    """
     local_store = LocalSocketStore(id="local", store_path=Path("/"))
 
     async with Server(local_store=local_store, http_port=0) as server:
@@ -151,7 +163,11 @@ async def test_cache_as_substituter() -> None:
 
 @pytest.mark.timeout(60)
 async def test_cache_not_found() -> None:
-    """Test 404 response for non-existent paths."""
+    """Test 404 response for non-existent paths.
+
+    Store operations triggered:
+    - None: This test only checks HTTP 404 handling without triggering Store operations
+    """
     local_store = LocalSocketStore(id="local", store_path=Path("/"))
     async with Server(local_store=local_store, http_port=0) as server:
         base_url = f"http://127.0.0.1:{server.http_bound_port}"

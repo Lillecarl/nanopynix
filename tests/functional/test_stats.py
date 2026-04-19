@@ -1,4 +1,7 @@
-"""Test build statistics tracking and prioritization."""
+"""Test build statistics tracking and prioritization.
+
+All tests in this file are statistics/metrics tests that don't trigger Store operations.
+"""
 
 from __future__ import annotations
 
@@ -105,7 +108,11 @@ class StatsTestStore(LocalSocketStore):
 
 @pytest.mark.asyncio
 async def test_build_stats_recording(tmp_path: Path) -> None:
-    """Verify that build stats are recorded to the DB."""
+    """Verify that build stats are recorded to the DB.
+
+    Store operations triggered:
+    - None: This test only checks statistics recording without triggering Store operations
+    """
     async with asyncio.timeout(30):
         pynixd_local_path = STORE_PREFIX / "stats-local"
         pynixd_remote_path = STORE_PREFIX / "stats-remote"
@@ -178,7 +185,11 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
-    """Verify that the scheduler fast-tracks tiny builds to the local store."""
+    """Verify that the scheduler fast-tracks tiny builds to the local store.
+
+    Store operations triggered:
+    - None: This test only checks scheduler behavior without triggering Store operations
+    """
     async with asyncio.timeout(30):
         pynixd_local_path = STORE_PREFIX / "fasttrack-local"
         pynixd_remote_path = STORE_PREFIX / "fasttrack-remote"
@@ -273,7 +284,11 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_levenshtein_sql(tmp_path: Path) -> None:
-    """Verify that the levenshtein function works in SQLite."""
+    """Verify that the levenshtein function works in SQLite.
+
+    Store operations triggered:
+    - None: This test only checks SQLite function without triggering Store operations
+    """
     pynixd_local_path = STORE_PREFIX / "levenshtein-test"
     rmtree_robust(pynixd_local_path)
     (pynixd_local_path / "nix/var/nix/db").mkdir(parents=True)
@@ -340,7 +355,11 @@ class CpuUtilTestStore(StatsTestStore):
 
 @pytest.mark.asyncio
 async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
-    """Verify scheduler skips stores at >99% CPU utilization."""
+    """Verify scheduler skips stores at >99% CPU utilization.
+
+    Store operations triggered:
+    - None: This test only checks scheduler CPU utilization behavior without triggering Store operations
+    """
     async with asyncio.timeout(30):
         pynixd_local_path = STORE_PREFIX / "cpu-util-local"
         pynixd_busy_path = STORE_PREFIX / "cpu-util-busy"

@@ -14,7 +14,11 @@ from pynixd.store import LocalSocketStore
 
 @pytest.mark.timeout(30)
 async def test_htpasswd_auth(tmp_path: Path) -> None:
-    """Test HTTP cache authentication using an htpasswd file."""
+    """Test HTTP cache authentication using an htpasswd file.
+
+    Store operations triggered:
+    - None: This test only checks HTTP authentication without triggering Store operations
+    """
     htpasswd_path = tmp_path / "htpasswd"
     ht = HtpasswdFile(str(htpasswd_path), new=True)
     ht.set_password("alice", "password123")
@@ -61,7 +65,11 @@ async def test_htpasswd_auth(tmp_path: Path) -> None:
 
 @pytest.mark.timeout(30)
 async def test_htpasswd_fallback_to_single_user(tmp_path: Path) -> None:
-    """Test that htpasswd takes precedence but single user still works if no htpasswd."""
+    """Test that htpasswd takes precedence but single user still works if no htpasswd.
+
+    Store operations triggered:
+    - None: This test only checks HTTP authentication fallback without triggering Store operations
+    """
     local_store = LocalSocketStore(id="local", store_path=Path("/"))
 
     # No htpasswd, just single user/pass

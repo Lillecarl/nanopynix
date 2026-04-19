@@ -58,7 +58,11 @@ async def get_no_refs_path() -> StorePath:
 
 @pytest.mark.timeout(60)
 async def test_http_upload(tmp_path: Path) -> None:
-    """Test uploading a path to the HTTP cache via PUT using aiohttp directly."""
+    """Test uploading a path to the HTTP cache via PUT using aiohttp directly.
+
+    Store operations triggered:
+    - None: This test only checks HTTP upload functionality without triggering explicit Store operations
+    """
     async with asyncio.timeout(50):
         # 1. Source store (root) has the path
         root_store = LocalSocketStore(
@@ -130,7 +134,11 @@ async def test_http_upload(tmp_path: Path) -> None:
 
 @pytest.mark.timeout(60)
 async def test_nix_copy_to_http(tmp_path: Path) -> None:
-    """Test copying a path to the HTTP cache using 'nix copy --to http://...'."""
+    """Test copying a path to the HTTP cache using 'nix copy --to http://...'.
+
+    Store operations triggered:
+    - None: This test only checks HTTP upload functionality via nix copy without triggering explicit Store operations
+    """
     async with asyncio.timeout(50):
         # 1. Source store (root) has the path
         # Use hello as requested by user - nix copy handles the closure

@@ -35,6 +35,9 @@ async def test_stream_nar() -> None:
     """
     Test streaming a NAR from the system store to a temporary store.
     This doesn't start pynixd, it just uses two LocalSocketStore instances.
+
+    Store operations triggered:
+    - NarFromPath: Gets NAR from path for streaming
     """
     async with asyncio.timeout(50):
         # 1. Build hello in the system store

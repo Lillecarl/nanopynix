@@ -1,4 +1,7 @@
-"""Unit tests for PSI and cgroupv2 CPU utilization parsing."""
+"""Unit tests for PSI and cgroupv2 CPU utilization parsing.
+
+All tests in this file are parsing unit tests that don't trigger Store operations.
+"""
 
 from __future__ import annotations
 

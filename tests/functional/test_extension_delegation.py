@@ -37,7 +37,13 @@ async def _pick_random_path(store: LocalSocketStore) -> str:
 
 @pytest.mark.timeout(60)
 async def test_extension_delegation(tmp_path: Path) -> None:
-    """Test that pynixd can delegate extension OPs to other pynixd instances."""
+    """Test that pynixd can delegate extension OPs to other pynixd instances.
+
+    Store operations triggered:
+    - QueryAllValidPaths: Queries all valid paths
+    - QueryPathInfo: Queries path info
+    - QueryPathInfos: Queries path infos
+    """
 
     # 0. Setup SSH keys and stores
     key = asyncssh.generate_private_key("ssh-rsa")

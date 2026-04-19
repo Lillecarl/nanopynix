@@ -36,7 +36,11 @@ class NoQueryAllValidPathsStore(LocalSocketStore):
 
 @pytest.mark.asyncio
 async def test_known_paths_persistence(tmp_path: Path) -> None:
-    """Verify that known paths for a remote store survive server restart."""
+    """Verify that known paths for a remote store survive server restart.
+
+    Store operations triggered:
+    - QueryAllValidPaths: Queries all valid paths for persistence verification
+    """
     async with asyncio.timeout(30):
         pynixd_local_path = STORE_PREFIX / "persistence-local"
         pynixd_remote_path = STORE_PREFIX / "persistence-remote"
@@ -109,7 +113,11 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_known_paths_cleanup(tmp_path: Path) -> None:
-    """Verify that stale cached paths are removed after verification."""
+    """Verify that stale cached paths are removed after verification.
+
+    Store operations triggered:
+    - QueryAllValidPaths: Queries all valid paths for cleanup verification
+    """
     async with asyncio.timeout(30):
         pynixd_local_path = STORE_PREFIX / "cleanup-local"
         pynixd_remote_path = STORE_PREFIX / "cleanup-remote"
@@ -188,7 +196,11 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_is_valid_path_isolation(tmp_path: Path) -> None:
-    """Verify that IsValidPath correctly distinguishes between local and remote stores sharing a DB."""
+    """Verify that IsValidPath correctly distinguishes between local and remote stores sharing a DB.
+
+    Store operations triggered:
+    - QueryAllValidPaths: Queries all valid paths for isolation verification
+    """
     async with asyncio.timeout(30):
         pynixd_local_path = STORE_PREFIX / "isolation-local"
         pynixd_remote_path = STORE_PREFIX / "isolation-remote"

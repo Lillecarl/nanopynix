@@ -17,7 +17,13 @@ LOCAL_STORE = STORE_PREFIX / "local"
 
 
 async def test_copy():
-    """Copy paths between two stores via UDS."""
+    """Copy paths between two stores via UDS.
+
+    Store operations triggered:
+    - AddMultipleToStore: Adds multiple paths to store
+    - QueryValidPaths: Queries valid paths
+    - RegisterDrvOutput: Registers derivation output
+    """
 
     rmtree_robust(LOCAL_STORE)
     src_store = LocalSocketStore(

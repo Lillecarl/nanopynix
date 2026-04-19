@@ -21,7 +21,12 @@ LOCAL_STORE = STORE_PREFIX / "add-to-store-nar-test"
 
 
 async def test_add_to_store_nar(tmp_path: Path):
-    """Add a path to the store using nix store add-path to trigger AddToStoreNar."""
+    """Add a path to the store using nix store add-path to trigger AddToStoreNar.
+
+    Store operations triggered:
+    - IsValidPath: Checks if path exists
+    - AddToStoreNar: Adds the NAR to the store
+    """
     async with asyncio.timeout(50):
         rmtree_robust(LOCAL_STORE)
         target_store = LocalSocketStore(
