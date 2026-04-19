@@ -144,7 +144,7 @@ logging.getLogger("asyncio").setLevel(logging.WARNING)
 log = structlog.get_logger(__name__)
 
 
-TEST_NIX = env.path("PYNIXD_TEST_NIX", Path("test.nix"))
+TEST_NIX = env.path("PYNIXD_TEST_NIX", Path("tests/test.nix"))
 
 LIX_BIN = env.path("LIX_BIN", Path("nix"))
 NIX_BIN = env.path("NIX_BIN", Path("nix"))

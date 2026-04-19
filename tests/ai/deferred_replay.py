@@ -42,7 +42,7 @@ from tests.conftest import (
 )
 from tests.nix_config import NixConfig
 
-CA_NIX = Path(__file__).resolve().parent.parent.parent / "test-ca.nix"
+CA_NIX = Path(__file__).resolve().parent.parent / "test-ca.nix"
 CA_NIX_CONFIG = NixConfig.for_ca_derivations()
 
 

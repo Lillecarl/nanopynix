@@ -34,7 +34,7 @@ async def test_builders(tmp_path: Path) -> None:
     - QueryValidPaths: Queries valid paths
     """
     async with asyncio.timeout(120):  # DAG builds can take longer
-        test_nix = Path("test.nix")
+        test_nix = Path("tests/test.nix")
 
         # 1. Backends for pynixd
         pynixd_local_path = STORE_PREFIX / "dag-builders-local"
@@ -107,7 +107,7 @@ async def test_store(tmp_path: Path) -> None:
     - QueryValidPaths: Queries valid paths
     """
     async with asyncio.timeout(120):
-        test_nix = Path("test.nix")
+        test_nix = Path("tests/test.nix")
 
         pynixd_local_path = STORE_PREFIX / "dag-store-local"
         pynixd_builder_path = STORE_PREFIX / "dag-store-builder"

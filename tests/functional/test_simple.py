@@ -35,7 +35,7 @@ async def test_builders(profiler: pyinstrument.Profiler, tmp_path: Path) -> None
     - QueryValidPaths: Queries valid paths
     """
     async with asyncio.timeout(60):
-        test_nix = Path("test.nix")
+        test_nix = Path("tests/test.nix")
 
         # 1. Backends for pynixd
         pynixd_local_path = STORE_PREFIX / "pynixd-local-builders"
@@ -101,7 +101,7 @@ async def test_store(profiler: pyinstrument.Profiler, tmp_path: Path) -> None:
     - QueryValidPaths: Queries valid paths
     """
     async with asyncio.timeout(60):
-        test_nix = Path("test.nix")
+        test_nix = Path("tests/test.nix")
 
         pynixd_local_path = STORE_PREFIX / "pynixd-local-store"
         pynixd_builder_path = STORE_PREFIX / "pynixd-builder-store"

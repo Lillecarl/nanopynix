@@ -23,7 +23,7 @@ from tests.nix_config import NixConfig
 
 log = structlog.get_logger(__name__)
 
-TEST_CA_NIX = Path("test-ca.nix")
+TEST_CA_NIX = Path("tests/test-ca.nix")
 
 CA_NIX_CONFIG = NixConfig.for_ca_derivations(
     substituters=(
@@ -613,7 +613,7 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
         )
 
 
-DYN_NIX = Path("test-dyn-drv.nix")
+DYN_NIX = Path("tests/test-dyn-drv.nix")
 
 DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations()
 

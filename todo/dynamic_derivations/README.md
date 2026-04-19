@@ -23,12 +23,12 @@ Experimental Nix feature: derivations whose outputs are themselves derivations (
 | 03 | Trampoline: build inner .drv from text-hashed output | High | 01, 02 | DONE |
 | 04 | Dynamic dep DAG linking in decomposition | High | 01, 03 | DONE |
 | 05 | Resolve wrapper derivations with dynamic inputDrvs | Medium | 01-04 | DONE |
-| 06 | BuildDerivation wire format for DrvWithVersion | Low | 05 (skip if always resolving) | Deferred |
-| 07 | Fix QueryRealisation ANSI escape bug | Medium | — (independent) | Pending |
+| 06 | BuildDerivation wire format for DrvWithVersion | N/A | — | DONE (not applicable) |
+| 07 | DrvOutput type safety + QueryRealisation execute | Low | — (independent) | DONE |
 
 ## Research Artifacts
 
-- `test-dyn-drv.nix` — Nix expressions for dynamic derivation test fixtures
+- `tests/test-dyn-drv.nix` — Nix expressions for dynamic derivation test fixtures
 - `tests/ai/dynamic_drv.py` — Research script that exercises the full lifecycle
 - `todo/test_ca_ops.md` — CA derivation research (prerequisite, already done)
 - `todo/deferred_build_ordering.md` — Deferred derivation resolution (prerequisite, already done)
