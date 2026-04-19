@@ -40,10 +40,10 @@ from tests.conftest import (
     run_subproc,
     rmtree_robust,
 )
+from tests.nix_config import NixConfig
 
 CA_NIX = Path(__file__).resolve().parent.parent.parent / "test-ca.nix"
-CA_EXTRA_ARGS = ["--option", "extra-experimental-features", "ca-derivations"]
-CA_NIX_CONFIG = {"extra-experimental-features": "ca-derivations"}
+CA_NIX_CONFIG = NixConfig.for_ca_derivations()
 
 
 async def add_text_to_store(
@@ -87,9 +87,7 @@ async def main() -> None:
 
     root_path = STORE_PREFIX / "deferred-replay-root"
     rmtree_robust(root_path)
-    root_kwargs = get_test_store_kwargs(
-        extra_args=CA_EXTRA_ARGS, extra_env=CA_NIX_CONFIG
-    )
+    root_kwargs = get_test_store_kwargs(nix_config=CA_NIX_CONFIG)
     root_store = LocalSocketStore(
         id="deferred-replay-root", store_path=root_path, **root_kwargs
     )
@@ -204,9 +202,7 @@ async def main() -> None:
 
     builder_path = STORE_PREFIX / "deferred-replay-builder"
     rmtree_robust(builder_path)
-    builder_kwargs = get_test_store_kwargs(
-        extra_args=CA_EXTRA_ARGS, extra_env=CA_NIX_CONFIG
-    )
+    builder_kwargs = get_test_store_kwargs(nix_config=CA_NIX_CONFIG)
     builder_store = LocalSocketStore(
         id="deferred-replay-builder", store_path=builder_path, **builder_kwargs
     )

@@ -37,10 +37,15 @@ from tests.conftest import (
     run_subproc,
     rmtree_robust,
 )
+from tests.nix_config import NixConfig
 
 CA_NIX = Path(__file__).resolve().parent.parent.parent / "test-ca.nix"
-CA_EXTRA_ARGS = ["--option", "extra-experimental-features", "ca-derivations"]
-CA_NIX_CONFIG = {"extra-experimental-features": "ca-derivations"}
+CA_NIX_CONFIG = NixConfig.for_ca_derivations(
+    substituters=(
+        "https://cache.nixos.org/",
+        "unix:///nix/var/nix/daemon-socket/socket?root=/",
+    ),
+)
 STORE_DIR = "/nix/store"
 
 NIX32_CHARS = "0123456789abcdfghijklmnpqrsvwxyz"
@@ -322,10 +327,7 @@ async def main() -> None:
     root_path = STORE_PREFIX / "deferred-replay-root"
     rmtree_robust(root_path)
 
-    root_kwargs = get_test_store_kwargs(
-        extra_args=CA_EXTRA_ARGS,
-        extra_env=CA_NIX_CONFIG,
-    )
+    root_kwargs = get_test_store_kwargs(nix_config=CA_NIX_CONFIG)
     root_store = LocalSocketStore(
         id="deferred-replay-root",
         store_path=root_path,

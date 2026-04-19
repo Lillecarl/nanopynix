@@ -32,25 +32,21 @@ from tests.conftest import (
     run_subproc,
     rmtree_robust,
 )
+from tests.nix_config import NixConfig
 
 DYN_NIX = Path(__file__).resolve().parent.parent.parent / "test-dyn-drv.nix"
-DYN_DAEMON_ARGS = [
-    "--option",
-    "extra-experimental-features",
-    "ca-derivations dynamic-derivations",
-]
-DYN_NIX_CONFIG = {
-    "extra-experimental-features": "nix-command ca-derivations dynamic-derivations",
-}
+DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
+    substituters=(
+        "https://cache.nixos.org/",
+        "unix:///nix/var/nix/daemon-socket/socket?root=/",
+    ),
+)
 
 
 async def main() -> None:
     root_path = STORE_PREFIX / "dyn-drv-root"
     rmtree_robust(root_path)
-    root_kwargs = get_test_store_kwargs(
-        extra_args=DYN_DAEMON_ARGS,
-        extra_env=DYN_NIX_CONFIG,
-    )
+    root_kwargs = get_test_store_kwargs(nix_config=DYN_NIX_CONFIG)
     root_store = LocalSocketStore(
         id="dyn-drv-root", store_path=root_path, **root_kwargs
     )
