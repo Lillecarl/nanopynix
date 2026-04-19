@@ -406,6 +406,8 @@ class BinaryCacheServer:
             except OSError:
                 pass
 
+        self.store.add_path_info(vinfo)
+        self.store.tracker.add_known_path(vinfo.path)
         log.info("upload_to_store_complete", path=vinfo.path)
         return web.Response(status=HTTPStatus.OK, text="ok\n")
 
