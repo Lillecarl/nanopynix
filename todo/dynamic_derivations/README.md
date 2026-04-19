@@ -16,15 +16,15 @@ Experimental Nix feature: derivations whose outputs are themselves derivations (
 
 ## Execution Order
 
-| # | Task | Priority | Depends on |
-|---|------|----------|------------|
-| 01 | Extend DerivedPath for nested `^out^out` refs | Critical | — |
-| 02 | Text-hashed CA output resolution | High | 01 |
-| 03 | Trampoline: build inner .drv from text-hashed output | High | 01, 02 |
-| 04 | Dynamic dep DAG linking in decomposition | High | 01, 03 |
-| 05 | Resolve wrapper derivations with dynamic inputDrvs | Medium | 01-04 |
-| 06 | BuildDerivation wire format for DrvWithVersion | Low | 05 (skip if always resolving) |
-| 07 | Fix QueryRealisation ANSI escape bug | Medium | — (independent) |
+| # | Task | Priority | Depends on | Status |
+|---|------|----------|------------|--------|
+| 01 | Extend DerivedPath for nested `^out^out` refs | Critical | — | DONE |
+| 02 | Text-hashed CA output resolution | High | 01 | DONE |
+| 03 | Trampoline: build inner .drv from text-hashed output | High | 01, 02 | DONE |
+| 04 | Dynamic dep DAG linking in decomposition | High | 01, 03 | DONE |
+| 05 | Resolve wrapper derivations with dynamic inputDrvs | Medium | 01-04 | DONE |
+| 06 | BuildDerivation wire format for DrvWithVersion | Low | 05 (skip if always resolving) | Deferred |
+| 07 | Fix QueryRealisation ANSI escape bug | Medium | — (independent) | Pending |
 
 ## Research Artifacts
 
