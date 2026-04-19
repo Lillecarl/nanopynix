@@ -23,7 +23,7 @@ from tests.nix_config import NixConfig
 
 log = structlog.get_logger(__name__)
 
-TEST_NIX = Path("tests/test.nix")
+TEST_NIX = Path("tests/nix")
 
 CA_NIX_CONFIG = NixConfig.for_ca_derivations(
     substituters=(

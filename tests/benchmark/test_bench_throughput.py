@@ -24,7 +24,7 @@ from tests.conftest import (
 log = structlog.get_logger(__name__)
 
 # Common test configuration
-NIX_FILE = Path("tests/test.nix")
+NIX_FILE = Path("tests/nix")
 TARGET = "parallel"
 MAX_JOBS = 20
 TEST_ENV = {

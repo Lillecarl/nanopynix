@@ -23,7 +23,7 @@ log = structlog.get_logger(__name__)
 
 
 async def test_builders(tmp_path: Path) -> None:
-    """Build test.nix .dag via --builders.
+    """Build nix/standard.dag via --builders.
 
     Store operations triggered:
     - AddMultipleToStore: Adds multiple paths to store
@@ -32,7 +32,7 @@ async def test_builders(tmp_path: Path) -> None:
     - QueryPathInfo: Queries path info
     - QueryValidPaths: Queries valid paths
     """
-    test_nix = Path("tests/test.nix")
+    test_nix = Path("tests/nix")
 
     # 1. Backends for pynixd
     pynixd_local_path = STORE_PREFIX / "dag-builders-local"
@@ -89,7 +89,7 @@ async def test_builders(tmp_path: Path) -> None:
 
 
 async def test_store(tmp_path: Path) -> None:
-    """Build test.nix .dag via --store.
+    """Build nix/standard.dag via --store.
 
     Store operations triggered:
     - AddMultipleToStore: Adds multiple paths to store
@@ -98,7 +98,7 @@ async def test_store(tmp_path: Path) -> None:
     - QueryMissing: Queries missing paths
     - QueryValidPaths: Queries valid paths
     """
-    test_nix = Path("tests/test.nix")
+    test_nix = Path("tests/nix")
 
     pynixd_local_path = STORE_PREFIX / "dag-store-local"
     pynixd_builder_path = STORE_PREFIX / "dag-store-builder"

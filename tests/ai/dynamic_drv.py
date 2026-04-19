@@ -34,7 +34,7 @@ from tests.conftest import (
 )
 from tests.nix_config import NixConfig
 
-DYN_NIX = Path(__file__).resolve().parent.parent / "test.nix"
+DYN_NIX = Path(__file__).resolve().parent.parent / "nix"
 DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
     substituters=(
         "https://cache.nixos.org/",

@@ -26,7 +26,7 @@ log = structlog.get_logger(__name__)
 
 @pytest.mark.timeout(60)
 async def test_builders(profiler: pyinstrument.Profiler, tmp_path: Path) -> None:
-    """Build test.nix .simple via --builders.
+    """Build nix/standard.simple via --builders.
 
     Store operations triggered:
     - AddMultipleToStore: Adds multiple paths to store
@@ -35,7 +35,7 @@ async def test_builders(profiler: pyinstrument.Profiler, tmp_path: Path) -> None
     - QueryMissing: Queries missing paths
     - QueryValidPaths: Queries valid paths
     """
-    test_nix = Path("tests/test.nix")
+    test_nix = Path("tests/nix")
 
     # 1. Backends for pynixd
     pynixd_local_path = STORE_PREFIX / "pynixd-local-builders"
@@ -89,7 +89,7 @@ async def test_builders(profiler: pyinstrument.Profiler, tmp_path: Path) -> None
 
 @pytest.mark.timeout(60)
 async def test_store(profiler: pyinstrument.Profiler, tmp_path: Path) -> None:
-    """Build test.nix .simple via --eval-store.
+    """Build nix/standard.simple via --eval-store.
 
     Store operations triggered:
     - AddMultipleToStore: Adds multiple paths to store
@@ -98,7 +98,7 @@ async def test_store(profiler: pyinstrument.Profiler, tmp_path: Path) -> None:
     - QueryMissing: Queries missing paths
     - QueryValidPaths: Queries valid paths
     """
-    test_nix = Path("tests/test.nix")
+    test_nix = Path("tests/nix")
 
     pynixd_local_path = STORE_PREFIX / "pynixd-local-store"
     pynixd_builder_path = STORE_PREFIX / "pynixd-builder-store"

@@ -49,7 +49,7 @@ async def query_env(tmp_path: Path):
         uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
 
         # Populate with a simple build
-        test_nix = Path("tests/test.nix")
+        test_nix = Path("tests/nix")
         cmd = [
             NIX_BIN,
             "build",
@@ -105,7 +105,7 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
     - QueryValidPaths: Queries valid paths
     """
     server, uri, out_path = query_env
-    test_nix = Path("tests/test.nix")
+    test_nix = Path("tests/nix")
 
     # Build another thing that depends on 'out_path'
     cmd = [
@@ -236,7 +236,7 @@ async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None
     """
     server, uri, out_path = query_env
 
-    test_nix = Path("tests/test.nix")
+    test_nix = Path("tests/nix")
     cmd = [
         NIX_BIN,
         "build",

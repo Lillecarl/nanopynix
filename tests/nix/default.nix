@@ -12,10 +12,10 @@ let
     if v == "" then toString builtins.currentTime else v;
 
   modes = {
-    standard = import ./modes/standard.nix { inherit pkgs system ts; };
-    ca = import ./modes/ca.nix { inherit system ts; };
-    dyn = import ./modes/dyn-drv.nix { inherit system ts; };
-    minimal = import ./modes/minimal.nix { inherit system ts; };
+    standard = import ./standard.nix { inherit pkgs system ts; };
+    ca = import ./ca.nix { inherit system ts; };
+    dyn = import ./dyn-drv.nix { inherit system ts; };
+    minimal = import ./minimal.nix { inherit system ts; };
   };
 
 in
