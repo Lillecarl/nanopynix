@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -30,7 +29,7 @@ async def get_hello_path() -> StorePath:
     return StorePath(stdout.strip())
 
 
-@pytest.mark.asyncio
+@pytest.mark.timeout(50)
 async def test_stream_nar() -> None:
     """
     Test streaming a NAR from the system store to a temporary store.
@@ -39,41 +38,40 @@ async def test_stream_nar() -> None:
     Store operations triggered:
     - NarFromPath: Gets NAR from path for streaming
     """
-    async with asyncio.timeout(50):
-        # 1. Build hello in the system store
-        store_path = await get_hello_path()
-        log.info("streaming_path", path=store_path)
+    # 1. Build hello in the system store
+    store_path = await get_hello_path()
+    log.info("streaming_path", path=store_path)
 
-        # Source store is the system store (/)
-        src_store = LocalSocketStore(
-            id="system",
-            store_path=Path("/"),
-            **get_test_store_kwargs(),
+    # Source store is the system store (/)
+    src_store = LocalSocketStore(
+        id="system",
+        store_path=Path("/"),
+        **get_test_store_kwargs(),
+    )
+
+    # Destination store is a temporary store
+    dst_path = STORE_PREFIX / "test-stream-nar"
+    rmtree_robust(dst_path)
+    dst_store = LocalSocketStore(
+        id="test-stream-nar",
+        store_path=dst_path,
+        **get_test_store_kwargs(),
+    )
+
+    try:
+        # 2. Stream the path from src to dst
+        # Check if path exists in src
+        is_valid_src = await src_store.execute(IsValidPathRequest(path=store_path))
+        assert is_valid_src.valid, f"Path {store_path} not valid in system store"
+
+        # Use stream_paths_store_to_store which handles the NAR piping
+        await Store.stream_paths_store_to_store(src_store, dst_store, [store_path])
+
+        # Verify it now exists in dst
+        is_valid_dst_after = await dst_store.execute(
+            IsValidPathRequest(path=store_path)
         )
-
-        # Destination store is a temporary store
-        dst_path = STORE_PREFIX / "test-stream-nar"
-        rmtree_robust(dst_path)
-        dst_store = LocalSocketStore(
-            id="test-stream-nar",
-            store_path=dst_path,
-            **get_test_store_kwargs(),
-        )
-
-        try:
-            # 2. Stream the path from src to dst
-            # Check if path exists in src
-            is_valid_src = await src_store.execute(IsValidPathRequest(path=store_path))
-            assert is_valid_src.valid, f"Path {store_path} not valid in system store"
-
-            # Use stream_paths_store_to_store which handles the NAR piping
-            await Store.stream_paths_store_to_store(src_store, dst_store, [store_path])
-
-            # Verify it now exists in dst
-            is_valid_dst_after = await dst_store.execute(
-                IsValidPathRequest(path=store_path)
-            )
-            assert is_valid_dst_after.valid
-        finally:
-            await src_store.close()
-            await dst_store.close()
+        assert is_valid_dst_after.valid
+    finally:
+        await src_store.close()
+        await dst_store.close()

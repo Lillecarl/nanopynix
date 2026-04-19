@@ -138,75 +138,75 @@ async def test_throughput_daemon() -> None:
 
 
 @pytest.mark.benchmark
+@pytest.mark.timeout(0)
 async def test_throughput_pynixd(profiler: pyinstrument.Profiler) -> None:
     """pynixd: Build through pynixd proxy."""
     # THIS TEST MUST COMPLETE WITHIN 120 SECONDS. If it takes longer, something is broken.
     # With MAX_JOBS=20 and sleep=0, builds complete in ~10-30s depending on system.
-    async with asyncio.timeout(None):
-        local_path = STORE_PREFIX / "throughput-pynixd-local"
-        builder_path = STORE_PREFIX / "throughput-pynixd-builder"
-        client_path = STORE_PREFIX / "throughput-pynixd-client"
+    local_path = STORE_PREFIX / "throughput-pynixd-local"
+    builder_path = STORE_PREFIX / "throughput-pynixd-builder"
+    client_path = STORE_PREFIX / "throughput-pynixd-client"
 
-        rmtree_robust(local_path)
-        rmtree_robust(builder_path)
-        rmtree_robust(client_path)
+    rmtree_robust(local_path)
+    rmtree_robust(builder_path)
+    rmtree_robust(client_path)
 
-        local_path.mkdir(parents=True, exist_ok=True)
-        builder_path.mkdir(parents=True, exist_ok=True)
-        client_path.mkdir(parents=True, exist_ok=True)
+    local_path.mkdir(parents=True, exist_ok=True)
+    builder_path.mkdir(parents=True, exist_ok=True)
+    client_path.mkdir(parents=True, exist_ok=True)
 
-        local_store = LocalSocketStore(
-            id="local",
-            store_path=local_path,
-            max_builds=0,
-            max_transfers=100,
-            **get_test_store_kwargs(),
-        )
-        builder_store = LocalSocketStore(
-            id="builder",
-            store_path=builder_path,
-            max_builds=MAX_JOBS,
-            max_transfers=100,
-            **get_test_store_kwargs(),
-        )
+    local_store = LocalSocketStore(
+        id="local",
+        store_path=local_path,
+        max_builds=0,
+        max_transfers=100,
+        **get_test_store_kwargs(),
+    )
+    builder_store = LocalSocketStore(
+        id="builder",
+        store_path=builder_path,
+        max_builds=MAX_JOBS,
+        max_transfers=100,
+        **get_test_store_kwargs(),
+    )
 
-        async with Server(
-            local_store=local_store,
-            stores={"builder": builder_store},
-            ssh_port=0,
-        ) as server:
-            log.info("server_up_resetting_profiler")
-            profiler.reset()
+    async with Server(
+        local_store=local_store,
+        stores={"builder": builder_store},
+        ssh_port=0,
+    ) as server:
+        log.info("server_up_resetting_profiler")
+        profiler.reset()
 
-            try:
-                builder_spec = server.builder_uri(max_jobs=MAX_JOBS)
+        try:
+            builder_spec = server.builder_uri(max_jobs=MAX_JOBS)
 
-                cmd = [
-                    str(NIX_BIN),
-                    "build",
-                    "--store",
-                    str(client_path),
-                    "--builders",
-                    builder_spec,
-                    "--max-jobs",
-                    "0",
-                    "--no-link",
-                    "--file",
-                    str(NIX_FILE),
-                    TARGET,
-                ]
+            cmd = [
+                str(NIX_BIN),
+                "build",
+                "--store",
+                str(client_path),
+                "--builders",
+                builder_spec,
+                "--max-jobs",
+                "0",
+                "--no-link",
+                "--file",
+                str(NIX_FILE),
+                TARGET,
+            ]
 
-                start = time.perf_counter()
-                rc, _, _, stdboth = await run_subproc(
-                    cmd,
-                    env={
-                        "NIX_STATE_DIR": str(client_path / "var/nix"),
-                        **TEST_ENV,
-                    },
-                )
-                elapsed = time.perf_counter() - start
+            start = time.perf_counter()
+            rc, _, _, stdboth = await run_subproc(
+                cmd,
+                env={
+                    "NIX_STATE_DIR": str(client_path / "var/nix"),
+                    **TEST_ENV,
+                },
+            )
+            elapsed = time.perf_counter() - start
 
-                assert rc == 0, f"pynixd throughput build failed:\n{stdboth}"
-                log.info("pynixd_throughput_finished", elapsed=f"{elapsed:.2f}s")
-            finally:
-                log.info("build_finished")
+            assert rc == 0, f"pynixd throughput build failed:\n{stdboth}"
+            log.info("pynixd_throughput_finished", elapsed=f"{elapsed:.2f}s")
+        finally:
+            log.info("build_finished")

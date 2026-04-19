@@ -10,6 +10,7 @@ from passlib.apache import HtpasswdFile
 
 from pynixd import Server
 from pynixd.store import LocalSocketStore
+from tests.conftest import get_test_store_kwargs
 
 
 @pytest.mark.timeout(30)
@@ -25,7 +26,9 @@ async def test_htpasswd_auth(tmp_path: Path) -> None:
     ht.set_password("bob", "secret456")
     ht.save()
 
-    local_store = LocalSocketStore(id="local", store_path=Path("/"))
+    local_store = LocalSocketStore(
+        id="local", store_path=Path("/"), **get_test_store_kwargs()
+    )
 
     async with Server(
         local_store=local_store,
@@ -70,7 +73,9 @@ async def test_htpasswd_fallback_to_single_user(tmp_path: Path) -> None:
     Store operations triggered:
     - None: This test only checks HTTP authentication fallback without triggering Store operations
     """
-    local_store = LocalSocketStore(id="local", store_path=Path("/"))
+    local_store = LocalSocketStore(
+        id="local", store_path=Path("/"), **get_test_store_kwargs()
+    )
 
     # No htpasswd, just single user/pass
     async with Server(

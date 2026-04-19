@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from pathlib import Path
 
@@ -63,73 +62,72 @@ async def test_http_upload(tmp_path: Path) -> None:
     Store operations triggered:
     - None: This test only checks HTTP upload functionality without triggering explicit Store operations
     """
-    async with asyncio.timeout(50):
-        # 1. Source store (root) has the path
-        root_store = LocalSocketStore(
-            id="root", store_path=Path("/"), **get_test_store_kwargs()
+    # 1. Source store (root) has the path
+    root_store = LocalSocketStore(
+        id="root", store_path=Path("/"), **get_test_store_kwargs()
+    )
+    # Use no-refs path for direct PUT to avoid dependency issues
+    path = await get_no_refs_path()
+    hash_part = path.hash_part()
+
+    # Get its NAR and narinfo
+    info_resp = await root_store.execute(QueryPathInfoRequest(path=path))
+    assert info_resp.valid and info_resp.info
+    vinfo = info_resp.info.with_path(path)
+
+    nar_data = bytearray()
+
+    async def collect_nar(chunk: bytes):
+        nar_data.extend(chunk)
+
+    await root_store.execute(
+        NarFromPathRequest(
+            path=path, nar_size=vinfo.nar_size, async_callback=collect_nar
         )
-        # Use no-refs path for direct PUT to avoid dependency issues
-        path = await get_no_refs_path()
-        hash_part = path.hash_part()
+    )
 
-        # Get its NAR and narinfo
-        info_resp = await root_store.execute(QueryPathInfoRequest(path=path))
-        assert info_resp.valid and info_resp.info
-        vinfo = info_resp.info.with_path(path)
+    narinfo = vinfo.to_narinfo()
 
-        nar_data = bytearray()
+    # 2. Target store (temp) is empty
+    target_store_path = STORE_PREFIX / "http-upload-target-direct"
+    rmtree_robust(target_store_path)
+    os.makedirs(target_store_path, exist_ok=True)
+    target_store = LocalSocketStore(
+        id="target", store_path=target_store_path, **get_test_store_kwargs()
+    )
 
-        async def collect_nar(chunk: bytes):
-            nar_data.extend(chunk)
+    # Enable uploads in pynixd
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
 
-        await root_store.execute(
-            NarFromPathRequest(
-                path=path, nar_size=vinfo.nar_size, async_callback=collect_nar
-            )
+    async with Server(
+        local_store=target_store, http_port=0, http_upload_dir=upload_dir
+    ) as server:
+        base_url = f"http://127.0.0.1:{server.http_bound_port}"
+
+        async with aiohttp.ClientSession() as session:
+            # 3. PUT NAR
+            nar_hash_part = vinfo.nar_hash.split(":")[-1]
+            log.info("uploading_nar", hash=nar_hash_part, size=len(nar_data))
+            async with session.put(
+                f"{base_url}/nar/{nar_hash_part}.nar", data=nar_data
+            ) as resp:
+                assert resp.status == 200
+                assert await resp.text() == "ok\n"
+
+            # 4. PUT .narinfo
+            log.info("uploading_narinfo", hash=hash_part)
+            async with session.put(
+                f"{base_url}/{hash_part}.narinfo", data=narinfo
+            ) as resp:
+                assert resp.status == 200
+                assert await resp.text() == "ok\n"
+
+        # 5. Verify it now exists in the target store
+        info_resp = await target_store.execute(QueryPathInfoRequest(path=path))
+        assert info_resp.valid, (
+            f"Path {path} should be valid in target store after upload"
         )
-
-        narinfo = vinfo.to_narinfo()
-
-        # 2. Target store (temp) is empty
-        target_store_path = STORE_PREFIX / "http-upload-target-direct"
-        rmtree_robust(target_store_path)
-        os.makedirs(target_store_path, exist_ok=True)
-        target_store = LocalSocketStore(
-            id="target", store_path=target_store_path, **get_test_store_kwargs()
-        )
-
-        # Enable uploads in pynixd
-        upload_dir = tmp_path / "uploads"
-        upload_dir.mkdir()
-
-        async with Server(
-            local_store=target_store, http_port=0, http_upload_dir=upload_dir
-        ) as server:
-            base_url = f"http://127.0.0.1:{server.http_bound_port}"
-
-            async with aiohttp.ClientSession() as session:
-                # 3. PUT NAR
-                nar_hash_part = vinfo.nar_hash.split(":")[-1]
-                log.info("uploading_nar", hash=nar_hash_part, size=len(nar_data))
-                async with session.put(
-                    f"{base_url}/nar/{nar_hash_part}.nar", data=nar_data
-                ) as resp:
-                    assert resp.status == 200
-                    assert await resp.text() == "ok\n"
-
-                # 4. PUT .narinfo
-                log.info("uploading_narinfo", hash=hash_part)
-                async with session.put(
-                    f"{base_url}/{hash_part}.narinfo", data=narinfo
-                ) as resp:
-                    assert resp.status == 200
-                    assert await resp.text() == "ok\n"
-
-            # 5. Verify it now exists in the target store
-            info_resp = await target_store.execute(QueryPathInfoRequest(path=path))
-            assert info_resp.valid, (
-                f"Path {path} should be valid in target store after upload"
-            )
 
 
 @pytest.mark.timeout(60)
@@ -139,41 +137,40 @@ async def test_nix_copy_to_http(tmp_path: Path) -> None:
     Store operations triggered:
     - None: This test only checks HTTP upload functionality via nix copy without triggering explicit Store operations
     """
-    async with asyncio.timeout(50):
-        # 1. Source store (root) has the path
-        # Use hello as requested by user - nix copy handles the closure
-        path = await get_hello_path()
+    # 1. Source store (root) has the path
+    # Use hello as requested by user - nix copy handles the closure
+    path = await get_hello_path()
 
-        # 2. Target store (temp) is empty
-        target_store_path = STORE_PREFIX / "nix-copy-to-http-target"
-        rmtree_robust(target_store_path)
-        os.makedirs(target_store_path, exist_ok=True)
-        target_store = LocalSocketStore(
-            id="target", store_path=target_store_path, **get_test_store_kwargs()
+    # 2. Target store (temp) is empty
+    target_store_path = STORE_PREFIX / "nix-copy-to-http-target"
+    rmtree_robust(target_store_path)
+    os.makedirs(target_store_path, exist_ok=True)
+    target_store = LocalSocketStore(
+        id="target", store_path=target_store_path, **get_test_store_kwargs()
+    )
+
+    # Enable uploads in pynixd
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+
+    async with Server(
+        local_store=target_store, http_port=0, http_upload_dir=upload_dir
+    ) as server:
+        base_url = f"http://127.0.0.1:{server.http_bound_port}"
+
+        # 3. Use 'nix copy' to upload
+        cmd = [
+            str(NIX_BIN),
+            "copy",
+            "--to",
+            base_url,
+            str(path),
+        ]
+        rc, stdout, stderr, _ = await run_subproc(cmd)
+        assert rc == 0, f"nix copy failed:\n{stderr}"
+
+        # 4. Verify it now exists in the target store
+        info_resp = await target_store.execute(QueryPathInfoRequest(path=path))
+        assert info_resp.valid, (
+            f"Path {path} should be valid in target store after nix copy"
         )
-
-        # Enable uploads in pynixd
-        upload_dir = tmp_path / "uploads"
-        upload_dir.mkdir()
-
-        async with Server(
-            local_store=target_store, http_port=0, http_upload_dir=upload_dir
-        ) as server:
-            base_url = f"http://127.0.0.1:{server.http_bound_port}"
-
-            # 3. Use 'nix copy' to upload
-            cmd = [
-                str(NIX_BIN),
-                "copy",
-                "--to",
-                base_url,
-                str(path),
-            ]
-            rc, stdout, stderr, _ = await run_subproc(cmd)
-            assert rc == 0, f"nix copy failed:\n{stderr}"
-
-            # 4. Verify it now exists in the target store
-            info_resp = await target_store.execute(QueryPathInfoRequest(path=path))
-            assert info_resp.valid, (
-                f"Path {path} should be valid in target store after nix copy"
-            )

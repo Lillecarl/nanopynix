@@ -15,7 +15,13 @@ from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
-from tests.conftest import STORE_PREFIX, run_subproc
+from tests.conftest import (
+    NIX_BIN,
+    STORE_PREFIX,
+    get_test_store_kwargs,
+    run_subproc,
+    rmtree_robust,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -52,7 +58,9 @@ async def test_narinfo() -> None:
     Store operations triggered:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
-    local_store = LocalSocketStore(id="local", store_path=Path("/"))
+    local_store = LocalSocketStore(
+        id="local", store_path=Path("/"), **get_test_store_kwargs()
+    )
 
     async with Server(local_store=local_store, http_port=0) as server:
         path = await _pick_random_path(local_store)
@@ -76,7 +84,9 @@ async def test_nar_streaming() -> None:
     Store operations triggered:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
-    local_store = LocalSocketStore(id="local", store_path=Path("/"))
+    local_store = LocalSocketStore(
+        id="local", store_path=Path("/"), **get_test_store_kwargs()
+    )
 
     async with Server(local_store=local_store, http_port=0) as server:
         path = await _pick_random_path(local_store)
@@ -114,7 +124,9 @@ async def test_cache_as_substituter() -> None:
     Store operations triggered:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
-    local_store = LocalSocketStore(id="local", store_path=Path("/"))
+    local_store = LocalSocketStore(
+        id="local", store_path=Path("/"), **get_test_store_kwargs()
+    )
 
     async with Server(local_store=local_store, http_port=0) as server:
         target_path = await _pick_random_path(local_store)
@@ -122,15 +134,8 @@ async def test_cache_as_substituter() -> None:
 
         # Use a fresh temporary store for substitution
         subst_store_path = STORE_PREFIX / "http-subst-functional"
-        if subst_store_path.exists():
-            import shutil
-
-            shutil.rmtree(subst_store_path)
+        rmtree_robust(subst_store_path)
         os.makedirs(subst_store_path, exist_ok=True)
-
-        # Build something that requires our target path
-        # For simplicity, we just try to 'nix-store -r' it into the new store
-        from tests.conftest import NIX_BIN
 
         cmd = [
             str(NIX_BIN),
@@ -165,7 +170,9 @@ async def test_cache_not_found() -> None:
     Store operations triggered:
     - None: This test only checks HTTP 404 handling without triggering Store operations
     """
-    local_store = LocalSocketStore(id="local", store_path=Path("/"))
+    local_store = LocalSocketStore(
+        id="local", store_path=Path("/"), **get_test_store_kwargs()
+    )
     async with Server(local_store=local_store, http_port=0) as server:
         base_url = f"http://127.0.0.1:{server.http_bound_port}"
         async with aiohttp.ClientSession() as session:
