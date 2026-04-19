@@ -42,7 +42,7 @@ from tests.conftest import (
 )
 from tests.nix_config import NixConfig
 
-CA_NIX = Path(__file__).resolve().parent.parent / "test-ca.nix"
+CA_NIX = Path(__file__).resolve().parent.parent / "test.nix"
 CA_NIX_CONFIG = NixConfig.for_ca_derivations()
 
 
@@ -98,9 +98,10 @@ async def main() -> None:
         "build",
         "--store",
         str(root_path),
+        "--impure",
         "--file",
         str(CA_NIX),
-        "ca_simple",
+        "ca.simple",
         "--no-link",
         "--print-out-paths",
     ]
@@ -114,9 +115,10 @@ async def main() -> None:
         "build",
         "--store",
         str(root_path),
+        "--impure",
         "--file",
         str(CA_NIX),
-        "non_ca_depends_on_ca",
+        "ca.non_ca_depends_on_ca",
         "--no-link",
         "--print-out-paths",
     ]
@@ -136,6 +138,7 @@ async def main() -> None:
         "eval",
         "--store",
         str(root_path),
+        "--impure",
         "--file",
         str(CA_NIX),
         "ca_simple.drvPath",
@@ -150,6 +153,7 @@ async def main() -> None:
         "eval",
         "--store",
         str(root_path),
+        "--impure",
         "--file",
         str(CA_NIX),
         "non_ca_depends_on_ca.drvPath",

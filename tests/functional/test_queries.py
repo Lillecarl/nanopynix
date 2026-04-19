@@ -49,7 +49,7 @@ async def query_env(tmp_path: Path):
         uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
 
         # Populate with a simple build
-        test_nix = Path("tests/test-minimal.nix")
+        test_nix = Path("tests/test.nix")
         cmd = [
             NIX_BIN,
             "build",
@@ -57,9 +57,10 @@ async def query_env(tmp_path: Path):
             "auto",
             "--store",
             uri,
+            "--impure",
             "--file",
             test_nix,
-            "leaf",
+            "minimal.leaf",
             "--no-link",
         ]
         rc, stdout, stderr, stdboth = await run_subproc(cmd)
@@ -68,9 +69,10 @@ async def query_env(tmp_path: Path):
         # Get expected output path locally
         cmd = [
             NIX_BIN.parent / "nix-instantiate",
+            "--impure",
             test_nix,
             "-A",
-            "leaf",
+            "minimal.leaf",
         ]
         rc, stdout, stderr, stdboth = await run_subproc(cmd)
         assert rc == 0
@@ -103,7 +105,7 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
     - QueryValidPaths: Queries valid paths
     """
     server, uri, out_path = query_env
-    test_nix = Path("tests/test-minimal.nix")
+    test_nix = Path("tests/test.nix")
 
     # Build another thing that depends on 'out_path'
     cmd = [
@@ -113,9 +115,10 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
         "auto",
         "--store",
         uri,
+        "--impure",
         "--file",
         test_nix,
-        "dependent",
+        "minimal.dependent",
         "--no-link",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
@@ -124,9 +127,10 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
     # Get dep_path locally
     cmd = [
         NIX_BIN.parent / "nix-instantiate",
+        "--impure",
         test_nix,
         "-A",
-        "dependent",
+        "minimal.dependent",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0
@@ -232,7 +236,7 @@ async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None
     """
     server, uri, out_path = query_env
 
-    test_nix = Path("tests/test-minimal.nix")
+    test_nix = Path("tests/test.nix")
     cmd = [
         NIX_BIN,
         "build",
@@ -240,9 +244,10 @@ async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None
         "auto",
         "--store",
         uri,
+        "--impure",
         "--file",
         test_nix,
-        "leaf",
+        "minimal.leaf",
         "--dry-run",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)

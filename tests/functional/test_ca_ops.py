@@ -23,7 +23,7 @@ from tests.nix_config import NixConfig
 
 log = structlog.get_logger(__name__)
 
-TEST_CA_NIX = Path("tests/test-ca.nix")
+TEST_NIX = Path("tests/test.nix")
 
 CA_NIX_CONFIG = NixConfig.for_ca_derivations(
     substituters=(
@@ -87,20 +87,17 @@ async def test_ca_simple_build_root_store(
             "build",
             "--store",
             str(store_path),
+            "--impure",
             "--file",
-            str(TEST_CA_NIX),
-            "ca_simple",
+            str(TEST_NIX),
+            "ca.simple",
             "--no-link",
             "--print-out-paths",
         ]
-        rc, stdout, stderr, stdboth = await run_subproc(
-            cmd, nix_config=CA_NIX_CONFIG
-        )
+        rc, stdout, stderr, stdboth = await run_subproc(cmd, nix_config=CA_NIX_CONFIG)
         assert rc == 0, f"CA simple build failed:\n{stdboth}"
         out_path = stdout.strip()
-        assert out_path.startswith("/nix/store/"), (
-            f"Unexpected output path: {out_path}"
-        )
+        assert out_path.startswith("/nix/store/"), f"Unexpected output path: {out_path}"
         log.info("ca_simple_output", path=out_path)
     finally:
         await store.close()
@@ -127,20 +124,17 @@ async def test_ca_multi_output_build_root_store(
             "build",
             "--store",
             str(store_path),
+            "--impure",
             "--file",
-            str(TEST_CA_NIX),
-            "ca_multi_output",
+            str(TEST_NIX),
+            "ca.multi_output",
             "--no-link",
             "--print-out-paths",
         ]
-        rc, stdout, stderr, stdboth = await run_subproc(
-            cmd, nix_config=CA_NIX_CONFIG
-        )
+        rc, stdout, stderr, stdboth = await run_subproc(cmd, nix_config=CA_NIX_CONFIG)
         assert rc == 0, f"CA multi-output build failed:\n{stdboth}"
         paths = stdout.strip().splitlines()
-        assert len(paths) == 2, (
-            f"Expected 2 output paths, got {len(paths)}: {paths}"
-        )
+        assert len(paths) == 2, f"Expected 2 output paths, got {len(paths)}: {paths}"
         for p in paths:
             assert p.startswith("/nix/store/"), f"Unexpected output path: {p}"
         log.info("ca_multi_output_paths", paths=paths)
@@ -169,20 +163,17 @@ async def test_ca_depends_on_ca_root_store(
             "build",
             "--store",
             str(store_path),
+            "--impure",
             "--file",
-            str(TEST_CA_NIX),
-            "ca_depends_on_ca",
+            str(TEST_NIX),
+            "ca.depends_on_ca",
             "--no-link",
             "--print-out-paths",
         ]
-        rc, stdout, stderr, stdboth = await run_subproc(
-            cmd, nix_config=CA_NIX_CONFIG
-        )
+        rc, stdout, stderr, stdboth = await run_subproc(cmd, nix_config=CA_NIX_CONFIG)
         assert rc == 0, f"CA depends-on-CA build failed:\n{stdboth}"
         out_path = stdout.strip()
-        assert out_path.startswith("/nix/store/"), (
-            f"Unexpected output path: {out_path}"
-        )
+        assert out_path.startswith("/nix/store/"), f"Unexpected output path: {out_path}"
         log.info("ca_depends_on_ca_output", path=out_path)
     finally:
         await store.close()
@@ -209,20 +200,17 @@ async def test_non_ca_depends_on_ca_root_store(
             "build",
             "--store",
             str(store_path),
+            "--impure",
             "--file",
-            str(TEST_CA_NIX),
-            "non_ca_depends_on_ca",
+            str(TEST_NIX),
+            "ca.non_ca_depends_on_ca",
             "--no-link",
             "--print-out-paths",
         ]
-        rc, stdout, stderr, stdboth = await run_subproc(
-            cmd, nix_config=CA_NIX_CONFIG
-        )
+        rc, stdout, stderr, stdboth = await run_subproc(cmd, nix_config=CA_NIX_CONFIG)
         assert rc == 0, f"Non-CA depends-on-CA build failed:\n{stdboth}"
         out_path = stdout.strip()
-        assert out_path.startswith("/nix/store/"), (
-            f"Unexpected output path: {out_path}"
-        )
+        assert out_path.startswith("/nix/store/"), f"Unexpected output path: {out_path}"
         log.info("non_ca_depends_on_ca_output", path=out_path)
     finally:
         await store.close()
@@ -247,9 +235,10 @@ async def test_ca_simple_via_pynixd(profiler: pyinstrument.Profiler, ca_env) -> 
         "auto",
         "--store",
         uri,
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "ca_simple",
+        str(TEST_NIX),
+        "ca.simple",
         "--no-link",
         "--print-out-paths",
     ]
@@ -281,9 +270,10 @@ async def test_ca_multi_output_via_pynixd(
         "auto",
         "--store",
         uri,
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "ca_multi_output",
+        str(TEST_NIX),
+        "ca.multi_output",
         "--no-link",
         "--print-out-paths",
     ]
@@ -317,9 +307,10 @@ async def test_ca_depends_on_ca_via_pynixd(
         "auto",
         "--store",
         uri,
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "ca_depends_on_ca",
+        str(TEST_NIX),
+        "ca.depends_on_ca",
         "--no-link",
         "--print-out-paths",
     ]
@@ -352,9 +343,10 @@ async def test_non_ca_depends_on_ca_via_pynixd(
         "auto",
         "--store",
         uri,
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "non_ca_depends_on_ca",
+        str(TEST_NIX),
+        "ca.non_ca_depends_on_ca",
         "--no-link",
         "--print-out-paths",
     ]
@@ -393,9 +385,10 @@ async def test_ca_query_derivation_output_map_via_pynixd(
         "auto",
         "--store",
         uri,
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "ca_simple",
+        str(TEST_NIX),
+        "ca.simple",
         "--no-link",
         "--print-out-paths",
     ]
@@ -410,9 +403,10 @@ async def test_ca_query_derivation_output_map_via_pynixd(
         "eval",
         "--store",
         uri,
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "ca_simple.drvPath",
+        str(TEST_NIX),
+        "ca.simple.drvPath",
         "--raw",
     ]
     rc, drv_out, _, _ = await run_subproc(eval_cmd, nix_config=CA_NIX_CONFIG)
@@ -458,9 +452,10 @@ async def test_ca_query_derivation_output_map_root_store(
         "build",
         "--store",
         str(store_path),
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "ca_simple",
+        str(TEST_NIX),
+        "ca.simple",
         "--no-link",
         "--print-out-paths",
     ]
@@ -475,9 +470,10 @@ async def test_ca_query_derivation_output_map_root_store(
         "eval",
         "--store",
         str(store_path),
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "ca_simple.drvPath",
+        str(TEST_NIX),
+        "ca.simple.drvPath",
         "--raw",
     ]
     rc, drv_out, stderr, stdboth = await run_subproc(cmd, nix_config=CA_NIX_CONFIG)
@@ -534,8 +530,8 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
         uri,
         "--impure",
         "--file",
-        str(DYN_NIX),
-        "producingDrv.drvPath",
+        str(TEST_NIX),
+        "dyn.producingDrv.drvPath",
         "--raw",
     ]
     rc, drv_out, _, _ = await run_subproc(eval_cmd, nix_config=DYN_NIX_CONFIG)
@@ -567,18 +563,17 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
     )
 
 
-DYN_NIX = Path("tests/test-dyn-drv.nix")
-
-DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations()
+DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
+    substituters=(
+        "https://cache.nixos.org/",
+        "unix:///nix/var/nix/daemon-socket/socket?root=/",
+    ),
+)
 
 
 @pytest.fixture
 async def dyn_env(tmp_path: Path):
-    """Set up a pynixd server with dynamic-derivations enabled.
-
-    Does NOT use the root store as a substituter so builds actually
-    go through pynixd's scheduler instead of being substituted.
-    """
+    """Set up a pynixd server with dynamic-derivations enabled."""
     pynixd_local_path = STORE_PREFIX / "pynixd-local-dyn"
     pynixd_builder_path = STORE_PREFIX / "pynixd-builder-dyn"
     rmtree_robust(pynixd_local_path)
@@ -641,8 +636,8 @@ async def test_dynamic_drv_producing_via_pynixd(
         uri,
         "--impure",
         "--file",
-        str(DYN_NIX),
-        "producingDrv",
+        str(TEST_NIX),
+        "dyn.producingDrv",
         "--no-link",
         "--print-out-paths",
     ]
@@ -656,9 +651,7 @@ async def test_dynamic_drv_producing_via_pynixd(
     )
 
     # The output of producingDrv IS a .drv file
-    assert producing_out.endswith(".drv"), (
-        f"Expected .drv output, got: {producing_out}"
-    )
+    assert producing_out.endswith(".drv"), f"Expected .drv output, got: {producing_out}"
 
     # Verify it's parseable as a derivation
     pynixd_local_path = STORE_PREFIX / "pynixd-local-dyn"
@@ -677,8 +670,8 @@ async def test_dynamic_drv_producing_via_pynixd(
         uri,
         "--impure",
         "--file",
-        str(DYN_NIX),
-        "producingDrv.drvPath",
+        str(TEST_NIX),
+        "dyn.producingDrv.drvPath",
         "--raw",
     ]
     rc, drv_out, _, _ = await run_subproc(eval_cmd, nix_config=DYN_NIX_CONFIG)
@@ -725,26 +718,23 @@ async def test_text_hashed_ca_build_root_store(
             "build",
             "--store",
             str(store_path),
+            "--impure",
             "--file",
-            str(TEST_CA_NIX),
-            "ca_text_hashed",
+            str(TEST_NIX),
+            "ca.text_hashed",
             "--no-link",
             "--print-out-paths",
         ]
-        rc, stdout, stderr, stdboth = await run_subproc(
-            cmd, nix_config=CA_NIX_CONFIG
-        )
+        rc, stdout, stderr, stdboth = await run_subproc(cmd, nix_config=CA_NIX_CONFIG)
         assert rc == 0, f"Text-hashed CA build failed:\n{stdboth}"
         out_path = stdout.strip()
-        assert out_path.startswith("/nix/store/"), (
-            f"Unexpected output path: {out_path}"
-        )
+        assert out_path.startswith("/nix/store/"), f"Unexpected output path: {out_path}"
         log.info("text_hashed_ca_output", path=out_path)
 
         full_path = store_path / out_path.lstrip("/")
         assert full_path.exists(), f"Output file missing: {full_path}"
         content = full_path.read_text().strip()
-        assert content == "text-content", f"Unexpected content: {content!r}"
+        assert content.startswith("text-content-"), f"Unexpected content: {content!r}"
     finally:
         await store.close()
 
@@ -775,9 +765,10 @@ async def test_text_hashed_ca_build_via_pynixd(
         "",
         "--store",
         uri,
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "ca_text_hashed",
+        str(TEST_NIX),
+        "ca.text_hashed",
         "--no-link",
         "--print-out-paths",
     ]
@@ -795,9 +786,10 @@ async def test_text_hashed_ca_build_via_pynixd(
         "eval",
         "--store",
         uri,
+        "--impure",
         "--file",
-        str(TEST_CA_NIX),
-        "ca_text_hashed.drvPath",
+        str(TEST_NIX),
+        "ca.text_hashed.drvPath",
         "--raw",
     ]
     rc, drv_out, _, _ = await run_subproc(eval_cmd, nix_config=CA_NIX_CONFIG)
@@ -846,9 +838,10 @@ async def test_dynamic_drv_wrapper_via_pynixd(
         "",
         "--store",
         uri,
+        "--impure",
         "--file",
-        str(DYN_NIX),
-        "wrapper",
+        str(TEST_NIX),
+        "dyn.wrapper",
         "--no-link",
         "--print-out-paths",
     ]

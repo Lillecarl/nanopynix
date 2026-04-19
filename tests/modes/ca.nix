@@ -1,6 +1,5 @@
-{
-  system ? builtins.currentSystem,
-}:
+{ system, ts }:
+
 let
   mkCADrv =
     {
@@ -20,6 +19,7 @@ let
       outputHashAlgo = hashAlgo;
       outputHashMode = hashMode;
       __contentAddressed = true;
+      _timestamp = ts;
     };
 
   mkDrv =
@@ -31,14 +31,15 @@ let
         "-c"
         buildCommand
       ];
+      _timestamp = ts;
     };
 
-  ca_simple = mkCADrv {
+  simple = mkCADrv {
     name = "ca-simple";
-    buildCommand = "echo ca-content > $out";
+    buildCommand = "echo ca-content-${ts} > $out";
   };
 
-  ca_multi_output = mkCADrv {
+  multi_output = mkCADrv {
     name = "ca-multi";
     buildCommand = ''
       mkdir -p $out $dev
@@ -51,28 +52,29 @@ let
     ];
   };
 
-  ca_depends_on_ca = mkCADrv {
+  depends_on_ca = mkCADrv {
     name = "ca-depends-on-ca";
-    buildCommand = "echo dep-on-${ca_simple} > $out";
+    buildCommand = "echo dep-on-${simple} > $out";
   };
 
   non_ca_depends_on_ca = mkDrv {
     name = "non-ca-depends-on-ca";
-    buildCommand = "echo dep-on-${ca_simple} > $out";
+    buildCommand = "echo dep-on-${simple} > $out";
   };
 
-  ca_text_hashed = mkCADrv {
+  text_hashed = mkCADrv {
     name = "ca-text.txt";
     hashMode = "text";
-    buildCommand = "echo text-content > $out";
+    buildCommand = "echo text-content-${ts} > $out";
   };
+
 in
 {
   inherit
-    ca_simple
-    ca_multi_output
-    ca_depends_on_ca
+    simple
+    multi_output
+    depends_on_ca
     non_ca_depends_on_ca
-    ca_text_hashed
+    text_hashed
     ;
 }

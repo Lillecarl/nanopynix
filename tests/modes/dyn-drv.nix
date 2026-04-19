@@ -1,6 +1,6 @@
-let
-  system = builtins.currentSystem;
+{ system, ts }:
 
+let
   mkDrv =
     { name, buildCommand }:
     derivation {
@@ -10,6 +10,7 @@ let
         "-c"
         buildCommand
       ];
+      _timestamp = ts;
     };
 
   mkCADrv =
@@ -28,6 +29,7 @@ let
       outputHashAlgo = "sha256";
       outputHashMode = hashMode;
       __contentAddressed = true;
+      _timestamp = ts;
     };
 
   hello = mkDrv {
@@ -55,6 +57,7 @@ let
       done < "${indirectHello}" > $out
     '';
   };
+
 in
 {
   inherit hello producingDrv wrapper;

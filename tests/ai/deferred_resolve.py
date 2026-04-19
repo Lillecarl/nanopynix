@@ -39,7 +39,7 @@ from tests.conftest import (
 )
 from tests.nix_config import NixConfig
 
-CA_NIX = Path(__file__).resolve().parent.parent / "test-ca.nix"
+CA_NIX = Path(__file__).resolve().parent.parent / "test.nix"
 CA_NIX_CONFIG = NixConfig.for_ca_derivations(
     substituters=(
         "https://cache.nixos.org/",
@@ -340,9 +340,10 @@ async def main() -> None:
         "build",
         "--store",
         str(root_path),
+        "--impure",
         "--file",
         str(CA_NIX),
-        "ca_simple",
+        "ca.simple",
         "--no-link",
         "--print-out-paths",
     ]
@@ -356,9 +357,10 @@ async def main() -> None:
         "build",
         "--store",
         str(root_path),
+        "--impure",
         "--file",
         str(CA_NIX),
-        "non_ca_depends_on_ca",
+        "ca.non_ca_depends_on_ca",
         "--no-link",
         "--print-out-paths",
     ]
@@ -378,9 +380,10 @@ async def main() -> None:
         "eval",
         "--store",
         str(root_path),
+        "--impure",
         "--file",
         str(CA_NIX),
-        "ca_simple.drvPath",
+        "ca.simple.drvPath",
         "--raw",
     ]
     rc, stdout, _, _ = await run_subproc(eval_cmd, nix_config=CA_NIX_CONFIG)
@@ -392,9 +395,10 @@ async def main() -> None:
         "eval",
         "--store",
         str(root_path),
+        "--impure",
         "--file",
         str(CA_NIX),
-        "non_ca_depends_on_ca.drvPath",
+        "ca.non_ca_depends_on_ca.drvPath",
         "--raw",
     ]
     rc, stdout, _, _ = await run_subproc(eval_cmd2, nix_config=CA_NIX_CONFIG)
