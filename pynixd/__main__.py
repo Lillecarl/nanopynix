@@ -4,7 +4,7 @@ All configuration is via environment variables:
 
 General:
   PYNIXD_HOST          Listen address for SSH (default: 127.0.0.1)
-  PYNIXD_BACKEND_FILE  JSON file containing backend definitions
+  PYNIXD_CONFIG        JSON file containing pynixd configuration
   PYNIXD_DEV           Dev mode: spawn N local builders (default: 0)
   PYNIXD_LOG_LEVEL     Log level: DEBUG, INFO, WARNING, ERROR (default: WARNING)
 
@@ -36,88 +36,26 @@ See also: gc.py, psi.py, scheduler.py for additional env vars.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from pathlib import Path
 
 import structlog
 from environs import env
 
+from .config import PynixdConfigFile
 from .instance import PynixdConfig, Server
-from .store import (
-    LocalSocketStore,
-    SSHSocketStore,
-    SSHSubprocessStore,
-    Store,
-)
+from .store import LocalSocketStore, Store
 
 log = structlog.get_logger(__name__)
 
 
-def load_backends_from_file(path: Path) -> dict[str, Store]:
-    """Load store definitions from a JSON file."""
-    with open(path) as f:
-        data = json.load(f)
-
+def load_config_from_file(path: Path) -> dict[str, Store]:
+    """Load store definitions from a PYNIXD_CONFIG JSON file."""
+    config = PynixdConfigFile.from_file(path)
     stores: dict[str, Store] = {}
-    for spec in data:
-        btype = spec.get("type")
-        b_id = spec.get("id")
-        max_builds = spec.get("max_builds", 2)
-        max_transfers = spec.get("max_transfers", 4)
-        systems_raw = spec.get("systems")
-        systems = set(systems_raw) if systems_raw else None
-        system_features = set(spec.get("system_features", []))
-
-        if btype == "ssh-subprocess":
-            store = SSHSubprocessStore(
-                host=spec["host"],
-                id=b_id,
-                port=spec.get("port", 22),
-                username=spec.get("username"),
-                store_path=Path(spec.get("store_path", "/")),
-                max_builds=max_builds,
-                max_transfers=max_transfers,
-                systems=systems,
-                system_features=system_features,
-            )
-        elif btype == "ssh-socket":
-            store = SSHSocketStore(
-                host=spec["host"],
-                id=b_id,
-                port=spec.get("port", 22),
-                username=spec.get("username"),
-                socket_path=Path(
-                    spec.get("socket_path", "/nix/var/nix/daemon-socket/socket")
-                ),
-                max_builds=max_builds,
-                max_transfers=max_transfers,
-                systems=systems,
-                system_features=system_features,
-            )
-        elif btype == "local-socket":
-            store = LocalSocketStore(
-                id=b_id,
-                store_path=Path(spec.get("store_path", "/")),
-                max_builds=max_builds,
-                max_transfers=max_transfers,
-                systems=systems,
-                system_features=system_features,
-            )
-        elif btype == "local-subprocess":
-            store = LocalSocketStore(
-                store_path=Path(spec["store_path"]),
-                id=b_id,
-                max_builds=max_builds,
-                max_transfers=max_transfers,
-                systems=systems,
-                system_features=system_features,
-            )
-        else:
-            raise ValueError(f"Unknown store type: {btype!r}")
-
+    for spec in config.stores:
+        store = spec.to_store()
         stores[store.id] = store
-
     return stores
 
 
@@ -142,19 +80,19 @@ async def async_main() -> None:
         )
 
     else:
-        backend_file = env.path("PYNIXD_BACKEND_FILE", None)
-        if backend_file:
-            if not backend_file.exists():
-                raise FileNotFoundError(f"Backend file not found: {backend_file}")
-            log.info("loading_backends", path=str(backend_file))
-            stores = load_backends_from_file(backend_file)
+        config_file = env.path("PYNIXD_CONFIG", None)
+        if config_file:
+            if not config_file.exists():
+                raise FileNotFoundError(f"Config file not found: {config_file}")
+            log.info("loading_config", path=str(config_file))
+            stores = load_config_from_file(config_file)
         else:
-            log.info("no_backends_configured", mode="local-only")
+            log.info("no_config_file", mode="local-only")
             stores = {}
 
         if "local" in stores:
             local_store = stores.pop("local")
-            log.info("using_local_from_backend")
+            log.info("using_local_from_config")
         else:
             local_store = LocalSocketStore(id="local", store_path=Path("/"))
 

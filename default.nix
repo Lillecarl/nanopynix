@@ -39,6 +39,7 @@ let
       python.pkgs.zstandard
       python.pkgs.lz4
       python.pkgs.brotli
+      python.pkgs.pydantic
     ];
 
     nativeCheckInputs = [
