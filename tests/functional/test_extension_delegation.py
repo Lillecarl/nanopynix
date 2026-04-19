@@ -110,8 +110,8 @@ async def test_extension_delegation(tmp_path: Path) -> None:
             # Trigger feature detection
             await store_a_b.execute(QueryAllValidPathsRequest())
 
-            log.info("server_b_features", features=store_a_b.supported_features)
-            assert "QueryPathInfos" in store_a_b.supported_features
+            log.info("server_b_features", features=store_a_b.features)
+            assert "QueryPathInfos" in store_a_b.features
 
             # Now try to execute QueryPathInfos on store_a_b
             req = QueryPathInfosRequest(paths={path})

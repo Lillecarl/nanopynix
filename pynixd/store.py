@@ -21,7 +21,7 @@ import shlex
 import subprocess
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Coroutine, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -37,10 +37,14 @@ from .local_store_db import LocalStoreDB
 from .operations.add_multiple_to_store import AddMultipleToStoreRequest
 from .operations.add_to_store_nar import AddToStoreNarRequest
 from .operations.base import (
+    BasicDerivation,
+    BuildMode,
+    DerivationOutput,
     OpRequest,
     Resp,
     ValidPathInfo,
 )
+from .operations.build_derivation import BuildDerivationRequest
 from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .psi import (
@@ -57,6 +61,7 @@ from .psi import (
 from .signing import SecretKey
 from .path_tracker import PathTrackerInstance
 from .store_path import StorePath
+from .utils import random_nix32_hash
 from .wire import (
     SSHNixReader,
     SSHNixWriter,
@@ -97,7 +102,7 @@ class Store(ABC):
         max_builds: int = 2,
         max_transfers: int = 16,
         idle_ttl: float = _DEFAULT_IDLE_TTL,
-        supported_systems: list[str] | None = None,
+        systems: list[str] | None = None,
         system_features: set[str] | None = None,
     ) -> None:
         self.id = id
@@ -113,7 +118,7 @@ class Store(ABC):
         self.all_conns: list[Connection] = []
         self.conn_counter: int = 0
         self.sweep_task: asyncio.Task[None] | None = None
-        self.supported_systems = supported_systems or []
+        self.systems = systems or []
         self.system_features = system_features or set()
         self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
@@ -122,7 +127,7 @@ class Store(ABC):
         self.consecutive_failures: int = 0
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
-        self.supported_features: set[str] = set()
+        self.features: set[str] = set()
         self.probed = False
         self.signing_keys: dict[str, SecretKey] = {}
         self._holder_task: asyncio.Task | None = None
@@ -153,19 +158,160 @@ class Store(ABC):
 
     def supports_system(self, system: str) -> bool:
         """Check if this store supports the given system."""
-        if not self.supported_systems:
+        if not self.systems:
             return True  # No restriction = supports all
-        return system in self.supported_systems
+        return system in self.systems
 
     def supports_feature(self, feature: str) -> bool:
         """Check if this store supports the given system feature.
 
         A store with no system_features configured is treated as
-        supporting all features (same semantics as supported_systems).
+        supporting all features (same semantics as systems).
         """
         if not self.system_features:
             return True
         return feature in self.system_features
+
+    async def probe_systems(self) -> None:
+        """Probe the store for supported systems via BuildDerivation.
+
+        Sends trivial derivations for each system in PROBE_SYSTEMS
+        (or ``self.systems`` if already configured). Accepted builds confirm
+        the system. Probed results **replace** ``self.systems`` with only the
+        systems that were actually accepted.
+
+        Must be called after ``probe_version()`` so the store has an
+        active connection.
+        """
+        from .system_features import PROBE_SYSTEMS
+
+        if self.systems:
+            systems_to_probe = list(self.systems)
+        else:
+            systems_to_probe = list(PROBE_SYSTEMS)
+
+        results = await asyncio.gather(
+            *[
+                self._send_probe(f"probe-system-{s}", s, "", ["-c", f"echo {s} > $out"])
+                for s in systems_to_probe
+            ]
+        )
+        self.systems = list(
+            {system for system, (_, ok) in zip(systems_to_probe, results) if ok}
+        )
+
+        log.info("systems_probed", store_id=self.id, systems=sorted(self.systems))
+
+    async def probe_features(self) -> None:
+        """Probe the store for supported system features via BuildDerivation.
+
+        Sends derivations with ``requiredSystemFeatures`` set. The scheduling
+        gate determines acceptance — no actual build output matters except for
+        kvm which verifies ``/dev/kvm`` writability.
+
+        Probed against the first system in ``self.systems``, or
+        ``x86_64-linux`` as default. Probed results **replace**
+        ``self.system_features`` with only the features that were actually
+        accepted.
+
+        Must be called after ``probe_version()`` so the store has an
+        active connection. Call ``probe_systems()`` first for accurate
+        system detection.
+        """
+        from .system_features import KNOWN_FEATURES
+
+        probe_system = self.systems[0] if self.systems else "x86_64-linux"
+
+        probe_features = sorted(KNOWN_FEATURES | self.system_features)
+        probes: list[Coroutine[None, None, tuple[str, bool]]] = []
+        for feature in probe_features:
+            if feature == "kvm":
+                args = [
+                    "-c",
+                    "test -w /dev/kvm && echo kvm > $out"
+                    " || { echo 'kvm: /dev/kvm not writable' >&2; exit 1; }",
+                ]
+            else:
+                args = ["-c", f"echo {feature} > $out"]
+
+            name = f"probe-feature-{feature}"
+            extra_env: dict[str, str] = {
+                "requiredSystemFeatures": feature,
+                "NIXBUILDNET_MIN_CPU": "1",
+                "NIXBUILDNET_MAX_CPU": "1",
+                "NIXBUILDNET_MIN_MEM": "128",
+                "NIXBUILDNET_MAX_MEM": "128",
+            }
+            probes.append(
+                self._send_probe(name, probe_system, feature, args, extra_env)
+            )
+
+        results = await asyncio.gather(*probes)
+        discovered = {
+            feature for feature, (_, ok) in zip(probe_features, results) if ok
+        }
+        self.system_features = discovered
+
+        log.info(
+            "features_probed",
+            store_id=self.id,
+            system_features=sorted(self.system_features),
+        )
+
+    async def _send_probe(
+        self,
+        name: str,
+        system: str,
+        required_features: str,
+        args: list[str],
+        extra_env: dict[str, str] | None = None,
+    ) -> tuple[str, bool]:
+        """Send a single BuildDerivation probe. Returns (name, accepted)."""
+        drv_hash = random_nix32_hash()
+        out_path = f"/nix/store/{drv_hash}-{name}"
+        drv_path = StorePath(f"/nix/store/{drv_hash}-{name}.drv")
+
+        env: dict[str, str] = {
+            "builder": "/bin/sh",
+            "name": name,
+            "out": out_path,
+            "system": system,
+        }
+        if required_features:
+            env["requiredSystemFeatures"] = required_features
+        if extra_env:
+            env.update(extra_env)
+
+        basic = BasicDerivation(
+            outputs={"out": DerivationOutput(path=out_path, method="", hash_digest="")},
+            input_srcs=set(),
+            platform=system,
+            builder="/bin/sh",
+            args=args,
+            env=env,
+        )
+        request = BuildDerivationRequest(
+            drv_path=drv_path,
+            derivation=basic,
+            build_mode=BuildMode.NORMAL,
+        )
+        try:
+            resp = await self.call(request)
+            accepted = resp.result.status == 0
+            if accepted:
+                log.debug("probe_accepted", store_id=self.id, probe=name)
+            else:
+                log.debug(
+                    "probe_denied",
+                    store_id=self.id,
+                    probe=name,
+                    status=resp.result.status,
+                    error_msg=resp.result.error_msg,
+                )
+            return name, accepted
+        except Exception as e:
+            log.debug("probe_exception", store_id=self.id, probe=name, error=str(e))
+            return name, False
 
     # ── Circuit breaker ──────────────────────────────────────────────
 
@@ -524,14 +670,14 @@ class Store(ABC):
         if self.conn_counter == 1:
             self.version = conn.version
             self.nix_version = conn.nix_version
-            self.supported_features = conn.features
+            self.features = conn.features
             self.probed = True
             log.info(
                 "store_protocol_version",
                 store_id=self.id,
                 version=wire.proto_str(self.version),
                 nix_version=self.nix_version,
-                features=sorted(self.supported_features),
+                features=sorted(self.features),
             )
         pool_log.debug(
             "pool_created_connection",
@@ -955,7 +1101,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         store_path: Path = Path("/"),
         max_builds: int = 2,
         max_transfers: int = 4,
-        supported_systems: list[str] | None = None,
+        systems: list[str] | None = None,
         system_features: set[str] | None = None,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
@@ -966,7 +1112,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
             store_path=store_path,
             max_builds=max_builds,
             max_transfers=max_transfers,
-            supported_systems=supported_systems,
+            systems=systems,
             system_features=system_features,
         )
         self.host = host
@@ -1043,7 +1189,7 @@ class LocalSocketStore(Store):
         socket_path: Path | None = None,
         max_builds: int = 1,
         max_transfers: int = 4,
-        supported_systems: list[str] | None = None,
+        systems: list[str] | None = None,
         system_features: set[str] | None = None,
         nix_bin: str = "nix",
         extra_env: dict[str, str] | None = None,
@@ -1065,7 +1211,7 @@ class LocalSocketStore(Store):
             store_path=store_path,
             max_builds=max_builds,
             max_transfers=max_transfers,
-            supported_systems=supported_systems,
+            systems=systems,
             system_features=system_features,
         )
         self.managed = managed
@@ -1209,7 +1355,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         socket_path: Path = DAEMON_SOCKET_PATH,
         max_builds: int = 2,
         max_transfers: int = 4,
-        supported_systems: list[str] | None = None,
+        systems: list[str] | None = None,
         system_features: set[str] | None = None,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
@@ -1218,7 +1364,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
             id=id or f"ssh-socket:{username or ''}@{host}:{port}",
             max_builds=max_builds,
             max_transfers=max_transfers,
-            supported_systems=supported_systems,
+            systems=systems,
             system_features=system_features,
         )
         self.host = host

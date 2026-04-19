@@ -28,25 +28,10 @@ from .drv_parser import ParsedDerivation
 from .operations.base import BasicDerivation, DerivationOutput
 from .store_path import StorePath
 
+from .utils import nix32_encode
+
 NIX32_CHARS = "0123456789abcdfghijklmnpqrsvwxyz"
 STORE_DIR = "/nix/store"
-
-
-def nix32_encode(data: bytes) -> str:
-    if len(data) == 0:
-        return ""
-    size = len(data)
-    result_len = (size * 8 - 1) // 5 + 1
-    result: list[str] = []
-    for n in range(result_len - 1, -1, -1):
-        b = n * 5
-        i = b // 8
-        j = b % 8
-        c = (data[i] >> j) & 0x1F
-        if i + 1 < size:
-            c |= (data[i + 1] << (8 - j)) & 0x1F
-        result.append(NIX32_CHARS[c])
-    return "".join(result)
 
 
 def _output_path_name(drv_name: str, output_name: str) -> str:

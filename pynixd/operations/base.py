@@ -154,7 +154,7 @@ class OpRequest(ABC, Generic[Resp]):
                 await store.probe_version()
 
             feature_name = type(self).name
-            if feature_name in store.supported_features:
+            if feature_name in store.features:
                 from ..testing import set_test_value
 
                 set_test_value(f"{feature_name}_delegated", True)

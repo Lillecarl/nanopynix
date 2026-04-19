@@ -1,12 +1,12 @@
-"""Nix system features and requiredSystemFeatures.
+"""Nix system features, system platforms, and requiredSystemFeatures.
 
 System features are arbitrary strings used to match derivations to builders.
 A derivation declares `requiredSystemFeatures` and a builder advertises
 `system-features`; a builder is only eligible if its features are a superset.
 
-This module defines constants for the known/standard feature strings.
-At runtime, features are kept as plain strings so arbitrary/custom
-feature strings (not in this module) are fully supported.
+This module defines constants for the known/standard feature strings and
+platform strings. At runtime, features are kept as plain strings so
+arbitrary/custom feature strings (not in this module) are fully supported.
 """
 
 from __future__ import annotations
@@ -44,4 +44,12 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         SystemFeature.CA_DERIVATIONS,
         SystemFeature.RECURSIVE_NIX,
     }
+)
+
+# Platforms to probe when discovering store capabilities.
+# Each is a Nix system triple (machine-kernel).
+PROBE_SYSTEMS: tuple[str, ...] = (
+    "x86_64-linux",
+    "aarch64-linux",
+    "aarch64-darwin",
 )

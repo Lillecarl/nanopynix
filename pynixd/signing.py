@@ -22,8 +22,7 @@ if TYPE_CHECKING:
     from .operations.base import ValidPathInfo
 
 
-# Nix32 alphabet (base-32 encoding used by Nix for hashes)
-_NIX32_CHARS = b"0123456789abcdfghijklmnpqrsvwxyz"
+# Nix32 alphabet (kept for reference; encoding is in utils.py)
 
 
 def get_default_signing_key() -> SecretKey | None:
@@ -32,19 +31,6 @@ def get_default_signing_key() -> SecretKey | None:
     if not val:
         return None
     return SecretKey.from_string(val)
-
-
-def _nix32_encode(data: bytes) -> str:
-    """Encode bytes to Nix's base-32 format."""
-    # Nix32 encodes 5 bits per character, LSB first within each 5-bit group
-    s = ""
-    n = int.from_bytes(data, "big")
-    total_bits = len(data) * 8
-    # Process 5 bits at a time from LSB
-    for _ in range((total_bits + 4) // 5):
-        s += chr(_NIX32_CHARS[n & 31])
-        n >>= 5
-    return s
 
 
 @dataclass

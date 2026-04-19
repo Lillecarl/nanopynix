@@ -65,7 +65,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
         b_id = spec.get("id")
         max_builds = spec.get("max_builds", 2)
         max_transfers = spec.get("max_transfers", 4)
-        supported_systems = spec.get("supported_systems")
+        systems = spec.get("systems")
         system_features = set(spec.get("system_features", []))
 
         if btype == "ssh-subprocess":
@@ -77,7 +77,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 store_path=Path(spec.get("store_path", "/")),
                 max_builds=max_builds,
                 max_transfers=max_transfers,
-                supported_systems=supported_systems,
+                systems=systems,
                 system_features=system_features,
             )
         elif btype == "ssh-socket":
@@ -91,7 +91,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 ),
                 max_builds=max_builds,
                 max_transfers=max_transfers,
-                supported_systems=supported_systems,
+                systems=systems,
                 system_features=system_features,
             )
         elif btype == "local-socket":
@@ -100,7 +100,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 store_path=Path(spec.get("store_path", "/")),
                 max_builds=max_builds,
                 max_transfers=max_transfers,
-                supported_systems=supported_systems,
+                systems=systems,
                 system_features=system_features,
             )
         elif btype == "local-subprocess":
@@ -109,7 +109,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 id=b_id,
                 max_builds=max_builds,
                 max_transfers=max_transfers,
-                supported_systems=supported_systems,
+                systems=systems,
                 system_features=system_features,
             )
         else:
