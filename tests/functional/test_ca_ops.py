@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from pathlib import Path
 
 import pyinstrument
@@ -36,19 +35,6 @@ CA_NIX_CONFIG = NixConfig.for_ca_derivations(
 
 def _ca_test_store_kwargs(**overrides) -> dict:
     return get_test_store_kwargs(nix_config=CA_NIX_CONFIG, **overrides)
-
-
-@pytest.fixture(autouse=True)
-def _fixed_test_ts():
-    """Pin PYNIXD_TEST_TS for consistent .drv paths across build+eval steps."""
-    ts = str(int(time.time()))
-    original = os.environ.get("PYNIXD_TEST_TS")
-    os.environ["PYNIXD_TEST_TS"] = ts
-    yield
-    if original is None:
-        os.environ.pop("PYNIXD_TEST_TS", None)
-    else:
-        os.environ["PYNIXD_TEST_TS"] = original
 
 
 @pytest.fixture

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import time
 from pathlib import Path
 
 import pyinstrument
@@ -22,19 +21,6 @@ from tests.conftest import (
 )
 
 log = structlog.get_logger(__name__)
-
-
-@pytest.fixture(autouse=True)
-def _fixed_test_ts():
-    """Pin PYNIXD_TEST_TS for consistent .drv paths across build+eval steps."""
-    ts = str(int(time.time()))
-    original = os.environ.get("PYNIXD_TEST_TS")
-    os.environ["PYNIXD_TEST_TS"] = ts
-    yield
-    if original is None:
-        os.environ.pop("PYNIXD_TEST_TS", None)
-    else:
-        os.environ["PYNIXD_TEST_TS"] = original
 
 
 @pytest.fixture

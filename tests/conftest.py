@@ -285,6 +285,19 @@ def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
 
 
 @pytest.fixture(autouse=True)
+def _fixed_test_ts():
+    """Pin PYNIXD_TEST_TS for each test so build+eval get consistent .drv paths."""
+    ts = str(int(time.time()))
+    original = os.environ.get("PYNIXD_TEST_TS")
+    os.environ["PYNIXD_TEST_TS"] = ts
+    yield
+    if original is None:
+        os.environ.pop("PYNIXD_TEST_TS", None)
+    else:
+        os.environ["PYNIXD_TEST_TS"] = original
+
+
+@pytest.fixture(autouse=True)
 async def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
     """Profile every test and save to a .pyinstrument file."""
     from pyinstrument import Profiler
