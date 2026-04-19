@@ -202,7 +202,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
     pynixd_remote = StatsTestStore(
         id="remote",
         store_path=pynixd_remote_path,
-        max_builds=1,
+        max_builds=10,
         **get_test_store_kwargs(),
     )
 
@@ -366,7 +366,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     pynixd_busy = CpuUtilTestStore(
         id="busy",
         store_path=pynixd_busy_path,
-        max_builds=1,
+        max_builds=10,
         **get_test_store_kwargs(),
     )
     pynixd_busy._cpu_util = CpuUtil(utilization=99.5, cores=2.0, throttled_pct=10.0)
@@ -375,7 +375,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     pynixd_free = CpuUtilTestStore(
         id="free",
         store_path=pynixd_free_path,
-        max_builds=1,
+        max_builds=10,
         **get_test_store_kwargs(),
     )
     pynixd_free._cpu_util = CpuUtil(utilization=50.0, cores=2.0, throttled_pct=0.0)
