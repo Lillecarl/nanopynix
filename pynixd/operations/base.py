@@ -150,8 +150,7 @@ class OpRequest(ABC, Generic[Resp]):
         for extension operations.
         """
         if self.is_extension:
-            if not store.probed:
-                await store.probe_version()
+            await store.probe()
 
             feature_name = type(self).name
             if feature_name in store.features:

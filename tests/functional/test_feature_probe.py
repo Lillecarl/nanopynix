@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 import structlog
 
-from pynixd.operations.probe_features import probe_features
-from pynixd.operations.probe_systems import probe_systems
+from pynixd.operations.probe_features import ProbeFeaturesRequest
+from pynixd.operations.probe_systems import ProbeSystemsRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from tests.conftest import (
     STORE_PREFIX,
@@ -45,9 +45,11 @@ async def test_feature_probe_in_memory() -> None:
     )
     await store.ensure_daemon()
 
-    await probe_systems(store)
-    await probe_features(store)
+    await store.execute(ProbeSystemsRequest())
+    await store.execute(ProbeFeaturesRequest())
 
+    assert store.systems is not None
+    assert store.system_features is not None
     assert "x86_64-linux" in store.systems
     assert "big-parallel" in store.system_features
     assert "ca-derivations" in store.system_features
@@ -67,9 +69,11 @@ async def test_feature_probe_nixbuild_net() -> None:
         max_transfers=10,
     )
 
-    await probe_systems(store)
-    await probe_features(store)
+    await store.execute(ProbeSystemsRequest())
+    await store.execute(ProbeFeaturesRequest())
 
+    assert store.systems is not None
+    assert store.system_features is not None
     assert "x86_64-linux" in store.systems
     assert "benchmark" in store.system_features
     assert "big-parallel" in store.system_features

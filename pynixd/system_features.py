@@ -48,8 +48,10 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
 
 # Platforms to probe when discovering store capabilities.
 # Each is a Nix system triple (machine-kernel).
-PROBE_SYSTEMS: tuple[str, ...] = (
-    "x86_64-linux",
-    "aarch64-linux",
-    "aarch64-darwin",
+PROBE_SYSTEMS: frozenset[str] = frozenset(
+    {
+        "x86_64-linux",
+        "aarch64-linux",
+        "aarch64-darwin",
+    }
 )

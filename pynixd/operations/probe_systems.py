@@ -1,53 +1,85 @@
 """Probe a store for supported systems via BuildDerivation.
 
-Sends trivial derivations for each candidate system and checks which are
-accepted by the scheduling gate. This is an internal operation — it is
-never dispatched from the daemon wire protocol.
+An internal operation — never dispatched from the daemon wire protocol.
+Constructs trivial derivations for each candidate system and checks which
+are accepted by the scheduling gate.
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from .build_derivation import BuildDerivationRequest
-from .base import BasicDerivation, BuildMode, DerivationOutput
+from ..operations.base import (
+    BasicDerivation,
+    BuildMode,
+    BuildResultStatus,
+    DerivationOutput,
+    OpRequest,
+    OpResponse,
+)
+from ..operations.build_derivation import BuildDerivationRequest
 from ..store_path import StorePath
-from ..utils import random_nix32_hash
 from ..system_features import PROBE_SYSTEMS
+from ..utils import random_nix32_hash
+from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
+    from ..connection import ClientConn
     from ..store import Store
 
 log = structlog.get_logger(__name__)
 
 
 @dataclass
-class ProbeSystemsResult:
-    systems: list[str] = field(default_factory=list)
+class ProbeSystemsResponse(OpResponse):
+    systems: set[str] = field(default_factory=set)
+
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        return self
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        pass
 
 
-async def probe_systems(store: Store) -> ProbeSystemsResult:
-    if store.systems:
-        candidates = list(store.systems)
-    else:
-        candidates = list(PROBE_SYSTEMS)
+@dataclass
+class ProbeSystemsRequest(OpRequest[ProbeSystemsResponse]):
+    name: ClassVar[str] = "ProbeSystems"
+    op: ClassVar[int] = 108
+    response_type: ClassVar[type[OpResponse]] = ProbeSystemsResponse
+    systems: set[str] = field(default_factory=set)
 
-    results = await asyncio.gather(
-        *[
-            _send_probe(store, f"probe-system-{s}", s, "", ["-c", f"echo {s} > $out"])
-            for s in candidates
-        ]
-    )
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        return self
 
-    discovered = list({system for system, (_, ok) in zip(candidates, results) if ok})
-    store.systems = discovered
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        pass
 
-    log.info("systems_probed", store_id=store.id, systems=sorted(store.systems))
-    return ProbeSystemsResult(systems=discovered)
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> ProbeSystemsResponse:
+        candidates = self.systems or PROBE_SYSTEMS
+
+        results = await asyncio.gather(
+            *[
+                _send_probe(
+                    store, f"probe-system-{s}", s, "", ["-c", f"echo {s} > $out"]
+                )
+                for s in candidates
+            ]
+        )
+
+        systems = {system for system, (_, ok) in zip(candidates, results) if ok}
+        store.systems = systems
+
+        log.info("systems_probed", store_id=store.id, systems=sorted(store.systems))
+        return ProbeSystemsResponse(systems=systems)
 
 
 async def _send_probe(
@@ -67,6 +99,7 @@ async def _send_probe(
         "name": name,
         "out": out_path,
         "system": system,
+        "hash": drv_hash,
     }
     if required_features:
         env["requiredSystemFeatures"] = required_features
@@ -87,8 +120,14 @@ async def _send_probe(
         build_mode=BuildMode.NORMAL,
     )
     try:
-        resp = await store.call(request)
-        accepted = resp.result.status == 0
+        # use store.call to skip the scheduler, just send builds to the store
+        resp = await store.call(request, skip_probe=True)
+        accepted = resp.result.status in (
+            BuildResultStatus.BUILT,
+            BuildResultStatus.SUBSTITUTED,
+            BuildResultStatus.ALREADY_VALID,
+            BuildResultStatus.RESOLVES_TO_ALREADY_VALID,
+        )
         if accepted:
             log.debug("probe_accepted", store_id=store.id, probe=name)
         else:

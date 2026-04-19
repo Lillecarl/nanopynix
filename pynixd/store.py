@@ -24,6 +24,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from contextvars import ContextVar
+from enum import IntEnum
 from pathlib import Path
 
 import asyncssh
@@ -80,6 +81,12 @@ _nested_conns: ContextVar[dict[tuple[str, str], int]] = ContextVar(
 )
 
 
+class ProbeState(IntEnum):
+    NOT_PROBED = 0
+    PROBING = 1
+    PROBED = 2
+
+
 class Store(ABC):
     """A build store with on-demand connection pooling.
 
@@ -97,7 +104,7 @@ class Store(ABC):
         max_builds: int = 2,
         max_transfers: int = 16,
         idle_ttl: float = _DEFAULT_IDLE_TTL,
-        systems: list[str] | None = None,
+        systems: set[str] | None = None,
         system_features: set[str] | None = None,
     ) -> None:
         self.id = id
@@ -113,8 +120,8 @@ class Store(ABC):
         self.all_conns: list[Connection] = []
         self.conn_counter: int = 0
         self.sweep_task: asyncio.Task[None] | None = None
-        self.systems = systems or []
-        self.system_features = system_features or set()
+        self.systems = systems or None
+        self.system_features = system_features or None
         self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
             maxsize=10000, ttl=300
@@ -123,7 +130,8 @@ class Store(ABC):
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
         self.features: set[str] = set()
-        self.probed = False
+        self.probe_state: ProbeState = ProbeState.NOT_PROBED
+        self._probe_event: asyncio.Event = asyncio.Event()
         self.signing_keys: dict[str, SecretKey] = {}
         self._holder_task: asyncio.Task | None = None
 
@@ -218,8 +226,9 @@ class Store(ABC):
         client: ClientConn | None = None,
         suppress_last: bool = False,
         raise_on_error: bool = False,
+        skip_probe: bool = False,
     ) -> Resp:
-        """Execute any operation on this store. Handles connection lifecycle.
+        """Send an operation to this store. Handles connection lifecycle.
 
         Args:
             request: The operation request object.
@@ -227,6 +236,9 @@ class Store(ABC):
             suppress_last: If True, consume but don't forward STDERR_LAST.
             raise_on_error: Whether to raise BackendError on daemon errors.
         """
+        if not skip_probe:
+            await self.probe()
+
         # Use build_conn for builds, transfer_conn for queries/mutations
         if request.is_build:
             pool = self.build_conn
@@ -250,12 +262,15 @@ class Store(ABC):
         request: OpRequest[Resp],
         client: ClientConn | None = None,
         suppress_last: bool = False,
+        skip_probe: bool = False,
     ) -> Resp:
         """Execute an operation on this store.
 
         Delegates logic to the request object, which may use fast-paths
-        (SQLite, memory) or fallback to this store's 'call' method.
+        (SQLite, memory), schedule builds or fallback to this store's 'call' method.
         """
+        if not skip_probe:
+            await self.probe()
         return await request.execute(
             self,
             client=client,
@@ -394,14 +409,41 @@ class Store(ABC):
         """Create transport, construct Connection, and connect it."""
         ...
 
-    async def probe_version(self) -> int:
-        """Connect once to discover the daemon's protocol version.
+    async def probe(self) -> None:
+        """Discover the daemon's protocol version, systems, and system features.
 
-        The connection is returned to the idle pool for reuse.
+        Concurrent callers block on ``_probe_event`` while the first caller
+        does the work.  The state transitions NOT_PROBED -> PROBING -> PROBED.
         """
-        async with self.transfer_conn() as _conn:
-            pass
-        return self.version
+        if self.probe_state == ProbeState.PROBED:
+            return
+
+        if self.probe_state == ProbeState.PROBING:
+            await self._probe_event.wait()
+            return
+
+        self.probe_state = ProbeState.PROBING
+
+        from .operations.probe_features import ProbeFeaturesRequest
+        from .operations.probe_systems import ProbeSystemsRequest
+        from .system_features import KNOWN_FEATURES, PROBE_SYSTEMS
+
+        self.systems = (
+            await ProbeSystemsRequest(
+                systems=set(self.systems or PROBE_SYSTEMS)
+            ).execute(self)
+        ).systems
+
+        probe_system = next(iter(self.systems), None) or "x86_64-linux"
+        self.system_features = (
+            await ProbeFeaturesRequest(
+                probe_system=probe_system,
+                system_features=(self.system_features or set()) | KNOWN_FEATURES,
+            ).execute(self)
+        ).system_features
+
+        self.probe_state = ProbeState.PROBED
+        self._probe_event.set()
 
     async def warm_pool(self, n: int) -> None:
         """Pre-create n connections and park them in the idle pool."""
@@ -520,24 +562,17 @@ class Store(ABC):
         self.conn_counter += 1
         conn = await self.create_conn()
         self.all_conns.append(conn)
-        # Capture protocol version and nix version string from first connection
-        if self.conn_counter == 1:
-            self.version = conn.version
-            self.nix_version = conn.nix_version
-            self.features = conn.features
-            self.probed = True
-            log.info(
-                "store_protocol_version",
-                store_id=self.id,
-                version=wire.proto_str(self.version),
-                nix_version=self.nix_version,
-                features=sorted(self.features),
-            )
+        self.version = conn.version
+        self.nix_version = conn.nix_version
+        self.features = conn.features
         pool_log.debug(
             "pool_created_connection",
             store_id=self.id,
             conn_id=conn.id,
             pool_stats=self.pool_stats,
+            version=wire.proto_str(self.version),
+            nix_version=self.nix_version,
+            features=sorted(self.features),
         )
         return conn
 
@@ -955,7 +990,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         store_path: Path = Path("/"),
         max_builds: int = 2,
         max_transfers: int = 4,
-        systems: list[str] | None = None,
+        systems: set[str] | None = None,
         system_features: set[str] | None = None,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
@@ -1043,7 +1078,7 @@ class LocalSocketStore(Store):
         socket_path: Path | None = None,
         max_builds: int = 1,
         max_transfers: int = 4,
-        systems: list[str] | None = None,
+        systems: set[str] | None = None,
         system_features: set[str] | None = None,
         nix_bin: str = "nix",
         extra_env: dict[str, str] | None = None,
@@ -1209,7 +1244,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         socket_path: Path = DAEMON_SOCKET_PATH,
         max_builds: int = 2,
         max_transfers: int = 4,
-        systems: list[str] | None = None,
+        systems: set[str] | None = None,
         system_features: set[str] | None = None,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,

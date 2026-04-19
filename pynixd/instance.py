@@ -109,6 +109,8 @@ class Server:
         """Add a remote store to the server, linking it to the central DB and path tracker."""
         from .operations.query_all_valid_paths import QueryAllValidPathsRequest
 
+        await store.probe()
+
         local_store = self.config.local_store
         store.db = local_store.db
         store.tracker = self.path_tracker.get_instance(store.id, is_local=False)
@@ -195,7 +197,7 @@ class Server:
         local_store = self.config.local_store
         stores = self.config.stores
 
-        await local_store.probe_version()
+        await local_store.probe()
 
         # Enforce minimum protocol version for the local store.
         # 1.35 is required for reliable operation and modern field support.
@@ -226,6 +228,7 @@ class Server:
         self.config.stores.clear()
 
         for store in stores_to_add:
+            await store.probe()
             await self.add_store(store)
 
         # Start background services

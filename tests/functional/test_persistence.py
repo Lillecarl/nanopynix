@@ -26,11 +26,18 @@ class NoQueryAllValidPathsStore(LocalSocketStore):
     """A store that fails QueryAllValidPaths to simulate nixbuild.net."""
 
     async def call(
-        self, request, client=None, suppress_last=False, raise_on_error=False
+        self,
+        request,
+        client=None,
+        suppress_last=False,
+        raise_on_error=False,
+        skip_probe=False,
     ):
         if isinstance(request, QueryAllValidPathsRequest):
             raise RuntimeError("QueryAllValidPaths not supported")
-        return await super().call(request, client, suppress_last, raise_on_error)
+        return await super().call(
+            request, client, suppress_last, raise_on_error, skip_probe=skip_probe
+        )
 
 
 @pytest.mark.timeout(30)
@@ -149,7 +156,9 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
     # 2. Restart with stub that ONLY reports path_valid as valid
     # and fails QueryAllValidPaths
     class PartialVerifyStore(NoQueryAllValidPathsStore):
-        async def execute(self, request, client=None, suppress_last=False):
+        async def execute(
+            self, request, client=None, suppress_last=False, skip_probe=False
+        ):
             from pynixd.operations.query_valid_paths import (
                 QueryValidPathsRequest,
                 QueryValidPathsResponse,
@@ -158,7 +167,9 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
             if isinstance(request, QueryValidPathsRequest):
                 # Only return the valid one
                 return QueryValidPathsResponse(paths={path_valid})
-            return await super().execute(request, client, suppress_last)
+            return await super().execute(
+                request, client, suppress_last, skip_probe=skip_probe
+            )
 
     pynixd_local_2 = LocalSocketStore(
         id="local",

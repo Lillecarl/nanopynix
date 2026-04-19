@@ -65,7 +65,8 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
         b_id = spec.get("id")
         max_builds = spec.get("max_builds", 2)
         max_transfers = spec.get("max_transfers", 4)
-        systems = spec.get("systems")
+        systems_raw = spec.get("systems")
+        systems = set(systems_raw) if systems_raw else None
         system_features = set(spec.get("system_features", []))
 
         if btype == "ssh-subprocess":

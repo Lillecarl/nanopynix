@@ -72,7 +72,9 @@ class StatsTestStore(LocalSocketStore):
 
             yield MockConn(self)  # type: ignore
 
-    async def execute(self, request, client=None, suppress_last=False):
+    async def execute(
+        self, request, client=None, suppress_last=False, skip_probe=False
+    ):
         from pynixd.operations.query_all_valid_paths import (
             QueryAllValidPathsRequest,
             QueryAllValidPathsResponse,
@@ -97,13 +99,21 @@ class StatsTestStore(LocalSocketStore):
                 for p in request.paths
             ]
             return QueryClosureWithInfoResponse(infos=infos)
-        return await super().execute(request, client, suppress_last)
+        return await super().execute(
+            request, client, suppress_last, skip_probe=skip_probe
+        )
 
     async def call(
-        self, request, client=None, suppress_last=False, raise_on_error=False
+        self,
+        request,
+        client=None,
+        suppress_last=False,
+        raise_on_error=False,
+        skip_probe=False,
     ):
-        # Fallback for other ops
-        return await super().call(request, client, suppress_last, raise_on_error)
+        return await super().call(
+            request, client, suppress_last, raise_on_error, skip_probe=skip_probe
+        )
 
 
 @pytest.mark.timeout(30)
