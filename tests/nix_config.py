@@ -515,24 +515,42 @@ class NixConfig:
 
     # ── Rendering ──────────────────────────────────────────────────
 
-    def _iter_set(self) -> Iterator[tuple[str, str]]:
+    _EXTRA_PREFIX_SETTINGS = frozenset(
+        {
+            "experimental-features",
+            "substituters",
+            "trusted-substituters",
+        }
+    )
+
+    def _iter_set(self, *, use_extra_prefix: bool = False) -> Iterator[tuple[str, str]]:
         for f in type(self).__dataclass_fields__.values():
             val = getattr(self, f.name)
             if isinstance(val, (NixBool, NixInt, NixStr, NixList)):
                 rendered = val.render()
                 if rendered is not None:
-                    yield f.name.replace("_", "-"), rendered
+                    key = f.name.replace("_", "-")
+                    if use_extra_prefix and key in self._EXTRA_PREFIX_SETTINGS:
+                        key = f"extra-{key}"
+                    yield key, rendered
 
     def to_nix_conf(self) -> str:
         return "\n".join(f"{k} = {v}" for k, v in self._iter_set())
 
     def to_nix_config_env(self) -> str:
-        return self.to_nix_conf()
+        return "\n".join(f"{k} = {v}" for k, v in self._iter_set(use_extra_prefix=True))
 
     def to_extra_args(self) -> list[str]:
         args: list[str] = []
         for k, v in self._iter_set():
             args.extend(["--option", k, v])
+        return args
+
+    def to_daemon_args(self) -> list[str]:
+        args: list[str] = []
+        for k, v in self._iter_set():
+            if k in ("require-sigs",):
+                args.extend(["--option", k, v])
         return args
 
     # ── Convenience constructors ───────────────────────────────────

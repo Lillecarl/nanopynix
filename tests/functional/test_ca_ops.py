@@ -19,28 +19,22 @@ from tests.conftest import (
     run_subproc,
     rmtree_robust,
 )
+from tests.nix_config import NixConfig
 
 log = structlog.get_logger(__name__)
 
 TEST_CA_NIX = Path("test-ca.nix")
 
-CA_EXTRA_ARGS = [
-    "--option",
-    "extra-experimental-features",
-    "ca-derivations",
-]
-
-CA_NIX_CONFIG = {
-    "extra-experimental-features": "ca-derivations",
-}
+CA_NIX_CONFIG = NixConfig.for_ca_derivations(
+    substituters=(
+        "https://cache.nixos.org/",
+        "unix:///nix/var/nix/daemon-socket/socket?root=/",
+    ),
+)
 
 
 def _ca_test_store_kwargs(**overrides) -> dict:
-    kwargs = get_test_store_kwargs(
-        extra_args=CA_EXTRA_ARGS,
-        extra_env=CA_NIX_CONFIG,
-    )
-    return kwargs | overrides
+    return get_test_store_kwargs(nix_config=CA_NIX_CONFIG, **overrides)
 
 
 @pytest.fixture
@@ -621,15 +615,7 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
 
 DYN_NIX = Path("test-dyn-drv.nix")
 
-DYN_EXTRA_ARGS = [
-    "--option",
-    "extra-experimental-features",
-    "ca-derivations dynamic-derivations",
-]
-
-DYN_NIX_CONFIG = {
-    "extra-experimental-features": "ca-derivations dynamic-derivations",
-}
+DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations()
 
 
 @pytest.fixture
@@ -645,12 +631,7 @@ async def dyn_env(tmp_path: Path):
         rmtree_robust(pynixd_local_path)
         rmtree_robust(pynixd_builder_path)
 
-        dyn_kwargs = get_test_store_kwargs(
-            extra_args=DYN_EXTRA_ARGS,
-            extra_env={
-                "NIX_CONFIG": "extra-experimental-features = ca-derivations dynamic-derivations",
-            },
-        )
+        dyn_kwargs = get_test_store_kwargs(nix_config=DYN_NIX_CONFIG)
 
         pynixd_local = LocalSocketStore(
             id="pynixd-local-dyn",

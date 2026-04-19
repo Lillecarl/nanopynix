@@ -19,6 +19,8 @@ import pytest
 import structlog
 from environs import env
 
+from tests.nix_config import NixConfig
+
 # Structlog configuration
 _session_start_time = time.monotonic()
 
@@ -78,30 +80,28 @@ LIX_BIN = env.path("LIX_BIN")
 DEFAULT_SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 
-def get_test_store_kwargs(**kwargs) -> dict[str, Any]:
+DEFAULT_NIX_CONFIG = NixConfig.for_test_store()
+
+
+def get_test_store_kwargs(
+    nix_config: NixConfig = DEFAULT_NIX_CONFIG,
+    **kwargs,
+) -> dict[str, Any]:
     """Return common kwargs for LocalSocketStore in tests.
 
-    Sets require-sigs to false and ensures NIX_SSHOPTS are set.
+    Args:
+        nix_config: NixConfig to derive NIX_CONFIG env and daemon --option args from.
+        **kwargs: Additional overrides passed through to LocalSocketStore.
     """
-    extra_args = [
-        "--option",
-        "require-sigs",
-        "false",
-    ]
+    extra_args = nix_config.to_daemon_args()
     if "extra_args" in kwargs:
         extra_args.extend(kwargs.pop("extra_args"))
 
-    # Ensure the managed daemon has NIX_SSHOPTS so it can connect back to
-    # the system store via SSH if needed.
     extra_env = kwargs.pop("extra_env", {})
     if "NIX_SSHOPTS" not in extra_env:
         extra_env["NIX_SSHOPTS"] = DEFAULT_SSH_OPTS
-
-    # Use the same default NIX_CONFIG as run_subproc for consistency
     if "NIX_CONFIG" not in extra_env:
-        extra_env["NIX_CONFIG"] = (
-            "substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/"
-        )
+        extra_env["NIX_CONFIG"] = nix_config.to_nix_config_env()
 
     res = {
         "nix_bin": str(NIX_BIN),
@@ -372,7 +372,7 @@ async def run_subproc(
     cmd: Sequence[str | Path],
     print: bool = True,
     expected_retcode: int | None = 0,
-    nix_config: dict[str, str] | None = None,
+    nix_config: NixConfig | dict[str, str] | None = None,
     **kwargs,
 ) -> tuple[int, str, str, str]:
     """Run a command, streaming stdout/stderr through structlog in real-time.
@@ -381,7 +381,7 @@ async def run_subproc(
         cmd: Command and arguments to run
         print: If True, stream output to structlog in real-time
         expected_retcode: If not None, raise if return code doesn't match. Defaults to 0.
-        nix_config: Additional Nix configuration as a dictionary, rendered to NIX_CONFIG env var.
+        nix_config: NixConfig object or dict for NIX_CONFIG env var.
         **kwargs: Additional arguments passed to create_subprocess_exec
 
     Returns:
@@ -391,13 +391,17 @@ async def run_subproc(
     if "NIX_SSHOPTS" not in run_env:
         run_env["NIX_SSHOPTS"] = DEFAULT_SSH_OPTS
 
-    # Default Nix configuration
-    default_config = {
-        "substituters": "https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/"
-    }
-    nix_config_final = default_config | (nix_config or {})
+    if isinstance(nix_config, NixConfig):
+        config_str = nix_config.to_nix_config_env()
+    elif nix_config is not None:
+        default_config = {
+            "substituters": "https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/"
+        }
+        merged = default_config | nix_config
+        config_str = "\n".join(f"{k} = {v}" for k, v in merged.items())
+    else:
+        config_str = DEFAULT_NIX_CONFIG.to_nix_config_env()
 
-    config_str = "\n".join(f"{k} = {v}" for k, v in nix_config_final.items())
     if "NIX_CONFIG" in run_env:
         run_env["NIX_CONFIG"] = f"{run_env['NIX_CONFIG']}\n{config_str}"
     else:
