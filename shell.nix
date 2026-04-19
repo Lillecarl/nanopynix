@@ -24,7 +24,6 @@ pkgs.mkShell {
     pkgs.sqlite
   ];
   shellHook = ''
-    export PYNIXD_TEST_NIX=${./test.nix}
     export PYTHONPATH="$PWD:${python}/${python.sitePackages}:$PYTHONPATH"
     export LIX_BIN=${lib.getExe pkgs.lix}
     export NIX_BIN=${lib.getExe pkgs.nix}

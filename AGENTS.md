@@ -90,3 +90,9 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 - If output is too large for context (failing tests produce heaps of logs), redirect to a file: `pytest ... > /tmp/test-output.txt 2>&1`, then read specific sections.
 - Do NOT use `tee` when redirecting — it doubles context consumption.
 - If you must limit output, use `tail -N` on the file afterwards, never pipe the command itself.
+- You do NOT need to specify pytest timeout, the configured 120s is enough per test.
+#### Good examples
+- just test
+- just precommit
+- pytest tests/functional/test_ca_ops.py &> /tmp/test_output.txt
+- pytest tests/functional/test_ca_ops.py::test_ca_simple_build_root_store &> /tmp/test_output.txt

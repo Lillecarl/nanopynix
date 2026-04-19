@@ -66,6 +66,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
         max_builds = spec.get("max_builds", 2)
         max_transfers = spec.get("max_transfers", 4)
         supported_systems = spec.get("supported_systems")
+        system_features = set(spec.get("system_features", []))
 
         if btype == "ssh-subprocess":
             store = SSHSubprocessStore(
@@ -77,6 +78,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 max_builds=max_builds,
                 max_transfers=max_transfers,
                 supported_systems=supported_systems,
+                system_features=system_features,
             )
         elif btype == "ssh-socket":
             store = SSHSocketStore(
@@ -90,6 +92,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 max_builds=max_builds,
                 max_transfers=max_transfers,
                 supported_systems=supported_systems,
+                system_features=system_features,
             )
         elif btype == "local-socket":
             store = LocalSocketStore(
@@ -98,6 +101,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 max_builds=max_builds,
                 max_transfers=max_transfers,
                 supported_systems=supported_systems,
+                system_features=system_features,
             )
         elif btype == "local-subprocess":
             store = LocalSocketStore(
@@ -106,6 +110,7 @@ def load_backends_from_file(path: Path) -> dict[str, Store]:
                 max_builds=max_builds,
                 max_transfers=max_transfers,
                 supported_systems=supported_systems,
+                system_features=system_features,
             )
         else:
             raise ValueError(f"Unknown store type: {btype!r}")

@@ -79,6 +79,18 @@ class ParsedDerivation:
     # Only present for DrvWithVersion format where outputs depend on
     # other dynamic outputs
 
+    @property
+    def required_system_features(self) -> set[str]:
+        """Parse requiredSystemFeatures from the env dict.
+
+        Nix encodes this as a space-separated string in the derivation
+        environment, e.g. ``"recursive-nix uid-range"``.
+        """
+        raw = self.env.get("requiredSystemFeatures", "")
+        if not raw:
+            return set()
+        return set(raw.split())
+
     def output_paths(self) -> dict[str, StorePath]:
         """Return {output_name: output_path} for all outputs."""
         return {o.name: StorePath(o.path) for o in self.outputs}

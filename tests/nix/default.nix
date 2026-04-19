@@ -16,6 +16,7 @@ let
     ca = import ./ca.nix { inherit system ts; };
     dyn = import ./dyn-drv.nix { inherit system ts; };
     minimal = import ./minimal.nix { inherit system ts; };
+    feat = import ./system_features.nix { inherit system ts; };
   };
 
 in
@@ -24,4 +25,5 @@ modes.standard
   ca = modes.ca;
   dyn = modes.dyn;
   minimal = modes.minimal;
+  feat = modes.feat;
 }

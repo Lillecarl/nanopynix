@@ -98,6 +98,7 @@ class Store(ABC):
         max_transfers: int = 16,
         idle_ttl: float = _DEFAULT_IDLE_TTL,
         supported_systems: list[str] | None = None,
+        system_features: set[str] | None = None,
     ) -> None:
         self.id = id
         self.store_path = store_path
@@ -113,6 +114,7 @@ class Store(ABC):
         self.conn_counter: int = 0
         self.sweep_task: asyncio.Task[None] | None = None
         self.supported_systems = supported_systems or []
+        self.system_features = system_features or set()
         self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
             maxsize=10000, ttl=300
@@ -154,6 +156,16 @@ class Store(ABC):
         if not self.supported_systems:
             return True  # No restriction = supports all
         return system in self.supported_systems
+
+    def supports_feature(self, feature: str) -> bool:
+        """Check if this store supports the given system feature.
+
+        A store with no system_features configured is treated as
+        supporting all features (same semantics as supported_systems).
+        """
+        if not self.system_features:
+            return True
+        return feature in self.system_features
 
     # ── Circuit breaker ──────────────────────────────────────────────
 
@@ -944,6 +956,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         max_builds: int = 2,
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
+        system_features: set[str] | None = None,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
         nix_bin: str = "nix",
@@ -954,6 +967,7 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
             max_builds=max_builds,
             max_transfers=max_transfers,
             supported_systems=supported_systems,
+            system_features=system_features,
         )
         self.host = host
         self.port = port
@@ -1030,6 +1044,7 @@ class LocalSocketStore(Store):
         max_builds: int = 1,
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
+        system_features: set[str] | None = None,
         nix_bin: str = "nix",
         extra_env: dict[str, str] | None = None,
         extra_args: list[str] | None = None,
@@ -1051,6 +1066,7 @@ class LocalSocketStore(Store):
             max_builds=max_builds,
             max_transfers=max_transfers,
             supported_systems=supported_systems,
+            system_features=system_features,
         )
         self.managed = managed
         self.nix_bin = nix_bin
@@ -1194,6 +1210,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         max_builds: int = 2,
         max_transfers: int = 4,
         supported_systems: list[str] | None = None,
+        system_features: set[str] | None = None,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
     ) -> None:
@@ -1202,6 +1219,7 @@ class SSHSocketStore(_SSHStoreMixin, Store):
             max_builds=max_builds,
             max_transfers=max_transfers,
             supported_systems=supported_systems,
+            system_features=system_features,
         )
         self.host = host
         self.port = port
