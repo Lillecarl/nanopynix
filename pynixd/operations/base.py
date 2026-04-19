@@ -22,7 +22,7 @@ import structlog
 
 from .. import wire
 from ..exceptions import OpNotImplementedError
-from ..store_path import StorePath
+from ..store_path import DrvOutput, StorePath
 from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
@@ -769,8 +769,7 @@ class BuildResult:
     stop_time: int = 0
     cpu_user: int | None = None
     cpu_system: int | None = None
-    # built_outputs maps DrvOutput -> Realisation (parsed JSON dict)
-    built_outputs: dict[str, dict] = field(default_factory=dict)
+    built_outputs: dict[DrvOutput, dict] = field(default_factory=dict)
 
     async def from_reader(self, reader: NixReader, version: int) -> BuildResult:
         self.status = BuildResultStatus(await reader.read_uint64())
@@ -796,7 +795,7 @@ class BuildResult:
         if version >= wire.proto(1, 28):
             n = await reader.read_uint64()
             for _ in range(n):
-                drv_output = await reader.read_string()
+                drv_output = DrvOutput(await reader.read_string())
                 realisation_json = await reader.read_string()
                 self.built_outputs[drv_output] = json.loads(realisation_json)
 

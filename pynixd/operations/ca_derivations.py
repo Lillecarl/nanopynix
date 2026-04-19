@@ -14,7 +14,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..store_path import StorePath
+from ..store_path import DrvOutput, StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     OpRequest,
@@ -25,11 +25,6 @@ from .base import (
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
-
-# ── DrvOutput ──────────────────────────────────────────────────────────
-
-# DrvOutput is a string of the form "sha256:hash!outName" identifying a derivation output
-DrvOutput = str
 
 
 # ── RegisterDrvOutput (op 42) ─────────────────────────────────────────
@@ -126,11 +121,12 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
     op: ClassVar[int] = 43
     response_type: ClassVar[type[OpResponse]] = QueryRealisationResponse
     is_query: ClassVar[bool] = True
-    drv_output: DrvOutput = ""
+    drv_output: DrvOutput = field(default_factory=DrvOutput)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.drv_output = await reader.read_string()
+        raw = await reader.read_string()
+        self.drv_output = DrvOutput(raw)
         self.logger.debug("from_reader", drv_output=self.drv_output)
         return self
 
@@ -138,3 +134,18 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.drv_output)
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> QueryRealisationResponse:
+        resp = await store.call(self, client=client, suppress_last=suppress_last)
+
+        for r in resp.realisations:
+            out_path = r.get("outPath")
+            if out_path:
+                store.tracker.add_known_path(StorePath(out_path).with_store_prefix())
+
+        return resp

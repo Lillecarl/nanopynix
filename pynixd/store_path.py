@@ -1,5 +1,6 @@
 """
 StorePath: a str subclass for Nix store paths with helpers.
+DrvOutput: a str subclass for Nix derivation output identifiers.
 """
 
 from __future__ import annotations
@@ -59,3 +60,37 @@ class StorePath(str):
         if self.extrainfo:
             return f"StorePath({str.__repr__(self)}, info={self.extrainfo!r})"
         return f"StorePath({str.__repr__(self)})"
+
+
+class DrvOutput(str):
+    """A str subclass representing a Nix DrvOutput identifier.
+
+    Format: ``<hash-algo>:<base16-hash>!<outputName>``
+    Example: ``sha256:ba0770319c4c4c5f849e8e0e4a8b9c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8!out``
+
+    The hash is the derivation's ``hashDerivationModulo`` — NOT the .drv store path.
+    """
+
+    __slots__ = ()
+
+    def __new__(cls, value: str | DrvOutput = "") -> Self:
+        instance = str.__new__(cls, value)
+        if value and "!" not in value:
+            raise ValueError(
+                f"Invalid DrvOutput: {value!r} — "
+                "expected format '<algo>:<hash>!<outputName>'"
+            )
+        return instance
+
+    @property
+    def id_hash(self) -> str:
+        """The hash-algorithm-prefixed hash part (before '!')."""
+        return self.split("!", 1)[0]
+
+    @property
+    def output_name(self) -> str:
+        """The output name (after '!')."""
+        return self.split("!", 1)[1]
+
+    def __repr__(self) -> str:
+        return f"DrvOutput({str.__repr__(self)})"

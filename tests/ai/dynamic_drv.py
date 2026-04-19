@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pynixd.drv_parser import read_drv_file
 from pynixd.store import LocalSocketStore
-from pynixd.store_path import StorePath
+from pynixd.store_path import DrvOutput, StorePath
 from pynixd.operations.query_derivation_output_map import (
     QueryDerivationOutputMapRequest,
 )
@@ -34,7 +34,7 @@ from tests.conftest import (
 )
 from tests.nix_config import NixConfig
 
-DYN_NIX = Path(__file__).resolve().parent.parent.parent / "test-dyn-drv.nix"
+DYN_NIX = Path(__file__).resolve().parent.parent / "test-dyn-drv.nix"
 DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
     substituters=(
         "https://cache.nixos.org/",
@@ -331,9 +331,22 @@ async def main() -> None:
     print("=" * 70)
     print("Step 8: QueryRealisation for producingDrv^out")
     print("=" * 70)
+    # DrvOutput format is "sha256:<hash>!<outputName>" — NOT a store path.
+    # The hash is hashDerivationModulo (sha256 of the masked ATerm).
+    # For a CA text-hashed drv, we compute it from the .drv content.
+    import hashlib
+
+    from pynixd.derivation_resolution import _unparse_basic_derivation
+    from pynixd.drv_parser import to_basic_derivation
+
     try:
+        basic = to_basic_derivation(parsed_producing, root_store.store_path)
+        aterm = _unparse_basic_derivation(basic, mask_outputs=True)
+        h = hashlib.sha256(aterm.encode()).hexdigest()
+        drv_output_id = DrvOutput(f"sha256:{h}!out")
+        print(f"Computed DrvOutput: {drv_output_id}")
         resp = await root_store.execute(
-            QueryRealisationRequest(drv_output=f"{producing_drv_path}!out")
+            QueryRealisationRequest(drv_output=drv_output_id)
         )
         print(f"producingDrv realisation: {resp}")
     except Exception as e:

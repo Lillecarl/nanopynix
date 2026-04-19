@@ -10,8 +10,8 @@ Experimental Nix feature: derivations whose outputs are themselves derivations (
 │   └── 03 (Trampoline: build inner .drv)
 │       └── 04 (Dynamic dep DAG linking)
 │           └── 05 (Resolve wrapper dynamic inputs)
-└── 07 (Fix QueryRealisation ANSI bug) [independent]
-    06 (BuildDerivation DrvWithVersion wire) [optional/low priority]
+└── 07 (DrvOutput type safety + QueryRealisation) [independent]
+    06 (BuildDerivation DrvWithVersion wire) [N/A — wire protocol cannot carry DrvWithVersion]
 ```
 
 ## Execution Order
