@@ -84,3 +84,9 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 - Keep tests simple and explicit. Avoid over-engineered abstractions.
 - Construct commands as plain lists so the exact invocation is visible at a glance.
 - Use `pytest.fixture(autouse=True)` for per-test cleanup (store directories, etc.).
+
+### Running Validation Commands
+- **NEVER pipe away output** from `just check`, `just precommit`, or `pytest` — the full output contains failure details you need to diagnose issues.
+- If output is too large for context (failing tests produce heaps of logs), redirect to a file: `pytest ... > /tmp/test-output.txt 2>&1`, then read specific sections.
+- Do NOT use `tee` when redirecting — it doubles context consumption.
+- If you must limit output, use `tail -N` on the file afterwards, never pipe the command itself.
