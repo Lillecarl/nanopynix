@@ -17,6 +17,8 @@ from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
+    SESSION_HTTP_PASS,
+    SESSION_HTTP_USER,
     STORE_PREFIX,
     get_test_store_kwargs,
     run_subproc,
@@ -163,22 +165,19 @@ async def test_cache_as_substituter() -> None:
         assert rc == 0, f"path check failed:\n{stderr}"
 
 
-@pytest.mark.timeout(60)
-async def test_cache_not_found() -> None:
+async def test_cache_not_found(pynixd_server: Server) -> None:
     """Test 404 response for non-existent paths.
 
     Store operations triggered:
     - None: This test only checks HTTP 404 handling without triggering Store operations
     """
-    local_store = LocalSocketStore(
-        id="local", store_path=Path("/"), **get_test_store_kwargs()
-    )
-    async with Server(local_store=local_store, http_port=0) as server:
-        base_url = f"http://127.0.0.1:{server.http_bound_port}"
-        async with aiohttp.ClientSession() as session:
-            hash_part = "00000000000000000000000000000000"
-            async with session.get(
-                f"{base_url}/{hash_part}.narinfo",
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as resp:
-                assert resp.status == 404
+    base_url = f"http://127.0.0.1:{pynixd_server.http_bound_port}"
+    auth = aiohttp.BasicAuth(SESSION_HTTP_USER, SESSION_HTTP_PASS)
+    async with aiohttp.ClientSession() as session:
+        hash_part = "00000000000000000000000000000000"
+        async with session.get(
+            f"{base_url}/{hash_part}.narinfo",
+            auth=auth,
+            timeout=aiohttp.ClientTimeout(total=5),
+        ) as resp:
+            assert resp.status == 404
