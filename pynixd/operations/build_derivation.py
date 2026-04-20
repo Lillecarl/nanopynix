@@ -105,8 +105,13 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         if isinstance(response, BuildDerivationResponse):
             if response.result.status != 0 and response.result.error_msg:
-                ctx.proxy.client.queue.put_nowait(
-                    StderrNext(text=f"pynixd: {response.result.error_msg}\n")
-                )
+                # Only send StderrNext if the error came from a backend daemon
+                # (response has real daemon logs). Scheduler-generated
+                # incompatibility errors (empty logs) are already sent as
+                # StderrNext by the scheduler — avoid double-reporting.
+                if response.logs.messages:
+                    ctx.proxy.client.queue.put_nowait(
+                        StderrNext(text=f"pynixd: {response.result.error_msg}\n")
+                    )
         self.logger.debug("responded_op")
         return response

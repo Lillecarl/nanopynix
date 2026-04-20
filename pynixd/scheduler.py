@@ -465,14 +465,30 @@ class Scheduler:
             # 2. Standard remote backend assignment
             ranked = self.rank_stores(build)
 
-            # If NO store will ever support this platform, fail it statelessly
+            # If NO store will ever support this platform/features, fail it statelessly
             if not ranked and not any(
                 s.supports_derivation(build.platform, build_features)
                 for s in self.stores.values()
             ):
-                await self.queue.fail(
-                    build.id, f"No store supports system: {build.platform}"
+                reasons = self._incompatibility_reasons(build.platform, build_features)
+                error_msg = (
+                    f"No compatible store for {build.platform}"
+                    + (
+                        f" (requires {', '.join(sorted(build_features))})"
+                        if build_features
+                        else ""
+                    )
+                    + "\n"
+                    + "\n".join(f"  {r}" for r in reasons)
                 )
+                client = await self.queue.fail(build.id, error_msg)
+                if client is not None:
+                    from .stderr import StderrNext
+
+                    for line in error_msg.split("\n"):
+                        client.queue.put_nowait(StderrNext(text=f"pynixd: {line}\n"))
+                if build.scheduler_request_id is not None:
+                    await self._on_build_complete_failed(build, error_msg)
                 continue
 
             assigned = False
@@ -493,6 +509,37 @@ class Scheduler:
                     break
 
             if not assigned:
+                # If all compatible stores have already failed this build,
+                # it's permanently stuck — fail it now with a clear message.
+                compatible = [
+                    s
+                    for s in self.stores.values()
+                    if s.supports_derivation(build.platform, build_features)
+                ]
+                if compatible and all(
+                    s.id in build.failed_backends for s in compatible
+                ):
+                    failed_ids = [s.id for s in compatible]
+                    error_msg = (
+                        f"All compatible stores failed for {build.platform}"
+                        + (
+                            f" (requires {', '.join(sorted(build_features))})"
+                            if build_features
+                            else ""
+                        )
+                        + f": {', '.join(failed_ids)}"
+                    )
+                    client = await self.queue.fail(build.id, error_msg)
+                    if client is not None:
+                        from .stderr import StderrNext
+
+                        for line in error_msg.split("\n"):
+                            client.queue.put_nowait(
+                                StderrNext(text=f"pynixd: {line}\n")
+                            )
+                    if build.scheduler_request_id is not None:
+                        await self._on_build_complete_failed(build, error_msg)
+                    continue
                 waiting_slot.append(build)
 
         # 3. Handle proactive transfers for waiting_slot builds
@@ -529,6 +576,51 @@ class Scheduler:
                 for s in self.stores.values()
             },
         )
+
+    def _incompatibility_reasons(
+        self, platform: str, features: set[str] | None
+    ) -> list[str]:
+        """Build per-store incompatibility explanations for error reporting."""
+        reasons: list[str] = []
+        fm = self.local_store._feature_matrix
+        if fm is not None and platform not in fm:
+            reasons.append(f"local: system {platform} not in feature_matrix")
+        elif fm is not None and features:
+            local_feats = fm.get(platform, set())
+            missing = features - local_feats
+            if missing:
+                reasons.append(
+                    f"local: missing features {', '.join(sorted(missing))} for {platform}"
+                )
+        elif fm is None:
+            reasons.append("local: no feature_matrix (not probed)")
+        else:
+            reasons.append("local: compatible")
+
+        all_stores = list(self.stores.values())
+        for store in all_stores:
+            sfm = store._feature_matrix
+            if sfm is not None and platform not in sfm:
+                reasons.append(f"{store.id}: system {platform} not in feature_matrix")
+            elif sfm is not None and features:
+                store_feats = sfm.get(platform, set())
+                missing = features - store_feats
+                if missing:
+                    reasons.append(
+                        f"{store.id}: missing features {', '.join(sorted(missing))} for {platform}"
+                    )
+                else:
+                    reasons.append(
+                        f"{store.id}: compatible but excluded (unhealthy/saturated/failed)"
+                    )
+            elif sfm is None:
+                reasons.append(f"{store.id}: no feature_matrix (not probed)")
+            else:
+                reasons.append(
+                    f"{store.id}: compatible but excluded (unhealthy/saturated/failed)"
+                )
+
+        return reasons
 
     def rank_stores(self, build: QueuedBuild) -> RankedStores:
         """Rank stores for a build by path overlap, tiebreak by available slots."""
