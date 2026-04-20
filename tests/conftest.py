@@ -28,15 +28,58 @@ if TYPE_CHECKING:
 _session_start_time = time.monotonic()
 
 
-def relative_time_stamper(logger: Any, method_name: str, event_dict: Any) -> Any:
-    """Custom processor to show time since test (or session) start."""
-    # Use test start time if available in contextvars, otherwise session start
-    start = event_dict.pop("test_start_time", _session_start_time)
-    elapsed = time.monotonic() - start
+def _abs_time_stamper(logger: Any, method_name: str, event_dict: Any) -> Any:
+    """Store absolute monotonic time in the event dict for per-handler formatting."""
+    event_dict["_abs_time"] = time.monotonic()
+    return event_dict
+
+
+def _relative_time_stamper(logger: Any, method_name: str, event_dict: Any) -> Any:
+    """Compute timestamp relative to test_start_time (contextvar) or session start.
+
+    The ``test_start_time`` contextvar is bound per-test by the ``test_log_file``
+    fixture.  Background tasks in the shared pynixd server don't inherit this
+    contextvar, so they fall back to ``_session_start_time``.  The per-test
+    log handler (``_TestRelativeTimeHandler``) corrects these stale timestamps
+    by recomputing from ``LogRecord.created``.
+    """
+    abs_time = event_dict.pop("_abs_time", None) or time.monotonic()
+    start = event_dict.pop("test_start_time", None) or _session_start_time
+    elapsed = abs_time - start
     seconds = int(elapsed)
     milliseconds = int((elapsed - seconds) * 1000)
     event_dict["timestamp"] = f"{seconds:03d}.{milliseconds:03d}"
     return event_dict
+
+
+class _TestRelativeTimeHandler(logging.FileHandler):
+    """File handler that recomputes timestamps relative to test start.
+
+    Structlog's global chain renders timestamps relative to
+    ``test_start_time`` from contextvars (or session start as fallback).
+    But background tasks in the shared pynixd server don't inherit the
+    current test's contextvars, so their timestamps would be stale.
+
+    This handler patches the rendered message by replacing the leading
+    ``SSS.MMM`` timestamp with one recomputed from ``LogRecord.created``
+    (the wall-clock time of the log call) relative to when the test started.
+    """
+
+    _TS_LEN = 7  # "SSS.MMM" — just the timestamp digits and dot
+
+    def __init__(self, test_start: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._test_start = test_start
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.created:
+            elapsed = record.created - self._test_start
+            seconds = int(elapsed)
+            milliseconds = int((elapsed - seconds) * 1000)
+            ts = f"{seconds:03d}.{milliseconds:03d}"
+            if record.msg and len(record.msg) >= self._TS_LEN:
+                record.msg = ts + record.msg[self._TS_LEN :]
+        super().emit(record)
 
 
 structlog.configure(
@@ -45,7 +88,8 @@ structlog.configure(
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
         structlog.contextvars.merge_contextvars,
-        relative_time_stamper,
+        _abs_time_stamper,
+        _relative_time_stamper,
         structlog.processors.StackInfoRenderer(),
         structlog.dev.ConsoleRenderer(colors=False),
     ],
@@ -273,7 +317,8 @@ def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
 
     structlog.contextvars.bind_contextvars(test_start_time=time.monotonic())
 
-    handler = logging.FileHandler(log_file)
+    test_start = time.time()
+    handler = _TestRelativeTimeHandler(test_start, log_file)
     handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(message)s")
     handler.setFormatter(formatter)
