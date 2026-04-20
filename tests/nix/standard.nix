@@ -9,7 +9,7 @@ let
     {
       name,
       deps ? [ ],
-      sleepSecs ? 1,
+      sleepSecs ? 0,
       text ? "",
     }:
     pkgs.stdenvNoCC.mkDerivation (

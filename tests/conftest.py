@@ -555,5 +555,6 @@ async def pynixd_server(
         http_upload_dir=upload_dir,
         http_user=SESSION_HTTP_USER,
         http_pass=SESSION_HTTP_PASS,
+        admin_users={"admin-user"},
     ) as server:
         yield server

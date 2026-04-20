@@ -11,8 +11,6 @@ from pathlib import Path
 import pytest
 import structlog
 
-from pynixd.operations.probe_features import ProbeFeaturesRequest
-from pynixd.operations.probe_systems import ProbeSystemsRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from tests.conftest import (
     STORE_PREFIX,
@@ -46,7 +44,7 @@ async def test_feature_probe_in_memory() -> None:
     await store.ensure_daemon()
 
     await store.probe()
-    
+
     assert store.systems is not None
     assert store.system_features is not None
     assert "x86_64-linux" in store.systems

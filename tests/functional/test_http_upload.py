@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import os
 from pathlib import Path
 
 import aiohttp
@@ -19,11 +18,8 @@ from tests.conftest import (
     NIX_BIN,
     SESSION_HTTP_USER,
     SESSION_HTTP_PASS,
-    STORE_PREFIX,
-    SESSION_STORE_PREFIX,
     get_test_store_kwargs,
     run_subproc,
-    rmtree_robust,
 )
 
 log = structlog.get_logger(__name__)
