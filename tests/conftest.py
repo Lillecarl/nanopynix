@@ -13,13 +13,16 @@ import time
 from contextlib import contextmanager
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 import pytest
 import structlog
 from environs import env
 
 from tests.nix_config import NixConfig
+
+if TYPE_CHECKING:
+    from pynixd import Server
 
 # Structlog configuration
 _session_start_time = time.monotonic()
@@ -113,6 +116,9 @@ def get_test_store_kwargs(
 
 
 STORE_PREFIX = Path("/tmp/pynixd-stores")
+SESSION_STORE_PREFIX = Path("/tmp/pynixd-session-stores")
+
+_default_store_ids = {"local", "builder"}
 
 _log_dir_key = pytest.StashKey[Path]()
 
@@ -376,9 +382,24 @@ def rmtree_robust_glob(pattern: str) -> None:
 
 @pytest.fixture(autouse=True)
 def cleanup_stores():
-    """Remove any leftover test stores before each test."""
+    """Remove any leftover test stores before each test (skips session stores)."""
     rmtree_robust_glob(f"{STORE_PREFIX}/*")
     yield
+
+
+@pytest.fixture(autouse=True)
+async def cleanup_extra_stores(pynixd_server: Server | None):
+    """Remove non-default stores added by tests between each test."""
+    yield
+    if pynixd_server is None:
+        return
+    extra_ids = [sid for sid in pynixd_server.stores if sid not in _default_store_ids]
+    for sid in extra_ids:
+        store = pynixd_server.stores[sid]
+        store_path = store.store_path
+        await pynixd_server.remove_store(sid)
+        if store_path and str(store_path).startswith(str(SESSION_STORE_PREFIX)):
+            rmtree_robust(store_path)
 
 
 async def run_subproc(
@@ -466,3 +487,55 @@ async def run_subproc(
 def nix_env() -> dict[str, str]:
     """Environment variables for nix subprocess calls."""
     return os.environ.copy()
+
+
+SESSION_SSH_PORT = 0
+SESSION_HTTP_PORT = 0
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def pynixd_server(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[Server, None]:
+    """Session-scoped shared pynixd server (autouse).
+
+    Provides a running Server with a local store and one builder store on
+    deterministic paths under SESSION_STORE_PREFIX. Stores are cleaned at
+    session startup but left intact at session end for post-mortem inspection.
+
+    Tests that need their own isolated server should be marked with
+    @pytest.mark.no_pynixd and set up their own Server. The marker does NOT
+    suppress this fixture (it always runs), but serves as documentation and
+    allows filtering (e.g. pytest -m no_pynixd).
+    """
+    from pynixd import Server
+    from pynixd.store import LocalSocketStore
+
+    local_path = SESSION_STORE_PREFIX / "local"
+    builder_path = SESSION_STORE_PREFIX / "builder"
+    socket_path = SESSION_STORE_PREFIX / "pynixd.sock"
+
+    rmtree_robust(local_path)
+    rmtree_robust(builder_path)
+    if socket_path.exists():
+        socket_path.unlink()
+
+    local_store = LocalSocketStore(
+        id="local",
+        store_path=local_path,
+        **get_test_store_kwargs(),
+    )
+    builder_store = LocalSocketStore(
+        id="builder",
+        store_path=builder_path,
+        **get_test_store_kwargs(),
+    )
+
+    async with Server(
+        local_store=local_store,
+        stores={"builder": builder_store},
+        ssh_port=SESSION_SSH_PORT,
+        http_port=SESSION_HTTP_PORT,
+        unix_path=socket_path,
+    ) as server:
+        yield server
