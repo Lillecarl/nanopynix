@@ -455,10 +455,9 @@ class Store(ABC):
             from .operations.probe_features import ProbeFeaturesRequest
             from .system_features import KNOWN_FEATURES
 
-            probe_system = next(iter(self.systems), None) or "x86_64-linux"
             self.system_features = (
                 await ProbeFeaturesRequest(
-                    probe_system=probe_system,
+                    systems=set(self.systems or set()),
                     system_features=(self.system_features or set()) | KNOWN_FEATURES,
                 ).execute(self)
             ).system_features

@@ -2,13 +2,14 @@
 
 An internal operation — never dispatched from the daemon wire protocol.
 Constructs derivations with ``requiredSystemFeatures`` set and checks which
-are accepted by the scheduling gate.
+are accepted by the scheduling gate.  Features are probed for every
+discovered system so that platform-specific features (e.g. ``apple-virt``
+on Darwin, ``kvm`` on Linux) are correctly detected.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -42,7 +43,8 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
     name: ClassVar[str] = "ProbeFeatures"
     op: ClassVar[int] = 109
     response_type: ClassVar[type[OpResponse]] = ProbeFeaturesResponse
-    probe_system: str = "x86_64-linux"
+
+    systems: set[str] = field(default_factory=lambda: {"x86_64-linux"})
     system_features: set[str] = field(default_factory=set)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
@@ -58,28 +60,29 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
         suppress_last: bool = False,
     ) -> ProbeFeaturesResponse:
         to_probe = (self.system_features or set()) | KNOWN_FEATURES
-        probes: list[Coroutine[None, None, tuple[str, bool]]] = []
-        for feature in to_probe:
-            if feature == "kvm":
-                args = [
-                    "-c",
-                    "test -w /dev/kvm && echo kvm > $out"
-                    " || { echo 'kvm: /dev/kvm not writable' >&2; exit 1; }",
-                ]
-            else:
-                args = ["-c", f"echo {feature} > $out"]
+        probes = []
+        for system in self.systems:
+            for feature in to_probe:
+                if feature == "kvm":
+                    args = [
+                        "-c",
+                        "test -w /dev/kvm && echo kvm > $out"
+                        " || { echo 'kvm: /dev/kvm not writable' >&2; exit 1; }",
+                    ]
+                else:
+                    args = ["-c", f"echo {feature} > $out"]
 
-            name = f"probe-feature-{feature}"
-            extra_env: dict[str, str] = {
-                "requiredSystemFeatures": feature,
-                "NIXBUILDNET_MIN_CPU": "1",
-                "NIXBUILDNET_MAX_CPU": "1",
-                "NIXBUILDNET_MIN_MEM": "128",
-                "NIXBUILDNET_MAX_MEM": "128",
-            }
-            probes.append(
-                _send_probe(store, name, self.probe_system, feature, args, extra_env)
-            )
+                name = f"probe-feature-{feature}"
+                extra_env: dict[str, str] = {
+                    "requiredSystemFeatures": feature,
+                    "NIXBUILDNET_MIN_CPU": "1",
+                    "NIXBUILDNET_MAX_CPU": "1",
+                    "NIXBUILDNET_MIN_MEM": "128",
+                    "NIXBUILDNET_MAX_MEM": "128",
+                }
+                probes.append(
+                    _send_probe(store, name, system, feature, args, extra_env)
+                )
 
         results = await asyncio.gather(*probes)
         system_features = {feature for feature, (_, ok) in zip(to_probe, results) if ok}
