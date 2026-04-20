@@ -52,7 +52,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
     rmtree_robust(store_b_path)
     store_b_path.mkdir(parents=True, exist_ok=True)
     store_b = LocalSocketStore(
-        id="b-local", store_path=store_b_path, **get_test_store_kwargs()
+        id="b-local", store_path=store_b_path, **get_test_store_kwargs(no_probe=True)
     )
     await store_b.ensure_daemon()
 
@@ -94,7 +94,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
             id="a-local",
             store_path=Path("/"),
             use_db=False,
-            **get_test_store_kwargs(),
+            **get_test_store_kwargs(no_probe=True),
         )
 
         unix_path_a = tmp_path / "server-a.sock"

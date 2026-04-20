@@ -46,7 +46,7 @@ async def test_stream_nar() -> None:
     src_store = LocalSocketStore(
         id="system",
         store_path=Path("/"),
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     # Destination store is a temporary store
@@ -55,7 +55,7 @@ async def test_stream_nar() -> None:
     dst_store = LocalSocketStore(
         id="test-stream-nar",
         store_path=dst_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     try:

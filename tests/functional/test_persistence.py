@@ -56,12 +56,12 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
     pynixd_local = LocalSocketStore(
         id="local",
         store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_remote = LocalSocketStore(
         id="remote-stub",
         store_path=pynixd_remote_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     # We need a path that actually exists in the remote store so verification succeeds
@@ -97,13 +97,13 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
     pynixd_local_2 = LocalSocketStore(
         id="local",
         store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     # Use our stub that fails QueryAllValidPaths
     pynixd_remote_2 = NoQueryAllValidPathsStore(
         id="remote-stub",  # Same ID is important!
         store_path=pynixd_remote_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     async with Server(
@@ -132,12 +132,12 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
     pynixd_local = LocalSocketStore(
         id="local",
         store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_remote = LocalSocketStore(
         id="remote",
         store_path=pynixd_remote_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     path_valid = StorePath("/nix/store/00000000000000000000000000000001-valid")
@@ -174,12 +174,12 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
     pynixd_local_2 = LocalSocketStore(
         id="local",
         store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_remote_2 = PartialVerifyStore(
         id="remote",
         store_path=pynixd_remote_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     async with Server(
@@ -217,12 +217,12 @@ async def test_is_valid_path_isolation(tmp_path: Path) -> None:
     pynixd_local = LocalSocketStore(
         id="local",
         store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_remote = LocalSocketStore(
         id="remote",
         store_path=pynixd_remote_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     async with Server(

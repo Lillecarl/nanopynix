@@ -432,6 +432,11 @@ class Store(ABC):
 
         self.probe_state = ProbeState.PROBING
 
+        skip_builds = not self._probe_systems and not self._probe_features
+
+        if skip_builds:
+            await self.warm_pool(1)
+
         if self._probe_systems:
             from .operations.probe_systems import ProbeSystemsRequest
             from .system_features import PROBE_SYSTEMS
@@ -1012,6 +1017,8 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         max_transfers: int = 4,
         systems: set[str] | None = None,
         system_features: set[str] | None = None,
+        probe_systems: bool = True,
+        probe_features: bool = True,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
         nix_bin: str = "nix",
@@ -1023,6 +1030,8 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
             max_transfers=max_transfers,
             systems=systems,
             system_features=system_features,
+            probe_systems=probe_systems,
+            probe_features=probe_features,
         )
         self.host = host
         self.port = port
@@ -1100,6 +1109,8 @@ class LocalSocketStore(Store):
         max_transfers: int = 4,
         systems: set[str] | None = None,
         system_features: set[str] | None = None,
+        probe_systems: bool = True,
+        probe_features: bool = True,
         nix_bin: str = "nix",
         extra_env: dict[str, str] | None = None,
         extra_args: list[str] | None = None,
@@ -1122,6 +1133,8 @@ class LocalSocketStore(Store):
             max_transfers=max_transfers,
             systems=systems,
             system_features=system_features,
+            probe_systems=probe_systems,
+            probe_features=probe_features,
         )
         self.managed = managed
         self.nix_bin = nix_bin
@@ -1266,6 +1279,8 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         max_transfers: int = 4,
         systems: set[str] | None = None,
         system_features: set[str] | None = None,
+        probe_systems: bool = True,
+        probe_features: bool = True,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
     ) -> None:
@@ -1275,6 +1290,8 @@ class SSHSocketStore(_SSHStoreMixin, Store):
             max_transfers=max_transfers,
             systems=systems,
             system_features=system_features,
+            probe_systems=probe_systems,
+            probe_features=probe_features,
         )
         self.host = host
         self.port = port

@@ -131,12 +131,12 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
     pynixd_local = LocalSocketStore(
         id="local",
         store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_remote = StatsTestStore(
         id="remote",
         store_path=pynixd_remote_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_remote.build_delays["fast-pkg"] = 0.05
 
@@ -207,13 +207,13 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
     pynixd_local = LocalSocketStore(
         id="local",
         store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_remote = StatsTestStore(
         id="remote",
         store_path=pynixd_remote_path,
         max_builds=10,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     async with Server(
@@ -305,7 +305,7 @@ async def test_levenshtein_sql(tmp_path: Path) -> None:
     pynixd_local = LocalSocketStore(
         id="local",
         store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     # Ensure DB is created
     from pynixd.local_store_db import LocalStoreDB
@@ -371,13 +371,13 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     pynixd_local = LocalSocketStore(
         id="local",
         store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_busy = CpuUtilTestStore(
         id="busy",
         store_path=pynixd_busy_path,
         max_builds=10,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_busy._cpu_util = CpuUtil(utilization=99.5, cores=2.0, throttled_pct=10.0)
     pynixd_busy.build_delays["test-pkg"] = 0.05
@@ -386,7 +386,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
         id="free",
         store_path=pynixd_free_path,
         max_builds=10,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(no_probe=True),
     )
     pynixd_free._cpu_util = CpuUtil(utilization=50.0, cores=2.0, throttled_pct=0.0)
     pynixd_free.build_delays["test-pkg"] = 0.05

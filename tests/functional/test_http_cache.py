@@ -61,7 +61,7 @@ async def test_narinfo() -> None:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
     local_store = LocalSocketStore(
-        id="local", store_path=Path("/"), **get_test_store_kwargs()
+        id="local", store_path=Path("/"), **get_test_store_kwargs(no_probe=True)
     )
 
     async with Server(local_store=local_store, http_port=0) as server:
@@ -87,7 +87,7 @@ async def test_nar_streaming() -> None:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
     local_store = LocalSocketStore(
-        id="local", store_path=Path("/"), **get_test_store_kwargs()
+        id="local", store_path=Path("/"), **get_test_store_kwargs(no_probe=True)
     )
 
     async with Server(local_store=local_store, http_port=0) as server:
@@ -127,7 +127,7 @@ async def test_cache_as_substituter() -> None:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
     local_store = LocalSocketStore(
-        id="local", store_path=Path("/"), **get_test_store_kwargs()
+        id="local", store_path=Path("/"), **get_test_store_kwargs(no_probe=True)
     )
 
     async with Server(local_store=local_store, http_port=0) as server:

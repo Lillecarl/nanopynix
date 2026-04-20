@@ -132,12 +132,15 @@ DEFAULT_NIX_CONFIG = NixConfig.for_test_store()
 
 def get_test_store_kwargs(
     nix_config: NixConfig = DEFAULT_NIX_CONFIG,
+    no_probe: bool = False,
     **kwargs,
 ) -> dict[str, Any]:
     """Return common kwargs for LocalSocketStore in tests.
 
     Args:
         nix_config: NixConfig to derive NIX_CONFIG env and daemon --option args from.
+        no_probe: If True, skip build-based system/feature probing (saves ~4s per store).
+            Requires callers to supply ``systems`` and ``system_features`` explicitly.
         **kwargs: Additional overrides passed through to LocalSocketStore.
     """
     extra_args = nix_config.to_daemon_args()
@@ -155,12 +158,27 @@ def get_test_store_kwargs(
         "extra_args": extra_args,
         "extra_env": extra_env,
     }
+    if no_probe:
+        res["probe_systems"] = False
+        res["probe_features"] = False
+        res.setdefault("systems", _NO_PROBE_SYSTEMS)
+        res.setdefault("system_features", _NO_PROBE_FEATURES)
     res.update(kwargs)
     return res
 
 
 STORE_PREFIX = Path("/tmp/pynixd-stores")
 SESSION_STORE_PREFIX = Path("/tmp/pynixd-session-stores")
+
+_NO_PROBE_SYSTEMS = {"x86_64-linux", "aarch64-linux"}
+_NO_PROBE_FEATURES = {
+    "nixos-test",
+    "benchmark",
+    "big-parallel",
+    "kvm",
+    "ca-derivations",
+    "recursive-nix",
+}
 
 _default_store_ids = {"local", "builder"}
 
