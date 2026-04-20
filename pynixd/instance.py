@@ -94,6 +94,20 @@ class Server:
         except Exception:
             log.exception("sync_paths_failed", id=store.id)
 
+    async def remove_store(self, store_id: str) -> None:
+        """Remove a remote store, cleaning DB records and closing connections."""
+        store = self.stores.pop(store_id, None)
+        if store is None:
+            log.warning("remove_store_not_found", store_id=store_id)
+            return
+
+        local_store = self.local_store
+        if local_store.db is not None:
+            await local_store.db.remove_store_paths(store_id)
+
+        await store.close()
+        log.info("removed_store", store_id=store_id)
+
     @property
     def host(self) -> str:
         return self.settings.ssh_host
