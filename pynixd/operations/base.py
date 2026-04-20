@@ -551,6 +551,14 @@ class BasicDerivation:
             or self.env.get("preferLocalBuild") == "1"
         )
 
+    @property
+    def required_system_features(self) -> set[str]:
+        """Parse requiredSystemFeatures from the env dict."""
+        raw = self.env.get("requiredSystemFeatures", "")
+        if not raw:
+            return set()
+        return set(raw.split())
+
     def output_paths(self) -> dict[str, StorePath]:
         """Return {output_name: output_path} for all outputs."""
         return {name: StorePath(o.path) for name, o in self.outputs.items()}

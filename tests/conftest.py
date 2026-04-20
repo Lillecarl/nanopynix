@@ -140,7 +140,7 @@ def get_test_store_kwargs(
     Args:
         nix_config: NixConfig to derive NIX_CONFIG env and daemon --option args from.
         no_probe: If True, skip build-based system/feature probing (saves ~4s per store).
-            Requires callers to supply ``systems`` and ``system_features`` explicitly.
+            Supplies a default feature_matrix covering common test systems.
         **kwargs: Additional overrides passed through to LocalSocketStore.
     """
     extra_args = nix_config.to_daemon_args()
@@ -159,10 +159,8 @@ def get_test_store_kwargs(
         "extra_env": extra_env,
     }
     if no_probe:
-        res["probe_systems"] = False
-        res["probe_features"] = False
-        res.setdefault("systems", _NO_PROBE_SYSTEMS)
-        res.setdefault("system_features", _NO_PROBE_FEATURES)
+        res["probe"] = False
+        res.setdefault("feature_matrix", _NO_PROBE_FEATURE_MATRIX)
     res.update(kwargs)
     return res
 
@@ -170,14 +168,22 @@ def get_test_store_kwargs(
 STORE_PREFIX = Path("/tmp/pynixd-stores")
 SESSION_STORE_PREFIX = Path("/tmp/pynixd-session-stores")
 
-_NO_PROBE_SYSTEMS = {"x86_64-linux", "aarch64-linux"}
-_NO_PROBE_FEATURES = {
-    "nixos-test",
-    "benchmark",
-    "big-parallel",
-    "kvm",
-    "ca-derivations",
-    "recursive-nix",
+_NO_PROBE_FEATURE_MATRIX: dict[str, set[str]] = {
+    "x86_64-linux": {
+        "nixos-test",
+        "benchmark",
+        "big-parallel",
+        "kvm",
+        "ca-derivations",
+        "recursive-nix",
+    },
+    "aarch64-linux": {
+        "nixos-test",
+        "benchmark",
+        "big-parallel",
+        "ca-derivations",
+        "recursive-nix",
+    },
 }
 
 _default_store_ids = {"local", "builder"}

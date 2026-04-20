@@ -442,10 +442,11 @@ class Scheduler:
         for build in schedulable:
             # 1. Check for "Tiny Build" fast-track to local store
             # We only do this if it's explicitly tiny, not just unknown.
+            build_features = build.request.derivation.required_system_features
             if (
                 build.expected_duration is not None
                 and build.expected_duration <= TINY_BUILD_THRESHOLD_MS
-                and self.local_store.supports_system(build.platform)
+                and self.local_store.supports_derivation(build.platform, build_features)
             ):
                 # Is local store available? (We don't want to swamp it either)
                 # But tiny builds are "free" enough that we can be liberal.
@@ -466,7 +467,8 @@ class Scheduler:
 
             # If NO store will ever support this platform, fail it statelessly
             if not ranked and not any(
-                s.supports_system(build.platform) for s in self.stores.values()
+                s.supports_derivation(build.platform, build_features)
+                for s in self.stores.values()
             ):
                 await self.queue.fail(
                     build.id, f"No store supports system: {build.platform}"
@@ -530,11 +532,12 @@ class Scheduler:
 
     def rank_stores(self, build: QueuedBuild) -> RankedStores:
         """Rank stores for a build by path overlap, tiebreak by available slots."""
+        build_features = build.request.derivation.required_system_features
         stores = []
         for store_id, store in self.stores.items():
             if not store.is_healthy:
                 continue
-            if not store.supports_system(build.platform):
+            if not store.supports_derivation(build.platform, build_features):
                 continue
             if store_id in build.failed_backends:
                 continue

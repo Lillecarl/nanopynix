@@ -104,10 +104,8 @@ class Store(ABC):
         max_builds: int = 2,
         max_transfers: int = 16,
         idle_ttl: float = _DEFAULT_IDLE_TTL,
-        systems: set[str] | None = None,
-        system_features: set[str] | None = None,
-        probe_systems: bool = True,
-        probe_features: bool = True,
+        feature_matrix: dict[str, set[str]] | None = None,
+        probe: bool = True,
     ) -> None:
         self.id = id
         self.store_path = store_path
@@ -122,10 +120,8 @@ class Store(ABC):
         self.all_conns: list[Connection] = []
         self.conn_counter: int = 0
         self.sweep_task: asyncio.Task[None] | None = None
-        self.systems = systems or None
-        self.system_features = system_features or None
-        self._probe_systems = probe_systems
-        self._probe_features = probe_features
+        self._feature_matrix: dict[str, set[str]] | None = feature_matrix
+        self._probe = probe
         self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
             maxsize=10000, ttl=300
@@ -163,21 +159,64 @@ class Store(ABC):
             raise KeyError(f"Signing key '{name}' not found")
         return key
 
+    @property
+    def feature_matrix(self) -> dict[str, set[str]]:
+        """Per-system feature mapping: {system: {features}}."""
+        if self._feature_matrix is not None:
+            return self._feature_matrix
+        return {}
+
+    @feature_matrix.setter
+    def feature_matrix(self, value: dict[str, set[str]]) -> None:
+        self._feature_matrix = value
+
+    @property
+    def systems(self) -> set[str] | None:
+        """Set of systems this store supports, derived from feature_matrix keys."""
+        fm = self._feature_matrix
+        if fm is not None:
+            return set(fm.keys()) if fm else None
+        return None
+
+    @systems.setter
+    def systems(self, value: set[str] | None) -> None:
+        """Setting systems updates the feature_matrix keys, preserving features."""
+        if self._feature_matrix is not None:
+            if value is None:
+                self._feature_matrix = {}
+                return
+            old = self._feature_matrix
+            self._feature_matrix = {s: old.get(s, set()) for s in value}
+        elif value is not None:
+            self._feature_matrix = {s: set() for s in value}
+
     def supports_system(self, system: str) -> bool:
         """Check if this store supports the given system."""
-        if not self.systems:
-            return True  # No restriction = supports all
-        return system in self.systems
-
-    def supports_feature(self, feature: str) -> bool:
-        """Check if this store supports the given system feature.
-
-        A store with no system_features configured is treated as
-        supporting all features (same semantics as systems).
-        """
-        if not self.system_features:
+        fm = self._feature_matrix
+        if fm is None:
             return True
-        return feature in self.system_features
+        return system in fm
+
+    def supports_derivation(
+        self, system: str, features: set[str] | None = None
+    ) -> bool:
+        """Check if this store can build a derivation requiring the given
+        system and set of requiredSystemFeatures.
+
+        Returns True only if the store supports the system AND that system
+        has ALL the required features in the feature matrix.
+        """
+        fm = self._feature_matrix
+        if fm is not None:
+            sys_features = fm.get(system)
+            if sys_features is None:
+                return False
+            if not features:
+                return True
+            return features.issubset(sys_features)
+        if not features:
+            return True
+        return True
 
     # ── Circuit breaker ──────────────────────────────────────────────
 
@@ -419,9 +458,9 @@ class Store(ABC):
         Concurrent callers block on ``_probe_event`` while the first caller
         does the work.  The state transitions NOT_PROBED -> PROBING -> PROBED.
 
-        When ``_probe_systems`` and ``_probe_features`` are both False,
-        build-based probing is skipped and the store is marked probed
-        immediately (using any pre-supplied systems/system_features).
+        When ``_probe`` is False, build-based probing is skipped — the
+        feature_matrix supplied at construction is used as-is and the
+        store is marked probed after warming the connection pool.
         """
         if self.probe_state == ProbeState.PROBED:
             return
@@ -432,39 +471,47 @@ class Store(ABC):
 
         self.probe_state = ProbeState.PROBING
 
-        skip_builds = not self._probe_systems and not self._probe_features
-
-        if skip_builds:
+        if not self._probe:
             await self.warm_pool(1)
+            self.probe_state = ProbeState.PROBED
+            self._probe_event.set()
+            return
 
-        if self._probe_systems:
-            from .operations.probe_systems import ProbeSystemsRequest
-            from .system_features import PROBE_SYSTEMS
+        from .operations.probe_systems import ProbeSystemsRequest
+        from .system_features import PROBE_SYSTEMS, KNOWN_FEATURES
 
-            self.systems = (
-                await ProbeSystemsRequest(
-                    systems=set(self.systems or PROBE_SYSTEMS)
-                ).execute(self)
-            ).systems
-        elif self.systems is None:
-            from .system_features import PROBE_SYSTEMS
+        existing_systems = (
+            set(self._feature_matrix.keys()) if self._feature_matrix else set()
+        )
+        existing_features: set[str] = set()
+        if self._feature_matrix:
+            for feats in self._feature_matrix.values():
+                existing_features.update(feats)
 
-            self.systems = set(PROBE_SYSTEMS)
+        candidate_systems = existing_systems or set(PROBE_SYSTEMS)
+        candidate_features = existing_features or set(KNOWN_FEATURES)
 
-        if self._probe_features:
-            from .operations.probe_features import ProbeFeaturesRequest
-            from .system_features import KNOWN_FEATURES
+        systems_resp = await ProbeSystemsRequest(
+            systems=candidate_systems,
+        ).execute(self)
 
-            self.system_features = (
-                await ProbeFeaturesRequest(
-                    systems=set(self.systems or set()),
-                    system_features=(self.system_features or set()) | KNOWN_FEATURES,
-                ).execute(self)
-            ).system_features
-        elif self.system_features is None:
-            from .system_features import KNOWN_FEATURES
+        from .operations.probe_features import ProbeFeaturesRequest
 
-            self.system_features = set(KNOWN_FEATURES)
+        features_resp = await ProbeFeaturesRequest(
+            systems=systems_resp.systems,
+            system_features=candidate_features,
+        ).execute(self)
+
+        self._feature_matrix = features_resp.feature_matrix
+
+        log.info(
+            "store_probed",
+            store_id=self.id,
+            systems=sorted(self._feature_matrix.keys()) if self._feature_matrix else [],
+            feature_matrix={
+                k: sorted(v) for k, v in (self._feature_matrix or {}).items()
+            },
+        )
 
         self.probe_state = ProbeState.PROBED
         self._probe_event.set()
@@ -1014,10 +1061,8 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
         store_path: Path = Path("/"),
         max_builds: int = 2,
         max_transfers: int = 4,
-        systems: set[str] | None = None,
-        system_features: set[str] | None = None,
-        probe_systems: bool = True,
-        probe_features: bool = True,
+        feature_matrix: dict[str, set[str]] | None = None,
+        probe: bool = True,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
         nix_bin: str = "nix",
@@ -1027,10 +1072,8 @@ class SSHSubprocessStore(_SSHStoreMixin, Store):
             store_path=store_path,
             max_builds=max_builds,
             max_transfers=max_transfers,
-            systems=systems,
-            system_features=system_features,
-            probe_systems=probe_systems,
-            probe_features=probe_features,
+            feature_matrix=feature_matrix,
+            probe=probe,
         )
         self.host = host
         self.port = port
@@ -1106,10 +1149,8 @@ class LocalSocketStore(Store):
         socket_path: Path | None = None,
         max_builds: int = 1,
         max_transfers: int = 4,
-        systems: set[str] | None = None,
-        system_features: set[str] | None = None,
-        probe_systems: bool = True,
-        probe_features: bool = True,
+        feature_matrix: dict[str, set[str]] | None = None,
+        probe: bool = True,
         nix_bin: str = "nix",
         extra_env: dict[str, str] | None = None,
         extra_args: list[str] | None = None,
@@ -1130,10 +1171,8 @@ class LocalSocketStore(Store):
             store_path=store_path,
             max_builds=max_builds,
             max_transfers=max_transfers,
-            systems=systems,
-            system_features=system_features,
-            probe_systems=probe_systems,
-            probe_features=probe_features,
+            feature_matrix=feature_matrix,
+            probe=probe,
         )
         self.managed = managed
         self.nix_bin = nix_bin
@@ -1276,10 +1315,8 @@ class SSHSocketStore(_SSHStoreMixin, Store):
         socket_path: Path = DAEMON_SOCKET_PATH,
         max_builds: int = 2,
         max_transfers: int = 4,
-        systems: set[str] | None = None,
-        system_features: set[str] | None = None,
-        probe_systems: bool = True,
-        probe_features: bool = True,
+        feature_matrix: dict[str, set[str]] | None = None,
+        probe: bool = True,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
     ) -> None:
@@ -1287,10 +1324,8 @@ class SSHSocketStore(_SSHStoreMixin, Store):
             id=id or f"ssh-socket:{username or ''}@{host}:{port}",
             max_builds=max_builds,
             max_transfers=max_transfers,
-            systems=systems,
-            system_features=system_features,
-            probe_systems=probe_systems,
-            probe_features=probe_features,
+            feature_matrix=feature_matrix,
+            probe=probe,
         )
         self.host = host
         self.port = port

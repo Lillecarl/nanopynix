@@ -29,7 +29,7 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class ProbeFeaturesResponse(OpResponse):
-    system_features: set[str] = field(default_factory=set)
+    feature_matrix: dict[str, set[str]] = field(default_factory=dict)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
         return self
@@ -61,6 +61,7 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
     ) -> ProbeFeaturesResponse:
         to_probe = (self.system_features or set()) | KNOWN_FEATURES
         probes = []
+        probe_keys: list[tuple[str, str]] = []
         for system in self.systems:
             for feature in to_probe:
                 if feature == "kvm":
@@ -72,7 +73,6 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
                 else:
                     args = ["-c", f"echo {feature} > $out"]
 
-                name = f"probe-feature-{feature}"
                 extra_env: dict[str, str] = {
                     "requiredSystemFeatures": feature,
                     "NIXBUILDNET_MIN_CPU": "1",
@@ -80,17 +80,29 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
                     "NIXBUILDNET_MIN_MEM": "128",
                     "NIXBUILDNET_MAX_MEM": "128",
                 }
+                probe_keys.append((system, feature))
                 probes.append(
-                    _send_probe(store, name, system, feature, args, extra_env)
+                    _send_probe(
+                        store,
+                        f"probe-feature-{feature}",
+                        system,
+                        feature,
+                        args,
+                        extra_env,
+                    )
                 )
 
         results = await asyncio.gather(*probes)
-        system_features = {feature for feature, (_, ok) in zip(to_probe, results) if ok}
-        store.system_features = system_features
+        feature_matrix: dict[str, set[str]] = {s: set() for s in self.systems}
+        for (system, feature), (_, ok) in zip(probe_keys, results):
+            if ok:
+                feature_matrix[system].add(feature)
+
+        store.feature_matrix = feature_matrix
 
         log.info(
             "features_probed",
             store_id=store.id,
-            system_features=sorted(store.system_features),
+            feature_matrix={k: sorted(v) for k, v in feature_matrix.items()},
         )
-        return ProbeFeaturesResponse(system_features=system_features)
+        return ProbeFeaturesResponse(feature_matrix=feature_matrix)

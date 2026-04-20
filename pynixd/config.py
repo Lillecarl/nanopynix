@@ -17,6 +17,25 @@ if TYPE_CHECKING:
     from .store import Store
 
 
+def _feature_matrix_from_config(
+    systems: set[str] | None, system_features: set[str]
+) -> dict[str, set[str]] | None:
+    """Convert config-level systems + system_features into a feature_matrix.
+
+    Returns None if both are empty/default (meaning: probe at startup).
+    """
+    if systems and system_features:
+        return {s: set(system_features) for s in systems}
+    if systems:
+        return {s: set() for s in systems}
+    if system_features:
+        raise ValueError(
+            "system_features specified without systems; "
+            "specify systems to create a feature_matrix"
+        )
+    return None
+
+
 class LocalSocketStoreSpec(BaseModel):
     type: Literal["local-socket"] = "local-socket"
     id: str | None = None
@@ -34,14 +53,15 @@ class LocalSocketStoreSpec(BaseModel):
     def to_store(self) -> Store:
         from .store import LocalSocketStore
 
+        feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return LocalSocketStore(
             id=self.id,
             store_path=self.store_path,
             socket_path=self.socket_path,
             max_builds=self.max_builds,
             max_transfers=self.max_transfers,
-            systems=self.systems,
-            system_features=self.system_features,
+            feature_matrix=feature_matrix,
+            probe=feature_matrix is None,
             nix_bin=self.nix_bin,
             extra_env=self.extra_env,
             extra_args=self.extra_args,
@@ -65,13 +85,14 @@ class LocalSubprocessStoreSpec(BaseModel):
     def to_store(self) -> Store:
         from .store import LocalSocketStore
 
+        feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return LocalSocketStore(
             id=self.id,
             store_path=self.store_path,
             max_builds=self.max_builds,
             max_transfers=self.max_transfers,
-            systems=self.systems,
-            system_features=self.system_features,
+            feature_matrix=feature_matrix,
+            probe=feature_matrix is None,
             nix_bin=self.nix_bin,
             extra_env=self.extra_env,
             extra_args=self.extra_args,
@@ -96,6 +117,7 @@ class SSHSubprocessStoreSpec(BaseModel):
     def to_store(self) -> Store:
         from .store import SSHSubprocessStore
 
+        feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return SSHSubprocessStore(
             host=self.host,
             id=self.id,
@@ -104,8 +126,8 @@ class SSHSubprocessStoreSpec(BaseModel):
             store_path=self.store_path,
             max_builds=self.max_builds,
             max_transfers=self.max_transfers,
-            systems=self.systems,
-            system_features=self.system_features,
+            feature_matrix=feature_matrix,
+            probe=feature_matrix is None,
             monitor=self.monitor,
             nix_bin=self.nix_bin,
         )
@@ -127,6 +149,7 @@ class SSHSocketStoreSpec(BaseModel):
     def to_store(self) -> Store:
         from .store import SSHSocketStore
 
+        feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return SSHSocketStore(
             host=self.host,
             id=self.id,
@@ -135,8 +158,8 @@ class SSHSocketStoreSpec(BaseModel):
             socket_path=self.socket_path,
             max_builds=self.max_builds,
             max_transfers=self.max_transfers,
-            systems=self.systems,
-            system_features=self.system_features,
+            feature_matrix=feature_matrix,
+            probe=feature_matrix is None,
             monitor=self.monitor,
         )
 
