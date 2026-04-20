@@ -106,6 +106,8 @@ class Store(ABC):
         idle_ttl: float = _DEFAULT_IDLE_TTL,
         systems: set[str] | None = None,
         system_features: set[str] | None = None,
+        probe_systems: bool = True,
+        probe_features: bool = True,
     ) -> None:
         self.id = id
         self.store_path = store_path
@@ -122,6 +124,8 @@ class Store(ABC):
         self.sweep_task: asyncio.Task[None] | None = None
         self.systems = systems or None
         self.system_features = system_features or None
+        self._probe_systems = probe_systems
+        self._probe_features = probe_features
         self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
             maxsize=10000, ttl=300
@@ -414,6 +418,10 @@ class Store(ABC):
 
         Concurrent callers block on ``_probe_event`` while the first caller
         does the work.  The state transitions NOT_PROBED -> PROBING -> PROBED.
+
+        When ``_probe_systems`` and ``_probe_features`` are both False,
+        build-based probing is skipped and the store is marked probed
+        immediately (using any pre-supplied systems/system_features).
         """
         if self.probe_state == ProbeState.PROBED:
             return
@@ -424,23 +432,35 @@ class Store(ABC):
 
         self.probe_state = ProbeState.PROBING
 
-        from .operations.probe_features import ProbeFeaturesRequest
-        from .operations.probe_systems import ProbeSystemsRequest
-        from .system_features import KNOWN_FEATURES, PROBE_SYSTEMS
+        if self._probe_systems:
+            from .operations.probe_systems import ProbeSystemsRequest
+            from .system_features import PROBE_SYSTEMS
 
-        self.systems = (
-            await ProbeSystemsRequest(
-                systems=set(self.systems or PROBE_SYSTEMS)
-            ).execute(self)
-        ).systems
+            self.systems = (
+                await ProbeSystemsRequest(
+                    systems=set(self.systems or PROBE_SYSTEMS)
+                ).execute(self)
+            ).systems
+        elif self.systems is None:
+            from .system_features import PROBE_SYSTEMS
 
-        probe_system = next(iter(self.systems), None) or "x86_64-linux"
-        self.system_features = (
-            await ProbeFeaturesRequest(
-                probe_system=probe_system,
-                system_features=(self.system_features or set()) | KNOWN_FEATURES,
-            ).execute(self)
-        ).system_features
+            self.systems = set(PROBE_SYSTEMS)
+
+        if self._probe_features:
+            from .operations.probe_features import ProbeFeaturesRequest
+            from .system_features import KNOWN_FEATURES
+
+            probe_system = next(iter(self.systems), None) or "x86_64-linux"
+            self.system_features = (
+                await ProbeFeaturesRequest(
+                    probe_system=probe_system,
+                    system_features=(self.system_features or set()) | KNOWN_FEATURES,
+                ).execute(self)
+            ).system_features
+        elif self.system_features is None:
+            from .system_features import KNOWN_FEATURES
+
+            self.system_features = set(KNOWN_FEATURES)
 
         self.probe_state = ProbeState.PROBED
         self._probe_event.set()
