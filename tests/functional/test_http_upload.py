@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from pathlib import Path
 
@@ -16,13 +17,21 @@ from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
+    SESSION_HTTP_USER,
+    SESSION_HTTP_PASS,
     STORE_PREFIX,
+    SESSION_STORE_PREFIX,
     get_test_store_kwargs,
     run_subproc,
     rmtree_robust,
 )
 
 log = structlog.get_logger(__name__)
+
+HTTP_AUTH_HEADER = (
+    "Basic "
+    + base64.b64encode(f"{SESSION_HTTP_USER}:{SESSION_HTTP_PASS}".encode()).decode()
+)
 
 
 async def get_hello_path() -> StorePath:
@@ -56,21 +65,22 @@ async def get_no_refs_path() -> StorePath:
 
 
 @pytest.mark.timeout(60)
-async def test_http_upload(tmp_path: Path) -> None:
+async def test_http_upload(
+    pynixd_server: Server,
+) -> None:
     """Test uploading a path to the HTTP cache via PUT using aiohttp directly.
 
     Store operations triggered:
     - None: This test only checks HTTP upload functionality without triggering explicit Store operations
     """
-    # 1. Source store (root) has the path
-    root_store = LocalSocketStore(
-        id="root", store_path=Path("/"), **get_test_store_kwargs()
-    )
     # Use no-refs path for direct PUT to avoid dependency issues
     path = await get_no_refs_path()
     hash_part = path.hash_part()
 
-    # Get its NAR and narinfo
+    # Get its NAR and narinfo from root store
+    root_store = LocalSocketStore(
+        id="root", store_path=Path("/"), **get_test_store_kwargs()
+    )
     info_resp = await root_store.execute(QueryPathInfoRequest(path=path))
     assert info_resp.valid and info_resp.info
     vinfo = info_resp.info.with_path(path)
@@ -88,89 +98,57 @@ async def test_http_upload(tmp_path: Path) -> None:
 
     narinfo = vinfo.to_narinfo()
 
-    # 2. Target store (temp) is empty
-    target_store_path = STORE_PREFIX / "http-upload-target-direct"
-    rmtree_robust(target_store_path)
-    os.makedirs(target_store_path, exist_ok=True)
-    target_store = LocalSocketStore(
-        id="target", store_path=target_store_path, **get_test_store_kwargs()
-    )
+    base_url = f"http://127.0.0.1:{pynixd_server.http_bound_port}"
 
-    # Enable uploads in pynixd
-    upload_dir = tmp_path / "uploads"
-    upload_dir.mkdir()
+    async with aiohttp.ClientSession() as session:
+        headers = {"Authorization": HTTP_AUTH_HEADER}
+        # 3. PUT NAR
+        nar_hash_part = vinfo.nar_hash.split(":")[-1]
+        log.info("uploading_nar", hash=nar_hash_part, size=len(nar_data))
+        async with session.put(
+            f"{base_url}/nar/{nar_hash_part}.nar", data=nar_data, headers=headers
+        ) as resp:
+            assert resp.status == 200
+            assert await resp.text() == "ok\n"
 
-    async with Server(
-        local_store=target_store, http_port=0, http_upload_dir=upload_dir
-    ) as server:
-        base_url = f"http://127.0.0.1:{server.http_bound_port}"
+        # 4. PUT .narinfo
+        log.info("uploading_narinfo", hash=hash_part)
+        async with session.put(
+            f"{base_url}/{hash_part}.narinfo", data=narinfo, headers=headers
+        ) as resp:
+            assert resp.status == 200
+            assert await resp.text() == "ok\n"
 
-        async with aiohttp.ClientSession() as session:
-            # 3. PUT NAR
-            nar_hash_part = vinfo.nar_hash.split(":")[-1]
-            log.info("uploading_nar", hash=nar_hash_part, size=len(nar_data))
-            async with session.put(
-                f"{base_url}/nar/{nar_hash_part}.nar", data=nar_data
-            ) as resp:
-                assert resp.status == 200
-                assert await resp.text() == "ok\n"
-
-            # 4. PUT .narinfo
-            log.info("uploading_narinfo", hash=hash_part)
-            async with session.put(
-                f"{base_url}/{hash_part}.narinfo", data=narinfo
-            ) as resp:
-                assert resp.status == 200
-                assert await resp.text() == "ok\n"
-
-        # 5. Verify it now exists in the target store
-        info_resp = await target_store.execute(QueryPathInfoRequest(path=path))
-        assert info_resp.valid, (
-            f"Path {path} should be valid in target store after upload"
-        )
+    # 5. Verify it now exists in the local store (HTTP uploads go to local_store)
+    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=path))
+    assert info_resp.valid, f"Path {path} should be valid in local store after upload"
 
 
 @pytest.mark.timeout(60)
-async def test_nix_copy_to_http(tmp_path: Path) -> None:
+async def test_nix_copy_to_http(
+    pynixd_server: Server,
+) -> None:
     """Test copying a path to the HTTP cache using 'nix copy --to http://...'.
 
     Store operations triggered:
     - None: This test only checks HTTP upload functionality via nix copy without triggering explicit Store operations
     """
-    # 1. Source store (root) has the path
     # Use hello as requested by user - nix copy handles the closure
     path = await get_hello_path()
 
-    # 2. Target store (temp) is empty
-    target_store_path = STORE_PREFIX / "nix-copy-to-http-target"
-    rmtree_robust(target_store_path)
-    os.makedirs(target_store_path, exist_ok=True)
-    target_store = LocalSocketStore(
-        id="target", store_path=target_store_path, **get_test_store_kwargs()
-    )
+    # 3. Use 'nix copy' to upload
+    # Nix copy expects URL with embedded credentials for basic auth
+    auth_url = f"http://{SESSION_HTTP_USER}:{SESSION_HTTP_PASS}@127.0.0.1:{pynixd_server.http_bound_port}"
+    cmd = [
+        str(NIX_BIN),
+        "copy",
+        "--to",
+        auth_url,
+        str(path),
+    ]
+    rc, stdout, stderr, _ = await run_subproc(cmd)
+    assert rc == 0, f"nix copy failed:\n{stderr}"
 
-    # Enable uploads in pynixd
-    upload_dir = tmp_path / "uploads"
-    upload_dir.mkdir()
-
-    async with Server(
-        local_store=target_store, http_port=0, http_upload_dir=upload_dir
-    ) as server:
-        base_url = f"http://127.0.0.1:{server.http_bound_port}"
-
-        # 3. Use 'nix copy' to upload
-        cmd = [
-            str(NIX_BIN),
-            "copy",
-            "--to",
-            base_url,
-            str(path),
-        ]
-        rc, stdout, stderr, _ = await run_subproc(cmd)
-        assert rc == 0, f"nix copy failed:\n{stderr}"
-
-        # 4. Verify it now exists in the target store
-        info_resp = await target_store.execute(QueryPathInfoRequest(path=path))
-        assert info_resp.valid, (
-            f"Path {path} should be valid in target store after nix copy"
-        )
+    # 4. Verify it now exists in the local store (HTTP uploads go to local_store)
+    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=path))
+    assert info_resp.valid, f"Path {path} should be valid in local store after nix copy"

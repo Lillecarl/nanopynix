@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
@@ -11,85 +10,59 @@ import pytest
 import structlog
 
 from pynixd import Server
-from pynixd.store import LocalSocketStore
 from tests.conftest import (
     NIX_BIN,
-    STORE_PREFIX,
-    get_test_store_kwargs,
     run_subproc,
-    rmtree_robust,
 )
 
 log = structlog.get_logger(__name__)
 
 
 @pytest.fixture
-async def query_env(tmp_path: Path):
+async def query_env(pynixd_server: Server):
     """Set up a pynixd server with some initial paths."""
-    pynixd_local_path = STORE_PREFIX / "pynixd-local-queries"
-    pynixd_builder_path = STORE_PREFIX / "pynixd-builder-queries"
-    rmtree_robust(pynixd_local_path)
-    rmtree_robust(pynixd_builder_path)
+    uri = pynixd_server.uri()
 
-    pynixd_local = LocalSocketStore(
-        id="pynixd-local",
-        store_path=pynixd_local_path,
-        **get_test_store_kwargs(),
-    )
-    pynixd_builder = LocalSocketStore(
-        id="pynixd-builder",
-        store_path=pynixd_builder_path,
-        **get_test_store_kwargs(),
-    )
+    test_nix = Path("tests/nix")
+    cmd = [
+        NIX_BIN,
+        "build",
+        "--eval-store",
+        "auto",
+        "--store",
+        uri,
+        "--impure",
+        "--file",
+        test_nix,
+        "minimal.leaf",
+        "--no-link",
+    ]
+    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+    assert rc == 0, f"Initial build failed:\n{stdboth}"
 
-    async with Server(
-        local_store=pynixd_local, stores={"builder": pynixd_builder}, ssh_port=0
-    ) as server:
-        username = os.environ.get("USER", "root")
-        uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
+    cmd = [
+        NIX_BIN.parent / "nix-instantiate",
+        "--impure",
+        test_nix,
+        "-A",
+        "minimal.leaf",
+    ]
+    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+    assert rc == 0
+    drv_path = stdout.strip()
 
-        # Populate with a simple build
-        test_nix = Path("tests/nix")
-        cmd = [
-            NIX_BIN,
-            "build",
-            "--eval-store",
-            "auto",
-            "--store",
-            uri,
-            "--impure",
-            "--file",
-            test_nix,
-            "minimal.leaf",
-            "--no-link",
-        ]
-        rc, stdout, stderr, stdboth = await run_subproc(cmd)
-        assert rc == 0, f"Initial build failed:\n{stdboth}"
+    cmd = [
+        NIX_BIN.parent / "nix-store",
+        "-q",
+        "--outputs",
+        drv_path,
+    ]
+    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+    assert rc == 0
+    out_path = stdout.strip()
+    assert out_path.startswith("/nix/store/"), f"Unexpected path: {out_path}"
 
-        # Get expected output path locally
-        cmd = [
-            NIX_BIN.parent / "nix-instantiate",
-            "--impure",
-            test_nix,
-            "-A",
-            "minimal.leaf",
-        ]
-        rc, stdout, stderr, stdboth = await run_subproc(cmd)
-        assert rc == 0
-        drv_path = stdout.strip()
-
-        cmd = [
-            NIX_BIN.parent / "nix-store",
-            "-q",
-            "--outputs",
-            drv_path,
-        ]
-        rc, stdout, stderr, stdboth = await run_subproc(cmd)
-        assert rc == 0
-        out_path = stdout.strip()
-        assert out_path.startswith("/nix/store/"), f"Unexpected path: {out_path}"
-
-        yield server, uri, out_path
+    yield pynixd_server, uri, out_path
 
 
 async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> None:

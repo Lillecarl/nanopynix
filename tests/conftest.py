@@ -491,11 +491,24 @@ def nix_env() -> dict[str, str]:
 
 SESSION_SSH_PORT = 0
 SESSION_HTTP_PORT = 0
+SESSION_HTTP_USER = "testuser"
+SESSION_HTTP_PASS = "testpass"
+SESSION_NIX_CONFIG = NixConfig.for_test_store(
+    experimental_features=(
+        "nix-command",
+        "flakes",
+        "read-only-local-store",
+        "ca-derivations",
+        "dynamic-derivations",
+        "recursive-nix",
+    ),
+)
 
 
 @pytest.fixture(scope="session", autouse=True)
 async def pynixd_server(
     request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> AsyncGenerator[Server, None]:
     """Session-scoped shared pynixd server (autouse).
 
@@ -523,13 +536,15 @@ async def pynixd_server(
     local_store = LocalSocketStore(
         id="local",
         store_path=local_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG),
     )
     builder_store = LocalSocketStore(
         id="builder",
         store_path=builder_path,
-        **get_test_store_kwargs(),
+        **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG),
     )
+
+    upload_dir = tmp_path_factory.mktemp("http-uploads")
 
     async with Server(
         local_store=local_store,
@@ -537,5 +552,8 @@ async def pynixd_server(
         ssh_port=SESSION_SSH_PORT,
         http_port=SESSION_HTTP_PORT,
         unix_path=socket_path,
+        http_upload_dir=upload_dir,
+        http_user=SESSION_HTTP_USER,
+        http_pass=SESSION_HTTP_PASS,
     ) as server:
         yield server

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pyinstrument
@@ -14,6 +13,7 @@ from pynixd import Server
 from pynixd.store import LocalSocketStore
 from tests.conftest import (
     NIX_BIN,
+    SESSION_STORE_PREFIX,
     STORE_PREFIX,
     get_test_store_kwargs,
     run_subproc,
@@ -38,34 +38,12 @@ def _ca_test_store_kwargs(**overrides) -> dict:
 
 
 @pytest.fixture
-async def ca_env(tmp_path: Path):
+async def ca_env(pynixd_server: Server):
     """Set up a pynixd server with CA-derivations enabled."""
-    pynixd_local_path = STORE_PREFIX / "pynixd-local-ca"
-    pynixd_builder_path = STORE_PREFIX / "pynixd-builder-ca"
-    rmtree_robust(pynixd_local_path)
-    rmtree_robust(pynixd_builder_path)
-
-    pynixd_local = LocalSocketStore(
-        id="pynixd-local-ca",
-        store_path=pynixd_local_path,
-        **_ca_test_store_kwargs(),
-    )
-    pynixd_builder = LocalSocketStore(
-        id="pynixd-builder-ca",
-        store_path=pynixd_builder_path,
-        **_ca_test_store_kwargs(),
-    )
-
-    async with Server(
-        local_store=pynixd_local,
-        stores={"builder": pynixd_builder},
-        ssh_port=0,
-    ) as server:
-        username = os.environ.get("USER", "root")
-        uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
-        yield server, uri
+    yield pynixd_server, pynixd_server.uri()
 
 
+@pytest.mark.no_pynixd
 async def test_ca_simple_build_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -103,6 +81,7 @@ async def test_ca_simple_build_root_store(
         await store.close()
 
 
+@pytest.mark.no_pynixd
 async def test_ca_multi_output_build_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -142,6 +121,7 @@ async def test_ca_multi_output_build_root_store(
         await store.close()
 
 
+@pytest.mark.no_pynixd
 async def test_ca_depends_on_ca_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -179,6 +159,7 @@ async def test_ca_depends_on_ca_root_store(
         await store.close()
 
 
+@pytest.mark.no_pynixd
 async def test_non_ca_depends_on_ca_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -431,6 +412,7 @@ async def test_ca_query_derivation_output_map_via_pynixd(
         assert "ca" in data, f"Expected 'ca' field in {data}"
 
 
+@pytest.mark.no_pynixd
 async def test_ca_query_derivation_output_map_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -572,34 +554,9 @@ DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
 
 
 @pytest.fixture
-async def dyn_env(tmp_path: Path):
+async def dyn_env(pynixd_server: Server):
     """Set up a pynixd server with dynamic-derivations enabled."""
-    pynixd_local_path = STORE_PREFIX / "pynixd-local-dyn"
-    pynixd_builder_path = STORE_PREFIX / "pynixd-builder-dyn"
-    rmtree_robust(pynixd_local_path)
-    rmtree_robust(pynixd_builder_path)
-
-    dyn_kwargs = get_test_store_kwargs(nix_config=DYN_NIX_CONFIG)
-
-    pynixd_local = LocalSocketStore(
-        id="pynixd-local-dyn",
-        store_path=pynixd_local_path,
-        **dyn_kwargs,
-    )
-    pynixd_builder = LocalSocketStore(
-        id="pynixd-builder-dyn",
-        store_path=pynixd_builder_path,
-        **dyn_kwargs,
-    )
-
-    async with Server(
-        local_store=pynixd_local,
-        stores={"builder": pynixd_builder},
-        ssh_port=0,
-    ) as server:
-        username = os.environ.get("USER", "root")
-        uri = f"ssh-ng://{username}@127.0.0.1:{server.port}"
-        yield server, uri
+    yield pynixd_server, pynixd_server.uri()
 
 
 async def test_dynamic_drv_producing_via_pynixd(
@@ -654,7 +611,7 @@ async def test_dynamic_drv_producing_via_pynixd(
     assert producing_out.endswith(".drv"), f"Expected .drv output, got: {producing_out}"
 
     # Verify it's parseable as a derivation
-    pynixd_local_path = STORE_PREFIX / "pynixd-local-dyn"
+    pynixd_local_path = SESSION_STORE_PREFIX / "local"
     full_path = pynixd_local_path / producing_out.lstrip("/")
     if full_path.exists():
         content = full_path.read_text()
@@ -697,6 +654,7 @@ async def test_dynamic_drv_producing_via_pynixd(
     log.info("producingDrv_via_pynixd", output=producing_out)
 
 
+@pytest.mark.no_pynixd
 async def test_text_hashed_ca_build_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:

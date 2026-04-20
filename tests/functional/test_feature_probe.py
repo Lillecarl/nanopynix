@@ -45,9 +45,8 @@ async def test_feature_probe_in_memory() -> None:
     )
     await store.ensure_daemon()
 
-    await store.execute(ProbeSystemsRequest())
-    await store.execute(ProbeFeaturesRequest())
-
+    await store.probe()
+    
     assert store.systems is not None
     assert store.system_features is not None
     assert "x86_64-linux" in store.systems
@@ -59,6 +58,8 @@ async def test_feature_probe_in_memory() -> None:
 
 
 @pytest.mark.timeout(120)
+@pytest.mark.nixbuild
+@pytest.mark.skip(reason="requires nixbuild.net; pass -m nixbuild to run")
 async def test_feature_probe_nixbuild_net() -> None:
     store = SSHSubprocessStore(
         host="eu.nixbuild.net",
@@ -69,8 +70,7 @@ async def test_feature_probe_nixbuild_net() -> None:
         max_transfers=10,
     )
 
-    await store.execute(ProbeSystemsRequest())
-    await store.execute(ProbeFeaturesRequest())
+    await store.probe()
 
     assert store.systems is not None
     assert store.system_features is not None
