@@ -422,12 +422,12 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
             failed_backends=[],
         )
 
-        ranked = scheduler.rank_stores(build)
+        ranked = scheduler.allocator.rank_stores(build)
         store_ids = [rs.store_id for rs in ranked]
         assert "busy" not in store_ids
         assert "free" in store_ids
 
         pynixd_busy._cpu_util = CpuUtil(utilization=98.0, cores=2.0, throttled_pct=5.0)
-        ranked2 = scheduler.rank_stores(build)
+        ranked2 = scheduler.allocator.rank_stores(build)
         store_ids2 = [rs.store_id for rs in ranked2]
         assert "busy" in store_ids2
