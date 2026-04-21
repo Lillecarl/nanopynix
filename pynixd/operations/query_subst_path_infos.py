@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
 from ..wire import NixReader, NixWriter
+from ..connection import ClientConn
 from .base import OpRequest, OpResponse, OperationLogs, SubstitutablePathInfo
 
 
@@ -19,7 +20,13 @@ class SubstitutablePathInfoEntry:
 class QuerySubstitutablePathInfosResponse(OpResponse):
     entries: list[SubstitutablePathInfoEntry] = field(default_factory=list)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         n = await reader.read_uint64()
@@ -50,7 +57,13 @@ class QuerySubstitutablePathInfosRequest(
     is_query: ClassVar[bool] = True
     items: dict[str, str] = field(default_factory=dict)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         n = await reader.read_uint64()
         self.items = {}

@@ -23,9 +23,15 @@ if TYPE_CHECKING:
 
 @dataclass
 class SetOptionsResponse(OpResponse):
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        self.logs = await OperationLogs().from_reader(reader, client=client, buffer=buffer_logs)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -53,7 +59,13 @@ class SetOptionsRequest(OpRequest[SetOptionsResponse]):
     use_substitutes: int = 0
     overrides: dict[str, str] = field(default_factory=dict)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.keep_failed = await reader.read_uint64()
         self.keep_going = await reader.read_uint64()

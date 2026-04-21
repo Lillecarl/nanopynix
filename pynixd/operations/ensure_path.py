@@ -7,6 +7,7 @@ from typing import ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
+from ..connection import ClientConn
 from .base import OpRequest, OpResponse, OperationLogs
 
 
@@ -14,7 +15,13 @@ from .base import OpRequest, OpResponse, OperationLogs
 class EnsurePathResponse(OpResponse):
     value: int = 0
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         self.value = await reader.read_uint64()
@@ -34,7 +41,13 @@ class EnsurePathRequest(OpRequest[EnsurePathResponse]):
     response_type: ClassVar[type[OpResponse]] = EnsurePathResponse
     path: StorePath = StorePath("")
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.path = await reader.read_string(StorePath)
         self.logger.debug("from_reader", path=self.path)

@@ -77,17 +77,29 @@ class ClientConn:
 
     async def drain_loop(self) -> None:
         """Consume stderr messages from the queue and write to client."""
+        from .operations.base import ByteCollector
+
         while True:
             msg = await self.queue.get()
             try:
+                # Use a buffer to batch multiple messages into a single write() call.
+                # This avoids O(N^2) performance issues in asyncio transport's
+                # get_write_buffer_size() when the buffer contains many small pieces.
+                buf = ByteCollector()
                 if msg is not None:
-                    msg.to_writer(self.w)
+                    msg.to_writer(buf)
+
                 # Batch: grab any additional messages already queued
                 while not self.queue.empty():
                     extra = self.queue.get_nowait()
                     if extra is not None:
-                        extra.to_writer(self.w)
+                        extra.to_writer(buf)
                     self.queue.task_done()
+
+                data = buf.getvalue()
+                if data:
+                    self.w.write(data)
+
                 # Flush buffered writes to the socket
                 await self.w.drain()
             finally:
@@ -182,7 +194,14 @@ class Connection:
         await request.to_writer(self.w, self.version)
         await self.w.drain()
 
-        response = await response_type().from_reader(self.r, self.version)
+        # If client is provided, we stream logs directly to them and don't buffer
+        # locally to save memory on large builds.
+        response = await response_type().from_reader(
+            self.r,
+            self.version,
+            client=client,
+            buffer_logs=(client is None),
+        )
 
         return cast(Resp, response)
 

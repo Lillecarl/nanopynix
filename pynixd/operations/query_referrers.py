@@ -7,6 +7,7 @@ from typing import ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
+from ..connection import ClientConn
 from .base import OpRequest, OpResponse, OperationLogs
 
 
@@ -14,7 +15,13 @@ from .base import OpRequest, OpResponse, OperationLogs
 class QueryReferrersResponse(OpResponse):
     paths: set[StorePath] = field(default_factory=set)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         self.paths = await reader.read_string_set(StorePath)
@@ -35,7 +42,13 @@ class QueryReferrersRequest(OpRequest[QueryReferrersResponse]):
     is_query: ClassVar[bool] = True
     path: StorePath = StorePath("")
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.path = await reader.read_string(StorePath)
         self.logger.debug("from_reader", path=self.path)

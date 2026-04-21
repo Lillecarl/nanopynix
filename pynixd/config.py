@@ -234,7 +234,6 @@ class PynixdSettings(BaseSettings):
     admin_users: set[str] = Field(default_factory=set)
 
     idle_timeout: int | None = None
-    local_building: bool = False
 
     @classmethod
     def settings_customise_sources(

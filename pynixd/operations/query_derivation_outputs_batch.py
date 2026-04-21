@@ -11,7 +11,7 @@ from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from ..drv_parser import read_drv_file
-from .base import OpRequest, OpResponse, OperationLogs
+from .base import OpRequest, OpResponse
 
 QUERY_DERIVATION_OUTPUTS_BATCH = """
 SELECT vp_drv.path, do.id, do.path
@@ -35,9 +35,15 @@ class DerivationOutputsBatchResponse(OpResponse):
     def is_not_found(self) -> bool:
         return not self.outputs
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
         n = await reader.read_uint64()
         self.outputs = {}
         for _ in range(n):

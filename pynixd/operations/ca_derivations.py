@@ -32,9 +32,15 @@ if TYPE_CHECKING:
 
 @dataclass
 class RegisterDrvOutputResponse(OpResponse):
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        self.logs = await OperationLogs().from_reader(reader, client=client, buffer=buffer_logs)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -55,7 +61,13 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     response_type: ClassVar[type[OpResponse]] = RegisterDrvOutputResponse
     realisation: dict = field(default_factory=dict)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         realisation_json = await reader.read_string()
         self.realisation = json.loads(realisation_json)
@@ -94,9 +106,15 @@ class QueryRealisationResponse(OpResponse):
 
     realisations: list[dict] = field(default_factory=list)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        self.logs = await OperationLogs().from_reader(reader, client=client, buffer=buffer_logs)
         n = await reader.read_uint64()
         self.realisations = []
         for _ in range(n):
@@ -123,7 +141,13 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
     is_query: ClassVar[bool] = True
     drv_output: DrvOutput = field(default_factory=DrvOutput)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         raw = await reader.read_string()
         self.drv_output = DrvOutput(raw)

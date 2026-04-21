@@ -10,6 +10,8 @@ from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, OperationLogs, RequestContext, Role
 
 if TYPE_CHECKING:
+    from ..connection import ClientConn
+
     pass
 
 
@@ -17,7 +19,13 @@ if TYPE_CHECKING:
 class OptimiseStoreResponse(OpResponse):
     value: int = 0
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         self.value = await reader.read_uint64()
@@ -36,7 +44,13 @@ class OptimiseStoreRequest(OpRequest[OptimiseStoreResponse]):
     op: ClassVar[int] = 34
     response_type: ClassVar[type[OpResponse]] = OptimiseStoreResponse
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logger.debug("from_reader")
         return self

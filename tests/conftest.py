@@ -592,7 +592,7 @@ async def pynixd_server(
     # Check if any test in the session needs a session server.
     # Actually, autouse session fixtures can't easily check markers of the current test.
     # But we can check the command line or just let it run.
-    
+
     # Wait! I'll make it NOT autouse, but requested by functional tests.
     # Or just let it run but don't bind to it if not needed.
     from pynixd import Server

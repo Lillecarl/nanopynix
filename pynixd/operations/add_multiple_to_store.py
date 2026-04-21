@@ -7,18 +7,24 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
-from .base import OperationLogs, OpRequest, OpResponse, RequestContext, ValidPathInfo
+from .base import OpRequest, OpResponse, RequestContext, ValidPathInfo
 from ..stderr import StderrNext
 
 if TYPE_CHECKING:
-    pass
+    from ..connection import ClientConn
 
 
 @dataclass
 class AddMultipleToStoreResponse(OpResponse):
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -63,16 +69,18 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
             # We must run forward_stream and the response reader concurrently
             # because the backend might send logs while we are still sending data.
             # If we don't read the logs, the backend's output buffer fills and it blocks.
-            
+
             # Use a task to read the response (including logs)
             resp_task = asyncio.create_task(
                 AddMultipleToStoreResponse().from_reader(conn.r, conn.version)
             )
-            
+
             infos = await self.forward_stream(ctx.proxy.r, conn.w)
             resp = await resp_task
-            resp.logs.messages.append(StderrNext("pynixd: AddMultipleToStore forwarding complete"))
-            
+            resp.logs.messages.append(
+                StderrNext("pynixd: AddMultipleToStore forwarding complete")
+            )
+
             ctx.proxy.local_store.add_path_infos(infos)
             ctx.proxy.local_store.tracker.add_known_paths({i.path for i in infos})
         return resp

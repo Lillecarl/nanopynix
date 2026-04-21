@@ -31,7 +31,13 @@ log = structlog.get_logger(__name__)
 class ProbeFeaturesResponse(OpResponse):
     feature_matrix: dict[str, set[str]] = field(default_factory=dict)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

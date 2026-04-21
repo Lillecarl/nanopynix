@@ -216,8 +216,16 @@ class OperationLogs:
             msg.to_writer(writer)
         writer.write_uint64(wire.STDERR_LAST)
 
-    async def from_reader(self, reader: NixReader) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        client: ClientConn | None = None,
+        buffer: bool = True,
+    ) -> Self:
         """Read stderr messages until STDERR_LAST from reader.
+
+        If client is provided, messages are queued for real-time delivery.
+        If buffer is False, messages are NOT added to self.messages.
 
         Raises BackendError if a StderrError is received from the daemon,
         since the daemon sends no response payload after an error.
@@ -226,7 +234,10 @@ class OperationLogs:
         from ..stderr import StderrError, read_stream
 
         async for msg in read_stream(reader):
-            self.add(msg)
+            if client:
+                client.queue.put_nowait(msg)
+            if buffer:
+                self.add(msg)
             if isinstance(msg, StderrError):
                 raise BackendError(f"Daemon error ({msg.error_type}): {msg.msg}")
         return self
@@ -254,7 +265,13 @@ class OpResponse(ABC):
         return False
 
     @abstractmethod
-    async def from_reader(self, reader: NixReader, version: int) -> Self: ...
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self: ...
 
     @abstractmethod
     async def to_writer(self, writer: NixWriter, version: int) -> None: ...

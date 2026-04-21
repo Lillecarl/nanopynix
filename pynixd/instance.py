@@ -95,7 +95,7 @@ class Server:
                 last_activity = self._last_activity_at
                 if self.scheduler:
                     last_activity = max(last_activity, self.scheduler.last_activity_at)
-                    
+
                     pending = self.scheduler.queue.count(status="pending")
                     running = self.scheduler.queue.count(status="running")
                     if pending > 0 or running > 0:
@@ -145,7 +145,7 @@ class Server:
         """Remove a remote store, cleaning DB records and closing connections."""
         if self.scheduler:
             await self.scheduler.remove_store(store_id, drain_timeout=drain_timeout)
-        
+
         # Scheduler.remove_store already popped it from allocator/stores,
         # but we also pop from self.stores for consistency.
         store = self.stores.pop(store_id, None)

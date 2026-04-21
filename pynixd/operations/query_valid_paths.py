@@ -24,9 +24,15 @@ if TYPE_CHECKING:
 class QueryValidPathsResponse(OpResponse):
     paths: set[StorePath] = field(default_factory=set)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        self.logs = await OperationLogs().from_reader(reader, client=client, buffer=buffer_logs)
         self.paths = await reader.read_string_set(StorePath)
         return self
 
@@ -46,7 +52,13 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
     paths: set[StorePath] = field(default_factory=set)
     substitute: int = 0
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.paths = await reader.read_string_set(StorePath)
         self.substitute = 0

@@ -13,7 +13,6 @@ from pynixd.operations.sign_path_info import SignPathInfoRequest
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import (
-    OperationLogs,
     OpRequest,
     OpResponse,
     RequestContext,
@@ -31,9 +30,15 @@ class AddToStoreResponse(OpResponse):
 
     info: ValidPathInfo | None = None
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
         self.info = await ValidPathInfo().from_reader(reader)
         return self
 

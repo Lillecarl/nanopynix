@@ -144,7 +144,11 @@ class Store(ABC):
     @property
     def native_db(self) -> LocalStoreDB | None:
         """The local SQLite DB if it is the native database for this store root."""
-        if self.db is not None and self.db.store_path == self.store_path:
+        if (
+            self.db is not None
+            and self.db.active
+            and self.db.store_path == self.store_path
+        ):
             return self.db
         return None
 

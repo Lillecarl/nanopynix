@@ -9,6 +9,8 @@ from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, OperationLogs
 
 if TYPE_CHECKING:
+    from ..connection import ClientConn
+
     pass
 
 
@@ -16,7 +18,13 @@ if TYPE_CHECKING:
 class AddPermRootResponse(OpResponse):
     gc_root: str = ""
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         self.gc_root = await reader.read_string()
@@ -37,7 +45,13 @@ class AddPermRootRequest(OpRequest[AddPermRootResponse]):
     store_path: str = ""
     gc_root: str = ""
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.store_path = await reader.read_string()
         self.gc_root = await reader.read_string()

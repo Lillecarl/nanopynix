@@ -8,7 +8,7 @@ import pytest
 import structlog
 
 from pynixd.operations.is_valid_path import IsValidPathRequest
-from pynixd.store import LocalSocketStore, Store
+from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,

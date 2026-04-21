@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs
+from .base import OpRequest, OpResponse
 
 QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
 
@@ -20,9 +20,15 @@ if TYPE_CHECKING:
 class QueryAllValidPathsResponse(OpResponse):
     paths: set[StorePath] = field(default_factory=set)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
         self.paths = await reader.read_string_set(StorePath)
         return self
 

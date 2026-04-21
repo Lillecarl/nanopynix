@@ -8,6 +8,7 @@ from typing import ClassVar, Self
 from ..derived_path import DerivedPath
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
+from ..connection import ClientConn
 from .base import OpRequest, OpResponse, OperationLogs
 
 
@@ -19,7 +20,13 @@ class QueryMissingResponse(OpResponse):
     download_size: int = 0
     nar_size: int = 0
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(reader)
         self.will_build = await reader.read_string_set(StorePath)
@@ -53,7 +60,13 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
     is_query: ClassVar[bool] = True
     derived_paths: set[DerivedPath] = field(default_factory=set)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.derived_paths = await reader.read_string_set(DerivedPath)
         self.logger.debug("from_reader", derived_paths=self.derived_paths)

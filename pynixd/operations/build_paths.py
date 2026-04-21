@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 
 from ..derived_path import DerivedPath
+from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
     BuildMode,
     KeyedBuildResult,
-    OperationLogs,
     OpRequest,
     OpResponse,
     RequestContext,
 )
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
 
 # ── BuildPaths ───────────────────────────────────────────────────────
 
@@ -24,9 +27,15 @@ from .base import (
 class BuildPathsResponse(OpResponse):
     value: int = 0
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
         self.value = await reader.read_uint64()
         self.logger.debug("from_reader", value=self.value)
         return self
@@ -67,9 +76,20 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 
         await self.from_reader(ctx.proxy.r, ctx.version)
 
-        if ctx.proxy.scheduler is None:
+        # Bypass scheduler if no remote stores are configured (simple proxy mode)
+        if ctx.proxy.scheduler is None or not ctx.proxy.scheduler.stores:
             self.logger.debug("handle_local_mode_fallback")
             result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
+
+            # Track newly built paths
+            if isinstance(result, BuildPathsWithResultsResponse):
+                for kr in result.results:
+                    if kr.result.status == 0:
+                        for output in kr.result.built_outputs.values():
+                            ctx.proxy.local_store.tracker.add_known_path(
+                                StorePath(output["outPath"]).with_store_prefix()
+                            )
+
             self.logger.debug("responded_op")
             return result
 
@@ -94,9 +114,15 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 class BuildPathsWithResultsResponse(OpResponse):
     results: list[KeyedBuildResult] = field(default_factory=list)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
         n = await reader.read_uint64()
         self.results = []
         for _ in range(n):
@@ -142,9 +168,20 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
 
         await self.from_reader(ctx.proxy.r, ctx.version)
 
-        if ctx.proxy.scheduler is None:
+        # Bypass scheduler if no remote stores are configured (simple proxy mode)
+        if ctx.proxy.scheduler is None or not ctx.proxy.scheduler.stores:
             self.logger.debug("handle_local_mode_fallback")
             result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
+
+            # Track newly built paths
+            if isinstance(result, BuildPathsWithResultsResponse):
+                for kr in result.results:
+                    if kr.result.status == 0:
+                        for output in kr.result.built_outputs.values():
+                            ctx.proxy.local_store.tracker.add_known_path(
+                                StorePath(output["outPath"]).with_store_prefix()
+                            )
+
             self.logger.debug("responded_op")
             return result
 

@@ -59,11 +59,8 @@ class Scheduler:
         self.queue = BuildQueue()
         self.stores = stores
         self.local_store = local_store
-        
-        effective_settings = settings or PynixdSettings()
-        self.allocator = BuildAllocator(
-            stores, local_store, local_building=effective_settings.local_building
-        )
+
+        self.allocator = BuildAllocator(stores, local_store)
         self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
         self.dynamic_resolver = DynamicDerivationResolver(self, read_drv_fn=read_drv_fn)
         self.trigger_event = asyncio.Event()
@@ -96,7 +93,9 @@ class Scheduler:
         if not store:
             return
 
-        log.info("removing_store_dynamically", store_id=store_id, drain_timeout=drain_timeout)
+        log.info(
+            "removing_store_dynamically", store_id=store_id, drain_timeout=drain_timeout
+        )
         store.draining = True
         self.trigger()
 
@@ -116,11 +115,15 @@ class Scheduler:
         for build in pending:
             if build.assigned_store_id == store_id:
                 if build.build_task and not build.build_task.done():
-                    log.info("cancelling_build_for_store_removal", build_id=build.id, store_id=store_id)
+                    log.info(
+                        "cancelling_build_for_store_removal",
+                        build_id=build.id,
+                        store_id=store_id,
+                    )
                     build.build_task.cancel()
                 if build.transfer_task and not build.transfer_task.done():
                     build.transfer_task.cancel()
-                
+
                 # Requeue: reset state so it can be picked up by another store
                 build.reset_for_retry(store_id, build.transfer_task)
 
@@ -211,10 +214,16 @@ class Scheduler:
         if not pending:
             # Still update store metrics even if queue is empty
             for s in self.stores.values():
-                metrics.STORE_AVAILABLE_SLOTS.labels(store_id=s.id).set(s.available_slots)
-                metrics.STORE_HEALTHY.labels(store_id=s.id).set(1 if s.is_healthy else 0)
+                metrics.STORE_AVAILABLE_SLOTS.labels(store_id=s.id).set(
+                    s.available_slots
+                )
+                metrics.STORE_HEALTHY.labels(store_id=s.id).set(
+                    1 if s.is_healthy else 0
+                )
                 if s.cpu_util:
-                    metrics.STORE_CPU_UTILIZATION.labels(store_id=s.id).set(s.cpu_util.utilization)
+                    metrics.STORE_CPU_UTILIZATION.labels(store_id=s.id).set(
+                        s.cpu_util.utilization
+                    )
             return
 
         # 1. Identify builds ready to execute
@@ -399,7 +408,9 @@ class Scheduler:
             metrics.STORE_AVAILABLE_SLOTS.labels(store_id=s.id).set(s.available_slots)
             metrics.STORE_HEALTHY.labels(store_id=s.id).set(1 if s.is_healthy else 0)
             if s.cpu_util:
-                metrics.STORE_CPU_UTILIZATION.labels(store_id=s.id).set(s.cpu_util.utilization)
+                metrics.STORE_CPU_UTILIZATION.labels(store_id=s.id).set(
+                    s.cpu_util.utilization
+                )
 
         log.debug(
             "scheduling_pass_done",
@@ -548,7 +559,9 @@ class Scheduler:
             for p in to_pull:
                 log.debug("pulling_path", store_id=store.id, path=p)
             await store.stream_paths_to(self.local_store, to_pull)
-            metrics.PATHS_TRANSFERRED.labels(source=store.id, destination=self.local_store.id).inc(len(to_pull))
+            metrics.PATHS_TRANSFERRED.labels(
+                source=store.id, destination=self.local_store.id
+            ).inc(len(to_pull))
             log.debug(
                 "pulled_paths_into_local_store",
                 count=len(to_pull),

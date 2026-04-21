@@ -12,23 +12,28 @@ from .base import (
     BasicDerivation,
     BuildMode,
     BuildResult,
-    OperationLogs,
     OpRequest,
     OpResponse,
     RequestContext,
 )
 
 if TYPE_CHECKING:
-    pass
+    from ..connection import ClientConn
 
 
 @dataclass
 class BuildDerivationResponse(OpResponse):
     result: BuildResult = field(default_factory=BuildResult)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        self,
+        reader: NixReader,
+        version: int,
+        client: ClientConn | None = None,
+        buffer_logs: bool = True,
+    ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
         self.result = await BuildResult().from_reader(reader, version)
         return self
 
@@ -71,9 +76,18 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         await self.from_reader(ctx.proxy.r, ctx.version)
 
-        if ctx.proxy.scheduler is None:
+        # Bypass scheduler if no remote stores are configured (simple proxy mode)
+        if ctx.proxy.scheduler is None or not ctx.proxy.scheduler.stores:
             self.logger.debug("handle_local_mode_fallback")
             result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
+
+            # Track newly built paths
+            if result.result.status == 0:
+                for output in result.result.built_outputs.values():
+                    ctx.proxy.local_store.tracker.add_known_path(
+                        StorePath(output["outPath"]).with_store_prefix()
+                    )
+
             self.logger.debug("responded_op")
             return result
 
