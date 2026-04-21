@@ -13,6 +13,7 @@ from pynixd.psi import CpuUtil
 from pynixd.store import Store
 from pynixd.store_path import StorePath
 from pynixd.wire import NixReader, NixWriter
+from pynixd import metrics
 
 if TYPE_CHECKING:
     from pynixd.connection import ClientConn
@@ -39,8 +40,35 @@ class MockConnection(Connection):
         self.connected = True
         self.dirty = False
         self.op_log = []
-        self.r = cast(NixReader, None)
-        self.w = cast(NixWriter, None)
+
+        # Dummy reader/writer to avoid AttributeErrors on .identifier
+        class DummyRW:
+            def __init__(self, id: str):
+                self.identifier = id
+
+            def framed(self):
+                return self
+
+            def write(self, *args, **kwargs):
+                pass
+
+            def write_uint64(self, *args, **kwargs):
+                pass
+
+            def write_string(self, *args, **kwargs):
+                pass
+
+            def write_string_set(self, *args, **kwargs):
+                pass
+
+            async def drain(self):
+                pass
+
+            async def finalize(self):
+                pass
+
+        self.r = cast(NixReader, DummyRW(f"{self.id}-r"))
+        self.w = cast(NixWriter, DummyRW(f"{self.id}-w"))
 
     async def __aenter__(self) -> MockConnection:
         """Simulate the entry into a connection context (e.g. acquiring from pool)."""
@@ -138,8 +166,8 @@ class MockStore(Store):
         self._cpu_util = value
 
     async def create_conn(self) -> Connection:
-        """Required by Store ABC but MockStore does not use real sockets."""
-        raise NotImplementedError("MockStore does not use real connections")
+        """Return a MockConnection."""
+        return MockConnection(self)
 
     @contextlib.asynccontextmanager
     async def build_conn(self) -> AsyncIterator[MockConnection]:
@@ -175,6 +203,15 @@ class MockStore(Store):
         req_type = type(request)
 
         from pynixd.operations.build_derivation import BuildDerivationRequest
+        from pynixd.operations.query_all_valid_paths import (
+            QueryAllValidPathsRequest,
+            QueryAllValidPathsResponse,
+        )
+        from pynixd.operations.query_closure_with_info import (
+            QueryClosureWithInfoRequest,
+            QueryClosureWithInfoResponse,
+        )
+        from pynixd.operations.base import ValidPathInfo
 
         if isinstance(request, BuildDerivationRequest):
             drv_path = str(request.drv_path)
@@ -189,6 +226,29 @@ class MockStore(Store):
         if req_type in self.responses:
             return self.responses[req_type]
 
+        # Default handlers for discovery ops
+        if isinstance(request, QueryAllValidPathsRequest):
+            return QueryAllValidPathsResponse(paths=self.tracker.known_paths)
+
+        if isinstance(request, QueryClosureWithInfoRequest):
+            infos = []
+            for p in request.paths:
+                # Provide a fake info for any requested path
+                infos.append(
+                    ValidPathInfo(
+                        path=p,
+                        deriver=StorePath(""),
+                        nar_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                        references=set(),
+                        registration_time=0,
+                        nar_size=1024,
+                        ultimate=0,
+                        sigs=set(),
+                        ca="",
+                    )
+                )
+            return QueryClosureWithInfoResponse(infos=infos)
+
         log.warning(
             "mock_store_no_response", store_id=self.id, request=req_type.__name__
         )
@@ -197,23 +257,24 @@ class MockStore(Store):
             f"Update your test setup to provide a mock response."
         )
 
-    @classmethod
-    async def stream_paths_store_to_store(
-        cls,
-        src: Store,
+    async def stream_paths_to(
+        self,
         dst: Store,
         paths: Iterable[StorePath],
         cancel_event: asyncio.Event | None = None,
     ) -> None:
-        """Instantly move paths between store trackers.
+        """Instantly move paths from this store to dst tracker.
 
         Bypasses NAR generation and socket streaming. The destination store's
         `PathTracker` is updated immediately.
         """
         dst.tracker.add_known_paths(paths)
+        metrics.PATHS_TRANSFERRED.labels(source=self.id, destination=dst.id).inc(
+            len(list(paths))
+        )
         log.debug(
             "mock_path_transfer_complete",
-            src=src.id,
+            src=self.id,
             dst=dst.id,
             count=len(list(paths)),
         )

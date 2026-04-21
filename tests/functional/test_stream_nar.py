@@ -64,8 +64,8 @@ async def test_stream_nar() -> None:
         is_valid_src = await src_store.execute(IsValidPathRequest(path=store_path))
         assert is_valid_src.valid, f"Path {store_path} not valid in system store"
 
-        # Use stream_paths_store_to_store which handles the NAR piping
-        await Store.stream_paths_store_to_store(src_store, dst_store, [store_path])
+        # Use stream_paths_to which handles the NAR piping
+        await src_store.stream_paths_to(dst_store, [store_path])
 
         # Verify it now exists in dst
         is_valid_dst_after = await dst_store.execute(

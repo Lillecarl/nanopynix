@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from . import wire
 from .config import PynixdSettings
 from .gc import GarbageCollector
-from .http_cache import BinaryCacheServer
+from .http_server import PynixdHttpServer
 from .local_store_db import LocalStoreDB
 from .path_tracker import PathTracker
 from .scheduler import Scheduler
@@ -56,10 +56,7 @@ class Server:
         self.stores: dict[str, Store] = stores
         self.settings: PynixdSettings = settings or PynixdSettings(**kwargs)
 
-        if stores:
-            self.scheduler: Scheduler | None = Scheduler(stores, local_store)
-        else:
-            self.scheduler = None
+        self.scheduler: Scheduler | None = Scheduler(self.stores, self.local_store)
 
         self.background_tasks: list[asyncio.Task[Any]] = []
         self.ssh_server: asyncssh.SSHAcceptor | None = None
@@ -89,13 +86,21 @@ class Server:
 
         self.stores[store.id] = store
 
+        if self.scheduler:
+            self.scheduler.add_store(store.id, store)
+
         try:
             await store.execute(QueryAllValidPathsRequest())
         except Exception:
             log.exception("sync_paths_failed", id=store.id)
 
-    async def remove_store(self, store_id: str) -> None:
+    async def remove_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
         """Remove a remote store, cleaning DB records and closing connections."""
+        if self.scheduler:
+            await self.scheduler.remove_store(store_id, drain_timeout=drain_timeout)
+        
+        # Scheduler.remove_store already popped it from allocator/stores,
+        # but we also pop from self.stores for consistency.
         store = self.stores.pop(store_id, None)
         if store is None:
             log.warning("remove_store_not_found", store_id=store_id)
@@ -105,7 +110,7 @@ class Server:
         if local_store.db is not None:
             await local_store.db.remove_store_paths(store_id)
 
-        await store.close()
+        # Scheduler.remove_store already closed it
         log.info("removed_store", store_id=store_id)
 
     @property
@@ -232,8 +237,11 @@ class Server:
             )
 
         if s.http_port is not None or s.https_port is not None:
-            cache = BinaryCacheServer(
+            cache = PynixdHttpServer(
                 local_store,
+                enable_cache=s.http_enable_cache,
+                enable_metrics=s.http_enable_metrics,
+                metrics_no_auth=s.http_metrics_no_auth,
                 username=s.http_user,
                 password=s.http_pass,
                 htpasswd_path=s.http_htpasswd,

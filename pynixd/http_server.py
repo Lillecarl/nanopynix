@@ -1,18 +1,11 @@
-"""HTTP binary cache server for the local Nix store.
+"""Unified HTTP server for pynixd.
 
-Serves the standard Nix binary cache protocol over HTTP/HTTPS.
-Metadata queries (narinfo) are served from LocalStoreDB when available,
-falling back to the daemon protocol. NAR data is always streamed from
-the daemon via NarFromPath.
+Provides:
+- Nix binary cache protocol (narinfo, NAR streaming, uploads)
+- Prometheus metrics endpoint (/metrics)
 
-Endpoints:
-    GET /nix-cache-info       → cache metadata
-    GET /{hash}.narinfo       → path metadata
-    GET /nar/{hash}.nar       → NAR archive data
-    PUT /nar/{hash}.nar       → upload NAR data (temporary)
-    PUT /{hash}.narinfo       → upload path metadata (finalizes upload)
-
-Supports optional basic auth and TLS.
+Supports granular enabling of features (cache vs metrics) and
+optional basic auth/TLS.
 """
 
 from __future__ import annotations
@@ -26,6 +19,7 @@ import os
 import ssl
 from http import HTTPStatus
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import brotli
 import lz4.frame
@@ -43,6 +37,10 @@ from .operations.base import ValidPathInfo
 from .store import Store
 from .store_path import StorePath
 from .wire import NixWriter
+from . import metrics
+
+if TYPE_CHECKING:
+    pass
 
 log = structlog.get_logger(__name__)
 
@@ -57,16 +55,20 @@ def strip_store_prefix(path: StorePath | str) -> str:
     return path_str
 
 
-class BinaryCacheServer:
-    """HTTP binary cache server for the local Nix store.
+class PynixdHttpServer:
+    """Unified HTTP server for pynixd.
 
-    Supports reading and (optionally) writing paths via standard protocol.
+    Supports reading and (optionally) writing paths via standard protocol,
+    and exposing Prometheus metrics.
     """
 
     def __init__(
         self,
         local_store: Store,
         *,
+        enable_cache: bool = True,
+        enable_metrics: bool = True,
+        metrics_no_auth: bool = True,
         username: str | None = None,
         password: str | None = None,
         htpasswd_path: str | Path | None = None,
@@ -74,6 +76,9 @@ class BinaryCacheServer:
         upload_dir: str | Path | None = None,
     ) -> None:
         self.store = local_store
+        self.enable_cache = enable_cache
+        self.enable_metrics = enable_metrics
+        self.metrics_no_auth = metrics_no_auth
         self.username = username
         self.password = password
         self.htpasswd = None
@@ -88,13 +93,18 @@ class BinaryCacheServer:
             middlewares=[self.auth_middleware],
             client_max_size=1024**4,  # 1 TiB
         )
-        self.app.router.add_get("/nix-cache-info", self.handle_cache_info)
-        self.app.router.add_get("/{hash}.narinfo", self.handle_narinfo)
-        self.app.router.add_get("/nar/{filename:.+}", self.handle_nar)
 
-        if self.upload_dir:
-            self.app.router.add_put("/nar/{filename:.+}", self.handle_put_nar)
-            self.app.router.add_put("/{hash}.narinfo", self.handle_put_narinfo)
+        if self.enable_metrics:
+            self.app.router.add_get("/metrics", self.handle_metrics)
+
+        if self.enable_cache:
+            self.app.router.add_get("/nix-cache-info", self.handle_cache_info)
+            self.app.router.add_get("/{hash}.narinfo", self.handle_narinfo)
+            self.app.router.add_get("/nar/{filename:.+}", self.handle_nar)
+
+            if self.upload_dir:
+                self.app.router.add_put("/nar/{filename:.+}", self.handle_put_nar)
+                self.app.router.add_put("/{hash}.narinfo", self.handle_put_narinfo)
 
     @property
     def db(self) -> LocalStoreDB | None:
@@ -106,8 +116,12 @@ class BinaryCacheServer:
     async def auth_middleware(
         self,
         request: web.Request,
-        handler,
+        handler: Any,
     ) -> web.StreamResponse:
+        # Check if we should skip auth for metrics
+        if self.enable_metrics and self.metrics_no_auth and request.path == "/metrics":
+            return await handler(request)
+
         if self.username is None and self.htpasswd is None:
             return await handler(request)
 
@@ -141,6 +155,13 @@ class BinaryCacheServer:
         return await handler(request)
 
     # ── Handlers ──────────────────────────────────────────────────────
+
+    async def handle_metrics(self, request: web.Request) -> web.Response:
+        """Expose Prometheus metrics."""
+        body, content_type = metrics.get_metrics_response()
+        # aiohttp: charset must not be in content_type argument
+        content_type_only = content_type.split(";")[0]
+        return web.Response(body=body, content_type=content_type_only)
 
     async def handle_cache_info(self, request: web.Request) -> web.Response:
         lines = [
@@ -472,9 +493,15 @@ class BinaryCacheServer:
         # types-aiohttp don't declare sockets on AbstractServer (added in Python 3.7)
         bound_port = site._server.sockets[0].getsockname()[1]  # type: ignore[reportAttributeAccessIssue]
         log.info(
-            "binary_cache_server_listening",
+            "pynixd_http_server_listening",
             scheme=scheme,
             host=host,
             port=bound_port,
+            enable_cache=self.enable_cache,
+            enable_metrics=self.enable_metrics,
         )
         return runner, bound_port
+
+
+# Backward compatibility alias
+BinaryCacheServer = PynixdHttpServer

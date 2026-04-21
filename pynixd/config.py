@@ -218,6 +218,9 @@ class PynixdSettings(BaseSettings):
 
     http_host: str = "0.0.0.0"
     http_port: int | None = None
+    http_enable_cache: bool = True
+    http_enable_metrics: bool = True
+    http_metrics_no_auth: bool = True
     http_user: str | None = None
     http_pass: str | None = None
     http_htpasswd: Path | None = None

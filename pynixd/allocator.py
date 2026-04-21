@@ -58,7 +58,7 @@ class BuildAllocator:
         build_features = build.request.derivation.effective_required_features
         stores = []
         for store_id, store in self.stores.items():
-            if not store.is_healthy:
+            if not store.is_healthy or store.draining:
                 continue
             if not store.supports_derivation(build.platform, build_features):
                 continue

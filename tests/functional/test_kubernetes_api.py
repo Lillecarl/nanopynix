@@ -1,0 +1,106 @@
+import asyncio
+import pytest
+import aiohttp
+from pynixd import Server
+from pynixd.operations.base import BasicDerivation, BuildResult, BuildResultStatus
+from pynixd.operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
+from pynixd.store_path import StorePath
+from tests.functional.mock_store import MockStore
+
+@pytest.mark.asyncio
+async def test_dynamic_store_management():
+    """Verify adding and removing stores at runtime works correctly."""
+    local_store = MockStore("local", max_builds=10, feature_matrix={"x86_64-linux": set()})
+    
+    server = Server(local_store=local_store, http_port=0, http_enable_metrics=True)
+    await server.start()
+    
+    try:
+        scheduler = server.scheduler
+        assert scheduler is not None
+        assert len(scheduler.stores) == 0
+        
+        # 1. Add stores dynamically
+        remote1 = MockStore("remote1", max_builds=1, feature_matrix={"x86_64-linux": set()})
+        remote2 = MockStore("remote2", max_builds=0, feature_matrix={"x86_64-linux": set()})
+        await server.add_store(remote1)
+        await server.add_store(remote2)
+        assert "remote1" in scheduler.stores
+        assert "remote2" in scheduler.stores
+        assert scheduler.allocator.stores == scheduler.stores
+        
+        # 2. Enqueue a build and block it
+        drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
+        local_store.tracker.add_known_path(drv_path)
+        request = BuildDerivationRequest(
+            drv_path=drv_path,
+            derivation=BasicDerivation(platform="x86_64-linux")
+        )
+        
+        # Mock build responder
+        remote1.responses[BuildDerivationRequest] = BuildDerivationResponse(
+            result=BuildResult(status=BuildResultStatus.BUILT)
+        )
+        
+        # Block the build
+        build_done = remote1.block_build(drv_path)
+        
+        build_id, future = await scheduler.build_derivation(
+            request, client=None, required_paths={drv_path}, platform="x86_64-linux"
+        )
+        
+        await scheduler.schedule()
+        
+        # Wait for assignment
+        queued_build = scheduler.queue.by_id[build_id]
+        for _ in range(10):
+            if queued_build.assigned_store_id == "remote1":
+                break
+            await asyncio.sleep(0.01)
+        assert queued_build.assigned_store_id == "remote1"
+        assert queued_build.is_building
+        
+        # 3. Remove store with short timeout (force kill)
+        # We start the removal in background because it will wait for the build
+        remove_task = asyncio.create_task(server.remove_store("remote1", drain_timeout=0.1))
+        
+        # Wait for drain timeout to trigger hard-kill
+        await asyncio.sleep(0.2)
+        await remove_task
+        
+        assert "remote1" not in scheduler.stores
+        
+        # Verify the build was requeued (reset_for_retry clears build_task and started_at)
+        assert queued_build.assigned_store_id == "remote1" # It records where it failed
+        assert queued_build.build_task is None
+        assert queued_build.is_pending
+        assert queued_build.retries == 1
+        
+    finally:
+        await server.close()
+
+@pytest.mark.asyncio
+async def test_prometheus_metrics_endpoint():
+    """Verify that the /metrics endpoint serves Prometheus data."""
+    local_store = MockStore("local", max_builds=10, feature_matrix={"x86_64-linux": set()})
+    
+    # Start server with metrics enabled on random port
+    server = Server(local_store=local_store, http_port=0, http_enable_metrics=True, http_metrics_no_auth=True)
+    await server.start()
+    
+    try:
+        port = server.http_bound_port
+        url = f"http://127.0.0.1:{port}/metrics"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                assert resp.status == 200
+                text = await resp.text()
+                
+                # Check for our custom metrics
+                assert "pynixd_build_queue_size" in text
+                assert "pynixd_store_available_slots" in text
+                assert 'status="pending"' in text
+                
+    finally:
+        await server.close()

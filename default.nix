@@ -41,6 +41,7 @@ let
       python.pkgs.brotli
       python.pkgs.pydantic
       python.pkgs.pydantic-settings
+      python.pkgs.prometheus-client
     ];
 
     nativeCheckInputs = [

@@ -44,7 +44,6 @@ async def test_scheduler_load_balancing():
     scheduler = Scheduler(
         stores={"remote1": remote1},
         local_store=local_store,
-        stream_paths_fn=MockStore.stream_paths_store_to_store,
     )
 
     # 2. Mock build response for the remote store
@@ -101,7 +100,6 @@ async def test_scheduler_skips_saturated_store():
     scheduler = Scheduler(
         stores={"remote1": remote1},
         local_store=local_store,
-        stream_paths_fn=MockStore.stream_paths_store_to_store,
     )
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
@@ -166,7 +164,6 @@ async def test_scheduler_proactive_transfer():
     scheduler = Scheduler(
         stores={"busy": remote_busy, "idle": remote_idle},
         local_store=local_store,
-        stream_paths_fn=MockStore.stream_paths_store_to_store,
     )
 
     # Mock build response for idle store
@@ -245,7 +242,6 @@ async def test_scheduler_decomposition_and_ordering():
     scheduler = Scheduler(
         stores={"remote1": remote1},
         local_store=local_store,
-        stream_paths_fn=MockStore.stream_paths_store_to_store,
     )
 
     leaf_path = StorePath("/nix/store/00000000000000000000000000000001-leaf.drv")
@@ -389,7 +385,6 @@ async def test_scheduler_cpu_utilization():
     scheduler = Scheduler(
         stores={"hot": remote_hot, "cold": remote_cold},
         local_store=local_store,
-        stream_paths_fn=MockStore.stream_paths_store_to_store,
     )
 
     # remote_cold will handle the build
@@ -454,7 +449,6 @@ async def test_scheduler_feature_matching():
     scheduler = Scheduler(
         stores={"plain": remote_plain, "full": remote_full},
         local_store=local_store,
-        stream_paths_fn=MockStore.stream_paths_store_to_store,
     )
 
     remote_full.responses[BuildDerivationRequest] = BuildDerivationResponse(

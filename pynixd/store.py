@@ -134,6 +134,7 @@ class Store(ABC):
         self._probe_event: asyncio.Event = asyncio.Event()
         self.signing_keys: dict[str, SecretKey] = {}
         self._holder_task: asyncio.Task | None = None
+        self.draining: bool = False
 
     @property
     def db_enabled(self) -> bool:
@@ -333,15 +334,13 @@ class Store(ABC):
         """Get ValidPathInfo from cache if available."""
         return self.path_info_cache.get(path)
 
-    @classmethod
-    async def stream_paths_store_to_store(
-        cls,
-        src: Store,
+    async def stream_paths_to(
+        self,
         dst: Store,
         paths: Iterable[StorePath],
         cancel_event: asyncio.Event | None = None,
     ) -> None:
-        """Copy paths from src to dst via streaming, querying closure first.
+        """Copy paths from this store to dst via streaming, querying closure first.
 
         Bypasses the normal handle() path, so we update dst knowledge manually.
         Only transfers paths that dst doesn't already have.
@@ -351,7 +350,7 @@ class Store(ABC):
             return
 
         # 1. Get closure from source
-        closure_resp = await src.execute(
+        closure_resp = await self.execute(
             QueryClosureWithInfoRequest(paths=paths_set),
             client=None,
         )
@@ -368,8 +367,8 @@ class Store(ABC):
             return
 
         # 3. Stream the missing paths
-        async with src.transfer_conn() as src_conn, dst.transfer_conn() as dst_conn:
-            dst_conn.op_log.append("AddMultipleToStore (stream_paths_store_to_store)")
+        async with self.transfer_conn() as src_conn, dst.transfer_conn() as dst_conn:
+            dst_conn.op_log.append("AddMultipleToStore (stream_paths_to)")
             req = AddMultipleToStoreRequest(
                 repair=0,
                 dont_check_sigs=1,
@@ -386,7 +385,7 @@ class Store(ABC):
                     break
 
                 path = info.path
-                dst_conn.op_log.append("AddToStoreNar (stream_paths_store_to_store)")
+                dst_conn.op_log.append("AddToStoreNar (stream_paths_to)")
 
                 # Use info.to_bytes() to send metadata as a single frame
                 fw.write(info.to_bytes())

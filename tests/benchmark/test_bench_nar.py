@@ -205,8 +205,8 @@ async def test_bench_nar_small_batch(
     log.info("starting_small_nar_batch_bench", count=len(paths))
 
     start = time.perf_counter()
-    # stream_paths_store_to_store handles closure and batching
-    await Store.stream_paths_store_to_store(bench_store, dst_store, paths)
+    # stream_paths_to handles closure and batching
+    await bench_store.stream_paths_to(dst_store, paths)
     elapsed = time.perf_counter() - start
 
     ops_per_s = len(paths) / elapsed

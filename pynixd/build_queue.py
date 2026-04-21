@@ -21,6 +21,7 @@ from .derived_path import DerivedPath
 from .operations.base import BuildMode, BuildResult, BuildResultStatus
 from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
 from .store_path import StorePath
+from . import metrics
 
 log = structlog.get_logger(__name__)
 
@@ -329,6 +330,7 @@ class BuildQueue:
                 required_paths=len(required_paths),
                 scheduler_request_id=scheduler_request_id,
             )
+            metrics.QUEUE_SIZE.labels(status="pending").inc()
             return build.id, future
 
     async def get_pending(self) -> list[QueuedBuild]:
@@ -364,6 +366,18 @@ class BuildQueue:
                     b.finished_at = time.monotonic()
                     b.future.set_result(response)
                     log.info("build_completed", build_id=build_id)
+
+                    metrics.QUEUE_SIZE.labels(status="building").dec()
+                    metrics.QUEUE_SIZE.labels(status="done").inc()
+                    status = (
+                        "success"
+                        if response.result.status == BuildResultStatus.BUILT
+                        else "failure"
+                    )
+                    metrics.BUILDS_COMPLETED.labels(status=status).inc()
+                    if b.build_time is not None:
+                        metrics.BUILD_DURATION.observe(b.build_time)
+
                     return b.client
         raise ValueError(f"Build {build_id} not found")
 
@@ -383,15 +397,26 @@ class BuildQueue:
                     )
                     b.future.set_result(response)
                     log.info("build_failed", build_id=build_id, error_msg=error_msg)
+
+                    metrics.QUEUE_SIZE.labels(status="pending").dec()
+                    metrics.QUEUE_SIZE.labels(status="done").inc()
+                    metrics.BUILDS_COMPLETED.labels(status="failure").inc()
+
                     return b.client
         raise ValueError(f"Build {build_id} not found")
 
     async def cleanup_completed(self) -> int:
         """Remove completed builds from queue, return count removed."""
         async with self.lock:
-            before = len(self.queue)
+            completed = [b for b in self.queue if b.is_done]
+            removed_count = len(completed)
+            if removed_count == 0:
+                return 0
+
             self.queue = [b for b in self.queue if not b.is_done]
             # Rebuild by_key and by_id
             self.by_key = {BuildKey.from_request(b.request): b for b in self.queue}
             self.by_id = {b.id: b for b in self.queue}
-            return before - len(self.queue)
+
+            metrics.QUEUE_SIZE.labels(status="done").dec(removed_count)
+            return removed_count
