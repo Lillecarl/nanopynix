@@ -7,12 +7,33 @@ from pynixd.operations.build_derivation import (
 )
 from pynixd.operations.base import BasicDerivation, BuildResult, BuildResultStatus
 from pynixd.store_path import StorePath
-from tests.ai.mock_store import MockStore
+from tests.functional.mock_store import MockStore
+
+"""
+Deterministic Scheduler Logic Tests
+
+These tests use the `MockStore` to verify the pynixd Scheduler's 
+routing, load-balancing, and DAG decomposition logic without 
+requiring a real Nix daemon or filesystem state.
+
+By virtualizing all I/O and controlling build completion timing, 
+we can assert on complex behaviors (like proactive transfers or 
+PSI-aware routing) with zero flakiness and high speed.
+"""
 
 
 @pytest.mark.asyncio
 async def test_scheduler_load_balancing():
-    """Test that the scheduler correctly balances builds across stores."""
+    """Verify that the scheduler correctly assigns builds to idle remote stores.
+
+    Setup:
+    - 1 Local store (1 slot)
+    - 1 Remote store (1 slot)
+
+    Success Condition:
+    - Build is enqueued and assigned to 'remote1'.
+    - Manual schedule pass triggers execution.
+    """
 
     # 1. Setup Virtual Fleet
     local_store = MockStore(
@@ -26,7 +47,7 @@ async def test_scheduler_load_balancing():
         stream_paths_fn=MockStore.stream_paths_store_to_store,
     )
 
-    # 2. Mock build response
+    # 2. Mock build response for the remote store
     build_resp = BuildDerivationResponse(
         result=BuildResult(status=BuildResultStatus.BUILT)
     )
@@ -46,13 +67,9 @@ async def test_scheduler_load_balancing():
     # 4. Trigger scheduler manually
     await scheduler.schedule()
 
-    # 5. Verify assignment (before completion/cleanup)
-    # The build might complete instantly in the mock, but it should
-    # still be in the queue until we call cleanup_completed.
-    # However, since execute_build is a background task, we need
-    # to yield control to let it set assigned_store_id.
+    # 5. Verify assignment (polling to account for background task startup)
+    queued_build = scheduler.queue.by_id[build_id]
     for _ in range(10):
-        queued_build = scheduler.queue.by_id[build_id]
         if queued_build.assigned_store_id is not None:
             break
         await asyncio.sleep(0.01)
@@ -66,7 +83,15 @@ async def test_scheduler_load_balancing():
 
 @pytest.mark.asyncio
 async def test_scheduler_skips_saturated_store():
-    """Test that the scheduler waits if no slots are available."""
+    """Verify that the scheduler waits for available slots instead of over-subscribing.
+
+    Setup:
+    - Remote store with 0 available slots.
+
+    Success Condition:
+    - Build remains pending after first pass.
+    - Build is assigned only after a slot is manually released.
+    """
 
     local_store = MockStore(
         "local", max_builds=0, feature_matrix={"x86_64-linux": set()}
@@ -89,15 +114,17 @@ async def test_scheduler_skips_saturated_store():
         request, client=None, required_paths={drv_path}, platform="x86_64-linux"
     )
 
+    # Pass 1: No slots available anywhere
     await scheduler.schedule()
 
     queued_build = scheduler.queue.by_id[build_id]
     assert queued_build.assigned_store_id is None
     assert queued_build.is_pending
 
-    # Free a slot
+    # 2. Free a slot on remote1
     remote1.build_semaphore.release()
 
+    # Pass 2: Now it should be assigned
     await scheduler.schedule()
 
     # Wait for the build task to start and assign
@@ -110,11 +137,17 @@ async def test_scheduler_skips_saturated_store():
 
 @pytest.mark.asyncio
 async def test_scheduler_proactive_transfer():
-    """Test that the scheduler proactively pulls paths to an idle store."""
+    """Verify that the scheduler proactively pulls paths to an idle store.
 
-    # local MUST NOT have the path initially for us to test "pulling waiting paths"
-    # Wait, proactive transfer is for "waiting_slot".
-    # waiting_slot means all paths are in local_store.
+    Scenario:
+    - Store 'busy' has the inputs but no slots.
+    - Store 'idle' has slots but no inputs.
+
+    Success Condition:
+    - Scheduler assigns build to 'idle'.
+    - Scheduler triggers `transfer_inputs` (simulated by stream_paths_fn).
+    - Inputs are present on 'idle' before build execution starts.
+    """
 
     local_store = MockStore(
         "local", max_builds=1, feature_matrix={"x86_64-linux": set()}
@@ -151,7 +184,6 @@ async def test_scheduler_proactive_transfer():
     )
 
     # Pass 1: busy is best (has paths) but saturated. idle has slot but needs paths.
-    # Should assign to idle and start transfer.
     await scheduler.schedule()
 
     queued_build = scheduler.queue.by_id[build_id]
@@ -168,12 +200,22 @@ async def test_scheduler_proactive_transfer():
     # Yield control to let execute_build (and stream_paths) finish
     await asyncio.sleep(0.05)
 
+    # Verify path was moved to the idle store
     assert remote_idle.tracker.has_path(drv_path)
 
 
 @pytest.mark.asyncio
 async def test_scheduler_decomposition_and_ordering():
-    """Test that BuildDecomposer correctly resolves a DAG and the Scheduler respects it."""
+    """Verify that BuildDecomposer correctly resolves a DAG and the Scheduler respects it.
+
+    Scenario:
+    - Enqueue a 'root' derivation that depends on a 'leaf' derivation.
+
+    Success Condition:
+    - Queue contains both builds.
+    - Leaf is scheduled and completed first.
+    - Root is only scheduled AFTER leaf completes.
+    """
     from pynixd.derived_path import DerivedPath
     from pynixd.operations.base import BuildMode, BuildResult, BuildResultStatus
     from pynixd.operations.query_missing import (
@@ -194,7 +236,7 @@ async def test_scheduler_decomposition_and_ordering():
         BuildDerivationResponse,
     )
 
-    # 1. Setup Fleet (remote1 can build everything)
+    # 1. Setup Fleet
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
     remote1 = MockStore(
         "remote1", max_builds=10, feature_matrix={"x86_64-linux": set()}
@@ -210,9 +252,9 @@ async def test_scheduler_decomposition_and_ordering():
     root_path = StorePath("/nix/store/00000000000000000000000000000002-root.drv")
     local_store.tracker.add_known_paths({leaf_path, root_path})
 
-    # 2. Mock Responses for Decomposer
+    # 2. Mock Responses for the BuildDecomposer pipeline
     local_store.responses[QueryMissingRequest] = QueryMissingResponse(
-        will_build={str(leaf_path), str(root_path)}
+        will_build={leaf_path, root_path}
     )
     local_store.responses[QueryValidPathsRequest] = QueryValidPathsResponse(paths=set())
     local_store.responses[QueryDerivationOutputsBatchRequest] = (
@@ -242,7 +284,8 @@ async def test_scheduler_decomposition_and_ordering():
         platform="x86_64-linux",
     )
 
-    def mock_read_drv(store_path, drv_path):
+    # Inject deterministic derivation reader
+    def mock_read_drv(_store_path, drv_path):
         if str(drv_path) == str(leaf_path):
             return leaf_drv
         if str(drv_path) == str(root_path):
@@ -251,11 +294,12 @@ async def test_scheduler_decomposition_and_ordering():
 
     scheduler.decomposer.read_drv_fn = mock_read_drv
 
-    # 3. Mock build response for remote1
+    # 3. Setup build responders
     remote1.responses[BuildDerivationRequest] = BuildDerivationResponse(
         result=BuildResult(status=BuildResultStatus.BUILT)
     )
-    # Block BOTH builds initially
+
+    # Block BOTH builds initially so we can check queue state before completion
     leaf_done = remote1.block_build(leaf_path)
     root_done = remote1.block_build(root_path)
 
@@ -269,7 +313,7 @@ async def test_scheduler_decomposition_and_ordering():
     await asyncio.sleep(0.05)
     assert len(scheduler.queue.queue) == 2
 
-    # Find builds
+    # Find builds in queue
     root_b = [
         b for b in scheduler.queue.queue if str(b.request.drv_path) == str(root_path)
     ][0]
@@ -277,11 +321,11 @@ async def test_scheduler_decomposition_and_ordering():
         b for b in scheduler.queue.queue if str(b.request.drv_path) == str(leaf_path)
     ][0]
 
-    # 5. Run first scheduling pass
+    # 5. Pass 1: Scheduling
     await scheduler.schedule()
     await asyncio.sleep(0.05)
 
-    # Verify: Only leaf is scheduled and building
+    # Verify: Only leaf is scheduled (root blocked by depends_on)
     assert leaf_b.assigned_store_id == "remote1"
     assert leaf_b.is_building
     assert root_b.assigned_store_id is None
@@ -292,7 +336,7 @@ async def test_scheduler_decomposition_and_ordering():
     await asyncio.sleep(0.05)
     assert leaf_b.is_done
 
-    # 7. Run second pass: root should now be schedulable
+    # 7. Pass 2: Root should now be schedulable
     await scheduler.schedule()
     await asyncio.sleep(0.05)
     assert root_b.assigned_store_id == "remote1"
@@ -303,7 +347,7 @@ async def test_scheduler_decomposition_and_ordering():
     await asyncio.sleep(0.05)
     assert root_b.is_done
 
-    # 9. Final result
+    # 9. Final result verification
     results = await build_task
     assert len(results.results) == 1
     assert results.results[0].result.status == BuildResultStatus.BUILT
@@ -311,7 +355,16 @@ async def test_scheduler_decomposition_and_ordering():
 
 @pytest.mark.asyncio
 async def test_scheduler_cpu_utilization():
-    """Test that the scheduler avoids stores with high CPU utilization."""
+    """Verify that the scheduler avoids stores with high CPU utilization (PSI aware).
+
+    Setup:
+    - Store 'hot': 100% CPU utilization
+    - Store 'cold': 10% CPU utilization
+
+    Success Condition:
+    - Build is enqueued.
+    - Scheduler assigns build to 'cold' store, bypassing 'hot'.
+    """
     from pynixd.operations.build_derivation import (
         BuildDerivationRequest,
         BuildDerivationResponse,
@@ -365,3 +418,70 @@ async def test_scheduler_cpu_utilization():
         await asyncio.sleep(0.01)
 
     assert queued_build.assigned_store_id == "cold"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_feature_matching():
+    """Verify that the scheduler respects Store system/feature matrix requirements.
+
+    Scenario:
+    - Enqueue a build requiring 'kvm' and 'big-parallel'.
+    - Store 'plain': Supports x86_64-linux but no extra features.
+    - Store 'full': Supports x86_64-linux with 'kvm' and 'big-parallel'.
+
+    Success Condition:
+    - Scheduler assigns build to 'full' store.
+    - 'plain' is correctly ignored due to missing features.
+    """
+    from pynixd.operations.build_derivation import (
+        BuildDerivationRequest,
+        BuildDerivationResponse,
+    )
+
+    local_store = MockStore("local", feature_matrix={})
+
+    # plain supports the system but not the features
+    remote_plain = MockStore(
+        "plain", feature_matrix={"x86_64-linux": {"ca-derivations"}}
+    )
+
+    # full supports both
+    remote_full = MockStore(
+        "full",
+        feature_matrix={"x86_64-linux": {"ca-derivations", "kvm", "big-parallel"}},
+    )
+
+    scheduler = Scheduler(
+        stores={"plain": remote_plain, "full": remote_full},
+        local_store=local_store,
+        stream_paths_fn=MockStore.stream_paths_store_to_store,
+    )
+
+    remote_full.responses[BuildDerivationRequest] = BuildDerivationResponse(
+        result=BuildResult(status=BuildResultStatus.BUILT)
+    )
+
+    drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
+    local_store.tracker.add_known_path(drv_path)
+
+    # Create request with required features
+    derivation = BasicDerivation(platform="x86_64-linux")
+    derivation.env["requiredSystemFeatures"] = "kvm big-parallel"
+
+    request = BuildDerivationRequest(drv_path=drv_path, derivation=derivation)
+
+    build_id, _future = await scheduler.build_derivation(
+        request, client=None, required_paths={drv_path}, platform="x86_64-linux"
+    )
+
+    await scheduler.schedule()
+
+    queued_build = scheduler.queue.by_id[build_id]
+
+    # Wait for assignment
+    for _ in range(10):
+        if queued_build.assigned_store_id is not None:
+            break
+        await asyncio.sleep(0.01)
+
+    assert queued_build.assigned_store_id == "full"

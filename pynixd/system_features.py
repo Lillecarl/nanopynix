@@ -29,6 +29,7 @@ class SystemFeature:
     KVM = "kvm"
     APPLE_VIRT = "apple-virt"
     CA_DERIVATIONS = "ca-derivations"
+    DYNAMIC_DERIVATIONS = "dynamic-derivations"
     RECURSIVE_NIX = "recursive-nix"
 
 
@@ -42,21 +43,24 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         SystemFeature.KVM,
         SystemFeature.APPLE_VIRT,
         SystemFeature.CA_DERIVATIONS,
+        SystemFeature.DYNAMIC_DERIVATIONS,
         SystemFeature.RECURSIVE_NIX,
     }
 )
 
 # Features that pynixd handles before sending builds to backend stores.
 # These can be safely stripped from requiredSystemFeatures because pynixd
-# resolves the derivation (e.g., CA derivations → InputAddressed) before
-# forwarding the BuildDerivation. The backend daemon never sees the
-# CA-specific semantics.
+# resolves the derivation (e.g., CA derivations → InputAddressed) or
+# manages the trampoline (for dynamic derivations) before forwarding or
+# after receiving results. The backend daemon never needs to see the
+# experimental semantics.
 #
 # recursive-nix is NOT here — the builder truly needs nix available at
 # runtime to execute recursive builds.
 PYNIXD_HANDLED_FEATURES: frozenset[str] = frozenset(
     {
         SystemFeature.CA_DERIVATIONS,
+        SystemFeature.DYNAMIC_DERIVATIONS,
     }
 )
 
