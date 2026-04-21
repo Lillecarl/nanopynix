@@ -1,1 +1,0 @@
-in store.py there's some LSP error that opencode finds about record_success and record_failure. Investigate how to get rid of this LSP warning (it's only a warning in OpenCode LSP not when running pyright CLI)

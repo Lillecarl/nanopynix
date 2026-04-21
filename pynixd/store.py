@@ -778,7 +778,7 @@ class Store(ABC):
         )
 
 
-class _SSHStoreMixin:
+class _SSHStoreMixin(Store):
     """Shared SSH connection management with exponential backoff reconnection.
 
     Subclasses must set host, port, username on __init__.
@@ -1011,13 +1011,13 @@ class _SSHStoreMixin:
                 # Reset backoff on success
                 self.backoff = self.INITIAL_BACKOFF
                 self.last_failure = 0.0
-                self.record_success()  # type: ignore[attr-defined]
+                self.record_success()
                 self.start_psi_polling()
                 return self.conn
             except Exception:
                 self.last_failure = time.monotonic()
                 self.backoff = min(self.backoff * 2, self.MAX_BACKOFF)
-                self.record_failure()  # type: ignore[attr-defined]
+                self.record_failure()
                 log.warning(
                     "ssh_connect_failed",
                     store_id=self.id,
@@ -1041,7 +1041,7 @@ class _SSHStoreMixin:
             self.conn = None
 
 
-class SSHSubprocessStore(_SSHStoreMixin, Store):
+class SSHSubprocessStore(_SSHStoreMixin):
     """Persistent SSH connection, spawns nix-daemon --stdio channels.
 
     Used primarily for "fake Nix" stores like nixbuild.net that provide
@@ -1303,7 +1303,7 @@ class LocalSocketStore(Store):
 DAEMON_SOCKET_PATH = Path("/nix/var/nix/daemon-socket/socket")
 
 
-class SSHSocketStore(_SSHStoreMixin, Store):
+class SSHSocketStore(_SSHStoreMixin):
     """Persistent SSH connection, tunnels to remote Unix socket."""
 
     def __init__(
