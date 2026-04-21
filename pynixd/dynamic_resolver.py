@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -26,10 +26,11 @@ log = structlog.get_logger(__name__)
 class DynamicDerivationResolver:
     """Handles resolution of CA and dynamic derivations during the build lifecycle."""
 
-    def __init__(self, scheduler: Scheduler) -> None:
+    def __init__(self, scheduler: Scheduler, read_drv_fn: Any = None) -> None:
         self.scheduler = scheduler
         self.local_store = scheduler.local_store
         self.queue = scheduler.queue
+        self.read_drv_fn = read_drv_fn or read_drv_file
 
     async def register_dep_realisations(self, build: QueuedBuild, store: Store) -> None:
         """Register CA realisations from completed dependency builds on the
@@ -101,7 +102,6 @@ class DynamicDerivationResolver:
             _unparse_basic_derivation,
             _nix_drv_name,
         )
-        from .drv_parser import read_drv_file
         from .operations.add_to_store import AddToStoreRequest
         from .operations.base import OutputKind
 
@@ -114,7 +114,7 @@ class DynamicDerivationResolver:
         drv_path = build.request.drv_path
 
         try:
-            parsed = read_drv_file(self.local_store.store_path, drv_path)
+            parsed = self.read_drv_fn(self.local_store.store_path, drv_path)
         except FileNotFoundError:
             log.warning(
                 "resolve_deferred_drv_not_found",
@@ -229,7 +229,6 @@ class DynamicDerivationResolver:
             _unparse_basic_derivation,
             _nix_drv_name,
         )
-        from .drv_parser import read_drv_file
         from .operations.add_to_store import AddToStoreRequest
 
         if not build.dynamic_input_drvs:
@@ -238,7 +237,7 @@ class DynamicDerivationResolver:
         drv_path = build.request.drv_path
 
         try:
-            parsed = read_drv_file(self.local_store.store_path, drv_path)
+            parsed = self.read_drv_fn(self.local_store.store_path, drv_path)
         except FileNotFoundError:
             log.warning(
                 "resolve_dynamic_drv_not_found",
@@ -461,7 +460,7 @@ class DynamicDerivationResolver:
                 )
 
                 try:
-                    inner_parsed = read_drv_file(self.local_store.store_path, out_sp)
+                    inner_parsed = self.read_drv_fn(self.local_store.store_path, out_sp)
                 except FileNotFoundError:
                     log.warning(
                         "trampoline_drv_not_found",

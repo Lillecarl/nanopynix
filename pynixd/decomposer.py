@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -29,10 +29,11 @@ log = structlog.get_logger(__name__)
 class BuildDecomposer:
     """Decomposes high-level build requests into individual derivation builds."""
 
-    def __init__(self, scheduler: Scheduler) -> None:
+    def __init__(self, scheduler: Scheduler, read_drv_fn: Any = None) -> None:
         self.scheduler = scheduler
         self.local_store = scheduler.local_store
         self.queue = scheduler.queue
+        self.read_drv_fn = read_drv_fn or read_drv_file
 
     async def decompose(
         self,
@@ -105,7 +106,9 @@ class BuildDecomposer:
             visited.add(sp)
             dp = drv_to_derived.get(str(sp), DerivedPath(sp))
             try:
-                parsed = dp.to_derivation(self.local_store.store_path)
+                parsed = dp.to_derivation(
+                    self.local_store.store_path, reader_fn=self.read_drv_fn
+                )
             except FileNotFoundError:
                 log.warning("drv_read_failed", drv_path=dp.drv_path)
                 continue
@@ -124,7 +127,7 @@ class BuildDecomposer:
                 if dyn_drv_path not in to_build:
                     # Check if this dynamic dep's outputs are already available
                     try:
-                        dyn_parsed = read_drv_file(
+                        dyn_parsed = self.read_drv_fn(
                             self.local_store.store_path, dyn_drv_path
                         )
                     except FileNotFoundError:
@@ -186,7 +189,7 @@ class BuildDecomposer:
                 ].is_dynamic
             else:
                 try:
-                    parsed = read_drv_file(
+                    parsed = self.read_drv_fn(
                         self.local_store.store_path, drv_request.drv_path
                     )
                     drv_request.derivation.is_dynamic = parsed.is_dynamic

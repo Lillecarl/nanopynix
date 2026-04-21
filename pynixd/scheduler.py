@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -51,13 +51,16 @@ class Scheduler:
         self,
         stores: Mapping[str, Store],
         local_store: Store,
+        stream_paths_fn: Any = None,
+        read_drv_fn: Any = None,
     ) -> None:
         self.queue = BuildQueue()
         self.stores = stores
         self.local_store = local_store
         self.allocator = BuildAllocator(stores, local_store)
-        self.decomposer = BuildDecomposer(self)
-        self.dynamic_resolver = DynamicDerivationResolver(self)
+        self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
+        self.dynamic_resolver = DynamicDerivationResolver(self, read_drv_fn=read_drv_fn)
+        self.stream_paths_fn = stream_paths_fn or Store.stream_paths_store_to_store
         self.trigger_event = asyncio.Event()
         self.running = False
 
@@ -357,9 +360,7 @@ class Scheduler:
                     log.debug(
                         "build_sending_inputs", build_id=build.id, store_id=store.id
                     )
-                    await Store.stream_paths_store_to_store(
-                        self.local_store, store, missing
-                    )
+                    await self.stream_paths_fn(self.local_store, store, missing)
 
                 # 2. Trigger build
                 log.debug("build_executing", build_id=build.id, store_id=store.id)
@@ -393,7 +394,7 @@ class Scheduler:
                     )
                     for p in all_output_paths:
                         log.debug("pulling_path", store_id=store.id, path=p)
-                    await Store.stream_paths_store_to_store(
+                    await self.stream_paths_fn(
                         store, self.local_store, all_output_paths
                     )
                     log.debug(
@@ -460,7 +461,7 @@ class Scheduler:
             log.info("pulling_paths", store_id=store.id, count=len(to_pull))
             for p in to_pull:
                 log.debug("pulling_path", store_id=store.id, path=p)
-            await Store.stream_paths_store_to_store(store, self.local_store, to_pull)
+            await self.stream_paths_fn(store, self.local_store, to_pull)
             log.debug(
                 "pulled_paths_into_local_store",
                 count=len(to_pull),

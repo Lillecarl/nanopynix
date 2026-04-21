@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .store_path import StorePath
 
@@ -234,7 +234,11 @@ class DerivedPath(StorePath):
     def output_names(self) -> set[str]:
         return dp_output_names(self._derived)
 
-    def to_derivation(self, store_path: Path) -> ParsedDerivation:
+    def to_derivation(
+        self, store_path: Path, reader_fn: Any = None
+    ) -> ParsedDerivation:
+        if reader_fn is not None:
+            return reader_fn(store_path, self.drv_path)
         return dp_to_derivation(self._derived, store_path)
 
     def to_outputs(self, store_path: Path) -> set[StorePath]:
