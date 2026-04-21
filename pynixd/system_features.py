@@ -46,6 +46,20 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
     }
 )
 
+# Features that pynixd handles before sending builds to backend stores.
+# These can be safely stripped from requiredSystemFeatures because pynixd
+# resolves the derivation (e.g., CA derivations → InputAddressed) before
+# forwarding the BuildDerivation. The backend daemon never sees the
+# CA-specific semantics.
+#
+# recursive-nix is NOT here — the builder truly needs nix available at
+# runtime to execute recursive builds.
+PYNIXD_HANDLED_FEATURES: frozenset[str] = frozenset(
+    {
+        SystemFeature.CA_DERIVATIONS,
+    }
+)
+
 # Platforms to probe when discovering store capabilities.
 # Each is a Nix system triple (machine-kernel).
 PROBE_SYSTEMS: frozenset[str] = frozenset(

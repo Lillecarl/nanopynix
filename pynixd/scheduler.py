@@ -442,7 +442,7 @@ class Scheduler:
         for build in schedulable:
             # 1. Check for "Tiny Build" fast-track to local store
             # We only do this if it's explicitly tiny, not just unknown.
-            build_features = build.request.derivation.required_system_features
+            build_features = build.request.derivation.effective_required_features
             if (
                 build.expected_duration is not None
                 and build.expected_duration <= TINY_BUILD_THRESHOLD_MS
@@ -467,7 +467,9 @@ class Scheduler:
 
             # If NO store will ever support this platform/features, fail it statelessly
             if not ranked and not any(
-                s.supports_derivation(build.platform, build_features)
+                s.supports_derivation(
+                    build.platform, build.request.derivation.effective_required_features
+                )
                 for s in self.stores.values()
             ):
                 reasons = self._incompatibility_reasons(build.platform, build_features)
@@ -577,6 +579,34 @@ class Scheduler:
             },
         )
 
+    @staticmethod
+    def _strip_handled_features(build: QueuedBuild) -> None:
+        """Remove pynixd-handled features from requiredSystemFeatures in env.
+
+        After resolution, features like ca-derivations are no longer relevant
+        to the backend daemon — pynixd already converted the derivation.
+        Stripping them allows Lix stores (no ca-derivations support) to build
+        resolved CA derivations that are now plain InputAddressed builds.
+        """
+        from .system_features import PYNIXD_HANDLED_FEATURES
+
+        raw = build.request.derivation.env.get("requiredSystemFeatures", "")
+        if not raw:
+            return
+        features = set(raw.split())
+        stripped = features & PYNIXD_HANDLED_FEATURES
+        if not stripped:
+            return
+        remaining = features - PYNIXD_HANDLED_FEATURES
+        new_val = " ".join(sorted(remaining))
+        build.request.derivation.env["requiredSystemFeatures"] = new_val
+        log.debug(
+            "stripped_handled_features",
+            build_id=build.id,
+            stripped=sorted(stripped),
+            remaining=sorted(remaining),
+        )
+
     def _incompatibility_reasons(
         self, platform: str, features: set[str] | None
     ) -> list[str]:
@@ -624,7 +654,7 @@ class Scheduler:
 
     def rank_stores(self, build: QueuedBuild) -> RankedStores:
         """Rank stores for a build by path overlap, tiebreak by available slots."""
-        build_features = build.request.derivation.required_system_features
+        build_features = build.request.derivation.effective_required_features
         stores = []
         for store_id, store in self.stores.items():
             if not store.is_healthy:
@@ -656,6 +686,12 @@ class Scheduler:
                     await self._register_dep_realisations(build, store)
                     await self._resolve_deferred_derivation(build, store)
                     await self._resolve_dynamic_derivation(build, store)
+
+                # Strip pynixd-handled features from requiredSystemFeatures.
+                # After resolution, the backend daemon doesn't need to see
+                # features like ca-derivations — pynixd already converted the
+                # derivation to a regular InputAddressed BuildDerivation.
+                self._strip_handled_features(build)
 
                 # 1. Ensure all inputs are present on the builder
                 missing = build.required_paths - store.tracker.known_paths

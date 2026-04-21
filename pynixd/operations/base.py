@@ -559,6 +559,18 @@ class BasicDerivation:
             return set()
         return set(raw.split())
 
+    @property
+    def effective_required_features(self) -> set[str]:
+        """Required features with pynixd-handled features stripped.
+
+        Features like ca-derivations are resolved by pynixd before the
+        build reaches the backend store. This property returns the
+        feature set that the backend store actually needs to support.
+        """
+        from ..system_features import PYNIXD_HANDLED_FEATURES
+
+        return self.required_system_features - PYNIXD_HANDLED_FEATURES
+
     def output_paths(self) -> dict[str, StorePath]:
         """Return {output_name: output_path} for all outputs."""
         return {name: StorePath(o.path) for name, o in self.outputs.items()}
