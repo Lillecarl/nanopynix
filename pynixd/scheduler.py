@@ -35,6 +35,7 @@ from .store import Store
 from .store_path import StorePath
 
 from .allocator import BuildAllocator, TINY_BUILD_THRESHOLD_MS
+from .config import PynixdSettings
 from .decomposer import BuildDecomposer
 from .dynamic_resolver import DynamicDerivationResolver
 from . import metrics
@@ -52,16 +53,26 @@ class Scheduler:
         self,
         stores: Mapping[str, Store],
         local_store: Store,
+        settings: PynixdSettings | None = None,
         read_drv_fn: Any = None,
     ) -> None:
         self.queue = BuildQueue()
         self.stores = stores
         self.local_store = local_store
-        self.allocator = BuildAllocator(stores, local_store)
+        
+        effective_settings = settings or PynixdSettings()
+        self.allocator = BuildAllocator(
+            stores, local_store, local_building=effective_settings.local_building
+        )
         self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
         self.dynamic_resolver = DynamicDerivationResolver(self, read_drv_fn=read_drv_fn)
         self.trigger_event = asyncio.Event()
         self.running = False
+        self.last_activity_at: float = asyncio.get_event_loop().time()
+
+    def record_activity(self) -> None:
+        """Update last activity timestamp."""
+        self.last_activity_at = asyncio.get_event_loop().time()
 
     def trigger(self) -> None:
         """Signal that a scheduling pass is needed."""

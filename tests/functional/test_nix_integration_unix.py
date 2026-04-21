@@ -1,0 +1,98 @@
+import os
+import pytest
+from pathlib import Path
+from tests.conftest import run_subproc, get_test_store_kwargs, rmtree_robust
+from pynixd.store import LocalSocketStore
+from pynixd import Server
+
+"""
+End-to-End Nix Integration Tests via Unix Socket
+
+These tests use the real `nix` binary to perform builds against a 
+running pynixd server via its Unix socket. This verifies the 
+daemon protocol proxying logic without SSH complexity.
+"""
+
+@pytest.fixture
+async def pynixd_server(tmp_path: Path):
+    """Start a pynixd server listening on a Unix socket."""
+    store_path = tmp_path / "store"
+    store_path.mkdir()
+    socket_path = tmp_path / "pynixd.sock"
+    
+    local_store = LocalSocketStore(
+        id="local",
+        store_path=store_path,
+        **get_test_store_kwargs(no_probe=True)
+    )
+    
+    async with Server(
+        local_store=local_store,
+        unix_path=socket_path,
+        ssh_port=None, # Disable SSH
+        http_port=None,
+        local_building=True,
+    ) as server:
+        yield server, socket_path, store_path
+
+@pytest.mark.no_pynixd
+@pytest.mark.asyncio
+async def test_nix_build_via_unix(pynixd_server):
+    """Verify that 'nix build' works when using pynixd via Unix socket."""
+    server, socket_path, store_path = pynixd_server
+    
+    # Construction of Unix URI: unix:///path/to/socket?root=/path/to/store
+    uri = f"unix://{socket_path}?root={store_path}"
+    
+    nix_expr = """
+    with import <nixpkgs> {};
+    runCommand "pynixd-test" { 
+        ts = builtins.currentTime; 
+    } "echo 'hello from pynixd' > $out"
+    """
+    expr_path = Path("/tmp/pynixd-it-test.nix")
+    expr_path.write_text(nix_expr)
+    
+    cmd = [
+        "nix", "build",
+        "--file", str(expr_path),
+        "--store", uri,
+        "--no-link",
+        "--print-out-paths",
+        "--impure",
+    ]
+    
+    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+    assert rc == 0
+    assert "/nix/store/" in stdout
+    # The output path should contain our test string (or the hash)
+    # We can check that the path exists in pynixd's store
+    out_path = stdout.strip()
+    assert server.local_store.tracker.has_path(out_path)
+
+@pytest.mark.no_pynixd
+@pytest.mark.asyncio
+async def test_nix_copy_via_unix(pynixd_server, tmp_path: Path):
+    """Verify 'nix copy' works against pynixd via Unix socket."""
+    server, socket_path, store_path = pynixd_server
+    uri = f"unix://{socket_path}?root={store_path}"
+    
+    dummy_file = tmp_path / "dummy"
+    dummy_file.write_text("pynixd-copy-test")
+    
+    # Setup: add to system store
+    rc, stdout, stderr, stdboth = await run_subproc(["nix-store", "--add", str(dummy_file)])
+    assert rc == 0
+    system_path = stdout.strip()
+    
+    cmd = [
+        "nix", "copy",
+        "--to", uri,
+        system_path
+    ]
+    
+    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+    assert rc == 0
+    
+    # Verify it exists in pynixd's local store
+    assert server.local_store.tracker.has_path(system_path)

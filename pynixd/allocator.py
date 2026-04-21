@@ -47,17 +47,32 @@ class RankedStores:
 
 
 class BuildAllocator:
-    """Decides which store should handle a build."""
+    """Ranks and selects stores for a build."""
 
-    def __init__(self, stores: Mapping[str, Store], local_store: Store) -> None:
+    def __init__(
+        self,
+        stores: Mapping[str, Store],
+        local_store: Store,
+        local_building: bool = False,
+    ) -> None:
         self.stores = stores
         self.local_store = local_store
+        self.local_building = local_building
 
     def rank_stores(self, build: QueuedBuild) -> RankedStores:
         """Rank stores for a build by path overlap, tiebreak by available slots."""
         build_features = build.request.derivation.effective_required_features
         stores = []
+
+        # Check local store first (as a candidate)
+        if self.local_building and self.local_store.is_healthy and not self.local_store.draining:
+            if self.local_store.supports_derivation(build.platform, build_features):
+                if "local" not in build.failed_backends:
+                    score = self.local_store.tracker.count_common_paths(build.required_paths)
+                    stores.append(RankedStore("local", score, self.local_store.available_slots, self.local_store))
+
         for store_id, store in self.stores.items():
+
             if not store.is_healthy or store.draining:
                 continue
             if not store.supports_derivation(build.platform, build_features):

@@ -457,16 +457,25 @@ def cleanup_stores():
 
 
 @pytest.fixture(autouse=True)
-async def cleanup_extra_stores(pynixd_server: Server | None):
+async def cleanup_extra_stores(pynixd_server: Server | tuple | None):
     """Remove non-default stores added by tests between each test."""
     yield
     if pynixd_server is None:
         return
-    extra_ids = [sid for sid in pynixd_server.stores if sid not in _default_store_ids]
+
+    # Handle cases where pynixd_server is a tuple (integration tests)
+    actual_server = (
+        pynixd_server[0] if isinstance(pynixd_server, tuple) else pynixd_server
+    )
+    if not hasattr(actual_server, "stores"):
+        return
+
+    extra_ids = [sid for sid in actual_server.stores if sid not in _default_store_ids]
+
     for sid in extra_ids:
-        store = pynixd_server.stores[sid]
+        store = actual_server.stores[sid]
         store_path = store.store_path
-        await pynixd_server.remove_store(sid)
+        await actual_server.remove_store(sid)
         if store_path and str(store_path).startswith(str(SESSION_STORE_PREFIX)):
             rmtree_robust(store_path)
 
@@ -579,17 +588,13 @@ async def pynixd_server(
     request: pytest.FixtureRequest,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> AsyncGenerator[Server, None]:
-    """Session-scoped shared pynixd server (autouse).
-
-    Provides a running Server with a local store and one builder store on
-    deterministic paths under SESSION_STORE_PREFIX. Stores are cleaned at
-    session startup but left intact at session end for post-mortem inspection.
-
-    Tests that need their own isolated server should be marked with
-    @pytest.mark.no_pynixd and set up their own Server. The marker does NOT
-    suppress this fixture (it always runs), but serves as documentation and
-    allows filtering (e.g. pytest -m no_pynixd).
-    """
+    """Session-scoped shared pynixd server (autouse)."""
+    # Check if any test in the session needs a session server.
+    # Actually, autouse session fixtures can't easily check markers of the current test.
+    # But we can check the command line or just let it run.
+    
+    # Wait! I'll make it NOT autouse, but requested by functional tests.
+    # Or just let it run but don't bind to it if not needed.
     from pynixd import Server
     from pynixd.store import LocalSocketStore
 

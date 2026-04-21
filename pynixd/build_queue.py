@@ -420,3 +420,14 @@ class BuildQueue:
 
             metrics.QUEUE_SIZE.labels(status="done").dec(removed_count)
             return removed_count
+
+    def count(self, status: str) -> int:
+        """Get count of builds with given status (non-async, thread-safe for reading)."""
+        match status:
+            case "pending":
+                return len([b for b in self.queue if b.is_pending])
+            case "running":
+                return len([b for b in self.queue if b.is_building])
+            case "done":
+                return len([b for b in self.queue if b.is_done])
+        return 0

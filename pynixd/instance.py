@@ -56,7 +56,9 @@ class Server:
         self.stores: dict[str, Store] = stores
         self.settings: PynixdSettings = settings or PynixdSettings(**kwargs)
 
-        self.scheduler: Scheduler | None = Scheduler(self.stores, self.local_store)
+        self.scheduler: Scheduler | None = Scheduler(
+            self.stores, self.local_store, settings=self.settings
+        )
 
         self.background_tasks: list[asyncio.Task[Any]] = []
         self.ssh_server: asyncssh.SSHAcceptor | None = None
@@ -67,6 +69,51 @@ class Server:
         self.https_bound_port: int | None = None
         self.path_tracker: PathTracker = PathTracker(db=None)
         self._started = False
+        self._last_activity_at: float = asyncio.get_event_loop().time()
+
+    def record_activity(self) -> None:
+        """Update last activity timestamp."""
+        now = asyncio.get_event_loop().time()
+        self._last_activity_at = now
+        if self.scheduler:
+            self.scheduler.record_activity()
+
+    async def _idleness_watcher(self) -> None:
+        """Monitor idleness and shutdown if timeout reached."""
+        if not self.settings.idle_timeout:
+            return
+
+        timeout = float(self.settings.idle_timeout)
+        log.info("idleness_watcher_started", timeout=timeout)
+
+        while True:
+            try:
+                await asyncio.sleep(1)
+                now = asyncio.get_event_loop().time()
+
+                # Activity from BuildQueue
+                last_activity = self._last_activity_at
+                if self.scheduler:
+                    last_activity = max(last_activity, self.scheduler.last_activity_at)
+                    
+                    pending = self.scheduler.queue.count(status="pending")
+                    running = self.scheduler.queue.count(status="running")
+                    if pending > 0 or running > 0:
+                        self.record_activity()
+                        last_activity = now
+
+                if now - last_activity > timeout:
+                    log.info(
+                        "idle_timeout_reached",
+                        idle_for=round(now - last_activity, 1),
+                    )
+                    # Signal application exit by closing servers
+                    # We do this in a separate task to avoid blocking the watcher
+                    asyncio.create_task(self.close())
+                    break
+            except Exception:
+                log.exception("idle_watcher_error")
+                await asyncio.sleep(5)
 
     async def add_store(self, store: Store) -> None:
         """Add a remote store to the server, linking it to the central DB and path tracker."""
@@ -265,6 +312,9 @@ class Server:
                 self.https_server = runner
                 self.https_bound_port = port
 
+        if self.settings.idle_timeout:
+            self.background_tasks.append(asyncio.create_task(self._idleness_watcher()))
+
         if not (
             self.ssh_server or self.unix_server or self.http_server or self.https_server
         ):
@@ -287,24 +337,31 @@ class Server:
     async def close(self) -> None:
         """Gracefully shut down the server."""
         if not self._started:
-            raise RuntimeError("Server not started or already closed")
+            return
         self._started = False
         log.info("server_shutting_down")
         if self.http_server:
             await self.http_server.cleanup()
+            self.http_server = None
         if self.https_server:
             await self.https_server.cleanup()
+            self.https_server = None
 
         if self.ssh_server:
             self.ssh_server.close()
+            await self.ssh_server.wait_closed()
+            self.ssh_server = None
         if self.unix_server:
             self.unix_server.close()
+            await self.unix_server.wait_closed()
+            self.unix_server = None
 
         if self.scheduler:
             await self.scheduler.stop()
 
         for task in self.background_tasks:
             task.cancel()
+        self.background_tasks.clear()
 
         local_store = self.local_store
         if local_store.db:
@@ -313,3 +370,4 @@ class Server:
         await local_store.close()
         for store in self.stores.values():
             await store.close()
+        self.stores.clear()
