@@ -393,24 +393,28 @@ async def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
         yield None
         return
 
+    assert Profiler is not None
     p = Profiler(async_mode="enabled")
     p.start()
 
     yield p
 
-    if p.is_running:
-        p.stop()
+    if p is not None:
+        if p.is_running:
+            p.stop()
 
-    session = p.last_session
-    if session:
-        log_file = get_log_file_path(test_log_dir, request.node)
-        profile_file = log_file.with_suffix(".pyinstrument")
+        session = p.last_session
+        if session:
+            log_file = get_log_file_path(test_log_dir, request.node)
+            profile_file = log_file.with_suffix(".pyinstrument")
 
-        renderer = ConsoleRenderer(unicode=True, color=False)
-        renderer.processors.insert(0, _prune_client_processor)
+            assert ConsoleRenderer is not None
+            renderer = ConsoleRenderer(unicode=True, color=False)
+            renderer.processors.insert(0, _prune_client_processor)
 
-        with open(profile_file, "w") as f:
-            f.write(renderer.render(session))
+            with open(profile_file, "w") as f:
+                content = renderer.render(session)
+                f.write(content)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -441,19 +445,32 @@ def pytest_runtest_makereport(item: pytest.Item, call):
 
 
 def rmtree_robust(path: str | Path) -> None:
-    """Recursively remove a directory, unsetting read-only bits as needed."""
+    """Recursively remove a directory or file, unsetting read-only bits as needed."""
     path = Path(path)
     if not path.exists():
         return
 
-    def handle_errors(func, path, _excinfo):
+    if path.is_dir():
+
+        def handle_errors(func, path, _excinfo):
+            try:
+                os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+                func(path)
+            except Exception:
+                pass
+
+        shutil.rmtree(path, onerror=handle_errors)
+    else:
         try:
-            os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
-            func(path)
+            path.unlink()
+        except PermissionError:
+            try:
+                os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+                path.unlink()
+            except Exception:
+                pass
         except Exception:
             pass
-
-    shutil.rmtree(path, onerror=handle_errors)
 
 
 def rmtree_robust_glob(pattern: str) -> None:
@@ -615,8 +632,7 @@ async def pynixd_server(
 
     rmtree_robust(local_path)
     rmtree_robust(builder_path)
-    if socket_path.exists():
-        socket_path.unlink()
+    rmtree_robust(socket_path)
 
     local_store = LocalSocketStore(
         id="local",

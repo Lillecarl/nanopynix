@@ -40,7 +40,8 @@ async def test_local_socket_store_gating(tmp_path: Path) -> None:
     )
 
     # 1. Replace the real monitor with a mock one we can control
-    await store.monitor.stop()
+    if store.monitor:
+        await store.monitor.stop()
     store.monitor = MockMonitor(store.gate, settings)
     store.monitor.start()
 
@@ -87,7 +88,8 @@ async def test_gate_wait_timeout_success(tmp_path: Path) -> None:
         **get_test_store_kwargs(no_probe=True),
     )
 
-    await store.monitor.stop()
+    if store.monitor:
+        await store.monitor.stop()
     store.monitor = MockMonitor(store.gate, settings)
     store.monitor.start()
 

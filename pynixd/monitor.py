@@ -25,6 +25,7 @@ from .psi import (
     compute_cpu_util,
     count_cpus_from_proc_stat,
     MemInfo,
+    CpuUtil,
 )
 
 if TYPE_CHECKING:
@@ -39,8 +40,10 @@ class ResourceGate:
     def __init__(self) -> None:
         self.cpu_clear = asyncio.Event()
         self.mem_clear = asyncio.Event()
+        self.io_clear = asyncio.Event()
         self.cpu_clear.set()
         self.mem_clear.set()
+        self.io_clear.set()
 
     async def wait_cpu_clear(self, timeout: float = 5.0) -> None:
         """Wait for CPU pressure to drop below threshold."""
@@ -57,6 +60,13 @@ class ResourceGate:
             raise ResourceExhaustedError(
                 "Memory pressure remains too high after timeout"
             )
+
+    async def wait_io_clear(self, timeout: float = 5.0) -> None:
+        """Wait for IO pressure to drop below threshold."""
+        try:
+            await asyncio.wait_for(self.io_clear.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise ResourceExhaustedError("IO pressure remains too high after timeout")
 
 
 class ResourceMonitor(ABC):
@@ -87,6 +97,28 @@ class ResourceMonitor(ABC):
                 await self.task
             except asyncio.CancelledError:
                 pass
+
+
+class DummyResourceMonitor(ResourceMonitor):
+    """Monitor for stores that don't support telemetry. Reports static healthy stats."""
+
+    def __init__(
+        self, gate: ResourceGate, settings: PynixdSettings, cpu_util: float = 0.0
+    ) -> None:
+        super().__init__(gate, settings)
+        self.cpu_util = cpu_util
+
+    async def run(self) -> None:
+        log.info("dummy_resource_monitor_started", cpu_util=self.cpu_util)
+        self.health = SystemHealth(
+            cpu_util=CpuUtil(utilization=self.cpu_util, cores=1.0, throttled_pct=0.0),
+            timestamp=time.monotonic(),
+        )
+        self.gate.cpu_clear.set()
+        self.gate.mem_clear.set()
+        self.gate.io_clear.set()
+        while self.running:
+            await asyncio.sleep(60)
 
 
 class GenericResourcePoller(ResourceMonitor):
@@ -209,11 +241,17 @@ class GenericResourcePoller(ResourceMonitor):
                     self.gate.cpu_clear.set()
 
                 if self.health.is_mem_stressed(
-                    self.settings.psi_mem_threshold, self.settings.min_free_mem_kb
+                    self.settings.psi_mem_threshold,
+                    self.settings.min_available_memory_mb * 1024,
                 ):
                     self.gate.mem_clear.clear()
                 else:
                     self.gate.mem_clear.set()
+
+                if self.health.is_io_stressed(self.settings.psi_io_threshold):
+                    self.gate.io_clear.clear()
+                else:
+                    self.gate.io_clear.set()
 
             except asyncio.CancelledError:
                 break
@@ -230,6 +268,7 @@ class LocalPSIMonitor(ResourceMonitor):
         super().__init__(gate, settings)
         self.cpu_fd: int | None = None
         self.mem_fd: int | None = None
+        self.io_fd: int | None = None
 
     async def run(self) -> None:
         """Uses loop.add_reader to listen for kernel PSI events."""
@@ -237,6 +276,7 @@ class LocalPSIMonitor(ResourceMonitor):
 
         cpu_threshold = f"some {int(self.settings.psi_cpu_threshold * 1000)} 1000000"
         mem_threshold = f"some {int(self.settings.psi_mem_threshold * 1000)} 1000000"
+        io_threshold = f"some {int(self.settings.psi_io_threshold * 1000)} 1000000"
 
         try:
             if not os.access("/sys/fs/cgroup/cpu.pressure", os.R_OK | os.W_OK):
@@ -252,6 +292,11 @@ class LocalPSIMonitor(ResourceMonitor):
             )
             os.write(self.mem_fd, mem_threshold.encode())
 
+            self.io_fd = os.open(
+                "/sys/fs/cgroup/io.pressure", os.O_RDWR | os.O_NONBLOCK
+            )
+            os.write(self.io_fd, io_threshold.encode())
+
             def on_cpu_event():
                 log.warning("cpu_pressure_event_fired")
                 self.gate.cpu_clear.clear()
@@ -262,10 +307,21 @@ class LocalPSIMonitor(ResourceMonitor):
                 self.gate.mem_clear.clear()
                 loop.call_later(2.0, self.check_pressure_manually)
 
+            def on_io_event():
+                log.warning("io_pressure_event_fired")
+                self.gate.io_clear.clear()
+                loop.call_later(2.0, self.check_pressure_manually)
+
             loop.add_reader(self.cpu_fd, on_cpu_event)
             loop.add_reader(self.mem_fd, on_mem_event)
+            loop.add_reader(self.io_fd, on_io_event)
 
-            log.info("psi_notifier_started", cpu=cpu_threshold, mem=mem_threshold)
+            log.info(
+                "psi_notifier_started",
+                cpu=cpu_threshold,
+                mem=mem_threshold,
+                io=io_threshold,
+            )
 
             while self.running:
                 await asyncio.sleep(10)
@@ -294,6 +350,9 @@ class LocalPSIMonitor(ResourceMonitor):
             if self.mem_fd:
                 loop.remove_reader(self.mem_fd)
                 os.close(self.mem_fd)
+            if self.io_fd:
+                loop.remove_reader(self.io_fd)
+                os.close(self.io_fd)
 
     def check_pressure_manually(self) -> None:
         """Update health state via manual read."""
@@ -305,13 +364,25 @@ class LocalPSIMonitor(ResourceMonitor):
 
             snap = parse_psi_output("\n".join(parts))
             self.health.psi = snap
+
+            # We also need meminfo for absolute threshold check
+            with open("/proc/meminfo") as f:
+                self.health.meminfo = parse_meminfo(f.read())
+
             self.health.timestamp = time.monotonic()
 
             if snap.cpu.some_avg10 < self.settings.psi_cpu_threshold:
                 self.gate.cpu_clear.set()
 
             if snap.memory.some_avg10 < self.settings.psi_mem_threshold:
-                self.gate.mem_clear.set()
+                if (
+                    self.health.meminfo.mem_available
+                    >= self.settings.min_available_memory_mb * 1024
+                ):
+                    self.gate.mem_clear.set()
+
+            if snap.io.some_avg10 < self.settings.psi_io_threshold:
+                self.gate.io_clear.set()
 
         except Exception:
             log.exception("psi_manual_check_failed")

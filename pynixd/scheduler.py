@@ -36,7 +36,7 @@ from .store import Store
 from .store_path import StorePath
 from .stderr import StderrNext
 
-from .allocator import BuildAllocator, TINY_BUILD_THRESHOLD_MS
+from .allocator import BuildAllocator, TINY_BUILD_THRESHOLD_MS, TelemetryStoreRanker
 from .decomposer import BuildDecomposer
 from .dynamic_resolver import DynamicDerivationResolver
 from . import metrics
@@ -63,7 +63,8 @@ class Scheduler:
         self.stores = ctx.stores
         self.local_store = ctx.local_store
 
-        self.allocator = BuildAllocator(self.stores, self.local_store)
+        self.ranker = TelemetryStoreRanker(ctx.settings)
+        self.allocator = BuildAllocator(self.stores, self.local_store, self.ranker)
         self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
         self.dynamic_resolver = DynamicDerivationResolver(self, read_drv_fn=read_drv_fn)
         self.trigger_event = asyncio.Event()
@@ -106,7 +107,7 @@ class Scheduler:
         # Wait for all build slots to be released
         start = time.monotonic()
         while time.monotonic() - start < drain_timeout:
-            if store.build_semaphore._value == store.max_builds:
+            if store.in_flight == 0:
                 break
             await asyncio.sleep(1.0)
         else:
@@ -221,9 +222,6 @@ class Scheduler:
         if not pending:
             # Still update store metrics even if queue is empty
             for s in self.stores.values():
-                metrics.STORE_AVAILABLE_SLOTS.labels(store_id=s.id).set(
-                    s.available_slots
-                )
                 metrics.STORE_HEALTHY.labels(store_id=s.id).set(
                     1 if s.is_healthy else 0
                 )
@@ -268,8 +266,9 @@ class Scheduler:
 
         # 2. Assign schedulable builds to backends
         # Load balancing: prefer backends with the most relevant paths already present
-        # and with free slots.
+        # and with free resources.
         waiting_slot: list[QueuedBuild] = []
+        assigned_this_pass: dict[str, int] = {}
 
         for build in schedulable:
             # 1. Check for "Tiny Build" fast-track to local store
@@ -282,7 +281,8 @@ class Scheduler:
             ):
                 # Is local store available? (We don't want to swamp it either)
                 # But tiny builds are "free" enough that we can be liberal.
-                if self.local_store.available_slots > 0:
+                # Use in_flight as a soft cap for local store too
+                if self.local_store.in_flight < 4:
                     log.info(
                         "build_fasttracked_local",
                         build_id=build.id,
@@ -299,7 +299,7 @@ class Scheduler:
                     continue
 
             # 2. Standard remote backend assignment
-            ranked = self.allocator.rank_stores(build)
+            ranked = self.allocator.rank_stores(build, assigned_this_pass)
 
             # If NO store will ever support this platform/features, fail it statelessly
             if not ranked and not any(
@@ -331,28 +331,25 @@ class Scheduler:
                     )
                 continue
 
-            assigned = False
-            for rs in ranked.with_slots():
-                if build.build_task is None:
-                    log.debug(
-                        "build_assigned_to_store",
-                        build_id=build.id,
-                        store_id=rs.store_id,
-                        score=rs.score,
-                        effective_slots=rs.slots,
-                    )
-                    metrics.QUEUE_SIZE.labels(status="pending").dec()
-                    metrics.QUEUE_SIZE.labels(status="building").inc()
-                    # wait_time is available now because build.started_at will be set in execute_build
-                    # but we can observe it there too. Actually build_queue uses MONOTONIC.
-                    build.build_task = asyncio.create_task(
-                        self.execute_build(build, rs.store)
-                    )
-                    assigned = True
-                    building.append(build.id)
-                    break
-
-            if not assigned:
+            if ranked:
+                # Take the highest ranked store
+                rs = list(ranked)[0]
+                log.debug(
+                    "build_assigned_to_store",
+                    build_id=build.id,
+                    store_id=rs.store_id,
+                    score=rs.score,
+                )
+                metrics.QUEUE_SIZE.labels(status="pending").dec()
+                metrics.QUEUE_SIZE.labels(status="building").inc()
+                build.build_task = asyncio.create_task(
+                    self.execute_build(build, rs.store)
+                )
+                building.append(build.id)
+                assigned_this_pass[rs.store_id] = (
+                    assigned_this_pass.get(rs.store_id, 0) + 1
+                )
+            else:
                 # If all compatible stores have already failed this build,
                 # it's permanently stuck — fail it now with a clear message.
                 compatible = [
@@ -388,27 +385,25 @@ class Scheduler:
 
         # 3. Handle proactive transfers for waiting_slot builds
         # Proactive transfer is for builds that are ready to run (all inputs in local_store)
-        # but the best builder has no free slots. We transfer inputs to a builder with slots
-        # so it can start building.
+        # but the best builder has no free resources. We transfer inputs to a builder anyway.
         transferring_list: list[int] = []
         for build in waiting_slot:
             if build.is_transferring:
                 transferring_list.append(build.id)
                 continue
 
-            ranked = self.allocator.rank_stores(build)
-            for rs in ranked.with_slots().sort():
+            ranked = self.allocator.rank_stores(build, assigned_this_pass)
+            if ranked:
+                rs = list(ranked)[0]
                 missing = build.required_paths - rs.store.tracker.known_paths
                 if missing and self.local_store.tracker.has_all_paths(missing):
                     build.transfer_task = asyncio.create_task(
                         self.transfer_inputs(build, rs.store, missing)
                     )
                     transferring_list.append(build.id)
-                    break
 
         # 4. Update store metrics
         for s in self.stores.values():
-            metrics.STORE_AVAILABLE_SLOTS.labels(store_id=s.id).set(s.available_slots)
             metrics.STORE_HEALTHY.labels(store_id=s.id).set(1 if s.is_healthy else 0)
             if s.cpu_util:
                 metrics.STORE_CPU_UTILIZATION.labels(store_id=s.id).set(
@@ -423,7 +418,7 @@ class Scheduler:
             waiting_paths=len(waiting_paths),
             waiting_deps=len(waiting_deps),
             waiting_slot=len(waiting_slot),
-            slots={s.id: s.available_slots for s in self.stores.values()},
+            in_flight={s.id: s.in_flight for s in self.stores.values()},
             cpu_util={
                 s.id: f"{s.cpu_util.utilization:.1f}%" if s.cpu_util else None
                 for s in self.stores.values()

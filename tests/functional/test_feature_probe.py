@@ -37,8 +37,6 @@ async def test_feature_probe_in_memory() -> None:
     store: LocalSocketStore | SSHSubprocessStore = LocalSocketStore(
         id="feature-probe",
         store_path=store_path,
-        max_builds=10,
-        max_transfers=10,
         **kwargs,
     )
     await store.ensure_daemon()
@@ -64,8 +62,6 @@ async def test_feature_probe_nixbuild_net() -> None:
         id="nixbuild-net",
         username="lillecarl",
         client_keys=[Path("~/.ssh/id_ed25519")],
-        max_builds=10,
-        max_transfers=10,
     )
 
     await store.probe()

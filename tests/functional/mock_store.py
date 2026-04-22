@@ -73,6 +73,9 @@ class MockConnection(Connection):
             def write_string_set(self, *args, **kwargs):
                 pass
 
+            async def is_dirty(self):
+                return False
+
             async def drain(self):
                 pass
 
@@ -122,15 +125,13 @@ class MockStore(Store):
       the real one, but transfers are simulated as instant set operations.
     - **Build Control**: Use `.block_build(drv_path)` to pause a build in-flight
       and manually trigger its completion via an `asyncio.Event`.
-    - **Load Simulation**: Tweak `max_builds` and `cpu_util` at runtime to
-      observe how the scheduler reacts to fleet saturation.
+    - **Load Simulation**: Tweak `cpu_util` at runtime to observe how the
+      scheduler reacts to fleet saturation.
     """
 
     def __init__(
         self,
         id: str,
-        max_builds: int = 2,
-        max_transfers: int = 16,
         feature_matrix: dict[str, set[str]] | None = None,
         cpu_utilization: float = 0.0,
     ) -> None:
@@ -139,8 +140,6 @@ class MockStore(Store):
         super().__init__(
             id=id,
             store_path=Path(f"/mock/{id}"),
-            max_builds=max_builds,
-            max_transfers=max_transfers,
             feature_matrix=feature_matrix,
             probe=False,
         )
@@ -155,6 +154,7 @@ class MockStore(Store):
         self._cpu_util = CpuUtil(
             utilization=cpu_utilization, cores=4.0, throttled_pct=0.0
         )
+        # In MockStore, we don't want real PSI monitoring, so we don't start any poller.
 
     def block_build(self, drv_path: str | StorePath) -> asyncio.Event:
         """Prevent a build of the given .drv from completing.
@@ -183,17 +183,14 @@ class MockStore(Store):
 
     @contextlib.asynccontextmanager
     async def build_conn(self) -> AsyncIterator[MockConnection]:
-        """Simulate acquiring a build connection from a pool.
-
-        Respects the `max_builds` semaphore to simulate slot limits.
-        """
-        async with self.build_semaphore:
+        """Simulate acquiring a build connection."""
+        async with self.pool.acquire("build"):
             yield MockConnection(self)
 
     @contextlib.asynccontextmanager
     async def transfer_conn(self) -> AsyncIterator[MockConnection]:
         """Simulate acquiring a transfer connection."""
-        async with self.transfer_semaphore:
+        async with self.pool.acquire("transfer"):
             yield MockConnection(self)
 
     async def call(
@@ -229,7 +226,9 @@ class MockStore(Store):
 
         # Default handlers for discovery ops
         if isinstance(request, QueryAllValidPathsRequest):
-            return QueryAllValidPathsResponse(paths=self.tracker.known_paths)
+            return cast(
+                "Resp", QueryAllValidPathsResponse(paths=self.tracker.known_paths)
+            )
 
         if isinstance(request, QueryClosureWithInfoRequest):
             infos = []
@@ -248,7 +247,7 @@ class MockStore(Store):
                         ca="",
                     )
                 )
-            return QueryClosureWithInfoResponse(infos=infos)
+            return cast("Resp", QueryClosureWithInfoResponse(infos=infos))
 
         log.warning(
             "mock_store_no_response", store_id=self.id, request=req_type.__name__

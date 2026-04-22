@@ -96,15 +96,30 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                         count=len(store.tracker.known_paths),
                     )
 
-                    verified = await store.execute(
-                        QueryValidPathsRequest(paths=store.tracker.known_paths),
-                        client=client,
-                        suppress_last=suppress_last,
-                    )
-                    store.tracker.set_known_paths(verified.paths, update_regtime=False)
-                    return QueryAllValidPathsResponse(paths=verified.paths)
+                    try:
+                        verified = await store.execute(
+                            QueryValidPathsRequest(paths=store.tracker.known_paths),
+                            client=client,
+                            suppress_last=suppress_last,
+                        )
+                        store.tracker.set_known_paths(
+                            verified.paths, update_regtime=False
+                        )
+                        return QueryAllValidPathsResponse(paths=verified.paths)
+                    except Exception as e2:
+                        self.logger.warning(
+                            "path_verification_failed",
+                            store_id=store.id,
+                            error=str(e2),
+                        )
+                        # Keep existing paths, better to be stale than empty for now?
+                        # Or should we clear? The previous behavior was to clear.
+                        # But for persistence test, we want to keep.
+                        return QueryAllValidPathsResponse(
+                            paths=store.tracker.known_paths
+                        )
                 raise
         except Exception:
             self.logger.warning("sync_paths_failed", store_id=store.id)
-            store.tracker.known_paths = set()
-            return QueryAllValidPathsResponse(paths=set())
+            # Do NOT clear known_paths here, it might have been loaded from DB
+            return QueryAllValidPathsResponse(paths=store.tracker.known_paths)

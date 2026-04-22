@@ -21,7 +21,6 @@ from .gc import GarbageCollector
 from .http_server import PynixdHttpServer
 from .local_store_db import LocalStoreDB
 from .path_tracker import PathTracker
-from .operations.query_all_valid_paths import QueryAllValidPathsRequest
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
 from .store import LocalSocketStore, Store, get_current_system
@@ -144,9 +143,6 @@ class Server:
 
     async def add_store(self, store: Store) -> None:
         """Add a remote store to the server, linking it to the central DB and path tracker."""
-
-        await store.probe()
-
         local_store = self.local_store
         store.db = local_store.db
         store.tracker = self.path_tracker.get_instance(store.id, is_local=False)
@@ -157,15 +153,12 @@ class Server:
                 store.tracker.add_known_paths(paths, update_regtime=False)
                 log.info("loaded_cached_paths", store_id=store.id, count=len(paths))
 
+        await store.start()
+
         self.stores[store.id] = store
 
         if self.scheduler:
             self.scheduler.add_store(store.id, store)
-
-        try:
-            await store.execute(QueryAllValidPathsRequest())
-        except Exception:
-            log.exception("sync_paths_failed", id=store.id)
 
     async def remove_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
         """Remove a remote store, cleaning DB records and closing connections."""
@@ -249,7 +242,7 @@ class Server:
         local_store = self.ctx.local_store
         stores = self.ctx.stores
 
-        await local_store.probe()
+        await local_store.start()
 
         if local_store.version < wire.proto(1, 35):
             raise RuntimeError(
@@ -279,8 +272,8 @@ class Server:
         stores_to_add = list(self.ctx.stores.values())
         self.ctx.stores.clear()
 
-        for store in stores_to_add:
-            await self.add_store(store)
+        if stores_to_add:
+            await asyncio.gather(*[self.add_store(s) for s in stores_to_add])
 
         if self.ctx.scheduler:
             self.background_tasks.append(

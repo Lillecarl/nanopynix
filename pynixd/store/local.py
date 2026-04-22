@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,12 +14,11 @@ import structlog
 
 from .base import Store
 from ..connection import Connection
-from ..monitor import ResourceGate, create_monitor
+from ..monitor import create_monitor
 from ..wire import UnixNixReader, UnixNixWriter
 from ..config import PynixdSettings
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from ..monitor import ResourceMonitor
 
 log = structlog.get_logger(__name__)
@@ -45,8 +43,6 @@ class LocalSocketStore(Store):
         id: str | None = None,
         store_path: Path | None = None,
         socket_path: Path | None = None,
-        max_builds: int = 1,
-        max_transfers: int = 4,
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
         nix_bin: str = "nix",
@@ -68,8 +64,6 @@ class LocalSocketStore(Store):
         super().__init__(
             id=id or f"local-socket:{self.socket_path}",
             store_path=store_path,
-            max_builds=max_builds,
-            max_transfers=max_transfers,
             feature_matrix=feature_matrix,
             probe=probe,
         )
@@ -83,38 +77,16 @@ class LocalSocketStore(Store):
         self.settings = settings or PynixdSettings()
 
         # Resource Monitoring
-        self.gate = ResourceGate()
-        self.monitor: ResourceMonitor = create_monitor(self.gate, self.settings)
-        self.monitor.start()
+        self.monitor: ResourceMonitor | None = create_monitor(self.gate, self.settings)
 
     @property
     def db_enabled(self) -> bool:
         return self.use_db
 
-    @asynccontextmanager
-    async def acquire_conn(
-        self,
-        semaphore: asyncio.Semaphore,
-    ) -> AsyncIterator[Connection]:
-        """Override to implement pressure gating before acquiring semaphore.
-        Always gates on memory to prevent OOM when spawning new Nix instances.
-        """
-        timeout = self.settings.gate_timeout
-
-        try:
-            await self.gate.wait_mem_clear(timeout=timeout)
-        except Exception as e:
-            # ResourceExhaustedError will be caught by Scheduler
-            log.warning(
-                "resource_gate_rejection",
-                store_id=self.id,
-                error=str(e),
-                kind="build" if semaphore is self.build_semaphore else "transfer",
-            )
-            raise
-
-        async with super().acquire_conn(semaphore) as conn:
-            yield conn
+    async def start(self) -> None:
+        """Spawn managed daemon and initialize the store."""
+        await self.ensure_daemon()
+        await super().start()
 
     async def ensure_daemon(self) -> None:
         """Spawn a managed daemon if needed (first call only).
@@ -182,16 +154,21 @@ class LocalSocketStore(Store):
             )
 
         # Socket file exists but daemon may not be listening yet — probe
-        for attempt in range(50):
+        for attempt in range(100):
             try:
                 r, w = await asyncio.open_unix_connection(str(self.socket_path))
                 w.close()
                 await w.wait_closed()
                 log.info("daemon_socket_ready", socket_path=str(self.socket_path))
+
+                # Tiny breathe time to ensure the daemon has processed the close
+                # and is ready for the next "real" connection.
+                await asyncio.sleep(0.1)
+
                 self.daemon_ready.set()
                 return
             except (ConnectionRefusedError, ConnectionResetError):
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.05)
 
         raise RuntimeError(
             f"Managed daemon socket exists but not accepting connections "
@@ -219,7 +196,8 @@ class LocalSocketStore(Store):
     async def close(self) -> None:
         """Close stores, stop monitor and terminate managed daemon if any."""
         await super().close()
-        await self.monitor.stop()
+        if self.monitor:
+            await self.monitor.stop()
         if self.managed and self.daemon_proc is not None:
             self.daemon_proc.terminate()
             try:

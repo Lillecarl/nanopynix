@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,7 +16,7 @@ from .base import Store
 from .. import wire
 from ..connection import Connection
 from ..wire import SSHNixReader, SSHNixWriter
-from ..monitor import ResourceGate, GenericResourcePoller
+from ..monitor import GenericResourcePoller, DummyResourceMonitor, ResourceMonitor
 from ..config import PynixdSettings
 from ..psi import (
     CpuUtil,
@@ -65,12 +63,21 @@ class _SSHStoreMixin(Store):
         self.monitor_enabled = monitor
         self.client_keys = client_keys
         self.settings = settings or PynixdSettings()
-        self.gate = ResourceGate()
-        self.poller: GenericResourcePoller | None = None
+        # self.gate is inherited from Store.__init__
+        self.monitor: ResourceMonitor | None = None
+
+    async def start(self) -> None:
+        """Establish SSH connection and initialize the store."""
+        await self.ensure_ssh()
+        await super().start()
 
     def start_psi_polling(self, sftp: asyncssh.SFTPClient) -> None:
         """Start consolidated resource poller over SFTP."""
         if not self.monitor_enabled:
+            # If monitoring is explicitly disabled, use dummy monitor with 0.0 load
+            if self.monitor is None:
+                self.monitor = DummyResourceMonitor(self.gate, self.settings)
+                self.monitor.start()
             return
 
         async def sftp_read(path: str) -> str:
@@ -84,65 +91,47 @@ class _SSHStoreMixin(Store):
             except asyncssh.SFTPError:
                 return False
 
-        if self.poller is None or not self.poller.running:
-            self.poller = GenericResourcePoller(
+        if self.monitor is None or isinstance(self.monitor, DummyResourceMonitor):
+            if self.monitor:
+                asyncio.create_task(self.monitor.stop())
+            self.monitor = GenericResourcePoller(
                 self.gate, self.settings, sftp_read, sftp_exists
             )
-            self.poller.start()
+            self.monitor.start()
 
     def stop_psi_polling(self) -> None:
         """Cancel the resource polling task."""
-        if self.poller is not None:
-            asyncio.create_task(self.poller.stop())
-            self.poller = None
+        if self.monitor is not None:
+            asyncio.create_task(self.monitor.stop())
+            self.monitor = None
 
     @property
     def pressure(self) -> float | None:
         """System pressure score (0-100), or None if unavailable."""
-        if self.poller is None or self.poller.health.psi is None:
+        if self.monitor is None:
             return None
+
+        if isinstance(self.monitor, DummyResourceMonitor):
+            return 0.0
+
+        if self.monitor.health.psi is None:
+            return None
+
         # Stale check: 3x interval
-        if time.monotonic() - self.poller.health.timestamp > self.poller.interval * 3:
+        interval = getattr(self.monitor, "interval", 5.0)
+        if time.monotonic() - self.monitor.health.timestamp > interval * 3:
             return None
-        return self.poller.health.psi.pressure_score()
+        return self.monitor.health.psi.pressure_score()
 
     @property
     def meminfo(self) -> MemInfo | None:
         """System memory info, or None if unavailable."""
-        return self.poller.health.meminfo if self.poller else None
+        return self.monitor.health.meminfo if self.monitor else None
 
     @property
     def cpu_util(self) -> CpuUtil | None:
         """CPU utilization from cgroupv2, or None if unavailable."""
-        return self.poller.health.cpu_util if self.poller else None
-
-    @asynccontextmanager
-    async def acquire_conn(
-        self,
-        semaphore: asyncio.Semaphore,
-    ) -> AsyncIterator[Connection]:
-        """Override to implement pressure gating before acquiring semaphore.
-        Always gates on memory to prevent OOM on the remote side.
-        """
-        if not self.monitor_enabled:
-            async with super().acquire_conn(semaphore) as conn:
-                yield conn
-            return
-
-        timeout = self.settings.gate_timeout
-        try:
-            await self.gate.wait_mem_clear(timeout=timeout)
-        except Exception as e:
-            log.warning(
-                "remote_resource_gate_rejection",
-                store_id=self.id,
-                error=str(e),
-                kind="build" if semaphore is self.build_semaphore else "transfer",
-            )
-            raise
-
-        async with super().acquire_conn(semaphore) as conn:
-            yield conn
+        return self.monitor.health.cpu_util if self.monitor else None
 
     async def ensure_ssh(self) -> asyncssh.SSHClientConnection:
         if self.conn is not None:
@@ -229,8 +218,6 @@ class SSHSubprocessStore(_SSHStoreMixin):
         port: int = 22,
         username: str | None = None,
         store_path: Path = Path("/"),
-        max_builds: int = 2,
-        max_transfers: int = 4,
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
         monitor: bool = True,
@@ -240,8 +227,6 @@ class SSHSubprocessStore(_SSHStoreMixin):
         super().__init__(
             id=id or f"ssh:{username or ''}@{host}:{port}",
             store_path=store_path,
-            max_builds=max_builds,
-            max_transfers=max_transfers,
             feature_matrix=feature_matrix,
             probe=probe,
         )
@@ -313,8 +298,6 @@ class SSHSocketStore(_SSHStoreMixin):
         port: int = 22,
         username: str | None = None,
         socket_path: Path = DAEMON_SOCKET_PATH,
-        max_builds: int = 2,
-        max_transfers: int = 4,
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
         monitor: bool = True,
@@ -322,8 +305,6 @@ class SSHSocketStore(_SSHStoreMixin):
     ) -> None:
         super().__init__(
             id=id or f"ssh-socket:{username or ''}@{host}:{port}",
-            max_builds=max_builds,
-            max_transfers=max_transfers,
             feature_matrix=feature_matrix,
             probe=probe,
         )

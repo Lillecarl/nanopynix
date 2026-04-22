@@ -58,10 +58,8 @@ async def test_scheduler_load_balancing():
     """
 
     # 1. Setup Virtual Fleet
-    local_store = MockStore(
-        "local", max_builds=1, feature_matrix={"x86_64-linux": set()}
-    )
-    remote1 = MockStore("remote1", max_builds=1, feature_matrix={"x86_64-linux": set()})
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+    remote1 = MockStore("remote1", feature_matrix={"x86_64-linux": set()})
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
@@ -71,10 +69,11 @@ async def test_scheduler_load_balancing():
     )
     scheduler = Scheduler(ctx)
 
-    # 2. Mock build response for the remote store
+    # 2. Mock build response for all stores
     build_resp = BuildDerivationResponse(
         result=BuildResult(status=BuildResultStatus.BUILT)
     )
+    local_store.responses[BuildDerivationRequest] = build_resp
     remote1.responses[BuildDerivationRequest] = build_resp
 
     # 3. Enqueue a build
@@ -117,10 +116,14 @@ async def test_scheduler_skips_saturated_store():
     - Build is assigned only after a slot is manually released.
     """
 
-    local_store = MockStore(
-        "local", max_builds=0, feature_matrix={"x86_64-linux": set()}
-    )
-    remote1 = MockStore("remote1", max_builds=0, feature_matrix={"x86_64-linux": set()})
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+    remote1 = MockStore("remote1", feature_matrix={"x86_64-linux": set()})
+
+    # Simulate saturation by manually incrementing active connections
+    # A concurrency penalty of 50.0 per connection will push the score below 0.0
+    # (Assuming base score is 100 from CPU idle)
+    local_store.pool.active_connections = 3
+    remote1.pool.active_connections = 3
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
@@ -129,6 +132,13 @@ async def test_scheduler_skips_saturated_store():
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
+
+    # Ensure all stores have a build response before we start
+    build_resp = BuildDerivationResponse(
+        result=BuildResult(status=BuildResultStatus.BUILT)
+    )
+    local_store.responses[BuildDerivationRequest] = build_resp
+    remote1.responses[BuildDerivationRequest] = build_resp
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     local_store.tracker.add_known_path(drv_path)
@@ -140,7 +150,7 @@ async def test_scheduler_skips_saturated_store():
         request, client=None, required_paths={drv_path}, platform="x86_64-linux"
     )
 
-    # Pass 1: No slots available anywhere
+    # Pass 1: No slots available anywhere (scores < 0)
     await scheduler.schedule()
 
     queued_build = scheduler.queue.by_id[build_id]
@@ -148,7 +158,7 @@ async def test_scheduler_skips_saturated_store():
     assert queued_build.is_pending
 
     # 2. Free a slot on remote1
-    remote1.build_semaphore.release()
+    remote1.pool.active_connections = 0
 
     # Pass 2: Now it should be assigned
     await scheduler.schedule()
@@ -175,15 +185,13 @@ async def test_scheduler_proactive_transfer():
     - Inputs are present on 'idle' before build execution starts.
     """
 
-    local_store = MockStore(
-        "local", max_builds=1, feature_matrix={"x86_64-linux": set()}
-    )
-    remote_busy = MockStore(
-        "busy", max_builds=0, feature_matrix={"x86_64-linux": set()}
-    )
-    remote_idle = MockStore(
-        "idle", max_builds=1, feature_matrix={"x86_64-linux": set()}
-    )
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+    remote_busy = MockStore("busy", feature_matrix={"x86_64-linux": set()})
+    remote_idle = MockStore("idle", feature_matrix={"x86_64-linux": set()})
+
+    # Saturate 'busy' store
+    # With locality_weight=500 and cpu_idle_weight=100, we need > (500+100)/50 = 12 conns
+    remote_busy.pool.active_connections = 13
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     remote_busy.tracker.add_known_path(drv_path)
@@ -197,11 +205,13 @@ async def test_scheduler_proactive_transfer():
     )
     scheduler = Scheduler(ctx)
 
-    # Mock build response for idle store
-    idle_resp = BuildDerivationResponse(
+    # Mock build response for all stores
+    build_resp = BuildDerivationResponse(
         result=BuildResult(status=BuildResultStatus.BUILT)
     )
-    remote_idle.responses[BuildDerivationRequest] = idle_resp
+    local_store.responses[BuildDerivationRequest] = build_resp
+    remote_busy.responses[BuildDerivationRequest] = build_resp
+    remote_idle.responses[BuildDerivationRequest] = build_resp
 
     request = BuildDerivationRequest(
         drv_path=drv_path, derivation=BasicDerivation(platform="x86_64-linux")
@@ -245,9 +255,7 @@ async def test_scheduler_decomposition_and_ordering():
     - Root is only scheduled AFTER leaf completes.
     """
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
-    remote1 = MockStore(
-        "remote1", max_builds=10, feature_matrix={"x86_64-linux": set()}
-    )
+    remote1 = MockStore("remote1", feature_matrix={"x86_64-linux": set()})
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
@@ -304,9 +312,11 @@ async def test_scheduler_decomposition_and_ordering():
     scheduler.decomposer.read_drv_fn = mock_read_drv
 
     # 3. Setup build responders
-    remote1.responses[BuildDerivationRequest] = BuildDerivationResponse(
+    build_resp = BuildDerivationResponse(
         result=BuildResult(status=BuildResultStatus.BUILT)
     )
+    local_store.responses[BuildDerivationRequest] = build_resp
+    remote1.responses[BuildDerivationRequest] = build_resp
 
     # Block BOTH builds initially so we can check queue state before completion
     leaf_done = remote1.block_build(leaf_path)
@@ -374,18 +384,14 @@ async def test_scheduler_cpu_utilization():
     - Build is enqueued.
     - Scheduler assigns build to 'cold' store, bypassing 'hot'.
     """
-    local_store = MockStore(
-        "local", max_builds=1, feature_matrix={"x86_64-linux": set()}
-    )
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
     remote_hot = MockStore(
         "hot",
-        max_builds=1,
         feature_matrix={"x86_64-linux": set()},
         cpu_utilization=100.0,
     )
     remote_cold = MockStore(
         "cold",
-        max_builds=1,
         feature_matrix={"x86_64-linux": set()},
         cpu_utilization=10.0,
     )

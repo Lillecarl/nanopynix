@@ -144,6 +144,12 @@ class SystemHealth:
             return True
         return False
 
+    def is_io_stressed(self, psi_threshold: float) -> bool:
+        """True if IO pressure exceeds threshold."""
+        if self.psi and self.psi.io.some_avg10 >= psi_threshold:
+            return True
+        return False
+
 
 def parse_cpu_stat(text: str) -> CgroupCpuStat:
     """Parse /sys/fs/cgroup/cpu.stat output."""

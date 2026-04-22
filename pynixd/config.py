@@ -38,13 +38,39 @@ def _feature_matrix_from_config(
     return None
 
 
+class StoreRankingSettings(BaseModel):
+    """Configurable weights for the telemetry-driven store ranking algorithm."""
+
+    locality_weight: float = 500.0
+    """Points for data locality: (common_paths / total_paths) * locality_weight."""
+
+    cpu_idle_weight: float = 100.0
+    """Points for CPU availability: (1.0 - cpu_utilization) * cpu_idle_weight."""
+
+    cpu_pressure_penalty: float = 50.0
+    """Penalty scaled by CPU PSI average: -(cpu_psi * cpu_pressure_penalty)."""
+
+    io_pressure_penalty: float = 50.0
+    """Penalty scaled by IO PSI average: -(io_psi * io_pressure_penalty)."""
+
+    concurrency_penalty: float = 50.0
+    """Penalty per active connection: -(active_conns * concurrency_penalty)."""
+
+    predicted_load_penalty_per_min: float = 10.0
+    """Penalty per expected minute of in-flight work: -(predicted_mins * load_penalty)."""
+
+    thundering_herd_penalty: float = 100.0
+    """Penalty per build assigned in current scheduling pass: -(assigned * penalty)."""
+
+    min_schedule_score: float = 0.0
+    """Minimum score required for a store to be considered. If lower, builds stay queued."""
+
+
 class LocalSocketStoreSpec(BaseModel):
     type: Literal["local-socket"] = "local-socket"
     id: str | None = None
     store_path: Path = Path("/")
     socket_path: Path | None = None
-    max_builds: int = 1
-    max_transfers: int = 4
     systems: set[str] | None = None
     system_features: set[str] = Field(default_factory=set)
     nix_bin: str = "nix"
@@ -60,8 +86,6 @@ class LocalSocketStoreSpec(BaseModel):
             id=self.id,
             store_path=self.store_path,
             socket_path=self.socket_path,
-            max_builds=self.max_builds,
-            max_transfers=self.max_transfers,
             feature_matrix=feature_matrix,
             probe=feature_matrix is None,
             nix_bin=self.nix_bin,
@@ -75,8 +99,6 @@ class LocalSubprocessStoreSpec(BaseModel):
     type: Literal["local-subprocess"] = "local-subprocess"
     id: str | None = None
     store_path: Path
-    max_builds: int = 1
-    max_transfers: int = 4
     systems: set[str] | None = None
     system_features: set[str] = Field(default_factory=set)
     nix_bin: str = "nix"
@@ -91,8 +113,6 @@ class LocalSubprocessStoreSpec(BaseModel):
         return LocalSocketStore(
             id=self.id,
             store_path=self.store_path,
-            max_builds=self.max_builds,
-            max_transfers=self.max_transfers,
             feature_matrix=feature_matrix,
             probe=feature_matrix is None,
             nix_bin=self.nix_bin,
@@ -109,8 +129,6 @@ class SSHSubprocessStoreSpec(BaseModel):
     port: int = 22
     username: str | None = None
     store_path: Path = Path("/")
-    max_builds: int = 2
-    max_transfers: int = 4
     systems: set[str] | None = None
     system_features: set[str] = Field(default_factory=set)
     monitor: bool = True
@@ -126,8 +144,6 @@ class SSHSubprocessStoreSpec(BaseModel):
             port=self.port,
             username=self.username,
             store_path=self.store_path,
-            max_builds=self.max_builds,
-            max_transfers=self.max_transfers,
             feature_matrix=feature_matrix,
             probe=feature_matrix is None,
             monitor=self.monitor,
@@ -142,8 +158,6 @@ class SSHSocketStoreSpec(BaseModel):
     port: int = 22
     username: str | None = None
     socket_path: Path = Path("/nix/var/nix/daemon-socket/socket")
-    max_builds: int = 2
-    max_transfers: int = 4
     systems: set[str] | None = None
     system_features: set[str] = Field(default_factory=set)
     monitor: bool = True
@@ -158,8 +172,6 @@ class SSHSocketStoreSpec(BaseModel):
             port=self.port,
             username=self.username,
             socket_path=self.socket_path,
-            max_builds=self.max_builds,
-            max_transfers=self.max_transfers,
             feature_matrix=feature_matrix,
             probe=feature_matrix is None,
             monitor=self.monitor,
@@ -241,10 +253,14 @@ class PynixdSettings(BaseSettings):
     gc_local_max_age: int = 604800
     gc_builder_max_age: int = 3600
 
-    # Resource Monitoring (LocalSocketStore)
+    # Scheduling & Telemetry
+    ranking: StoreRankingSettings = Field(default_factory=StoreRankingSettings)
+
+    # Resource Monitoring
     psi_cpu_threshold: float = 15.0  # % pressure (some)
     psi_mem_threshold: float = 10.0  # % pressure (some)
-    min_free_mem_kb: int = 512 * 1024  # Fallback: keep 512MB free
+    psi_io_threshold: float = 10.0  # % pressure (some)
+    min_available_memory_mb: int = 512  # Hard gate: block if < 512MB available
     max_cpu_util: float = 90.0  # Fallback: max 90% utilization
     gate_timeout: float = 5.0  # seconds to wait for pressure to subside
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -10,6 +11,7 @@ from .system_features import PYNIXD_HANDLED_FEATURES
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild
     from .store import Store
+    from .config import PynixdSettings
 
 log = structlog.get_logger(__name__)
 
@@ -20,8 +22,7 @@ TINY_BUILD_THRESHOLD_MS = 2500
 @dataclass
 class RankedStore:
     store_id: str
-    score: int
-    slots: int
+    score: float
     store: Store
 
 
@@ -38,30 +39,103 @@ class RankedStores:
     def __bool__(self) -> bool:
         return bool(self._stores)
 
-    def with_slots(self) -> RankedStores:
-        return RankedStores([s for s in self._stores if s.slots > 0])
-
     def sort(self) -> RankedStores:
-        return RankedStores(
-            sorted(self._stores, key=lambda s: (s.score, s.slots), reverse=True)
-        )
+        return RankedStores(sorted(self._stores, key=lambda s: s.score, reverse=True))
+
+
+class StoreRanker(ABC):
+    """Abstract base for store ranking strategies."""
+
+    @abstractmethod
+    def rank_stores(
+        self,
+        build: QueuedBuild,
+        stores: list[Store],
+        assigned_this_pass: Mapping[str, int],
+    ) -> RankedStores:
+        """Score and sort available stores for the given build."""
+        ...
+
+
+class TelemetryStoreRanker(StoreRanker):
+    """Ranks stores using telemetry-driven heuristic scoring."""
+
+    def __init__(self, settings: PynixdSettings) -> None:
+        self.settings = settings.ranking
+
+    def rank_stores(
+        self,
+        build: QueuedBuild,
+        stores: list[Store],
+        assigned_this_pass: Mapping[str, int],
+    ) -> RankedStores:
+        ranked = []
+        for store in stores:
+            score = 0.0
+
+            # 1. Data Locality (+ points)
+            if build.required_paths:
+                common = store.tracker.count_common_paths(build.required_paths)
+                ratio = common / len(build.required_paths)
+                score += ratio * self.settings.locality_weight
+
+            # 2. CPU Availability (+ points)
+            if store.cpu_util:
+                idle_ratio = 1.0 - (store.cpu_util.utilization / 100.0)
+                score += idle_ratio * self.settings.cpu_idle_weight
+            else:
+                # Assume partially busy if telemetry is missing
+                score += 0.5 * self.settings.cpu_idle_weight
+
+            # 3. System Pressure (- points)
+            if store.monitor and store.monitor.health.psi:
+                psi = store.monitor.health.psi
+                score -= psi.cpu.some_avg10 * self.settings.cpu_pressure_penalty
+                score -= psi.io.some_avg10 * self.settings.io_pressure_penalty
+
+            # 4. Concurrency Penalty (- points)
+            score -= store.in_flight * self.settings.concurrency_penalty
+
+            # 5. Predicted Load Penalty (- points)
+            # (Requires build duration estimation, placeholder for now)
+            # score -= predicted_mins * self.settings.predicted_load_penalty_per_min
+
+            # 6. Thundering Herd Penalty (- points)
+            assigned = assigned_this_pass.get(store.id, 0)
+            score -= assigned * self.settings.thundering_herd_penalty
+
+            if score >= self.settings.min_schedule_score:
+                ranked.append(RankedStore(store.id, score, store))
+            else:
+                log.debug(
+                    "store_ranking_below_threshold",
+                    store_id=store.id,
+                    score=score,
+                    threshold=self.settings.min_schedule_score,
+                )
+
+        return RankedStores(ranked).sort()
 
 
 class BuildAllocator:
-    """Ranks and selects stores for a build."""
+    """Ranks and selects stores for a build using a pluggable ranker."""
 
     def __init__(
         self,
         stores: Mapping[str, Store],
         local_store: Store,
+        ranker: StoreRanker,
     ) -> None:
         self.stores = stores
         self.local_store = local_store
+        self.ranker = ranker
 
-    def rank_stores(self, build: QueuedBuild) -> RankedStores:
-        """Rank stores for a build by path overlap, tiebreak by available slots."""
+    def rank_stores(
+        self, build: QueuedBuild, assigned_this_pass: Mapping[str, int]
+    ) -> RankedStores:
+        """Rank stores for a build using the injected ranker."""
         build_features = build.request.derivation.effective_required_features
-        stores = []
+        candidates = []
 
         for store_id, store in self.stores.items():
             if not store.is_healthy or store.draining:
@@ -71,17 +145,9 @@ class BuildAllocator:
             if store_id in build.failed_backends:
                 continue
 
-            # Skip stores that are under extreme CPU pressure
-            # (Memory gating happens at the connection layer)
-            if store.pressure is not None and store.pressure > 80.0:
-                continue
-            if store.cpu_util is not None and store.cpu_util.utilization > 99.0:
-                continue
+            candidates.append(store)
 
-            score = store.tracker.count_common_paths(build.required_paths)
-            stores.append(RankedStore(store_id, score, store.available_slots, store))
-
-        return RankedStores(stores).sort()
+        return self.ranker.rank_stores(build, candidates, assigned_this_pass)
 
     def incompatibility_reasons(
         self, platform: str, features: set[str] | None

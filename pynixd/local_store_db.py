@@ -248,7 +248,8 @@ class LocalStoreDB:
                         "CREATE TABLE IF NOT EXISTS PynixdKnownPaths ("
                         "storeId TEXT, "
                         "path TEXT, "
-                        "PRIMARY KEY (storeId, path))"
+                        "PRIMARY KEY (storeId, path)"
+                        ")"
                     )
                     await db.execute(
                         "CREATE TABLE IF NOT EXISTS DerivationStats ("
@@ -260,7 +261,8 @@ class LocalStoreDB:
                         "cpu_system_us INTEGER, "
                         "duration_ms INTEGER, "
                         "last_built_at INTEGER, "
-                        "PRIMARY KEY (pname, version, platform, serialized_drv))"
+                        "PRIMARY KEY (pname, version, platform, serialized_drv)"
+                        ")"
                     )
                     await db.execute(
                         "CREATE INDEX IF NOT EXISTS idx_drv_stats_lookup "

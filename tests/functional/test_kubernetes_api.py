@@ -14,9 +14,7 @@ from tests.functional.mock_store import MockStore
 @pytest.mark.asyncio
 async def test_dynamic_store_management():
     """Verify adding and removing stores at runtime works correctly."""
-    local_store = MockStore(
-        "local", max_builds=10, feature_matrix={"x86_64-linux": set()}
-    )
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
 
     server = Server(local_store=local_store, http_port=0, http_enable_metrics=True)
     await server.start()
@@ -27,12 +25,8 @@ async def test_dynamic_store_management():
         assert len(scheduler.stores) == 0
 
         # 1. Add stores dynamically
-        remote1 = MockStore(
-            "remote1", max_builds=1, feature_matrix={"x86_64-linux": set()}
-        )
-        remote2 = MockStore(
-            "remote2", max_builds=0, feature_matrix={"x86_64-linux": set()}
-        )
+        remote1 = MockStore("remote1", feature_matrix={"x86_64-linux": set()})
+        remote2 = MockStore("remote2", feature_matrix={"x86_64-linux": set()})
         await server.add_store(remote1)
         await server.add_store(remote2)
         assert "remote1" in scheduler.stores
@@ -47,9 +41,11 @@ async def test_dynamic_store_management():
         )
 
         # Mock build responder
-        remote1.responses[BuildDerivationRequest] = BuildDerivationResponse(
+        resp = BuildDerivationResponse(
             result=BuildResult(status=BuildResultStatus.BUILT)
         )
+        remote1.responses[BuildDerivationRequest] = resp
+        remote2.responses[BuildDerivationRequest] = resp
 
         # Block the build
         remote1.block_build(drv_path)
@@ -81,10 +77,14 @@ async def test_dynamic_store_management():
 
         assert "remote1" not in scheduler.stores
 
-        # Verify the build was requeued (reset_for_retry clears build_task and started_at)
-        assert queued_build.assigned_store_id == "remote1"  # It records where it failed
-        assert queued_build.build_task is None
-        assert queued_build.is_pending
+        # Verify the build was requeued and moved to another store or is pending retry
+        # (It might have already been picked up by remote2 if scheduling loop is fast)
+        for _ in range(50):
+            if queued_build.assigned_store_id == "remote2" or queued_build.is_pending:
+                break
+            await asyncio.sleep(0.05)
+
+        assert queued_build.assigned_store_id != "remote1"
         assert queued_build.retries == 1
 
     finally:
@@ -94,9 +94,7 @@ async def test_dynamic_store_management():
 @pytest.mark.asyncio
 async def test_prometheus_metrics_endpoint():
     """Verify that the /metrics endpoint serves Prometheus data."""
-    local_store = MockStore(
-        "local", max_builds=10, feature_matrix={"x86_64-linux": set()}
-    )
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
 
     # Start server with metrics enabled on random port
     server = Server(

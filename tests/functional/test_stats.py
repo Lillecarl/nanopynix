@@ -53,7 +53,7 @@ class StatsTestStore(LocalSocketStore):
 
     @asynccontextmanager
     async def build_conn(self):  # type: ignore[override]
-        async with self.build_semaphore:
+        async with self.pool.acquire("build"):
 
             class MockConn:
                 def __init__(self, store):
@@ -133,6 +133,8 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
     pynixd_remote_path = STORE_PREFIX / "stats-remote"
     rmtree_robust(pynixd_local_path)
     rmtree_robust(pynixd_remote_path)
+    pynixd_local_path.mkdir(parents=True, exist_ok=True)
+    pynixd_remote_path.mkdir(parents=True, exist_ok=True)
 
     pynixd_local = LocalSocketStore(
         id="local",
@@ -207,6 +209,8 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
     pynixd_remote_path = STORE_PREFIX / "fasttrack-remote"
     rmtree_robust(pynixd_local_path)
     rmtree_robust(pynixd_remote_path)
+    pynixd_local_path.mkdir(parents=True, exist_ok=True)
+    pynixd_remote_path.mkdir(parents=True, exist_ok=True)
 
     pynixd_local = LocalSocketStore(
         id="local",
@@ -216,7 +220,6 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
     pynixd_remote = StatsTestStore(
         id="remote",
         store_path=pynixd_remote_path,
-        max_builds=10,
         **get_test_store_kwargs(no_probe=True),
     )
 
@@ -374,16 +377,15 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     pynixd_busy = CpuUtilTestStore(
         id="busy",
         store_path=pynixd_busy_path,
-        max_builds=10,
         **get_test_store_kwargs(no_probe=True),
     )
-    pynixd_busy._cpu_util = CpuUtil(utilization=99.5, cores=2.0, throttled_pct=10.0)
+    # Utilization 101% ensures score < 0 even with no penalties
+    pynixd_busy._cpu_util = CpuUtil(utilization=101.0, cores=2.0, throttled_pct=10.0)
     pynixd_busy.build_delays["test-pkg"] = 0.05
 
     pynixd_free = CpuUtilTestStore(
         id="free",
         store_path=pynixd_free_path,
-        max_builds=10,
         **get_test_store_kwargs(no_probe=True),
     )
     pynixd_free._cpu_util = CpuUtil(utilization=50.0, cores=2.0, throttled_pct=0.0)
@@ -417,12 +419,12 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
             failed_backends=[],
         )
 
-        ranked = scheduler.allocator.rank_stores(build)
+        ranked = scheduler.allocator.rank_stores(build, {})
         store_ids = [rs.store_id for rs in ranked]
         assert "busy" not in store_ids
         assert "free" in store_ids
 
         pynixd_busy._cpu_util = CpuUtil(utilization=98.0, cores=2.0, throttled_pct=5.0)
-        ranked2 = scheduler.allocator.rank_stores(build)
+        ranked2 = scheduler.allocator.rank_stores(build, {})
         store_ids2 = [rs.store_id for rs in ranked2]
         assert "busy" in store_ids2

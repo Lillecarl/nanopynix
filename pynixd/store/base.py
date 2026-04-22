@@ -8,10 +8,11 @@ import asyncio
 import platform
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Iterable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import Iterable
+from contextlib import AbstractAsyncContextManager
 from enum import IntEnum
 from pathlib import Path
+from typing import Self
 
 import structlog
 from cachetools import TTLCache
@@ -27,7 +28,9 @@ from ..operations.base import (
     ValidPathInfo,
 )
 from ..operations.nar_from_path import NarFromPathRequest
+from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
 from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
+
 from ..operations.probe_systems import ProbeSystemsRequest
 from ..operations.probe_features import ProbeFeaturesRequest
 from ..system_features import PROBE_SYSTEMS, KNOWN_FEATURES
@@ -36,6 +39,7 @@ from ..signing import SecretKey
 from ..path_tracker import PathTrackerInstance
 from ..store_path import StorePath
 from .pool import ConnectionPool
+from ..monitor import ResourceGate, ResourceMonitor
 
 log = structlog.get_logger(__name__)
 
@@ -65,8 +69,6 @@ class Store(ABC):
         self,
         id: str,
         store_path: Path = Path("/"),
-        max_builds: int = 2,
-        max_transfers: int = 16,
         idle_ttl: float = _DEFAULT_IDLE_TTL,
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
@@ -75,20 +77,19 @@ class Store(ABC):
         self.store_path = store_path
         self.version: int = wire.PROTOCOL_VERSION
         self.nix_version: str = ""
-        self.max_builds = max_builds
-        self.max_transfers = max_transfers
         self.idle_ttl = idle_ttl
         self.conn_counter = 0
 
+        self.gate = ResourceGate()
         self.pool = ConnectionPool(
             store_id=id,
             factory=self._create_conn_with_counter,
-            max_builds=max_builds,
-            max_transfers=max_transfers,
+            gate=self.gate,
             idle_ttl=idle_ttl,
             on_connection_created=self._on_connection_created,
         )
 
+        self.monitor: ResourceMonitor | None = None
         self._feature_matrix: dict[str, set[str]] | None = feature_matrix
         self._probe = probe
         self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
@@ -104,6 +105,47 @@ class Store(ABC):
         self.signing_keys: dict[str, SecretKey] = {}
         self._holder_task: asyncio.Task | None = None
         self.draining: bool = False
+        self._started: bool = False
+
+    async def __aenter__(self) -> Self:
+        await self.start()
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.close()
+
+    async def start(self) -> None:
+        """Explicitly start the store and ensure it is ready for operations.
+
+        Subclasses should override this to perform their specific resource
+        setup (like spawning a daemon or connecting SSH) and MUST call
+        await super().start().
+        """
+        if self._started:
+            return
+
+        # 1. Ensure the protocol is bootstrapped and discovery is done.
+        # This also guarantees that backend daemons have initialized their
+        # files (like db.sqlite) by the time probe() returns.
+        await self.probe()
+
+        # 2. Synchronize paths to populate the tracker
+        await self.sync_paths()
+
+        # 3. Activate monitoring if configured
+        if self.monitor:
+            self.monitor.start()
+
+        self._started = True
+
+    async def sync_paths(self) -> None:
+        """Synchronize the set of known paths from the backend store."""
+        try:
+            resp = await self.execute(QueryAllValidPathsRequest())
+            self.tracker.add_known_paths(resp.paths)
+            log.debug("store_paths_synced", store_id=self.id, count=len(resp.paths))
+        except Exception:
+            log.exception("store_path_sync_failed", store_id=self.id)
 
     def _on_connection_created(self, conn: Connection) -> None:
         """Update store metadata from a newly created connection."""
@@ -115,14 +157,6 @@ class Store(ABC):
         """Wrap create_conn to increment the counter."""
         self.conn_counter += 1
         return await self.create_conn()
-
-    @property
-    def build_semaphore(self) -> asyncio.Semaphore:
-        return self.pool.build_semaphore
-
-    @property
-    def transfer_semaphore(self) -> asyncio.Semaphore:
-        return self.pool.transfer_semaphore
 
     @property
     def db_enabled(self) -> bool:
@@ -430,11 +464,6 @@ class Store(ABC):
 
             await nar_request.response_type().from_reader(dst_conn.r, dst_conn.version)
 
-    @property
-    def available_transfer_slots(self) -> int:
-        """Number of free transfer slots."""
-        return self.pool.transfer_semaphore._value
-
     @abstractmethod
     async def create_conn(self) -> Connection:
         """Create transport, construct Connection, and connect it."""
@@ -459,8 +488,13 @@ class Store(ABC):
 
         self.probe_state = ProbeState.PROBING
 
+        # Ensure protocol contact and handshake by acquiring a connection.
+        # This populates self.version, self.features, etc. and ensures
+        # backend resources (daemon/SSH) are fully initialized.
+        async with self.pool.acquire("probe"):
+            pass
+
         if not self._probe:
-            await self.pool.warm(1)
             self.probe_state = ProbeState.PROBED
             self._probe_event.set()
             return
@@ -476,14 +510,10 @@ class Store(ABC):
         candidate_systems = existing_systems or set(PROBE_SYSTEMS)
         candidate_features = existing_features or set(KNOWN_FEATURES)
 
-        if self.max_builds > 0:
-            systems_resp = await ProbeSystemsRequest(
-                systems=candidate_systems,
-            ).execute(self)
-            systems = systems_resp.systems
-        else:
-            log.info("skipping_systems_probe_no_slots", store_id=self.id)
-            systems = candidate_systems
+        systems_resp = await ProbeSystemsRequest(
+            systems=candidate_systems,
+        ).execute(self)
+        systems = systems_resp.systems
 
         features_resp = await ProbeFeaturesRequest(
             systems=systems,
@@ -505,11 +535,6 @@ class Store(ABC):
         self._probe_event.set()
 
     @property
-    def available_slots(self) -> int:
-        """Number of free build slots."""
-        return self.pool.build_semaphore._value
-
-    @property
     def pressure(self) -> float | None:
         """System pressure score (0-100), or None if unavailable."""
         return None
@@ -526,7 +551,7 @@ class Store(ABC):
 
     @property
     def in_flight(self) -> int:
-        return self.pool.in_flight_builds
+        return self.pool.active_connections
 
     @property
     def is_lix(self) -> bool:
@@ -537,29 +562,12 @@ class Store(ABC):
         return "lix" in self.nix_version.lower()
 
     def build_conn(self) -> AbstractAsyncContextManager[Connection]:
-        """Acquire a build connection (counts against max_builds).."""
-        return self.acquire_conn(self.build_semaphore)
+        """Acquire a build connection."""
+        return self.pool.acquire("build")
 
     def transfer_conn(self) -> AbstractAsyncContextManager[Connection]:
-        """Acquire a transfer connection (counts against max_transfers).
-
-        Transfer connections share the same pool as build connections
-        but use a separate semaphore so transfers don't block builds.
-        """
-        return self.acquire_conn(self.transfer_semaphore)
-
-    @asynccontextmanager
-    async def acquire_conn(
-        self,
-        semaphore: asyncio.Semaphore,
-    ) -> AsyncIterator[Connection]:
-        """Acquire a connection from the pool.
-        Base implementation delegates to the connection pool.
-        Subclasses can override this to implement pressure gating.
-        """
-        kind = "build" if semaphore is self.build_semaphore else "transfer"
-        async with self.pool.acquire(kind) as conn:
-            yield conn
+        """Acquire a transfer connection."""
+        return self.pool.acquire("transfer")
 
     async def close(self) -> None:
         """Close all pooled connections and stop sweep task."""
@@ -573,7 +581,7 @@ class Store(ABC):
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(id={self.id!r}, "
-            f"in_flight={self.in_flight}/{self.max_builds}, "
+            f"in_flight={self.in_flight}, "
             f"pool_stats={self.pool_stats})"
         )
 
