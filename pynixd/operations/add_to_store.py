@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from pynixd.operations.sign_path_info import SignPathInfoRequest
+from ..exceptions import BackendError
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
@@ -101,8 +102,6 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
                     await self.async_provider(conn.w)
                     await conn.w.drain()
                 except Exception as e:
-                    from ..exceptions import BackendError
-
                     raise BackendError(f"Failed to send store content: {e}") from e
 
                 resp = await AddToStoreResponse().from_reader(conn.r, conn.version)

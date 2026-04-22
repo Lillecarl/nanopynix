@@ -37,12 +37,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
-from .derived_path import DerivedPath
-from .operations.base import BasicDerivation, DerivationOutput
-from .store_path import StorePath
-
 if TYPE_CHECKING:
-    pass
+    from .derived_path import DerivedPath
+
+from .store_path import StorePath
+from .types import BasicDerivation, DerivationOutput
 
 
 class NixDerivationOutputShow(TypedDict, total=False):

@@ -31,12 +31,12 @@ class MockMonitor(ResourceMonitor):
 async def test_local_socket_store_gating(tmp_path: Path) -> None:
     """Test that LocalSocketStore gates connections based on memory gate state."""
 
-    settings = PynixdSettings(gate_timeout=0.2) # short timeout for testing
+    settings = PynixdSettings(gate_timeout=0.2)  # short timeout for testing
     store = LocalSocketStore(
         id="test-gate",
         store_path=tmp_path,
         settings=settings,
-        **get_test_store_kwargs(no_probe=True)
+        **get_test_store_kwargs(no_probe=True),
     )
 
     # 1. Replace the real monitor with a mock one we can control
@@ -46,13 +46,13 @@ async def test_local_socket_store_gating(tmp_path: Path) -> None:
 
     try:
         # 2. Test CPU Gate (Should NOT block anymore)
-        store.gate.cpu_clear.clear() # Simulate high pressure
+        store.gate.cpu_clear.clear()  # Simulate high pressure
 
         async with store.build_conn() as conn:
             assert conn is not None
 
         # 3. Test Memory Gate (Should still block)
-        store.gate.mem_clear.clear() # Simulate low memory
+        store.gate.mem_clear.clear()  # Simulate low memory
 
         # Build connections should wait for memory
         with pytest.raises(ResourceExhaustedError) as excinfo:
@@ -73,7 +73,6 @@ async def test_local_socket_store_gating(tmp_path: Path) -> None:
 
     finally:
         await store.close()
-
 
 
 @pytest.mark.asyncio

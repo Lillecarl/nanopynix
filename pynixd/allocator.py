@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import structlog
+from .system_features import PYNIXD_HANDLED_FEATURES
 
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild
@@ -135,7 +136,6 @@ class BuildAllocator:
         Stripping them allows Lix stores (no ca-derivations support) to build
         resolved CA derivations that are now plain InputAddressed builds.
         """
-        from .system_features import PYNIXD_HANDLED_FEATURES
 
         raw = build.request.derivation.env.get("requiredSystemFeatures", "")
         if not raw:

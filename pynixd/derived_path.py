@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .store_path import StorePath
+from .drv_parser import read_drv_file
 
 if TYPE_CHECKING:
     from .drv_parser import ParsedDerivation
@@ -176,8 +177,6 @@ def dp_output_names(dp: DerivedPathUnion) -> set[str]:
 
 
 def dp_to_derivation(dp: DerivedPathUnion, store_path: Path) -> ParsedDerivation:
-    from .drv_parser import read_drv_file
-
     return read_drv_file(store_path, dp_drv_path(dp))
 
 

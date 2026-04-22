@@ -13,18 +13,29 @@ from __future__ import annotations
 import asyncio
 import struct
 from collections.abc import AsyncIterator, Iterable
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 import asyncssh
 from environs import env
+
+from . import stderr
+from .constants import (
+    MINIMUM_REMOTE_PROTOCOL as MINIMUM_REMOTE_PROTOCOL,
+    PROTOCOL_VERSION as PROTOCOL_VERSION,
+    STDERR_LAST as STDERR_LAST,
+    WORKER_MAGIC_1 as WORKER_MAGIC_1,
+    WORKER_MAGIC_2 as WORKER_MAGIC_2,
+    proto as proto,
+    proto_str as proto_str,
+)
+
+if TYPE_CHECKING:
+    pass
 
 
 _CHUNK_SIZE = env.int("PYNIXD_CHUNK_SIZE", 1024 * 1024)
 
 _SSH_WINDOW_SIZE = env.int("PYNIXD_SSH_WINDOW", 16 * 1024 * 1024)
-
-if TYPE_CHECKING:
-    from . import stderr
 
 
 def _nar_pad(n: int) -> int:
@@ -77,14 +88,10 @@ class NixReader:
 
     async def drain_stderr(self, raise_on_error: bool = True) -> None:
         """Read and discard all stderr messages until STDERR_LAST."""
-        from . import stderr
-
         await stderr.drain(self, raise_on_error=raise_on_error)
 
     def read_stderr(self) -> AsyncIterator[stderr.StderrMsg]:
         """Return an AsyncIterator that yields stderr messages until STDERR_LAST."""
-        from . import stderr
-
         return stderr.read_stream(self)
 
     async def is_dirty(self) -> bool:
@@ -268,30 +275,6 @@ class UnixNixWriter(NixWriter):
         await self.drain()
         self.writer.close()
         await self.writer.wait_closed()
-
-
-WORKER_MAGIC_1: Final[int] = 0x6E697863  # client hello
-WORKER_MAGIC_2: Final[int] = 0x6478696F  # server hello
-PROTOCOL_VERSION: Final[int] = (1 << 8) | 38  # 1.38
-MINIMUM_REMOTE_PROTOCOL: Final[int] = (1 << 8) | 32  # 1.32
-
-
-def proto(major: int, minor: int) -> int:
-    """Encode a protocol version as a single int."""
-    return (major << 8) | minor
-
-
-def proto_str(version: int) -> str:
-    """Format a protocol version int as 'major.minor'."""
-    return f"{version >> 8}.{version & 0xFF}"
-
-
-STDERR_NEXT: Final[int] = 0x6F6C6D67
-STDERR_LAST: Final[int] = 0x616C7473
-STDERR_ERROR: Final[int] = 0x63787470
-STDERR_START_ACTIVITY: Final[int] = 0x53545254
-STDERR_STOP_ACTIVITY: Final[int] = 0x53544F50
-STDERR_RESULT: Final[int] = 0x52534C54
 
 
 async def stream_parse_nar(

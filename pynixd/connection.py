@@ -25,6 +25,7 @@ import structlog
 from . import stderr, wire
 from .exceptions import InfrastructureError
 from .operations.base import (
+    ByteCollector,
     OpRequest,
     Resp,
 )
@@ -77,7 +78,6 @@ class ClientConn:
 
     async def drain_loop(self) -> None:
         """Consume stderr messages from the queue and write to client."""
-        from .operations.base import ByteCollector
 
         while True:
             msg = await self.queue.get()

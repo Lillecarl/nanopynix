@@ -34,6 +34,7 @@ from .operations.build_paths import BuildPathsWithResultsResponse
 
 from .store import Store
 from .store_path import StorePath
+from .stderr import StderrNext
 
 from .allocator import BuildAllocator, TINY_BUILD_THRESHOLD_MS
 from .decomposer import BuildDecomposer
@@ -322,8 +323,6 @@ class Scheduler:
                 )
                 client = await self.queue.fail(build.id, error_msg)
                 if client is not None:
-                    from .stderr import StderrNext
-
                     for line in error_msg.split("\n"):
                         client.queue.put_nowait(StderrNext(text=f"pynixd: {line}\n"))
                 if build.scheduler_request_id is not None:
@@ -376,8 +375,6 @@ class Scheduler:
                     )
                     client = await self.queue.fail(build.id, error_msg)
                     if client is not None:
-                        from .stderr import StderrNext
-
                         for line in error_msg.split("\n"):
                             client.queue.put_nowait(
                                 StderrNext(text=f"pynixd: {line}\n")

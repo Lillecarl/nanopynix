@@ -8,7 +8,26 @@ from pynixd.operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )
-from pynixd.operations.base import BasicDerivation, BuildResult, BuildResultStatus
+from pynixd.derived_path import DerivedPath
+from pynixd.drv_parser import ParsedDerivation, OutputInfo
+from pynixd.operations.base import (
+    BasicDerivation,
+    BuildMode,
+    BuildResult,
+    BuildResultStatus,
+)
+from pynixd.operations.query_missing import (
+    QueryMissingRequest,
+    QueryMissingResponse,
+)
+from pynixd.operations.query_derivation_outputs_batch import (
+    QueryDerivationOutputsBatchRequest,
+    DerivationOutputsBatchResponse,
+)
+from pynixd.operations.query_valid_paths import (
+    QueryValidPathsRequest,
+    QueryValidPathsResponse,
+)
 from pynixd.store_path import StorePath
 from tests.functional.mock_store import MockStore
 
@@ -225,27 +244,6 @@ async def test_scheduler_decomposition_and_ordering():
     - Leaf is scheduled and completed first.
     - Root is only scheduled AFTER leaf completes.
     """
-    from pynixd.derived_path import DerivedPath
-    from pynixd.operations.base import BuildMode, BuildResult, BuildResultStatus
-    from pynixd.operations.query_missing import (
-        QueryMissingResponse,
-        QueryMissingRequest,
-    )
-    from pynixd.operations.query_derivation_outputs_batch import (
-        DerivationOutputsBatchResponse,
-        QueryDerivationOutputsBatchRequest,
-    )
-    from pynixd.operations.query_valid_paths import (
-        QueryValidPathsRequest,
-        QueryValidPathsResponse,
-    )
-    from pynixd.drv_parser import ParsedDerivation, OutputInfo
-    from pynixd.operations.build_derivation import (
-        BuildDerivationRequest,
-        BuildDerivationResponse,
-    )
-
-    # 1. Setup Fleet
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
     remote1 = MockStore(
         "remote1", max_builds=10, feature_matrix={"x86_64-linux": set()}
@@ -376,11 +374,6 @@ async def test_scheduler_cpu_utilization():
     - Build is enqueued.
     - Scheduler assigns build to 'cold' store, bypassing 'hot'.
     """
-    from pynixd.operations.build_derivation import (
-        BuildDerivationRequest,
-        BuildDerivationResponse,
-    )
-
     local_store = MockStore(
         "local", max_builds=1, feature_matrix={"x86_64-linux": set()}
     )
@@ -446,11 +439,6 @@ async def test_scheduler_feature_matching():
     - Scheduler assigns build to 'full' store.
     - 'plain' is correctly ignored due to missing features.
     """
-    from pynixd.operations.build_derivation import (
-        BuildDerivationRequest,
-        BuildDerivationResponse,
-    )
-
     local_store = MockStore("local", feature_matrix={})
 
     # plain supports the system but not the features

@@ -6,6 +6,7 @@ All tests in this file are statistics/metrics tests that don't trigger Store ope
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,9 +14,27 @@ import pytest
 import structlog
 
 from pynixd import Server
-from pynixd.operations.base import BuildResult, BuildResultStatus
+from pynixd.build_queue import QueuedBuild
+from pynixd.local_store_db import LocalStoreDB
+from pynixd.operations.base import (
+    BasicDerivation,
+    BuildResult,
+    BuildResultStatus,
+    DerivationOutput,
+    ValidPathInfo,
+)
+
 from pynixd.operations.build_derivation import (
     BuildDerivationRequest,
+    BuildDerivationResponse,
+)
+from pynixd.operations.query_all_valid_paths import (
+    QueryAllValidPathsRequest,
+    QueryAllValidPathsResponse,
+)
+from pynixd.operations.query_closure_with_info import (
+    QueryClosureWithInfoRequest,
+    QueryClosureWithInfoResponse,
 )
 from pynixd.psi import CpuUtil
 from pynixd.store import LocalSocketStore
@@ -54,10 +73,6 @@ class StatsTestStore(LocalSocketStore):
                     suppress_last=False,
                     raise_on_error=False,
                 ):
-                    from pynixd.operations.build_derivation import (
-                        BuildDerivationRequest,
-                        BuildDerivationResponse,
-                    )
 
                     if isinstance(request, BuildDerivationRequest):
                         pname = request.derivation.env.get("pname", "unknown")
@@ -75,15 +90,6 @@ class StatsTestStore(LocalSocketStore):
     async def execute(
         self, request, client=None, suppress_last=False, skip_probe=False
     ):
-        from pynixd.operations.query_all_valid_paths import (
-            QueryAllValidPathsRequest,
-            QueryAllValidPathsResponse,
-        )
-        from pynixd.operations.query_closure_with_info import (
-            QueryClosureWithInfoRequest,
-            QueryClosureWithInfoResponse,
-        )
-        from pynixd.operations.base import ValidPathInfo
 
         if isinstance(request, QueryAllValidPathsRequest):
             return QueryAllValidPathsResponse(paths=set())
@@ -147,8 +153,6 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
         unix_path=pynixd_local_path / "socket",
     ) as server:
         # 1. Run a build to generate stats
-        from pynixd.operations.base import BasicDerivation, DerivationOutput
-
         out_path = StorePath("/nix/store/00000000000000000000000000000004-fast-pkg")
         pynixd_local.tracker.add_known_path(out_path)
 
@@ -233,9 +237,6 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
             cpu_system_us=None,
             duration_ms=100,  # 100ms
         )
-
-        from pynixd.operations.base import BasicDerivation
-
         scheduler = server.scheduler
         assert scheduler is not None
 
@@ -296,7 +297,6 @@ async def test_levenshtein_sql(tmp_path: Path) -> None:
 
     # Create an empty sqlite file so open() doesn't fail
     db_file = pynixd_local_path / "nix/var/nix/db/db.sqlite"
-    import sqlite3
 
     conn = sqlite3.connect(db_file)
     conn.execute("CREATE TABLE ValidPaths (id INTEGER PRIMARY KEY, path TEXT UNIQUE)")
@@ -308,8 +308,6 @@ async def test_levenshtein_sql(tmp_path: Path) -> None:
         **get_test_store_kwargs(no_probe=True),
     )
     # Ensure DB is created
-    from pynixd.local_store_db import LocalStoreDB
-
     db = await LocalStoreDB.open(pynixd_local_path)
     pynixd_local.db = db
 
@@ -397,9 +395,6 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
         ssh_port=None,
         unix_path=pynixd_local_path / "socket",
     ) as server:
-        from pynixd.build_queue import QueuedBuild
-        from pynixd.operations.base import BasicDerivation
-
         scheduler = server.scheduler
         assert scheduler is not None
 

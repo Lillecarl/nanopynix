@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
+from ..exceptions import BackendError
+from ..stderr import StderrError, read_stream
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import (
@@ -90,9 +92,6 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
 
                 async def read_stderr():
                     nonlocal error
-                    from ..exceptions import BackendError
-                    from ..stderr import StderrError, read_stream
-
                     try:
                         async for msg in read_stream(conn.r):
                             logs.add(msg)

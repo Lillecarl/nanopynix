@@ -9,6 +9,11 @@ import structlog
 
 from pynixd import Server
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
+from pynixd.operations.query_valid_paths import (
+    QueryValidPathsRequest,
+    QueryValidPathsResponse,
+)
+from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
@@ -159,11 +164,6 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
         async def execute(
             self, request, client=None, suppress_last=False, skip_probe=False
         ):
-            from pynixd.operations.query_valid_paths import (
-                QueryValidPathsRequest,
-                QueryValidPathsResponse,
-            )
-
             if isinstance(request, QueryValidPathsRequest):
                 # Only return the valid one
                 return QueryValidPathsResponse(paths={path_valid})
@@ -239,11 +239,11 @@ async def test_is_valid_path_isolation(tmp_path: Path) -> None:
             "--store",
             str(pynixd_local_path),
         ]
-        rc, stdout, stderr, stdboth = await run_subproc(cmd)
+        rc, stdout, stderr, _ = await run_subproc(cmd)
+        assert rc == 0
         local_path = StorePath(stdout.strip())
 
         # Local store should know it (via ValidPaths fast-path)
-        from pynixd.operations.is_valid_path import IsValidPathRequest
 
         resp_local = await IsValidPathRequest(path=local_path).execute(pynixd_local)
         assert resp_local.valid

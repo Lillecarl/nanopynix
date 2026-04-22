@@ -23,6 +23,7 @@ Set PYNIXD_BENCH_CHUNKS to a comma-separated list of sizes in KB
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import time
@@ -113,7 +114,6 @@ async def _get_big_path() -> StorePath:
     out = subprocess.check_output(
         [NIX_BIN, "path-info", "--json", "nixpkgs#nix"], text=True
     )
-    import json
 
     data = json.loads(out)
     return StorePath(data[0]["path"])

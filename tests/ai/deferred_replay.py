@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -320,7 +321,6 @@ async def main() -> None:
             print("\nFAILURE!")
     except Exception as e:
         print(f"\nBuildDerivation EXCEPTION: {type(e).__name__}: {e}")
-        import traceback
 
         traceback.print_exc()
 

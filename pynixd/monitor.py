@@ -223,7 +223,6 @@ class GenericResourcePoller(ResourceMonitor):
             await asyncio.sleep(self.interval)
 
 
-
 class LocalPSIMonitor(ResourceMonitor):
     """Specialized Linux cgroupv2 PSI monitor using instant triggers."""
 

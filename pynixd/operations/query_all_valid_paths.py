@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
+from .query_valid_paths import QueryValidPathsRequest
 
 QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
 
@@ -94,7 +95,6 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                         error=str(e),
                         count=len(store.tracker.known_paths),
                     )
-                    from .query_valid_paths import QueryValidPathsRequest
 
                     verified = await store.execute(
                         QueryValidPathsRequest(paths=store.tracker.known_paths),

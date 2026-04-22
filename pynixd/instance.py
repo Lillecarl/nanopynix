@@ -21,6 +21,7 @@ from .gc import GarbageCollector
 from .http_server import PynixdHttpServer
 from .local_store_db import LocalStoreDB
 from .path_tracker import PathTracker
+from .operations.query_all_valid_paths import QueryAllValidPathsRequest
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
 from .store import LocalSocketStore, Store, get_current_system
@@ -143,7 +144,6 @@ class Server:
 
     async def add_store(self, store: Store) -> None:
         """Add a remote store to the server, linking it to the central DB and path tracker."""
-        from .operations.query_all_valid_paths import QueryAllValidPathsRequest
 
         await store.probe()
 

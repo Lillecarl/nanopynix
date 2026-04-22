@@ -9,6 +9,14 @@ from .operations.query_valid_paths import QueryValidPathsRequest
 from .operations.build_derivation import (
     BuildDerivationRequest,
 )
+from .operations.add_to_store import AddToStoreRequest
+from .operations.base import OutputKind, BuildResult, BuildResultStatus
+from .derivation_resolution import (
+    _nix_drv_name,
+    _unparse_basic_derivation,
+    resolve_derivation as drv_resolve_derivation,
+    resolve_dynamic_derivation as drv_resolve_dynamic_derivation,
+)
 from .drv_parser import read_drv_file, to_basic_derivation
 from .store_path import StorePath
 from .derived_path import DerivedPath
@@ -99,13 +107,9 @@ class DynamicDerivationResolver:
         self, build: QueuedBuild, store: Store
     ) -> None:
         """Resolve a deferred derivation before building."""
-        from .derivation_resolution import (
-            resolve_derivation,
-            _unparse_basic_derivation,
-            _nix_drv_name,
-        )
-        from .operations.add_to_store import AddToStoreRequest
-        from .operations.base import OutputKind
+
+        if not build.depends_on:
+            return
 
         if not any(
             o.kind == OutputKind.DEFERRED
@@ -150,7 +154,7 @@ class DynamicDerivationResolver:
             return
 
         try:
-            resolved = resolve_derivation(parsed, drv_path, resolved_output_paths)
+            resolved = drv_resolve_derivation(parsed, drv_path, resolved_output_paths)
         except Exception:
             log.exception(
                 "resolve_derivation_failed",
@@ -226,14 +230,8 @@ class DynamicDerivationResolver:
         self, build: QueuedBuild, store: Store
     ) -> None:
         """Resolve a dynamic (DrvWithVersion) wrapper derivation before building."""
-        from .derivation_resolution import (
-            resolve_dynamic_derivation,
-            _unparse_basic_derivation,
-            _nix_drv_name,
-        )
-        from .operations.add_to_store import AddToStoreRequest
 
-        if not build.dynamic_input_drvs:
+        if not build.depends_on:
             return
 
         drv_path = build.request.drv_path
@@ -305,7 +303,7 @@ class DynamicDerivationResolver:
             return
 
         try:
-            resolved = resolve_dynamic_derivation(
+            resolved = drv_resolve_dynamic_derivation(
                 parsed, drv_path, dynamic_output_paths
             )
         except Exception:
@@ -558,7 +556,6 @@ class DynamicDerivationResolver:
         error_msg: str,
     ) -> None:
         """Handle build failure within a SchedulerBuildRequest."""
-        from .operations.base import BuildResult, BuildResultStatus
 
         if build.scheduler_request_id is None:
             return

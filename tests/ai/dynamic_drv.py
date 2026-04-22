@@ -13,12 +13,14 @@ Exercises the full dynamic derivation lifecycle against a root Nix store:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from pynixd.drv_parser import read_drv_file
+from pynixd.drv_parser import read_drv_file, to_basic_derivation
+from pynixd.derivation_resolution import _unparse_basic_derivation
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import DrvOutput, StorePath
 from pynixd.operations.query_derivation_output_map import (
@@ -318,10 +320,6 @@ async def main() -> None:
     # DrvOutput format is "sha256:<hash>!<outputName>" — NOT a store path.
     # The hash is hashDerivationModulo (sha256 of the masked ATerm).
     # For a CA text-hashed drv, we compute it from the .drv content.
-    import hashlib
-
-    from pynixd.derivation_resolution import _unparse_basic_derivation
-    from pynixd.drv_parser import to_basic_derivation
 
     try:
         basic = to_basic_derivation(parsed_producing, root_store.store_path)

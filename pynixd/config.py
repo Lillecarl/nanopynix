@@ -14,7 +14,9 @@ from pydantic_settings import (
 )
 
 if TYPE_CHECKING:
-    from .store import Store
+    from .store import (
+        Store,
+    )
 
 
 def _feature_matrix_from_config(

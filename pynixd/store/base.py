@@ -29,6 +29,9 @@ from ..operations.base import (
 )
 from ..operations.nar_from_path import NarFromPathRequest
 from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
+from ..operations.probe_systems import ProbeSystemsRequest
+from ..operations.probe_features import ProbeFeaturesRequest
+from ..system_features import PROBE_SYSTEMS, KNOWN_FEATURES
 from ..psi import CpuUtil, MemInfo
 from ..signing import SecretKey
 from ..path_tracker import PathTrackerInstance
@@ -446,9 +449,6 @@ class Store(ABC):
             self._probe_event.set()
             return
 
-        from ..operations.probe_systems import ProbeSystemsRequest
-        from ..system_features import PROBE_SYSTEMS, KNOWN_FEATURES
-
         existing_systems = (
             set(self._feature_matrix.keys()) if self._feature_matrix else set()
         )
@@ -463,8 +463,6 @@ class Store(ABC):
         systems_resp = await ProbeSystemsRequest(
             systems=candidate_systems,
         ).execute(self)
-
-        from ..operations.probe_features import ProbeFeaturesRequest
 
         features_resp = await ProbeFeaturesRequest(
             systems=systems_resp.systems,

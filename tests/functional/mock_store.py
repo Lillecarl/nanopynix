@@ -11,6 +11,16 @@ import structlog
 from pynixd.connection import Connection
 from pynixd.psi import CpuUtil
 from pynixd.store import Store
+from pynixd.operations.base import ValidPathInfo
+from pynixd.operations.build_derivation import BuildDerivationRequest
+from pynixd.operations.query_all_valid_paths import (
+    QueryAllValidPathsRequest,
+    QueryAllValidPathsResponse,
+)
+from pynixd.operations.query_closure_with_info import (
+    QueryClosureWithInfoRequest,
+    QueryClosureWithInfoResponse,
+)
 from pynixd.store_path import StorePath
 from pynixd.wire import NixReader, NixWriter
 from pynixd import metrics
@@ -201,17 +211,6 @@ class MockStore(Store):
         4. Otherwise, raise NotImplementedError to alert the test writer.
         """
         req_type = type(request)
-
-        from pynixd.operations.build_derivation import BuildDerivationRequest
-        from pynixd.operations.query_all_valid_paths import (
-            QueryAllValidPathsRequest,
-            QueryAllValidPathsResponse,
-        )
-        from pynixd.operations.query_closure_with_info import (
-            QueryClosureWithInfoRequest,
-            QueryClosureWithInfoResponse,
-        )
-        from pynixd.operations.base import ValidPathInfo
 
         if isinstance(request, BuildDerivationRequest):
             drv_path = str(request.drv_path)

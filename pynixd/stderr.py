@@ -13,13 +13,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import structlog
 
-from . import wire
+from . import constants
 from .exceptions import BackendError
-from .wire import NixReader, NixWriter
+
+if TYPE_CHECKING:
+    from .wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
 
@@ -57,7 +59,7 @@ def write_fields(w: NixWriter, fields: list[Field]) -> None:
 class StderrNext:
     """STDERR_NEXT — a log line from the daemon."""
 
-    code: ClassVar[int] = wire.STDERR_NEXT
+    code: ClassVar[int] = constants.STDERR_NEXT
     text: str = ""
 
     async def from_reader(self, r: NixReader) -> StderrNext:
@@ -73,7 +75,7 @@ class StderrNext:
 class StderrStartActivity:
     """STDERR_START_ACTIVITY — begin a tracked activity."""
 
-    code: ClassVar[int] = wire.STDERR_START_ACTIVITY
+    code: ClassVar[int] = constants.STDERR_START_ACTIVITY
     act_id: int = 0
     level: int = 0
     type: int = 0
@@ -104,7 +106,7 @@ class StderrStartActivity:
 class StderrStopActivity:
     """STDERR_STOP_ACTIVITY — end a tracked activity."""
 
-    code: ClassVar[int] = wire.STDERR_STOP_ACTIVITY
+    code: ClassVar[int] = constants.STDERR_STOP_ACTIVITY
     act_id: int = 0
 
     async def from_reader(self, r: NixReader) -> StderrStopActivity:
@@ -120,7 +122,7 @@ class StderrStopActivity:
 class StderrResult:
     """STDERR_RESULT — result data for an activity."""
 
-    code: ClassVar[int] = wire.STDERR_RESULT
+    code: ClassVar[int] = constants.STDERR_RESULT
     act_id: int = 0
     result_type: int = 0
     fields: list[Field] = field(default_factory=list)
@@ -142,7 +144,7 @@ class StderrResult:
 class StderrError:
     """STDERR_ERROR — the daemon is reporting an error."""
 
-    code: ClassVar[int] = wire.STDERR_ERROR
+    code: ClassVar[int] = constants.STDERR_ERROR
     error_type: str = ""
     level: int = 0
     name: str = ""
@@ -188,20 +190,20 @@ LAST = object()
 # ── Parsers mapping msg_type → class ─────────────────────────────
 
 _PARSERS: dict[int, type[StderrMsg]] = {
-    wire.STDERR_NEXT: StderrNext,
-    wire.STDERR_START_ACTIVITY: StderrStartActivity,
-    wire.STDERR_STOP_ACTIVITY: StderrStopActivity,
-    wire.STDERR_RESULT: StderrResult,
-    wire.STDERR_ERROR: StderrError,
+    constants.STDERR_NEXT: StderrNext,
+    constants.STDERR_START_ACTIVITY: StderrStartActivity,
+    constants.STDERR_STOP_ACTIVITY: StderrStopActivity,
+    constants.STDERR_RESULT: StderrResult,
+    constants.STDERR_ERROR: StderrError,
 }
 
 _TYPE_NAMES: dict[int, str] = {
-    wire.STDERR_NEXT: "STDERR_NEXT",
-    wire.STDERR_LAST: "STDERR_LAST",
-    wire.STDERR_ERROR: "STDERR_ERROR",
-    wire.STDERR_START_ACTIVITY: "STDERR_START_ACTIVITY",
-    wire.STDERR_STOP_ACTIVITY: "STDERR_STOP_ACTIVITY",
-    wire.STDERR_RESULT: "STDERR_RESULT",
+    constants.STDERR_NEXT: "STDERR_NEXT",
+    constants.STDERR_LAST: "STDERR_LAST",
+    constants.STDERR_ERROR: "STDERR_ERROR",
+    constants.STDERR_START_ACTIVITY: "STDERR_START_ACTIVITY",
+    constants.STDERR_STOP_ACTIVITY: "STDERR_STOP_ACTIVITY",
+    constants.STDERR_RESULT: "STDERR_RESULT",
 }
 
 
@@ -226,7 +228,7 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
     while True:
         msg_type = await r.read_uint64()
 
-        if msg_type == wire.STDERR_LAST:
+        if msg_type == constants.STDERR_LAST:
             return
 
         parser = _PARSERS.get(msg_type)

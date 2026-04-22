@@ -10,6 +10,7 @@ import os
 import shlex
 import stat
 import time
+import shutil
 from contextlib import contextmanager
 from collections.abc import Sequence
 from pathlib import Path
@@ -19,7 +20,21 @@ import pytest
 import structlog
 from environs import env
 
+from pynixd import Server
+from pynixd.store import LocalSocketStore
+from pynixd.testing import clear_test_stash
 from tests.nix_config import NixConfig
+
+try:
+    from pyinstrument import Profiler
+    from pyinstrument.renderers import ConsoleRenderer
+
+    HAS_PYINSTRUMENT = True
+except ImportError:
+    Profiler = None  # type: ignore
+    ConsoleRenderer = None  # type: ignore
+    HAS_PYINSTRUMENT = False
+
 
 if TYPE_CHECKING:
     from pynixd import Server
@@ -314,7 +329,6 @@ def _wrap_with_asyncio_timeout(item: pytest.Function, default_timeout: float):
 @pytest.fixture(autouse=True)
 def clear_instrumentation():
     """Clear internal test stash before each test."""
-    from pynixd.testing import clear_test_stash
 
     clear_test_stash()
     yield
@@ -375,8 +389,9 @@ def _fixed_test_ts():
 @pytest.fixture(autouse=True)
 async def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
     """Profile every test and save to a .pyinstrument file."""
-    from pyinstrument import Profiler
-    from pyinstrument.renderers import ConsoleRenderer
+    if not HAS_PYINSTRUMENT:
+        yield None
+        return
 
     p = Profiler(async_mode="enabled")
     p.start()
@@ -437,8 +452,6 @@ def rmtree_robust(path: str | Path) -> None:
             func(path)
         except Exception:
             pass
-
-    import shutil
 
     shutil.rmtree(path, onerror=handle_errors)
 
@@ -595,8 +608,6 @@ async def pynixd_server(
 
     # Wait! I'll make it NOT autouse, but requested by functional tests.
     # Or just let it run but don't bind to it if not needed.
-    from pynixd import Server
-    from pynixd.store import LocalSocketStore
 
     local_path = SESSION_STORE_PREFIX / "local"
     builder_path = SESSION_STORE_PREFIX / "builder"
