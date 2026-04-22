@@ -10,7 +10,6 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from contextvars import ContextVar
 from enum import IntEnum
 from pathlib import Path
 
@@ -36,21 +35,14 @@ from ..psi import CpuUtil, MemInfo
 from ..signing import SecretKey
 from ..path_tracker import PathTrackerInstance
 from ..store_path import StorePath
+from .pool import ConnectionPool
 
 log = structlog.get_logger(__name__)
-pool_log = structlog.get_logger(f"{__name__}.pool")
 
 
 _DEFAULT_IDLE_TTL: float = 10.0
 _CB_THRESHOLD: int = 3  # failures before cooldown
 _CB_MAX_COOLDOWN: float = 300.0  # 5 min max
-
-# Per-store connection holder tracking via ContextVar
-# Tracks nested connection count per (store_id, kind) tuple
-_nested_conns: ContextVar[dict[tuple[str, str], int]] = ContextVar(
-    "_nested_conns",
-    default={},  # type: ignore[arg-type]
-)
 
 
 class ProbeState(IntEnum):
@@ -86,12 +78,17 @@ class Store(ABC):
         self.max_builds = max_builds
         self.max_transfers = max_transfers
         self.idle_ttl = idle_ttl
-        self.build_semaphore = asyncio.Semaphore(max_builds)
-        self.transfer_semaphore = asyncio.Semaphore(max_transfers)
-        self.idle_conns: list[tuple[Connection, float]] = []
-        self.all_conns: list[Connection] = []
-        self.conn_counter: int = 0
-        self.sweep_task: asyncio.Task[None] | None = None
+        self.conn_counter = 0
+
+        self.pool = ConnectionPool(
+            store_id=id,
+            factory=self._create_conn_with_counter,
+            max_builds=max_builds,
+            max_transfers=max_transfers,
+            idle_ttl=idle_ttl,
+            on_connection_created=self._on_connection_created,
+        )
+
         self._feature_matrix: dict[str, set[str]] | None = feature_matrix
         self._probe = probe
         self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
@@ -107,6 +104,25 @@ class Store(ABC):
         self.signing_keys: dict[str, SecretKey] = {}
         self._holder_task: asyncio.Task | None = None
         self.draining: bool = False
+
+    def _on_connection_created(self, conn: Connection) -> None:
+        """Update store metadata from a newly created connection."""
+        self.version = conn.version
+        self.nix_version = conn.nix_version
+        self.features = conn.features
+
+    async def _create_conn_with_counter(self) -> Connection:
+        """Wrap create_conn to increment the counter."""
+        self.conn_counter += 1
+        return await self.create_conn()
+
+    @property
+    def build_semaphore(self) -> asyncio.Semaphore:
+        return self.pool.build_semaphore
+
+    @property
+    def transfer_semaphore(self) -> asyncio.Semaphore:
+        return self.pool.transfer_semaphore
 
     @property
     def db_enabled(self) -> bool:
@@ -417,7 +433,7 @@ class Store(ABC):
     @property
     def available_transfer_slots(self) -> int:
         """Number of free transfer slots."""
-        return self.transfer_semaphore._value
+        return self.pool.transfer_semaphore._value
 
     @abstractmethod
     async def create_conn(self) -> Connection:
@@ -444,7 +460,7 @@ class Store(ABC):
         self.probe_state = ProbeState.PROBING
 
         if not self._probe:
-            await self.warm_pool(1)
+            await self.pool.warm(1)
             self.probe_state = ProbeState.PROBED
             self._probe_event.set()
             return
@@ -460,12 +476,17 @@ class Store(ABC):
         candidate_systems = existing_systems or set(PROBE_SYSTEMS)
         candidate_features = existing_features or set(KNOWN_FEATURES)
 
-        systems_resp = await ProbeSystemsRequest(
-            systems=candidate_systems,
-        ).execute(self)
+        if self.max_builds > 0:
+            systems_resp = await ProbeSystemsRequest(
+                systems=candidate_systems,
+            ).execute(self)
+            systems = systems_resp.systems
+        else:
+            log.info("skipping_systems_probe_no_slots", store_id=self.id)
+            systems = candidate_systems
 
         features_resp = await ProbeFeaturesRequest(
-            systems=systems_resp.systems,
+            systems=systems,
             system_features=candidate_features,
         ).execute(self)
 
@@ -483,20 +504,10 @@ class Store(ABC):
         self.probe_state = ProbeState.PROBED
         self._probe_event.set()
 
-    async def warm_pool(self, n: int) -> None:
-        """Pre-create n connections and park them in the idle pool."""
-        conns = await asyncio.gather(*[self.create_conn() for _ in range(n)])
-        now = time.monotonic()
-        for conn in conns:
-            self.all_conns.append(conn)
-            self.idle_conns.append((conn, now))
-        self.start_sweep()
-        log.info("pool_warmed", store_id=self.id, connections=n)
-
     @property
     def available_slots(self) -> int:
         """Number of free build slots."""
-        return self.build_semaphore._value
+        return self.pool.build_semaphore._value
 
     @property
     def pressure(self) -> float | None:
@@ -515,7 +526,7 @@ class Store(ABC):
 
     @property
     def in_flight(self) -> int:
-        return self.max_builds - self.build_semaphore._value
+        return self.pool.in_flight_builds
 
     @property
     def is_lix(self) -> bool:
@@ -524,177 +535,6 @@ class Store(ABC):
             return False
 
         return "lix" in self.nix_version.lower()
-
-    def start_sweep(self) -> None:
-        """Start the idle sweep task if not already running."""
-        if self.sweep_task is None or self.sweep_task.done():
-            self.sweep_task = asyncio.create_task(self.sweep_idle())
-
-    async def sweep_idle(self) -> None:
-        """Periodically close idle connections that have expired."""
-        while self.idle_conns:
-            await asyncio.sleep(self.idle_ttl / 2)
-            now = time.monotonic()
-            still_idle: list[tuple[Connection, float]] = []
-            for conn, returned_at in self.idle_conns:
-                if now - returned_at >= self.idle_ttl:
-                    pool_log.debug(
-                        "pool_closing_expired_idle",
-                        store_id=self.id,
-                        conn_id=conn.id,
-                    )
-                    if conn in self.all_conns:
-                        self.all_conns.remove(conn)
-                    try:
-                        await conn.close()
-                    except Exception:
-                        pass
-                else:
-                    still_idle.append((conn, returned_at))
-            self.idle_conns = still_idle
-
-    @staticmethod
-    async def reader_is_dirty(conn: Connection) -> bool:
-        """Check if the reader has unread buffered data (protocol desync)."""
-        return await conn.r.is_dirty()
-
-    async def get_or_create_conn(self) -> Connection:
-        """Pop an idle connection or create a new one."""
-        now = time.monotonic()
-        while self.idle_conns:
-            candidate, returned_at = self.idle_conns.pop()
-            if now - returned_at >= self.idle_ttl:
-                pool_log.debug(
-                    "pool_discarding_expired",
-                    store_id=self.id,
-                    conn_id=candidate.id,
-                )
-                if candidate in self.all_conns:
-                    self.all_conns.remove(candidate)
-                try:
-                    await candidate.close()
-                except Exception:
-                    pass
-                continue
-            if candidate.dirty or await self.reader_is_dirty(candidate):
-                log.warning(
-                    "pool_discarding_dirty_conn",
-                    store_id=self.id,
-                    conn_id=candidate.id,
-                    op_log=" -> ".join(candidate.op_log[-10:]) or "(empty)",
-                )
-                if candidate in self.all_conns:
-                    self.all_conns.remove(candidate)
-                try:
-                    await candidate.close()
-                except Exception:
-                    pass
-                continue
-            pool_log.debug(
-                "pool_reusing_conn",
-                store_id=self.id,
-                conn_id=candidate.id,
-            )
-            return candidate
-
-        self.conn_counter += 1
-        conn = await self.create_conn()
-        self.all_conns.append(conn)
-        self.version = conn.version
-        self.nix_version = conn.nix_version
-        self.features = conn.features
-        pool_log.debug(
-            "pool_created_connection",
-            store_id=self.id,
-            conn_id=conn.id,
-            pool_stats=self.pool_stats,
-            version=wire.proto_str(self.version),
-            nix_version=self.nix_version,
-            features=sorted(self.features),
-        )
-        return conn
-
-    @asynccontextmanager
-    async def acquire_conn(
-        self,
-        semaphore: asyncio.Semaphore,
-    ) -> AsyncIterator[Connection]:
-        """Acquire a connection from the shared pool.
-
-        If the same task that is already holding a connection tries to
-        acquire again (re-entry), a new connection is allocated outside
-        the semaphore to avoid deadlock. A warning is logged for investigation.
-        """
-        kind = "build" if semaphore is self.build_semaphore else "transfer"
-        key = (self.id, kind)
-        counts = dict(_nested_conns.get())  # Copy to avoid race with nested code
-        re_entrant = counts.get(key, 0) > 0 and semaphore.locked()
-        if counts.get(key, 0) > 0:
-            pool_log.warning(
-                "store_reentrant_acquire",
-                store_id=self.id,
-                kind=kind,
-            )
-
-        if re_entrant:
-            conn = await self.create_conn()
-            self.all_conns.append(conn)
-            counts[key] = counts.get(key, 0) + 1
-            _nested_conns.set(counts)
-            try:
-                async with conn:
-                    yield conn
-            finally:
-                counts = dict(_nested_conns.get())
-                counts[key] = counts.get(key, 0) - 1
-                _nested_conns.set(counts)
-                if conn in self.all_conns:
-                    self.all_conns.remove(conn)
-                try:
-                    await conn.close()
-                except Exception:
-                    pass
-            return
-
-        if semaphore.locked():
-            limit = self.max_builds if kind == "build" else self.max_transfers
-            pool_log.info(
-                "pool_all_slots_in_use",
-                store_id=self.id,
-                limit=limit,
-                kind=kind,
-            )
-        await semaphore.acquire()
-        conn: Connection | None = None
-        try:
-            conn = await self.get_or_create_conn()
-            counts = dict(_nested_conns.get())
-            counts[key] = counts.get(key, 0) + 1
-            _nested_conns.set(counts)
-            async with conn:
-                yield conn
-        finally:
-            counts = dict(_nested_conns.get())
-            counts[key] = counts.get(key, 0) - 1
-            _nested_conns.set(counts)
-            if conn is not None:
-                if conn.dirty:
-                    log.warning(
-                        "store_discarding_dirty_connection",
-                        store_id=self.id,
-                        conn_id=conn.id,
-                        op_log=" -> ".join(conn.op_log[-10:]) or "(empty)",
-                    )
-                    if conn in self.all_conns:
-                        self.all_conns.remove(conn)
-                    try:
-                        await conn.close()
-                    except Exception:
-                        pass
-                else:
-                    self.idle_conns.append((conn, time.monotonic()))
-                    self.start_sweep()
-            semaphore.release()
 
     def build_conn(self) -> AbstractAsyncContextManager[Connection]:
         """Acquire a build connection (counts against max_builds).."""
@@ -708,40 +548,33 @@ class Store(ABC):
         """
         return self.acquire_conn(self.transfer_semaphore)
 
+    @asynccontextmanager
+    async def acquire_conn(
+        self,
+        semaphore: asyncio.Semaphore,
+    ) -> AsyncIterator[Connection]:
+        """Acquire a connection from the pool.
+        Base implementation delegates to the connection pool.
+        Subclasses can override this to implement pressure gating.
+        """
+        kind = "build" if semaphore is self.build_semaphore else "transfer"
+        async with self.pool.acquire(kind) as conn:
+            yield conn
+
     async def close(self) -> None:
         """Close all pooled connections and stop sweep task."""
-        if self.sweep_task is not None:
-            self.sweep_task.cancel()
-            try:
-                await self.sweep_task
-            except asyncio.CancelledError:
-                pass
-            self.sweep_task = None
-        for conn in self.all_conns:
-            try:
-                await conn.close()
-            except (ProcessLookupError, Exception):
-                pass
-        self.all_conns.clear()
-        self.idle_conns.clear()
+        await self.pool.close()
 
     @property
     def pool_stats(self) -> str:
         """Human-readable pool statistics."""
-        build_in_use = self.max_builds - self.build_semaphore._value
-        transfer_in_use = self.max_transfers - self.transfer_semaphore._value
-        return (
-            f"builds={build_in_use}/{self.max_builds} "
-            f"transfers={transfer_in_use}/{self.max_transfers} "
-            f"idle={len(self.idle_conns)} total={len(self.all_conns)}"
-        )
+        return self.pool.stats
 
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(id={self.id!r}, "
             f"in_flight={self.in_flight}/{self.max_builds}, "
-            f"idle={len(self.idle_conns)}, "
-            f"connections={len(self.all_conns)})"
+            f"pool_stats={self.pool_stats})"
         )
 
 

@@ -47,6 +47,8 @@ class MockConnection(Connection):
         self.store = store
         self.id = f"mock-{store.id}"
         self.version = 0x125  # Simulates a modern Nix protocol version (e.g. 1.37)
+        self.nix_version = store.nix_version
+        self.features = set()
         self.connected = True
         self.dirty = False
         self.op_log = []
