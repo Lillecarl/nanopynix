@@ -1,0 +1,62 @@
+"""Operation logging and stderr buffering domain models."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Self
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..stderr import StderrMsg
+    from ..wire import NixReader, NixWriter
+
+
+@dataclass
+class OperationLogs:
+    """Container for stderr messages from an operation."""
+
+    messages: list[StderrMsg] = field(default_factory=list)
+
+    @property
+    def error(self):
+        from ..stderr import StderrError
+
+        for msg in self.messages:
+            if isinstance(msg, StderrError):
+                return msg
+        return None
+
+    @property
+    def has_error(self) -> bool:
+        return self.error is not None
+
+    def __bool__(self) -> bool:
+        return not self.has_error
+
+    def add(self, msg: StderrMsg) -> None:
+        self.messages.append(msg)
+
+    def to_writer(self, writer: NixWriter) -> None:
+        from .. import constants
+
+        for msg in self.messages:
+            msg.to_writer(writer)
+        writer.write_uint64(constants.STDERR_LAST)
+
+    async def from_reader(
+        self,
+        reader: NixReader,
+        client: ClientConn | None = None,
+        buffer: bool = True,
+    ) -> Self:
+        from ..exceptions import BackendError
+        from ..stderr import StderrError, read_stream
+
+        async for msg in read_stream(reader):
+            if client:
+                client.queue.put_nowait(msg)
+            if buffer:
+                self.add(msg)
+            if isinstance(msg, StderrError):
+                raise BackendError(f"Daemon error ({msg.error_type}): {msg.msg}")
+        return self
