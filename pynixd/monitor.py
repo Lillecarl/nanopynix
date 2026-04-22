@@ -1,12 +1,15 @@
 """
-System resource monitoring and concurrency gating for LocalSocketStore.
+System resource monitoring and concurrency gating for pynixd stores.
+Consolidated monitoring logic for local and remote (SSH) stores.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING
 
 import structlog
@@ -14,12 +17,14 @@ import structlog
 from .exceptions import ResourceExhaustedError
 from .psi import (
     CgroupCpuStat,
+    SystemHealth,
     parse_psi_output,
     parse_meminfo,
     parse_cpu_stat,
     parse_cpu_max,
     compute_cpu_util,
     count_cpus_from_proc_stat,
+    MemInfo,
 )
 
 if TYPE_CHECKING:
@@ -55,13 +60,14 @@ class ResourceGate:
 
 
 class ResourceMonitor(ABC):
-    """Abstract base for local system monitoring."""
+    """Abstract base for system monitoring."""
 
     def __init__(self, gate: ResourceGate, settings: PynixdSettings) -> None:
         self.gate = gate
         self.settings = settings
         self.running = False
         self.task: asyncio.Task[None] | None = None
+        self.health = SystemHealth()
 
     @abstractmethod
     async def run(self) -> None:
@@ -83,8 +89,131 @@ class ResourceMonitor(ABC):
                 pass
 
 
+class GenericResourcePoller(ResourceMonitor):
+    """Polling monitor that works over any read/exists functions (Local/SSH)."""
+
+    def __init__(
+        self,
+        gate: ResourceGate,
+        settings: PynixdSettings,
+        read_fn: Callable[[str], Coroutine[None, None, str]],
+        exists_fn: Callable[[str], Coroutine[None, None, bool]],
+    ) -> None:
+        super().__init__(gate, settings)
+        self.read_fn = read_fn
+        self.exists_fn = exists_fn
+        self.interval = 5.0
+        self.cpu_stat_prev: CgroupCpuStat | None = None
+        self.cpu_cores: float | None = None
+
+    async def run(self) -> None:
+        log.info("resource_poller_started")
+
+        # 1. Detect CPU cores once
+        try:
+            if await self.exists_fn("/sys/fs/cgroup/cpu.max"):
+                text = await self.read_fn("/sys/fs/cgroup/cpu.max")
+                self.cpu_cores = parse_cpu_max(text)
+
+            if self.cpu_cores is None:
+                if await self.exists_fn("/proc/stat"):
+                    text = await self.read_fn("/proc/stat")
+                    self.cpu_cores = float(count_cpus_from_proc_stat(text))
+        except Exception:
+            log.debug("cpu_core_detection_failed")
+            self.cpu_cores = 1.0
+
+        while self.running:
+            try:
+                # 2. Read PSI if available
+                psi_text = ""
+                has_psi = False
+                try:
+                    parts = []
+                    for p in ["cpu", "memory", "io"]:
+                        path = f"/proc/pressure/{p}"
+                        if await self.exists_fn(path):
+                            parts.append(await self.read_fn(path))
+                            has_psi = True
+                    if has_psi:
+                        psi_text = "\n".join(parts)
+                except Exception:
+                    pass
+
+                # 3. Read Memory
+                meminfo = None
+                try:
+                    # Prefer cgroupv2 memory.current/max if available (more accurate for containers)
+                    if await self.exists_fn("/sys/fs/cgroup/memory.current"):
+                        curr = int(
+                            (
+                                await self.read_fn("/sys/fs/cgroup/memory.current")
+                            ).strip()
+                        )
+                        max_raw = (
+                            await self.read_fn("/sys/fs/cgroup/memory.max")
+                        ).strip()
+                        total = None if max_raw == "max" else int(max_raw)
+
+                        # Fallback to /proc/meminfo for totals if cgroup is unlimited
+                        if total is None and await self.exists_fn("/proc/meminfo"):
+                            p_mem = parse_meminfo(await self.read_fn("/proc/meminfo"))
+                            total = p_mem.mem_total * 1024  # parse_meminfo returns kB
+
+                        meminfo = MemInfo(
+                            mem_total=(total // 1024) if total else 0,
+                            mem_available=((total - curr) // 1024) if total else 0,
+                        )
+                    elif await self.exists_fn("/proc/meminfo"):
+                        meminfo = parse_meminfo(await self.read_fn("/proc/meminfo"))
+                except Exception:
+                    pass
+
+                # 4. Read CPU util
+                cpu_util = None
+                try:
+                    if await self.exists_fn("/sys/fs/cgroup/cpu.stat"):
+                        stat = parse_cpu_stat(
+                            await self.read_fn("/sys/fs/cgroup/cpu.stat")
+                        )
+                        if self.cpu_stat_prev:
+                            cpu_util = compute_cpu_util(
+                                self.cpu_stat_prev, stat, self.cpu_cores
+                            )
+                        self.cpu_stat_prev = stat
+                except Exception:
+                    pass
+
+                # 5. Update Health and Gate
+                self.health = SystemHealth(
+                    psi=parse_psi_output(psi_text) if has_psi else None,
+                    meminfo=meminfo,
+                    cpu_util=cpu_util,
+                    timestamp=time.monotonic(),
+                )
+
+                if self.health.is_cpu_stressed(
+                    self.settings.psi_cpu_threshold, self.settings.max_cpu_util
+                ):
+                    self.gate.cpu_clear.clear()
+                else:
+                    self.gate.cpu_clear.set()
+
+                if self.health.is_mem_stressed(
+                    self.settings.psi_mem_threshold, self.settings.min_free_mem_kb
+                ):
+                    self.gate.mem_clear.clear()
+                else:
+                    self.gate.mem_clear.set()
+
+            except Exception:
+                log.exception("resource_poller_tick_failed")
+
+            await asyncio.sleep(self.interval)
+
+
 class LocalPSIMonitor(ResourceMonitor):
-    """Linux cgroupv2 PSI monitor using instant triggers/notifications."""
+    """Specialized Linux cgroupv2 PSI monitor using instant triggers."""
 
     def __init__(self, gate: ResourceGate, settings: PynixdSettings) -> None:
         super().__init__(gate, settings)
@@ -95,13 +224,10 @@ class LocalPSIMonitor(ResourceMonitor):
         """Uses loop.add_reader to listen for kernel PSI events."""
         loop = asyncio.get_running_loop()
 
-        # thresholds are 'some 150000 1000000' (150ms over 1s)
-        # we'll use a conservative default or from settings
         cpu_threshold = f"some {int(self.settings.psi_cpu_threshold * 1000)} 1000000"
         mem_threshold = f"some {int(self.settings.psi_mem_threshold * 1000)} 1000000"
 
         try:
-            # Check for existence and permission before opening
             if not os.access("/sys/fs/cgroup/cpu.pressure", os.R_OK | os.W_OK):
                 raise PermissionError("Insufficient permissions for PSI triggers")
 
@@ -118,7 +244,6 @@ class LocalPSIMonitor(ResourceMonitor):
             def on_cpu_event():
                 log.warning("cpu_pressure_event_fired")
                 self.gate.cpu_clear.clear()
-                # Schedule a re-check after a cooldown
                 loop.call_later(2.0, self.check_pressure_manually)
 
             def on_mem_event():
@@ -132,14 +257,25 @@ class LocalPSIMonitor(ResourceMonitor):
             log.info("psi_notifier_started", cpu=cpu_threshold, mem=mem_threshold)
 
             while self.running:
-                # Notifications are event-driven, but we re-verify periodically
                 await asyncio.sleep(10)
                 self.check_pressure_manually()
 
         except Exception as e:
             log.info("psi_notifier_unavailable", reason=str(e))
-            # Fallback to polling if triggers fail (e.g. older kernels)
-            await self._fallback_polling()
+
+            # Local fallback functions
+            async def local_read(path: str) -> str:
+                with open(path) as f:
+                    return f.read()
+
+            async def local_exists(path: str) -> bool:
+                return os.path.exists(path)
+
+            # Fallback to generic poller
+            poller = GenericResourcePoller(
+                self.gate, self.settings, local_read, local_exists
+            )
+            await poller.run()
         finally:
             if self.cpu_fd:
                 loop.remove_reader(self.cpu_fd)
@@ -149,95 +285,37 @@ class LocalPSIMonitor(ResourceMonitor):
                 os.close(self.mem_fd)
 
     def check_pressure_manually(self) -> None:
-        """Read PSI files directly to see if pressure has subsided."""
+        """Update health state via manual read."""
         try:
-            with open("/proc/pressure/cpu") as f:
-                cpu_text = f.read()
-            with open("/proc/pressure/memory") as f:
-                mem_text = f.read()
-            with open("/proc/pressure/io") as f:
-                io_text = f.read()
+            parts = []
+            for p in ["cpu", "memory", "io"]:
+                with open(f"/proc/pressure/{p}") as f:
+                    parts.append(f.read())
 
-            snap = parse_psi_output(f"{cpu_text}\n{mem_text}\n{io_text}")
+            snap = parse_psi_output("\n".join(parts))
+            self.health.psi = snap
+            self.health.timestamp = time.monotonic()
 
-            # Simple threshold check on 10s averages
             if snap.cpu.some_avg10 < self.settings.psi_cpu_threshold:
-                if not self.gate.cpu_clear.is_set():
-                    log.info("cpu_pressure_subsided", avg10=snap.cpu.some_avg10)
                 self.gate.cpu_clear.set()
 
             if snap.memory.some_avg10 < self.settings.psi_mem_threshold:
-                if not self.gate.mem_clear.is_set():
-                    log.info("mem_pressure_subsided", avg10=snap.memory.some_avg10)
                 self.gate.mem_clear.set()
 
         except Exception:
             log.exception("psi_manual_check_failed")
 
-    async def _fallback_polling(self) -> None:
-        """Periodic polling fallback if event triggers are unavailable."""
-        log.info("psi_falling_back_to_polling")
-        while self.running:
-            self.check_pressure_manually()
-            await asyncio.sleep(5.0)
-
-
-class ProcfsMonitor(ResourceMonitor):
-    """Fallback monitor using /proc/meminfo and /proc/stat (no PSI)."""
-
-    async def run(self) -> None:
-        log.info("procfs_monitor_started")
-        cpu_stat_prev: CgroupCpuStat | None = None
-
-        # Determine CPU count once
-        cores = 1.0
-        try:
-            with open("/sys/fs/cgroup/cpu.max") as f:
-                c = parse_cpu_max(f.read())
-                if c:
-                    cores = c
-            if cores == 1.0:
-                with open("/proc/stat") as f:
-                    cores = float(count_cpus_from_proc_stat(f.read()))
-        except Exception:
-            pass
-
-        while self.running:
-            try:
-                # 1. Memory
-                with open("/proc/meminfo") as f:
-                    mem = parse_meminfo(f.read())
-
-                # Gate if free memory is below threshold (e.g. 512MB)
-                if mem.mem_available < self.settings.min_free_mem_kb:
-                    self.gate.mem_clear.clear()
-                    log.warning("low_memory_detected", available_mb=mem.available_mb)
-                else:
-                    self.gate.mem_clear.set()
-
-                # 2. CPU
-                with open("/sys/fs/cgroup/cpu.stat") as f:
-                    stat = parse_cpu_stat(f.read())
-
-                if cpu_stat_prev:
-                    util = compute_cpu_util(cpu_stat_prev, stat, cores)
-                    if util and util.utilization > self.settings.max_cpu_util:
-                        self.gate.cpu_clear.clear()
-                        log.warning(
-                            "high_cpu_utilization_detected", util=util.utilization
-                        )
-                    else:
-                        self.gate.cpu_clear.set()
-
-                cpu_stat_prev = stat
-            except Exception:
-                log.exception("procfs_monitor_tick_failed")
-
-            await asyncio.sleep(5.0)
-
 
 def create_monitor(gate: ResourceGate, settings: PynixdSettings) -> ResourceMonitor:
     """Factory to create the best available local monitor."""
-    if os.path.exists("/proc/pressure/cpu"):
+
+    async def local_read(path: str) -> str:
+        with open(path) as f:
+            return f.read()
+
+    async def local_exists(path: str) -> bool:
+        return os.path.exists(path)
+
+    if os.path.exists("/sys/fs/cgroup/cpu.pressure"):
         return LocalPSIMonitor(gate, settings)
-    return ProcfsMonitor(gate, settings)
+    return GenericResourcePoller(gate, settings, local_read, local_exists)

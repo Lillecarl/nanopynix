@@ -119,6 +119,32 @@ class CpuUtil:
     throttled_pct: float
 
 
+@dataclass
+class SystemHealth:
+    """Unified system health state with threshold checking."""
+
+    psi: PsiSnapshot | None = None
+    meminfo: MemInfo | None = None
+    cpu_util: CpuUtil | None = None
+    timestamp: float = field(default_factory=time.monotonic)
+
+    def is_cpu_stressed(self, psi_threshold: float, util_threshold: float) -> bool:
+        """True if CPU pressure or utilization exceeds thresholds."""
+        if self.psi and self.psi.cpu.some_avg10 >= psi_threshold:
+            return True
+        if self.cpu_util and self.cpu_util.utilization >= util_threshold:
+            return True
+        return False
+
+    def is_mem_stressed(self, psi_threshold: float, min_free_kb: int) -> bool:
+        """True if Memory pressure exceeds threshold or free RAM is too low."""
+        if self.psi and self.psi.memory.some_avg10 >= psi_threshold:
+            return True
+        if self.meminfo and self.meminfo.mem_available < min_free_kb:
+            return True
+        return False
+
+
 def parse_cpu_stat(text: str) -> CgroupCpuStat:
     """Parse /sys/fs/cgroup/cpu.stat output."""
     fields: dict[str, int] = {}
