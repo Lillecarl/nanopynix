@@ -40,25 +40,10 @@ class GarbageCollector:
         self.interval = ctx.settings.gc_interval
         self.local_max_age = ctx.settings.gc_local_max_age
         self.builder_max_age = ctx.settings.gc_builder_max_age
-        self.task: asyncio.Task[None] | None = None
 
-    def start(self) -> None:
-        """Start the GC loop. Call from async context."""
-        if self.task is None or self.task.done():
-            self.task = asyncio.create_task(self.gc_loop())
-
-    async def stop(self) -> None:
-        """Stop the GC loop."""
-        if self.task is not None:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-            self.task = None
-
-    async def gc_loop(self) -> None:
+    async def run(self) -> None:
         """Run GC passes at the configured interval."""
+        log.info("gc_loop_started", interval=self.interval)
         while True:
             await asyncio.sleep(self.interval)
             try:

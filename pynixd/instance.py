@@ -272,26 +272,23 @@ class Server:
             local_store.id, is_local=True
         )
 
+        if self.ctx.db:
+            self.ctx.db.start()
+
+        # Gather stores to add and then clear the context mapping to ensure
+        # add_store (which populates it) starts from a clean state for these IDs.
         stores_to_add = list(self.ctx.stores.values())
-        # We use Mapping for ctx.stores now, so we need to be careful with mutations
-        # if instance.py is still using dict. For now we assume instance.py
-        # manages the dict and ctx.stores is a view.
+        self.ctx.stores.clear()
 
         for store in stores_to_add:
-            await store.probe()
-            # Note: add_store already updates self.ctx.stores/local_store knowledge
             await self.add_store(store)
 
         if self.ctx.scheduler:
-            scheduler_task = asyncio.create_task(self.ctx.scheduler.start())
-            self.background_tasks.append(scheduler_task)
+            self.background_tasks.append(asyncio.create_task(self.ctx.scheduler.start()))
 
         if self.ctx.db:
-            self.ctx.db.start()
             gc = GarbageCollector(self.ctx)
-            gc.start()
-            if gc.task:
-                self.background_tasks.append(gc.task)
+            self.background_tasks.append(asyncio.create_task(gc.run()))
 
         s = self.settings
         if s.ssh_port is not None:
@@ -361,8 +358,8 @@ class Server:
         if wait_tasks:
             await asyncio.gather(*wait_tasks)
         elif self.http_server or self.https_server:
-            while True:
-                await asyncio.sleep(3600)
+            while self._started:
+                await asyncio.sleep(1)
 
     async def close(self) -> None:
         """Gracefully shut down the server."""
@@ -370,6 +367,7 @@ class Server:
             return
         self._started = False
         log.info("server_shutting_down")
+
         if self.http_server:
             await self.http_server.cleanup()
             self.http_server = None
@@ -386,18 +384,22 @@ class Server:
             await self.unix_server.wait_closed()
             self.unix_server = None
 
-        if self.scheduler:
-            await self.scheduler.stop()
+        if self.ctx.db:
+            await self.ctx.db.close()
+            self.ctx.db = None
+
+        if self.ctx.scheduler:
+            await self.ctx.scheduler.close()
 
         for task in self.background_tasks:
             task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         self.background_tasks.clear()
 
-        local_store = self.local_store
-        if local_store.db:
-            await local_store.db.close()
-
-        await local_store.close()
+        await self.local_store.close()
         for store in self.stores.values():
             await store.close()
         self.stores.clear()

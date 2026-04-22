@@ -204,6 +204,10 @@ class Scheduler:
         self.running = False
         self.trigger()
 
+    async def close(self) -> None:
+        """Alias for stop() for consistency."""
+        await self.stop()
+
     async def schedule(self) -> None:
         """The core scheduling logic.
 

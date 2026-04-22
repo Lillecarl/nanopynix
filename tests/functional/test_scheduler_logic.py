@@ -1,6 +1,9 @@
 import asyncio
 import pytest
 from pynixd.scheduler import Scheduler
+from pynixd.context import PynixdContext
+from pynixd.config import PynixdSettings
+from pynixd.path_tracker import PathTracker
 from pynixd.operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
@@ -41,10 +44,13 @@ async def test_scheduler_load_balancing():
     )
     remote1 = MockStore("remote1", max_builds=1, feature_matrix={"x86_64-linux": set()})
 
-    scheduler = Scheduler(
-        stores={"remote1": remote1},
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
         local_store=local_store,
+        stores={"remote1": remote1},
+        path_tracker=PathTracker(db=None),
     )
+    scheduler = Scheduler(ctx)
 
     # 2. Mock build response for the remote store
     build_resp = BuildDerivationResponse(
@@ -97,10 +103,13 @@ async def test_scheduler_skips_saturated_store():
     )
     remote1 = MockStore("remote1", max_builds=0, feature_matrix={"x86_64-linux": set()})
 
-    scheduler = Scheduler(
-        stores={"remote1": remote1},
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
         local_store=local_store,
+        stores={"remote1": remote1},
+        path_tracker=PathTracker(db=None),
     )
+    scheduler = Scheduler(ctx)
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     local_store.tracker.add_known_path(drv_path)
@@ -161,10 +170,13 @@ async def test_scheduler_proactive_transfer():
     remote_busy.tracker.add_known_path(drv_path)
     local_store.tracker.add_known_path(drv_path)
 
-    scheduler = Scheduler(
-        stores={"busy": remote_busy, "idle": remote_idle},
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
         local_store=local_store,
+        stores={"busy": remote_busy, "idle": remote_idle},
+        path_tracker=PathTracker(db=None),
     )
+    scheduler = Scheduler(ctx)
 
     # Mock build response for idle store
     idle_resp = BuildDerivationResponse(
@@ -239,10 +251,13 @@ async def test_scheduler_decomposition_and_ordering():
         "remote1", max_builds=10, feature_matrix={"x86_64-linux": set()}
     )
 
-    scheduler = Scheduler(
-        stores={"remote1": remote1},
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
         local_store=local_store,
+        stores={"remote1": remote1},
+        path_tracker=PathTracker(db=None),
     )
+    scheduler = Scheduler(ctx)
 
     leaf_path = StorePath("/nix/store/00000000000000000000000000000001-leaf.drv")
     root_path = StorePath("/nix/store/00000000000000000000000000000002-root.drv")
@@ -382,10 +397,13 @@ async def test_scheduler_cpu_utilization():
         cpu_utilization=10.0,
     )
 
-    scheduler = Scheduler(
-        stores={"hot": remote_hot, "cold": remote_cold},
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
         local_store=local_store,
+        stores={"hot": remote_hot, "cold": remote_cold},
+        path_tracker=PathTracker(db=None),
     )
+    scheduler = Scheduler(ctx)
 
     # remote_cold will handle the build
     remote_cold.responses[BuildDerivationRequest] = BuildDerivationResponse(
@@ -446,10 +464,13 @@ async def test_scheduler_feature_matching():
         feature_matrix={"x86_64-linux": {"ca-derivations", "kvm", "big-parallel"}},
     )
 
-    scheduler = Scheduler(
-        stores={"plain": remote_plain, "full": remote_full},
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
         local_store=local_store,
+        stores={"plain": remote_plain, "full": remote_full},
+        path_tracker=PathTracker(db=None),
     )
+    scheduler = Scheduler(ctx)
 
     remote_full.responses[BuildDerivationRequest] = BuildDerivationResponse(
         result=BuildResult(status=BuildResultStatus.BUILT)
