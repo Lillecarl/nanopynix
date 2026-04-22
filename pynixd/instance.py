@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Mapping
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -284,7 +283,9 @@ class Server:
             await self.add_store(store)
 
         if self.ctx.scheduler:
-            self.background_tasks.append(asyncio.create_task(self.ctx.scheduler.start()))
+            self.background_tasks.append(
+                asyncio.create_task(self.ctx.scheduler.start())
+            )
 
         if self.ctx.db:
             gc = GarbageCollector(self.ctx)
