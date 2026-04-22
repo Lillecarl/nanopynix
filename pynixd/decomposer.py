@@ -20,7 +20,7 @@ from .store_path import StorePath
 
 if TYPE_CHECKING:
     from .connection import ClientConn
-    from .scheduler import Scheduler
+    from .scheduler import Scheduler, DerivationReader
     from .drv_parser import ParsedDerivation
 
 log = structlog.get_logger(__name__)
@@ -29,7 +29,9 @@ log = structlog.get_logger(__name__)
 class BuildDecomposer:
     """Decomposes high-level build requests into individual derivation builds."""
 
-    def __init__(self, scheduler: Scheduler, read_drv_fn: Any = None) -> None:
+    def __init__(
+        self, scheduler: Scheduler, read_drv_fn: DerivationReader | None = None
+    ) -> None:
         self.scheduler = scheduler
         self.local_store = scheduler.local_store
         self.queue = scheduler.queue

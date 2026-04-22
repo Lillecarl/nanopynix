@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -41,9 +42,12 @@ from .dynamic_resolver import DynamicDerivationResolver
 from . import metrics
 
 if TYPE_CHECKING:
-    pass
+    from .operations.base import BasicDerivation, BuildResult
+    from .drv_parser import ParsedDerivation
 
 log = structlog.get_logger(__name__)
+
+DerivationReader = Callable[[Path, "StorePath"], "ParsedDerivation"]
 
 
 class Scheduler:
@@ -54,7 +58,7 @@ class Scheduler:
         stores: Mapping[str, Store],
         local_store: Store,
         settings: PynixdSettings | None = None,
-        read_drv_fn: Any = None,
+        read_drv_fn: DerivationReader | None = None,
     ) -> None:
         self.queue = BuildQueue()
         self.stores = stores

@@ -35,11 +35,42 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, TypedDict
 
 from .derived_path import DerivedPath
 from .operations.base import BasicDerivation, DerivationOutput
 from .store_path import StorePath
+
+if TYPE_CHECKING:
+    pass
+
+
+class NixDerivationOutputShow(TypedDict, total=False):
+    """Output entry in `nix derivation show` JSON."""
+
+    path: str
+    hashAlgo: str
+    hash: str
+
+
+class NixInputDrvShow(TypedDict):
+    """Input derivation entry in `nix derivation show` JSON."""
+
+    dynamicOutputs: dict[str, dict[str, list[str]]]
+    outputs: list[str]
+
+
+class NixDerivationShow(TypedDict):
+    """Complete derivation object in `nix derivation show` JSON."""
+
+    args: list[str]
+    builder: str
+    env: dict[str, str]
+    inputDrvs: dict[str, NixInputDrvShow]
+    inputSrcs: list[str]
+    name: str
+    outputs: dict[str, NixDerivationOutputShow]
+    system: str
 
 
 @dataclass
@@ -95,7 +126,7 @@ class ParsedDerivation:
         """Return {output_name: output_path} for all outputs."""
         return {o.name: StorePath(o.path) for o in self.outputs}
 
-    def to_json(self, drv_path: StorePath | str) -> dict[str, Any]:
+    def to_json(self, drv_path: StorePath | str) -> dict[str, NixDerivationShow]:
         """Serialize to the same JSON format as `nix derivation show`.
 
         Args:
@@ -103,9 +134,9 @@ class ParsedDerivation:
         """
         drv_path_str = str(drv_path)
         # Outputs: {name: {path, hash?, hashAlgo?}}
-        outputs: dict[str, dict[str, str]] = {}
+        outputs: dict[str, NixDerivationOutputShow] = {}
         for o in self.outputs:
-            entry: dict[str, str] = {}
+            entry: NixDerivationOutputShow = {}
             if o.path:
                 entry["path"] = o.path
             if o.hash_algo:
@@ -115,7 +146,7 @@ class ParsedDerivation:
             outputs[o.name] = entry
 
         # inputDrvs: {drvPath: {outputs: [...], dynamicOutputs: {...}}}
-        input_drvs: dict[str, dict[str, Any]] = {}
+        input_drvs: dict[str, NixInputDrvShow] = {}
         # Merge simple and dynamic entries
         all_drv_paths = set(self.input_drvs) | set(self.dynamic_input_drvs)
         for dp in sorted(all_drv_paths):
@@ -135,7 +166,7 @@ class ParsedDerivation:
         if name.endswith(".drv"):
             name = name[:-4]
 
-        inner: dict[str, Any] = {
+        inner: NixDerivationShow = {
             "args": self.args,
             "builder": self.builder,
             "env": self.env,

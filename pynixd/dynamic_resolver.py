@@ -14,7 +14,7 @@ from .store_path import StorePath
 from .derived_path import DerivedPath
 
 if TYPE_CHECKING:
-    from .scheduler import Scheduler
+    from .scheduler import Scheduler, DerivationReader
     from .build_queue import QueuedBuild
     from .store import Store
     from .operations.build_derivation import BuildDerivationResponse
@@ -26,7 +26,9 @@ log = structlog.get_logger(__name__)
 class DynamicDerivationResolver:
     """Handles resolution of CA and dynamic derivations during the build lifecycle."""
 
-    def __init__(self, scheduler: Scheduler, read_drv_fn: Any = None) -> None:
+    def __init__(
+        self, scheduler: Scheduler, read_drv_fn: DerivationReader | None = None
+    ) -> None:
         self.scheduler = scheduler
         self.local_store = scheduler.local_store
         self.queue = scheduler.queue
