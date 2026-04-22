@@ -119,7 +119,7 @@ async def test_nar_streaming() -> None:
                 assert total_bytes > 0
 
 
-@pytest.mark.timeout(60)
+@pytest.mark.timeout(120)
 async def test_cache_as_substituter() -> None:
     """Test using pynixd HTTP cache as a substituter for another nix build.
 

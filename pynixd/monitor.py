@@ -119,6 +119,9 @@ class GenericResourcePoller(ResourceMonitor):
                 if await self.exists_fn("/proc/stat"):
                     text = await self.read_fn("/proc/stat")
                     self.cpu_cores = float(count_cpus_from_proc_stat(text))
+        except (PermissionError, FileNotFoundError, OSError):
+            log.info("resource_poller_metadata_unavailable", info="cpu_cores")
+            self.cpu_cores = 1.0
         except Exception:
             log.debug("cpu_core_detection_failed")
             self.cpu_cores = 1.0
@@ -137,6 +140,10 @@ class GenericResourcePoller(ResourceMonitor):
                             has_psi = True
                     if has_psi:
                         psi_text = "\n".join(parts)
+                except (PermissionError, FileNotFoundError, OSError):
+                    # Stop trying PSI if we hit a permission issue
+                    log.info("resource_poller_psi_unavailable")
+                    has_psi = False
                 except Exception:
                     pass
 
@@ -145,19 +152,16 @@ class GenericResourcePoller(ResourceMonitor):
                 try:
                     # Prefer cgroupv2 memory.current/max if available (more accurate for containers)
                     if await self.exists_fn("/sys/fs/cgroup/memory.current"):
-                        curr = int(
-                            (
-                                await self.read_fn("/sys/fs/cgroup/memory.current")
-                            ).strip()
-                        )
-                        max_raw = (
-                            await self.read_fn("/sys/fs/cgroup/memory.max")
-                        ).strip()
+                        curr_text = await self.read_fn("/sys/fs/cgroup/memory.current")
+                        curr = int(curr_text.strip())
+                        max_text = await self.read_fn("/sys/fs/cgroup/memory.max")
+                        max_raw = max_text.strip()
                         total = None if max_raw == "max" else int(max_raw)
 
                         # Fallback to /proc/meminfo for totals if cgroup is unlimited
                         if total is None and await self.exists_fn("/proc/meminfo"):
-                            p_mem = parse_meminfo(await self.read_fn("/proc/meminfo"))
+                            p_mem_text = await self.read_fn("/proc/meminfo")
+                            p_mem = parse_meminfo(p_mem_text)
                             total = p_mem.mem_total * 1024  # parse_meminfo returns kB
 
                         meminfo = MemInfo(
@@ -165,7 +169,10 @@ class GenericResourcePoller(ResourceMonitor):
                             mem_available=((total - curr) // 1024) if total else 0,
                         )
                     elif await self.exists_fn("/proc/meminfo"):
-                        meminfo = parse_meminfo(await self.read_fn("/proc/meminfo"))
+                        text = await self.read_fn("/proc/meminfo")
+                        meminfo = parse_meminfo(text)
+                except (PermissionError, FileNotFoundError, OSError):
+                    log.info("resource_poller_memory_unavailable")
                 except Exception:
                     pass
 
@@ -173,14 +180,15 @@ class GenericResourcePoller(ResourceMonitor):
                 cpu_util = None
                 try:
                     if await self.exists_fn("/sys/fs/cgroup/cpu.stat"):
-                        stat = parse_cpu_stat(
-                            await self.read_fn("/sys/fs/cgroup/cpu.stat")
-                        )
+                        stat_text = await self.read_fn("/sys/fs/cgroup/cpu.stat")
+                        stat = parse_cpu_stat(stat_text)
                         if self.cpu_stat_prev:
                             cpu_util = compute_cpu_util(
                                 self.cpu_stat_prev, stat, self.cpu_cores
                             )
                         self.cpu_stat_prev = stat
+                except (PermissionError, FileNotFoundError, OSError):
+                    log.info("resource_poller_cpu_unavailable")
                 except Exception:
                     pass
 
@@ -192,6 +200,7 @@ class GenericResourcePoller(ResourceMonitor):
                     timestamp=time.monotonic(),
                 )
 
+                # Reset gate if data is missing (assume healthy)
                 if self.health.is_cpu_stressed(
                     self.settings.psi_cpu_threshold, self.settings.max_cpu_util
                 ):
@@ -206,10 +215,13 @@ class GenericResourcePoller(ResourceMonitor):
                 else:
                     self.gate.mem_clear.set()
 
+            except asyncio.CancelledError:
+                break
             except Exception:
                 log.exception("resource_poller_tick_failed")
 
             await asyncio.sleep(self.interval)
+
 
 
 class LocalPSIMonitor(ResourceMonitor):

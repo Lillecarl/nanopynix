@@ -69,6 +69,11 @@ class BuildAllocator:
                 continue
             if store_id in build.failed_backends:
                 continue
+
+            # Skip stores that are under extreme CPU pressure
+            # (Memory gating happens at the connection layer)
+            if store.pressure is not None and store.pressure > 80.0:
+                continue
             if store.cpu_util is not None and store.cpu_util.utilization > 99.0:
                 continue
 

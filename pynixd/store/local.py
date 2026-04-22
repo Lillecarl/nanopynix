@@ -96,22 +96,20 @@ class LocalSocketStore(Store):
         self,
         semaphore: asyncio.Semaphore,
     ) -> AsyncIterator[Connection]:
-        """Override to implement pressure gating before acquiring semaphore."""
-        is_build = semaphore is self.build_semaphore
+        """Override to implement pressure gating before acquiring semaphore.
+        Always gates on memory to prevent OOM when spawning new Nix instances.
+        """
         timeout = self.settings.gate_timeout
 
         try:
-            if is_build:
-                await self.gate.wait_cpu_clear(timeout=timeout)
-            else:
-                await self.gate.wait_mem_clear(timeout=timeout)
+            await self.gate.wait_mem_clear(timeout=timeout)
         except Exception as e:
             # ResourceExhaustedError will be caught by Scheduler
             log.warning(
                 "resource_gate_rejection",
                 store_id=self.id,
                 error=str(e),
-                kind="build" if is_build else "transfer",
+                kind="build" if semaphore is self.build_semaphore else "transfer",
             )
             raise
 

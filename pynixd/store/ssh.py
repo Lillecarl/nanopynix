@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -113,6 +115,34 @@ class _SSHStoreMixin(Store):
     def cpu_util(self) -> CpuUtil | None:
         """CPU utilization from cgroupv2, or None if unavailable."""
         return self.poller.health.cpu_util if self.poller else None
+
+    @asynccontextmanager
+    async def acquire_conn(
+        self,
+        semaphore: asyncio.Semaphore,
+    ) -> AsyncIterator[Connection]:
+        """Override to implement pressure gating before acquiring semaphore.
+        Always gates on memory to prevent OOM on the remote side.
+        """
+        if not self.monitor_enabled:
+            async with super().acquire_conn(semaphore) as conn:
+                yield conn
+            return
+
+        timeout = self.settings.gate_timeout
+        try:
+            await self.gate.wait_mem_clear(timeout=timeout)
+        except Exception as e:
+            log.warning(
+                "remote_resource_gate_rejection",
+                store_id=self.id,
+                error=str(e),
+                kind="build" if semaphore is self.build_semaphore else "transfer",
+            )
+            raise
+
+        async with super().acquire_conn(semaphore) as conn:
+            yield conn
 
     async def ensure_ssh(self) -> asyncssh.SSHClientConnection:
         if self.conn is not None:

@@ -29,14 +29,14 @@ class MockMonitor(ResourceMonitor):
 
 @pytest.mark.asyncio
 async def test_local_socket_store_gating(tmp_path: Path) -> None:
-    """Test that LocalSocketStore gates connections based on gate state."""
+    """Test that LocalSocketStore gates connections based on memory gate state."""
 
-    settings = PynixdSettings(gate_timeout=0.2)  # short timeout for testing
+    settings = PynixdSettings(gate_timeout=0.2) # short timeout for testing
     store = LocalSocketStore(
         id="test-gate",
         store_path=tmp_path,
         settings=settings,
-        **get_test_store_kwargs(no_probe=True),
+        **get_test_store_kwargs(no_probe=True)
     )
 
     # 1. Replace the real monitor with a mock one we can control
@@ -45,22 +45,22 @@ async def test_local_socket_store_gating(tmp_path: Path) -> None:
     store.monitor.start()
 
     try:
-        # 2. Test CPU Gate (Builds)
-        store.gate.cpu_clear.clear()  # Simulate high pressure
+        # 2. Test CPU Gate (Should NOT block anymore)
+        store.gate.cpu_clear.clear() # Simulate high pressure
 
-        with pytest.raises(ResourceExhaustedError) as excinfo:
-            async with store.build_conn():
-                pass
-        assert "CPU pressure" in str(excinfo.value)
-
-        # Now clear it and try again
-        store.gate.cpu_clear.set()
         async with store.build_conn() as conn:
             assert conn is not None
 
-        # 3. Test Memory Gate (Transfers)
-        store.gate.mem_clear.clear()  # Simulate low memory
+        # 3. Test Memory Gate (Should still block)
+        store.gate.mem_clear.clear() # Simulate low memory
 
+        # Build connections should wait for memory
+        with pytest.raises(ResourceExhaustedError) as excinfo:
+            async with store.build_conn():
+                pass
+        assert "Memory pressure" in str(excinfo.value)
+
+        # Transfer connections should wait for memory
         with pytest.raises(ResourceExhaustedError) as excinfo:
             async with store.transfer_conn():
                 pass
@@ -73,6 +73,7 @@ async def test_local_socket_store_gating(tmp_path: Path) -> None:
 
     finally:
         await store.close()
+
 
 
 @pytest.mark.asyncio
