@@ -52,7 +52,7 @@ async def test_dynamic_store_management():
         )
 
         # Block the build
-        build_done = remote1.block_build(drv_path)
+        remote1.block_build(drv_path)
 
         build_id, future = await scheduler.build_derivation(
             request, client=None, required_paths={drv_path}, platform="x86_64-linux"

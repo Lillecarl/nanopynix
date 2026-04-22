@@ -59,7 +59,9 @@ class QueryClosureWithInfoResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader, client=client, buffer=buffer_logs)
+        self.logs = await OperationLogs().from_reader(
+            reader, client=client, buffer=buffer_logs
+        )
         n = await reader.read_uint64()
         self.infos = []
         for _ in range(n):

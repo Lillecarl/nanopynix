@@ -37,7 +37,9 @@ class NarFromPathResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader, client=client, buffer=buffer_logs)
+        self.logs = await OperationLogs().from_reader(
+            reader, client=client, buffer=buffer_logs
+        )
         collector = ByteCollector()
         await wire.stream_parse_nar(reader, collector, capture=False)
         self.nar_data = collector.getvalue()

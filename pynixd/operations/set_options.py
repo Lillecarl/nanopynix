@@ -31,7 +31,9 @@ class SetOptionsResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader, client=client, buffer=buffer_logs)
+        self.logs = await OperationLogs().from_reader(
+            reader, client=client, buffer=buffer_logs
+        )
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:

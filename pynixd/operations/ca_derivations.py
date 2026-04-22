@@ -40,7 +40,9 @@ class RegisterDrvOutputResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader, client=client, buffer=buffer_logs)
+        self.logs = await OperationLogs().from_reader(
+            reader, client=client, buffer=buffer_logs
+        )
         return self
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
@@ -114,7 +116,9 @@ class QueryRealisationResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader, client=client, buffer=buffer_logs)
+        self.logs = await OperationLogs().from_reader(
+            reader, client=client, buffer=buffer_logs
+        )
         n = await reader.read_uint64()
         self.realisations = []
         for _ in range(n):
