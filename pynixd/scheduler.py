@@ -24,7 +24,7 @@ import structlog
 from .build_queue import BuildQueue, QueuedBuild
 from .connection import ClientConn
 from .derived_path import DerivedPath
-from .exceptions import BackendError, InfrastructureError
+from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .operations.base import BuildMode
 from .operations.build_derivation import (
     BuildDerivationRequest,
@@ -527,6 +527,16 @@ class Scheduler:
                 # Capture response for completion AFTER semaphore is released
                 build_resp = resp
 
+        except ResourceExhaustedError as e:
+            log.info(
+                "build_deferred_busy",
+                build_id=build.id,
+                store_id=store.id,
+                reason=str(e),
+            )
+            await build.stop_transfer()
+            build.reset_for_busy(build.transfer_task)
+            self.trigger()
         except (BackendError, InfrastructureError) as e:
             log.warning("build_failed_retryable", build_id=build.id, error=str(e))
             # Don't fail the build yet, reset it for retry on another store

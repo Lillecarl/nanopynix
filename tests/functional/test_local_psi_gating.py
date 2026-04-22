@@ -1,0 +1,112 @@
+"""
+Functional tests for LocalSocketStore pressure gating.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+import structlog
+
+from pynixd.monitor import ResourceMonitor
+from pynixd.store.local import LocalSocketStore
+from pynixd.exceptions import ResourceExhaustedError
+from pynixd.config import PynixdSettings
+from tests.conftest import get_test_store_kwargs
+
+log = structlog.get_logger(__name__)
+
+
+class MockMonitor(ResourceMonitor):
+    """Monitor that doesn't actually poll, allows manual trigger."""
+
+    async def run(self) -> None:
+        while self.running:
+            await asyncio.sleep(1)
+
+
+@pytest.mark.asyncio
+async def test_local_socket_store_gating(tmp_path: Path) -> None:
+    """Test that LocalSocketStore gates connections based on gate state."""
+
+    settings = PynixdSettings(gate_timeout=0.2)  # short timeout for testing
+    store = LocalSocketStore(
+        id="test-gate",
+        store_path=tmp_path,
+        settings=settings,
+        **get_test_store_kwargs(no_probe=True),
+    )
+
+    # 1. Replace the real monitor with a mock one we can control
+    await store.monitor.stop()
+    store.monitor = MockMonitor(store.gate, settings)
+    store.monitor.start()
+
+    try:
+        # 2. Test CPU Gate (Builds)
+        store.gate.cpu_clear.clear()  # Simulate high pressure
+
+        with pytest.raises(ResourceExhaustedError) as excinfo:
+            async with store.build_conn():
+                pass
+        assert "CPU pressure" in str(excinfo.value)
+
+        # Now clear it and try again
+        store.gate.cpu_clear.set()
+        async with store.build_conn() as conn:
+            assert conn is not None
+
+        # 3. Test Memory Gate (Transfers)
+        store.gate.mem_clear.clear()  # Simulate low memory
+
+        with pytest.raises(ResourceExhaustedError) as excinfo:
+            async with store.transfer_conn():
+                pass
+        assert "Memory pressure" in str(excinfo.value)
+
+        # Clear and retry
+        store.gate.mem_clear.set()
+        async with store.transfer_conn() as conn:
+            assert conn is not None
+
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_gate_wait_timeout_success(tmp_path: Path) -> None:
+    """Test that gating succeeds if pressure subsides within timeout."""
+
+    settings = PynixdSettings(gate_timeout=2.0)
+    store = LocalSocketStore(
+        id="test-gate-timeout",
+        store_path=tmp_path,
+        settings=settings,
+        **get_test_store_kwargs(no_probe=True),
+    )
+
+    await store.monitor.stop()
+    store.monitor = MockMonitor(store.gate, settings)
+    store.monitor.start()
+
+    try:
+        store.gate.cpu_clear.clear()
+
+        # Start build_conn in background
+        async def acquire():
+            async with store.build_conn():
+                return True
+
+        task = asyncio.create_task(acquire())
+
+        # Wait a bit, then set the gate
+        await asyncio.sleep(0.5)
+        store.gate.cpu_clear.set()
+
+        result = await task
+        assert result is True
+
+    finally:
+        await store.close()

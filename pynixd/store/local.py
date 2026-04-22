@@ -7,13 +7,21 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
 from .base import Store
 from ..connection import Connection
+from ..monitor import ResourceGate, create_monitor
 from ..wire import UnixNixReader, UnixNixWriter
+from ..config import PynixdSettings
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from ..monitor import ResourceMonitor
 
 log = structlog.get_logger(__name__)
 
@@ -45,6 +53,7 @@ class LocalSocketStore(Store):
         extra_env: dict[str, str] | None = None,
         extra_args: list[str] | None = None,
         use_db: bool = True,
+        settings: PynixdSettings | None = None,
     ) -> None:
         if store_path is None:
             store_path = Path("/")
@@ -71,10 +80,43 @@ class LocalSocketStore(Store):
         self.daemon_ready: asyncio.Event | None = None
         self.extra_env = extra_env or {}
         self.extra_args = extra_args or []
+        self.settings = settings or PynixdSettings()
+
+        # Resource Monitoring
+        self.gate = ResourceGate()
+        self.monitor: ResourceMonitor = create_monitor(self.gate, self.settings)
+        self.monitor.start()
 
     @property
     def db_enabled(self) -> bool:
         return self.use_db
+
+    @asynccontextmanager
+    async def acquire_conn(
+        self,
+        semaphore: asyncio.Semaphore,
+    ) -> AsyncIterator[Connection]:
+        """Override to implement pressure gating before acquiring semaphore."""
+        is_build = semaphore is self.build_semaphore
+        timeout = self.settings.gate_timeout
+
+        try:
+            if is_build:
+                await self.gate.wait_cpu_clear(timeout=timeout)
+            else:
+                await self.gate.wait_mem_clear(timeout=timeout)
+        except Exception as e:
+            # ResourceExhaustedError will be caught by Scheduler
+            log.warning(
+                "resource_gate_rejection",
+                store_id=self.id,
+                error=str(e),
+                kind="build" if is_build else "transfer",
+            )
+            raise
+
+        async with super().acquire_conn(semaphore) as conn:
+            yield conn
 
     async def ensure_daemon(self) -> None:
         """Spawn a managed daemon if needed (first call only).
@@ -177,8 +219,9 @@ class LocalSocketStore(Store):
         return conn
 
     async def close(self) -> None:
-        """Close stores and terminate managed daemon if any."""
+        """Close stores, stop monitor and terminate managed daemon if any."""
         await super().close()
+        await self.monitor.stop()
         if self.managed and self.daemon_proc is not None:
             self.daemon_proc.terminate()
             try:

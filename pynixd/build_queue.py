@@ -141,6 +141,16 @@ class QueuedBuild:
             self.transfer_task = None
         self.transfer_cancel = asyncio.Event()
 
+    def reset_for_busy(self, old_transfer_task: asyncio.Task | None) -> None:
+        """Reset state because store was temporarily busy/stressed.
+        Does NOT increment retries or add to failed_backends.
+        """
+        self.build_task = None
+        self.started_at = None
+        if self.transfer_task is old_transfer_task:
+            self.transfer_task = None
+        self.transfer_cancel = asyncio.Event()
+
     @property
     def wait_time(self) -> float | None:
         """Seconds between enqueue and build start."""

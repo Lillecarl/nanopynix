@@ -239,6 +239,13 @@ class PynixdSettings(BaseSettings):
     gc_local_max_age: int = 604800
     gc_builder_max_age: int = 3600
 
+    # Resource Monitoring (LocalSocketStore)
+    psi_cpu_threshold: float = 15.0  # % pressure (some)
+    psi_mem_threshold: float = 10.0  # % pressure (some)
+    min_free_mem_kb: int = 512 * 1024  # Fallback: keep 512MB free
+    max_cpu_util: float = 90.0  # Fallback: max 90% utilization
+    gate_timeout: float = 5.0  # seconds to wait for pressure to subside
+
     @classmethod
     def settings_customise_sources(
         cls,

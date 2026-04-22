@@ -29,5 +29,9 @@ class BackendError(PynixdError):
     """
 
 
+class ResourceExhaustedError(PynixdError):
+    """Raised when system resources are too stressed to proceed (PSI/Load)."""
+
+
 class OpNotImplementedError(PynixdError):
     """Raised when an operation is not implemented for a specific executor (e.g. DB)."""
