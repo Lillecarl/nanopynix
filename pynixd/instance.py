@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Mapping
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
 from . import wire
 from .config import PynixdSettings
+from .context import PynixdContext
 from .gc import GarbageCollector
 from .http_server import PynixdHttpServer
 from .local_store_db import LocalStoreDB
@@ -52,13 +54,17 @@ class Server:
         if stores is None:
             stores = {}
 
-        self.local_store: Store = local_store
-        self.stores: dict[str, Store] = stores
-        self.settings: PynixdSettings = settings or PynixdSettings(**kwargs)
+        settings = settings or PynixdSettings(**kwargs)
+        path_tracker = PathTracker(db=None)
 
-        self.scheduler: Scheduler | None = Scheduler(
-            self.stores, self.local_store, settings=self.settings
+        self.ctx = PynixdContext(
+            settings=settings,
+            local_store=local_store,
+            stores=stores,
+            path_tracker=path_tracker,
         )
+
+        self.ctx.scheduler = Scheduler(self.ctx)
 
         self.background_tasks: list[asyncio.Task[Any]] = []
         self.ssh_server: asyncssh.SSHAcceptor | None = None
@@ -67,23 +73,42 @@ class Server:
         self.http_bound_port: int | None = None
         self.https_server: web.AppRunner | None = None
         self.https_bound_port: int | None = None
-        self.path_tracker: PathTracker = PathTracker(db=None)
         self._started = False
         self._last_activity_at: float = asyncio.get_event_loop().time()
+
+    @property
+    def local_store(self) -> Store:
+        return self.ctx.local_store
+
+    @property
+    def stores(self) -> dict[str, Store]:
+        return self.ctx.stores
+
+    @property
+    def settings(self) -> PynixdSettings:
+        return self.ctx.settings
+
+    @property
+    def scheduler(self) -> Scheduler | None:
+        return self.ctx.scheduler
+
+    @property
+    def path_tracker(self) -> PathTracker:
+        return self.ctx.path_tracker
 
     def record_activity(self) -> None:
         """Update last activity timestamp."""
         now = asyncio.get_event_loop().time()
         self._last_activity_at = now
-        if self.scheduler:
-            self.scheduler.record_activity()
+        if self.ctx.scheduler:
+            self.ctx.scheduler.record_activity()
 
     async def _idleness_watcher(self) -> None:
         """Monitor idleness and shutdown if timeout reached."""
-        if not self.settings.idle_timeout:
+        if not self.ctx.settings.idle_timeout:
             return
 
-        timeout = float(self.settings.idle_timeout)
+        timeout = float(self.ctx.settings.idle_timeout)
         log.info("idleness_watcher_started", timeout=timeout)
 
         while True:
@@ -93,11 +118,13 @@ class Server:
 
                 # Activity from BuildQueue
                 last_activity = self._last_activity_at
-                if self.scheduler:
-                    last_activity = max(last_activity, self.scheduler.last_activity_at)
+                if self.ctx.scheduler:
+                    last_activity = max(
+                        last_activity, self.ctx.scheduler.last_activity_at
+                    )
 
-                    pending = self.scheduler.queue.count(status="pending")
-                    running = self.scheduler.queue.count(status="running")
+                    pending = self.ctx.scheduler.queue.count(status="pending")
+                    running = self.ctx.scheduler.queue.count(status="running")
                     if pending > 0 or running > 0:
                         self.record_activity()
                         last_activity = now
@@ -220,8 +247,8 @@ class Server:
         if self._started:
             raise RuntimeError("Server already started")
         self._started = True
-        local_store = self.local_store
-        stores = self.stores
+        local_store = self.ctx.local_store
+        stores = self.ctx.stores
 
         await local_store.probe()
 
@@ -233,32 +260,35 @@ class Server:
             )
 
         if local_store.db_enabled:
-            local_store.db = await LocalStoreDB.open(
-                local_store.store_path or Path("/")
-            )
-            self.path_tracker.db = local_store.db
+            self.ctx.db = await LocalStoreDB.open(local_store.store_path or Path("/"))
+            local_store.db = self.ctx.db
+            self.ctx.path_tracker.db = self.ctx.db
         else:
+            self.ctx.db = None
             local_store.db = None
-            self.path_tracker.db = None
+            self.ctx.path_tracker.db = None
 
-        local_store.tracker = self.path_tracker.get_instance(
+        local_store.tracker = self.ctx.path_tracker.get_instance(
             local_store.id, is_local=True
         )
 
-        stores_to_add = list(self.stores.values())
-        self.stores.clear()
+        stores_to_add = list(self.ctx.stores.values())
+        # We use Mapping for ctx.stores now, so we need to be careful with mutations
+        # if instance.py is still using dict. For now we assume instance.py
+        # manages the dict and ctx.stores is a view.
 
         for store in stores_to_add:
             await store.probe()
+            # Note: add_store already updates self.ctx.stores/local_store knowledge
             await self.add_store(store)
 
-        if self.scheduler:
-            scheduler_task = asyncio.create_task(self.scheduler.start())
+        if self.ctx.scheduler:
+            scheduler_task = asyncio.create_task(self.ctx.scheduler.start())
             self.background_tasks.append(scheduler_task)
 
-        if local_store.db:
-            local_store.db.start()
-            gc = GarbageCollector(local_store.db, stores, local_store)
+        if self.ctx.db:
+            self.ctx.db.start()
+            gc = GarbageCollector(self.ctx)
             gc.start()
             if gc.task:
                 self.background_tasks.append(gc.task)

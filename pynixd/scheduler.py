@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping, Callable
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -36,14 +36,13 @@ from .store import Store
 from .store_path import StorePath
 
 from .allocator import BuildAllocator, TINY_BUILD_THRESHOLD_MS
-from .config import PynixdSettings
 from .decomposer import BuildDecomposer
 from .dynamic_resolver import DynamicDerivationResolver
 from . import metrics
 
 if TYPE_CHECKING:
-    from .operations.base import BasicDerivation, BuildResult
     from .drv_parser import ParsedDerivation
+    from .context import PynixdContext
 
 log = structlog.get_logger(__name__)
 
@@ -55,16 +54,15 @@ class Scheduler:
 
     def __init__(
         self,
-        stores: Mapping[str, Store],
-        local_store: Store,
-        settings: PynixdSettings | None = None,
+        ctx: PynixdContext,
         read_drv_fn: DerivationReader | None = None,
     ) -> None:
+        self.ctx = ctx
         self.queue = BuildQueue()
-        self.stores = stores
-        self.local_store = local_store
+        self.stores = ctx.stores
+        self.local_store = ctx.local_store
 
-        self.allocator = BuildAllocator(stores, local_store)
+        self.allocator = BuildAllocator(self.stores, self.local_store)
         self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
         self.dynamic_resolver = DynamicDerivationResolver(self, read_drv_fn=read_drv_fn)
         self.trigger_event = asyncio.Event()

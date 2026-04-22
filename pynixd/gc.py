@@ -13,41 +13,33 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import structlog
-from environs import env
 
 from .local_store_db import LocalStoreDB
 from .operations.collect_garbage import CollectGarbageRequest, CollectGarbageResponse
 from .store import Store
 from .store_path import StorePath
 
+if TYPE_CHECKING:
+    from .context import PynixdContext
+
 log = structlog.get_logger(__name__)
-
-
-_GC_INTERVAL = env.float("PYNIXD_GC_INTERVAL", 3600.0)
-_GC_LOCAL_MAX_AGE = env.int("PYNIXD_GC_LOCAL_MAX_AGE", 604800)
-_GC_BUILDER_MAX_AGE = env.int("PYNIXD_GC_BUILDER_MAX_AGE", 3600)
 
 
 class GarbageCollector:
     """Periodically deletes stale paths from all stores."""
 
-    def __init__(
-        self,
-        db: LocalStoreDB,
-        stores: Mapping[str, Store],
-        local_store: Store,
-        interval: float = _GC_INTERVAL,
-        local_max_age: int = _GC_LOCAL_MAX_AGE,
-        builder_max_age: int = _GC_BUILDER_MAX_AGE,
-    ) -> None:
-        self.db = db
-        self.stores = stores
-        self.local_store = local_store
-        self.interval = interval
-        self.local_max_age = local_max_age
-        self.builder_max_age = builder_max_age
+    def __init__(self, ctx: PynixdContext) -> None:
+        if ctx.db is None:
+            raise ValueError("GarbageCollector requires a database")
+        self.db: LocalStoreDB = ctx.db
+        self.stores: Mapping[str, Store] = ctx.stores
+        self.local_store: Store = ctx.local_store
+        self.interval = ctx.settings.gc_interval
+        self.local_max_age = ctx.settings.gc_local_max_age
+        self.builder_max_age = ctx.settings.gc_builder_max_age
         self.task: asyncio.Task[None] | None = None
 
     def start(self) -> None:

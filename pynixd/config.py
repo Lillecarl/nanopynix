@@ -235,6 +235,10 @@ class PynixdSettings(BaseSettings):
 
     idle_timeout: int | None = None
 
+    gc_interval: float = 3600.0
+    gc_local_max_age: int = 604800
+    gc_builder_max_age: int = 3600
+
     @classmethod
     def settings_customise_sources(
         cls,
