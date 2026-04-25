@@ -1,11 +1,16 @@
+from __future__ import annotations
+
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from pynixd import Server
 from pynixd.store import LocalSocketStore
 from tests.conftest import get_test_store_kwargs
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.mark.no_pynixd

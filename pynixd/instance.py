@@ -137,7 +137,8 @@ class Server:
                     )
                     # Signal application exit by closing servers
                     # We do this in a separate task to avoid blocking the watcher
-                    asyncio.create_task(self.close())
+                    _close_task = asyncio.create_task(self.close())
+                    _close_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
                     break
             except Exception:
                 log.exception("idle_watcher_error")

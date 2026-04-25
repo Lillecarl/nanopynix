@@ -131,25 +131,21 @@ class SystemHealth:
 
     def is_cpu_stressed(self, psi_threshold: float, util_threshold: float) -> bool:
         """True if CPU pressure or utilization exceeds thresholds."""
-        if self.psi and self.psi.cpu.some_avg10 >= psi_threshold:
-            return True
-        if self.cpu_util and self.cpu_util.utilization >= util_threshold:
-            return True
-        return False
+        return bool(
+            (self.psi and self.psi.cpu.some_avg10 >= psi_threshold)
+            or (self.cpu_util and self.cpu_util.utilization >= util_threshold)
+        )
 
     def is_mem_stressed(self, psi_threshold: float, min_free_kb: int) -> bool:
         """True if Memory pressure exceeds threshold or free RAM is too low."""
-        if self.psi and self.psi.memory.some_avg10 >= psi_threshold:
-            return True
-        if self.meminfo and self.meminfo.mem_available < min_free_kb:
-            return True
-        return False
+        return bool(
+            (self.psi and self.psi.memory.some_avg10 >= psi_threshold)
+            or (self.meminfo and self.meminfo.mem_available < min_free_kb)
+        )
 
     def is_io_stressed(self, psi_threshold: float) -> bool:
         """True if IO pressure exceeds threshold."""
-        if self.psi and self.psi.io.some_avg10 >= psi_threshold:
-            return True
-        return False
+        return bool(self.psi and self.psi.io.some_avg10 >= psi_threshold)
 
 
 def parse_cpu_stat(text: str) -> CgroupCpuStat:

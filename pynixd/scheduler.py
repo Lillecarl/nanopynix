@@ -360,7 +360,7 @@ class Scheduler:
 
             if ranked:
                 # Take the highest ranked store
-                rs = list(ranked)[0]
+                rs = next(iter(ranked))
                 log.debug(
                     "build_assigned_to_store",
                     build_id=build.id,

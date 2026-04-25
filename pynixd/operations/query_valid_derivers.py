@@ -42,7 +42,7 @@ class QueryValidDeriversRequest(OpRequest[QueryValidDeriversResponse]):
     op: ClassVar[int] = 33
     response_type: ClassVar[type[OpResponse]] = QueryValidDeriversResponse
     is_query: ClassVar[bool] = True
-    path: StorePath = StorePath("")
+    path: StorePath = field(default_factory=lambda: StorePath(""))
 
     async def from_reader(
         self,

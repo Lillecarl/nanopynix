@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
@@ -71,7 +71,7 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
     op: ClassVar[int] = 26
     response_type: ClassVar[type[OpResponse]] = QueryPathInfoResponse
     is_query: ClassVar[bool] = True
-    path: StorePath = StorePath("")
+    path: StorePath = field(default_factory=lambda: StorePath(""))
 
     async def from_reader(
         self,

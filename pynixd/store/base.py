@@ -310,11 +310,7 @@ class Store(ABC):
         if not skip_probe:
             await self.probe()
 
-        # Use build_conn for builds, transfer_conn for queries/mutations
-        if request.is_build:
-            pool = self.build_conn
-        else:
-            pool = self.transfer_conn
+        pool = self.build_conn if request.is_build else self.transfer_conn
 
         async with pool() as conn:
             res = await conn.call(

@@ -281,9 +281,6 @@ class PynixdSettings(BaseSettings):
             store = spec.to_store()
             stores[store.id] = store
 
-        if "local" in stores:
-            local_store = stores.pop("local")
-        else:
-            local_store = LocalSocketStore(id="local", store_path=Path("/"))
+        local_store = stores.pop("local") if "local" in stores else LocalSocketStore(id="local", store_path=Path("/"))
 
         return local_store, stores

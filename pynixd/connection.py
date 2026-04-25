@@ -202,7 +202,7 @@ class Connection:
             buffer_logs=(client is None),
         )
 
-        return cast(Resp, response)
+        return cast(Resp, response)  # noqa: TC006
 
     # ── Handshake ───────────────────────────────────────────────────
 

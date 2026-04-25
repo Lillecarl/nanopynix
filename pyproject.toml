@@ -62,22 +62,9 @@ select = [
 ignore = [
     # E501 line length — we use line-length=120 instead of the default 88
     "E501",
-    # contextlib.suppress is slower than try/except; we use the pattern intentionally
-    "SIM105",
-    # we use `from __future__ import annotations` so cast() doesn't need quotes
-    "TC006",
-    # trailing whitespace in multi-line strings is expected (SQL, nix exprs)
-    "W291",
-    # StorePath("") as dataclass default is intentional for protocol messages
-    "RUF009",
-    # fire-and-forget asyncio.create_task is intentional
-    "RUF006",
-    # mutable class defaults like _ESCAPE dicts are intentional constants
-    "RUF012",
-    # collapsing nested ifs is sometimes less readable, especially with comments
-    "SIM102",
-    # some style preferences: ternary vs if/else, all() vs for-loop, etc.
-    "SIM108",
+    # open-file-without-context-manager in http decompression generators
+    # (generator assigns the handle then wraps with `with ctx as f:`)
+    "SIM115",
 ]
 
 [tool.ruff.lint.flake8-type-checking]

@@ -290,7 +290,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             and not getattr(item.obj, "_pynixd_timeout_wrapped", False)
         ):
             item.obj = _wrap_with_asyncio_timeout(item, default_timeout)
-            item.obj._pynixd_timeout_wrapped = True
+            item.obj._pynixd_timeout_wrapped = True  # type: ignore[reportAttributeAccessIssue]
 
 
 def _wrap_with_asyncio_timeout(item: pytest.Function, default_timeout: float):

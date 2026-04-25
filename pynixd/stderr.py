@@ -10,7 +10,6 @@ making _forward_stderr and _drain_stderr trivial consumers.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
@@ -20,6 +19,7 @@ from . import constants
 from .exceptions import BackendError
 
 if TYPE_CHECKING:
+    import asyncio
     from collections.abc import AsyncIterator
 
     from .wire import NixReader, NixWriter

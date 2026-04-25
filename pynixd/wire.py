@@ -10,7 +10,6 @@ Write functions are sync (writer.write() buffers; callers await drain()).
 
 from __future__ import annotations
 
-import asyncio
 import struct
 from typing import TYPE_CHECKING
 
@@ -41,6 +40,7 @@ from .constants import (
 )
 
 if TYPE_CHECKING:
+    import asyncio
     from collections.abc import AsyncIterator, Iterable
 
 
@@ -135,10 +135,7 @@ class SSHNixReader(NixReader):
             self.reader._datatype,
             [],
         )
-        for chunk in buf:
-            if isinstance(chunk, (bytes, bytearray)) and len(chunk) > 0:
-                return True
-        return False
+        return any(isinstance(chunk, (bytes, bytearray)) and len(chunk) > 0 for chunk in buf)
 
 
 _UNIX_READ_AHEAD = 16 * 1024  # read-ahead size to amortize syscall overhead

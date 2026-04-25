@@ -42,7 +42,7 @@ class QueryReferrersRequest(OpRequest[QueryReferrersResponse]):
     op: ClassVar[int] = 6
     response_type: ClassVar[type[OpResponse]] = QueryReferrersResponse
     is_query: ClassVar[bool] = True
-    path: StorePath = StorePath("")
+    path: StorePath = field(default_factory=lambda: StorePath(""))
 
     async def from_reader(
         self,

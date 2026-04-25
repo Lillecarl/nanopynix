@@ -55,7 +55,7 @@ class QueryDerivationOutputMapRequest(OpRequest[QueryDerivationOutputMapResponse
     op: ClassVar[int] = 41
     response_type: ClassVar[type[OpResponse]] = QueryDerivationOutputMapResponse
     is_query: ClassVar[bool] = True
-    path: StorePath = StorePath("")
+    path: StorePath = field(default_factory=lambda: StorePath(""))
 
     async def from_reader(
         self,

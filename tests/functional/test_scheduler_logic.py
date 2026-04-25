@@ -36,12 +36,12 @@ from tests.functional.mock_store import MockStore
 """
 Deterministic Scheduler Logic Tests
 
-These tests use the `MockStore` to verify the pynixd Scheduler's 
-routing, load-balancing, and DAG decomposition logic without 
+These tests use the `MockStore` to verify the pynixd Scheduler's
+routing, load-balancing, and DAG decomposition logic without
 requiring a real Nix daemon or filesystem state.
 
-By virtualizing all I/O and controlling build completion timing, 
-we can assert on complex behaviors (like proactive transfers or 
+By virtualizing all I/O and controlling build completion timing,
+we can assert on complex behaviors (like proactive transfers or
 PSI-aware routing) with zero flakiness and high speed.
 """
 
@@ -351,8 +351,8 @@ async def test_scheduler_decomposition_and_ordering():
     assert len(scheduler.queue.queue) == 2
 
     # Find builds in queue
-    root_b = [b for b in scheduler.queue.queue if str(b.request.drv_path) == str(root_path)][0]
-    leaf_b = [b for b in scheduler.queue.queue if str(b.request.drv_path) == str(leaf_path)][0]
+    root_b = next(b for b in scheduler.queue.queue if str(b.request.drv_path) == str(root_path))
+    leaf_b = next(b for b in scheduler.queue.queue if str(b.request.drv_path) == str(leaf_path))
 
     # 5. Pass 1: Scheduling
     await scheduler.schedule()

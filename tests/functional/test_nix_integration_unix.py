@@ -9,8 +9,8 @@ from tests.conftest import get_test_store_kwargs, run_subproc
 """
 End-to-End Nix Integration Tests via Unix Socket
 
-These tests use the real `nix` binary to perform builds against a 
-running pynixd server via its Unix socket. This verifies the 
+These tests use the real `nix` binary to perform builds against a
+running pynixd server via its Unix socket. This verifies the
 daemon protocol proxying logic without SSH complexity.
 """
 
@@ -48,8 +48,8 @@ async def test_nix_build_via_unix(pynixd_server):
 
     nix_expr = """
     with import <nixpkgs> {};
-    runCommand "pynixd-test" { 
-        ts = builtins.currentTime; 
+    runCommand "pynixd-test" {
+        ts = builtins.currentTime;
     } "echo 'hello from pynixd' > $out"
     """
     expr_path = Path("/tmp/pynixd-it-test.nix")

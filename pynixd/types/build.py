@@ -101,7 +101,7 @@ class BuiltOutput:
 class BuildResult:
     """Result of a BuildDerivation or BuildPaths operation."""
 
-    _log: ClassVar = structlog.get_logger("pynixd.types.build.BuildResult")
+    logger: ClassVar = structlog.get_logger("pynixd.types.build.BuildResult")
     status: BuildResultStatus = BuildResultStatus.BUILT
     error_msg: str = ""
     times_built: int = 0

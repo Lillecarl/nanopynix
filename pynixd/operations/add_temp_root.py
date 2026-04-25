@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
@@ -41,7 +41,7 @@ class AddTempRootRequest(OpRequest[AddTempRootResponse]):
     name: ClassVar[str] = "AddTempRoot"
     op: ClassVar[int] = 11
     response_type: ClassVar[type[OpResponse]] = AddTempRootResponse
-    path: StorePath = StorePath("")
+    path: StorePath = field(default_factory=lambda: StorePath(""))
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)

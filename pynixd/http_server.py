@@ -361,16 +361,16 @@ class PynixdHttpServer:
 
             def decompress_gen(path: Path):
                 if path.name.endswith(".xz"):
-                    f = lzma.open(path, "rb")
+                    ctx = lzma.open(path, "rb")
                 elif path.name.endswith(".bz2"):
-                    f = bz2.open(path, "rb")
+                    ctx = bz2.open(path, "rb")
                 elif path.name.endswith(".gz"):
-                    f = gzip.open(path, "rb")
+                    ctx = gzip.open(path, "rb")
                 elif path.name.endswith(".zst"):
                     dctx = zstd.ZstdDecompressor()
-                    f = dctx.stream_reader(open(path, "rb"))
+                    ctx = dctx.stream_reader(open(path, "rb"))
                 elif path.name.endswith(".lz4"):
-                    f = lz4.frame.open(path, "rb")
+                    ctx = lz4.frame.open(path, "rb")
                 elif path.name.endswith(".br"):
                     d = brotli.Decompressor()
                     with open(path, "rb") as bf:
@@ -381,18 +381,14 @@ class PynixdHttpServer:
                             yield d.process(chunk)
                     return
                 else:
-                    f = open(path, "rb")
+                    ctx = open(path, "rb")
 
-                try:
-                    with f:
-                        while True:
-                            chunk = f.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            yield chunk
-                except Exception as e:
-                    log.error("decompression_failed", path=path, error=str(e))
-                    raise
+                with ctx as f:
+                    while True:
+                        chunk = f.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
 
             gen = decompress_gen(nar_temp_path)
 

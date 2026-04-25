@@ -93,7 +93,8 @@ class _SSHStoreMixin(Store):
 
         if self.monitor is None or isinstance(self.monitor, DummyResourceMonitor):
             if self.monitor:
-                asyncio.create_task(self.monitor.stop())
+                _stop_task = asyncio.create_task(self.monitor.stop())
+                _stop_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             self.monitor = GenericResourcePoller(
                 self.gate,
                 self.settings,
@@ -105,7 +106,8 @@ class _SSHStoreMixin(Store):
     def stop_psi_polling(self) -> None:
         """Cancel the resource polling task."""
         if self.monitor is not None:
-            asyncio.create_task(self.monitor.stop())
+            _stop_task = asyncio.create_task(self.monitor.stop())
+            _stop_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             self.monitor = None
 
     @property

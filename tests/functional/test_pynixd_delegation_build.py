@@ -113,8 +113,8 @@ async def test_pynixd_delegation_build(tmp_path: Path) -> None:
 
             nix_expr = """
             with import <nixpkgs> {};
-            runCommand "delegation-test" { 
-                ts = builtins.currentTime; 
+            runCommand "delegation-test" {
+                ts = builtins.currentTime;
             } "echo 'delegated build' > $out"
             """
             expr_file = tmp_path / "test.nix"

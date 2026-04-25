@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from .. import wire
@@ -61,7 +61,7 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     op: ClassVar[int] = 38
     response_type: ClassVar[type[OpResponse]] = NarFromPathResponse
     is_query: ClassVar[bool] = True
-    path: StorePath = StorePath("")
+    path: StorePath = field(default_factory=lambda: StorePath(""))
     nar_size: int = 0
     async_callback: Callable[[bytes], Awaitable[None]] | None = None
 

@@ -154,7 +154,7 @@ class LocalSocketStore(Store):
         # Socket file exists but daemon may not be listening yet — probe
         for _attempt in range(100):
             try:
-                r, w = await asyncio.open_unix_connection(str(self.socket_path))
+                _r, w = await asyncio.open_unix_connection(str(self.socket_path))
                 w.close()
                 await w.wait_closed()
                 log.info("daemon_socket_ready", socket_path=str(self.socket_path))

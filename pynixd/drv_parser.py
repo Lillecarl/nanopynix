@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, ClassVar, TypedDict
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -206,7 +206,7 @@ class _Parser:
         while self._pos < len(self._text) and self._text[self._pos] in " \t\n\r":
             self._pos += 1
 
-    _ESCAPE = {
+    _ESCAPE: ClassVar[dict[str, str]] = {
         '"': '"',
         "\\": "\\",
         "/": "/",
