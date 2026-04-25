@@ -14,7 +14,7 @@ import shutil
 from contextlib import contextmanager
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import Any, AsyncGenerator
 
 import pytest
 import structlog
@@ -35,9 +35,6 @@ except ImportError:
     ConsoleRenderer = None  # type: ignore
     HAS_PYINSTRUMENT = False
 
-
-if TYPE_CHECKING:
-    from pynixd import Server
 
 # Structlog configuration
 _session_start_time = time.monotonic()

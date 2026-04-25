@@ -229,7 +229,7 @@ class MockStore(Store):
         # Default handlers for discovery ops
         if isinstance(request, QueryAllValidPathsRequest):
             return cast(
-                "Resp", QueryAllValidPathsResponse(paths=self.tracker.known_paths)
+                Resp, QueryAllValidPathsResponse(paths=self.tracker.known_paths)
             )
 
         if isinstance(request, QueryClosureWithInfoRequest):
@@ -249,7 +249,7 @@ class MockStore(Store):
                         ca="",
                     )
                 )
-            return cast("Resp", QueryClosureWithInfoResponse(infos=infos))
+            return cast(Resp, QueryClosureWithInfoResponse(infos=infos))
 
         log.warning(
             "mock_store_no_response", store_id=self.id, request=req_type.__name__

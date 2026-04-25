@@ -124,7 +124,7 @@ class Connection:
         store_path: Path | None = None,
     ) -> None:
         self.id: str = conn_id
-        self.store_path: str | None = str(store_path) if store_path else None
+        self.store_path: Path | None = store_path
         self.version: int = wire.PROTOCOL_VERSION
         self.nix_version: str = ""
         self.features: set[str] = set()

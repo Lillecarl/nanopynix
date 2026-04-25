@@ -43,8 +43,7 @@ Pynixd will adversise 1.38 support even if local_store is 1.35 and translate whe
 ## 4. Engineering Standards
 - **Validation**: ALWAYS run `just precommit` before committing. This runs `ruff` (formatting/linting), `pyright` (type checking) and functionality tests.
 - **Type Safety**:
-  - Use `from __future__ import annotations`.
-  - NEVER use string type hints (e.g., `"Store"`). 
+  - NEVER use string type hints (e.g., `"Store"`). Use `from __future__ import annotations` where needed for `TYPE_CHECKING` imports and forward references.
   - Use `if TYPE_CHECKING:` blocks for cross-module imports.
   - **Imports**: All imports should be at the top of the file. Lazy imports inside functions are only acceptable to break circular import cycles.
 - **No-ops**: Restricted operations (like `SetOptions`, `AddPermRoot`, `AddIndirectRoot`) must be implemented as no-ops that return success (`0` or `EmptyResponse`) and log their status to stderr.
