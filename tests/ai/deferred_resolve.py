@@ -34,8 +34,8 @@ from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
-    run_subproc,
     rmtree_robust,
+    run_subproc,
 )
 from tests.nix_config import NixConfig
 
@@ -90,7 +90,9 @@ def _nix_store_path_name(store_path_str: str) -> str:
 
 
 def downstream_placeholder_unknown_ca_output(
-    drv_path_hash_part: str, drv_name: str, output_name: str
+    drv_path_hash_part: str,
+    drv_name: str,
+    output_name: str,
 ) -> str:
     clear_text = (
         f"nix-upstream-output:{drv_path_hash_part}:"
@@ -111,7 +113,10 @@ def compress_hash(data: bytes, new_size: int) -> bytes:
 
 
 def make_store_path(
-    type_str: str, hash_modulo: bytes, name: str, store_dir: str = STORE_DIR
+    type_str: str,
+    hash_modulo: bytes,
+    name: str,
+    store_dir: str = STORE_DIR,
 ) -> str:
     hash_str = "sha256:" + hash_modulo.hex()
     s = f"{type_str}:{hash_str}:{store_dir}:{name}"
@@ -122,7 +127,10 @@ def make_store_path(
 
 
 def make_output_path(
-    output_id: str, hash_modulo: bytes, drv_name: str, store_dir: str = STORE_DIR
+    output_id: str,
+    hash_modulo: bytes,
+    drv_name: str,
+    store_dir: str = STORE_DIR,
 ) -> str:
     name = output_path_name(drv_name, output_id)
     return make_store_path(f"output:{output_id}", hash_modulo, name, store_dir)
@@ -251,7 +259,9 @@ def resolve_derivation(
 
         for output_name in output_names:
             placeholder = downstream_placeholder_unknown_ca_output(
-                input_hash_part, input_drv_name, output_name
+                input_hash_part,
+                input_drv_name,
+                output_name,
             )
             actual_path = resolved_output_paths.get(output_name)
             if actual_path is None:
@@ -310,7 +320,9 @@ async def main() -> None:
     # Test vector from Nix: StorePath{"g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo.drv"}, output "out"
     # Expected placeholder: /0c6rn30q4frawknapgwq386zq358m8r6msvywcvc89n6m5p2dgbz
     placeholder = downstream_placeholder_unknown_ca_output(
-        "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q", "foo", "out"
+        "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q",
+        "foo",
+        "out",
     )
     expected = "/0c6rn30q4frawknapgwq386zq358m8r6msvywcvc89n6m5p2dgbz"
     ok = "OK" if placeholder == expected else f"FAIL (got {placeholder})"
@@ -413,7 +425,7 @@ async def main() -> None:
     for o in deferred_parsed.outputs:
         print(
             f"  output: name={o.name} path={o.path!r} "
-            f"hash_algo={o.hash_algo!r} hash_value={o.hash_value!r}"
+            f"hash_algo={o.hash_algo!r} hash_value={o.hash_value!r}",
         )
 
     # ── Step 3: Resolve the deferred derivation ──
@@ -435,7 +447,9 @@ async def main() -> None:
     )
 
     placeholder_out = downstream_placeholder_unknown_ca_output(
-        ca_hash_part, ca_drv_name_debug, "out"
+        ca_hash_part,
+        ca_drv_name_debug,
+        "out",
     )
     print(f"Placeholder for CA.drv!out: {placeholder_out}")
 
@@ -447,7 +461,9 @@ async def main() -> None:
 
     # Resolve
     resolved = resolve_derivation(
-        deferred_parsed, deferred_drv_path, resolved_output_paths
+        deferred_parsed,
+        deferred_drv_path,
+        resolved_output_paths,
     )
 
     print("\nResolved BasicDerivation:")
@@ -521,7 +537,9 @@ async def main() -> None:
         StorePath(ca_out_path),
     }
     await LocalSocketStore.stream_paths_store_to_store(
-        root_store, test_store, transfer_paths
+        root_store,
+        test_store,
+        transfer_paths,
     )
 
     # Register CA realisation
@@ -535,7 +553,9 @@ async def main() -> None:
         f"{ca_drv_path}^out",
     ]
     rc, realisation_out, _, _ = await run_subproc(
-        realisation_cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        realisation_cmd,
+        nix_config=CA_NIX_CONFIG,
+        expected_retcode=None,
     )
     if rc == 0 and realisation_out.strip():
         realisations = json.loads(realisation_out)
@@ -581,7 +601,9 @@ async def main() -> None:
         print(f"Nix's resolved .drv path: {nix_resolved_drv_path}")
         # Transfer it to test store
         await LocalSocketStore.stream_paths_store_to_store(
-            root_store, test_store, {nix_resolved_drv_path}
+            root_store,
+            test_store,
+            {nix_resolved_drv_path},
         )
 
         build_req = BuildDerivationRequest(

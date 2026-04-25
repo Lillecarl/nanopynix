@@ -187,7 +187,9 @@ class SubstitutablePathInfo:
     nar_size: int = 0
 
     async def from_reader(
-        self, reader: NixReader, version: int
+        self,
+        reader: NixReader,
+        version: int,
     ) -> SubstitutablePathInfo:
         self.deriver = await reader.read_string(StorePath)
         self.references = await reader.read_string_set(StorePath)

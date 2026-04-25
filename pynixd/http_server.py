@@ -28,16 +28,16 @@ import zstandard as zstd
 from aiohttp import web
 from passlib.apache import HtpasswdFile
 
+from . import metrics
 from .local_store_db import LocalStoreDB
 from .operations.add_to_store_nar import AddToStoreNarRequest
+from .operations.base import ValidPathInfo
 from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_path_from_hash_part import QueryPathFromHashPartRequest
 from .operations.query_path_info import QueryPathInfoRequest
-from .operations.base import ValidPathInfo
 from .store import Store
 from .store_path import StorePath
 from .wire import NixWriter
-from . import metrics
 
 if TYPE_CHECKING:
     pass
@@ -138,18 +138,21 @@ class PynixdHttpServer:
             user, passwd = auth_decoded.split(":", 1)
         except Exception:
             return web.Response(
-                status=HTTPStatus.UNAUTHORIZED, text="Malformed credentials\n"
+                status=HTTPStatus.UNAUTHORIZED,
+                text="Malformed credentials\n",
             )
 
         if self.htpasswd:
             if not self.htpasswd.check_password(user, passwd):
                 return web.Response(
-                    status=HTTPStatus.FORBIDDEN, text="Invalid credentials\n"
+                    status=HTTPStatus.FORBIDDEN,
+                    text="Invalid credentials\n",
                 )
         elif self.username is not None:
             if user != self.username or passwd != self.password:
                 return web.Response(
-                    status=HTTPStatus.FORBIDDEN, text="Invalid credentials\n"
+                    status=HTTPStatus.FORBIDDEN,
+                    text="Invalid credentials\n",
                 )
 
         return await handler(request)
@@ -203,7 +206,8 @@ class PynixdHttpServer:
             # We only serve raw NARs. If Nix asks for .xz or other, we return 404
             # so it might fall back to .nar if it wants.
             return web.Response(
-                status=HTTPStatus.NOT_FOUND, text="compression not supported\n"
+                status=HTTPStatus.NOT_FOUND,
+                text="compression not supported\n",
             )
 
         path = await self.resolve_path(hash_part)
@@ -254,7 +258,8 @@ class PynixdHttpServer:
         """Receive NAR data and save it to a temporary file."""
         if not self.upload_dir:
             return web.Response(
-                status=HTTPStatus.METHOD_NOT_ALLOWED, text="Upload disabled\n"
+                status=HTTPStatus.METHOD_NOT_ALLOWED,
+                text="Upload disabled\n",
             )
 
         filename = request.match_info["filename"]
@@ -274,7 +279,8 @@ class PynixdHttpServer:
         if ".nar" not in filename:
             log.warning("invalid_nar_upload_name", filename=filename)
             return web.Response(
-                status=HTTPStatus.BAD_REQUEST, text="Filename must contain .nar\n"
+                status=HTTPStatus.BAD_REQUEST,
+                text="Filename must contain .nar\n",
             )
 
         log.info(
@@ -296,7 +302,8 @@ class PynixdHttpServer:
         """Receive .narinfo, parse it, and finalize the upload to the Nix store."""
         if not self.upload_dir:
             return web.Response(
-                status=HTTPStatus.METHOD_NOT_ALLOWED, text="Upload disabled\n"
+                status=HTTPStatus.METHOD_NOT_ALLOWED,
+                text="Upload disabled\n",
             )
 
         content = await request.text()
@@ -306,7 +313,8 @@ class PynixdHttpServer:
         except Exception as e:
             log.warning("invalid_narinfo_upload", error=str(e))
             return web.Response(
-                status=HTTPStatus.BAD_REQUEST, text=f"Invalid .narinfo: {e}\n"
+                status=HTTPStatus.BAD_REQUEST,
+                text=f"Invalid .narinfo: {e}\n",
             )
 
         # Determine the NAR filename from the 'URL' field in .narinfo
@@ -318,7 +326,8 @@ class PynixdHttpServer:
 
         if not nar_url:
             return web.Response(
-                status=HTTPStatus.BAD_REQUEST, text="Missing 'URL' field in .narinfo\n"
+                status=HTTPStatus.BAD_REQUEST,
+                text="Missing 'URL' field in .narinfo\n",
             )
 
         # nar_url is usually "nar/<narhash>.nar[.comp]"
@@ -335,7 +344,9 @@ class PynixdHttpServer:
 
         if not nar_temp_path:
             log.warning(
-                "nar_missing_for_narinfo", nar_hash=nar_hash_part, path=vinfo.path
+                "nar_missing_for_narinfo",
+                nar_hash=nar_hash_part,
+                path=vinfo.path,
             )
             return web.Response(
                 status=HTTPStatus.NOT_FOUND,
@@ -418,7 +429,8 @@ class PynixdHttpServer:
         except Exception as e:
             log.exception("finalize_upload_failed", path=vinfo.path)
             return web.Response(
-                status=HTTPStatus.INTERNAL_SERVER_ERROR, text=f"Finalize failed: {e}\n"
+                status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                text=f"Finalize failed: {e}\n",
             )
         finally:
             # Clean up temporary NAR
@@ -444,7 +456,8 @@ class PynixdHttpServer:
             for prefix in ["sha256:", ""]:
                 full_hash = f"{prefix}{hash_part}"
                 async with self.db.execute(
-                    "SELECT path FROM ValidPaths WHERE hash = ?", (full_hash,)
+                    "SELECT path FROM ValidPaths WHERE hash = ?",
+                    (full_hash,),
                 ) as cursor:
                     row = await cursor.fetchone()
                 if row:
@@ -452,7 +465,7 @@ class PynixdHttpServer:
 
         # 2. Fall back to standard QueryPathFromHashPart (for 32-char store path hashes)
         resp = await self.store.execute(
-            QueryPathFromHashPartRequest(path=StorePath(hash_part))
+            QueryPathFromHashPartRequest(path=StorePath(hash_part)),
         )
         if resp.value:
             return StorePath(resp.value)

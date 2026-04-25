@@ -6,16 +6,15 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
+    OperationLogs,
     OpRequest,
     OpResponse,
-    OperationLogs,
-    ValidPathInfo,
     UnkeyedValidPathInfo,
+    ValidPathInfo,
 )
 from .query_path_info import QueryPathInfoRequest
 
@@ -56,7 +55,9 @@ class QueryPathInfosResponse(OpResponse):
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(
-            reader, client=client, buffer=buffer_logs
+            reader,
+            client=client,
+            buffer=buffer_logs,
         )
         n = await reader.read_uint64()
         self.infos = {}
@@ -134,7 +135,7 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
             refs_map: dict[StorePath, set[StorePath]] = {}
             for referrer, reference in ref_rows:
                 refs_map.setdefault(StorePath(referrer), set()).add(
-                    StorePath(reference)
+                    StorePath(reference),
                 )
 
             for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:

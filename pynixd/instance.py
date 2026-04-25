@@ -119,7 +119,8 @@ class Server:
                 last_activity = self._last_activity_at
                 if self.ctx.scheduler:
                     last_activity = max(
-                        last_activity, self.ctx.scheduler.last_activity_at
+                        last_activity,
+                        self.ctx.scheduler.last_activity_at,
                     )
 
                     pending = self.ctx.scheduler.queue.count(status="pending")
@@ -214,7 +215,9 @@ class Server:
         return f"{self.uri(implementation)} {system} - {max_jobs}"
 
     def uri_for(
-        self, uri_format: str, implementation: NixImplementation = NixImplementation.NIX
+        self,
+        uri_format: str,
+        implementation: NixImplementation = NixImplementation.NIX,
     ) -> str:
         """Return URI in the given format."""
         if uri_format == "ssh-ng":
@@ -248,7 +251,7 @@ class Server:
             raise RuntimeError(
                 f"Local store {local_store.id} uses protocol {wire.proto_str(local_store.version)}, "
                 "but pynixd requires at least 1.35 for the local store. "
-                "Please upgrade your Nix daemon."
+                "Please upgrade your Nix daemon.",
             )
 
         if local_store.db_enabled:
@@ -261,7 +264,8 @@ class Server:
             self.ctx.path_tracker.db = None
 
         local_store.tracker = self.ctx.path_tracker.get_instance(
-            local_store.id, is_local=True
+            local_store.id,
+            is_local=True,
         )
 
         if self.ctx.db:
@@ -277,7 +281,7 @@ class Server:
 
         if self.ctx.scheduler:
             self.background_tasks.append(
-                asyncio.create_task(self.ctx.scheduler.start())
+                asyncio.create_task(self.ctx.scheduler.start()),
             )
 
         if self.ctx.db:

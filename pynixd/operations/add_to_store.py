@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import structlog
 
 from pynixd.operations.sign_path_info import SignPathInfoRequest
-from ..exceptions import BackendError
 
+from ..exceptions import BackendError
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import (
@@ -119,7 +119,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
             if resp.info is not None:
                 resp.info = (
                     await ctx.proxy.local_store.execute(
-                        SignPathInfoRequest(info=resp.info)
+                        SignPathInfoRequest(info=resp.info),
                     )
                 ).info
                 if resp.info is not None:

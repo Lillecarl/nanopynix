@@ -6,11 +6,10 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-
+from ..drv_parser import read_drv_file
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from ..drv_parser import read_drv_file
 from .base import OpRequest, OpResponse
 
 QUERY_DERIVATION_OUTPUTS_BATCH = """
@@ -102,14 +101,15 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         if (db := store.native_db) is not None:
             paths_json = json.dumps([str(p) for p in self.drv_paths])
             async with db.execute(
-                QUERY_DERIVATION_OUTPUTS_BATCH, (paths_json,)
+                QUERY_DERIVATION_OUTPUTS_BATCH,
+                (paths_json,),
             ) as cursor:
                 rows = await cursor.fetchall()
 
             result: dict[StorePath, dict[str, StorePath]] = {}
             for drv_path, output_name, output_path in rows:
                 result.setdefault(StorePath(drv_path), {})[output_name] = StorePath(
-                    output_path
+                    output_path,
                 )
             return DerivationOutputsBatchResponse(outputs=result)
 

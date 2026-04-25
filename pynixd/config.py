@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 
 
 def _feature_matrix_from_config(
-    systems: set[str] | None, system_features: set[str]
+    systems: set[str] | None,
+    system_features: set[str],
 ) -> dict[str, set[str]] | None:
     """Convert config-level systems + system_features into a feature_matrix.
 
@@ -33,7 +34,7 @@ def _feature_matrix_from_config(
     if system_features:
         raise ValueError(
             "system_features specified without systems; "
-            "specify systems to create a feature_matrix"
+            "specify systems to create a feature_matrix",
         )
     return None
 

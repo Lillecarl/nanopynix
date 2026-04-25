@@ -78,7 +78,7 @@ class DrvOutput(str):
         if value and "!" not in value:
             raise ValueError(
                 f"Invalid DrvOutput: {value!r} — "
-                "expected format '<algo>:<hash>!<outputName>'"
+                "expected format '<algo>:<hash>!<outputName>'",
             )
         return instance
 

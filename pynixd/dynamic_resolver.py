@@ -4,29 +4,38 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from .operations.ca_derivations import RegisterDrvOutputRequest
-from .operations.query_valid_paths import QueryValidPathsRequest
-from .operations.build_derivation import (
-    BuildDerivationRequest,
-)
-from .operations.add_to_store import AddToStoreRequest
-from .operations.base import OutputKind, BuildResult, BuildResultStatus, UnkeyedValidPathInfo
 from .derivation_resolution import (
     _nix_drv_name,
     _unparse_basic_derivation,
+)
+from .derivation_resolution import (
     resolve_derivation as drv_resolve_derivation,
+)
+from .derivation_resolution import (
     resolve_dynamic_derivation as drv_resolve_dynamic_derivation,
 )
-from .drv_parser import read_drv_file, to_basic_derivation
-from .store_path import StorePath
 from .derived_path import DerivedPath
+from .drv_parser import read_drv_file, to_basic_derivation
+from .operations.add_to_store import AddToStoreRequest
+from .operations.base import (
+    BuildResult,
+    BuildResultStatus,
+    OutputKind,
+    UnkeyedValidPathInfo,
+)
+from .operations.build_derivation import (
+    BuildDerivationRequest,
+)
+from .operations.ca_derivations import RegisterDrvOutputRequest
+from .operations.query_valid_paths import QueryValidPathsRequest
+from .store_path import StorePath
 
 if TYPE_CHECKING:
-    from .scheduler import Scheduler, DerivationReader
     from .build_queue import QueuedBuild
-    from .store import Store
-    from .operations.build_derivation import BuildDerivationResponse
     from .operations.base import BasicDerivation
+    from .operations.build_derivation import BuildDerivationResponse
+    from .scheduler import DerivationReader, Scheduler
+    from .store import Store
 
 log = structlog.get_logger(__name__)
 
@@ -35,7 +44,9 @@ class DynamicDerivationResolver:
     """Handles resolution of CA and dynamic derivations during the build lifecycle."""
 
     def __init__(
-        self, scheduler: Scheduler, read_drv_fn: DerivationReader | None = None
+        self,
+        scheduler: Scheduler,
+        read_drv_fn: DerivationReader | None = None,
     ) -> None:
         self.scheduler = scheduler
         self.local_store = scheduler.local_store
@@ -104,7 +115,9 @@ class DynamicDerivationResolver:
                 )
 
     async def resolve_deferred_derivation(
-        self, build: QueuedBuild, store: Store
+        self,
+        build: QueuedBuild,
+        store: Store,
     ) -> None:
         """Resolve a deferred derivation before building."""
 
@@ -142,7 +155,7 @@ class DynamicDerivationResolver:
                 output_name = realisation.get("id", "").rsplit("!", 1)[-1] or "out"
                 if out_path:
                     resolved_output_paths[output_name] = StorePath(
-                        out_path
+                        out_path,
                     ).with_store_prefix()
 
         if not resolved_output_paths:
@@ -235,7 +248,9 @@ class DynamicDerivationResolver:
         )
 
     async def resolve_dynamic_derivation(
-        self, build: QueuedBuild, store: Store
+        self,
+        build: QueuedBuild,
+        store: Store,
     ) -> None:
         """Resolve a dynamic (DrvWithVersion) wrapper derivation before building."""
 
@@ -299,7 +314,8 @@ class DynamicDerivationResolver:
                         if not actual_path:
                             try:
                                 inner_parsed = self.read_drv_fn(
-                                    self.local_store.store_path, level1_path
+                                    self.local_store.store_path,
+                                    level1_path,
                                 )
                                 inner_outs = inner_parsed.output_paths()
                                 actual_path = inner_outs.get(inner_output_name)
@@ -330,7 +346,9 @@ class DynamicDerivationResolver:
 
         try:
             resolved = drv_resolve_dynamic_derivation(
-                parsed, drv_path, dynamic_output_paths
+                parsed,
+                drv_path,
+                dynamic_output_paths,
             )
         except Exception:
             log.exception(
@@ -511,7 +529,8 @@ class DynamicDerivationResolver:
                     continue
 
                 inner_basic = to_basic_derivation(
-                    inner_parsed, self.local_store.store_path
+                    inner_parsed,
+                    self.local_store.store_path,
                 )
 
                 unknown_srcs = (
@@ -520,10 +539,11 @@ class DynamicDerivationResolver:
                 if unknown_srcs:
                     try:
                         valid_resp = await self.local_store.execute(
-                            QueryValidPathsRequest(paths=unknown_srcs)
+                            QueryValidPathsRequest(paths=unknown_srcs),
                         )
                         self.local_store.tracker.add_known_paths(
-                            valid_resp.paths, update_regtime=False
+                            valid_resp.paths,
+                            update_regtime=False,
                         )
                     except Exception:
                         log.warning(
@@ -599,7 +619,8 @@ class DynamicDerivationResolver:
 
         parent_dps = sched_req.build_to_derived.get(build.id, set())
         failed_result = BuildResult(
-            status=BuildResultStatus.MISC_FAILURE, error_msg=error_msg
+            status=BuildResultStatus.MISC_FAILURE,
+            error_msg=error_msg,
         )
         for dp in parent_dps:
             sched_req.results[dp] = failed_result

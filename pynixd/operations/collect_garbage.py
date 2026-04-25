@@ -5,13 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
 from .base import (
+    OperationLogs,
     OpRequest,
     OpResponse,
-    OperationLogs,
     RequestContext,
     Role,
 )
@@ -36,7 +35,9 @@ class CollectGarbageResponse(OpResponse):
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(
-            reader, client=client, buffer=buffer_logs
+            reader,
+            client=client,
+            buffer=buffer_logs,
         )
         self.paths_deleted = await reader.read_string_set(StorePath)
         self.bytes_freed = await reader.read_uint64()
@@ -46,7 +47,9 @@ class CollectGarbageResponse(OpResponse):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug(
-            "to_writer", paths_deleted=self.paths_deleted, bytes_freed=self.bytes_freed
+            "to_writer",
+            paths_deleted=self.paths_deleted,
+            bytes_freed=self.bytes_freed,
         )
         self.logs.to_writer(writer)
         writer.write_string_set(self.paths_deleted)
@@ -111,7 +114,7 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)
             await ctx.proxy.send_error(
-                f"Operation '{self.name}' requires administrative privileges."
+                f"Operation '{self.name}' requires administrative privileges.",
             )
             return None
 

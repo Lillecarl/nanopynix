@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .store_path import StorePath
 from .drv_parser import read_drv_file
+from .store_path import StorePath
 
 if TYPE_CHECKING:
     from .drv_parser import ParsedDerivation
@@ -234,7 +234,9 @@ class DerivedPath(StorePath):
         return dp_output_names(self._derived)
 
     def to_derivation(
-        self, store_path: Path, reader_fn: Any = None
+        self,
+        store_path: Path,
+        reader_fn: Any = None,
     ) -> ParsedDerivation:
         if reader_fn is not None:
             return reader_fn(store_path, self.drv_path)

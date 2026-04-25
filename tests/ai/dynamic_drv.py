@@ -19,20 +19,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from pynixd.drv_parser import read_drv_file, to_basic_derivation
 from pynixd.derivation_resolution import _unparse_basic_derivation
-from pynixd.store import LocalSocketStore
-from pynixd.store_path import DrvOutput, StorePath
+from pynixd.drv_parser import read_drv_file, to_basic_derivation
+from pynixd.operations.ca_derivations import QueryRealisationRequest
 from pynixd.operations.query_derivation_output_map import (
     QueryDerivationOutputMapRequest,
 )
-from pynixd.operations.ca_derivations import QueryRealisationRequest
+from pynixd.store import LocalSocketStore
+from pynixd.store_path import DrvOutput, StorePath
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
-    run_subproc,
     rmtree_robust,
+    run_subproc,
 )
 from tests.nix_config import NixConfig
 
@@ -50,7 +50,9 @@ async def main() -> None:
     rmtree_robust(root_path)
     root_kwargs = get_test_store_kwargs(nix_config=DYN_NIX_CONFIG)
     root_store = LocalSocketStore(
-        id="dyn-drv-root", store_path=root_path, **root_kwargs
+        id="dyn-drv-root",
+        store_path=root_path,
+        **root_kwargs,
     )
     await root_store.ensure_daemon()
 
@@ -152,7 +154,7 @@ async def main() -> None:
     parsed_producing = read_drv_file(root_store.store_path, producing_drv_path)
     print(f"is_dynamic: {parsed_producing.is_dynamic}")
     print(
-        f"outputs: {[(o.name, o.path, o.hash_algo, o.hash_value) for o in parsed_producing.outputs]}"
+        f"outputs: {[(o.name, o.path, o.hash_algo, o.hash_value) for o in parsed_producing.outputs]}",
     )
     print(f"input_srcs: {sorted(str(p) for p in parsed_producing.input_srcs)}")
     print(f"input_drvs: {sorted(str(p) for p in parsed_producing.input_drvs.keys())}")
@@ -160,7 +162,7 @@ async def main() -> None:
 
     for o in parsed_producing.outputs:
         print(
-            f"  output {o.name}: path={o.path!r} hash_algo={o.hash_algo!r} hash_value={o.hash_value!r}"
+            f"  output {o.name}: path={o.path!r} hash_algo={o.hash_algo!r} hash_value={o.hash_value!r}",
         )
 
     # Step 4: Build then inspect wrapper .drv (has dynamic dependencies)
@@ -201,16 +203,16 @@ async def main() -> None:
                 wrapper_parsed = read_drv_file(root_store.store_path, wrapper_drv_path)
                 print(f"wrapper is_dynamic: {wrapper_parsed.is_dynamic}")
                 print(
-                    f"wrapper outputs: {[(o.name, o.path, o.hash_algo, o.hash_value) for o in wrapper_parsed.outputs]}"
+                    f"wrapper outputs: {[(o.name, o.path, o.hash_algo, o.hash_value) for o in wrapper_parsed.outputs]}",
                 )
                 print(
-                    f"wrapper input_drvs: {sorted(str(p) for p in wrapper_parsed.input_drvs.keys())}"
+                    f"wrapper input_drvs: {sorted(str(p) for p in wrapper_parsed.input_drvs.keys())}",
                 )
                 print(
-                    f"wrapper dynamic_input_drvs: {wrapper_parsed.dynamic_input_drvs}"
+                    f"wrapper dynamic_input_drvs: {wrapper_parsed.dynamic_input_drvs}",
                 )
                 print(
-                    f"wrapper input_srcs: {sorted(str(p) for p in wrapper_parsed.input_srcs)}"
+                    f"wrapper input_srcs: {sorted(str(p) for p in wrapper_parsed.input_srcs)}",
                 )
             except Exception as e:
                 print(f"wrapper .drv parse error: {type(e).__name__}: {e}")
@@ -297,7 +299,7 @@ async def main() -> None:
 
     try:
         resp = await root_store.execute(
-            QueryDerivationOutputMapRequest(path=producing_drv_path)
+            QueryDerivationOutputMapRequest(path=producing_drv_path),
         )
         print(f"producingDrv output_map: {resp.items}")
     except Exception as e:
@@ -306,7 +308,7 @@ async def main() -> None:
     if wrapper_drv_path_local is not None:
         try:
             resp = await root_store.execute(
-                QueryDerivationOutputMapRequest(path=wrapper_drv_path_local)
+                QueryDerivationOutputMapRequest(path=wrapper_drv_path_local),
             )
             print(f"wrapper output_map: {resp.items}")
         except Exception as e:
@@ -328,7 +330,7 @@ async def main() -> None:
         drv_output_id = DrvOutput(f"sha256:{h}!out")
         print(f"Computed DrvOutput: {drv_output_id}")
         resp = await root_store.execute(
-            QueryRealisationRequest(drv_output=drv_output_id)
+            QueryRealisationRequest(drv_output=drv_output_id),
         )
         print(f"producingDrv realisation: {resp}")
     except Exception as e:

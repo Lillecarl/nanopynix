@@ -1,6 +1,8 @@
 import asyncio
-import pytest
 from pathlib import Path
+
+import pytest
+
 from pynixd import Server
 from pynixd.store import LocalSocketStore
 from tests.conftest import get_test_store_kwargs
@@ -14,7 +16,9 @@ async def test_idle_timeout(tmp_path: Path):
     store_path.mkdir()
 
     local_store = LocalSocketStore(
-        id="local", store_path=store_path, **get_test_store_kwargs(no_probe=True)
+        id="local",
+        store_path=store_path,
+        **get_test_store_kwargs(no_probe=True),
     )
 
     # Low timeout for testing

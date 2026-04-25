@@ -10,10 +10,10 @@ from pathlib import Path
 import pytest
 import structlog
 
+from pynixd.config import PynixdSettings
+from pynixd.exceptions import ResourceExhaustedError
 from pynixd.monitor import ResourceMonitor
 from pynixd.store.local import LocalSocketStore
-from pynixd.exceptions import ResourceExhaustedError
-from pynixd.config import PynixdSettings
 from tests.conftest import get_test_store_kwargs
 
 log = structlog.get_logger(__name__)

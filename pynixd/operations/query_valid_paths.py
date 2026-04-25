@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from .. import wire
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs
+from .base import OperationLogs, OpRequest, OpResponse
 
 QUERY_VALID_PATHS = """
 SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
@@ -33,7 +33,9 @@ class QueryValidPathsResponse(OpResponse):
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(
-            reader, client=client, buffer=buffer_logs
+            reader,
+            client=client,
+            buffer=buffer_logs,
         )
         self.paths = await reader.read_string_set(StorePath)
         return self

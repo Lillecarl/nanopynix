@@ -112,7 +112,8 @@ async def _get_big_path() -> StorePath:
     """Find a large NAR path in the local store (>100MB)."""
     # Just use something common like 'nix' if it exists
     out = subprocess.check_output(
-        [NIX_BIN, "path-info", "--json", "nixpkgs#nix"], text=True
+        [NIX_BIN, "path-info", "--json", "nixpkgs#nix"],
+        text=True,
     )
 
     data = json.loads(out)
@@ -122,7 +123,8 @@ async def _get_big_path() -> StorePath:
 async def _get_small_paths(n: int = 1000) -> list[StorePath]:
     """Find n small NAR paths in the local store."""
     out = subprocess.check_output(
-        [NIX_BIN, "query", "--all", "--limit", str(n)], text=True
+        [NIX_BIN, "query", "--all", "--limit", str(n)],
+        text=True,
     )
     return [StorePath(p) for p in out.splitlines() if p.strip()]
 
@@ -198,7 +200,9 @@ async def test_bench_nar_small_pipe(
 
 @pytest.mark.benchmark
 async def test_bench_nar_small_batch(
-    request: pytest.FixtureRequest, bench_store: Store, dst_store: LocalSocketStore
+    request: pytest.FixtureRequest,
+    bench_store: Store,
+    dst_store: LocalSocketStore,
 ) -> None:
     """Measure overhead for batched AddMultipleToStore."""
     paths = await _get_small_paths(100)
@@ -221,7 +225,9 @@ async def test_bench_nar_small_batch(
 @pytest.mark.benchmark
 @pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
 async def test_bench_nar_serve(
-    request: pytest.FixtureRequest, bench_store: Store, concurrency: int
+    request: pytest.FixtureRequest,
+    bench_store: Store,
+    concurrency: int,
 ) -> None:
     """Measure how fast a store can serve NARs via nar_from_path."""
     paths = await _get_small_paths(100)

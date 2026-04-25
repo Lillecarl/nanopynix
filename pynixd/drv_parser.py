@@ -103,7 +103,7 @@ class ParsedDerivation:
     """True if DrvWithVersion("xp-dyn-drv",...) format (dynamic derivations)."""
 
     dynamic_input_drvs: dict[StorePath, dict[str, list[str]]] = field(
-        default_factory=dict
+        default_factory=dict,
     )
     # dynamic_input_drvs: {drv_path: {output_name: [nested_output_name, ...], ...}}
     # Only present for DrvWithVersion format where outputs depend on
@@ -285,7 +285,7 @@ class _Parser:
                     path=path,
                     hash_algo=hash_algo,
                     hash_value=hash_value,
-                )
+                ),
             )
             self._skip_ws()
         self._expect("]")
@@ -364,7 +364,7 @@ class _Parser:
                 dynamic[drv_path] = nested
             else:
                 raise ValueError(
-                    f"Expected '[' or '(' at pos {self._pos}, got {self._peek()!r}"
+                    f"Expected '[' or '(' at pos {self._pos}, got {self._peek()!r}",
                 )
             self._expect(")")
             self._skip_ws()
@@ -511,7 +511,8 @@ def extract_platforms(derived_paths: set[DerivedPath], store_path: Path) -> set[
 
 
 def collect_required_paths(
-    derived_paths: set[DerivedPath], store_path: Path
+    derived_paths: set[DerivedPath],
+    store_path: Path,
 ) -> set[StorePath]:
     """Collect the full transitive closure of store paths needed for BuildPaths.
 
@@ -568,7 +569,8 @@ def collect_required_paths(
 
 
 def collect_output_paths(
-    derived_paths: set[DerivedPath], store_path: Path
+    derived_paths: set[DerivedPath],
+    store_path: Path,
 ) -> list[StorePath]:
     """Collect expected output paths from derived paths by reading .drv files.
 
@@ -673,7 +675,8 @@ def parse_drv(content: str) -> ParsedDerivation:
 
 
 def read_drv_file(
-    store_path: Path, drv_store_path: StorePath | str
+    store_path: Path,
+    drv_store_path: StorePath | str,
 ) -> ParsedDerivation:
     """Read and parse a .drv file from a store's filesystem.
 

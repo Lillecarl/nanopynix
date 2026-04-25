@@ -75,10 +75,14 @@ class ProbeSystemsRequest(OpRequest[ProbeSystemsResponse]):
         results = await asyncio.gather(
             *[
                 _send_probe(
-                    store, f"probe-system-{s}", s, "", ["-c", f"echo {s} > $out"]
+                    store,
+                    f"probe-system-{s}",
+                    s,
+                    "",
+                    ["-c", f"echo {s} > $out"],
                 )
                 for s in candidates
-            ]
+            ],
         )
 
         systems = {system for system, (_, ok) in zip(candidates, results) if ok}

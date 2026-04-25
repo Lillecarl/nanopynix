@@ -60,7 +60,9 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         self.derivation = await BasicDerivation().from_reader(reader, version)
         self.build_mode = BuildMode(await reader.read_uint64())
         self.logger.debug(
-            "from_reader", drv_path=self.drv_path, build_mode=self.build_mode
+            "from_reader",
+            drv_path=self.drv_path,
+            build_mode=self.build_mode,
         )
         return self
 
@@ -85,7 +87,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             if result.result.status == 0:
                 for output in result.result.built_outputs.values():
                     ctx.proxy.local_store.tracker.add_known_path(
-                        StorePath(output["outPath"]).with_store_prefix()
+                        StorePath(output["outPath"]).with_store_prefix(),
                     )
 
             self.logger.debug("responded_op")
@@ -125,7 +127,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
                 # StderrNext by the scheduler — avoid double-reporting.
                 if response.logs.messages:
                     ctx.proxy.client.queue.put_nowait(
-                        StderrNext(text=f"pynixd: {response.result.error_msg}\n")
+                        StderrNext(text=f"pynixd: {response.result.error_msg}\n"),
                     )
         self.logger.debug("responded_op")
         return response

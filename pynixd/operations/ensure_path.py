@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
+from ..connection import ClientConn
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from ..connection import ClientConn
-from .base import OpRequest, OpResponse, OperationLogs
+from .base import OperationLogs, OpRequest, OpResponse
 
 
 @dataclass

@@ -95,7 +95,7 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
                         feature,
                         args,
                         extra_env,
-                    )
+                    ),
                 )
 
         results = await asyncio.gather(*probes)

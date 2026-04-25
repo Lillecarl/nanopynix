@@ -126,7 +126,8 @@ async def test_throughput_daemon() -> None:
 
         start = time.perf_counter()
         rc, _, _, stdboth = await run_subproc(
-            cmd, env=TEST_ENV | {"NIX_REMOTE": remote_uri}
+            cmd,
+            env=TEST_ENV | {"NIX_REMOTE": remote_uri},
         )
         elapsed = time.perf_counter() - start
 

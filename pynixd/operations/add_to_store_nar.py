@@ -143,7 +143,10 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         dont_check_sigs = await src.read_uint64()
 
         self.logger.debug(
-            "forward", info=info, repair=repair, dont_check_sigs=dont_check_sigs
+            "forward",
+            info=info,
+            repair=repair,
+            dont_check_sigs=dont_check_sigs,
         )
 
         info.to_writer(dst)

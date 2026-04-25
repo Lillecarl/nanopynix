@@ -21,22 +21,46 @@ import structlog
 from .. import derived_path as derived_path_mod
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
-from ..wire import NixReader, NixWriter
 from ..types import (
     BasicDerivation as BasicDerivation,
+)
+from ..types import (
     BuildMode as BuildMode,
+)
+from ..types import (
     BuildResult as BuildResult,
+)
+from ..types import (
     BuildResultStatus as BuildResultStatus,
+)
+from ..types import (
     BuiltOutput as BuiltOutput,
+)
+from ..types import (
     DerivationOutput as DerivationOutput,
+)
+from ..types import (
     OperationLogs as OperationLogs,
+)
+from ..types import (
     OutputKind as OutputKind,
+)
+from ..types import (
     RequestContext as RequestContext,
+)
+from ..types import (
     Role as Role,
+)
+from ..types import (
     SubstitutablePathInfo as SubstitutablePathInfo,
+)
+from ..types import (
     UnkeyedValidPathInfo as UnkeyedValidPathInfo,
+)
+from ..types import (
     ValidPathInfo as ValidPathInfo,
 )
+from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -110,12 +134,14 @@ class OpRequest(ABC, Generic[Resp]):
 
                 set_test_value(f"{feature_name}_delegated", True)
                 return await store.call(
-                    self, client=client, suppress_last=suppress_last
+                    self,
+                    client=client,
+                    suppress_last=suppress_last,
                 )
 
             raise OpNotImplementedError(
                 f"Extension operation {type(self).__name__} (op={self.op}) "
-                "not supported by this store (no DB and no wire fallback)"
+                "not supported by this store (no DB and no wire fallback)",
             )
 
         return await store.call(
@@ -174,7 +200,7 @@ class KeyedBuildResult:
     """A build result associated with its derived path."""
 
     derived_path: derived_path_mod.DerivedPath = field(
-        default_factory=lambda: StorePath("")
+        default_factory=lambda: StorePath(""),
     )  # type: ignore
     result: BuildResult = field(default_factory=BuildResult)
 

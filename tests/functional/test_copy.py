@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from pynixd import Server
 from tests.conftest import (
     NIX_BIN,
@@ -29,5 +28,5 @@ async def test_copy(pynixd_server: Server):
             "--to",
             pynixd_server.uri(),
             "nixpkgs#hello",
-        ]
+        ],
     )

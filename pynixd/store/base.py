@@ -20,6 +20,7 @@ from cachetools import TTLCache
 from .. import wire
 from ..connection import ClientConn, Connection
 from ..local_store_db import LocalStoreDB
+from ..monitor import ResourceGate, ResourceMonitor
 from ..operations.add_multiple_to_store import AddMultipleToStoreRequest
 from ..operations.add_to_store_nar import AddToStoreNarRequest
 from ..operations.base import (
@@ -28,18 +29,16 @@ from ..operations.base import (
     ValidPathInfo,
 )
 from ..operations.nar_from_path import NarFromPathRequest
+from ..operations.probe_features import ProbeFeaturesRequest
+from ..operations.probe_systems import ProbeSystemsRequest
 from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
 from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
-
-from ..operations.probe_systems import ProbeSystemsRequest
-from ..operations.probe_features import ProbeFeaturesRequest
-from ..system_features import PROBE_SYSTEMS, KNOWN_FEATURES
+from ..path_tracker import PathTrackerInstance
 from ..psi import CpuUtil, MemInfo
 from ..signing import SecretKey
-from ..path_tracker import PathTrackerInstance
 from ..store_path import StorePath
+from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
-from ..monitor import ResourceGate, ResourceMonitor
 
 log = structlog.get_logger(__name__)
 
@@ -94,7 +93,8 @@ class Store(ABC):
         self._probe = probe
         self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
-            maxsize=10000, ttl=300
+            maxsize=10000,
+            ttl=300,
         )
         self.consecutive_failures: int = 0
         self.cooldown_until: float = 0.0
@@ -225,7 +225,9 @@ class Store(ABC):
         return system in fm
 
     def supports_derivation(
-        self, system: str, features: set[str] | None = None
+        self,
+        system: str,
+        features: set[str] | None = None,
     ) -> bool:
         """Check if this store can build a derivation requiring the given
         system and set of requiredSystemFeatures.
@@ -415,7 +417,8 @@ class Store(ABC):
 
                 # Request NAR from source
                 await NarFromPathRequest(path=path).to_writer(
-                    src_conn.w, src_conn.version
+                    src_conn.w,
+                    src_conn.version,
                 )
                 await src_conn.w.drain()
 

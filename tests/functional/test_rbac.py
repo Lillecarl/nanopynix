@@ -23,7 +23,8 @@ async def test_rbac_ssh_admin_vs_user(pynixd_server: Server) -> None:
     uri_user = f"ssh-ng://regular-user@127.0.0.1:{pynixd_server.port}"
     cmd_user = [str(NIX_BIN), "store", "gc", "--store", uri_user]
     rc_user, stdout_user, stderr_user, stdboth_user = await run_subproc(
-        cmd_user, expected_retcode=None
+        cmd_user,
+        expected_retcode=None,
     )
     assert rc_user != 0
     assert "requires administrative privileges" in stdboth_user

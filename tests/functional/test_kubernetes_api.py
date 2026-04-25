@@ -1,6 +1,8 @@
 import asyncio
-import pytest
+
 import aiohttp
+import pytest
+
 from pynixd import Server
 from pynixd.operations.base import BasicDerivation, BuildResult, BuildResultStatus
 from pynixd.operations.build_derivation import (
@@ -37,12 +39,13 @@ async def test_dynamic_store_management():
         drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
         local_store.tracker.add_known_path(drv_path)
         request = BuildDerivationRequest(
-            drv_path=drv_path, derivation=BasicDerivation(platform="x86_64-linux")
+            drv_path=drv_path,
+            derivation=BasicDerivation(platform="x86_64-linux"),
         )
 
         # Mock build responder
         resp = BuildDerivationResponse(
-            result=BuildResult(status=BuildResultStatus.BUILT)
+            result=BuildResult(status=BuildResultStatus.BUILT),
         )
         remote1.responses[BuildDerivationRequest] = resp
         remote2.responses[BuildDerivationRequest] = resp
@@ -51,7 +54,10 @@ async def test_dynamic_store_management():
         remote1.block_build(drv_path)
 
         build_id, future = await scheduler.build_derivation(
-            request, client=None, required_paths={drv_path}, platform="x86_64-linux"
+            request,
+            client=None,
+            required_paths={drv_path},
+            platform="x86_64-linux",
         )
 
         await scheduler.schedule()
@@ -68,7 +74,7 @@ async def test_dynamic_store_management():
         # 3. Remove store with short timeout (force kill)
         # We start the removal in background because it will wait for the build
         remove_task = asyncio.create_task(
-            server.remove_store("remote1", drain_timeout=0.1)
+            server.remove_store("remote1", drain_timeout=0.1),
         )
 
         # Wait for drain timeout to trigger hard-kill

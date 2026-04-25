@@ -21,9 +21,13 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from . import metrics
+from .allocator import TINY_BUILD_THRESHOLD_MS, BuildAllocator, TelemetryStoreRanker
 from .build_queue import BuildQueue, QueuedBuild
 from .connection import ClientConn
+from .decomposer import BuildDecomposer
 from .derived_path import DerivedPath
+from .dynamic_resolver import DynamicDerivationResolver
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .operations.base import BuildMode, UnkeyedValidPathInfo
 from .operations.build_derivation import (
@@ -32,19 +36,13 @@ from .operations.build_derivation import (
 )
 from .operations.build_paths import BuildPathsWithResultsResponse
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
-
+from .stderr import StderrNext
 from .store import Store
 from .store_path import StorePath
-from .stderr import StderrNext
-
-from .allocator import BuildAllocator, TINY_BUILD_THRESHOLD_MS, TelemetryStoreRanker
-from .decomposer import BuildDecomposer
-from .dynamic_resolver import DynamicDerivationResolver
-from . import metrics
 
 if TYPE_CHECKING:
-    from .drv_parser import ParsedDerivation
     from .context import PynixdContext
+    from .drv_parser import ParsedDerivation
 
 log = structlog.get_logger(__name__)
 
@@ -99,7 +97,9 @@ class Scheduler:
             return
 
         log.info(
-            "removing_store_dynamically", store_id=store_id, drain_timeout=drain_timeout
+            "removing_store_dynamically",
+            store_id=store_id,
+            drain_timeout=drain_timeout,
         )
         store.draining = True
         self.trigger()
@@ -157,7 +157,9 @@ class Scheduler:
             if pname:
                 serialized = request.derivation.serialize_for_stats()
                 hint = await self.local_store.db.get_build_stats_hint(
-                    pname, platform, serialized
+                    pname,
+                    platform,
+                    serialized,
                 )
 
         if isinstance(required_paths, set):
@@ -226,11 +228,11 @@ class Scheduler:
             # Still update store metrics even if queue is empty
             for s in self.stores.values():
                 metrics.STORE_HEALTHY.labels(store_id=s.id).set(
-                    1 if s.is_healthy else 0
+                    1 if s.is_healthy else 0,
                 )
                 if s.cpu_util:
                     metrics.STORE_CPU_UTILIZATION.labels(store_id=s.id).set(
-                        s.cpu_util.utilization
+                        s.cpu_util.utilization,
                     )
             return
 
@@ -244,7 +246,7 @@ class Scheduler:
             seeds = set(build.required_paths.keys())
             try:
                 resp = await self.local_store.execute(
-                    QueryClosureWithInfoRequest(paths=seeds)
+                    QueryClosureWithInfoRequest(paths=seeds),
                 )
                 build.required_paths = {info.path: info for info in resp.infos}
                 log.debug(
@@ -322,24 +324,28 @@ class Scheduler:
                     if build.wait_time is not None:
                         metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
                     build.build_task = asyncio.create_task(
-                        self.execute_build(build, self.local_store)
+                        self.execute_build(build, self.local_store),
                     )
                     continue
 
             # 2. Standard remote backend assignment
             ranked = self.allocator.rank_stores(
-                build, assigned_this_pass, override_in_flight=override_in_flight
+                build,
+                assigned_this_pass,
+                override_in_flight=override_in_flight,
             )
 
             # If NO store will ever support this platform/features, fail it statelessly
             if not ranked and not any(
                 s.supports_derivation(
-                    build.platform, build.request.derivation.effective_required_features
+                    build.platform,
+                    build.request.derivation.effective_required_features,
                 )
                 for s in self.stores.values()
             ):
                 reasons = self.allocator.incompatibility_reasons(
-                    build.platform, build_features
+                    build.platform,
+                    build_features,
                 )
                 error_msg = (
                     f"No compatible store for {build.platform}"
@@ -357,7 +363,8 @@ class Scheduler:
                         client.queue.put_nowait(StderrNext(text=f"pynixd: {line}\n"))
                 if build.scheduler_request_id is not None:
                     await self.dynamic_resolver.on_build_complete_failed(
-                        build, error_msg
+                        build,
+                        error_msg,
                     )
                 continue
 
@@ -373,7 +380,7 @@ class Scheduler:
                 metrics.QUEUE_SIZE.labels(status="pending").dec()
                 metrics.QUEUE_SIZE.labels(status="building").inc()
                 build.build_task = asyncio.create_task(
-                    self.execute_build(build, rs.store)
+                    self.execute_build(build, rs.store),
                 )
                 assigned_this_pass[rs.store_id] = (
                     assigned_this_pass.get(rs.store_id, 0) + 1
@@ -403,11 +410,12 @@ class Scheduler:
                     if client is not None:
                         for line in error_msg.split("\n"):
                             client.queue.put_nowait(
-                                StderrNext(text=f"pynixd: {line}\n")
+                                StderrNext(text=f"pynixd: {line}\n"),
                             )
                     if build.scheduler_request_id is not None:
                         await self.dynamic_resolver.on_build_complete_failed(
-                            build, error_msg
+                            build,
+                            error_msg,
                         )
                     continue
                 waiting_slot.append(build)
@@ -417,7 +425,7 @@ class Scheduler:
             metrics.STORE_HEALTHY.labels(store_id=s.id).set(1 if s.is_healthy else 0)
             if s.cpu_util:
                 metrics.STORE_CPU_UTILIZATION.labels(store_id=s.id).set(
-                    s.cpu_util.utilization
+                    s.cpu_util.utilization,
                 )
 
         log.debug(
@@ -447,7 +455,8 @@ class Scheduler:
                 if build.depends_on:
                     await self.dynamic_resolver.register_dep_realisations(build, store)
                     await self.dynamic_resolver.resolve_deferred_derivation(
-                        build, store
+                        build,
+                        store,
                     )
                     await self.dynamic_resolver.resolve_dynamic_derivation(build, store)
 
@@ -472,7 +481,9 @@ class Scheduler:
                         count=len(missing_info),
                         size=missing_size,
                     )
-                    await self.local_store.stream_paths_to(store, set(missing_info.keys()))
+                    await self.local_store.stream_paths_to(
+                        store, set(missing_info.keys())
+                    )
 
                 # 2. Trigger build
                 log.debug("build_executing", build_id=build.id, store_id=store.id)
@@ -481,7 +492,9 @@ class Scheduler:
                     metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
                 resp = await conn.call(build.request, client=build.client)
                 log.debug(
-                    "build_executed", build_id=build.id, status=resp.result.status
+                    "build_executed",
+                    build_id=build.id,
+                    status=resp.result.status,
                 )
 
                 # 3. Pull outputs back to local store if build succeeded
@@ -495,7 +508,7 @@ class Scheduler:
                             out_path = realisation.get("outPath")
                             if out_path:
                                 ca_output_paths.add(
-                                    StorePath(out_path).with_store_prefix()
+                                    StorePath(out_path).with_store_prefix(),
                                 )
                         build.ca_realisations = list(resp.result.built_outputs.values())
 
@@ -504,7 +517,9 @@ class Scheduler:
                     all_output_paths = static_paths | ca_output_paths
                     store.tracker.add_known_paths(all_output_paths)
                     log.info(
-                        "pulling_paths", store_id=store.id, count=len(all_output_paths)
+                        "pulling_paths",
+                        store_id=store.id,
+                        count=len(all_output_paths),
                     )
                     for p in all_output_paths:
                         log.debug("pulling_path", store_id=store.id, path=p)
@@ -558,7 +573,8 @@ class Scheduler:
             await self.queue.fail(build.id, "Internal scheduler error")
             if build.scheduler_request_id is not None:
                 await self.dynamic_resolver.on_build_complete_failed(
-                    build, "Internal scheduler error"
+                    build,
+                    "Internal scheduler error",
                 )
             self.trigger()
 

@@ -16,8 +16,8 @@ from tests.conftest import (
     SESSION_STORE_PREFIX,
     STORE_PREFIX,
     get_test_store_kwargs,
-    run_subproc,
     rmtree_robust,
+    run_subproc,
 )
 from tests.nix_config import NixConfig
 
@@ -224,14 +224,17 @@ async def test_ca_simple_via_pynixd(profiler: pyinstrument.Profiler, ca_env) -> 
         "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        cmd,
+        nix_config=CA_NIX_CONFIG,
+        expected_retcode=None,
     )
     log.info("ca_simple_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
     assert rc == 0, f"CA simple build via pynixd failed:\n{stdboth}"
 
 
 async def test_ca_multi_output_via_pynixd(
-    profiler: pyinstrument.Profiler, ca_env
+    profiler: pyinstrument.Profiler,
+    ca_env,
 ) -> None:
     """Build a CA derivation with multiple outputs through pynixd.
 
@@ -259,7 +262,9 @@ async def test_ca_multi_output_via_pynixd(
         "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        cmd,
+        nix_config=CA_NIX_CONFIG,
+        expected_retcode=None,
     )
     log.info("ca_multi_output_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
     assert rc == 0, f"CA multi-output build via pynixd failed:\n{stdboth}"
@@ -268,7 +273,8 @@ async def test_ca_multi_output_via_pynixd(
 
 
 async def test_ca_depends_on_ca_via_pynixd(
-    profiler: pyinstrument.Profiler, ca_env
+    profiler: pyinstrument.Profiler,
+    ca_env,
 ) -> None:
     """Build a CA derivation that depends on another CA derivation through pynixd.
 
@@ -296,7 +302,9 @@ async def test_ca_depends_on_ca_via_pynixd(
         "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        cmd,
+        nix_config=CA_NIX_CONFIG,
+        expected_retcode=None,
     )
     log.info("ca_depends_on_ca_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
     assert rc == 0, f"CA depends-on-CA build via pynixd failed:\n{stdboth}"
@@ -304,7 +312,8 @@ async def test_ca_depends_on_ca_via_pynixd(
 
 
 async def test_non_ca_depends_on_ca_via_pynixd(
-    profiler: pyinstrument.Profiler, ca_env
+    profiler: pyinstrument.Profiler,
+    ca_env,
 ) -> None:
     """Build a deferred (non-CA) derivation that depends on a CA derivation through pynixd.
 
@@ -332,7 +341,9 @@ async def test_non_ca_depends_on_ca_via_pynixd(
         "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        cmd,
+        nix_config=CA_NIX_CONFIG,
+        expected_retcode=None,
     )
     log.info("non_ca_depends_on_ca_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
     assert rc == 0, f"Non-CA depends-on-CA build via pynixd failed:\n{stdboth}"
@@ -340,7 +351,8 @@ async def test_non_ca_depends_on_ca_via_pynixd(
 
 
 async def test_ca_query_derivation_output_map_via_pynixd(
-    profiler: pyinstrument.Profiler, ca_env
+    profiler: pyinstrument.Profiler,
+    ca_env,
 ) -> None:
     """Build CA derivation through pynixd then query its output map.
 
@@ -374,7 +386,9 @@ async def test_ca_query_derivation_output_map_via_pynixd(
         "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        build_cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        build_cmd,
+        nix_config=CA_NIX_CONFIG,
+        expected_retcode=None,
     )
     assert rc == 0, f"CA build via pynixd failed:\n{stdboth}"
 
@@ -535,7 +549,9 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
         "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        build_cmd, nix_config=DYN_NIX_CONFIG, expected_retcode=None
+        build_cmd,
+        nix_config=DYN_NIX_CONFIG,
+        expected_retcode=None,
     )
     assert rc == 0, f"Dynamic trampoline build failed:\n{stdboth}"
     out_path = stdout.strip()
@@ -560,7 +576,8 @@ async def dyn_env(pynixd_server: Server):
 
 
 async def test_dynamic_drv_producing_via_pynixd(
-    profiler: pyinstrument.Profiler, dyn_env
+    profiler: pyinstrument.Profiler,
+    dyn_env,
 ) -> None:
     """Build producingDrv (text-hashed CA whose output IS a .drv) through pynixd.
 
@@ -599,7 +616,9 @@ async def test_dynamic_drv_producing_via_pynixd(
         "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        build_cmd, nix_config=DYN_NIX_CONFIG, expected_retcode=None
+        build_cmd,
+        nix_config=DYN_NIX_CONFIG,
+        expected_retcode=None,
     )
     assert rc == 0, f"producingDrv build via pynixd failed:\n{stdboth}"
     producing_out = stdout.strip()
@@ -698,7 +717,8 @@ async def test_text_hashed_ca_build_root_store(
 
 
 async def test_text_hashed_ca_build_via_pynixd(
-    profiler: pyinstrument.Profiler, ca_env
+    profiler: pyinstrument.Profiler,
+    ca_env,
 ) -> None:
     """Build a text-hashed CA derivation through pynixd proxy.
 
@@ -731,7 +751,9 @@ async def test_text_hashed_ca_build_via_pynixd(
         "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        build_cmd, nix_config=CA_NIX_CONFIG, expected_retcode=None
+        build_cmd,
+        nix_config=CA_NIX_CONFIG,
+        expected_retcode=None,
     )
     assert rc == 0, f"Text-hashed CA build via pynixd failed:\n{stdboth}"
     out_path = stdout.strip()
@@ -773,7 +795,8 @@ async def test_text_hashed_ca_build_via_pynixd(
 
 
 async def test_dynamic_drv_wrapper_via_pynixd(
-    profiler: pyinstrument.Profiler, dyn_env
+    profiler: pyinstrument.Profiler,
+    dyn_env,
 ) -> None:
     """Build the wrapper derivation (depends on dynamic drv^out^out) through pynixd.
 
@@ -804,7 +827,9 @@ async def test_dynamic_drv_wrapper_via_pynixd(
         "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        build_cmd, nix_config=DYN_NIX_CONFIG, expected_retcode=None
+        build_cmd,
+        nix_config=DYN_NIX_CONFIG,
+        expected_retcode=None,
     )
     assert rc == 0, f"Wrapper build via pynixd failed:\n{stdboth}"
     out_path = stdout.strip()

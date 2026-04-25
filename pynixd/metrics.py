@@ -8,12 +8,12 @@ PynixdHttpServer's /metrics endpoint.
 from __future__ import annotations
 
 from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    REGISTRY,
     Counter,
     Gauge,
     Histogram,
-    REGISTRY,
     generate_latest,
-    CONTENT_TYPE_LATEST,
 )
 
 # --- Queue Metrics ---

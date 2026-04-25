@@ -5,10 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs, RequestContext, Role
+from .base import OperationLogs, OpRequest, OpResponse, RequestContext, Role
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -72,7 +71,7 @@ class AddBuildLogRequest(OpRequest[AddBuildLogResponse]):
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)
             await ctx.proxy.send_error(
-                f"Operation '{self.name}' requires administrative privileges."
+                f"Operation '{self.name}' requires administrative privileges.",
             )
             return None
 

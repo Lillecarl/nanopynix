@@ -27,7 +27,6 @@ import hashlib
 from .drv_parser import ParsedDerivation
 from .operations.base import BasicDerivation, DerivationOutput
 from .store_path import StorePath
-
 from .utils import nix32_encode
 
 NIX32_CHARS = "0123456789abcdfghijklmnpqrsvwxyz"
@@ -92,14 +91,16 @@ def downstream_placeholder_from_chain(
 
     for _, output_name in chain[1:]:
         current_hash = downstream_placeholder_unknown_derivation_raw(
-            current_hash, output_name
+            current_hash,
+            output_name,
         )
 
     return "/" + nix32_encode(current_hash)
 
 
 def downstream_placeholder_unknown_derivation(
-    parent_placeholder_hash: bytes, output_name: str
+    parent_placeholder_hash: bytes,
+    output_name: str,
 ) -> str:
     """DownstreamPlaceholder::unknownDerivation — for nested dynamic outputs.
 
@@ -111,13 +112,15 @@ def downstream_placeholder_unknown_derivation(
     """
     return "/" + nix32_encode(
         downstream_placeholder_unknown_derivation_raw(
-            parent_placeholder_hash, output_name
-        )
+            parent_placeholder_hash,
+            output_name,
+        ),
     )
 
 
 def downstream_placeholder_unknown_derivation_raw(
-    parent_placeholder_hash: bytes, output_name: str
+    parent_placeholder_hash: bytes,
+    output_name: str,
 ) -> bytes:
     """Raw hash for DownstreamPlaceholder::unknownDerivation."""
     compressed = _compress_hash(parent_placeholder_hash, 20)
@@ -133,7 +136,10 @@ def _compress_hash(data: bytes, new_size: int) -> bytes:
 
 
 def _make_store_path(
-    type_str: str, hash_modulo: bytes, name: str, store_dir: str = STORE_DIR
+    type_str: str,
+    hash_modulo: bytes,
+    name: str,
+    store_dir: str = STORE_DIR,
 ) -> str:
     hash_str = "sha256:" + hash_modulo.hex()
     s = f"{type_str}:{hash_str}:{store_dir}:{name}"
@@ -143,7 +149,10 @@ def _make_store_path(
 
 
 def _make_output_path(
-    output_id: str, hash_modulo: bytes, drv_name: str, store_dir: str = STORE_DIR
+    output_id: str,
+    hash_modulo: bytes,
+    drv_name: str,
+    store_dir: str = STORE_DIR,
 ) -> str:
     name = _output_path_name(drv_name, output_id)
     return _make_store_path(f"output:{output_id}", hash_modulo, name, store_dir)
@@ -165,7 +174,7 @@ def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -
     for name, o in sorted(drv.outputs.items()):
         path = "" if mask_outputs else o.path
         out_parts.append(
-            f'("{name}","{_aterm_escape(path)}","{_aterm_escape(o.method)}","{_aterm_escape(o.hash_digest)}")'
+            f'("{name}","{_aterm_escape(path)}","{_aterm_escape(o.method)}","{_aterm_escape(o.hash_digest)}")',
         )
     parts.append(f"[{','.join(out_parts)}],")
 
@@ -192,7 +201,8 @@ def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -
 
 
 def _hash_derivation_modulo(
-    drv: BasicDerivation, mask_outputs: bool = True
+    drv: BasicDerivation,
+    mask_outputs: bool = True,
 ) -> dict[str, bytes]:
     aterm = _unparse_basic_derivation(drv, mask_outputs=mask_outputs)
     h = hashlib.sha256(aterm.encode()).digest()
@@ -264,7 +274,9 @@ def resolve_derivation(
             h = hash_modulo[name]
             out_path = _make_output_path(name, h, drv_name)
             new_outputs[name] = DerivationOutput(
-                path=out_path, method="", hash_digest=""
+                path=out_path,
+                method="",
+                hash_digest="",
             )
             resolved.env[name] = out_path
         else:
@@ -328,7 +340,7 @@ def resolve_dynamic_derivation(
 
             # The level-1 output is the .drv itself — add to input_srcs if known
             level1_path = dynamic_output_paths.get(
-                (dyn_drv_path, outer_output, outer_output)
+                (dyn_drv_path, outer_output, outer_output),
             )
             if level1_path is not None:
                 rewrites[outer_placeholder] = str(level1_path)
@@ -337,14 +349,15 @@ def resolve_dynamic_derivation(
             # Compute level-2+ placeholders (unknownDerivation)
             for inner_output in inner_outputs:
                 inner_placeholder = downstream_placeholder_unknown_derivation(
-                    outer_hash, inner_output
+                    outer_hash,
+                    inner_output,
                 )
                 actual_path = dynamic_output_paths.get(
-                    (dyn_drv_path, outer_output, inner_output)
+                    (dyn_drv_path, outer_output, inner_output),
                 )
                 if actual_path is None:
                     raise ValueError(
-                        f"No resolved path for {dyn_drv_path}^{outer_output}^{inner_output}"
+                        f"No resolved path for {dyn_drv_path}^{outer_output}^{inner_output}",
                     )
                 rewrites[inner_placeholder] = str(actual_path)
                 new_input_srcs.add(StorePath(str(actual_path)))
@@ -374,7 +387,9 @@ def resolve_dynamic_derivation(
             h = hash_modulo[name]
             out_path = _make_output_path(name, h, drv_name)
             new_outputs[name] = DerivationOutput(
-                path=out_path, method="", hash_digest=""
+                path=out_path,
+                method="",
+                hash_digest="",
             )
             resolved.env[name] = out_path
         else:

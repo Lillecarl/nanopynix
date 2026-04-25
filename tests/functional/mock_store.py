@@ -8,9 +8,8 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, cast
 
 import structlog
 
+from pynixd import metrics
 from pynixd.connection import Connection
-from pynixd.psi import CpuUtil
-from pynixd.store import Store
 from pynixd.operations.base import ValidPathInfo
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.query_all_valid_paths import (
@@ -21,9 +20,10 @@ from pynixd.operations.query_closure_with_info import (
     QueryClosureWithInfoRequest,
     QueryClosureWithInfoResponse,
 )
+from pynixd.psi import CpuUtil
+from pynixd.store import Store
 from pynixd.store_path import StorePath
 from pynixd.wire import NixReader, NixWriter
-from pynixd import metrics
 
 if TYPE_CHECKING:
     from pynixd.connection import ClientConn
@@ -152,12 +152,16 @@ class MockStore(Store):
         self.build_blockers: dict[str, asyncio.Event] = {}
         # Initialize PSI-like load stats
         self._cpu_util = CpuUtil(
-            utilization=cpu_utilization, cores=4.0, throttled_pct=0.0
+            utilization=cpu_utilization,
+            cores=4.0,
+            throttled_pct=0.0,
         )
         # In MockStore, we don't want real PSI monitoring, so we don't start any poller.
 
     def block_build(
-        self, drv_path: str | StorePath, blocker: asyncio.Event | None = None
+        self,
+        drv_path: str | StorePath,
+        blocker: asyncio.Event | None = None,
     ) -> asyncio.Event:
         """Prevent a build of the given .drv from completing.
 
@@ -229,7 +233,8 @@ class MockStore(Store):
         # Default handlers for discovery ops
         if isinstance(request, QueryAllValidPathsRequest):
             return cast(
-                Resp, QueryAllValidPathsResponse(paths=self.tracker.known_paths)
+                Resp,
+                QueryAllValidPathsResponse(paths=self.tracker.known_paths),
             )
 
         if isinstance(request, QueryClosureWithInfoRequest):
@@ -247,16 +252,18 @@ class MockStore(Store):
                         ultimate=0,
                         sigs=set(),
                         ca="",
-                    )
+                    ),
                 )
             return cast(Resp, QueryClosureWithInfoResponse(infos=infos))
 
         log.warning(
-            "mock_store_no_response", store_id=self.id, request=req_type.__name__
+            "mock_store_no_response",
+            store_id=self.id,
+            request=req_type.__name__,
         )
         raise NotImplementedError(
             f"MockStore {self.id} has no response for {req_type.__name__}. "
-            f"Update your test setup to provide a mock response."
+            f"Update your test setup to provide a mock response.",
         )
 
     async def stream_paths_to(
@@ -272,7 +279,7 @@ class MockStore(Store):
         """
         dst.tracker.add_known_paths(paths)
         metrics.PATHS_TRANSFERRED.labels(source=self.id, destination=dst.id).inc(
-            len(list(paths))
+            len(list(paths)),
         )
         log.debug(
             "mock_path_transfer_complete",
@@ -292,7 +299,9 @@ class MockStore(Store):
         return await self.call(request, client, suppress_last, skip_probe=skip_probe)
 
     def supports_derivation(
-        self, system: str, features: set[str] | None = None
+        self,
+        system: str,
+        features: set[str] | None = None,
     ) -> bool:
         """Check if the simulated store supports a specific system/feature set."""
         if self._feature_matrix is None:

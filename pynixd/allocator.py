@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import structlog
+
 from .system_features import PYNIXD_HANDLED_FEATURES
 
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild
-    from .store import Store
     from .config import PynixdSettings
+    from .store import Store
 
 log = structlog.get_logger(__name__)
 
@@ -90,7 +91,7 @@ class TelemetryStoreRanker(StoreRanker):
                     score += ratio * self.settings.locality_weight
                 else:
                     common = store.tracker.count_common_paths(
-                        set(build.required_paths.keys())
+                        set(build.required_paths.keys()),
                     )
                     ratio = common / len(build.required_paths)
                     score += ratio * self.settings.locality_weight
@@ -170,11 +171,16 @@ class BuildAllocator:
             candidates.append(store)
 
         return self.ranker.rank_stores(
-            build, candidates, assigned_this_pass, override_in_flight
+            build,
+            candidates,
+            assigned_this_pass,
+            override_in_flight,
         )
 
     def incompatibility_reasons(
-        self, platform: str, features: set[str] | None
+        self,
+        platform: str,
+        features: set[str] | None,
     ) -> list[str]:
         """Build per-store incompatibility explanations for error reporting."""
         reasons: list[str] = []
@@ -186,7 +192,7 @@ class BuildAllocator:
             missing = features - local_feats
             if missing:
                 reasons.append(
-                    f"local: missing features {', '.join(sorted(missing))} for {platform}"
+                    f"local: missing features {', '.join(sorted(missing))} for {platform}",
                 )
         elif fm is None:
             reasons.append("local: no feature_matrix (not probed)")
@@ -202,17 +208,17 @@ class BuildAllocator:
                 missing = features - store_feats
                 if missing:
                     reasons.append(
-                        f"{store.id}: missing features {', '.join(sorted(missing))} for {platform}"
+                        f"{store.id}: missing features {', '.join(sorted(missing))} for {platform}",
                     )
                 else:
                     reasons.append(
-                        f"{store.id}: compatible but excluded (unhealthy/saturated/failed)"
+                        f"{store.id}: compatible but excluded (unhealthy/saturated/failed)",
                     )
             elif sfm is None:
                 reasons.append(f"{store.id}: no feature_matrix (not probed)")
             else:
                 reasons.append(
-                    f"{store.id}: compatible but excluded (unhealthy/saturated/failed)"
+                    f"{store.id}: compatible but excluded (unhealthy/saturated/failed)",
                 )
 
         return reasons

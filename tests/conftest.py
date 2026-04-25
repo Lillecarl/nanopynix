@@ -8,11 +8,11 @@ import glob
 import logging
 import os
 import shlex
+import shutil
 import stat
 import time
-import shutil
-from contextlib import contextmanager
 from collections.abc import Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
@@ -534,7 +534,7 @@ async def run_subproc(
         config_str = nix_config.to_nix_config_env()
     elif nix_config is not None:
         default_config = {
-            "substituters": "https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/"
+            "substituters": "https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/",
         }
         merged = default_config | nix_config
         config_str = "\n".join(f"{k} = {v}" for k, v in merged.items())
@@ -578,7 +578,7 @@ async def run_subproc(
     rc = proc.returncode if proc.returncode is not None else 0
     if expected_retcode is not None and rc != expected_retcode:
         raise RuntimeError(
-            f"Command failed with rc={rc} (expected {expected_retcode}):\n{''.join(stdboth)}"
+            f"Command failed with rc={rc} (expected {expected_retcode}):\n{''.join(stdboth)}",
         )
     return (
         rc,

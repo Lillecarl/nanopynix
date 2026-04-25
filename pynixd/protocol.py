@@ -5,7 +5,6 @@ Protocol versions 1.32+ are supported (negotiated per connection).
 
 from enum import IntEnum
 
-
 from .operations.base import OP_REGISTRY
 
 

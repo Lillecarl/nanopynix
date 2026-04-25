@@ -17,15 +17,15 @@ import structlog
 from .exceptions import ResourceExhaustedError
 from .psi import (
     CgroupCpuStat,
+    CpuUtil,
+    MemInfo,
     SystemHealth,
-    parse_psi_output,
-    parse_meminfo,
-    parse_cpu_stat,
-    parse_cpu_max,
     compute_cpu_util,
     count_cpus_from_proc_stat,
-    MemInfo,
-    CpuUtil,
+    parse_cpu_max,
+    parse_cpu_stat,
+    parse_meminfo,
+    parse_psi_output,
 )
 
 if TYPE_CHECKING:
@@ -58,7 +58,7 @@ class ResourceGate:
             await asyncio.wait_for(self.mem_clear.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             raise ResourceExhaustedError(
-                "Memory pressure remains too high after timeout"
+                "Memory pressure remains too high after timeout",
             )
 
     async def wait_io_clear(self, timeout: float = 5.0) -> None:
@@ -103,7 +103,10 @@ class DummyResourceMonitor(ResourceMonitor):
     """Monitor for stores that don't support telemetry. Reports static healthy stats."""
 
     def __init__(
-        self, gate: ResourceGate, settings: PynixdSettings, cpu_util: float = 0.0
+        self,
+        gate: ResourceGate,
+        settings: PynixdSettings,
+        cpu_util: float = 0.0,
     ) -> None:
         super().__init__(gate, settings)
         self.cpu_util = cpu_util
@@ -216,7 +219,9 @@ class GenericResourcePoller(ResourceMonitor):
                         stat = parse_cpu_stat(stat_text)
                         if self.cpu_stat_prev:
                             cpu_util = compute_cpu_util(
-                                self.cpu_stat_prev, stat, self.cpu_cores
+                                self.cpu_stat_prev,
+                                stat,
+                                self.cpu_cores,
                             )
                         self.cpu_stat_prev = stat
                 except (PermissionError, FileNotFoundError, OSError):
@@ -234,7 +239,8 @@ class GenericResourcePoller(ResourceMonitor):
 
                 # Reset gate if data is missing (assume healthy)
                 if self.health.is_cpu_stressed(
-                    self.settings.psi_cpu_threshold, self.settings.max_cpu_util
+                    self.settings.psi_cpu_threshold,
+                    self.settings.max_cpu_util,
                 ):
                     self.gate.cpu_clear.clear()
                 else:
@@ -283,17 +289,20 @@ class LocalPSIMonitor(ResourceMonitor):
                 raise PermissionError("Insufficient permissions for PSI triggers")
 
             self.cpu_fd = os.open(
-                "/sys/fs/cgroup/cpu.pressure", os.O_RDWR | os.O_NONBLOCK
+                "/sys/fs/cgroup/cpu.pressure",
+                os.O_RDWR | os.O_NONBLOCK,
             )
             os.write(self.cpu_fd, cpu_threshold.encode())
 
             self.mem_fd = os.open(
-                "/sys/fs/cgroup/memory.pressure", os.O_RDWR | os.O_NONBLOCK
+                "/sys/fs/cgroup/memory.pressure",
+                os.O_RDWR | os.O_NONBLOCK,
             )
             os.write(self.mem_fd, mem_threshold.encode())
 
             self.io_fd = os.open(
-                "/sys/fs/cgroup/io.pressure", os.O_RDWR | os.O_NONBLOCK
+                "/sys/fs/cgroup/io.pressure",
+                os.O_RDWR | os.O_NONBLOCK,
             )
             os.write(self.io_fd, io_threshold.encode())
 
@@ -340,7 +349,10 @@ class LocalPSIMonitor(ResourceMonitor):
 
             # Fallback to generic poller
             poller = GenericResourcePoller(
-                self.gate, self.settings, local_read, local_exists
+                self.gate,
+                self.settings,
+                local_read,
+                local_exists,
             )
             await poller.run()
         finally:

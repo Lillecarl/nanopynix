@@ -135,7 +135,8 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
 
 
 async def test_query_path_from_hash_part(
-    profiler: pyinstrument.Profiler, query_env
+    profiler: pyinstrument.Profiler,
+    query_env,
 ) -> None:
     """Verify QueryPathFromHashPart via 'nix store path-from-hash-part'.
 

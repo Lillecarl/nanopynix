@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
-from ..wire import NixReader, NixWriter
 from ..connection import ClientConn
-from .base import OpRequest, OpResponse, OperationLogs, SubstitutablePathInfo
+from ..wire import NixReader, NixWriter
+from .base import OperationLogs, OpRequest, OpResponse, SubstitutablePathInfo
 
 
 @dataclass
@@ -49,7 +49,7 @@ class QuerySubstitutablePathInfosResponse(OpResponse):
 
 @dataclass
 class QuerySubstitutablePathInfosRequest(
-    OpRequest[QuerySubstitutablePathInfosResponse]
+    OpRequest[QuerySubstitutablePathInfosResponse],
 ):
     name: ClassVar[str] = "QuerySubstitutablePathInfos"
     op: ClassVar[int] = 30

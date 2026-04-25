@@ -117,7 +117,7 @@ class GarbageCollector:
             CollectGarbageRequest(
                 action=3,  # DeleteSpecific
                 paths_to_delete=paths,
-            )
+            ),
         )
         if resp.paths_deleted:
             log.info(

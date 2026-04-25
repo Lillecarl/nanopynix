@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs
+from .base import OperationLogs, OpRequest, OpResponse
 
 QUERY_PATH_FROM_HASH_PART = """
 SELECT path FROM ValidPaths WHERE path >= ? AND path < ? LIMIT 1
@@ -31,7 +31,9 @@ class QueryPathFromHashPartResponse(OpResponse):
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(
-            reader, client=client, buffer=buffer_logs
+            reader,
+            client=client,
+            buffer=buffer_logs,
         )
         self.value = await reader.read_string(StorePath)
         return self

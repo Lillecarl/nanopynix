@@ -1,8 +1,10 @@
-import pytest
 from pathlib import Path
-from tests.conftest import run_subproc, get_test_store_kwargs
-from pynixd.store import LocalSocketStore
+
+import pytest
+
 from pynixd import Server
+from pynixd.store import LocalSocketStore
+from tests.conftest import get_test_store_kwargs, run_subproc
 
 """
 End-to-End Nix Integration Tests via Unix Socket
@@ -21,7 +23,9 @@ async def pynixd_server(tmp_path: Path):
     socket_path = tmp_path / "pynixd.sock"
 
     local_store = LocalSocketStore(
-        id="local", store_path=store_path, **get_test_store_kwargs(no_probe=True)
+        id="local",
+        store_path=store_path,
+        **get_test_store_kwargs(no_probe=True),
     )
 
     async with Server(
@@ -84,7 +88,7 @@ async def test_nix_copy_via_unix(pynixd_server, tmp_path: Path):
 
     # Setup: add to system store
     rc, stdout, stderr, stdboth = await run_subproc(
-        ["nix-store", "--add", str(dummy_file)]
+        ["nix-store", "--add", str(dummy_file)],
     )
     assert rc == 0
     system_path = stdout.strip()

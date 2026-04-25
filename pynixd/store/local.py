@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from .base import Store
+from ..config import PynixdSettings
 from ..connection import Connection
 from ..monitor import create_monitor
 from ..wire import UnixNixReader, UnixNixWriter
-from ..config import PynixdSettings
+from .base import Store
 
 if TYPE_CHECKING:
     from ..monitor import ResourceMonitor

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-
 from ..derived_path import DerivedPath
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter
@@ -61,7 +60,9 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         self.derived_paths = await reader.read_string_set(DerivedPath)
         self.build_mode = BuildMode(await reader.read_uint64())
         self.logger.debug(
-            "from_reader", derived_paths=self.derived_paths, build_mode=self.build_mode
+            "from_reader",
+            derived_paths=self.derived_paths,
+            build_mode=self.build_mode,
         )
         return self
 
@@ -87,7 +88,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
                     if kr.result.status == 0:
                         for output in kr.result.built_outputs.values():
                             ctx.proxy.local_store.tracker.add_known_path(
-                                StorePath(output["outPath"]).with_store_prefix()
+                                StorePath(output["outPath"]).with_store_prefix(),
                             )
 
             self.logger.debug("responded_op")
@@ -95,7 +96,9 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 
         self.logger.debug("BuildPaths len(paths)=%d", len(self.derived_paths))
         result = await ctx.proxy.scheduler.build_derived_paths(
-            self.derived_paths, self.build_mode, client=ctx.proxy.client
+            self.derived_paths,
+            self.build_mode,
+            client=ctx.proxy.client,
         )
 
         for kr in result.results:
@@ -153,7 +156,9 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
         self.build_mode = BuildMode(await reader.read_uint64())
 
         self.logger.debug(
-            "from_reader", derived_paths=self.derived_paths, build_mode=self.build_mode
+            "from_reader",
+            derived_paths=self.derived_paths,
+            build_mode=self.build_mode,
         )
         return self
 
@@ -179,7 +184,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
                     if kr.result.status == 0:
                         for output in kr.result.built_outputs.values():
                             ctx.proxy.local_store.tracker.add_known_path(
-                                StorePath(output["outPath"]).with_store_prefix()
+                                StorePath(output["outPath"]).with_store_prefix(),
                             )
 
             self.logger.debug("responded_op")
@@ -190,7 +195,9 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
             num_derivations=len(self.derived_paths),
         )
         result = await ctx.proxy.scheduler.build_derived_paths(
-            self.derived_paths, self.build_mode, client=ctx.proxy.client
+            self.derived_paths,
+            self.build_mode,
+            client=ctx.proxy.client,
         )
 
         for kr in result.results:

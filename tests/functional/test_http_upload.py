@@ -10,14 +10,14 @@ import pytest
 import structlog
 
 from pynixd import Server
-from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.operations.nar_from_path import NarFromPathRequest
+from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
-    SESSION_HTTP_USER,
     SESSION_HTTP_PASS,
+    SESSION_HTTP_USER,
     get_test_store_kwargs,
     run_subproc,
 )
@@ -33,12 +33,12 @@ HTTP_AUTH_HEADER = (
 async def get_hello_path() -> StorePath:
     """Build nixpkgs#hello and return its store path."""
     rc, stdout, stderr, _ = await run_subproc(
-        [str(NIX_BIN), "path-info", "nixpkgs#hello"]
+        [str(NIX_BIN), "path-info", "nixpkgs#hello"],
     )
     if rc != 0:
         await run_subproc([str(NIX_BIN), "build", "nixpkgs#hello"])
         rc, stdout, stderr, _ = await run_subproc(
-            [str(NIX_BIN), "path-info", "nixpkgs#hello"]
+            [str(NIX_BIN), "path-info", "nixpkgs#hello"],
         )
     return StorePath(stdout.strip())
 
@@ -54,7 +54,7 @@ async def get_no_refs_path() -> StorePath:
             "--impure",
             "--expr",
             'builtins.toFile "no-refs-test" "some random content"',
-        ]
+        ],
     )
     assert rc == 0, f"Failed to create no-refs path: {stderr}"
     return StorePath(stdout.strip())
@@ -75,7 +75,9 @@ async def test_http_upload(
 
     # Get its NAR and narinfo from root store
     root_store = LocalSocketStore(
-        id="root", store_path=Path("/"), **get_test_store_kwargs(no_probe=True)
+        id="root",
+        store_path=Path("/"),
+        **get_test_store_kwargs(no_probe=True),
     )
     info_resp = await root_store.execute(QueryPathInfoRequest(path=path))
     assert info_resp.valid and info_resp.info
@@ -88,8 +90,10 @@ async def test_http_upload(
 
     await root_store.execute(
         NarFromPathRequest(
-            path=path, nar_size=vinfo.nar_size, async_callback=collect_nar
-        )
+            path=path,
+            nar_size=vinfo.nar_size,
+            async_callback=collect_nar,
+        ),
     )
 
     narinfo = vinfo.to_narinfo()
@@ -102,7 +106,9 @@ async def test_http_upload(
         nar_hash_part = vinfo.nar_hash.split(":")[-1]
         log.info("uploading_nar", hash=nar_hash_part, size=len(nar_data))
         async with session.put(
-            f"{base_url}/nar/{nar_hash_part}.nar", data=nar_data, headers=headers
+            f"{base_url}/nar/{nar_hash_part}.nar",
+            data=nar_data,
+            headers=headers,
         ) as resp:
             assert resp.status == 200
             assert await resp.text() == "ok\n"
@@ -110,7 +116,9 @@ async def test_http_upload(
         # 4. PUT .narinfo
         log.info("uploading_narinfo", hash=hash_part)
         async with session.put(
-            f"{base_url}/{hash_part}.narinfo", data=narinfo, headers=headers
+            f"{base_url}/{hash_part}.narinfo",
+            data=narinfo,
+            headers=headers,
         ) as resp:
             assert resp.status == 200
             assert await resp.text() == "ok\n"

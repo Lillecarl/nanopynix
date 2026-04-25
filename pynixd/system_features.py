@@ -45,7 +45,7 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         SystemFeature.CA_DERIVATIONS,
         SystemFeature.DYNAMIC_DERIVATIONS,
         SystemFeature.RECURSIVE_NIX,
-    }
+    },
 )
 
 # Features that pynixd handles before sending builds to backend stores.
@@ -61,7 +61,7 @@ PYNIXD_HANDLED_FEATURES: frozenset[str] = frozenset(
     {
         SystemFeature.CA_DERIVATIONS,
         SystemFeature.DYNAMIC_DERIVATIONS,
-    }
+    },
 )
 
 # Platforms to probe when discovering store capabilities.
@@ -71,5 +71,5 @@ PROBE_SYSTEMS: frozenset[str] = frozenset(
         "x86_64-linux",
         "aarch64-linux",
         "aarch64-darwin",
-    }
+    },
 )

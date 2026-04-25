@@ -12,16 +12,16 @@ from typing import TYPE_CHECKING
 import asyncssh
 import structlog
 
-from .base import Store
 from .. import wire
-from ..connection import Connection
-from ..wire import SSHNixReader, SSHNixWriter
-from ..monitor import GenericResourcePoller, DummyResourceMonitor, ResourceMonitor
 from ..config import PynixdSettings
+from ..connection import Connection
+from ..monitor import DummyResourceMonitor, GenericResourcePoller, ResourceMonitor
 from ..psi import (
     CpuUtil,
     MemInfo,
 )
+from ..wire import SSHNixReader, SSHNixWriter
+from .base import Store
 
 if TYPE_CHECKING:
     pass
@@ -95,7 +95,10 @@ class _SSHStoreMixin(Store):
             if self.monitor:
                 asyncio.create_task(self.monitor.stop())
             self.monitor = GenericResourcePoller(
-                self.gate, self.settings, sftp_read, sftp_exists
+                self.gate,
+                self.settings,
+                sftp_read,
+                sftp_exists,
             )
             self.monitor.start()
 
@@ -261,7 +264,8 @@ class SSHSubprocessStore(_SSHStoreMixin):
             raise
         self.ssh_processes.append(proc)
         proc.channel.set_write_buffer_limits(
-            high=wire._SSH_WINDOW_SIZE, low=wire._SSH_WINDOW_SIZE // 4
+            high=wire._SSH_WINDOW_SIZE,
+            low=wire._SSH_WINDOW_SIZE // 4,
         )
 
         conn = Connection(

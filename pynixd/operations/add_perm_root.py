@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..wire import NixReader, NixWriter
-from .base import OpRequest, OpResponse, OperationLogs
+from .base import OperationLogs, OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -56,7 +56,9 @@ class AddPermRootRequest(OpRequest[AddPermRootResponse]):
         self.store_path = await reader.read_string()
         self.gc_root = await reader.read_string()
         self.logger.debug(
-            "from_reader", store_path=self.store_path, gc_root=self.gc_root
+            "from_reader",
+            store_path=self.store_path,
+            gc_root=self.gc_root,
         )
         return self
 

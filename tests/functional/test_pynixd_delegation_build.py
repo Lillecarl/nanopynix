@@ -49,7 +49,9 @@ async def test_pynixd_delegation_build(tmp_path: Path) -> None:
     rmtree_robust(store_b_path)
     store_b_path.mkdir(parents=True, exist_ok=True)
     store_b = LocalSocketStore(
-        id="b-local", store_path=store_b_path, **get_test_store_kwargs(no_probe=True)
+        id="b-local",
+        store_path=store_b_path,
+        **get_test_store_kwargs(no_probe=True),
     )
 
     # 1. Start Server B (The Actual Builder)

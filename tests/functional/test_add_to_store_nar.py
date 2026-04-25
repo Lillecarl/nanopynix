@@ -36,7 +36,7 @@ async def test_add_to_store_nar(pynixd_server: Server, tmp_path: Path):
             "--store",
             pynixd_server.uri(),
             str(test_file),
-        ]
+        ],
     )
     assert rc == 0, f"nix store add-path failed:\n{stderr}"
     path = StorePath(stdout.strip())

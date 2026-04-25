@@ -82,14 +82,16 @@ async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
 async def _get_test_paths(n: int = 100) -> list[StorePath]:
     """Get n arbitrary valid paths from the system store."""
     out = subprocess.check_output(
-        [NIX_BIN, "query", "--all", "--limit", str(n)], text=True
+        [NIX_BIN, "query", "--all", "--limit", str(n)],
+        text=True,
     )
     return [StorePath(p) for p in out.splitlines() if p.strip()]
 
 
 @pytest.mark.benchmark
 async def test_bench_query_all_valid_paths(
-    request: pytest.FixtureRequest, bench_store: Store
+    request: pytest.FixtureRequest,
+    bench_store: Store,
 ) -> None:
     """Measure latency of QueryAllValidPaths."""
     start = time.perf_counter()
@@ -107,7 +109,8 @@ async def test_bench_query_all_valid_paths(
 
 @pytest.mark.benchmark
 async def test_bench_query_path_info_latency(
-    request: pytest.FixtureRequest, bench_store: Store
+    request: pytest.FixtureRequest,
+    bench_store: Store,
 ) -> None:
     """Measure latency of QueryPathInfo for 100 random paths."""
     paths = await _get_test_paths(100)
@@ -130,7 +133,8 @@ async def test_bench_query_path_info_latency(
 
 @pytest.mark.benchmark
 async def test_bench_is_valid_path_throughput(
-    request: pytest.FixtureRequest, bench_store: Store
+    request: pytest.FixtureRequest,
+    bench_store: Store,
 ) -> None:
     """Measure throughput of IsValidPath (ops/s)."""
     paths = await _get_test_paths(500)
@@ -152,7 +156,8 @@ async def test_bench_is_valid_path_throughput(
 
 @pytest.mark.benchmark
 async def test_bench_is_valid_path_parallel(
-    request: pytest.FixtureRequest, bench_store: Store
+    request: pytest.FixtureRequest,
+    bench_store: Store,
 ) -> None:
     """Measure throughput of IsValidPath with 10 parallel tasks."""
     paths = await _get_test_paths(1000)

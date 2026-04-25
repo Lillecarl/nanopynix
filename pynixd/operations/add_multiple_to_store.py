@@ -6,9 +6,9 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
+from ..stderr import StderrNext
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
 from .base import OpRequest, OpResponse, RequestContext, ValidPathInfo
-from ..stderr import StderrNext
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -48,7 +48,9 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         self.repair = await reader.read_uint64()
         self.dont_check_sigs = await reader.read_uint64()
         self.logger.debug(
-            "from_reader", repair=self.repair, dont_check_sigs=self.dont_check_sigs
+            "from_reader",
+            repair=self.repair,
+            dont_check_sigs=self.dont_check_sigs,
         )
         return self
 
@@ -72,13 +74,13 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
 
             # Use a task to read the response (including logs)
             resp_task = asyncio.create_task(
-                AddMultipleToStoreResponse().from_reader(conn.r, conn.version)
+                AddMultipleToStoreResponse().from_reader(conn.r, conn.version),
             )
 
             infos = await self.forward_stream(ctx.proxy.r, conn.w)
             resp = await resp_task
             resp.logs.messages.append(
-                StderrNext("pynixd: AddMultipleToStore forwarding complete")
+                StderrNext("pynixd: AddMultipleToStore forwarding complete"),
             )
 
             ctx.proxy.local_store.add_path_infos(infos)
@@ -86,7 +88,9 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         return resp
 
     async def forward_stream(
-        self, src: NixReader, dst: NixWriter
+        self,
+        src: NixReader,
+        dst: NixWriter,
     ) -> set[ValidPathInfo]:
         """Forward AddMultipleToStore payload verbatim, snooping ValidPathInfos."""
         self.logger = self.logger.bind(identifier=src.identifier)
@@ -102,7 +106,9 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
             info = await ValidPathInfo().from_reader(fsrc)
             infos.add(info)
             self.logger.info(
-                "forward_path_start", path=info.path, nar_size=info.nar_size
+                "forward_path_start",
+                path=info.path,
+                nar_size=info.nar_size,
             )
             fdst.write(info.to_bytes())
             sent_bytes = 0

@@ -21,8 +21,8 @@ from tests.conftest import (
     SESSION_HTTP_USER,
     STORE_PREFIX,
     get_test_store_kwargs,
-    run_subproc,
     rmtree_robust,
+    run_subproc,
 )
 
 log = structlog.get_logger(__name__)
@@ -61,7 +61,9 @@ async def test_narinfo() -> None:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
     local_store = LocalSocketStore(
-        id="local", store_path=Path("/"), **get_test_store_kwargs(no_probe=True)
+        id="local",
+        store_path=Path("/"),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     async with Server(local_store=local_store, http_port=0) as server:
@@ -87,7 +89,9 @@ async def test_nar_streaming() -> None:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
     local_store = LocalSocketStore(
-        id="local", store_path=Path("/"), **get_test_store_kwargs(no_probe=True)
+        id="local",
+        store_path=Path("/"),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     async with Server(local_store=local_store, http_port=0) as server:
@@ -110,7 +114,8 @@ async def test_nar_streaming() -> None:
 
             # Stream the NAR and verify it's not empty
             async with session.get(
-                f"{base_url}/{nar_url}", timeout=aiohttp.ClientTimeout(total=30)
+                f"{base_url}/{nar_url}",
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 assert resp.status == 200
                 total_bytes = 0
@@ -127,7 +132,9 @@ async def test_cache_as_substituter() -> None:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
     local_store = LocalSocketStore(
-        id="local", store_path=Path("/"), **get_test_store_kwargs(no_probe=True)
+        id="local",
+        store_path=Path("/"),
+        **get_test_store_kwargs(no_probe=True),
     )
 
     async with Server(local_store=local_store, http_port=0) as server:

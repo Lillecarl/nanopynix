@@ -6,7 +6,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
 from ..wire import NixReader, NixWriter
 from .add_signatures import AddSignaturesRequest
@@ -37,7 +36,9 @@ class SignPathInfoResponse(OpResponse):
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
         self.logs = await OperationLogs().from_reader(
-            reader, client=client, buffer=buffer_logs
+            reader,
+            client=client,
+            buffer=buffer_logs,
         )
         self.info = await ValidPathInfo().from_reader(reader)
         return self
@@ -92,7 +93,7 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)
             await ctx.proxy.send_error(
-                f"Operation '{self.name}' requires administrative privileges."
+                f"Operation '{self.name}' requires administrative privileges.",
             )
             return None
 

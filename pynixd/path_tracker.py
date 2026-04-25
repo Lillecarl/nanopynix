@@ -49,7 +49,10 @@ class PathTrackerInstance:
             )
 
     def add_known_paths(
-        self, paths: Iterable[StorePath], *, update_regtime: bool = True
+        self,
+        paths: Iterable[StorePath],
+        *,
+        update_regtime: bool = True,
     ) -> None:
         path_set = set(paths)
         if not path_set:
@@ -64,7 +67,10 @@ class PathTrackerInstance:
             )
 
     def set_known_paths(
-        self, paths: Iterable[StorePath], *, update_regtime: bool = True
+        self,
+        paths: Iterable[StorePath],
+        *,
+        update_regtime: bool = True,
     ) -> None:
         """Replace the current known paths with a new set."""
         new_paths = set(paths)
@@ -108,7 +114,11 @@ class PathTracker:
         )
 
     def notify_path_added(
-        self, store_id: str, path: StorePath, update_regtime: bool, is_local: bool
+        self,
+        store_id: str,
+        path: StorePath,
+        update_regtime: bool,
+        is_local: bool,
     ) -> None:
         if self.db is None:
             return
@@ -118,7 +128,11 @@ class PathTracker:
             self.db.mark_known_paths(store_id, {path})
 
     def notify_paths_added(
-        self, store_id: str, paths: set[StorePath], update_regtime: bool, is_local: bool
+        self,
+        store_id: str,
+        paths: set[StorePath],
+        update_regtime: bool,
+        is_local: bool,
     ) -> None:
         if self.db is None:
             return

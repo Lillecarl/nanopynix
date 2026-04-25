@@ -70,19 +70,25 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                 # Use set_known_paths to ensure the in-memory cache is fully synced with DB
                 store.tracker.set_known_paths(resp.paths, update_regtime=False)
                 self.logger.info(
-                    "sync_paths_complete", store_id=store.id, count=len(resp.paths)
+                    "sync_paths_complete",
+                    store_id=store.id,
+                    count=len(resp.paths),
                 )
                 return resp
 
             # Remote store or no native DB: try the wire first.
             try:
                 resp = await store.call(
-                    self, client=client, suppress_last=suppress_last
+                    self,
+                    client=client,
+                    suppress_last=suppress_last,
                 )
                 # Success: Overwrite path tracker data (source of truth)
                 store.tracker.set_known_paths(resp.paths, update_regtime=False)
                 self.logger.info(
-                    "sync_paths_complete", store_id=store.id, count=len(resp.paths)
+                    "sync_paths_complete",
+                    store_id=store.id,
+                    count=len(resp.paths),
                 )
                 return resp
             except Exception as e:
@@ -103,7 +109,8 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                             suppress_last=suppress_last,
                         )
                         store.tracker.set_known_paths(
-                            verified.paths, update_regtime=False
+                            verified.paths,
+                            update_regtime=False,
                         )
                         return QueryAllValidPathsResponse(paths=verified.paths)
                     except Exception as e2:
@@ -116,7 +123,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                         # Or should we clear? The previous behavior was to clear.
                         # But for persistence test, we want to keep.
                         return QueryAllValidPathsResponse(
-                            paths=store.tracker.known_paths
+                            paths=store.tracker.known_paths,
                         )
                 raise
         except Exception:

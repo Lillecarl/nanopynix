@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-
 from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, RequestContext, Role
 
@@ -49,7 +48,9 @@ class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
         self.check_contents = await reader.read_uint64()
         self.repair = await reader.read_uint64()
         self.logger.debug(
-            "from_reader", check_contents=self.check_contents, repair=self.repair
+            "from_reader",
+            check_contents=self.check_contents,
+            repair=self.repair,
         )
         return self
 
@@ -68,7 +69,7 @@ class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)
             await ctx.proxy.send_error(
-                f"Operation '{self.name}' requires administrative privileges."
+                f"Operation '{self.name}' requires administrative privileges.",
             )
             return None
 

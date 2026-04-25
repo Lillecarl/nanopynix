@@ -22,7 +22,9 @@ log = structlog.get_logger(__name__)
 
 @pytest.mark.timeout(60)
 async def test_builders(
-    profiler: pyinstrument.Profiler, pynixd_server: Server, tmp_path: Path
+    profiler: pyinstrument.Profiler,
+    pynixd_server: Server,
+    tmp_path: Path,
 ) -> None:
     """Build nix/standard.simple via --builders.
 
@@ -56,14 +58,17 @@ async def test_builders(
         "0",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(
-        cmd, env={"NIX_STATE_DIR": str(client_store_path / "var/nix")}
+        cmd,
+        env={"NIX_STATE_DIR": str(client_store_path / "var/nix")},
     )
     assert rc == 0, f"build failed:\n{stdboth}"
 
 
 @pytest.mark.timeout(60)
 async def test_store(
-    profiler: pyinstrument.Profiler, pynixd_server: Server, tmp_path: Path
+    profiler: pyinstrument.Profiler,
+    pynixd_server: Server,
+    tmp_path: Path,
 ) -> None:
     """Build nix/standard.simple via --store.
 

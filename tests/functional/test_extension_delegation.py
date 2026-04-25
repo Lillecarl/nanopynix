@@ -9,10 +9,10 @@ import pytest
 import structlog
 
 from pynixd import Server
+from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_infos import (
     QueryPathInfosRequest,
 )
-from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
 from pynixd.testing import get_test_value
@@ -52,7 +52,9 @@ async def test_extension_delegation(tmp_path: Path) -> None:
     rmtree_robust(store_b_path)
     store_b_path.mkdir(parents=True, exist_ok=True)
     store_b = LocalSocketStore(
-        id="b-local", store_path=store_b_path, **get_test_store_kwargs(no_probe=True)
+        id="b-local",
+        store_path=store_b_path,
+        **get_test_store_kwargs(no_probe=True),
     )
     await store_b.ensure_daemon()
 

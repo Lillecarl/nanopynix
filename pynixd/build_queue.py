@@ -16,6 +16,7 @@ from typing import Self
 
 import structlog
 
+from . import metrics
 from .connection import ClientConn
 from .derived_path import DerivedPath
 from .operations.base import (
@@ -26,7 +27,6 @@ from .operations.base import (
 )
 from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
 from .store_path import StorePath
-from . import metrics
 
 log = structlog.get_logger(__name__)
 
@@ -87,7 +87,8 @@ class QueuedBuild:
     # Used by the trampoline to add depends_on edges and required_paths
     # to this build when a dynamic dep's inner build is enqueued.
     dynamic_input_drvs: dict[StorePath, dict[str, list[str]]] = field(
-        default_factory=dict, repr=False
+        default_factory=dict,
+        repr=False,
     )
 
     # For heap ordering
@@ -124,7 +125,9 @@ class QueuedBuild:
             await self.transfer_task
 
     def reset_for_retry(
-        self, failed_store_id: str, old_transfer_task: asyncio.Task | None
+        self,
+        failed_store_id: str,
+        old_transfer_task: asyncio.Task | None,
     ) -> None:
         """Reset state for retry on next scheduling pass.
 
@@ -307,7 +310,8 @@ class BuildQueue:
                             sched_req = self.requests.get(scheduler_request_id)
                             if sched_req is not None:
                                 sched_req.add_build(
-                                    existing.id, derived_paths_for_request
+                                    existing.id,
+                                    derived_paths_for_request,
                                 )
                     return existing.id, existing.future
                 # else: done, create new entry
@@ -404,7 +408,8 @@ class BuildQueue:
                     b.finished_at = time.monotonic()
                     response = BuildDerivationResponse(
                         result=BuildResult(
-                            status=BuildResultStatus.MISC_FAILURE, error_msg=error_msg
+                            status=BuildResultStatus.MISC_FAILURE,
+                            error_msg=error_msg,
                         ),
                     )
                     b.future.set_result(response)

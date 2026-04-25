@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Self
 
-from ..wire import NixReader, NixWriter
 from ..connection import ClientConn
-from .base import OpRequest, OpResponse, OperationLogs
+from ..wire import NixReader, NixWriter
+from .base import OperationLogs, OpRequest, OpResponse
 
 
 @dataclass

@@ -38,7 +38,9 @@ class _NixSSHServer(asyncssh.SSHServer):
 
     def validate_public_key(self, username: str, key: asyncssh.SSHKey) -> bool:
         log.info(
-            "pubkey_auth", username=username, key_fingerprint=key.get_fingerprint()
+            "pubkey_auth",
+            username=username,
+            key_fingerprint=key.get_fingerprint(),
         )
         return True
 
@@ -86,7 +88,8 @@ async def start_ssh_server(
             return
 
         process.channel.set_write_buffer_limits(
-            high=wire._SSH_WINDOW_SIZE, low=wire._SSH_WINDOW_SIZE // 4
+            high=wire._SSH_WINDOW_SIZE,
+            low=wire._SSH_WINDOW_SIZE // 4,
         )
         exit_code = 0
         username = str(process.get_extra_info("username", "unknown"))

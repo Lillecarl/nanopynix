@@ -21,11 +21,23 @@ from environs import env
 from . import stderr
 from .constants import (
     MINIMUM_REMOTE_PROTOCOL as MINIMUM_REMOTE_PROTOCOL,
+)
+from .constants import (
     PROTOCOL_VERSION as PROTOCOL_VERSION,
+)
+from .constants import (
     STDERR_LAST as STDERR_LAST,
+)
+from .constants import (
     WORKER_MAGIC_1 as WORKER_MAGIC_1,
+)
+from .constants import (
     WORKER_MAGIC_2 as WORKER_MAGIC_2,
+)
+from .constants import (
     proto as proto,
+)
+from .constants import (
     proto_str as proto_str,
 )
 
@@ -138,7 +150,9 @@ _UINT64_STRUCT = struct.Struct("<Q")
 
 class UnixNixReader(NixReader):
     def __init__(
-        self, reader: asyncio.StreamReader, identifier: str = "unknown"
+        self,
+        reader: asyncio.StreamReader,
+        identifier: str = "unknown",
     ) -> None:
         super().__init__(identifier=identifier)
         self.reader = reader
@@ -257,7 +271,9 @@ class SSHNixWriter(NixWriter):
 
 class UnixNixWriter(NixWriter):
     def __init__(
-        self, writer: asyncio.StreamWriter, identifier: str = "unknown"
+        self,
+        writer: asyncio.StreamWriter,
+        identifier: str = "unknown",
     ) -> None:
         super().__init__(identifier=identifier)
         self.writer = writer

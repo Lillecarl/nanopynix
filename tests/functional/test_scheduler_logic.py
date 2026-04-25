@@ -1,33 +1,35 @@
 import asyncio
+
 import pytest
-from pynixd.scheduler import Scheduler
-from pynixd.context import PynixdContext
+
 from pynixd.config import PynixdSettings
-from pynixd.path_tracker import PathTracker
-from pynixd.operations.build_derivation import (
-    BuildDerivationRequest,
-    BuildDerivationResponse,
-)
+from pynixd.context import PynixdContext
 from pynixd.derived_path import DerivedPath
-from pynixd.drv_parser import ParsedDerivation, OutputInfo
+from pynixd.drv_parser import OutputInfo, ParsedDerivation
 from pynixd.operations.base import (
     BasicDerivation,
     BuildMode,
     BuildResult,
     BuildResultStatus,
 )
+from pynixd.operations.build_derivation import (
+    BuildDerivationRequest,
+    BuildDerivationResponse,
+)
+from pynixd.operations.query_derivation_outputs_batch import (
+    DerivationOutputsBatchResponse,
+    QueryDerivationOutputsBatchRequest,
+)
 from pynixd.operations.query_missing import (
     QueryMissingRequest,
     QueryMissingResponse,
-)
-from pynixd.operations.query_derivation_outputs_batch import (
-    QueryDerivationOutputsBatchRequest,
-    DerivationOutputsBatchResponse,
 )
 from pynixd.operations.query_valid_paths import (
     QueryValidPathsRequest,
     QueryValidPathsResponse,
 )
+from pynixd.path_tracker import PathTracker
+from pynixd.scheduler import Scheduler
 from pynixd.store_path import StorePath
 from tests.functional.mock_store import MockStore
 
@@ -71,7 +73,7 @@ async def test_scheduler_load_balancing():
 
     # 2. Mock build response for all stores
     build_resp = BuildDerivationResponse(
-        result=BuildResult(status=BuildResultStatus.BUILT)
+        result=BuildResult(status=BuildResultStatus.BUILT),
     )
     local_store.responses[BuildDerivationRequest] = build_resp
     remote1.responses[BuildDerivationRequest] = build_resp
@@ -80,11 +82,15 @@ async def test_scheduler_load_balancing():
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     local_store.tracker.add_known_path(drv_path)
     request = BuildDerivationRequest(
-        drv_path=drv_path, derivation=BasicDerivation(platform="x86_64-linux")
+        drv_path=drv_path,
+        derivation=BasicDerivation(platform="x86_64-linux"),
     )
 
     build_id, future = await scheduler.build_derivation(
-        request, client=None, required_paths={drv_path}, platform="x86_64-linux"
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="x86_64-linux",
     )
 
     # 4. Trigger scheduler manually
@@ -135,7 +141,7 @@ async def test_scheduler_skips_saturated_store():
 
     # Ensure all stores have a build response before we start
     build_resp = BuildDerivationResponse(
-        result=BuildResult(status=BuildResultStatus.BUILT)
+        result=BuildResult(status=BuildResultStatus.BUILT),
     )
     local_store.responses[BuildDerivationRequest] = build_resp
     remote1.responses[BuildDerivationRequest] = build_resp
@@ -143,11 +149,15 @@ async def test_scheduler_skips_saturated_store():
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     local_store.tracker.add_known_path(drv_path)
     request = BuildDerivationRequest(
-        drv_path=drv_path, derivation=BasicDerivation(platform="x86_64-linux")
+        drv_path=drv_path,
+        derivation=BasicDerivation(platform="x86_64-linux"),
     )
 
     build_id, _future = await scheduler.build_derivation(
-        request, client=None, required_paths={drv_path}, platform="x86_64-linux"
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="x86_64-linux",
     )
 
     # Pass 1: No slots available anywhere (scores < 0)
@@ -207,18 +217,22 @@ async def test_scheduler_proactive_transfer():
 
     # Mock build response for all stores
     build_resp = BuildDerivationResponse(
-        result=BuildResult(status=BuildResultStatus.BUILT)
+        result=BuildResult(status=BuildResultStatus.BUILT),
     )
     local_store.responses[BuildDerivationRequest] = build_resp
     remote_busy.responses[BuildDerivationRequest] = build_resp
     remote_idle.responses[BuildDerivationRequest] = build_resp
 
     request = BuildDerivationRequest(
-        drv_path=drv_path, derivation=BasicDerivation(platform="x86_64-linux")
+        drv_path=drv_path,
+        derivation=BasicDerivation(platform="x86_64-linux"),
     )
 
     build_id, _future = await scheduler.build_derivation(
-        request, client=None, required_paths={drv_path}, platform="x86_64-linux"
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="x86_64-linux",
     )
 
     # Pass 1: busy is best (has paths) but saturated. idle has slot but needs paths.
@@ -271,20 +285,23 @@ async def test_scheduler_decomposition_and_ordering():
 
     # 2. Mock Responses for the BuildDecomposer pipeline
     local_store.responses[QueryMissingRequest] = QueryMissingResponse(
-        will_build={leaf_path, root_path}
+        will_build={leaf_path, root_path},
     )
     local_store.responses[QueryValidPathsRequest] = QueryValidPathsResponse(paths=set())
     local_store.responses[QueryDerivationOutputsBatchRequest] = (
         DerivationOutputsBatchResponse(
-            outputs={leaf_path: {"out": StorePath("/nix/store/leaf-out")}}
+            outputs={leaf_path: {"out": StorePath("/nix/store/leaf-out")}},
         )
     )
 
     leaf_drv = ParsedDerivation(
         outputs=[
             OutputInfo(
-                name="out", path="/nix/store/leaf-out", hash_algo="", hash_value=""
-            )
+                name="out",
+                path="/nix/store/leaf-out",
+                hash_algo="",
+                hash_value="",
+            ),
         ],
         input_drvs={},
         input_srcs=set(),
@@ -293,8 +310,11 @@ async def test_scheduler_decomposition_and_ordering():
     root_drv = ParsedDerivation(
         outputs=[
             OutputInfo(
-                name="out", path="/nix/store/root-out", hash_algo="", hash_value=""
-            )
+                name="out",
+                path="/nix/store/root-out",
+                hash_algo="",
+                hash_value="",
+            ),
         ],
         input_drvs={leaf_path: ["out"]},
         input_srcs=set(),
@@ -313,7 +333,7 @@ async def test_scheduler_decomposition_and_ordering():
 
     # 3. Setup build responders
     build_resp = BuildDerivationResponse(
-        result=BuildResult(status=BuildResultStatus.BUILT)
+        result=BuildResult(status=BuildResultStatus.BUILT),
     )
     local_store.responses[BuildDerivationRequest] = build_resp
     remote1.responses[BuildDerivationRequest] = build_resp
@@ -325,7 +345,7 @@ async def test_scheduler_decomposition_and_ordering():
     # 4. Start decomposition in background
     dp = DerivedPath(str(root_path))
     build_task = asyncio.create_task(
-        scheduler.build_derived_paths({dp}, BuildMode.NORMAL)
+        scheduler.build_derived_paths({dp}, BuildMode.NORMAL),
     )
 
     # Wait for decomposition to finish and populate queue
@@ -406,17 +426,21 @@ async def test_scheduler_cpu_utilization():
 
     # remote_cold will handle the build
     remote_cold.responses[BuildDerivationRequest] = BuildDerivationResponse(
-        result=BuildResult(status=BuildResultStatus.BUILT)
+        result=BuildResult(status=BuildResultStatus.BUILT),
     )
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     local_store.tracker.add_known_path(drv_path)
     request = BuildDerivationRequest(
-        drv_path=drv_path, derivation=BasicDerivation(platform="x86_64-linux")
+        drv_path=drv_path,
+        derivation=BasicDerivation(platform="x86_64-linux"),
     )
 
     build_id, _future = await scheduler.build_derivation(
-        request, client=None, required_paths={drv_path}, platform="x86_64-linux"
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="x86_64-linux",
     )
 
     await scheduler.schedule()
@@ -449,7 +473,8 @@ async def test_scheduler_feature_matching():
 
     # plain supports the system but not the features
     remote_plain = MockStore(
-        "plain", feature_matrix={"x86_64-linux": {"ca-derivations"}}
+        "plain",
+        feature_matrix={"x86_64-linux": {"ca-derivations"}},
     )
 
     # full supports both
@@ -467,7 +492,7 @@ async def test_scheduler_feature_matching():
     scheduler = Scheduler(ctx)
 
     remote_full.responses[BuildDerivationRequest] = BuildDerivationResponse(
-        result=BuildResult(status=BuildResultStatus.BUILT)
+        result=BuildResult(status=BuildResultStatus.BUILT),
     )
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
@@ -480,7 +505,10 @@ async def test_scheduler_feature_matching():
     request = BuildDerivationRequest(drv_path=drv_path, derivation=derivation)
 
     build_id, _future = await scheduler.build_derivation(
-        request, client=None, required_paths={drv_path}, platform="x86_64-linux"
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="x86_64-linux",
     )
 
     await scheduler.schedule()

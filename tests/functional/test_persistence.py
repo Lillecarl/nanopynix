@@ -8,20 +8,20 @@ import pytest
 import structlog
 
 from pynixd import Server
+from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_valid_paths import (
     QueryValidPathsRequest,
     QueryValidPathsResponse,
 )
-from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
+    NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
     rmtree_robust,
     run_subproc,
-    NIX_BIN,
 )
 
 log = structlog.get_logger(__name__)
@@ -41,7 +41,11 @@ class NoQueryAllValidPathsStore(LocalSocketStore):
         if isinstance(request, QueryAllValidPathsRequest):
             raise RuntimeError("QueryAllValidPaths not supported")
         return await super().call(
-            request, client, suppress_last, raise_on_error, skip_probe=skip_probe
+            request,
+            client,
+            suppress_last,
+            raise_on_error,
+            skip_probe=skip_probe,
         )
 
 
@@ -162,13 +166,20 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
     # and fails QueryAllValidPaths
     class PartialVerifyStore(NoQueryAllValidPathsStore):
         async def execute(
-            self, request, client=None, suppress_last=False, skip_probe=False
+            self,
+            request,
+            client=None,
+            suppress_last=False,
+            skip_probe=False,
         ):
             if isinstance(request, QueryValidPathsRequest):
                 # Only return the valid one
                 return QueryValidPathsResponse(paths={path_valid})
             return await super().execute(
-                request, client, suppress_last, skip_probe=skip_probe
+                request,
+                client,
+                suppress_last,
+                skip_probe=skip_probe,
             )
 
     pynixd_local_2 = LocalSocketStore(

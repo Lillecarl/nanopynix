@@ -124,10 +124,16 @@ class TestComputeCpuUtil:
     def test_throttled_pct(self):
         now = time.monotonic()
         prev = CgroupCpuStat(
-            usage_usec=0, nr_periods=100, nr_throttled=20, timestamp=now - 1.0
+            usage_usec=0,
+            nr_periods=100,
+            nr_throttled=20,
+            timestamp=now - 1.0,
         )
         curr = CgroupCpuStat(
-            usage_usec=500_000, nr_periods=200, nr_throttled=40, timestamp=now
+            usage_usec=500_000,
+            nr_periods=200,
+            nr_throttled=40,
+            timestamp=now,
         )
         result = compute_cpu_util(prev, curr, cores=1.0)
         assert result is not None
@@ -167,7 +173,7 @@ class TestComputeCpuUtil:
 class TestParsePsiLine:
     def test_some_line(self):
         kind, vals = parse_psi_line(
-            "some avg10=1.50 avg60=2.30 avg300=3.10 total=12345"
+            "some avg10=1.50 avg60=2.30 avg300=3.10 total=12345",
         )
         assert kind == "some"
         assert vals["avg10"] == 1.50

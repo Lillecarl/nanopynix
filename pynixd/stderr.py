@@ -238,7 +238,7 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
             if unknown_streak >= _MAX_UNKNOWN_MSG_TYPES:
                 raise ConnectionError(
                     f"Protocol desync: {unknown_streak} consecutive "
-                    f"unknown stderr msg_types (last: 0x{msg_type:x})"
+                    f"unknown stderr msg_types (last: 0x{msg_type:x})",
                 )
             continue
 
@@ -250,7 +250,9 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
 
 
 async def drain(
-    r: NixReader, raise_on_error: bool = True, conn_id: str = "unknown"
+    r: NixReader,
+    raise_on_error: bool = True,
+    conn_id: str = "unknown",
 ) -> StderrError | None:
     """Read and discard all stderr messages until STDERR_LAST.
 

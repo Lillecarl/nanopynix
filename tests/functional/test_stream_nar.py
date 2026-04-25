@@ -14,8 +14,8 @@ from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
-    run_subproc,
     rmtree_robust,
+    run_subproc,
 )
 
 log = structlog.get_logger(__name__)
@@ -24,7 +24,7 @@ log = structlog.get_logger(__name__)
 async def get_hello_path() -> StorePath:
     """Build nixpkgs#hello and return its store path."""
     rc, stdout, stderr, _ = await run_subproc(
-        [str(NIX_BIN), "build", "nixpkgs#hello", "--no-link", "--print-out-paths"]
+        [str(NIX_BIN), "build", "nixpkgs#hello", "--no-link", "--print-out-paths"],
     )
     return StorePath(stdout.strip())
 
@@ -69,7 +69,7 @@ async def test_stream_nar() -> None:
 
         # Verify it now exists in dst
         is_valid_dst_after = await dst_store.execute(
-            IsValidPathRequest(path=store_path)
+            IsValidPathRequest(path=store_path),
         )
         assert is_valid_dst_after.valid
     finally:

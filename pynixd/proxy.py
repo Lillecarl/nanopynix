@@ -202,7 +202,7 @@ class DaemonProxy:
 
         raise OpNotImplementedError(
             f"Extension operation {type(request).__name__} (op={request.op}) "
-            "not supported by any configured store"
+            "not supported by any configured store",
         )
 
     async def dispatch(self, op_num: int) -> OpResponse | None:
@@ -239,6 +239,6 @@ class DaemonProxy:
                 msg=msg,
                 have_pos=0,
                 traces=[],
-            )
+            ),
         )
         await self.client.flush()

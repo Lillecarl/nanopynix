@@ -249,7 +249,7 @@ class LocalStoreDB:
                         "storeId TEXT, "
                         "path TEXT, "
                         "PRIMARY KEY (storeId, path)"
-                        ")"
+                        ")",
                     )
                     await db.execute(
                         "CREATE TABLE IF NOT EXISTS DerivationStats ("
@@ -262,11 +262,11 @@ class LocalStoreDB:
                         "duration_ms INTEGER, "
                         "last_built_at INTEGER, "
                         "PRIMARY KEY (pname, version, platform, serialized_drv)"
-                        ")"
+                        ")",
                     )
                     await db.execute(
                         "CREATE INDEX IF NOT EXISTS idx_drv_stats_lookup "
-                        "ON DerivationStats(pname, platform)"
+                        "ON DerivationStats(pname, platform)",
                     )
                 await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
 
@@ -333,7 +333,9 @@ class LocalStoreDB:
             self.pending_removed_known_paths[store_id].update(paths)
 
     async def get_known_paths(
-        self, store_id: str, conn: aiosqlite.Connection | None = None
+        self,
+        store_id: str,
+        conn: aiosqlite.Connection | None = None,
     ) -> set[StorePath]:
         """Fetch all known paths for a store from the DB."""
         if not self.active:
@@ -394,7 +396,10 @@ class LocalStoreDB:
             log.warning("record_build_stats_failed", pname=pname, exc_info=True)
 
     async def get_build_stats_hint(
-        self, pname: str, platform: str, serialized_drv: str
+        self,
+        pname: str,
+        platform: str,
+        serialized_drv: str,
     ) -> int | None:
         """Get an expected duration hint for a derivation (in ms)."""
         if not self.active:
@@ -402,7 +407,8 @@ class LocalStoreDB:
         try:
             # 1. Try exact match or closest Levenshtein on same platform
             async with self.execute(
-                QUERY_BUILD_STATS_HINT, (pname, platform, serialized_drv)
+                QUERY_BUILD_STATS_HINT,
+                (pname, platform, serialized_drv),
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
@@ -410,7 +416,8 @@ class LocalStoreDB:
 
             # 2. Fallback to platform-agnostic average for this pname
             async with self.execute(
-                QUERY_BUILD_STATS_CROSS_PLATFORM, (pname,)
+                QUERY_BUILD_STATS_CROSS_PLATFORM,
+                (pname,),
             ) as cursor:
                 row = await cursor.fetchone()
                 if row and row[0] is not None:

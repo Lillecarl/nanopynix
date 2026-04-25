@@ -23,7 +23,6 @@ from pynixd.operations.base import (
     DerivationOutput,
     ValidPathInfo,
 )
-
 from pynixd.operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
@@ -79,16 +78,20 @@ class StatsTestStore(LocalSocketStore):
                         delay = self.store.build_delays.get(pname, 0.1)
                         await asyncio.sleep(delay)
                         return BuildDerivationResponse(
-                            result=BuildResult(status=BuildResultStatus.BUILT)
+                            result=BuildResult(status=BuildResultStatus.BUILT),
                         )
                     raise NotImplementedError(
-                        f"MockConn doesn't support {type(request)}"
+                        f"MockConn doesn't support {type(request)}",
                     )
 
             yield MockConn(self)  # type: ignore
 
     async def execute(
-        self, request, client=None, suppress_last=False, skip_probe=False
+        self,
+        request,
+        client=None,
+        suppress_last=False,
+        skip_probe=False,
     ):
 
         if isinstance(request, QueryAllValidPathsRequest):
@@ -106,7 +109,10 @@ class StatsTestStore(LocalSocketStore):
             ]
             return QueryClosureWithInfoResponse(infos=infos)
         return await super().execute(
-            request, client, suppress_last, skip_probe=skip_probe
+            request,
+            client,
+            suppress_last,
+            skip_probe=skip_probe,
         )
 
     async def call(
@@ -118,7 +124,11 @@ class StatsTestStore(LocalSocketStore):
         skip_probe=False,
     ):
         return await super().call(
-            request, client, suppress_last, raise_on_error, skip_probe=skip_probe
+            request,
+            client,
+            suppress_last,
+            raise_on_error,
+            skip_probe=skip_probe,
         )
 
 
@@ -167,12 +177,12 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
                     path=str(out_path),
                     method="",
                     hash_digest="",
-                )
+                ),
             },
         )
         req = BuildDerivationRequest(
             drv_path=StorePath(
-                "/nix/store/00000000000000000000000000000001-fast-pkg.drv"
+                "/nix/store/00000000000000000000000000000001-fast-pkg.drv",
             ),
             derivation=drv,
         )
@@ -182,14 +192,17 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
         assert scheduler is not None
 
         build_id, future = await scheduler.build_derivation(
-            req, None, set(), "x86_64-linux"
+            req,
+            None,
+            set(),
+            "x86_64-linux",
         )
         await future
 
         # 2. Check the DB
         assert pynixd_local.db is not None
         async with pynixd_local.db.execute(
-            "SELECT pname, duration_ms FROM DerivationStats WHERE pname = 'fast-pkg'"
+            "SELECT pname, duration_ms FROM DerivationStats WHERE pname = 'fast-pkg'",
         ) as cursor:
             row = await cursor.fetchone()
             assert row is not None
@@ -248,7 +261,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
         blocker_drv = BasicDerivation(platform="x86_64-linux", env={"pname": "blocker"})
         blocker_req = BuildDerivationRequest(
             drv_path=StorePath(
-                "/nix/store/00000000000000000000000000000000-blocker.drv"
+                "/nix/store/00000000000000000000000000000000-blocker.drv",
             ),
             derivation=blocker_drv,
         )
@@ -270,7 +283,10 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
         )
 
         id_tiny, fut_tiny = await scheduler.build_derivation(
-            tiny_req, None, set(), "x86_64-linux"
+            tiny_req,
+            None,
+            set(),
+            "x86_64-linux",
         )
 
         # 3. Verify it's building on LOCAL
@@ -332,7 +348,9 @@ async def test_levenshtein_sql(tmp_path: Path) -> None:
     )
 
     hint = await db.get_build_stats_hint(
-        "test", "x86_64-linux", "very-long-string-with-small-change-B"
+        "test",
+        "x86_64-linux",
+        "very-long-string-with-small-change-B",
     )
     assert hint == 100
     log.info("levenshtein_sql_verified")
@@ -403,7 +421,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
         drv = BasicDerivation(platform="x86_64-linux", env={"pname": "test-pkg"})
         req = BuildDerivationRequest(
             drv_path=StorePath(
-                "/nix/store/00000000000000000000000000000000-test-pkg.drv"
+                "/nix/store/00000000000000000000000000000000-test-pkg.drv",
             ),
             derivation=drv,
         )

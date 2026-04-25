@@ -22,24 +22,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from pynixd.store import LocalSocketStore
-from pynixd.store_path import StorePath
-from pynixd.drv_parser import read_drv_file
 from pynixd.derivation_resolution import (
-    resolve_derivation,
-    _unparse_basic_derivation,
     _nix_drv_name,
+    _unparse_basic_derivation,
+    resolve_derivation,
 )
+from pynixd.drv_parser import read_drv_file
+from pynixd.operations.add_to_store import AddToStoreRequest
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest
-from pynixd.operations.add_to_store import AddToStoreRequest
+from pynixd.store import LocalSocketStore
+from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
-    run_subproc,
     rmtree_robust,
+    run_subproc,
 )
 from tests.nix_config import NixConfig
 
@@ -90,7 +90,9 @@ async def main() -> None:
     rmtree_robust(root_path)
     root_kwargs = get_test_store_kwargs(nix_config=CA_NIX_CONFIG)
     root_store = LocalSocketStore(
-        id="deferred-replay-root", store_path=root_path, **root_kwargs
+        id="deferred-replay-root",
+        store_path=root_path,
+        **root_kwargs,
     )
     await root_store.ensure_daemon()
 
@@ -181,7 +183,8 @@ async def main() -> None:
         f"{ca_drv_path}^out",
     ]
     rc, realisation_out, _, _ = await run_subproc(
-        realisation_cmd, nix_config=CA_NIX_CONFIG
+        realisation_cmd,
+        nix_config=CA_NIX_CONFIG,
     )
     realisations_raw = (
         json.loads(realisation_out) if rc == 0 and realisation_out.strip() else []
@@ -199,7 +202,9 @@ async def main() -> None:
     rmtree_robust(builder_path)
     builder_kwargs = get_test_store_kwargs(nix_config=CA_NIX_CONFIG)
     builder_store = LocalSocketStore(
-        id="deferred-replay-builder", store_path=builder_path, **builder_kwargs
+        id="deferred-replay-builder",
+        store_path=builder_path,
+        **builder_kwargs,
     )
     await builder_store.ensure_daemon()
 
@@ -214,14 +219,16 @@ async def main() -> None:
 
     print(f"Transferring {len(paths_to_transfer)} paths...")
     await LocalSocketStore.stream_paths_store_to_store(
-        root_store, builder_store, paths_to_transfer
+        root_store,
+        builder_store,
+        paths_to_transfer,
     )
 
     valid_resp = await builder_store.execute(
-        QueryValidPathsRequest(paths=paths_to_transfer, substitute=0)
+        QueryValidPathsRequest(paths=paths_to_transfer, substitute=0),
     )
     print(
-        f"Builder store has {len(valid_resp.paths)} of {len(paths_to_transfer)} paths"
+        f"Builder store has {len(valid_resp.paths)} of {len(paths_to_transfer)} paths",
     )
 
     # -- Step 4: Register CA realisation on builder --
@@ -245,10 +252,12 @@ async def main() -> None:
     print("=" * 70)
 
     resolved_output_paths_early: dict[str, StorePath] = {
-        "out": StorePath(ca_out_path).with_store_prefix()
+        "out": StorePath(ca_out_path).with_store_prefix(),
     }
     resolved_early = resolve_derivation(
-        deferred_parsed, deferred_drv_path, resolved_output_paths_early
+        deferred_parsed,
+        deferred_drv_path,
+        resolved_output_paths_early,
     )
     resolved_aterm_early = _unparse_basic_derivation(resolved_early, mask_outputs=False)
 

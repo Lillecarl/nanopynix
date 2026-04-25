@@ -20,8 +20,8 @@ from .store_path import StorePath
 
 if TYPE_CHECKING:
     from .connection import ClientConn
-    from .scheduler import Scheduler, DerivationReader
     from .drv_parser import ParsedDerivation
+    from .scheduler import DerivationReader, Scheduler
 
 log = structlog.get_logger(__name__)
 
@@ -30,7 +30,9 @@ class BuildDecomposer:
     """Decomposes high-level build requests into individual derivation builds."""
 
     def __init__(
-        self, scheduler: Scheduler, read_drv_fn: DerivationReader | None = None
+        self,
+        scheduler: Scheduler,
+        read_drv_fn: DerivationReader | None = None,
     ) -> None:
         self.scheduler = scheduler
         self.local_store = scheduler.local_store
@@ -50,7 +52,9 @@ class BuildDecomposer:
         per-key results (BuildPaths) can just check for failures.
         """
         _req_id, sched_req = await self.queue.create_request(
-            derived_paths, build_mode, client
+            derived_paths,
+            build_mode,
+            client,
         )
 
         # For nested DerivedPaths (e.g., a.drv^out^out), QueryMissing
@@ -66,7 +70,7 @@ class BuildDecomposer:
                 flat_derived_paths.add(dp)
 
         missing_resp = await self.local_store.execute(
-            QueryMissingRequest(derived_paths=flat_derived_paths)
+            QueryMissingRequest(derived_paths=flat_derived_paths),
         )
 
         if missing_resp.will_substitute:
@@ -76,7 +80,7 @@ class BuildDecomposer:
                     QueryValidPathsRequest(
                         paths=missing_resp.will_substitute,
                         substitute=1,
-                    )
+                    ),
                 )
                 self.local_store.tracker.add_known_paths(valid.paths)
 
@@ -109,7 +113,8 @@ class BuildDecomposer:
             dp = drv_to_derived.get(str(sp), DerivedPath(sp))
             try:
                 parsed = dp.to_derivation(
-                    self.local_store.store_path, reader_fn=self.read_drv_fn
+                    self.local_store.store_path,
+                    reader_fn=self.read_drv_fn,
                 )
             except FileNotFoundError:
                 log.warning("drv_read_failed", drv_path=dp.drv_path)
@@ -130,7 +135,8 @@ class BuildDecomposer:
                     # Check if this dynamic dep's outputs are already available
                     try:
                         dyn_parsed = self.read_drv_fn(
-                            self.local_store.store_path, dyn_drv_path
+                            self.local_store.store_path,
+                            dyn_drv_path,
                         )
                     except FileNotFoundError:
                         continue
@@ -148,7 +154,7 @@ class BuildDecomposer:
         output_cache = None
         if all_input_drvs:
             resp = await self.local_store.execute(
-                QueryDerivationOutputsBatchRequest(drv_paths=all_input_drvs)
+                QueryDerivationOutputsBatchRequest(drv_paths=all_input_drvs),
             )
             output_cache = resp.outputs if resp.outputs else {}
 
@@ -163,7 +169,9 @@ class BuildDecomposer:
                 continue
 
             basic = to_basic_derivation(
-                parsed, self.local_store.store_path, output_cache=output_cache
+                parsed,
+                self.local_store.store_path,
+                output_cache=output_cache,
             )
             drv_request = BuildDerivationRequest(
                 drv_path=drv_path,
@@ -176,10 +184,11 @@ class BuildDecomposer:
         unknown = all_input_srcs - self.local_store.tracker.known_paths
         if unknown:
             valid_resp = await self.local_store.execute(
-                QueryValidPathsRequest(paths=unknown)
+                QueryValidPathsRequest(paths=unknown),
             )
             self.local_store.tracker.add_known_paths(
-                valid_resp.paths, update_regtime=False
+                valid_resp.paths,
+                update_regtime=False,
             )
 
         drv_to_build_id: dict[str, int] = {}
@@ -192,7 +201,8 @@ class BuildDecomposer:
             else:
                 try:
                     parsed = self.read_drv_fn(
-                        self.local_store.store_path, drv_request.drv_path
+                        self.local_store.store_path,
+                        drv_request.drv_path,
                     )
                     drv_request.derivation.is_dynamic = parsed.is_dynamic
                 except FileNotFoundError:
@@ -204,10 +214,12 @@ class BuildDecomposer:
             required_paths: set[StorePath] = set()
             for inp in drv_request.derivation.input_srcs:
                 required_paths.add(
-                    StorePath(inp, extrainfo=f"input_src of {drv_path_str}")
+                    StorePath(inp, extrainfo=f"input_src of {drv_path_str}"),
                 )
             required_paths.add(
-                StorePath(drv_request.drv_path, extrainfo=f"drv_path of {drv_path_str}")
+                StorePath(
+                    drv_request.drv_path, extrainfo=f"drv_path of {drv_path_str}"
+                ),
             )
             build_id, _future = await self.scheduler.build_derivation(
                 drv_request,
