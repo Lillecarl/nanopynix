@@ -26,7 +26,7 @@ class MockMonitor(ResourceMonitor):
     """Monitor that doesn't actually poll, allows manual trigger."""
 
     async def run(self) -> None:
-        while self.running:
+        while self.running:  # noqa: ASYNC110 — test mock
             await asyncio.sleep(1)
 
 

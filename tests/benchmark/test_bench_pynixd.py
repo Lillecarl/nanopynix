@@ -82,7 +82,7 @@ async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
 
 async def _get_test_paths(n: int = 100) -> list[StorePath]:
     """Get n arbitrary valid paths from the system store."""
-    out = subprocess.check_output(
+    out = subprocess.check_output(  # noqa: ASYNC221
         [NIX_BIN, "query", "--all", "--limit", str(n)],
         text=True,
     )
@@ -195,7 +195,7 @@ async def test_bench_local_socket_overhead(request: pytest.FixtureRequest) -> No
     # 2. Managed socket (spawned daemon)
     managed_path = Path("/tmp/pynixd-bench-managed")
     rmtree_robust(managed_path)
-    managed_path.mkdir(parents=True, exist_ok=True)
+    managed_path.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
     managed_store = LocalSocketStore(
         id="managed",
         store_path=managed_path,

@@ -356,7 +356,7 @@ class Server:
         if wait_tasks:
             await asyncio.gather(*wait_tasks)
         elif self.http_server or self.https_server:
-            while self._started:
+            while self._started:  # noqa: ASYNC110 — long-running server keep-alive loop
                 await asyncio.sleep(1)
 
     async def close(self) -> None:

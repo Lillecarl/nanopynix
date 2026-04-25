@@ -48,7 +48,7 @@ class ResourceGate:
         self.mem_clear.set()
         self.io_clear.set()
 
-    async def wait_cpu_clear(self, timeout: float = 5.0) -> None:
+    async def wait_cpu_clear(self, timeout: float = 5.0) -> None:  # noqa: ASYNC109
         """Wait for CPU pressure to drop below threshold."""
         try:
             await asyncio.wait_for(self.cpu_clear.wait(), timeout=timeout)
@@ -57,7 +57,7 @@ class ResourceGate:
                 "CPU pressure remains too high after timeout",
             ) from None
 
-    async def wait_mem_clear(self, timeout: float = 5.0) -> None:
+    async def wait_mem_clear(self, timeout: float = 5.0) -> None:  # noqa: ASYNC109
         """Wait for Memory pressure to drop below threshold."""
         try:
             await asyncio.wait_for(self.mem_clear.wait(), timeout=timeout)
@@ -66,7 +66,7 @@ class ResourceGate:
                 "Memory pressure remains too high after timeout",
             ) from None
 
-    async def wait_io_clear(self, timeout: float = 5.0) -> None:
+    async def wait_io_clear(self, timeout: float = 5.0) -> None:  # noqa: ASYNC109
         """Wait for IO pressure to drop below threshold."""
         try:
             await asyncio.wait_for(self.io_clear.wait(), timeout=timeout)
@@ -125,7 +125,7 @@ class DummyResourceMonitor(ResourceMonitor):
         self.gate.cpu_clear.set()
         self.gate.mem_clear.set()
         self.gate.io_clear.set()
-        while self.running:
+        while self.running:  # noqa: ASYNC110 — 60s PSI polling interval
             await asyncio.sleep(60)
 
 
@@ -345,11 +345,11 @@ class LocalPSIMonitor(ResourceMonitor):
 
             # Local fallback functions
             async def local_read(path: str) -> str:
-                with Path(path).open() as f:
+                with Path(path).open() as f:  # noqa: ASYNC230 — /proc reads are instant
                     return f.read()
 
             async def local_exists(path: str) -> bool:
-                return Path(path).exists()
+                return Path(path).exists()  # noqa: ASYNC240 — instant local FS check
 
             # Fallback to generic poller
             poller = GenericResourcePoller(
@@ -407,11 +407,11 @@ def create_monitor(gate: ResourceGate, settings: PynixdSettings) -> ResourceMoni
     """Factory to create the best available local monitor."""
 
     async def local_read(path: str) -> str:
-        with Path(path).open() as f:
+        with Path(path).open() as f:  # noqa: ASYNC230 — /proc reads are instant
             return f.read()
 
     async def local_exists(path: str) -> bool:
-        return Path(path).exists()
+        return Path(path).exists()  # noqa: ASYNC240 — instant local FS check
 
     if Path("/sys/fs/cgroup/cpu.pressure").exists():
         return LocalPSIMonitor(gate, settings)

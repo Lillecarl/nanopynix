@@ -53,7 +53,7 @@ async def test_nix_build_via_unix(pynixd_server):
     } "echo 'hello from pynixd' > $out"
     """
     expr_path = Path("/tmp/pynixd-it-test.nix")
-    expr_path.write_text(nix_expr)
+    expr_path.write_text(nix_expr)  # noqa: ASYNC240 — test setup
 
     cmd = [
         "nix",

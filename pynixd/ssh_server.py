@@ -72,7 +72,7 @@ async def start_ssh_server(
         The asyncssh acceptor instance.
     """
     # Load or generate host key
-    if host_key_path and host_key_path.exists():
+    if host_key_path and host_key_path.exists():  # noqa: ASYNC240 — one-time startup check
         host_key: asyncssh.SSHKey = asyncssh.read_private_key(str(host_key_path))
         log.info("host_key_loaded_from_file", host_key_path=host_key_path)
     else:

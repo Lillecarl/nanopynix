@@ -100,7 +100,7 @@ async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
 @pytest.fixture
 async def dst_store() -> AsyncIterator[LocalSocketStore]:
     rmtree_robust(BENCH_DST)
-    BENCH_DST.mkdir(parents=True, exist_ok=True)
+    BENCH_DST.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
     s = LocalSocketStore(
         id="bench-dst",
         store_path=BENCH_DST,
@@ -113,7 +113,7 @@ async def dst_store() -> AsyncIterator[LocalSocketStore]:
 async def _get_big_path() -> StorePath:
     """Find a large NAR path in the local store (>100MB)."""
     # Just use something common like 'nix' if it exists
-    out = subprocess.check_output(
+    out = subprocess.check_output(  # noqa: ASYNC221
         [NIX_BIN, "path-info", "--json", "nixpkgs#nix"],
         text=True,
     )
@@ -124,7 +124,7 @@ async def _get_big_path() -> StorePath:
 
 async def _get_small_paths(n: int = 1000) -> list[StorePath]:
     """Find n small NAR paths in the local store."""
-    out = subprocess.check_output(
+    out = subprocess.check_output(  # noqa: ASYNC221
         [NIX_BIN, "query", "--all", "--limit", str(n)],
         text=True,
     )

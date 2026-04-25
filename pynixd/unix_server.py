@@ -66,8 +66,8 @@ async def start_unix_server(
             writer.close()
 
     # Clean up stale socket
-    if socket_path.exists():
-        socket_path.unlink()
+    if socket_path.exists():  # noqa: ASYNC240
+        socket_path.unlink()  # noqa: ASYNC240
 
     server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
     log.info("unix_server_listening", socket_path=socket_path)
