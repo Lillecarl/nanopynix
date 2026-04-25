@@ -45,15 +45,12 @@ class DerivationOutput:
         if self.method == "":
             if self.path == "":
                 return OutputKind.DEFERRED
-            else:
-                return OutputKind.INPUT_ADDRESSED
-        else:
-            if self.hash_digest == "impure":
-                return OutputKind.IMPURE
-            elif self.hash_digest != "":
-                return OutputKind.CA_FIXED
-            else:
-                return OutputKind.CA_FLOATING
+            return OutputKind.INPUT_ADDRESSED
+        if self.hash_digest == "impure":
+            return OutputKind.IMPURE
+        if self.hash_digest != "":
+            return OutputKind.CA_FIXED
+        return OutputKind.CA_FLOATING
 
     @property
     def is_ca(self) -> bool:

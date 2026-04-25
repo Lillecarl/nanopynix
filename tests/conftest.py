@@ -13,7 +13,7 @@ import stat
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import structlog
@@ -25,7 +25,7 @@ from pynixd.testing import clear_test_stash
 from tests.nix_config import NixConfig
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncGenerator, Sequence
 
 try:
     from pyinstrument import Profiler
@@ -312,8 +312,8 @@ def _wrap_with_asyncio_timeout(item: pytest.Function, default_timeout: float):
         try:
             async with asyncio.timeout(timeout_val):
                 return await original_func(*args, **kwargs)
-        except asyncio.TimeoutError:
-            log.error(
+        except TimeoutError:
+            log.exception(
                 "test_timeout_triggered",
                 test=item.nodeid,
                 timeout=seconds,
@@ -614,7 +614,7 @@ SESSION_NIX_CONFIG = NixConfig.for_test_store(
 async def pynixd_server(
     request: pytest.FixtureRequest,
     tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncGenerator[Server, None]:
+) -> AsyncGenerator[Server]:
     """Session-scoped shared pynixd server (autouse)."""
     # Check if any test in the session needs a session server.
     # Actually, autouse session fixtures can't easily check markers of the current test.

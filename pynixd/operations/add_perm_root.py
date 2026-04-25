@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..wire import NixReader, NixWriter
 
-    pass
 
 
 @dataclass

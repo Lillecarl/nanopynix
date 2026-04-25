@@ -234,7 +234,7 @@ def resolve_derivation(
     # basename after the hash- prefix, minus .drv extension
     drv_path_str = str(drv_path)
     nix_name_with_ext = _nix_store_path_name(drv_path_str)
-    drv_name = nix_name_with_ext[:-4] if nix_name_with_ext.endswith(".drv") else nix_name_with_ext
+    drv_name = nix_name_with_ext.removesuffix(".drv")
 
     # Compute the placeholder for each input drv output
     rewrites: dict[str, str] = {}
@@ -245,7 +245,7 @@ def resolve_derivation(
         input_basename = input_drv_str.rsplit("/", 1)[-1]
         input_hash_part = input_basename.split("-", 1)[0]
         input_nix_name = _nix_store_path_name(input_drv_str)
-        input_drv_name = input_nix_name[:-4] if input_nix_name.endswith(".drv") else input_nix_name
+        input_drv_name = input_nix_name.removesuffix(".drv")
 
         for output_name in output_names:
             placeholder = downstream_placeholder_unknown_ca_output(
@@ -431,7 +431,7 @@ async def main() -> None:
     ca_basename = str(ca_drv_path).rsplit("/", 1)[-1]
     ca_hash_part = ca_basename.split("-", 1)[0]
     ca_nix_name = _nix_store_path_name(str(ca_drv_path))
-    ca_drv_name_debug = ca_nix_name[:-4] if ca_nix_name.endswith(".drv") else ca_nix_name
+    ca_drv_name_debug = ca_nix_name.removesuffix(".drv")
 
     placeholder_out = downstream_placeholder_unknown_ca_output(
         ca_hash_part,

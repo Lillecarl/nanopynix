@@ -313,13 +313,12 @@ class Store(ABC):
         pool = self.build_conn if request.is_build else self.transfer_conn
 
         async with pool() as conn:
-            res = await conn.call(
+            return await conn.call(
                 request,
                 client=client,
                 suppress_last=suppress_last,
                 raise_on_error=raise_on_error,
             )
-            return res
 
     async def execute(
         self,

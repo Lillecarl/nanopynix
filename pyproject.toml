@@ -57,6 +57,38 @@ select = [
     # trailing commas — handled by ruff format, don't select COM812
     # commented-out code
     "ERA",
+    # pyupgrade
+    "UP",
+    # flake8-builtins
+    "A",
+    # flake8-use-pathlib
+    "PTH",
+    # flake8-unused-arguments
+    "ARG",
+    # Perflint
+    "PERF",
+    # flake8-return
+    "RET",
+    # flake8-raise
+    "RSE",
+    # flake8-print
+    "T20",
+    # flake8-pie
+    "PIE",
+    # flake8-2020
+    "YTT",
+    # flake8-async
+    "ASYNC",
+    # tryceratops
+    "TRY",
+    # refurb
+    "FURB",
+    # flake8-tidy-imports
+    "TID",
+    # pep8-naming
+    "N",
+    # flynt
+    "FLY",
 ]
 
 ignore = [
@@ -65,13 +97,18 @@ ignore = [
     # open-file-without-context-manager in http decompression generators
     # (generator assigns the handle then wraps with `with ctx as f:`)
     "SIM115",
+    # relative imports — pynixd uses relative imports by design within packages
+    "TID252",
+    # unused method arguments — protocol interfaces have uniform signatures
+    # (from_reader, to_writer, execute, handle) where not every param is used
+    "ARG002",
 ]
 
 [tool.ruff.lint.flake8-type-checking]
 quote-annotations = true
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ERA001", "RUF059", "F401"]
+"tests/**" = ["ERA001", "RUF059", "F401", "T201", "ARG001"]
 
 [tool.ruff.format]
 docstring-code-format = true

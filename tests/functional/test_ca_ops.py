@@ -426,7 +426,7 @@ async def test_ca_query_derivation_output_map_via_pynixd(
 
     info = json.loads(info_out)
     assert len(info) > 0, f"No output paths found for {drv_path}"
-    for _path, data in info.items():
+    for data in info.values():
         assert "ca" in data, f"Expected 'ca' field in {data}"
 
 

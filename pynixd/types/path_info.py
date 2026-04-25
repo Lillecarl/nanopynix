@@ -38,8 +38,7 @@ class UnkeyedValidPathInfo:
     def to_writer(self, writer: NixWriter) -> None:
         writer.write_string(self.deriver)
         nar_hash = self.nar_hash
-        if nar_hash.startswith("sha256:"):
-            nar_hash = nar_hash[7:]
+        nar_hash = nar_hash.removeprefix("sha256:")
         writer.write_string(nar_hash)
         writer.write_string_set(self.references)
         writer.write_uint64(self.registration_time)

@@ -224,7 +224,7 @@ class Server:
         """Return URI in the given format."""
         if uri_format == "ssh-ng":
             return self.uri(implementation)
-        elif uri_format == "unix":
+        if uri_format == "unix":
             if not self.settings.unix_path:
                 return ""
             uri = f"unix://{self.settings.unix_path}"

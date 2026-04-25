@@ -160,8 +160,7 @@ class ParsedDerivation:
         # name is derived from the store path: /nix/store/<hash>-<name>.drv
         basename = drv_path_str.rsplit("/", 1)[-1]  # <hash>-<name>.drv
         name = basename.split("-", 1)[1] if "-" in basename else basename
-        if name.endswith(".drv"):
-            name = name[:-4]
+        name = name.removesuffix(".drv")
 
         inner: NixDerivationShow = {
             "args": self.args,
@@ -395,8 +394,7 @@ class _Parser:
         # Check for dynamic derivation format
         if self._text[self._pos :].startswith("DrvWithVersion("):
             return self._parse_dynamic_derivation()
-        else:
-            return self._parse_traditional_derivation()
+        return self._parse_traditional_derivation()
 
     def _parse_traditional_derivation(self) -> ParsedDerivation:
         """Parse Derive(...) term."""

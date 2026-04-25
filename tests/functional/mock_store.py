@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
@@ -24,7 +24,7 @@ from pynixd.store import Store
 from pynixd.store_path import StorePath
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import AsyncIterator, Iterable
 
     from pynixd.connection import ClientConn
     from pynixd.operations.base import OpRequest, Resp
@@ -92,7 +92,6 @@ class MockConnection(Connection):
 
     async def __aexit__(self, *args: Any) -> None:
         """Simulate connection release."""
-        pass
 
     async def call(
         self,

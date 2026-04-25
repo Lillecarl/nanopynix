@@ -162,8 +162,7 @@ def _aterm_escape(s: str) -> str:
     s = s.replace('"', '\\"')
     s = s.replace("\n", "\\n")
     s = s.replace("\r", "\\r")
-    s = s.replace("\t", "\\t")
-    return s
+    return s.replace("\t", "\\t")
 
 
 def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -> str:

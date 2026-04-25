@@ -105,8 +105,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
                 except Exception as e:
                     raise BackendError(f"Failed to send store content: {e}") from e
 
-                resp = await AddToStoreResponse().from_reader(conn.r, conn.version)
-                return resp
+                return await AddToStoreResponse().from_reader(conn.r, conn.version)
 
         return await super().execute(store, client, suppress_last)
 

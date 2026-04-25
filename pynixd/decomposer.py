@@ -155,7 +155,7 @@ class BuildDecomposer:
             resp = await self.local_store.execute(
                 QueryDerivationOutputsBatchRequest(drv_paths=all_input_drvs),
             )
-            output_cache = resp.outputs if resp.outputs else {}
+            output_cache = resp.outputs or {}
 
         resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []
         all_input_srcs: set[StorePath] = set()

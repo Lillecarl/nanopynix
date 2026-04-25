@@ -230,7 +230,7 @@ class DynamicDerivationResolver:
             sp = StorePath(inp)
             if sp not in build.required_paths:
                 build.required_paths[sp] = UnkeyedValidPathInfo()
-        for _name, o in resolved.outputs.items():
+        for o in resolved.outputs.values():
             if o.path:
                 sp = StorePath(o.path)
                 if sp not in build.required_paths:
@@ -416,7 +416,7 @@ class DynamicDerivationResolver:
             sp = StorePath(inp)
             if sp not in build.required_paths:
                 build.required_paths[sp] = UnkeyedValidPathInfo()
-        for _name, o in resolved.outputs.items():
+        for o in resolved.outputs.values():
             if o.path:
                 sp = StorePath(o.path)
                 if sp not in build.required_paths:
@@ -455,7 +455,7 @@ class DynamicDerivationResolver:
         has_drv_output = False
         has_dynamic_dependent = False
         if is_dynamic and build_resp.result.status == 0 and drv_outputs:
-            for _drv_output_str, realisation in drv_outputs.items():
+            for realisation in drv_outputs.values():
                 out_path = realisation.get("outPath", "")
                 if out_path:
                     out_sp = StorePath(out_path).with_store_prefix()
@@ -468,7 +468,7 @@ class DynamicDerivationResolver:
         # outputs resolved, so we must trampoline.
         if has_drv_output and not has_nested_dp:
             build_drv_path = StorePath(build.request.drv_path)
-            for _bid, other_build in self.queue.by_id.items():
+            for other_build in self.queue.by_id.values():
                 if other_build.is_done:
                     continue
                 if not other_build.dynamic_input_drvs:
@@ -478,7 +478,7 @@ class DynamicDerivationResolver:
                     break
 
         if is_dynamic and (has_nested_dp or has_dynamic_dependent) and build_resp.result.status == 0 and drv_outputs:
-            for _drv_output_str, realisation in drv_outputs.items():
+            for realisation in drv_outputs.values():
                 out_path = realisation.get("outPath", "")
                 output_name = realisation.get("id", "").rsplit("!", 1)[-1] or "out"
                 if not out_path:
@@ -629,7 +629,7 @@ class DynamicDerivationResolver:
         inner_outputs = inner_derivation.output_paths()
         inner_output_paths: set[StorePath] = {p for p in inner_outputs.values() if p != StorePath("")}
 
-        for _bid, other_build in self.queue.by_id.items():
+        for other_build in self.queue.by_id.values():
             if other_build.is_done:
                 continue
             if not other_build.dynamic_input_drvs:

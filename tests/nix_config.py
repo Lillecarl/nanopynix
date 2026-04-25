@@ -17,7 +17,10 @@ Unset by default -- only explicitly set values render in output.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Iterator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 @dataclass(frozen=True)
@@ -553,7 +556,7 @@ class NixConfig:
     def to_daemon_args(self) -> list[str]:
         args: list[str] = []
         for k, v in self._iter_set():
-            if k in ("require-sigs",):
+            if k == "require-sigs":
                 args.extend(["--option", k, v])
         return args
 
@@ -589,8 +592,7 @@ class NixConfig:
         for s in substituters:
             cfg = cfg.substituters.add(s)
         cfg = cfg.require_sigs.set(require_sigs)
-        cfg = cfg.experimental_features.add("ca-derivations", "dynamic-derivations")
-        return cfg
+        return cfg.experimental_features.add("ca-derivations", "dynamic-derivations")
 
     @classmethod
     def for_ca_derivations(
@@ -603,5 +605,4 @@ class NixConfig:
         for s in substituters:
             cfg = cfg.substituters.add(s)
         cfg = cfg.require_sigs.set(require_sigs)
-        cfg = cfg.experimental_features.add("ca-derivations")
-        return cfg
+        return cfg.experimental_features.add("ca-derivations")

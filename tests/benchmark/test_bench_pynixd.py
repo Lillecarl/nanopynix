@@ -54,7 +54,7 @@ async def _make_store(store_type: str) -> Store:
     """Create a store that reads from the system store."""
     if store_type == "local-socket":
         return LocalSocketStore(id="local-socket", max_transfers=_MAX_TRANSFERS)
-    elif store_type == "ssh-subprocess":
+    if store_type == "ssh-subprocess":
         return SSHSubprocessStore(
             host="127.0.0.1",
             id="ssh-subprocess",
@@ -62,7 +62,7 @@ async def _make_store(store_type: str) -> Store:
             username=_SSH_USER,
             max_transfers=_MAX_TRANSFERS,
         )
-    elif store_type == "ssh-socket":
+    if store_type == "ssh-socket":
         return SSHSocketStore(
             host="127.0.0.1",
             id="ssh-socket",
@@ -70,8 +70,7 @@ async def _make_store(store_type: str) -> Store:
             username=_SSH_USER,
             max_transfers=_MAX_TRANSFERS,
         )
-    else:
-        raise ValueError(f"Unknown store type: {store_type}")
+    raise ValueError(f"Unknown store type: {store_type}")
 
 
 @pytest.fixture(params=_STORE_TYPES)

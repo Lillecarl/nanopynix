@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 
 import structlog
 
@@ -78,7 +78,7 @@ OP_REGISTRY: dict[int, type[OpRequest[Any]]] = {}
 
 
 @dataclass
-class OpRequest(ABC, Generic[Resp]):
+class OpRequest[Resp: "OpResponse"](ABC):
     """Base class for operation requests.
 
     Subclasses that set ``op`` in their own class body are automatically
@@ -111,8 +111,7 @@ class OpRequest(ABC, Generic[Resp]):
         Streaming operations should override this method.
         """
         await self.from_reader(ctx.proxy.r, ctx.version)
-        result = await ctx.proxy.execute(self)
-        return result
+        return await ctx.proxy.execute(self)
 
     async def execute(
         self,

@@ -475,10 +475,7 @@ class Scheduler:
                 if resp.result.status == 0:
                     ca_output_paths: set[StorePath] = set()
                     if resp.result.built_outputs:
-                        for (
-                            _drv_output_str,
-                            realisation,
-                        ) in resp.result.built_outputs.items():
+                        for realisation in resp.result.built_outputs.values():
                             out_path = realisation.get("outPath")
                             if out_path:
                                 ca_output_paths.add(
