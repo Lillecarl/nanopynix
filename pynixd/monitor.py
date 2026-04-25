@@ -288,10 +288,10 @@ class LocalPSIMonitor(ResourceMonitor):
         mem_threshold = f"some {int(self.settings.psi_mem_threshold * 1000)} 1000000"
         io_threshold = f"some {int(self.settings.psi_io_threshold * 1000)} 1000000"
 
-        try:
-            if not os.access("/sys/fs/cgroup/cpu.pressure", os.R_OK | os.W_OK):
-                raise PermissionError("Insufficient permissions for PSI triggers")
+        if not os.access("/sys/fs/cgroup/cpu.pressure", os.R_OK | os.W_OK):
+            raise PermissionError("Insufficient permissions for PSI triggers")
 
+        try:
             self.cpu_fd = os.open(
                 "/sys/fs/cgroup/cpu.pressure",
                 os.O_RDWR | os.O_NONBLOCK,

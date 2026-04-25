@@ -147,7 +147,8 @@ async def _send_probe(
                 status=resp.result.status,
                 error_msg=resp.result.error_msg,
             )
-        return name, accepted
     except Exception as e:
         log.debug("probe_exception", store_id=store.id, probe=name, error=str(e))
         return name, False
+    else:
+        return name, accepted

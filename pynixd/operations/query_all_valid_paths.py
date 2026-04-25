@@ -90,7 +90,6 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                     store_id=store.id,
                     count=len(resp.paths),
                 )
-                return resp
             except Exception as e:
                 if store.tracker.known_paths:
                     # If we already have paths (e.g. from DB on startup), verify them
@@ -126,6 +125,8 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                             paths=store.tracker.known_paths,
                         )
                 raise
+            else:
+                return resp
         except Exception:
             self.logger.warning("sync_paths_failed", store_id=store.id)
             # Do NOT clear known_paths here, it might have been loaded from DB

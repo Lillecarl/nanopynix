@@ -87,9 +87,10 @@ class _SSHStoreMixin(Store):
         async def sftp_exists(path: str) -> bool:
             try:
                 await sftp.stat(path)
-                return True
             except asyncssh.SFTPError:
                 return False
+            else:
+                return True
 
         if self.monitor is None or isinstance(self.monitor, DummyResourceMonitor):
             if self.monitor:
@@ -176,8 +177,6 @@ class _SSHStoreMixin(Store):
                 if self.monitor_enabled:
                     sftp = await self.conn.start_sftp_client()
                     self.start_psi_polling(sftp)
-
-                return self.conn
             except Exception:
                 self.last_failure = time.monotonic()
                 self.backoff = min(self.backoff * 2, self.MAX_BACKOFF)
@@ -188,6 +187,8 @@ class _SSHStoreMixin(Store):
                     next_retry_seconds=self.backoff,
                 )
                 raise
+            else:
+                return self.conn
 
     def invalidate_ssh(self) -> None:
         """Mark SSH connection as dead so next ensure_ssh reconnects."""
@@ -241,10 +242,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
         self.ssh_processes: list[asyncssh.SSHClientProcess] = []
 
     async def create_conn(self) -> Connection:
-        try:
-            ssh_conn = await self.ensure_ssh()
-        except Exception:
-            raise
+        ssh_conn = await self.ensure_ssh()
         conn_id = f"{self.id}-{self.conn_counter}"
         if self.store_path and self.store_path != Path("/"):
             cmd = f"{self.nix_bin} daemon --store {self.store_path} --stdio"
@@ -317,10 +315,7 @@ class SSHSocketStore(_SSHStoreMixin):
         self.init_ssh_state(monitor=monitor, client_keys=client_keys)
 
     async def create_conn(self) -> Connection:
-        try:
-            ssh_conn = await self.ensure_ssh()
-        except Exception:
-            raise
+        ssh_conn = await self.ensure_ssh()
         conn_id = f"{self.id}-{self.conn_counter}"
         log.debug(
             "tunneling_to_socket",

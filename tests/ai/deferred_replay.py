@@ -74,9 +74,10 @@ async def add_text_to_store(
             store.add_path_info(resp.info)
             return resp.info.path
         print(f"  AddToStore returned no path info! logs={resp.logs.messages}")
-        return None
     except Exception as e:
         print(f"  AddToStore FAILED: {type(e).__name__}: {e}")
+        return None
+    else:
         return None
 
 

@@ -268,12 +268,6 @@ class LocalStoreDB:
                     )
                 await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
 
-            log.info(
-                "local_store_db_active",
-                db_path=db_path,
-                mode="read-write" if not read_only else "read-only",
-            )
-            return instance
         except Exception as e:
             log.warning(
                 "nix_db_open_failed",
@@ -283,9 +277,17 @@ class LocalStoreDB:
             return cls(
                 db_path=None,
                 store_path=store_path,
-                read_only=True,
-                regtime_flush_interval=regtime_flush_interval,
+                read_only=read_only,
+                active=False,
             )
+        else:
+            log.info(
+                "local_store_db_active",
+                db_path=db_path,
+                mode="read-write" if not read_only else "read-only",
+            )
+            return instance
+
 
     # ── Internal utility queries ──────────────────────────────────────
     # These are not operation dispatches but internal helpers used by

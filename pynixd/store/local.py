@@ -162,11 +162,11 @@ class LocalSocketStore(Store):
                 # Tiny breathe time to ensure the daemon has processed the close
                 # and is ready for the next "real" connection.
                 await asyncio.sleep(0.1)
-
-                self.daemon_ready.set()
-                return
             except (ConnectionRefusedError, ConnectionResetError):
                 await asyncio.sleep(0.05)
+            else:
+                self.daemon_ready.set()
+                return
 
         raise RuntimeError(
             f"Managed daemon socket exists but not accepting connections "
