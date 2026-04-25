@@ -23,11 +23,14 @@ The resolution flow:
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
 
-from .drv_parser import ParsedDerivation
 from .operations.base import BasicDerivation, DerivationOutput
 from .store_path import StorePath
 from .utils import nix32_encode
+
+if TYPE_CHECKING:
+    from .drv_parser import ParsedDerivation
 
 NIX32_CHARS = "0123456789abcdfghijklmnpqrsvwxyz"
 STORE_DIR = "/nix/store"
@@ -57,9 +60,7 @@ def _nix_drv_name(drv_path: StorePath) -> str:
 def downstream_placeholder(drv_path: StorePath, output_name: str) -> str:
     hash_part = str(drv_path).rsplit("/", 1)[-1].split("-", 1)[0]
     drv_name = _nix_drv_name(drv_path)
-    clear_text = (
-        f"nix-upstream-output:{hash_part}:{_output_path_name(drv_name, output_name)}"
-    )
+    clear_text = f"nix-upstream-output:{hash_part}:{_output_path_name(drv_name, output_name)}"
     h = hashlib.sha256(clear_text.encode()).digest()
     return "/" + nix32_encode(h)
 
@@ -84,9 +85,7 @@ def downstream_placeholder_from_chain(
     base_drv, base_output = chain[0]
     hash_part = str(base_drv).rsplit("/", 1)[-1].split("-", 1)[0]
     drv_name = _nix_drv_name(base_drv)
-    clear_text = (
-        f"nix-upstream-output:{hash_part}:{_output_path_name(drv_name, base_output)}"
-    )
+    clear_text = f"nix-upstream-output:{hash_part}:{_output_path_name(drv_name, base_output)}"
     current_hash = hashlib.sha256(clear_text.encode()).digest()
 
     for _, output_name in chain[1:]:
@@ -180,9 +179,7 @@ def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -
 
     parts.append("[],")
 
-    srcs = ",".join(
-        f'"{_aterm_escape(str(p))}"' for p in sorted(str(p) for p in drv.input_srcs)
-    )
+    srcs = ",".join(f'"{_aterm_escape(str(p))}"' for p in sorted(str(p) for p in drv.input_srcs))
     parts.append(f"[{srcs}],")
 
     parts.append(f'"{_aterm_escape(drv.platform)}",')
@@ -206,7 +203,7 @@ def _hash_derivation_modulo(
 ) -> dict[str, bytes]:
     aterm = _unparse_basic_derivation(drv, mask_outputs=mask_outputs)
     h = hashlib.sha256(aterm.encode()).digest()
-    return {name: h for name in drv.outputs}
+    return dict.fromkeys(drv.outputs, h)
 
 
 def _rewrite_strings(s: str, rewrites: dict[str, str]) -> str:
@@ -331,10 +328,7 @@ def resolve_dynamic_derivation(
 
         for outer_output, inner_outputs in output_deps.items():
             # Compute level-1 placeholder hash (unknownCaOutput)
-            outer_clear = (
-                f"nix-upstream-output:{hash_part}:"
-                f"{_output_path_name(dyn_drv_name, outer_output)}"
-            )
+            outer_clear = f"nix-upstream-output:{hash_part}:{_output_path_name(dyn_drv_name, outer_output)}"
             outer_hash = hashlib.sha256(outer_clear.encode()).digest()
             outer_placeholder = "/" + nix32_encode(outer_hash)
 

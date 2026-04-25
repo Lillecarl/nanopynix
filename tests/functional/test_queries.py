@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pyinstrument
 import pytest
 import structlog
 
-from pynixd import Server
 from tests.conftest import (
     NIX_BIN,
     run_subproc,
 )
+
+if TYPE_CHECKING:
+    import pyinstrument
+
+    from pynixd import Server
 
 log = structlog.get_logger(__name__)
 

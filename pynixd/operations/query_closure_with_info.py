@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
-from ..wire import NixReader, NixWriter
 from .base import (
     OperationLogs,
     OpRequest,
@@ -40,6 +39,7 @@ ORDER BY vp.id ASC
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..wire import NixReader, NixWriter
 
 
 @dataclass
@@ -131,9 +131,7 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
                 refs_str,
             ) in rows:
                 p = StorePath(path)
-                references = (
-                    {StorePath(r) for r in refs_str.split()} if refs_str else set()
-                )
+                references = {StorePath(r) for r in refs_str.split()} if refs_str else set()
                 uinfo = UnkeyedValidPathInfo(
                     deriver=StorePath(deriver or ""),
                     nar_hash=nar_hash,

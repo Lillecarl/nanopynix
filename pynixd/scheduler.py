@@ -24,25 +24,25 @@ import structlog
 from . import metrics
 from .allocator import TINY_BUILD_THRESHOLD_MS, BuildAllocator, TelemetryStoreRanker
 from .build_queue import BuildQueue, QueuedBuild
-from .connection import ClientConn
 from .decomposer import BuildDecomposer
-from .derived_path import DerivedPath
 from .dynamic_resolver import DynamicDerivationResolver
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .operations.base import BuildMode, UnkeyedValidPathInfo
-from .operations.build_derivation import (
-    BuildDerivationRequest,
-    BuildDerivationResponse,
-)
-from .operations.build_paths import BuildPathsWithResultsResponse
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .stderr import StderrNext
-from .store import Store
 from .store_path import StorePath
 
 if TYPE_CHECKING:
+    from .connection import ClientConn
     from .context import PynixdContext
+    from .derived_path import DerivedPath
     from .drv_parser import ParsedDerivation
+    from .operations.build_derivation import (
+        BuildDerivationRequest,
+        BuildDerivationResponse,
+    )
+    from .operations.build_paths import BuildPathsWithResultsResponse
+    from .store import Store
 
 log = structlog.get_logger(__name__)
 
@@ -237,11 +237,7 @@ class Scheduler:
             return
 
         # 1. Ensure all builds have closure metadata
-        needs_metadata = [
-            b
-            for b in pending
-            if any(info.nar_size == 0 for info in b.required_paths.values())
-        ]
+        needs_metadata = [b for b in pending if any(info.nar_size == 0 for info in b.required_paths.values())]
         for build in needs_metadata:
             seeds = set(build.required_paths.keys())
             try:
@@ -282,8 +278,7 @@ class Scheduler:
                 unfinished_deps = {
                     dep_id
                     for dep_id in build.depends_on
-                    if dep_id in self.queue.by_id
-                    and not self.queue.by_id[dep_id].is_done
+                    if dep_id in self.queue.by_id and not self.queue.by_id[dep_id].is_done
                 }
                 if unfinished_deps:
                     waiting_deps.append(build)
@@ -348,11 +343,7 @@ class Scheduler:
                 )
                 error_msg = (
                     f"No compatible store for {build.platform}"
-                    + (
-                        f" (requires {', '.join(sorted(build_features))})"
-                        if build_features
-                        else ""
-                    )
+                    + (f" (requires {', '.join(sorted(build_features))})" if build_features else "")
                     + "\n"
                     + "\n".join(f"  {r}" for r in reasons)
                 )
@@ -381,28 +372,16 @@ class Scheduler:
                 build.build_task = asyncio.create_task(
                     self.execute_build(build, rs.store),
                 )
-                assigned_this_pass[rs.store_id] = (
-                    assigned_this_pass.get(rs.store_id, 0) + 1
-                )
+                assigned_this_pass[rs.store_id] = assigned_this_pass.get(rs.store_id, 0) + 1
             else:
                 # If all compatible stores have already failed this build,
                 # it's permanently stuck — fail it now with a clear message.
-                compatible = [
-                    s
-                    for s in self.stores.values()
-                    if s.supports_derivation(build.platform, build_features)
-                ]
-                if compatible and all(
-                    s.id in build.failed_backends for s in compatible
-                ):
+                compatible = [s for s in self.stores.values() if s.supports_derivation(build.platform, build_features)]
+                if compatible and all(s.id in build.failed_backends for s in compatible):
                     failed_ids = [s.id for s in compatible]
                     error_msg = (
                         f"All compatible stores failed for {build.platform}"
-                        + (
-                            f" (requires {', '.join(sorted(build_features))})"
-                            if build_features
-                            else ""
-                        )
+                        + (f" (requires {', '.join(sorted(build_features))})" if build_features else "")
                         + f": {', '.join(failed_ids)}"
                     )
                     client = await self.queue.fail(build.id, error_msg)
@@ -434,10 +413,7 @@ class Scheduler:
             waiting_deps=len(waiting_deps),
             waiting_slot=len(waiting_slot),
             in_flight={s.id: s.in_flight for s in self.stores.values()},
-            cpu_util={
-                s.id: f"{s.cpu_util.utilization:.1f}%" if s.cpu_util else None
-                for s in self.stores.values()
-            },
+            cpu_util={s.id: f"{s.cpu_util.utilization:.1f}%" if s.cpu_util else None for s in self.stores.values()},
         )
 
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
@@ -467,9 +443,7 @@ class Scheduler:
 
                 # 1. Ensure all inputs are present on the builder
                 missing_info = {
-                    p: info
-                    for p, info in build.required_paths.items()
-                    if p not in store.tracker.known_paths
+                    p: info for p, info in build.required_paths.items() if p not in store.tracker.known_paths
                 }
                 if missing_info:
                     missing_size = sum(info.nar_size for info in missing_info.values())
@@ -481,7 +455,8 @@ class Scheduler:
                         size=missing_size,
                     )
                     await self.local_store.stream_paths_to(
-                        store, set(missing_info.keys())
+                        store,
+                        set(missing_info.keys()),
                     )
 
                 # 2. Trigger build

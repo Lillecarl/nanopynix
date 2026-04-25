@@ -34,10 +34,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .derived_path import DerivedPath
 
 from .store_path import StorePath

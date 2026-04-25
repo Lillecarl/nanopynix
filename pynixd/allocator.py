@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -10,6 +9,8 @@ import structlog
 from .system_features import PYNIXD_HANDLED_FEATURES
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
+
     from .build_queue import QueuedBuild
     from .config import PynixdSettings
     from .store import Store
@@ -78,9 +79,7 @@ class TelemetryStoreRanker(StoreRanker):
 
             # 1. Data Locality (+ points)
             if build.required_paths:
-                total_size = sum(
-                    info.nar_size for info in build.required_paths.values()
-                )
+                total_size = sum(info.nar_size for info in build.required_paths.values())
                 if total_size > 0:
                     present_size = sum(
                         info.nar_size

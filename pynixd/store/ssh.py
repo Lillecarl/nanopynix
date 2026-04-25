@@ -17,15 +17,14 @@ from .. import wire
 from ..config import PynixdSettings
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, GenericResourcePoller, ResourceMonitor
-from ..psi import (
-    CpuUtil,
-    MemInfo,
-)
 from ..wire import SSHNixReader, SSHNixWriter
 from .base import Store
 
 if TYPE_CHECKING:
-    pass
+    from ..psi import (
+        CpuUtil,
+        MemInfo,
+    )
 
 log = structlog.get_logger(__name__)
 

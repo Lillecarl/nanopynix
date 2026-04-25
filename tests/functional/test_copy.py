@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from pynixd import Server
+from typing import TYPE_CHECKING
+
 from tests.conftest import (
     NIX_BIN,
     run_subproc,
 )
+
+if TYPE_CHECKING:
+    from pynixd import Server
 
 
 async def test_copy(pynixd_server: Server):

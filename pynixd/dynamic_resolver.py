@@ -14,7 +14,6 @@ from .derivation_resolution import (
 from .derivation_resolution import (
     resolve_dynamic_derivation as drv_resolve_dynamic_derivation,
 )
-from .derived_path import DerivedPath
 from .drv_parser import read_drv_file, to_basic_derivation
 from .operations.add_to_store import AddToStoreRequest
 from .operations.base import (
@@ -32,6 +31,7 @@ from .store_path import StorePath
 
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild
+    from .derived_path import DerivedPath
     from .operations.base import BasicDerivation
     from .operations.build_derivation import BuildDerivationResponse
     from .scheduler import DerivationReader, Scheduler
@@ -124,10 +124,7 @@ class DynamicDerivationResolver:
         if not build.depends_on:
             return
 
-        if not any(
-            o.kind == OutputKind.DEFERRED
-            for o in build.request.derivation.outputs.values()
-        ):
+        if not any(o.kind == OutputKind.DEFERRED for o in build.request.derivation.outputs.values()):
             return
 
         drv_path = build.request.drv_path
@@ -284,9 +281,7 @@ class DynamicDerivationResolver:
                 out_path = realisation.get("outPath", "")
                 output_name = realisation.get("id", "").rsplit("!", 1)[-1] or "out"
                 if out_path:
-                    dep_realisations.setdefault(dep_drv_path, {})[output_name] = (
-                        StorePath(out_path).with_store_prefix()
-                    )
+                    dep_realisations.setdefault(dep_drv_path, {})[output_name] = StorePath(out_path).with_store_prefix()
 
         for dyn_drv_path, output_deps in build.dynamic_input_drvs.items():
             # Level 1: outer drv's outputs (e.g., producingDrv^out = .drv path)
@@ -323,13 +318,9 @@ class DynamicDerivationResolver:
                                 pass
 
                         if actual_path:
-                            dynamic_output_paths[
-                                (dyn_drv_path, outer_output, inner_output_name)
-                            ] = actual_path
+                            dynamic_output_paths[(dyn_drv_path, outer_output, inner_output_name)] = actual_path
                     else:
-                        dynamic_output_paths[
-                            (dyn_drv_path, outer_output, inner_output_name)
-                        ] = level1_path
+                        dynamic_output_paths[(dyn_drv_path, outer_output, inner_output_name)] = level1_path
 
         if not dynamic_output_paths:
             log.warning(
@@ -364,9 +355,7 @@ class DynamicDerivationResolver:
             "resolve_dynamic_derivation_debug",
             build_id=build.id,
             drv_path=drv_path,
-            dynamic_output_paths={
-                str(k): str(v) for k, v in dynamic_output_paths.items()
-            },
+            dynamic_output_paths={str(k): str(v) for k, v in dynamic_output_paths.items()},
             resolved_outputs={n: o.path for n, o in resolved.outputs.items()},
             resolved_input_srcs=[str(p) for p in resolved.input_srcs],
             resolved_aterm_len=len(resolved_aterm),
@@ -488,12 +477,7 @@ class DynamicDerivationResolver:
                     has_dynamic_dependent = True
                     break
 
-        if (
-            is_dynamic
-            and (has_nested_dp or has_dynamic_dependent)
-            and build_resp.result.status == 0
-            and drv_outputs
-        ):
+        if is_dynamic and (has_nested_dp or has_dynamic_dependent) and build_resp.result.status == 0 and drv_outputs:
             for _drv_output_str, realisation in drv_outputs.items():
                 out_path = realisation.get("outPath", "")
                 output_name = realisation.get("id", "").rsplit("!", 1)[-1] or "out"
@@ -533,9 +517,7 @@ class DynamicDerivationResolver:
                     self.local_store.store_path,
                 )
 
-                unknown_srcs = (
-                    inner_basic.input_srcs - self.local_store.tracker.known_paths
-                )
+                unknown_srcs = inner_basic.input_srcs - self.local_store.tracker.known_paths
                 if unknown_srcs:
                     try:
                         valid_resp = await self.local_store.execute(
@@ -645,9 +627,7 @@ class DynamicDerivationResolver:
         """
         outer_drv_path = StorePath(outer_build.request.drv_path)
         inner_outputs = inner_derivation.output_paths()
-        inner_output_paths: set[StorePath] = {
-            p for p in inner_outputs.values() if p != StorePath("")
-        }
+        inner_output_paths: set[StorePath] = {p for p in inner_outputs.values() if p != StorePath("")}
 
         for _bid, other_build in self.queue.by_id.items():
             if other_build.is_done:

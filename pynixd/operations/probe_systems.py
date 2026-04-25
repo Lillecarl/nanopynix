@@ -25,11 +25,11 @@ from ..operations.build_derivation import BuildDerivationRequest
 from ..store_path import StorePath
 from ..system_features import PROBE_SYSTEMS
 from ..utils import random_nix32_hash
-from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
 
@@ -85,9 +85,7 @@ class ProbeSystemsRequest(OpRequest[ProbeSystemsResponse]):
             ],
         )
 
-        systems = {
-            system for system, (_, ok) in zip(candidates, results, strict=True) if ok
-        }
+        systems = {system for system, (_, ok) in zip(candidates, results, strict=True) if ok}
 
         log.info("systems_probed", store_id=store.id, systems=sorted(systems))
         return ProbeSystemsResponse(systems=systems)

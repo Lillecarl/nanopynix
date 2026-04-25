@@ -11,7 +11,6 @@ making _forward_stderr and _drain_stderr trivial consumers.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
@@ -21,6 +20,8 @@ from . import constants
 from .exceptions import BackendError
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from .wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
@@ -180,9 +181,7 @@ class StderrError:
 
 
 # Union of all stderr message types
-StderrMsg = (
-    StderrNext | StderrStartActivity | StderrStopActivity | StderrResult | StderrError
-)
+StderrMsg = StderrNext | StderrStartActivity | StderrStopActivity | StderrResult | StderrError
 
 # Sentinel returned when the stream ends with STDERR_LAST
 LAST = object()
@@ -237,8 +236,7 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
             log.warning("stderr_unknown_msg_type", msg_type=msg_type)
             if unknown_streak >= _MAX_UNKNOWN_MSG_TYPES:
                 raise ConnectionError(
-                    f"Protocol desync: {unknown_streak} consecutive "
-                    f"unknown stderr msg_types (last: 0x{msg_type:x})",
+                    f"Protocol desync: {unknown_streak} consecutive unknown stderr msg_types (last: 0x{msg_type:x})",
                 )
             continue
 

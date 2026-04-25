@@ -77,8 +77,7 @@ class DrvOutput(str):
         instance = str.__new__(cls, value)
         if value and "!" not in value:
             raise ValueError(
-                f"Invalid DrvOutput: {value!r} — "
-                "expected format '<algo>:<hash>!<outputName>'",
+                f"Invalid DrvOutput: {value!r} — expected format '<algo>:<hash>!<outputName>'",
             )
         return instance
 

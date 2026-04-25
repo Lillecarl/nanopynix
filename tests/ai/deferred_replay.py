@@ -186,9 +186,7 @@ async def main() -> None:
         realisation_cmd,
         nix_config=CA_NIX_CONFIG,
     )
-    realisations_raw = (
-        json.loads(realisation_out) if rc == 0 and realisation_out.strip() else []
-    )
+    realisations_raw = json.loads(realisation_out) if rc == 0 and realisation_out.strip() else []
     realisation_to_register = realisations_raw[0] if realisations_raw else None
     print(f"CA realisation: {realisation_to_register}")
 

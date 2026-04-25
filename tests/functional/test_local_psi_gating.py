@@ -5,7 +5,7 @@ Functional tests for LocalSocketStore pressure gating.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import structlog
@@ -15,6 +15,9 @@ from pynixd.exceptions import ResourceExhaustedError
 from pynixd.monitor import ResourceMonitor
 from pynixd.store.local import LocalSocketStore
 from tests.conftest import get_test_store_kwargs
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 log = structlog.get_logger(__name__)
 

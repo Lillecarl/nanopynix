@@ -148,8 +148,7 @@ class LocalSocketStore(Store):
             await asyncio.sleep(0.1)
         else:
             raise RuntimeError(
-                f"Managed daemon did not create socket at {self.socket_path} "
-                f"within 5s (pid={self.daemon_proc.pid})",
+                f"Managed daemon did not create socket at {self.socket_path} within 5s (pid={self.daemon_proc.pid})",
             )
 
         # Socket file exists but daemon may not be listening yet — probe

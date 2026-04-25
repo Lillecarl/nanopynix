@@ -15,13 +15,14 @@ like `a.drv^out^out` are parsed as Built(Built(Opaque(a.drv), "out"), "out").
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .drv_parser import read_drv_file
 from .store_path import StorePath
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .drv_parser import ParsedDerivation
 
 

@@ -18,7 +18,6 @@ import asyncio
 import json
 import os
 import time
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,7 +28,7 @@ import structlog
 from .store_path import StorePath
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import AsyncIterator
 
 log = structlog.get_logger(__name__)
 
@@ -265,8 +264,7 @@ class LocalStoreDB:
                         ")",
                     )
                     await db.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_drv_stats_lookup "
-                        "ON DerivationStats(pname, platform)",
+                        "CREATE INDEX IF NOT EXISTS idx_drv_stats_lookup ON DerivationStats(pname, platform)",
                     )
                 await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
 
@@ -430,11 +428,7 @@ class LocalStoreDB:
         """Flush pending registration time updates to SQLite."""
         if not self.active or self.read_only:
             return
-        if (
-            not self.pending_regtime
-            and not self.pending_known_paths
-            and not self.pending_removed_known_paths
-        ):
+        if not self.pending_regtime and not self.pending_known_paths and not self.pending_removed_known_paths:
             return
 
         paths = self.pending_regtime

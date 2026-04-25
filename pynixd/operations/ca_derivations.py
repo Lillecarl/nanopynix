@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import DrvOutput, StorePath
-from ..wire import NixReader, NixWriter
 from .base import (
     OperationLogs,
     OpRequest,
@@ -25,6 +24,7 @@ from .base import (
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..wire import NixReader, NixWriter
 
 
 # ── RegisterDrvOutput (op 42) ─────────────────────────────────────────

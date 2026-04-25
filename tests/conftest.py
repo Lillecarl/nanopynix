@@ -11,10 +11,9 @@ import shlex
 import shutil
 import stat
 import time
-from collections.abc import Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 import pytest
 import structlog
@@ -24,6 +23,9 @@ from pynixd import Server
 from pynixd.store import LocalSocketStore
 from pynixd.testing import clear_test_stash
 from tests.nix_config import NixConfig
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 try:
     from pyinstrument import Profiler
@@ -221,9 +223,7 @@ def _prune_client_processor(frame, options):
         return None
 
     for child in list(frame.children):
-        if child.function and (
-            "run_nix_build" in child.function or "run_subproc" in child.function
-        ):
+        if child.function and ("run_nix_build" in child.function or "run_subproc" in child.function):
             child.remove_from_parent()
         else:
             _prune_client_processor(child, options)
@@ -493,9 +493,7 @@ async def cleanup_extra_stores(pynixd_server: Server | tuple | None):
         return
 
     # Handle cases where pynixd_server is a tuple (integration tests)
-    actual_server = (
-        pynixd_server[0] if isinstance(pynixd_server, tuple) else pynixd_server
-    )
+    actual_server = pynixd_server[0] if isinstance(pynixd_server, tuple) else pynixd_server
     if not hasattr(actual_server, "stores"):
         return
 

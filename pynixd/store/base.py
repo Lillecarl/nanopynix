@@ -8,37 +8,40 @@ import asyncio
 import platform
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
-from contextlib import AbstractAsyncContextManager
 from enum import IntEnum
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 import structlog
 from cachetools import TTLCache
 
 from .. import wire
-from ..connection import ClientConn, Connection
-from ..local_store_db import LocalStoreDB
 from ..monitor import ResourceGate, ResourceMonitor
 from ..operations.add_multiple_to_store import AddMultipleToStoreRequest
 from ..operations.add_to_store_nar import AddToStoreNarRequest
-from ..operations.base import (
-    OpRequest,
-    Resp,
-    ValidPathInfo,
-)
 from ..operations.nar_from_path import NarFromPathRequest
 from ..operations.probe_features import ProbeFeaturesRequest
 from ..operations.probe_systems import ProbeSystemsRequest
 from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
 from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
 from ..path_tracker import PathTrackerInstance
-from ..psi import CpuUtil, MemInfo
-from ..signing import SecretKey
 from ..store_path import StorePath
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from contextlib import AbstractAsyncContextManager
+
+    from ..connection import ClientConn, Connection
+    from ..local_store_db import LocalStoreDB
+    from ..operations.base import (
+        OpRequest,
+        Resp,
+        ValidPathInfo,
+    )
+    from ..psi import CpuUtil, MemInfo
+    from ..signing import SecretKey
 
 log = structlog.get_logger(__name__)
 
@@ -166,11 +169,7 @@ class Store(ABC):
     @property
     def native_db(self) -> LocalStoreDB | None:
         """The local SQLite DB if it is the native database for this store root."""
-        if (
-            self.db is not None
-            and self.db.active
-            and self.db.store_path == self.store_path
-        ):
+        if self.db is not None and self.db.active and self.db.store_path == self.store_path:
             return self.db
         return None
 
@@ -384,9 +383,7 @@ class Store(ABC):
 
         # 2. Filter out paths already in destination
         to_transfer: list[ValidPathInfo] = [
-            info
-            for info in closure_resp.infos
-            if info.path not in dst.tracker.known_paths
+            info for info in closure_resp.infos if info.path not in dst.tracker.known_paths
         ]
         if not to_transfer:
             return
@@ -502,9 +499,7 @@ class Store(ABC):
             self._probe_event.set()
             return
 
-        existing_systems = (
-            set(self._feature_matrix.keys()) if self._feature_matrix else set()
-        )
+        existing_systems = set(self._feature_matrix.keys()) if self._feature_matrix else set()
         existing_features: set[str] = set()
         if self._feature_matrix:
             for feats in self._feature_matrix.values():
@@ -529,9 +524,7 @@ class Store(ABC):
             "store_probed",
             store_id=self.id,
             systems=sorted(self._feature_matrix.keys()) if self._feature_matrix else [],
-            feature_matrix={
-                k: sorted(v) for k, v in (self._feature_matrix or {}).items()
-            },
+            feature_matrix={k: sorted(v) for k, v in (self._feature_matrix or {}).items()},
         )
 
         self.probe_state = ProbeState.PROBED
@@ -582,11 +575,7 @@ class Store(ABC):
         return self.pool.stats
 
     def __repr__(self) -> str:
-        return (
-            f"{type(self).__name__}(id={self.id!r}, "
-            f"in_flight={self.in_flight}, "
-            f"pool_stats={self.pool_stats})"
-        )
+        return f"{type(self).__name__}(id={self.id!r}, in_flight={self.in_flight}, pool_stats={self.pool_stats})"
 
 
 def get_current_system() -> str:

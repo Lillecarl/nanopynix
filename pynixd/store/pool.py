@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
@@ -14,6 +13,8 @@ from typing import TYPE_CHECKING
 import structlog
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
     from ..connection import Connection
     from ..monitor import ResourceGate
 
@@ -54,10 +55,7 @@ class ConnectionPool:
     @property
     def stats(self) -> str:
         """Human-readable pool statistics."""
-        return (
-            f"active={self.active_connections} "
-            f"idle={len(self.idle_conns)} total={len(self.all_conns)}"
-        )
+        return f"active={self.active_connections} idle={len(self.idle_conns)} total={len(self.all_conns)}"
 
     def start_sweep(self) -> None:
         """Start the idle sweep task if not already running."""

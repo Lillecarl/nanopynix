@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiohttp
 import pytest
 import structlog
 
-from pynixd import Server
 from pynixd.operations.nar_from_path import NarFromPathRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
@@ -22,12 +22,12 @@ from tests.conftest import (
     run_subproc,
 )
 
+if TYPE_CHECKING:
+    from pynixd import Server
+
 log = structlog.get_logger(__name__)
 
-HTTP_AUTH_HEADER = (
-    "Basic "
-    + base64.b64encode(f"{SESSION_HTTP_USER}:{SESSION_HTTP_PASS}".encode()).decode()
-)
+HTTP_AUTH_HEADER = "Basic " + base64.b64encode(f"{SESSION_HTTP_USER}:{SESSION_HTTP_PASS}".encode()).decode()
 
 
 async def get_hello_path() -> StorePath:

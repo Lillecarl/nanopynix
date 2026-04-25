@@ -7,8 +7,7 @@ for each `nix-daemon --stdio` exec request.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import asyncssh
 import structlog
@@ -16,9 +15,14 @@ import structlog
 from . import wire
 from .operations.base import Role
 from .proxy import DaemonProxy
-from .scheduler import Scheduler
-from .store import Store
 from .wire import SSHNixReader, SSHNixWriter
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
+
+    from .scheduler import Scheduler
+    from .store import Store
 
 log = structlog.get_logger(__name__)
 

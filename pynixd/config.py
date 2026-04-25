@@ -33,8 +33,7 @@ def _feature_matrix_from_config(
         return {s: set() for s in systems}
     if system_features:
         raise ValueError(
-            "system_features specified without systems; "
-            "specify systems to create a feature_matrix",
+            "system_features specified without systems; specify systems to create a feature_matrix",
         )
     return None
 
@@ -180,10 +179,7 @@ class SSHSocketStoreSpec(BaseModel):
 
 
 StoreSpec = Annotated[
-    LocalSocketStoreSpec
-    | LocalSubprocessStoreSpec
-    | SSHSubprocessStoreSpec
-    | SSHSocketStoreSpec,
+    LocalSocketStoreSpec | LocalSubprocessStoreSpec | SSHSubprocessStoreSpec | SSHSocketStoreSpec,
     Field(discriminator="type"),
 ]
 

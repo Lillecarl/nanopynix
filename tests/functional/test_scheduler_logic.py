@@ -288,10 +288,8 @@ async def test_scheduler_decomposition_and_ordering():
         will_build={leaf_path, root_path},
     )
     local_store.responses[QueryValidPathsRequest] = QueryValidPathsResponse(paths=set())
-    local_store.responses[QueryDerivationOutputsBatchRequest] = (
-        DerivationOutputsBatchResponse(
-            outputs={leaf_path: {"out": StorePath("/nix/store/leaf-out")}},
-        )
+    local_store.responses[QueryDerivationOutputsBatchRequest] = DerivationOutputsBatchResponse(
+        outputs={leaf_path: {"out": StorePath("/nix/store/leaf-out")}},
     )
 
     leaf_drv = ParsedDerivation(
@@ -353,12 +351,8 @@ async def test_scheduler_decomposition_and_ordering():
     assert len(scheduler.queue.queue) == 2
 
     # Find builds in queue
-    root_b = [
-        b for b in scheduler.queue.queue if str(b.request.drv_path) == str(root_path)
-    ][0]
-    leaf_b = [
-        b for b in scheduler.queue.queue if str(b.request.drv_path) == str(leaf_path)
-    ][0]
+    root_b = [b for b in scheduler.queue.queue if str(b.request.drv_path) == str(root_path)][0]
+    leaf_b = [b for b in scheduler.queue.queue if str(b.request.drv_path) == str(leaf_path)][0]
 
     # 5. Pass 1: Scheduling
     await scheduler.schedule()

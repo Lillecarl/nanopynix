@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import StderrNext
 from ..store_path import StorePath
-from ..wire import NixReader, NixWriter
 from .base import (
     BasicDerivation,
     BuildMode,
@@ -19,6 +18,7 @@ from .base import (
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..wire import NixReader, NixWriter
 
 
 @dataclass
@@ -98,8 +98,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         # We don't need to perform extra discovery or closure expansion.
         drv_path_str = str(self.drv_path)
         required_paths: set[StorePath] = {
-            StorePath(inp, extrainfo=f"input_src of {drv_path_str}")
-            for inp in self.derivation.input_srcs
+            StorePath(inp, extrainfo=f"input_src of {drv_path_str}") for inp in self.derivation.input_srcs
         }
 
         # We DO NOT add request.drv_path to required_paths because the client
@@ -119,16 +118,12 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         )
         response = await future
 
-        if isinstance(response, BuildDerivationResponse):  # noqa: SIM102
+        if isinstance(response, BuildDerivationResponse):
             # Only send StderrNext if the error came from a backend daemon
             # (response has real daemon logs). Scheduler-generated
             # incompatibility errors (empty logs) are already sent as
             # StderrNext by the scheduler — avoid double-reporting.
-            if (
-                response.result.status != 0
-                and response.result.error_msg
-                and response.logs.messages
-            ):
+            if response.result.status != 0 and response.result.error_msg and response.logs.messages:
                 ctx.proxy.client.queue.put_nowait(
                     StderrNext(text=f"pynixd: {response.result.error_msg}\n"),
                 )

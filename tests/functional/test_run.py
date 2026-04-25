@@ -49,10 +49,7 @@ class TestRunSubproc:
         )
         assert "foo = bar" in stdout
         assert "baz = qux" in stdout
-        assert (
-            "substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/"
-            in stdout
-        )
+        assert "substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/" in stdout
 
     async def test_nix_config_override(self):
         """Test NIX_CONFIG override behavior.
@@ -65,10 +62,7 @@ class TestRunSubproc:
             nix_config={"substituters": "https://example.org"},
         )
         assert "substituters = https://example.org" in stdout
-        assert (
-            "substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/"
-            not in stdout
-        )
+        assert "substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/" not in stdout
 
     async def test_nix_config_merge(self):
         """Test NIX_CONFIG merging with environment variable.
@@ -83,7 +77,4 @@ class TestRunSubproc:
         )
         assert "existing = true" in stdout
         assert "foo = bar" in stdout
-        assert (
-            "substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/"
-            in stdout
-        )
+        assert "substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/" in stdout

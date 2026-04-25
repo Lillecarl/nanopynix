@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
-from ..wire import NixReader, NixWriter
 from .base import (
     OperationLogs,
     OpRequest,
@@ -28,6 +27,7 @@ WHERE r.referrer = (SELECT id FROM ValidPaths WHERE path = ?)
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..wire import NixReader, NixWriter
 
 
 @dataclass

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pyinstrument
 import pytest
 import structlog
 
-from pynixd import Server
 from pynixd.store import LocalSocketStore
 from tests.conftest import (
     NIX_BIN,
@@ -20,6 +19,11 @@ from tests.conftest import (
     run_subproc,
 )
 from tests.nix_config import NixConfig
+
+if TYPE_CHECKING:
+    import pyinstrument
+
+    from pynixd import Server
 
 log = structlog.get_logger(__name__)
 
@@ -556,9 +560,7 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
     assert rc == 0, f"Dynamic trampoline build failed:\n{stdboth}"
     out_path = stdout.strip()
     assert out_path.startswith("/nix/store/"), f"Unexpected output: {out_path}"
-    assert not out_path.endswith(".drv"), (
-        f"Expected non-.drv output from trampoline, got: {out_path}"
-    )
+    assert not out_path.endswith(".drv"), f"Expected non-.drv output from trampoline, got: {out_path}"
 
 
 DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
@@ -622,9 +624,7 @@ async def test_dynamic_drv_producing_via_pynixd(
     )
     assert rc == 0, f"producingDrv build via pynixd failed:\n{stdboth}"
     producing_out = stdout.strip()
-    assert producing_out.startswith("/nix/store/"), (
-        f"Unexpected output path: {producing_out}"
-    )
+    assert producing_out.startswith("/nix/store/"), f"Unexpected output path: {producing_out}"
 
     # The output of producingDrv IS a .drv file
     assert producing_out.endswith(".drv"), f"Expected .drv output, got: {producing_out}"
@@ -634,9 +634,7 @@ async def test_dynamic_drv_producing_via_pynixd(
     full_path = pynixd_local_path / producing_out.lstrip("/")
     if full_path.exists():
         content = full_path.read_text()
-        assert content.startswith("Derive("), (
-            f"Output should be derivation ATerm, got: {content[:80]}"
-        )
+        assert content.startswith("Derive("), f"Output should be derivation ATerm, got: {content[:80]}"
 
     # Query the derivation output map to verify realisation registration
     eval_cmd = [
@@ -666,9 +664,7 @@ async def test_dynamic_drv_producing_via_pynixd(
     assert rc == 0, "path-info for producingDrv failed"
 
     info = json.loads(info_out)
-    assert producing_out in info, (
-        f"Expected {producing_out} in output map, got: {list(info.keys())}"
-    )
+    assert producing_out in info, f"Expected {producing_out} in output map, got: {list(info.keys())}"
 
     log.info("producingDrv_via_pynixd", output=producing_out)
 
@@ -834,8 +830,6 @@ async def test_dynamic_drv_wrapper_via_pynixd(
     assert rc == 0, f"Wrapper build via pynixd failed:\n{stdboth}"
     out_path = stdout.strip()
     assert out_path.startswith("/nix/store/"), f"Unexpected output: {out_path}"
-    assert not out_path.endswith(".drv"), (
-        f"Wrapper output should not be a .drv, got: {out_path}"
-    )
+    assert not out_path.endswith(".drv"), f"Wrapper output should not be a .drv, got: {out_path}"
 
     log.info("wrapper_via_pynixd", path=out_path)

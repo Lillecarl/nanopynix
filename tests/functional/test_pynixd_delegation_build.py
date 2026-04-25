@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import asyncssh
 import pytest
@@ -19,6 +19,9 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 log = structlog.get_logger(__name__)
 

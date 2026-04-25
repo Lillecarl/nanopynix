@@ -9,10 +9,10 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import asyncssh
 import structlog
 
 if TYPE_CHECKING:
+    import asyncssh
     from aiohttp import web
 
 from . import wire
@@ -341,9 +341,7 @@ class Server:
         if self.settings.idle_timeout:
             self.background_tasks.append(asyncio.create_task(self._idleness_watcher()))
 
-        if not (
-            self.ssh_server or self.unix_server or self.http_server or self.https_server
-        ):
+        if not (self.ssh_server or self.unix_server or self.http_server or self.https_server):
             log.warning("no_servers_started")
 
     async def wait_finished(self) -> None:

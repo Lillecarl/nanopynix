@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse, RequestContext, Role
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..wire import NixReader, NixWriter
 
 
 @dataclass

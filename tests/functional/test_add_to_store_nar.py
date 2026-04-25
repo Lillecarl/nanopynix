@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from pynixd import Server
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
     run_subproc,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pynixd import Server
 
 
 @pytest.mark.timeout(50)

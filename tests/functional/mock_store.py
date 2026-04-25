@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, cast
 
@@ -23,11 +22,13 @@ from pynixd.operations.query_closure_with_info import (
 from pynixd.psi import CpuUtil
 from pynixd.store import Store
 from pynixd.store_path import StorePath
-from pynixd.wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from pynixd.connection import ClientConn
     from pynixd.operations.base import OpRequest, Resp
+    from pynixd.wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
 
@@ -82,8 +83,8 @@ class MockConnection(Connection):
             async def finalize(self):
                 pass
 
-        self.r = cast(NixReader, DummyRW(f"{self.id}-r"))
-        self.w = cast(NixWriter, DummyRW(f"{self.id}-w"))
+        self.r = cast("NixReader", DummyRW(f"{self.id}-r"))
+        self.w = cast("NixWriter", DummyRW(f"{self.id}-w"))
 
     async def __aenter__(self) -> MockConnection:
         """Simulate the entry into a connection context (e.g. acquiring from pool)."""
@@ -233,7 +234,7 @@ class MockStore(Store):
         # Default handlers for discovery ops
         if isinstance(request, QueryAllValidPathsRequest):
             return cast(
-                Resp,
+                "Resp",
                 QueryAllValidPathsResponse(paths=self.tracker.known_paths),
             )
 
@@ -254,7 +255,7 @@ class MockStore(Store):
                         ca="",
                     ),
                 )
-            return cast(Resp, QueryClosureWithInfoResponse(infos=infos))
+            return cast("Resp", QueryClosureWithInfoResponse(infos=infos))
 
         log.warning(
             "mock_store_no_response",

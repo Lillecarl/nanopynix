@@ -12,18 +12,19 @@ Separate lifetimes for local and builder stores:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import structlog
 
-from .local_store_db import LocalStoreDB
 from .operations.collect_garbage import CollectGarbageRequest, CollectGarbageResponse
-from .store import Store
-from .store_path import StorePath
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .context import PynixdContext
+    from .local_store_db import LocalStoreDB
+    from .store import Store
+    from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 

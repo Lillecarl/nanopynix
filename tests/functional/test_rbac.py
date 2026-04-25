@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import structlog
 
-from pynixd import Server
 from tests.conftest import (
     NIX_BIN,
     SESSION_STORE_PREFIX,
     run_subproc,
 )
+
+if TYPE_CHECKING:
+    from pynixd import Server
 
 log = structlog.get_logger(__name__)
 

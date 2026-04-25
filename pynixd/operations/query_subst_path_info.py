@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..connection import ClientConn
-from ..wire import NixReader, NixWriter
 from .base import OperationLogs, OpRequest, OpResponse, SubstitutablePathInfo
+
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..wire import NixReader, NixWriter
 
 
 @dataclass

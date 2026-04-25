@@ -104,10 +104,7 @@ class BasicDerivation:
 
     @property
     def build_local(self) -> bool:
-        return (
-            self.env.get("pynixd_fast") == "1"
-            or self.env.get("preferLocalBuild") == "1"
-        )
+        return self.env.get("pynixd_fast") == "1" or self.env.get("preferLocalBuild") == "1"
 
     @property
     def required_system_features(self) -> set[str]:
@@ -130,11 +127,7 @@ class BasicDerivation:
 
     def serialize_for_stats(self) -> str:
         noisy = {"out", "bin", "dev", "lib", "include", "man", "doc"}
-        env_stable = {
-            k: v
-            for k, v in self.env.items()
-            if k not in noisy and not k.startswith("NIX_")
-        }
+        env_stable = {k: v for k, v in self.env.items() if k not in noisy and not k.startswith("NIX_")}
         parts = [
             f"B:{self.builder}",
             f"A:{' '.join(self.args)}",
@@ -186,9 +179,7 @@ class BasicDerivation:
 
     @property
     def has_ca_floating(self) -> bool:
-        return any(
-            o.is_floating_ca and not o.is_text_hashed for o in self.outputs.values()
-        )
+        return any(o.is_floating_ca and not o.is_text_hashed for o in self.outputs.values())
 
     @property
     def has_deferred(self) -> bool:

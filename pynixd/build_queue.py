@@ -12,13 +12,11 @@ import asyncio
 import heapq
 import time
 from dataclasses import dataclass, field
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 import structlog
 
 from . import metrics
-from .connection import ClientConn
-from .derived_path import DerivedPath
 from .operations.base import (
     BuildMode,
     BuildResult,
@@ -26,7 +24,11 @@ from .operations.base import (
     UnkeyedValidPathInfo,
 )
 from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
-from .store_path import StorePath
+
+if TYPE_CHECKING:
+    from .connection import ClientConn
+    from .derived_path import DerivedPath
+    from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -301,10 +303,7 @@ class BuildQueue:
                 existing = self.by_key[key]
                 if not existing.is_done:
                     log.debug("build_deduped", id=existing.id)
-                    if (
-                        scheduler_request_id is not None
-                        and existing.scheduler_request_id is None
-                    ):
+                    if scheduler_request_id is not None and existing.scheduler_request_id is None:
                         existing.scheduler_request_id = scheduler_request_id
                         if derived_paths_for_request:
                             sched_req = self.requests.get(scheduler_request_id)
@@ -385,11 +384,7 @@ class BuildQueue:
 
                     metrics.QUEUE_SIZE.labels(status="building").dec()
                     metrics.QUEUE_SIZE.labels(status="done").inc()
-                    status = (
-                        "success"
-                        if response.result.status == BuildResultStatus.BUILT
-                        else "failure"
-                    )
+                    status = "success" if response.result.status == BuildResultStatus.BUILT else "failure"
                     metrics.BUILDS_COMPLETED.labels(status=status).inc()
                     if b.build_time is not None:
                         metrics.BUILD_DURATION.observe(b.build_time)

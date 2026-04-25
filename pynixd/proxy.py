@@ -7,13 +7,12 @@ and dispatches them to request type handle() classmethods.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
 
 import asyncssh
 import structlog
 
 from . import wire
-from .build_queue import BuildQueue
 from .connection import ClientConn
 from .exceptions import BackendError, OpNotImplementedError
 from .operations import OP_REGISTRY
@@ -25,10 +24,15 @@ from .operations.base import (
     Role,
 )
 from .protocol import OptTrusted, get_extension_features
-from .scheduler import Scheduler
 from .stderr import StderrError
-from .store import Store
-from .wire import NixReader, NixWriter
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from .build_queue import BuildQueue
+    from .scheduler import Scheduler
+    from .store import Store
+    from .wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
 
@@ -201,8 +205,7 @@ class DaemonProxy:
             return local_resp
 
         raise OpNotImplementedError(
-            f"Extension operation {type(request).__name__} (op={request.op}) "
-            "not supported by any configured store",
+            f"Extension operation {type(request).__name__} (op={request.op}) not supported by any configured store",
         )
 
     async def dispatch(self, op_num: int) -> OpResponse | None:

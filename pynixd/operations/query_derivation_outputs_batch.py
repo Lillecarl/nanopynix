@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..drv_parser import read_drv_file
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
-from ..wire import NixReader, NixWriter
 from .base import OpRequest, OpResponse
 
 QUERY_DERIVATION_OUTPUTS_BATCH = """
@@ -22,6 +21,7 @@ WHERE vp_drv.path IN (SELECT value FROM json_each(?))
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..wire import NixReader, NixWriter
 
 
 @dataclass

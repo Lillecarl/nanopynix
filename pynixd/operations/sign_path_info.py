@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
-from ..wire import NixReader, NixWriter
 from .add_signatures import AddSignaturesRequest
 from .base import (
     OperationLogs,
@@ -21,6 +20,7 @@ from .base import (
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..wire import NixReader, NixWriter
 
 
 @dataclass

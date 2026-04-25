@@ -17,9 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from pathlib import Path
-from types import TracebackType
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import structlog
 
@@ -31,10 +29,15 @@ from .operations.base import (
     Resp,
 )
 from .protocol import get_extension_features
-from .wire import (
-    NixReader,
-    NixWriter,
-)
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    from types import TracebackType
+
+    from .wire import (
+        NixReader,
+        NixWriter,
+    )
 
 log = structlog.get_logger(__name__)
 stderr_log = structlog.get_logger("pynixd.stderr")

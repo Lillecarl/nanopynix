@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
-from ..wire import NixReader, NixWriter
 from .base import OperationLogs, OpRequest, OpResponse
 
 IS_VALID_PATH = "SELECT 1 FROM ValidPaths WHERE path = ? LIMIT 1"
@@ -14,6 +13,7 @@ IS_VALID_PATH = "SELECT 1 FROM ValidPaths WHERE path = ? LIMIT 1"
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..wire import NixReader, NixWriter
 
 
 @dataclass

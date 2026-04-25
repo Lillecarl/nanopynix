@@ -222,9 +222,7 @@ def compute_cpu_util(
     elapsed_wall_usec = int(elapsed_wall_sec * 1_000_000)
     total_capacity_usec = elapsed_wall_usec * (cores if cores is not None else 1.0)
     utilization = min((delta_usec / total_capacity_usec) * 100.0, 100.0)
-    throttled_pct = (
-        (curr.nr_throttled / curr.nr_periods * 100.0) if curr.nr_periods > 0 else 0.0
-    )
+    throttled_pct = (curr.nr_throttled / curr.nr_periods * 100.0) if curr.nr_periods > 0 else 0.0
     return CpuUtil(
         utilization=utilization,
         cores=cores if cores is not None else 1.0,

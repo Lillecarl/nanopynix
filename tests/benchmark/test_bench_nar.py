@@ -27,8 +27,8 @@ import json
 import os
 import subprocess
 import time
-from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import structlog
@@ -36,7 +36,6 @@ from conftest import NIX_BIN, _record, rmtree_robust
 from environs import env
 
 from pynixd import wire
-from pynixd.operations.base import ValidPathInfo
 from pynixd.operations.nar_from_path import NarFromPathRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import (
@@ -46,6 +45,11 @@ from pynixd.store import (
     Store,
 )
 from pynixd.store_path import StorePath
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from pynixd.operations.base import ValidPathInfo
 
 log = structlog.get_logger(__name__)
 

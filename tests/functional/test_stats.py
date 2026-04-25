@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from contextlib import asynccontextmanager
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import structlog
@@ -39,6 +39,9 @@ from pynixd.psi import CpuUtil
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import STORE_PREFIX, get_test_store_kwargs, rmtree_robust
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 log = structlog.get_logger(__name__)
 

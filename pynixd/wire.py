@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import struct
-from collections.abc import AsyncIterator, Iterable
 from typing import TYPE_CHECKING
 
 import asyncssh
@@ -42,7 +41,7 @@ from .constants import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import AsyncIterator, Iterable
 
 
 _CHUNK_SIZE = env.int("PYNIXD_CHUNK_SIZE", 1024 * 1024)

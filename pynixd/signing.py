@@ -10,16 +10,16 @@ from __future__ import annotations
 
 from base64 import b64decode, b64encode
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import nacl.signing
 from environs import env
 
-from .store_path import StorePath
-
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .operations.base import ValidPathInfo
+    from .store_path import StorePath
 
 
 # Nix32 alphabet (kept for reference; encoding is in utils.py)

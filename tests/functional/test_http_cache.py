@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import random
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiohttp
 import pytest
@@ -14,7 +15,6 @@ from pynixd import Server
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
-from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
     SESSION_HTTP_PASS,
@@ -24,6 +24,9 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
+
+if TYPE_CHECKING:
+    from pynixd.store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -165,7 +168,7 @@ async def test_cache_as_substituter() -> None:
             "store",
             "ls",
             "--store",
-            f"file://{str(subst_store_path)}",
+            f"file://{subst_store_path!s}",
             str(target_path),
         ]
         rc, stdout, stderr, _ = await run_subproc(cmd)

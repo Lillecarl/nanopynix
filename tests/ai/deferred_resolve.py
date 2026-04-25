@@ -94,10 +94,7 @@ def downstream_placeholder_unknown_ca_output(
     drv_name: str,
     output_name: str,
 ) -> str:
-    clear_text = (
-        f"nix-upstream-output:{drv_path_hash_part}:"
-        f"{output_path_name(drv_name, output_name)}"
-    )
+    clear_text = f"nix-upstream-output:{drv_path_hash_part}:{output_path_name(drv_name, output_name)}"
     h = hashlib.sha256(clear_text.encode()).digest()
     return "/" + nix32_encode(h)
 
@@ -158,7 +155,7 @@ def hash_derivation_modulo(
     """
     aterm = _unparse_basic_derivation(drv, mask_outputs=mask_outputs)
     h = hashlib.sha256(aterm.encode()).digest()
-    return {name: h for name in drv.outputs}
+    return dict.fromkeys(drv.outputs, h)
 
 
 def _rewrite_strings(s: str, rewrites: dict[str, str]) -> str:
@@ -237,11 +234,7 @@ def resolve_derivation(
     # basename after the hash- prefix, minus .drv extension
     drv_path_str = str(drv_path)
     nix_name_with_ext = _nix_store_path_name(drv_path_str)
-    drv_name = (
-        nix_name_with_ext[:-4]
-        if nix_name_with_ext.endswith(".drv")
-        else nix_name_with_ext
-    )
+    drv_name = nix_name_with_ext[:-4] if nix_name_with_ext.endswith(".drv") else nix_name_with_ext
 
     # Compute the placeholder for each input drv output
     rewrites: dict[str, str] = {}
@@ -252,9 +245,7 @@ def resolve_derivation(
         input_basename = input_drv_str.rsplit("/", 1)[-1]
         input_hash_part = input_basename.split("-", 1)[0]
         input_nix_name = _nix_store_path_name(input_drv_str)
-        input_drv_name = (
-            input_nix_name[:-4] if input_nix_name.endswith(".drv") else input_nix_name
-        )
+        input_drv_name = input_nix_name[:-4] if input_nix_name.endswith(".drv") else input_nix_name
 
         for output_name in output_names:
             placeholder = downstream_placeholder_unknown_ca_output(
@@ -423,8 +414,7 @@ async def main() -> None:
     print(f"Deferred .drv input_drvs: {list(deferred_parsed.input_drvs.keys())}")
     for o in deferred_parsed.outputs:
         print(
-            f"  output: name={o.name} path={o.path!r} "
-            f"hash_algo={o.hash_algo!r} hash_value={o.hash_value!r}",
+            f"  output: name={o.name} path={o.path!r} hash_algo={o.hash_algo!r} hash_value={o.hash_value!r}",
         )
 
     # ── Step 3: Resolve the deferred derivation ──
@@ -441,9 +431,7 @@ async def main() -> None:
     ca_basename = str(ca_drv_path).rsplit("/", 1)[-1]
     ca_hash_part = ca_basename.split("-", 1)[0]
     ca_nix_name = _nix_store_path_name(str(ca_drv_path))
-    ca_drv_name_debug = (
-        ca_nix_name[:-4] if ca_nix_name.endswith(".drv") else ca_nix_name
-    )
+    ca_drv_name_debug = ca_nix_name[:-4] if ca_nix_name.endswith(".drv") else ca_nix_name
 
     placeholder_out = downstream_placeholder_unknown_ca_output(
         ca_hash_part,

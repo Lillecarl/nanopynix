@@ -8,16 +8,20 @@ for each client. Used for testing (avoids SSH) and local daemon mode.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
 from .operations.base import Role
 from .proxy import DaemonProxy
-from .scheduler import Scheduler
-from .store import Store
 from .wire import UnixNixReader, UnixNixWriter
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
+
+    from .scheduler import Scheduler
+    from .store import Store
 
 log = structlog.get_logger(__name__)
 

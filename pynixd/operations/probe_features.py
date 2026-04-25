@@ -17,12 +17,12 @@ import structlog
 
 from ..operations.base import OpRequest, OpResponse
 from ..system_features import KNOWN_FEATURES
-from ..wire import NixReader, NixWriter
 from .probe_systems import _send_probe
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
 
@@ -73,8 +73,7 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
                 if feature == "kvm":
                     args = [
                         "-c",
-                        "test -w /dev/kvm && echo kvm > $out"
-                        " || { echo 'kvm: /dev/kvm not writable' >&2; exit 1; }",
+                        "test -w /dev/kvm && echo kvm > $out || { echo 'kvm: /dev/kvm not writable' >&2; exit 1; }",
                     ]
                 else:
                     args = ["-c", f"echo {feature} > $out"]

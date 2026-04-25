@@ -18,8 +18,8 @@ import asyncio
 import os
 import subprocess
 import time
-from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import structlog
@@ -36,6 +36,9 @@ from pynixd.store import (
     Store,
 )
 from pynixd.store_path import StorePath
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 log = structlog.get_logger(__name__)
 

@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
-from ..wire import NixReader, NixWriter
 from .base import OperationLogs, OpRequest, OpResponse
 
 QUERY_PATH_FROM_HASH_PART = """
@@ -16,6 +15,7 @@ SELECT path FROM ValidPaths WHERE path >= ? AND path < ? LIMIT 1
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..wire import NixReader, NixWriter
 
 
 @dataclass

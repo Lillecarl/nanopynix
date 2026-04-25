@@ -10,7 +10,6 @@ import contextlib
 import os
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING
 
 import structlog
@@ -30,6 +29,8 @@ from .psi import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
     from .config import PynixdSettings
 
 log = structlog.get_logger(__name__)
@@ -52,7 +53,7 @@ class ResourceGate:
             await asyncio.wait_for(self.cpu_clear.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             raise ResourceExhaustedError(
-                "CPU pressure remains too high after timeout"
+                "CPU pressure remains too high after timeout",
             ) from None
 
     async def wait_mem_clear(self, timeout: float = 5.0) -> None:
@@ -70,7 +71,7 @@ class ResourceGate:
             await asyncio.wait_for(self.io_clear.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             raise ResourceExhaustedError(
-                "IO pressure remains too high after timeout"
+                "IO pressure remains too high after timeout",
             ) from None
 
 
@@ -390,8 +391,7 @@ class LocalPSIMonitor(ResourceMonitor):
 
             if (
                 snap.memory.some_avg10 < self.settings.psi_mem_threshold
-                and self.health.meminfo.mem_available
-                >= self.settings.min_available_memory_mb * 1024
+                and self.health.meminfo.mem_available >= self.settings.min_available_memory_mb * 1024
             ):
                 self.gate.mem_clear.set()
 

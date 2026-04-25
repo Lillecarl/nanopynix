@@ -37,9 +37,7 @@ async def test_scheduler_flood_queueing():
     settings.ranking.cpu_idle_weight = 200.0
     settings.ranking.concurrency_penalty = 100.0
     settings.ranking.min_schedule_score = 1.0
-    settings.ranking.thundering_herd_penalty = (
-        200.0  # prevent multiple in one pass to be safe
-    )
+    settings.ranking.thundering_herd_penalty = 200.0  # prevent multiple in one pass to be safe
 
     ctx = PynixdContext(
         settings=settings,

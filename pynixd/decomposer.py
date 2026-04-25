@@ -142,8 +142,7 @@ class BuildDecomposer:
                         continue
                     dyn_outputs = dyn_parsed.output_paths()
                     has_unbuilt = any(
-                        p == StorePath("") or not self.local_store.tracker.has_path(p)
-                        for p in dyn_outputs.values()
+                        p == StorePath("") or not self.local_store.tracker.has_path(p) for p in dyn_outputs.values()
                     )
                     if has_unbuilt:
                         to_build.add(dyn_drv_path)
@@ -195,9 +194,7 @@ class BuildDecomposer:
 
         for _dp, _output_names, drv_request in resolved:
             if drv_request.drv_path in parsed_cache:
-                drv_request.derivation.is_dynamic = parsed_cache[
-                    drv_request.drv_path
-                ].is_dynamic
+                drv_request.derivation.is_dynamic = parsed_cache[drv_request.drv_path].is_dynamic
             else:
                 try:
                     parsed = self.read_drv_fn(
@@ -218,7 +215,8 @@ class BuildDecomposer:
                 )
             required_paths.add(
                 StorePath(
-                    drv_request.drv_path, extrainfo=f"drv_path of {drv_path_str}"
+                    drv_request.drv_path,
+                    extrainfo=f"drv_path of {drv_path_str}",
                 ),
             )
             build_id, _future = await self.scheduler.build_derivation(

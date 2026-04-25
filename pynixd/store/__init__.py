@@ -7,10 +7,10 @@ from .local import LocalSocketStore
 from .ssh import SSHSocketStore, SSHSubprocessStore
 
 __all__ = [
-    "Store",
-    "ProbeState",
-    "get_current_system",
     "LocalSocketStore",
-    "SSHSubprocessStore",
+    "ProbeState",
     "SSHSocketStore",
+    "SSHSubprocessStore",
+    "Store",
+    "get_current_system",
 ]

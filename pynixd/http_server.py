@@ -13,9 +13,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import bz2
+import contextlib
 import gzip
 import lzma
-import contextlib
 import os
 import ssl
 from http import HTTPStatus
@@ -30,18 +30,17 @@ from aiohttp import web
 from passlib.apache import HtpasswdFile
 
 from . import metrics
-from .local_store_db import LocalStoreDB
 from .operations.add_to_store_nar import AddToStoreNarRequest
 from .operations.base import ValidPathInfo
 from .operations.nar_from_path import NarFromPathRequest
 from .operations.query_path_from_hash_part import QueryPathFromHashPartRequest
 from .operations.query_path_info import QueryPathInfoRequest
-from .store import Store
 from .store_path import StorePath
-from .wire import NixWriter
 
 if TYPE_CHECKING:
-    pass
+    from .local_store_db import LocalStoreDB
+    from .store import Store
+    from .wire import NixWriter
 
 log = structlog.get_logger(__name__)
 
@@ -149,9 +148,7 @@ class PynixdHttpServer:
                     status=HTTPStatus.FORBIDDEN,
                     text="Invalid credentials\n",
                 )
-        elif self.username is not None and (
-            user != self.username or passwd != self.password
-        ):
+        elif self.username is not None and (user != self.username or passwd != self.password):
             return web.Response(
                 status=HTTPStatus.FORBIDDEN,
                 text="Invalid credentials\n",
