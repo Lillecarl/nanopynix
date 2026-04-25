@@ -115,14 +115,13 @@ async def test_prometheus_metrics_endpoint():
         port = server.http_bound_port
         url = f"http://127.0.0.1:{port}/metrics"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                assert resp.status == 200
-                text = await resp.text()
+        async with aiohttp.ClientSession() as session, session.get(url) as resp:
+            assert resp.status == 200
+            text = await resp.text()
 
-                # Check for our custom metrics
-                assert "pynixd_build_queue_size" in text
-                assert "pynixd_store_available_slots" in text
+            # Check for our custom metrics
+            assert "pynixd_build_queue_size" in text
+            assert "pynixd_store_available_slots" in text
 
     finally:
         await server.close()

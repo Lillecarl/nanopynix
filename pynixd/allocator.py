@@ -118,7 +118,6 @@ class TelemetryStoreRanker(StoreRanker):
 
             # 5. Predicted Load Penalty (- points)
             # (Requires build duration estimation, placeholder for now)
-            # score -= predicted_mins * self.settings.predicted_load_penalty_per_min
 
             # 6. Thundering Herd Penalty (- points)
             assigned = assigned_this_pass.get(store.id, 0)

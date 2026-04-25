@@ -6,6 +6,7 @@ Consolidated monitoring logic for local and remote (SSH) stores.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import time
 from abc import ABC, abstractmethod
@@ -50,7 +51,9 @@ class ResourceGate:
         try:
             await asyncio.wait_for(self.cpu_clear.wait(), timeout=timeout)
         except asyncio.TimeoutError:
-            raise ResourceExhaustedError("CPU pressure remains too high after timeout")
+            raise ResourceExhaustedError(
+                "CPU pressure remains too high after timeout"
+            ) from None
 
     async def wait_mem_clear(self, timeout: float = 5.0) -> None:
         """Wait for Memory pressure to drop below threshold."""
@@ -59,14 +62,16 @@ class ResourceGate:
         except asyncio.TimeoutError:
             raise ResourceExhaustedError(
                 "Memory pressure remains too high after timeout",
-            )
+            ) from None
 
     async def wait_io_clear(self, timeout: float = 5.0) -> None:
         """Wait for IO pressure to drop below threshold."""
         try:
             await asyncio.wait_for(self.io_clear.wait(), timeout=timeout)
         except asyncio.TimeoutError:
-            raise ResourceExhaustedError("IO pressure remains too high after timeout")
+            raise ResourceExhaustedError(
+                "IO pressure remains too high after timeout"
+            ) from None
 
 
 class ResourceMonitor(ABC):
@@ -93,10 +98,8 @@ class ResourceMonitor(ABC):
         self.running = False
         if self.task:
             self.task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self.task
-            except asyncio.CancelledError:
-                pass
 
 
 class DummyResourceMonitor(ResourceMonitor):
@@ -150,10 +153,9 @@ class GenericResourcePoller(ResourceMonitor):
                 text = await self.read_fn("/sys/fs/cgroup/cpu.max")
                 self.cpu_cores = parse_cpu_max(text)
 
-            if self.cpu_cores is None:
-                if await self.exists_fn("/proc/stat"):
-                    text = await self.read_fn("/proc/stat")
-                    self.cpu_cores = float(count_cpus_from_proc_stat(text))
+            if self.cpu_cores is None and await self.exists_fn("/proc/stat"):
+                text = await self.read_fn("/proc/stat")
+                self.cpu_cores = float(count_cpus_from_proc_stat(text))
         except (PermissionError, FileNotFoundError, OSError):
             log.info("resource_poller_metadata_unavailable", info="cpu_cores")
             self.cpu_cores = 1.0
@@ -386,12 +388,12 @@ class LocalPSIMonitor(ResourceMonitor):
             if snap.cpu.some_avg10 < self.settings.psi_cpu_threshold:
                 self.gate.cpu_clear.set()
 
-            if snap.memory.some_avg10 < self.settings.psi_mem_threshold:
-                if (
-                    self.health.meminfo.mem_available
-                    >= self.settings.min_available_memory_mb * 1024
-                ):
-                    self.gate.mem_clear.set()
+            if (
+                snap.memory.some_avg10 < self.settings.psi_mem_threshold
+                and self.health.meminfo.mem_available
+                >= self.settings.min_available_memory_mb * 1024
+            ):
+                self.gate.mem_clear.set()
 
             if snap.io.some_avg10 < self.settings.psi_io_threshold:
                 self.gate.io_clear.set()

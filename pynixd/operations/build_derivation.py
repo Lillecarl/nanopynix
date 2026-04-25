@@ -119,15 +119,18 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         )
         response = await future
 
-        if isinstance(response, BuildDerivationResponse):
-            if response.result.status != 0 and response.result.error_msg:
-                # Only send StderrNext if the error came from a backend daemon
-                # (response has real daemon logs). Scheduler-generated
-                # incompatibility errors (empty logs) are already sent as
-                # StderrNext by the scheduler — avoid double-reporting.
-                if response.logs.messages:
-                    ctx.proxy.client.queue.put_nowait(
-                        StderrNext(text=f"pynixd: {response.result.error_msg}\n"),
-                    )
+        if isinstance(response, BuildDerivationResponse):  # noqa: SIM102
+            # Only send StderrNext if the error came from a backend daemon
+            # (response has real daemon logs). Scheduler-generated
+            # incompatibility errors (empty logs) are already sent as
+            # StderrNext by the scheduler — avoid double-reporting.
+            if (
+                response.result.status != 0
+                and response.result.error_msg
+                and response.logs.messages
+            ):
+                ctx.proxy.client.queue.put_nowait(
+                    StderrNext(text=f"pynixd: {response.result.error_msg}\n"),
+                )
         self.logger.debug("responded_op")
         return response

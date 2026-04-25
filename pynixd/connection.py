@@ -16,6 +16,7 @@ Lifecycle:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from types import TracebackType
 from typing import cast
@@ -65,10 +66,8 @@ class ClientConn:
         """Stop the drain task."""
         if self.drain_task is not None:
             self.drain_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self.drain_task
-            except asyncio.CancelledError:
-                pass
             self.drain_task = None
 
     async def flush(self) -> None:
@@ -149,9 +148,8 @@ class Connection:
         if exc_type is not None:
             self.dirty = True
 
-        if not self.dirty:
-            if await self.r.is_dirty() or await self.w.is_dirty():
-                self.dirty = True
+        if not self.dirty and (await self.r.is_dirty() or await self.w.is_dirty()):
+            self.dirty = True
 
     async def connect(self) -> None:
         """Perform daemon protocol handshake."""
@@ -161,10 +159,8 @@ class Connection:
     async def close(self) -> None:
         """Close the connection and release the underlying transport."""
         self.connected = False
-        try:
+        with contextlib.suppress(Exception):
             await self.w.close()
-        except Exception:
-            pass
 
     async def call(
         self,

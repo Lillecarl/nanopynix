@@ -16,6 +16,7 @@ Future directions:
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass, field
 
@@ -157,10 +158,8 @@ def parse_cpu_stat(text: str) -> CgroupCpuStat:
     for line in text.splitlines():
         parts = line.split()
         if len(parts) == 2:
-            try:
+            with contextlib.suppress(ValueError):
                 fields[parts[0]] = int(parts[1])
-            except ValueError:
-                pass
     return CgroupCpuStat(
         usage_usec=fields.get("usage_usec", 0),
         user_usec=fields.get("user_usec", 0),
@@ -243,10 +242,8 @@ def parse_meminfo(text: str) -> MemInfo:
         # Values are in kB, strip the unit
         parts = rest.split()
         if parts:
-            try:
+            with contextlib.suppress(ValueError):
                 fields[key.strip()] = int(parts[0])
-            except ValueError:
-                pass
     return MemInfo(
         mem_total=fields.get("MemTotal", 0),
         mem_available=fields.get("MemAvailable", 0),

@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
@@ -79,10 +79,8 @@ class ConnectionPool:
                     )
                     if conn in self.all_conns:
                         self.all_conns.remove(conn)
-                    try:
+                    with suppress(Exception):
                         await conn.close()
-                    except Exception:
-                        pass
                 else:
                     still_idle.append((conn, returned_at))
             self.idle_conns = still_idle
@@ -100,10 +98,8 @@ class ConnectionPool:
                 )
                 if candidate in self.all_conns:
                     self.all_conns.remove(candidate)
-                try:
+                with suppress(Exception):
                     await candidate.close()
-                except Exception:
-                    pass
                 continue
 
             if candidate.dirty or await candidate.r.is_dirty():
@@ -115,10 +111,8 @@ class ConnectionPool:
                 )
                 if candidate in self.all_conns:
                     self.all_conns.remove(candidate)
-                try:
+                with suppress(Exception):
                     await candidate.close()
-                except Exception:
-                    pass
                 continue
 
             log.debug(
@@ -184,10 +178,8 @@ class ConnectionPool:
                 # Discard re-entrant connections immediately to avoid pool bloat
                 if conn in self.all_conns:
                     self.all_conns.remove(conn)
-                try:
+                with suppress(Exception):
                     await conn.close()
-                except Exception:
-                    pass
             return
 
         # Wait for memory safety before acquiring
@@ -222,10 +214,8 @@ class ConnectionPool:
                         )
                         if conn in self.all_conns:
                             self.all_conns.remove(conn)
-                        try:
+                        with suppress(Exception):
                             await conn.close()
-                        except Exception:
-                            pass
                     else:
                         self.idle_conns.append((conn, time.monotonic()))
                         self.start_sweep()
@@ -242,16 +232,12 @@ class ConnectionPool:
         """Close all pooled connections and stop sweep task."""
         if self.sweep_task is not None:
             self.sweep_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self.sweep_task
-            except asyncio.CancelledError:
-                pass
             self.sweep_task = None
 
         for conn in self.all_conns:
-            try:
+            with suppress(Exception):
                 await conn.close()
-            except (ProcessLookupError, Exception):
-                pass
         self.all_conns.clear()
         self.idle_conns.clear()

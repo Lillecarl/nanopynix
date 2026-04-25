@@ -12,6 +12,7 @@ See PynixdSettings for the full list.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 import structlog
@@ -56,10 +57,8 @@ def main() -> None:
         cache_logger_on_first_use=True,
     )
 
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(async_main())
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":

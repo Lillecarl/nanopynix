@@ -125,7 +125,7 @@ class SSHNixReader(NixReader):
         try:
             return await self.reader.readexactly(n)
         except asyncssh.misc.ConnectionLost:
-            raise EOFError("SSH connection lost")
+            raise EOFError("SSH connection lost") from None
 
     def _transport_is_dirty(self) -> bool:
         if hasattr(self.reader, "get_read_buffer_size"):

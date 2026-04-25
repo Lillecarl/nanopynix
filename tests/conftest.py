@@ -284,11 +284,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         # pytest.Item doesn't officially expose 'obj' in its type definition,
         # but it exists for Function nodes.
-        if isinstance(item, pytest.Function) and asyncio.iscoroutinefunction(item.obj):
-            # Check if already wrapped to avoid double-wrapping
-            if not getattr(item.obj, "_pynixd_timeout_wrapped", False):
-                item.obj = _wrap_with_asyncio_timeout(item, default_timeout)
-                setattr(item.obj, "_pynixd_timeout_wrapped", True)
+        if (
+            isinstance(item, pytest.Function)
+            and asyncio.iscoroutinefunction(item.obj)
+            and not getattr(item.obj, "_pynixd_timeout_wrapped", False)
+        ):
+            item.obj = _wrap_with_asyncio_timeout(item, default_timeout)
+            item.obj._pynixd_timeout_wrapped = True
 
 
 def _wrap_with_asyncio_timeout(item: pytest.Function, default_timeout: float):

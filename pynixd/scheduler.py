@@ -309,24 +309,23 @@ class Scheduler:
                 build.expected_duration is not None
                 and build.expected_duration <= TINY_BUILD_THRESHOLD_MS
                 and self.local_store.supports_derivation(build.platform, build_features)
+                and self.local_store.in_flight < 4
             ):
-                # Is local store available? (We don't want to swamp it either)
-                # But tiny builds are "free" enough that we can be liberal.
-                # Use in_flight as a soft cap for local store too
-                if self.local_store.in_flight < 4:
-                    log.info(
-                        "build_fasttracked_local",
-                        build_id=build.id,
-                        duration=build.expected_duration,
-                    )
-                    metrics.QUEUE_SIZE.labels(status="pending").dec()
-                    metrics.QUEUE_SIZE.labels(status="building").inc()
-                    if build.wait_time is not None:
-                        metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
-                    build.build_task = asyncio.create_task(
-                        self.execute_build(build, self.local_store),
-                    )
-                    continue
+                # Tiny builds are fast-tracked to the local store.
+                # Use in_flight as a soft cap to avoid swamping it.
+                log.info(
+                    "build_fasttracked_local",
+                    build_id=build.id,
+                    duration=build.expected_duration,
+                )
+                metrics.QUEUE_SIZE.labels(status="pending").dec()
+                metrics.QUEUE_SIZE.labels(status="building").inc()
+                if build.wait_time is not None:
+                    metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
+                build.build_task = asyncio.create_task(
+                    self.execute_build(build, self.local_store),
+                )
+                continue
 
             # 2. Standard remote backend assignment
             ranked = self.allocator.rank_stores(
@@ -502,7 +501,7 @@ class Scheduler:
                     ca_output_paths: set[StorePath] = set()
                     if resp.result.built_outputs:
                         for (
-                            drv_output_str,
+                            _drv_output_str,
                             realisation,
                         ) in resp.result.built_outputs.items():
                             out_path = realisation.get("outPath")

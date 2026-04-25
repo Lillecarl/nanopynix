@@ -85,7 +85,9 @@ class ProbeSystemsRequest(OpRequest[ProbeSystemsResponse]):
             ],
         )
 
-        systems = {system for system, (_, ok) in zip(candidates, results) if ok}
+        systems = {
+            system for system, (_, ok) in zip(candidates, results, strict=True) if ok
+        }
 
         log.info("systems_probed", store_id=store.id, systems=sorted(systems))
         return ProbeSystemsResponse(systems=systems)

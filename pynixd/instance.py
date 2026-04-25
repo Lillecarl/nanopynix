@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from enum import Enum, auto
 from pathlib import Path
@@ -391,10 +392,8 @@ class Server:
 
         for task in self.background_tasks:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
         self.background_tasks.clear()
 
         await self.local_store.close()

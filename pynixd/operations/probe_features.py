@@ -100,7 +100,7 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
 
         results = await asyncio.gather(*probes)
         feature_matrix: dict[str, set[str]] = {s: set() for s in self.systems}
-        for (system, feature), (_, ok) in zip(probe_keys, results):
+        for (system, feature), (_, ok) in zip(probe_keys, results, strict=True):
             if ok:
                 feature_matrix[system].add(feature)
 

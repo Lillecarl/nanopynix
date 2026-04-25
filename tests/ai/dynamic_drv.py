@@ -144,7 +144,6 @@ async def main() -> None:
     assert rc == 0
     producing_drv_path = StorePath(stdout.strip())
     print(f"producingDrv .drv path: {producing_drv_path}")
-    # producing_out_sp = StorePath(producing_out).with_store_prefix()
 
     # Step 3: Inspect producingDrv .drv
     print()
@@ -157,7 +156,7 @@ async def main() -> None:
         f"outputs: {[(o.name, o.path, o.hash_algo, o.hash_value) for o in parsed_producing.outputs]}",
     )
     print(f"input_srcs: {sorted(str(p) for p in parsed_producing.input_srcs)}")
-    print(f"input_drvs: {sorted(str(p) for p in parsed_producing.input_drvs.keys())}")
+    print(f"input_drvs: {sorted(str(p) for p in parsed_producing.input_drvs)}")
     print(f"dynamic_input_drvs: {parsed_producing.dynamic_input_drvs}")
 
     for o in parsed_producing.outputs:
@@ -206,7 +205,7 @@ async def main() -> None:
                     f"wrapper outputs: {[(o.name, o.path, o.hash_algo, o.hash_value) for o in wrapper_parsed.outputs]}",
                 )
                 print(
-                    f"wrapper input_drvs: {sorted(str(p) for p in wrapper_parsed.input_drvs.keys())}",
+                    f"wrapper input_drvs: {sorted(str(p) for p in wrapper_parsed.input_drvs)}",
                 )
                 print(
                     f"wrapper dynamic_input_drvs: {wrapper_parsed.dynamic_input_drvs}",

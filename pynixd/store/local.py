@@ -132,7 +132,6 @@ class LocalSocketStore(Store):
         env["NIX_DATA_DIR"] = str(self.store_path / "share")
         env["NIX_LOG_DIR"] = str(self.store_path / "var/log/nix")
         env["NIX_STATE_DIR"] = str(self.store_path / "var/nix")
-        # env["NIX_STORE_DIR"] = str(self.store_path / "store") # this one is evil and should not be changed
 
         self.daemon_proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -154,7 +153,7 @@ class LocalSocketStore(Store):
             )
 
         # Socket file exists but daemon may not be listening yet — probe
-        for attempt in range(100):
+        for _attempt in range(100):
             try:
                 r, w = await asyncio.open_unix_connection(str(self.socket_path))
                 w.close()

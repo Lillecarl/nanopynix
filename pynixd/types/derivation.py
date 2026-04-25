@@ -123,10 +123,7 @@ class BasicDerivation:
     def supports_lix(self) -> bool:
         if self.is_dynamic:
             return False
-        for o in self.outputs.values():
-            if o.is_ca or o.is_deferred:
-                return False
-        return True
+        return all(not (o.is_ca or o.is_deferred) for o in self.outputs.values())
 
     def output_paths(self) -> dict[str, StorePath]:
         return {name: StorePath(o.path) for name, o in self.outputs.items()}

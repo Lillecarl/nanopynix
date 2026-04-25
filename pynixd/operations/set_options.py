@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from ..store import Store
 
 # Silence SetOptions by default — it's extremely verbose
-# logging.getLogger("pynixd.operations.SetOptionsRequest").setLevel(logging.WARNING)
 
 
 @dataclass

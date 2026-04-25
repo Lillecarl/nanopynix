@@ -193,7 +193,7 @@ class BuildDecomposer:
 
         drv_to_build_id: dict[str, int] = {}
 
-        for dp, output_names, drv_request in resolved:
+        for _dp, _output_names, drv_request in resolved:
             if drv_request.drv_path in parsed_cache:
                 drv_request.derivation.is_dynamic = parsed_cache[
                     drv_request.drv_path
@@ -227,7 +227,7 @@ class BuildDecomposer:
                 required_paths,
                 platform=drv_request.derivation.platform,
                 scheduler_request_id=sched_req.id,
-                derived_paths_for_request={dp},
+                derived_paths_for_request={_dp},
             )
             drv_to_build_id[drv_path_str] = build_id
             log.info(
@@ -237,7 +237,7 @@ class BuildDecomposer:
                 scheduler_request_id=sched_req.id,
             )
 
-        for dp, output_names, drv_request in resolved:
+        for _dp, _output_names, drv_request in resolved:
             drv_path_str = str(drv_request.drv_path)
             parsed = parsed_cache.get(drv_request.drv_path)
             if parsed is None:

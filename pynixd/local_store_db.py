@@ -19,7 +19,7 @@ import json
 import os
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -489,10 +489,8 @@ class LocalStoreDB:
         """Stop flush task, flush pending writes, close database."""
         if self.flush_task is not None:
             self.flush_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self.flush_task
-            except asyncio.CancelledError:
-                pass
             self.flush_task = None
         await self.flush_regtime()
         await self.close_db_pool()
@@ -500,10 +498,8 @@ class LocalStoreDB:
     async def close_db_pool(self) -> None:
         async with self._pool_lock:
             for db in self._all_conns:
-                try:
+                with suppress(Exception):
                     await db.close()
-                except Exception:
-                    pass
             self._all_conns.clear()
             self._idle_conns.clear()
             self.db_path = None

@@ -91,7 +91,7 @@ class GarbageCollector:
 
         total_deleted = 0
         total_freed = 0
-        for store, result in zip(stores_for_tasks, results):
+        for store, result in zip(stores_for_tasks, results, strict=True):
             if isinstance(result, BaseException):
                 log.warning("gc_store_failed", store_id=store.id, error=result)
             elif isinstance(result, CollectGarbageResponse):

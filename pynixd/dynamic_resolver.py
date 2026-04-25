@@ -233,7 +233,7 @@ class DynamicDerivationResolver:
             sp = StorePath(inp)
             if sp not in build.required_paths:
                 build.required_paths[sp] = UnkeyedValidPathInfo()
-        for name, o in resolved.outputs.items():
+        for _name, o in resolved.outputs.items():
             if o.path:
                 sp = StorePath(o.path)
                 if sp not in build.required_paths:
@@ -270,7 +270,7 @@ class DynamicDerivationResolver:
             return
 
         # Build the dynamic_output_paths map from dependency builds:
-        # {(outer_drv_path, outer_output, inner_output): actual_store_path}
+
         dynamic_output_paths: dict[tuple[StorePath, str, str], StorePath] = {}
 
         # First, collect all dep build realisations, keyed by drv_path
@@ -427,7 +427,7 @@ class DynamicDerivationResolver:
             sp = StorePath(inp)
             if sp not in build.required_paths:
                 build.required_paths[sp] = UnkeyedValidPathInfo()
-        for name, o in resolved.outputs.items():
+        for _name, o in resolved.outputs.items():
             if o.path:
                 sp = StorePath(o.path)
                 if sp not in build.required_paths:

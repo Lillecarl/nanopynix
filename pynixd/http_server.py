@@ -15,6 +15,7 @@ import base64
 import bz2
 import gzip
 import lzma
+import contextlib
 import os
 import ssl
 from http import HTTPStatus
@@ -148,12 +149,13 @@ class PynixdHttpServer:
                     status=HTTPStatus.FORBIDDEN,
                     text="Invalid credentials\n",
                 )
-        elif self.username is not None:
-            if user != self.username or passwd != self.password:
-                return web.Response(
-                    status=HTTPStatus.FORBIDDEN,
-                    text="Invalid credentials\n",
-                )
+        elif self.username is not None and (
+            user != self.username or passwd != self.password
+        ):
+            return web.Response(
+                status=HTTPStatus.FORBIDDEN,
+                text="Invalid credentials\n",
+            )
 
         return await handler(request)
 
@@ -434,10 +436,8 @@ class PynixdHttpServer:
             )
         finally:
             # Clean up temporary NAR
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(nar_temp_path)
-            except OSError:
-                pass
 
         self.store.add_path_info(vinfo)
         self.store.tracker.add_known_path(vinfo.path)

@@ -514,9 +514,11 @@ class NixConfig:
     def __post_init__(self) -> None:
         for f in type(self).__dataclass_fields__.values():
             val = getattr(self, f.name)
-            if isinstance(val, (NixBool, NixInt, NixStr, NixList)):
-                if val._parent is not self:
-                    object.__setattr__(self, f.name, replace(val, _parent=self))
+            if (
+                isinstance(val, (NixBool, NixInt, NixStr, NixList))
+                and val._parent is not self
+            ):
+                object.__setattr__(self, f.name, replace(val, _parent=self))
 
     # ── Rendering ──────────────────────────────────────────────────
 

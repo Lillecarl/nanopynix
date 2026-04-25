@@ -89,10 +89,8 @@ class ParsedDerivation:
     outputs: list[OutputInfo] = field(default_factory=list)
 
     input_drvs: dict[StorePath, list[str]] = field(default_factory=dict)
-    # input_drvs: {drv_path: [output_name, ...]}
 
     input_srcs: set[StorePath] = field(default_factory=set)
-    # input_srcs: {store_path, ...}
 
     platform: str = ""
     builder: str = ""
@@ -144,7 +142,6 @@ class ParsedDerivation:
                 entry["hash"] = o.hash_value
             outputs[o.name] = entry
 
-        # inputDrvs: {drvPath: {outputs: [...], dynamicOutputs: {...}}}
         input_drvs: dict[str, NixInputDrvShow] = {}
         # Merge simple and dynamic entries
         all_drv_paths = set(self.input_drvs) | set(self.dynamic_input_drvs)
@@ -543,7 +540,7 @@ def collect_required_paths(
                 queue.append(input_drv)
 
         # Dynamic input derivations (DrvWithVersion format)
-        # dynamic_input_drvs: {drv_path: {output_name: [nested_output_names]}}
+
         for dyn_drv_path, output_deps in parsed.dynamic_input_drvs.items():
             if dyn_drv_path not in paths:
                 paths.add(dyn_drv_path)

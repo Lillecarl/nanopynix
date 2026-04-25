@@ -5,6 +5,7 @@ SSH Store implementations for pynixd.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -190,10 +191,8 @@ class _SSHStoreMixin(Store):
     def invalidate_ssh(self) -> None:
         """Mark SSH connection as dead so next ensure_ssh reconnects."""
         if self.conn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.conn.close()
-            except Exception:
-                pass
             self.conn = None
 
     async def close_ssh(self) -> None:
@@ -280,10 +279,8 @@ class SSHSubprocessStore(_SSHStoreMixin):
         """Close stores, SSH processes, and SSH connection."""
         await super().close()
         for proc in self.ssh_processes:
-            try:
+            with contextlib.suppress(Exception):
                 proc.terminate()
-            except Exception:
-                pass
             proc.close()
         self.ssh_processes.clear()
         await self.close_ssh()

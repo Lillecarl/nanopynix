@@ -173,7 +173,6 @@ def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -
     """Serialize a BasicDerivation to ATerm format (like Nix's drv.unparse)."""
     parts: list[str] = ["Derive("]
 
-    # Outputs: [("name","path","hashAlgo","hashValue"), ...]
     out_parts: list[str] = []
     for name, o in sorted(drv.outputs.items()):
         path = "" if mask_outputs else o.path
