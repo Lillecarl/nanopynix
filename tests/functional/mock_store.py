@@ -156,14 +156,16 @@ class MockStore(Store):
         )
         # In MockStore, we don't want real PSI monitoring, so we don't start any poller.
 
-    def block_build(self, drv_path: str | StorePath) -> asyncio.Event:
+    def block_build(
+        self, drv_path: str | StorePath, blocker: asyncio.Event | None = None
+    ) -> asyncio.Event:
         """Prevent a build of the given .drv from completing.
 
         The next `call(BuildDerivationRequest)` for this path will await
         the returned event. This is essential for testing concurrency and
         ensuring that the scheduler doesn't over-subscribe builders.
         """
-        event = asyncio.Event()
+        event = blocker or asyncio.Event()
         self.build_blockers[str(drv_path)] = event
         return event
 

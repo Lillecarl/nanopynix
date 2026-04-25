@@ -413,7 +413,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
             id=1,
             request=req,
             client=None,
-            required_paths=set(),
+            required_paths={},
             future=loop.create_future(),
             platform="x86_64-linux",
             failed_backends=[],

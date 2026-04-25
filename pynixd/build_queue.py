@@ -18,7 +18,12 @@ import structlog
 
 from .connection import ClientConn
 from .derived_path import DerivedPath
-from .operations.base import BuildMode, BuildResult, BuildResultStatus
+from .operations.base import (
+    BuildMode,
+    BuildResult,
+    BuildResultStatus,
+    UnkeyedValidPathInfo,
+)
 from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
 from .store_path import StorePath
 from . import metrics
@@ -44,7 +49,7 @@ class QueuedBuild:
     id: int  # Global incrementing ID
     request: BuildDerivationRequest  # The request to forward to the backend
     client: ClientConn | None  # Client connection for stderr forwarding
-    required_paths: set[StorePath]
+    required_paths: dict[StorePath, UnkeyedValidPathInfo]
     # All paths the backend needs (input_srcs for BuildDerivation)
     future: asyncio.Future[BuildDerivationResponse]  # Resolved when done
     platform: str = ""  # Derivation platform (for backend filtering)
@@ -57,9 +62,6 @@ class QueuedBuild:
     build_task: asyncio.Task | None = field(default=None, repr=False)
     transfer_task: asyncio.Task | None = field(default=None, repr=False)
     transfer_cancel: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
-    closure: set[StorePath] | None = field(
-        default=None, repr=False
-    )  # cached runtime closure
 
     # Build DAG: build IDs this build depends on (must complete before this
     # can be scheduled). Populated during decomposition for CA dependency
@@ -273,7 +275,7 @@ class BuildQueue:
         self,
         request: BuildDerivationRequest,
         client: ClientConn | None,
-        required_paths: set[StorePath],
+        required_paths: dict[StorePath, UnkeyedValidPathInfo],
         platform: str = "",
         expected_duration: int | None = None,
         scheduler_request_id: int | None = None,

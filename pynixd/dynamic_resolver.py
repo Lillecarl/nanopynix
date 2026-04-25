@@ -10,7 +10,7 @@ from .operations.build_derivation import (
     BuildDerivationRequest,
 )
 from .operations.add_to_store import AddToStoreRequest
-from .operations.base import OutputKind, BuildResult, BuildResultStatus
+from .operations.base import OutputKind, BuildResult, BuildResultStatus, UnkeyedValidPathInfo
 from .derivation_resolution import (
     _nix_drv_name,
     _unparse_basic_derivation,
@@ -211,12 +211,20 @@ class DynamicDerivationResolver:
         build.request.drv_path = resolved_drv_path
         build.request.derivation = resolved
 
-        build.required_paths.add(resolved_drv_path)
+        build.required_paths[resolved_drv_path] = UnkeyedValidPathInfo()
+        for p in resolved_output_paths.values():
+            if p not in build.required_paths:
+                build.required_paths[p] = UnkeyedValidPathInfo()
+
         for inp in resolved.input_srcs:
-            build.required_paths.add(StorePath(inp))
+            sp = StorePath(inp)
+            if sp not in build.required_paths:
+                build.required_paths[sp] = UnkeyedValidPathInfo()
         for name, o in resolved.outputs.items():
             if o.path:
-                build.required_paths.add(StorePath(o.path))
+                sp = StorePath(o.path)
+                if sp not in build.required_paths:
+                    build.required_paths[sp] = UnkeyedValidPathInfo()
 
         log.info(
             "resolved_deferred_derivation",
@@ -285,7 +293,20 @@ class DynamicDerivationResolver:
                     if level1_path.is_derivation():
                         inner_outputs_map = dep_realisations.get(level1_path, {})
                         actual_path = inner_outputs_map.get(inner_output_name)
-                        if actual_path is not None:
+
+                        # If not in dep_realisations, it might be a standard derivation
+                        # that was already built or enqueued elsewhere.
+                        if not actual_path:
+                            try:
+                                inner_parsed = self.read_drv_fn(
+                                    self.local_store.store_path, level1_path
+                                )
+                                inner_outs = inner_parsed.output_paths()
+                                actual_path = inner_outs.get(inner_output_name)
+                            except Exception:
+                                pass
+
+                        if actual_path:
                             dynamic_output_paths[
                                 (dyn_drv_path, outer_output, inner_output_name)
                             ] = actual_path
@@ -301,6 +322,11 @@ class DynamicDerivationResolver:
                 drv_path=drv_path,
             )
             return
+
+        # Add all dynamic outputs to required_paths
+        for p in dynamic_output_paths.values():
+            if p not in build.required_paths:
+                build.required_paths[p] = UnkeyedValidPathInfo()
 
         try:
             resolved = drv_resolve_dynamic_derivation(
@@ -374,12 +400,20 @@ class DynamicDerivationResolver:
         build.request.drv_path = resolved_drv_path
         build.request.derivation = resolved
 
-        build.required_paths.add(resolved_drv_path)
+        build.required_paths[resolved_drv_path] = UnkeyedValidPathInfo()
+        for p in dynamic_output_paths.values():
+            if p not in build.required_paths:
+                build.required_paths[p] = UnkeyedValidPathInfo()
+
         for inp in resolved.input_srcs:
-            build.required_paths.add(StorePath(inp))
+            sp = StorePath(inp)
+            if sp not in build.required_paths:
+                build.required_paths[sp] = UnkeyedValidPathInfo()
         for name, o in resolved.outputs.items():
             if o.path:
-                build.required_paths.add(StorePath(o.path))
+                sp = StorePath(o.path)
+                if sp not in build.required_paths:
+                    build.required_paths[sp] = UnkeyedValidPathInfo()
 
         log.info(
             "resolved_dynamic_derivation",
@@ -504,10 +538,10 @@ class DynamicDerivationResolver:
                     build_mode=sched_req.build_mode,
                 )
 
-                required_paths: set[StorePath] = set()
+                required_paths: dict[StorePath, UnkeyedValidPathInfo] = {}
                 for inp in inner_basic.input_srcs:
-                    required_paths.add(StorePath(inp))
-                required_paths.add(out_sp)
+                    required_paths[StorePath(inp)] = UnkeyedValidPathInfo()
+                required_paths[out_sp] = UnkeyedValidPathInfo()
 
                 inner_build_id, _inner_future = await self.scheduler.build_derivation(
                     inner_req,
@@ -618,7 +652,7 @@ class DynamicDerivationResolver:
             # Add inner build's output paths to required_paths
             for p in inner_output_paths:
                 if p not in other_build.required_paths:
-                    other_build.required_paths.add(p)
+                    other_build.required_paths[p] = UnkeyedValidPathInfo()
                     log.debug(
                         "dynamic_dep_required_path_added",
                         dependent_build_id=other_build.id,

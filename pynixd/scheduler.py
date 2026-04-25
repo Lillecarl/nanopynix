@@ -25,12 +25,13 @@ from .build_queue import BuildQueue, QueuedBuild
 from .connection import ClientConn
 from .derived_path import DerivedPath
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
-from .operations.base import BuildMode
+from .operations.base import BuildMode, UnkeyedValidPathInfo
 from .operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )
 from .operations.build_paths import BuildPathsWithResultsResponse
+from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 
 from .store import Store
 from .store_path import StorePath
@@ -144,7 +145,7 @@ class Scheduler:
         self,
         request: BuildDerivationRequest,
         client: ClientConn | None,
-        required_paths: set[StorePath],
+        required_paths: set[StorePath] | dict[StorePath, UnkeyedValidPathInfo],
         platform: str = "",
         scheduler_request_id: int | None = None,
         derived_paths_for_request: set[DerivedPath] | None = None,
@@ -158,6 +159,9 @@ class Scheduler:
                 hint = await self.local_store.db.get_build_stats_hint(
                     pname, platform, serialized
                 )
+
+        if isinstance(required_paths, set):
+            required_paths = {p: UnkeyedValidPathInfo() for p in required_paths}
 
         res = await self.queue.enqueue(
             request,
@@ -216,7 +220,6 @@ class Scheduler:
         1. Identifies schedulable builds (inputs ready in local_store).
         2. Ranks backends for each build based on locality and load.
         3. Dispatches builds to available slots.
-        4. Triggers proactive path pulling for builds waiting on DAG.
         """
         pending = await self.queue.get_pending()
         if not pending:
@@ -231,19 +234,45 @@ class Scheduler:
                     )
             return
 
-        # 1. Identify builds ready to execute
+        # 1. Ensure all builds have closure metadata
+        needs_metadata = [
+            b
+            for b in pending
+            if any(info.nar_size == 0 for info in b.required_paths.values())
+        ]
+        for build in needs_metadata:
+            seeds = set(build.required_paths.keys())
+            try:
+                resp = await self.local_store.execute(
+                    QueryClosureWithInfoRequest(paths=seeds)
+                )
+                build.required_paths = {info.path: info for info in resp.infos}
+                log.debug(
+                    "build_metadata_populated",
+                    build_id=build.id,
+                    paths=len(build.required_paths),
+                )
+            except Exception:
+                log.exception("metadata_query_failed", build_id=build.id)
+
+        # 2. Identify builds ready to execute
         schedulable: list[QueuedBuild] = []
         waiting_paths: list[QueuedBuild] = []
         waiting_deps: list[QueuedBuild] = []
-        building: list[int] = []
-        transferring: list[int] = []
+
+        # Count builds assigned to each store to avoid double-counting with s.in_flight
+        # which already includes some/all building jobs that have acquired connections.
+        assigned_count: dict[str, int] = {s.id: 0 for s in self.stores.values()}
+        for build in pending:
+            if build.is_building and build.assigned_store_id:
+                assigned_count[build.assigned_store_id] += 1
+
+        override_in_flight: dict[str, int] = {
+            s.id: max(s.in_flight, assigned_count[s.id]) for s in self.stores.values()
+        }
 
         for build in pending:
             if build.is_building:
-                building.append(build.id)
-                continue
-            if build.is_transferring:
-                transferring.append(build.id)
                 continue
 
             # Check if all DAG dependencies are satisfied
@@ -259,12 +288,12 @@ class Scheduler:
                     continue
 
             # Check if all required paths are in local store
-            if self.local_store.tracker.has_all_paths(build.required_paths):
+            if self.local_store.tracker.has_all_paths(set(build.required_paths.keys())):
                 schedulable.append(build)
             else:
                 waiting_paths.append(build)
 
-        # 2. Assign schedulable builds to backends
+        # 3. Assign schedulable builds to backends
         # Load balancing: prefer backends with the most relevant paths already present
         # and with free resources.
         waiting_slot: list[QueuedBuild] = []
@@ -295,11 +324,12 @@ class Scheduler:
                     build.build_task = asyncio.create_task(
                         self.execute_build(build, self.local_store)
                     )
-                    building.append(build.id)
                     continue
 
             # 2. Standard remote backend assignment
-            ranked = self.allocator.rank_stores(build, assigned_this_pass)
+            ranked = self.allocator.rank_stores(
+                build, assigned_this_pass, override_in_flight=override_in_flight
+            )
 
             # If NO store will ever support this platform/features, fail it statelessly
             if not ranked and not any(
@@ -345,7 +375,6 @@ class Scheduler:
                 build.build_task = asyncio.create_task(
                     self.execute_build(build, rs.store)
                 )
-                building.append(build.id)
                 assigned_this_pass[rs.store_id] = (
                     assigned_this_pass.get(rs.store_id, 0) + 1
                 )
@@ -383,25 +412,6 @@ class Scheduler:
                     continue
                 waiting_slot.append(build)
 
-        # 3. Handle proactive transfers for waiting_slot builds
-        # Proactive transfer is for builds that are ready to run (all inputs in local_store)
-        # but the best builder has no free resources. We transfer inputs to a builder anyway.
-        transferring_list: list[int] = []
-        for build in waiting_slot:
-            if build.is_transferring:
-                transferring_list.append(build.id)
-                continue
-
-            ranked = self.allocator.rank_stores(build, assigned_this_pass)
-            if ranked:
-                rs = list(ranked)[0]
-                missing = build.required_paths - rs.store.tracker.known_paths
-                if missing and self.local_store.tracker.has_all_paths(missing):
-                    build.transfer_task = asyncio.create_task(
-                        self.transfer_inputs(build, rs.store, missing)
-                    )
-                    transferring_list.append(build.id)
-
         # 4. Update store metrics
         for s in self.stores.values():
             metrics.STORE_HEALTHY.labels(store_id=s.id).set(1 if s.is_healthy else 0)
@@ -413,8 +423,6 @@ class Scheduler:
         log.debug(
             "scheduling_pass_done",
             pending=len(pending),
-            building=len(building),
-            transferring=len(transferring_list),
             waiting_paths=len(waiting_paths),
             waiting_deps=len(waiting_deps),
             waiting_slot=len(waiting_slot),
@@ -450,12 +458,21 @@ class Scheduler:
                 self.allocator.strip_handled_features(build)
 
                 # 1. Ensure all inputs are present on the builder
-                missing = build.required_paths - store.tracker.known_paths
-                if missing:
+                missing_info = {
+                    p: info
+                    for p, info in build.required_paths.items()
+                    if p not in store.tracker.known_paths
+                }
+                if missing_info:
+                    missing_size = sum(info.nar_size for info in missing_info.values())
                     log.debug(
-                        "build_sending_inputs", build_id=build.id, store_id=store.id
+                        "build_sending_inputs",
+                        build_id=build.id,
+                        store_id=store.id,
+                        count=len(missing_info),
+                        size=missing_size,
                     )
-                    await self.local_store.stream_paths_to(store, missing)
+                    await self.local_store.stream_paths_to(store, set(missing_info.keys()))
 
                 # 2. Trigger build
                 log.debug("build_executing", build_id=build.id, store_id=store.id)
@@ -552,44 +569,3 @@ class Scheduler:
             if build.scheduler_request_id is not None:
                 await self.dynamic_resolver.on_build_complete(build, build_resp)
             self.trigger()
-
-    async def transfer_inputs(
-        self, build: QueuedBuild, store: Store, paths: set[StorePath]
-    ) -> None:
-        """Background task to proactively pull missing inputs for a build."""
-        to_pull: set[StorePath] = set()
-        try:
-            to_pull = paths - self.local_store.tracker.known_paths
-            if not to_pull:
-                return
-
-            log.info("pulling_paths", store_id=store.id, count=len(to_pull))
-            for p in to_pull:
-                log.debug("pulling_path", store_id=store.id, path=p)
-            await store.stream_paths_to(self.local_store, to_pull)
-            metrics.PATHS_TRANSFERRED.labels(
-                source=store.id, destination=self.local_store.id
-            ).inc(len(to_pull))
-            log.debug(
-                "pulled_paths_into_local_store",
-                count=len(to_pull),
-                store_id=store.id,
-            )
-            self.trigger()
-        except ValueError as e:
-            log.warning(
-                "pull_paths_missing_inputs",
-                build_id=build.id,
-                error=str(e),
-                store_id=store.id,
-                count=len(to_pull),
-            )
-            self.trigger()
-        except Exception:
-            log.exception(
-                "pull_paths_failed",
-                count=len(to_pull),
-                store_id=store.id,
-            )
-        finally:
-            build.transfer_task = None

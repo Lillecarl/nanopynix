@@ -52,6 +52,7 @@ class StoreRanker(ABC):
         build: QueuedBuild,
         stores: list[Store],
         assigned_this_pass: Mapping[str, int],
+        override_in_flight: Mapping[str, int] | None = None,
     ) -> RankedStores:
         """Score and sort available stores for the given build."""
         ...
@@ -68,6 +69,7 @@ class TelemetryStoreRanker(StoreRanker):
         build: QueuedBuild,
         stores: list[Store],
         assigned_this_pass: Mapping[str, int],
+        override_in_flight: Mapping[str, int] | None = None,
     ) -> RankedStores:
         ranked = []
         for store in stores:
@@ -75,9 +77,23 @@ class TelemetryStoreRanker(StoreRanker):
 
             # 1. Data Locality (+ points)
             if build.required_paths:
-                common = store.tracker.count_common_paths(build.required_paths)
-                ratio = common / len(build.required_paths)
-                score += ratio * self.settings.locality_weight
+                total_size = sum(
+                    info.nar_size for info in build.required_paths.values()
+                )
+                if total_size > 0:
+                    present_size = sum(
+                        info.nar_size
+                        for path, info in build.required_paths.items()
+                        if path in store.tracker.known_paths
+                    )
+                    ratio = present_size / total_size
+                    score += ratio * self.settings.locality_weight
+                else:
+                    common = store.tracker.count_common_paths(
+                        set(build.required_paths.keys())
+                    )
+                    ratio = common / len(build.required_paths)
+                    score += ratio * self.settings.locality_weight
 
             # 2. CPU Availability (+ points)
             if store.cpu_util:
@@ -94,7 +110,10 @@ class TelemetryStoreRanker(StoreRanker):
                 score -= psi.io.some_avg10 * self.settings.io_pressure_penalty
 
             # 4. Concurrency Penalty (- points)
-            score -= store.in_flight * self.settings.concurrency_penalty
+            in_flight = store.in_flight
+            if override_in_flight and store.id in override_in_flight:
+                in_flight = override_in_flight[store.id]
+            score -= in_flight * self.settings.concurrency_penalty
 
             # 5. Predicted Load Penalty (- points)
             # (Requires build duration estimation, placeholder for now)
@@ -131,7 +150,10 @@ class BuildAllocator:
         self.ranker = ranker
 
     def rank_stores(
-        self, build: QueuedBuild, assigned_this_pass: Mapping[str, int]
+        self,
+        build: QueuedBuild,
+        assigned_this_pass: Mapping[str, int],
+        override_in_flight: Mapping[str, int] | None = None,
     ) -> RankedStores:
         """Rank stores for a build using the injected ranker."""
         build_features = build.request.derivation.effective_required_features
@@ -147,7 +169,9 @@ class BuildAllocator:
 
             candidates.append(store)
 
-        return self.ranker.rank_stores(build, candidates, assigned_this_pass)
+        return self.ranker.rank_stores(
+            build, candidates, assigned_this_pass, override_in_flight
+        )
 
     def incompatibility_reasons(
         self, platform: str, features: set[str] | None
