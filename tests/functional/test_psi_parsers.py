@@ -6,6 +6,7 @@ All tests in this file are parsing unit tests that don't trigger Store operation
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 
@@ -259,7 +260,7 @@ class TestCgroupv2Integration:
 
     def _read(self, path: str) -> str | None:
         try:
-            with open(path) as f:
+            with Path(path).open() as f:
                 return f.read()
         except FileNotFoundError:
             return None

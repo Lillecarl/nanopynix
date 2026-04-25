@@ -203,7 +203,7 @@ class _ConfigFileSource(PydanticBaseSettingsSource):
         path = Path(env_val)
         if not path.exists():
             return {}
-        with open(path) as f:
+        with path.open() as f:
             data = json.load(f)
         return {k: v for k, v in data.items() if k in self.settings_cls.model_fields}
 

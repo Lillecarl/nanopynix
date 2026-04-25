@@ -686,5 +686,5 @@ def read_drv_file(
     # drv_store_path is like "/nix/store/xxx.drv"
     # On disk it's at "{store_path}/nix/store/xxx.drv"
     fs_path = store_path / str(drv_store_path).lstrip("/")
-    with open(fs_path) as f:
+    with fs_path.open() as f:
         return parse_drv(f.read())

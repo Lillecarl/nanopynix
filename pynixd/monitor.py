@@ -10,6 +10,7 @@ import contextlib
 import os
 import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -344,11 +345,11 @@ class LocalPSIMonitor(ResourceMonitor):
 
             # Local fallback functions
             async def local_read(path: str) -> str:
-                with open(path) as f:
+                with Path(path).open() as f:
                     return f.read()
 
             async def local_exists(path: str) -> bool:
-                return os.path.exists(path)
+                return Path(path).exists()
 
             # Fallback to generic poller
             poller = GenericResourcePoller(
@@ -374,14 +375,14 @@ class LocalPSIMonitor(ResourceMonitor):
         try:
             parts = []
             for p in ["cpu", "memory", "io"]:
-                with open(f"/proc/pressure/{p}") as f:
+                with Path(f"/proc/pressure/{p}").open() as f:
                     parts.append(f.read())
 
             snap = parse_psi_output("\n".join(parts))
             self.health.psi = snap
 
             # We also need meminfo for absolute threshold check
-            with open("/proc/meminfo") as f:
+            with Path("/proc/meminfo").open() as f:
                 self.health.meminfo = parse_meminfo(f.read())
 
             self.health.timestamp = time.monotonic()
@@ -406,12 +407,12 @@ def create_monitor(gate: ResourceGate, settings: PynixdSettings) -> ResourceMoni
     """Factory to create the best available local monitor."""
 
     async def local_read(path: str) -> str:
-        with open(path) as f:
+        with Path(path).open() as f:
             return f.read()
 
     async def local_exists(path: str) -> bool:
-        return os.path.exists(path)
+        return Path(path).exists()
 
-    if os.path.exists("/sys/fs/cgroup/cpu.pressure"):
+    if Path("/sys/fs/cgroup/cpu.pressure").exists():
         return LocalPSIMonitor(gate, settings)
     return GenericResourcePoller(gate, settings, local_read, local_exists)

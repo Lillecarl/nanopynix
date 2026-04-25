@@ -492,7 +492,7 @@ async def main() -> None:
         nix_resolved_drv_path = StorePath(resolved_rows[0][0])
         read_drv_file(root_store.store_path, nix_resolved_drv_path)
         nix_aterm_path = root_store.store_path / str(nix_resolved_drv_path).lstrip("/")
-        with open(nix_aterm_path) as f:
+        with nix_aterm_path.open() as f:
             nix_aterm = f.read().strip()
         print("\n  Nix's resolved ATerm:")
         print(f"    {nix_aterm}")
@@ -575,7 +575,7 @@ async def main() -> None:
     # Write the resolved .drv to the test store's filesystem
     resolved_drv_fs_path = test_path / resolved_drv_store_path.lstrip("/")
     resolved_drv_fs_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(resolved_drv_fs_path, "w") as f:
+    with resolved_drv_fs_path.open("w") as f:
         f.write(resolved_aterm)
 
     # Register it with the daemon (AddToStore / valid path registration)
@@ -619,7 +619,7 @@ async def main() -> None:
                 # Read the output file
                 out_fs = test_path / str(outmap.items.get("out", "")).lstrip("/")
                 if out_fs.exists():
-                    with open(out_fs) as f:
+                    with out_fs.open() as f:
                         content = f.read().strip()
                     print(f"  Output content: {content}")
                     expected_content = f"dep-on-{ca_out_path}"

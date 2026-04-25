@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import glob
 import logging
 import os
 import shlex
@@ -411,7 +410,7 @@ async def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
             renderer = ConsoleRenderer(unicode=True, color=False)
             renderer.processors.insert(0, _prune_client_processor)
 
-            with open(profile_file, "w") as f:
+            with profile_file.open("w") as f:
                 content = renderer.render(session)
                 f.write(content)
 
@@ -428,7 +427,7 @@ def pytest_runtest_makereport(item: pytest.Item, call):
         log_dir = item.config.stash.get(_log_dir_key, None)
         if log_dir:
             log_file = get_log_file_path(log_dir, item)
-            with open(log_file, "a") as f:
+            with log_file.open("a") as f:
                 if report.longrepr:
                     f.write("\n--- Failure details ---\n")
                     f.write(str(report.longrepr))
@@ -453,7 +452,7 @@ def rmtree_robust(path: str | Path) -> None:
 
         def handle_errors(func, path, _excinfo):
             try:
-                os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+                Path(path).chmod(stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
                 func(path)
             except Exception:
                 pass
@@ -464,7 +463,7 @@ def rmtree_robust(path: str | Path) -> None:
             path.unlink()
         except PermissionError:
             try:
-                os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+                path.chmod(stat.S_IWRITE | stat.S_IREAD)
                 path.unlink()
             except Exception:
                 pass
@@ -474,7 +473,8 @@ def rmtree_robust(path: str | Path) -> None:
 
 def rmtree_robust_glob(pattern: str) -> None:
     """Remove all directories matching a glob pattern."""
-    for path in glob.glob(pattern):
+    # Use Path().glob() which handles absolute paths correctly
+    for path in Path().glob(pattern):
         rmtree_robust(path)
 
 

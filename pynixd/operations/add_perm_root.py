@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
 
 
-
 @dataclass
 class AddPermRootResponse(OpResponse):
     gc_root: str = ""

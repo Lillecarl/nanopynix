@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
 
 
-
 @dataclass
 class AddBuildLogResponse(OpResponse):
     value: int = 0

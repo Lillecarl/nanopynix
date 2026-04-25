@@ -16,7 +16,6 @@ import bz2
 import contextlib
 import gzip
 import lzma
-import os
 import ssl
 from http import HTTPStatus
 from pathlib import Path
@@ -290,7 +289,7 @@ class PynixdHttpServer:
         )
         loop = asyncio.get_running_loop()
         # Ensure we use run_in_executor for the file write to keep event loop non-blocking
-        with open(temp_path, "wb") as f:
+        with temp_path.open("wb") as f:
             async for chunk in request.content.iter_any():
                 await loop.run_in_executor(None, f.write, chunk)
 
@@ -368,12 +367,12 @@ class PynixdHttpServer:
                     ctx = gzip.open(path, "rb")
                 elif path.name.endswith(".zst"):
                     dctx = zstd.ZstdDecompressor()
-                    ctx = dctx.stream_reader(open(path, "rb"))
+                    ctx = dctx.stream_reader(path.open("rb"))
                 elif path.name.endswith(".lz4"):
                     ctx = lz4.frame.open(path, "rb")
                 elif path.name.endswith(".br"):
                     d = brotli.Decompressor()
-                    with open(path, "rb") as bf:
+                    with path.open("rb") as bf:
                         while True:
                             chunk = bf.read(1024 * 1024)
                             if not chunk:
@@ -381,7 +380,7 @@ class PynixdHttpServer:
                             yield d.process(chunk)
                     return
                 else:
-                    ctx = open(path, "rb")
+                    ctx = path.open("rb")
 
                 with ctx as f:
                     while True:
@@ -430,7 +429,7 @@ class PynixdHttpServer:
         finally:
             # Clean up temporary NAR
             with contextlib.suppress(OSError):
-                os.remove(nar_temp_path)
+                nar_temp_path.unlink()
 
         self.store.add_path_info(vinfo)
         self.store.tracker.add_known_path(vinfo.path)

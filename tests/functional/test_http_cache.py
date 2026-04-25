@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import random
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -147,7 +146,7 @@ async def test_cache_as_substituter() -> None:
         # Use a fresh temporary store for substitution
         subst_store_path = STORE_PREFIX / "http-subst-functional"
         rmtree_robust(subst_store_path)
-        os.makedirs(subst_store_path, exist_ok=True)
+        subst_store_path.mkdir(parents=True, exist_ok=True)
 
         cmd = [
             str(NIX_BIN),

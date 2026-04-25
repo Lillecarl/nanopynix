@@ -15,7 +15,6 @@ Results are recorded via the conftest.py record_bench helper.
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -196,7 +195,7 @@ async def test_bench_local_socket_overhead(request: pytest.FixtureRequest) -> No
     # 2. Managed socket (spawned daemon)
     managed_path = Path("/tmp/pynixd-bench-managed")
     rmtree_robust(managed_path)
-    os.makedirs(managed_path, exist_ok=True)
+    managed_path.mkdir(parents=True, exist_ok=True)
     managed_store = LocalSocketStore(
         id="managed",
         store_path=managed_path,

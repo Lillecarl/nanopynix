@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -101,7 +100,7 @@ async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
 @pytest.fixture
 async def dst_store() -> AsyncIterator[LocalSocketStore]:
     rmtree_robust(BENCH_DST)
-    os.makedirs(BENCH_DST, exist_ok=True)
+    BENCH_DST.mkdir(parents=True, exist_ok=True)
     s = LocalSocketStore(
         id="bench-dst",
         store_path=BENCH_DST,

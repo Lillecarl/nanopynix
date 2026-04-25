@@ -106,7 +106,7 @@ class LocalSocketStore(Store):
 
         path = self.store_path or Path("/")
         socket_dir = self.socket_path.parent
-        os.makedirs(socket_dir, exist_ok=True)
+        socket_dir.mkdir(parents=True, exist_ok=True)
 
         cmd = [
             self.nix_bin,
