@@ -1,216 +1,157 @@
-"""pynixd performance benchmarks.
-
-Measures latency and throughput for various Nix daemon operations
-across different store types.
-
-Store types are parametrized so each test runs against:
-- local-socket: system daemon Unix socket
-- ssh-subprocess: SSH channel -> nix-daemon --stdio (localhost)
-- ssh-socket: SSH tunnel -> daemon Unix socket (localhost)
-
-The benchmarks use the system Nix store as the source of paths.
-Results are recorded via the conftest.py record_bench helper.
+"""Performance benchmarks for pynixd operation dispatch and local DB.
 """
 
 from __future__ import annotations
 
 import asyncio
-import subprocess
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 import structlog
-from conftest import NIX_BIN, _record, rmtree_robust
-from environs import env
+from environs import Env
 
 from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
-from pynixd.store import (
-    LocalSocketStore,
-    SSHSocketStore,
-    SSHSubprocessStore,
-    Store,
-)
+from pynixd.store import LocalSocketStore, SSHSocketStore, SSHSubprocessStore, Store
 from pynixd.store_path import StorePath
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+from tests.conftest import NIX_BIN, rmtree_robust
 
 log = structlog.get_logger(__name__)
 
-
+env = Env()
 _SSH_USER = env.str("USER", "root")
 
 _STORE_TYPES = ["local-socket", "ssh-socket"]
-
-_MAX_TRANSFERS = 10
 
 
 async def _make_store(store_type: str) -> Store:
     """Create a store that reads from the system store."""
     if store_type == "local-socket":
-        return LocalSocketStore(id="local-socket", max_transfers=_MAX_TRANSFERS)
+        return LocalSocketStore(store_id="local-socket")
     if store_type == "ssh-subprocess":
         return SSHSubprocessStore(
             host="127.0.0.1",
-            id="ssh-subprocess",
+            store_id="ssh-subprocess",
             port=22,
             username=_SSH_USER,
-            max_transfers=_MAX_TRANSFERS,
         )
     if store_type == "ssh-socket":
         return SSHSocketStore(
             host="127.0.0.1",
-            id="ssh-socket",
+            store_id="ssh-socket",
             port=22,
             username=_SSH_USER,
-            max_transfers=_MAX_TRANSFERS,
         )
     raise ValueError(f"Unknown store type: {store_type}")
 
 
 @pytest.fixture(params=_STORE_TYPES)
 async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
-    """Parametrized store fixture — yields one store per type."""
+    """Parametrized store fixture."""
     s = await _make_store(request.param)
     yield s
     await s.close()
 
 
-async def _get_test_paths(n: int = 100) -> list[StorePath]:
-    """Get n arbitrary valid paths from the system store."""
-    out = subprocess.check_output(  # noqa: ASYNC221
-        [NIX_BIN, "query", "--all", "--limit", str(n)],
-        text=True,
-    )
-    return [StorePath(p) for p in out.splitlines() if p.strip()]
-
-
 @pytest.mark.benchmark
-async def test_bench_query_all_valid_paths(
-    request: pytest.FixtureRequest,
-    bench_store: Store,
-) -> None:
-    """Measure latency of QueryAllValidPaths."""
+async def test_bench_query_all_valid_paths(bench_store: Store):
+    """Benchmark QueryAllValidPaths latency."""
     start = time.perf_counter()
     resp = await bench_store.execute(QueryAllValidPathsRequest())
+    paths = resp.paths
     elapsed = time.perf_counter() - start
 
-    _record(
-        request,
-        "query_all_valid_paths",
-        store=bench_store.id,
-        count=len(resp.paths),
-        latency_ms=elapsed * 1000,
+    log.info(
+        "bench_query_all_valid_paths",
+        store=type(bench_store).__name__,
+        count=len(paths),
+        elapsed_ms=int(elapsed * 1000),
     )
 
 
 @pytest.mark.benchmark
-async def test_bench_query_path_info_latency(
-    request: pytest.FixtureRequest,
-    bench_store: Store,
-) -> None:
-    """Measure latency of QueryPathInfo for 100 random paths."""
-    paths = await _get_test_paths(100)
+async def test_bench_query_path_info_latency(bench_store: Store):
+    """Benchmark QueryPathInfo latency for a single path."""
+    resp_all = await bench_store.execute(QueryAllValidPathsRequest())
+    paths = list(resp_all.paths)
+    path = paths[0]
 
-    latencies = []
-    for path in paths:
-        start = time.perf_counter()
+    start = time.perf_counter()
+    # 100 iterations to get a stable average
+    for _ in range(100):
         await bench_store.execute(QueryPathInfoRequest(path=path))
-        latencies.append(time.perf_counter() - start)
-
-    avg_latency = sum(latencies) / len(latencies)
-    _record(
-        request,
-        "query_path_info_latency",
-        store=bench_store.id,
-        avg_ms=avg_latency * 1000,
-        p95_ms=sorted(latencies)[int(len(latencies) * 0.95)] * 1000,
-    )
-
-
-@pytest.mark.benchmark
-async def test_bench_is_valid_path_throughput(
-    request: pytest.FixtureRequest,
-    bench_store: Store,
-) -> None:
-    """Measure throughput of IsValidPath (ops/s)."""
-    paths = await _get_test_paths(500)
-
-    start = time.perf_counter()
-    # Execute sequentially to measure overhead
-    for path in paths:
-        await bench_store.execute(IsValidPathRequest(path=path))
     elapsed = time.perf_counter() - start
 
-    ops_per_s = len(paths) / elapsed
-    _record(
-        request,
-        "is_valid_path_throughput",
-        store=bench_store.id,
-        ops_per_s=ops_per_s,
+    log.info(
+        "bench_query_path_info_latency",
+        store=type(bench_store).__name__,
+        avg_ms=round((elapsed / 100) * 1000, 3),
     )
 
 
 @pytest.mark.benchmark
-async def test_bench_is_valid_path_parallel(
-    request: pytest.FixtureRequest,
-    bench_store: Store,
-) -> None:
-    """Measure throughput of IsValidPath with 10 parallel tasks."""
-    paths = await _get_test_paths(1000)
+async def test_bench_is_valid_path_throughput(bench_store: Store):
+    """Benchmark IsValidPath throughput (serial)."""
+    resp_all = await bench_store.execute(QueryAllValidPathsRequest())
+    paths = list(resp_all.paths)[:1000]
 
     start = time.perf_counter()
-    tasks = [bench_store.execute(IsValidPathRequest(path=path)) for path in paths]
-    await asyncio.gather(*tasks)
+    for p in paths:
+        await bench_store.execute(IsValidPathRequest(path=p))
     elapsed = time.perf_counter() - start
 
-    ops_per_s = len(paths) / elapsed
-    _record(
-        request,
-        "is_valid_path_parallel",
-        store=bench_store.id,
-        parallel_tasks=10,
-        ops_per_s=ops_per_s,
+    log.info(
+        "bench_is_valid_path_throughput",
+        store=type(bench_store).__name__,
+        count=len(paths),
+        ops_per_s=int(len(paths) / elapsed),
     )
 
 
 @pytest.mark.benchmark
-async def test_bench_local_socket_overhead(request: pytest.FixtureRequest) -> None:
-    """Compare direct Unix socket vs pynixd LocalSocketStore."""
-    path = (await _get_test_paths(1))[0]
+async def test_bench_is_valid_path_parallel(bench_store: Store):
+    """Benchmark IsValidPath throughput (parallel)."""
+    resp_all = await bench_store.execute(QueryAllValidPathsRequest())
+    paths = list(resp_all.paths)[:1000]
 
-    # 1. Direct system socket
-    system_store = LocalSocketStore(id="system")
-    latencies_direct = []
-    for _ in range(100):
-        start = time.perf_counter()
-        await system_store.execute(QueryPathInfoRequest(path=path))
-        latencies_direct.append(time.perf_counter() - start)
-    await system_store.close()
+    start = time.perf_counter()
+    await asyncio.gather(*[bench_store.execute(IsValidPathRequest(path=p)) for p in paths])
+    elapsed = time.perf_counter() - start
 
-    # 2. Managed socket (spawned daemon)
-    managed_path = Path("/tmp/pynixd-bench-managed")
-    rmtree_robust(managed_path)
-    managed_path.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
-    managed_store = LocalSocketStore(
-        id="managed",
-        store_path=managed_path,
+    log.info(
+        "bench_is_valid_path_parallel",
+        store=type(bench_store).__name__,
+        count=len(paths),
+        ops_per_s=int(len(paths) / elapsed),
     )
-    # Managed store will be empty, so we just measure the handshake + op overhead
-    latencies_managed = []
-    for _ in range(100):
-        start = time.perf_counter()
-        await managed_store.execute(QueryPathInfoRequest(path=path))
-        latencies_managed.append(time.perf_counter() - start)
-    await managed_store.close()
 
-    _record(
-        request,
-        "local_overhead",
-        direct_avg_ms=(sum(latencies_direct) / 100) * 1000,
-        managed_avg_ms=(sum(latencies_managed) / 100) * 1000,
+
+@pytest.mark.benchmark
+async def test_bench_local_socket_overhead():
+    """Benchmark the overhead of LocalSocketStore compared to direct daemon access.
+
+    Compares pynixd LocalSocketStore against 'nix store query --all' directly.
+    """
+    from tests.conftest import run_subproc
+
+    # 1. pynixd overhead
+    s = LocalSocketStore(store_id="managed", store_path=Path("/"))
+    start = time.perf_counter()
+    await s.execute(QueryAllValidPathsRequest())
+    pynixd_elapsed = time.perf_counter() - start
+    await s.close()
+
+    # 2. Native overhead
+    start = time.perf_counter()
+    rc, _, _, _ = await run_subproc([str(NIX_BIN), "store", "ls", "--all", "/nix/store"])
+    native_elapsed = time.perf_counter() - start
+
+    log.info(
+        "bench_local_socket_overhead",
+        pynixd_ms=int(pynixd_elapsed * 1000),
+        native_ms=int(native_elapsed * 1000),
+        ratio=round(pynixd_elapsed / native_elapsed, 2),
     )

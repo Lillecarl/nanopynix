@@ -74,7 +74,7 @@ class DynamicDerivationResolver:
                         "registering_dep_realisation_on_builder",
                         build_id=build.id,
                         dep_build_id=dep_id,
-                        store_id=store.id,
+                        store_id=store.store_id,
                         realisation=realisation,
                     )
                     await store.call(reg_req, suppress_last=True)
@@ -82,14 +82,14 @@ class DynamicDerivationResolver:
                         "registered_dep_realisation_on_builder",
                         build_id=build.id,
                         dep_build_id=dep_id,
-                        store_id=store.id,
+                        store_id=store.store_id,
                     )
                 except Exception as exc:
                     log.warning(
                         "register_dep_realisation_failed",
                         build_id=build.id,
                         dep_build_id=dep_id,
-                        store_id=store.id,
+                        store_id=store.store_id,
                         exc_info=True,
                         error=str(exc),
                     )
@@ -203,14 +203,14 @@ class DynamicDerivationResolver:
                     log.debug(
                         "resolved_drv_added_to_store",
                         build_id=build.id,
-                        store_id=target_store.id,
+                        store_id=target_store.store_id,
                         resolved_drv_path=resp.info.path,
                     )
             except Exception:
                 log.warning(
                     "resolved_drv_add_to_store_failed",
                     build_id=build.id,
-                    store_id=target_store.id,
+                    store_id=target_store.store_id,
                     exc_info=True,
                 )
 
@@ -389,14 +389,14 @@ class DynamicDerivationResolver:
                     log.debug(
                         "resolved_dynamic_drv_added_to_store",
                         build_id=build.id,
-                        store_id=target_store.id,
+                        store_id=target_store.store_id,
                         resolved_drv_path=resp.info.path,
                     )
             except Exception:
                 log.warning(
                     "resolved_dynamic_drv_add_to_store_failed",
                     build_id=build.id,
-                    store_id=target_store.id,
+                    store_id=target_store.store_id,
                     exc_info=True,
                 )
 

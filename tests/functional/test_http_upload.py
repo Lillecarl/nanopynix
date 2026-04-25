@@ -75,7 +75,7 @@ async def test_http_upload(
 
     # Get its NAR and narinfo from root store
     root_store = LocalSocketStore(
-        id="root",
+        store_id="root",
         store_path=Path("/"),
         **get_test_store_kwargs(no_probe=True),
     )

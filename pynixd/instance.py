@@ -50,7 +50,7 @@ class Server:
         **kwargs: Any,
     ) -> None:
         if local_store is None:
-            local_store = LocalSocketStore(id="local", store_path=Path("/"))
+            local_store = LocalSocketStore(store_id="local", store_path=Path("/"))
         if stores is None:
             stores = {}
 
@@ -148,20 +148,20 @@ class Server:
         """Add a remote store to the server, linking it to the central DB and path tracker."""
         local_store = self.local_store
         store.db = local_store.db
-        store.tracker = self.path_tracker.get_instance(store.id, is_local=False)
+        store.tracker = self.path_tracker.get_instance(store.store_id, is_local=False)
 
         if local_store.db is not None:
-            paths = await local_store.db.get_known_paths(store.id)
+            paths = await local_store.db.get_known_paths(store.store_id)
             if paths:
                 store.tracker.add_known_paths(paths, update_regtime=False)
-                log.info("loaded_cached_paths", store_id=store.id, count=len(paths))
+                log.info("loaded_cached_paths", store_id=store.store_id, count=len(paths))
 
         await store.start()
 
-        self.stores[store.id] = store
+        self.stores[store.store_id] = store
 
         if self.scheduler:
-            self.scheduler.add_store(store.id, store)
+            self.scheduler.add_store(store.store_id, store)
 
     async def remove_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
         """Remove a remote store, cleaning DB records and closing connections."""
@@ -251,7 +251,7 @@ class Server:
 
         if local_store.version < wire.proto(1, 35):
             raise RuntimeError(
-                f"Local store {local_store.id} uses protocol {wire.proto_str(local_store.version)}, "
+                f"Local store {local_store.store_id} uses protocol {wire.proto_str(local_store.version)}, "
                 "but pynixd requires at least 1.35 for the local store. "
                 "Please upgrade your Nix daemon.",
             )
@@ -266,7 +266,7 @@ class Server:
             self.ctx.path_tracker.db = None
 
         local_store.tracker = self.ctx.path_tracker.get_instance(
-            local_store.id,
+            local_store.store_id,
             is_local=True,
         )
 

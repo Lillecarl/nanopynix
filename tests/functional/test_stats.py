@@ -150,12 +150,12 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
     pynixd_remote_path.mkdir(parents=True, exist_ok=True)
 
     pynixd_local = LocalSocketStore(
-        id="local",
+        store_id="local",
         store_path=pynixd_local_path,
         **get_test_store_kwargs(no_probe=True),
     )
     pynixd_remote = StatsTestStore(
-        id="remote",
+        store_id="remote",
         store_path=pynixd_remote_path,
         **get_test_store_kwargs(no_probe=True),
     )
@@ -229,12 +229,12 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
     pynixd_remote_path.mkdir(parents=True, exist_ok=True)
 
     pynixd_local = LocalSocketStore(
-        id="local",
+        store_id="local",
         store_path=pynixd_local_path,
         **get_test_store_kwargs(no_probe=True),
     )
     pynixd_remote = StatsTestStore(
-        id="remote",
+        store_id="remote",
         store_path=pynixd_remote_path,
         **get_test_store_kwargs(no_probe=True),
     )
@@ -325,7 +325,7 @@ async def test_levenshtein_sql(tmp_path: Path) -> None:
     conn.close()
 
     pynixd_local = LocalSocketStore(
-        id="local",
+        store_id="local",
         store_path=pynixd_local_path,
         **get_test_store_kwargs(no_probe=True),
     )
@@ -391,12 +391,12 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     rmtree_robust(pynixd_free_path)
 
     pynixd_local = LocalSocketStore(
-        id="local",
+        store_id="local",
         store_path=pynixd_local_path,
         **get_test_store_kwargs(no_probe=True),
     )
     pynixd_busy = CpuUtilTestStore(
-        id="busy",
+        store_id="busy",
         store_path=pynixd_busy_path,
         **get_test_store_kwargs(no_probe=True),
     )
@@ -405,7 +405,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     pynixd_busy.build_delays["test-pkg"] = 0.05
 
     pynixd_free = CpuUtilTestStore(
-        id="free",
+        store_id="free",
         store_path=pynixd_free_path,
         **get_test_store_kwargs(no_probe=True),
     )

@@ -68,7 +68,7 @@ class StoreRankingSettings(BaseModel):
 
 class LocalSocketStoreSpec(BaseModel):
     type: Literal["local-socket"] = "local-socket"
-    id: str | None = None
+    store_id: str | None = None
     store_path: Path = Path("/")
     socket_path: Path | None = None
     systems: set[str] | None = None
@@ -83,7 +83,7 @@ class LocalSocketStoreSpec(BaseModel):
 
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return LocalSocketStore(
-            id=self.id,
+            store_id=self.store_id,
             store_path=self.store_path,
             socket_path=self.socket_path,
             feature_matrix=feature_matrix,
@@ -97,7 +97,7 @@ class LocalSocketStoreSpec(BaseModel):
 
 class LocalSubprocessStoreSpec(BaseModel):
     type: Literal["local-subprocess"] = "local-subprocess"
-    id: str | None = None
+    store_id: str | None = None
     store_path: Path
     systems: set[str] | None = None
     system_features: set[str] = Field(default_factory=set)
@@ -111,7 +111,7 @@ class LocalSubprocessStoreSpec(BaseModel):
 
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return LocalSocketStore(
-            id=self.id,
+            store_id=self.store_id,
             store_path=self.store_path,
             feature_matrix=feature_matrix,
             probe=feature_matrix is None,
@@ -125,7 +125,7 @@ class LocalSubprocessStoreSpec(BaseModel):
 class SSHSubprocessStoreSpec(BaseModel):
     type: Literal["ssh-subprocess"] = "ssh-subprocess"
     host: str
-    id: str | None = None
+    store_id: str | None = None
     port: int = 22
     username: str | None = None
     store_path: Path = Path("/")
@@ -140,7 +140,7 @@ class SSHSubprocessStoreSpec(BaseModel):
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return SSHSubprocessStore(
             host=self.host,
-            id=self.id,
+            store_id=self.store_id,
             port=self.port,
             username=self.username,
             store_path=self.store_path,
@@ -154,7 +154,7 @@ class SSHSubprocessStoreSpec(BaseModel):
 class SSHSocketStoreSpec(BaseModel):
     type: Literal["ssh-socket"] = "ssh-socket"
     host: str
-    id: str | None = None
+    store_id: str | None = None
     port: int = 22
     username: str | None = None
     socket_path: Path = Path("/nix/var/nix/daemon-socket/socket")
@@ -168,7 +168,7 @@ class SSHSocketStoreSpec(BaseModel):
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return SSHSocketStore(
             host=self.host,
-            id=self.id,
+            store_id=self.store_id,
             port=self.port,
             username=self.username,
             socket_path=self.socket_path,
@@ -279,8 +279,10 @@ class PynixdSettings(BaseSettings):
         stores: dict[str, Store] = {}
         for spec in self.stores:
             store = spec.to_store()
-            stores[store.id] = store
+            stores[store.store_id] = store
 
-        local_store = stores.pop("local") if "local" in stores else LocalSocketStore(id="local", store_path=Path("/"))
+        local_store = (
+            stores.pop("local") if "local" in stores else LocalSocketStore(store_id="local", store_path=Path("/"))
+        )
 
         return local_store, stores

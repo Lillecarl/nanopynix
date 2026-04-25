@@ -160,17 +160,13 @@ async def test_throughput_pynixd(profiler: pyinstrument.Profiler) -> None:
     client_path.mkdir(parents=True, exist_ok=True)
 
     local_store = LocalSocketStore(
-        id="local",
+        store_id="local",
         store_path=local_path,
-        max_builds=0,
-        max_transfers=100,
         **get_test_store_kwargs(),
     )
     builder_store = LocalSocketStore(
-        id="builder",
+        store_id="builder",
         store_path=builder_path,
-        max_builds=MAX_JOBS,
-        max_transfers=100,
         **get_test_store_kwargs(),
     )
 

@@ -17,15 +17,10 @@ from cachetools import TTLCache
 
 from .. import wire
 from ..monitor import ResourceGate, ResourceMonitor
-from ..operations.add_multiple_to_store import AddMultipleToStoreRequest
-from ..operations.add_to_store_nar import AddToStoreNarRequest
-from ..operations.nar_from_path import NarFromPathRequest
 from ..operations.probe_features import ProbeFeaturesRequest
 from ..operations.probe_systems import ProbeSystemsRequest
 from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
-from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
 from ..path_tracker import PathTrackerInstance
-from ..store_path import StorePath
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
 
@@ -42,6 +37,7 @@ if TYPE_CHECKING:
     )
     from ..psi import CpuUtil, MemInfo
     from ..signing import SecretKey
+    from ..store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -69,13 +65,13 @@ class Store(ABC):
 
     def __init__(
         self,
-        id: str,
+        store_id: str,
         store_path: Path = Path("/"),
         idle_ttl: float = _DEFAULT_IDLE_TTL,
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
     ) -> None:
-        self.id = id
+        self.store_id = store_id
         self.store_path = store_path
         self.version: int = wire.PROTOCOL_VERSION
         self.nix_version: str = ""
@@ -84,7 +80,7 @@ class Store(ABC):
 
         self.gate = ResourceGate()
         self.pool = ConnectionPool(
-            store_id=id,
+            store_id=store_id,
             factory=self._create_conn_with_counter,
             gate=self.gate,
             idle_ttl=idle_ttl,
@@ -94,7 +90,7 @@ class Store(ABC):
         self.monitor: ResourceMonitor | None = None
         self._feature_matrix: dict[str, set[str]] | None = feature_matrix
         self._probe = probe
-        self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=id)
+        self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=store_id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
             maxsize=10000,
             ttl=300,
@@ -133,22 +129,19 @@ class Store(ABC):
         await self.probe()
 
         # 2. Synchronize paths to populate the tracker
-        await self.sync_paths()
+        try:
+            resp = await self.execute(QueryAllValidPathsRequest())
+            self.tracker.add_known_paths(resp.paths)
+            log.debug("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
+        except Exception:
+            # Not critical during startup; operations will re-sync if needed
+            log.warning("store_paths_sync_failed", store_id=self.store_id)
 
         # 3. Activate monitoring if configured
         if self.monitor:
             self.monitor.start()
 
         self._started = True
-
-    async def sync_paths(self) -> None:
-        """Synchronize the set of known paths from the backend store."""
-        try:
-            resp = await self.execute(QueryAllValidPathsRequest())
-            self.tracker.add_known_paths(resp.paths)
-            log.debug("store_paths_synced", store_id=self.id, count=len(resp.paths))
-        except Exception:
-            log.exception("store_path_sync_failed", store_id=self.id)
 
     def _on_connection_created(self, conn: Connection) -> None:
         """Update store metadata from a newly created connection."""
@@ -258,7 +251,7 @@ class Store(ABC):
         if self.consecutive_failures > 0:
             log.info(
                 "store_recovered",
-                store_id=self.id,
+                store_id=self.store_id,
                 consecutive_failures=self.consecutive_failures,
             )
         self.consecutive_failures = 0
@@ -275,7 +268,7 @@ class Store(ABC):
             self.cooldown_until = time.monotonic() + cooldown
             log.warning(
                 "store_cooldown",
-                store_id=self.id,
+                store_id=self.store_id,
                 consecutive_failures=self.consecutive_failures,
                 cooldown=cooldown,
             )
@@ -353,112 +346,6 @@ class Store(ABC):
         """Get ValidPathInfo from cache if available."""
         return self.path_info_cache.get(path)
 
-    async def stream_paths_to(
-        self,
-        dst: Store,
-        paths: Iterable[StorePath],
-        cancel_event: asyncio.Event | None = None,
-    ) -> None:
-        """Copy paths from this store to dst via streaming, querying closure first.
-
-        Bypasses the normal handle() path, so we update dst knowledge manually.
-        Only transfers paths that dst doesn't already have.
-        """
-        paths_set: set[StorePath] = {StorePath(p) for p in paths}
-        if not paths_set:
-            return
-
-        # 1. Get closure from source
-        closure_resp = await self.execute(
-            QueryClosureWithInfoRequest(paths=paths_set),
-            client=None,
-        )
-        if not closure_resp.infos:
-            return
-
-        # 2. Filter out paths already in destination
-        to_transfer: list[ValidPathInfo] = [
-            info for info in closure_resp.infos if info.path not in dst.tracker.known_paths
-        ]
-        if not to_transfer:
-            return
-
-        # 3. Stream the missing paths
-        async with self.transfer_conn() as src_conn, dst.transfer_conn() as dst_conn:
-            dst_conn.op_log.append("AddMultipleToStore (stream_paths_to)")
-            req = AddMultipleToStoreRequest(
-                repair=0,
-                dont_check_sigs=1,
-            )
-            await req.to_writer(dst_conn.w, dst_conn.version)
-            await dst_conn.w.drain()
-
-            fw = dst_conn.w.framed()
-            fw.write_uint64(len(to_transfer))
-
-            for info in to_transfer:
-                if cancel_event and cancel_event.is_set():
-                    log.info("stream_paths_transfer_cancelled")
-                    break
-
-                path = info.path
-                dst_conn.op_log.append("AddToStoreNar (stream_paths_to)")
-
-                # Use info.to_bytes() to send metadata as a single frame
-                fw.write(info.to_bytes())
-
-                # Request NAR from source
-                await NarFromPathRequest(path=path).to_writer(
-                    src_conn.w,
-                    src_conn.version,
-                )
-                await src_conn.w.drain()
-
-                # Source will send stderr logs followed by STDERR_LAST before NAR data
-                await src_conn.r.drain_stderr()
-
-                # Pipe raw NAR data from source into the destination's framed stream
-                await wire.pipe_raw_to_framed_writer(
-                    src_conn.r,
-                    fw,
-                    info.nar_size,
-                )
-                await dst_conn.w.drain()
-
-            await fw.finalize()
-            await dst_conn.w.drain()
-            await req.response_type().from_reader(dst_conn.r, dst_conn.version)
-
-        # 4. Update destination store's knowledge
-        dst.add_path_infos(set(to_transfer))
-        dst.tracker.add_known_paths({i.path for i in to_transfer})
-
-    async def pipe_nar_from(
-        self,
-        src: Store,
-        path: StorePath,
-        info: ValidPathInfo,
-    ) -> None:
-        """Stream NAR from src store to this store."""
-        async with self.transfer_conn() as dst_conn, src.transfer_conn() as src_conn:
-            await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
-            await src_conn.w.drain()
-
-            nar_request = AddToStoreNarRequest(
-                info=info,
-                repair=0,
-                dont_check_sigs=1,
-            )
-            await nar_request.to_writer(dst_conn.w, dst_conn.version)
-
-            await wire.pipe_raw_to_framed(
-                src_conn.r,
-                dst_conn.w,
-                info.nar_size,
-            )
-
-            await nar_request.response_type().from_reader(dst_conn.r, dst_conn.version)
-
     @abstractmethod
     async def create_conn(self) -> Connection:
         """Create transport, construct Connection, and connect it."""
@@ -517,7 +404,7 @@ class Store(ABC):
 
         log.info(
             "store_probed",
-            store_id=self.id,
+            store_id=self.store_id,
             systems=sorted(self._feature_matrix.keys()) if self._feature_matrix else [],
             feature_matrix={k: sorted(v) for k, v in (self._feature_matrix or {}).items()},
         )
@@ -570,7 +457,7 @@ class Store(ABC):
         return self.pool.stats
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}(id={self.id!r}, in_flight={self.in_flight}, pool_stats={self.pool_stats})"
+        return f"{type(self).__name__}(store_id={self.store_id!r}, in_flight={self.in_flight}, pool_stats={self.pool_stats})"
 
 
 def get_current_system() -> str:

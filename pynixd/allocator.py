@@ -111,23 +111,23 @@ class TelemetryStoreRanker(StoreRanker):
 
             # 4. Concurrency Penalty (- points)
             in_flight = store.in_flight
-            if override_in_flight and store.id in override_in_flight:
-                in_flight = override_in_flight[store.id]
+            if override_in_flight and store.store_id in override_in_flight:
+                in_flight = override_in_flight[store.store_id]
             score -= in_flight * self.settings.concurrency_penalty
 
             # 5. Predicted Load Penalty (- points)
             # (Requires build duration estimation, placeholder for now)
 
             # 6. Thundering Herd Penalty (- points)
-            assigned = assigned_this_pass.get(store.id, 0)
+            assigned = assigned_this_pass.get(store.store_id, 0)
             score -= assigned * self.settings.thundering_herd_penalty
 
             if score >= self.settings.min_schedule_score:
-                ranked.append(RankedStore(store.id, score, store))
+                ranked.append(RankedStore(store.store_id, score, store))
             else:
                 log.debug(
                     "store_ranking_below_threshold",
-                    store_id=store.id,
+                    store_id=store.store_id,
                     score=score,
                     threshold=self.settings.min_schedule_score,
                 )
@@ -200,23 +200,23 @@ class BuildAllocator:
         for store in self.stores.values():
             sfm = store._feature_matrix
             if sfm is not None and platform not in sfm:
-                reasons.append(f"{store.id}: system {platform} not in feature_matrix")
+                reasons.append(f"{store.store_id}: system {platform} not in feature_matrix")
             elif sfm is not None and features:
                 store_feats = sfm.get(platform, set())
                 missing = features - store_feats
                 if missing:
                     reasons.append(
-                        f"{store.id}: missing features {', '.join(sorted(missing))} for {platform}",
+                        f"{store.store_id}: missing features {', '.join(sorted(missing))} for {platform}",
                     )
                 else:
                     reasons.append(
-                        f"{store.id}: compatible but excluded (unhealthy/saturated/failed)",
+                        f"{store.store_id}: compatible but excluded (unhealthy/saturated/failed)",
                     )
             elif sfm is None:
-                reasons.append(f"{store.id}: no feature_matrix (not probed)")
+                reasons.append(f"{store.store_id}: no feature_matrix (not probed)")
             else:
                 reasons.append(
-                    f"{store.id}: compatible but excluded (unhealthy/saturated/failed)",
+                    f"{store.store_id}: compatible but excluded (unhealthy/saturated/failed)",
                 )
 
         return reasons

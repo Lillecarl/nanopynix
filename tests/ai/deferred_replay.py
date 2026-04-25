@@ -32,7 +32,7 @@ from pynixd.operations.add_to_store import AddToStoreRequest
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest
-from pynixd.store import LocalSocketStore
+from pynixd.store import LocalSocketStore, Store
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
@@ -41,6 +41,7 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
+from pynixd.store.transfer import stream_paths_store_to_store
 from tests.nix_config import NixConfig
 
 CA_NIX = Path(__file__).resolve().parent.parent / "nix"
@@ -91,7 +92,7 @@ async def main() -> None:
     rmtree_robust(root_path)
     root_kwargs = get_test_store_kwargs(nix_config=CA_NIX_CONFIG)
     root_store = LocalSocketStore(
-        id="deferred-replay-root",
+        store_id="deferred-replay-root",
         store_path=root_path,
         **root_kwargs,
     )
@@ -201,7 +202,7 @@ async def main() -> None:
     rmtree_robust(builder_path)
     builder_kwargs = get_test_store_kwargs(nix_config=CA_NIX_CONFIG)
     builder_store = LocalSocketStore(
-        id="deferred-replay-builder",
+        store_id="deferred-replay-builder",
         store_path=builder_path,
         **builder_kwargs,
     )
@@ -217,7 +218,7 @@ async def main() -> None:
         paths_to_transfer.add(input_drv)
 
     print(f"Transferring {len(paths_to_transfer)} paths...")
-    await LocalSocketStore.stream_paths_store_to_store(
+    await stream_paths_store_to_store(
         root_store,
         builder_store,
         paths_to_transfer,

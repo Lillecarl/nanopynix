@@ -473,9 +473,9 @@ def rmtree_robust(path: str | Path) -> None:
 
 def rmtree_robust_glob(pattern: str) -> None:
     """Remove all directories matching a glob pattern."""
-    # Use Path().glob() which handles absolute paths correctly
-    for path in Path().glob(pattern):
-        rmtree_robust(path)
+    import glob
+    for path_str in glob.glob(pattern):
+        rmtree_robust(Path(path_str))
 
 
 @pytest.fixture(autouse=True)
@@ -509,7 +509,7 @@ async def cleanup_extra_stores(pynixd_server: Server | tuple | None):
 
 async def run_subproc(
     cmd: Sequence[str | Path],
-    print: bool = True,
+    verbose: bool = True,
     expected_retcode: int | None = 0,
     nix_config: NixConfig | dict[str, str] | None = None,
     **kwargs,
@@ -518,7 +518,7 @@ async def run_subproc(
 
     Args:
         cmd: Command and arguments to run
-        print: If True, stream output to structlog in real-time
+        verbose: If True, stream output to structlog in real-time
         expected_retcode: If not None, raise if return code doesn't match. Defaults to 0.
         nix_config: NixConfig object or dict for NIX_CONFIG env var.
         **kwargs: Additional arguments passed to create_subprocess_exec
@@ -568,7 +568,7 @@ async def run_subproc(
             stdboth.append(decoded_line)
             if not line:
                 break
-            if print:
+            if verbose:
                 log.info(name, message=decoded_line.rstrip())
 
     await asyncio.gather(
@@ -632,12 +632,12 @@ async def pynixd_server(
     rmtree_robust(socket_path)
 
     local_store = LocalSocketStore(
-        id="local",
+        store_id="local",
         store_path=local_path,
         **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG),
     )
     builder_store = LocalSocketStore(
-        id="builder",
+        store_id="builder",
         store_path=builder_path,
         **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG),
     )

@@ -50,7 +50,7 @@ async def main() -> None:
     rmtree_robust(root_path)
     root_kwargs = get_test_store_kwargs(nix_config=DYN_NIX_CONFIG)
     root_store = LocalSocketStore(
-        id="dyn-drv-root",
+        store_id="dyn-drv-root",
         store_path=root_path,
         **root_kwargs,
     )

@@ -1,43 +1,40 @@
+"""Mock Store implementations for unit and functional tests.
+"""
+
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
-from pynixd import metrics
-from pynixd.connection import Connection
-from pynixd.operations.base import ValidPathInfo
+from pynixd import metrics, wire
+from pynixd.operations.base import OpResponse
 from pynixd.operations.build_derivation import BuildDerivationRequest
-from pynixd.operations.query_all_valid_paths import (
-    QueryAllValidPathsRequest,
-    QueryAllValidPathsResponse,
-)
-from pynixd.operations.query_closure_with_info import (
-    QueryClosureWithInfoRequest,
-    QueryClosureWithInfoResponse,
-)
-from pynixd.psi import CpuUtil
-from pynixd.store import Store
+from pynixd.operations.query_all_valid_paths import QueryAllValidPathsResponse
+from pynixd.operations.query_closure_with_info import QueryClosureWithInfoRequest, QueryClosureWithInfoResponse
+from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
+from pynixd.store.base import Store
 from pynixd.store_path import StorePath
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterable
+    from collections.abc import Iterable
 
-    from pynixd.connection import ClientConn
+    from pynixd.connection import ClientConn, Connection
     from pynixd.operations.base import OpRequest, Resp
+    from pynixd.psi import CpuUtil
+    from pynixd.types.path_info import ValidPathInfo
     from pynixd.wire import NixReader, NixWriter
+
 
 log = structlog.get_logger(__name__)
 
 
-class MockConnection(Connection):
-    """A mock representation of a Nix daemon connection.
+class MockConnection:
+    """Mock connection that doesn't actually connect to anything.
 
-    Instead of communicating over a real Unix or TCP socket, this class
-    delegates all `call()` invocations directly back to the `MockStore`
+    Delegates all `call()` invocations directly back to the `MockStore`
     that created it. This allows tests to simulate the protocol handshake
     and operation execution without any network/IO overhead.
     """
@@ -46,7 +43,7 @@ class MockConnection(Connection):
         # We don't call super().__init__ because we don't have real R/W pairs.
         # Instead, we initialize the fields expected by the base class.
         self.store = store
-        self.id = f"mock-{store.id}"
+        self.id = f"mock-{store.store_id}"
         self.version = 0x125  # Simulates a modern Nix protocol version (e.g. 1.37)
         self.nix_version = store.nix_version
         self.features = set()
@@ -56,8 +53,8 @@ class MockConnection(Connection):
 
         # Dummy reader/writer to avoid AttributeErrors on .identifier
         class DummyRW:
-            def __init__(self, id: str):
-                self.identifier = id
+            def __init__(self, rw_id: str):
+                self.identifier = rw_id
 
             def framed(self):
                 return self
@@ -100,46 +97,33 @@ class MockConnection(Connection):
         suppress_last: bool = False,
         raise_on_error: bool = False,
     ) -> Resp:
-        """Forward the operation request to the MockStore for a response."""
-        return await self.store.call(
-            request,
-            client=client,
-            suppress_last=suppress_last,
-            raise_on_error=raise_on_error,
-        )
+        """Forward all calls to the parent MockStore's execute_mock method."""
+        return await self.store.execute_mock(request)
+
+    def close(self):
+        self.connected = False
 
 
 class MockStore(Store):
-    """A high-fidelity deterministic mock of the pynixd `Store` class.
+    """Store with pre-recorded or dynamically generated responses.
 
-    This class allows for zero-I/O testing of the Scheduler and its
-    associated components by virtualizing all interactions with the
-    Nix daemon and the local filesystem.
-
-    Key Features:
-    - **Configurable Responses**: Set fixed responses for specific `OpRequest` types
-      using the `.responses` dictionary.
-    - **Dynamic Handlers**: Provide async functions in `.call_handlers` to
-      generate responses dynamically based on the request content.
-    - **Path Virtualization**: The `.tracker` (PathTracker) behaves exactly like
-      the real one, but transfers are simulated as instant set operations.
-    - **Build Control**: Use `.block_build(drv_path)` to pause a build in-flight
-      and manually trigger its completion via an `asyncio.Event`.
-    - **Load Simulation**: Tweak `cpu_util` at runtime to observe how the
-      scheduler reacts to fleet saturation.
+    Useful for testing complex orchestration logic (like build decomposition
+    or the build scheduler) without spawning real Nix processes.
+    Also tracks statistics like current CPU utilization to test how the
+    scheduler reacts to fleet saturation.
     """
 
     def __init__(
         self,
-        id: str,
+        store_id: str,
         feature_matrix: dict[str, set[str]] | None = None,
         cpu_utilization: float = 0.0,
     ) -> None:
         # We pass probe=False to disable the background task that normally
         # tries to run 'nix show-derivation' on real stores.
         super().__init__(
-            id=id,
-            store_path=Path(f"/mock/{id}"),
+            store_id=store_id,
+            store_path=Path(f"/mock/{store_id}"),
             feature_matrix=feature_matrix,
             probe=False,
         )
@@ -148,144 +132,91 @@ class MockStore(Store):
         self.responses: dict[type[OpRequest], Any] = {}
         # call_handlers: Maps Request type -> async handler function
         self.call_handlers: dict[type[OpRequest], Any] = {}
-        # build_blockers: Maps drv_path -> asyncio.Event to control build timing
+
         self.build_blockers: dict[str, asyncio.Event] = {}
-        # Initialize PSI-like load stats
-        self._cpu_util = CpuUtil(
-            utilization=cpu_utilization,
-            cores=4.0,
-            throttled_pct=0.0,
-        )
-        # In MockStore, we don't want real PSI monitoring, so we don't start any poller.
+        self.cpu_utilization_val = cpu_utilization
 
-    def block_build(
-        self,
-        drv_path: str | StorePath,
-        blocker: asyncio.Event | None = None,
-    ) -> asyncio.Event:
-        """Prevent a build of the given .drv from completing.
+    @property
+    def cpu_util(self) -> CpuUtil | None:
+        """Mocked CPU utilization."""
+        from pynixd.psi import CpuUtil
+        return CpuUtil(utilization=self.cpu_utilization_val, cores=1.0, throttled_pct=0.0)
 
-        The next `call(BuildDerivationRequest)` for this path will await
-        the returned event. This is essential for testing concurrency and
-        ensuring that the scheduler doesn't over-subscribe builders.
-        """
+    @property
+    def pressure(self) -> float | None:
+        return self.cpu_utilization_val
+
+    def set_cpu_utilization(self, val: float) -> None:
+        self.cpu_utilization_val = val
+
+    def block_build(self, drv_path: str | StorePath, blocker: asyncio.Event | None = None) -> asyncio.Event:
+        """Create or use an event that will block builds of this drv_path."""
         event = blocker or asyncio.Event()
         self.build_blockers[str(drv_path)] = event
         return event
 
-    @property
-    def cpu_util(self) -> CpuUtil | None:
-        """Returns the current simulated CPU utilization."""
-        return self._cpu_util
-
-    @cpu_util.setter
-    def cpu_util(self, value: CpuUtil | None) -> None:
-        """Update the simulated load at runtime."""
-        self._cpu_util = value
+    def unblock_build(self, drv_path: str | StorePath) -> None:
+        """Signal the event to allow blocked builds of this drv_path to proceed."""
+        drv_str = str(drv_path)
+        if drv_str in self.build_blockers:
+            self.build_blockers[drv_str].set()
 
     async def create_conn(self) -> Connection:
-        """Return a MockConnection."""
-        return MockConnection(self)
+        """Return a MockConnection that delegates back to us."""
+        return cast("Connection", MockConnection(self))
 
-    @contextlib.asynccontextmanager
-    async def build_conn(self) -> AsyncIterator[MockConnection]:
-        """Simulate acquiring a build connection."""
-        async with self.pool.acquire("build"):
-            yield MockConnection(self)
-
-    @contextlib.asynccontextmanager
-    async def transfer_conn(self) -> AsyncIterator[MockConnection]:
-        """Simulate acquiring a transfer connection."""
-        async with self.pool.acquire("transfer"):
-            yield MockConnection(self)
-
-    async def call(
-        self,
-        request: OpRequest[Resp],
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-        raise_on_error: bool = False,
-        skip_probe: bool = False,
-    ) -> Resp:
-        """Mocked Nix RPC call implementation.
-
-        Logic flow:
-        1. If it's a build request, check for registered blockers.
-        2. Check for a custom handler in `call_handlers`.
-        3. Check for a fixed response in `responses`.
-        4. Otherwise, raise NotImplementedError to alert the test writer.
-        """
+    async def execute_mock(self, request: OpRequest[Resp]) -> Resp:
+        """Internal dispatcher for the MockConnection."""
         req_type = type(request)
 
         if isinstance(request, BuildDerivationRequest):
             drv_path = str(request.drv_path)
             if drv_path in self.build_blockers:
-                log.debug("mock_build_blocking", store_id=self.id, drv_path=drv_path)
+                log.debug("mock_build_blocking", store_id=self.store_id, drv_path=drv_path)
                 await self.build_blockers[drv_path].wait()
-                log.debug("mock_build_resuming", store_id=self.id, drv_path=drv_path)
+                log.debug("mock_build_resuming", store_id=self.store_id, drv_path=drv_path)
 
         if req_type in self.call_handlers:
             return await self.call_handlers[req_type](request)
 
         if req_type in self.responses:
-            return self.responses[req_type]
+            return cast("Resp", self.responses[req_type])
 
-        # Default handlers for discovery ops
-        if isinstance(request, QueryAllValidPathsRequest):
-            return cast(
-                "Resp",
-                QueryAllValidPathsResponse(paths=self.tracker.known_paths),
-            )
+        # Dynamic defaults for common queries
+        if isinstance(request, QueryValidPathsRequest):
+            return cast("Resp", QueryValidPathsResponse(paths=request.paths))
+
+        if req_type == QueryAllValidPathsResponse:
+            return cast("Resp", QueryAllValidPathsResponse(paths=self.tracker.known_paths))
 
         if isinstance(request, QueryClosureWithInfoRequest):
+            # Just return some dummy info for everything
+            from pynixd.types.path_info import ValidPathInfo
             infos = []
             for p in request.paths:
-                # Provide a fake info for any requested path
                 infos.append(
                     ValidPathInfo(
                         path=p,
                         deriver=StorePath(""),
                         nar_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                        nar_size=1024,
                         references=set(),
                         registration_time=0,
-                        nar_size=1024,
-                        ultimate=0,
+                        ultimate=1,
                         sigs=set(),
                         ca="",
-                    ),
+                    )
                 )
             return cast("Resp", QueryClosureWithInfoResponse(infos=infos))
 
         log.warning(
             "mock_store_no_response",
-            store_id=self.id,
+            store_id=self.store_id,
             request=req_type.__name__,
         )
         raise NotImplementedError(
-            f"MockStore {self.id} has no response for {req_type.__name__}. "
+            f"MockStore {self.store_id} has no response for {req_type.__name__}. "
             f"Update your test setup to provide a mock response.",
-        )
-
-    async def stream_paths_to(
-        self,
-        dst: Store,
-        paths: Iterable[StorePath],
-        cancel_event: asyncio.Event | None = None,
-    ) -> None:
-        """Instantly move paths from this store to dst tracker.
-
-        Bypasses NAR generation and socket streaming. The destination store's
-        `PathTracker` is updated immediately.
-        """
-        dst.tracker.add_known_paths(paths)
-        metrics.PATHS_TRANSFERRED.labels(source=self.id, destination=dst.id).inc(
-            len(list(paths)),
-        )
-        log.debug(
-            "mock_path_transfer_complete",
-            src=self.id,
-            dst=dst.id,
-            count=len(list(paths)),
         )
 
     async def execute(
@@ -295,25 +226,10 @@ class MockStore(Store):
         suppress_last: bool = False,
         skip_probe: bool = False,
     ) -> Resp:
-        """A simple proxy to `call()`, bypassing any real SQLite or cache fast-paths."""
-        return await self.call(request, client, suppress_last, skip_probe=skip_probe)
+        """Always use the dynamic mock logic, bypassing request.execute()."""
+        # Record the operation for test verification
+        async with self.transfer_conn() as conn:
+            # We know it's a MockConnection which has op_log
+            cast(Any, conn).op_log.append(type(request).__name__)
 
-    def supports_derivation(
-        self,
-        system: str,
-        features: set[str] | None = None,
-    ) -> bool:
-        """Check if the simulated store supports a specific system/feature set."""
-        if self._feature_matrix is None:
-            return False
-        supported_features = self._feature_matrix.get(system)
-        if supported_features is None:
-            return False
-        if features is None:
-            return True
-        return features.issubset(supported_features)
-
-    @property
-    def is_healthy(self) -> bool:
-        """Mock stores are always healthy in tests unless you override this."""
-        return True
+        return await self.execute_mock(request)

@@ -284,12 +284,11 @@ class LocalPSIMonitor(ResourceMonitor):
         """Uses loop.add_reader to listen for kernel PSI events."""
         loop = asyncio.get_running_loop()
 
-        cpu_threshold = f"some {int(self.settings.psi_cpu_threshold * 1000)} 1000000"
-        mem_threshold = f"some {int(self.settings.psi_mem_threshold * 1000)} 1000000"
-        io_threshold = f"some {int(self.settings.psi_io_threshold * 1000)} 1000000"
-
-        if not os.access("/sys/fs/cgroup/cpu.pressure", os.R_OK | os.W_OK):
-            raise PermissionError("Insufficient permissions for PSI triggers")
+        # Unprivileged users are limited to a minimum window size of 2 seconds.
+        window_size = 2000000
+        cpu_threshold = f"some {int(self.settings.psi_cpu_threshold * 1000)} {window_size}"
+        mem_threshold = f"some {int(self.settings.psi_mem_threshold * 1000)} {window_size}"
+        io_threshold = f"some {int(self.settings.psi_io_threshold * 1000)} {window_size}"
 
         try:
             self.cpu_fd = os.open(
@@ -309,22 +308,30 @@ class LocalPSIMonitor(ResourceMonitor):
                 os.O_RDWR | os.O_NONBLOCK,
             )
             os.write(self.io_fd, io_threshold.encode())
+        except (PermissionError, FileNotFoundError, OSError) as e:
+            log.warning(
+                "psi_triggers_unavailable",
+                error=str(e),
+                hint="Set kernel.psi=1 and ensure write access to cgroup.pressure files",
+            )
+            return
 
-            def on_cpu_event():
-                log.warning("cpu_pressure_event_fired")
-                self.gate.cpu_clear.clear()
-                loop.call_later(2.0, self.check_pressure_manually)
+        def on_cpu_event():
+            log.warning("cpu_pressure_event_fired")
+            self.gate.cpu_clear.clear()
+            loop.call_later(2.0, self.check_pressure_manually)
 
-            def on_mem_event():
-                log.warning("mem_pressure_event_fired")
-                self.gate.mem_clear.clear()
-                loop.call_later(2.0, self.check_pressure_manually)
+        def on_mem_event():
+            log.warning("mem_pressure_event_fired")
+            self.gate.mem_clear.clear()
+            loop.call_later(2.0, self.check_pressure_manually)
 
-            def on_io_event():
-                log.warning("io_pressure_event_fired")
-                self.gate.io_clear.clear()
-                loop.call_later(2.0, self.check_pressure_manually)
+        def on_io_event():
+            log.warning("io_pressure_event_fired")
+            self.gate.io_clear.clear()
+            loop.call_later(2.0, self.check_pressure_manually)
 
+        try:
             loop.add_reader(self.cpu_fd, on_cpu_event)
             loop.add_reader(self.mem_fd, on_mem_event)
             loop.add_reader(self.io_fd, on_io_event)

@@ -71,7 +71,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                 store.tracker.set_known_paths(resp.paths, update_regtime=False)
                 self.logger.info(
                     "sync_paths_complete",
-                    store_id=store.id,
+                    store_id=store.store_id,
                     count=len(resp.paths),
                 )
                 return resp
@@ -87,7 +87,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                 store.tracker.set_known_paths(resp.paths, update_regtime=False)
                 self.logger.info(
                     "sync_paths_complete",
-                    store_id=store.id,
+                    store_id=store.store_id,
                     count=len(resp.paths),
                 )
             except Exception as e:
@@ -96,7 +96,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                     # since the full sync failed.
                     self.logger.info(
                         "verifying_cached_paths",
-                        store_id=store.id,
+                        store_id=store.store_id,
                         error=str(e),
                         count=len(store.tracker.known_paths),
                     )
@@ -115,7 +115,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                     except Exception as e2:
                         self.logger.warning(
                             "path_verification_failed",
-                            store_id=store.id,
+                            store_id=store.store_id,
                             error=str(e2),
                         )
                         # Keep existing paths, better to be stale than empty for now?
@@ -128,6 +128,6 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
             else:
                 return resp
         except Exception:
-            self.logger.warning("sync_paths_failed", store_id=store.id)
+            self.logger.warning("sync_paths_failed", store_id=store.store_id)
             # Do NOT clear known_paths here, it might have been loaded from DB
             return QueryAllValidPathsResponse(paths=store.tracker.known_paths)

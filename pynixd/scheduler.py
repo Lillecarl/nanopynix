@@ -44,6 +44,8 @@ if TYPE_CHECKING:
     from .operations.build_paths import BuildPathsWithResultsResponse
     from .store import Store
 
+from .store.transfer import stream_paths_store_to_store
+
 log = structlog.get_logger(__name__)
 
 DerivationReader = Callable[[Path, "StorePath"], "ParsedDerivation"]
@@ -227,11 +229,11 @@ class Scheduler:
         if not pending:
             # Still update store metrics even if queue is empty
             for s in self.stores.values():
-                metrics.STORE_HEALTHY.labels(store_id=s.id).set(
+                metrics.STORE_HEALTHY.labels(store_id=s.store_id).set(
                     1 if s.is_healthy else 0,
                 )
                 if s.cpu_util:
-                    metrics.STORE_CPU_UTILIZATION.labels(store_id=s.id).set(
+                    metrics.STORE_CPU_UTILIZATION.labels(store_id=s.store_id).set(
                         s.cpu_util.utilization,
                     )
             return
@@ -260,13 +262,13 @@ class Scheduler:
 
         # Count builds assigned to each store to avoid double-counting with s.in_flight
         # which already includes some/all building jobs that have acquired connections.
-        assigned_count: dict[str, int] = {s.id: 0 for s in self.stores.values()}
+        assigned_count: dict[str, int] = {s.store_id: 0 for s in self.stores.values()}
         for build in pending:
             if build.is_building and build.assigned_store_id:
                 assigned_count[build.assigned_store_id] += 1
 
         override_in_flight: dict[str, int] = {
-            s.id: max(s.in_flight, assigned_count[s.id]) for s in self.stores.values()
+            s.store_id: max(s.in_flight, assigned_count[s.store_id]) for s in self.stores.values()
         }
 
         for build in pending:
@@ -377,8 +379,8 @@ class Scheduler:
                 # If all compatible stores have already failed this build,
                 # it's permanently stuck — fail it now with a clear message.
                 compatible = [s for s in self.stores.values() if s.supports_derivation(build.platform, build_features)]
-                if compatible and all(s.id in build.failed_backends for s in compatible):
-                    failed_ids = [s.id for s in compatible]
+                if compatible and all(s.store_id in build.failed_backends for s in compatible):
+                    failed_ids = [s.store_id for s in compatible]
                     error_msg = (
                         f"All compatible stores failed for {build.platform}"
                         + (f" (requires {', '.join(sorted(build_features))})" if build_features else "")
@@ -400,9 +402,9 @@ class Scheduler:
 
         # 4. Update store metrics
         for s in self.stores.values():
-            metrics.STORE_HEALTHY.labels(store_id=s.id).set(1 if s.is_healthy else 0)
+            metrics.STORE_HEALTHY.labels(store_id=s.store_id).set(1 if s.is_healthy else 0)
             if s.cpu_util:
-                metrics.STORE_CPU_UTILIZATION.labels(store_id=s.id).set(
+                metrics.STORE_CPU_UTILIZATION.labels(store_id=s.store_id).set(
                     s.cpu_util.utilization,
                 )
 
@@ -412,13 +414,15 @@ class Scheduler:
             waiting_paths=len(waiting_paths),
             waiting_deps=len(waiting_deps),
             waiting_slot=len(waiting_slot),
-            in_flight={s.id: s.in_flight for s in self.stores.values()},
-            cpu_util={s.id: f"{s.cpu_util.utilization:.1f}%" if s.cpu_util else None for s in self.stores.values()},
+            in_flight={s.store_id: s.in_flight for s in self.stores.values()},
+            cpu_util={
+                s.store_id: f"{s.cpu_util.utilization:.1f}%" if s.cpu_util else None for s in self.stores.values()
+            },
         )
 
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
         """Execute build on a store, handling inputs and outputs."""
-        build.assigned_store_id = store.id
+        build.assigned_store_id = store.store_id
         build_resp: BuildDerivationResponse | None = None
         try:
             # Acquire build connection with semaphore FIRST to limit concurrency
@@ -450,17 +454,18 @@ class Scheduler:
                     log.debug(
                         "build_sending_inputs",
                         build_id=build.id,
-                        store_id=store.id,
+                        store_id=store.store_id,
                         count=len(missing_info),
                         size=missing_size,
                     )
-                    await self.local_store.stream_paths_to(
+                    await stream_paths_store_to_store(
+                        self.local_store,
                         store,
                         set(missing_info.keys()),
                     )
 
                 # 2. Trigger build
-                log.debug("build_executing", build_id=build.id, store_id=store.id)
+                log.debug("build_executing", build_id=build.id, store_id=store.store_id)
                 build.started_at = time.monotonic()
                 if build.wait_time is not None:
                     metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
@@ -489,16 +494,16 @@ class Scheduler:
                     store.tracker.add_known_paths(all_output_paths)
                     log.info(
                         "pulling_paths",
-                        store_id=store.id,
+                        store_id=store.store_id,
                         count=len(all_output_paths),
                     )
                     for p in all_output_paths:
-                        log.debug("pulling_path", store_id=store.id, path=p)
-                    await store.stream_paths_to(self.local_store, all_output_paths)
+                        log.debug("pulling_path", store_id=store.store_id, path=p)
+                    await stream_paths_store_to_store(store, self.local_store, all_output_paths)
                     log.debug(
                         "pulled_paths_into_local_store",
                         count=len(all_output_paths),
-                        store_id=store.id,
+                        store_id=store.store_id,
                     )
 
                     # Register CA realisations after outputs are in local store
@@ -526,7 +531,7 @@ class Scheduler:
             log.info(
                 "build_deferred_busy",
                 build_id=build.id,
-                store_id=store.id,
+                store_id=store.store_id,
                 reason=str(e),
             )
             await build.stop_transfer()
@@ -537,7 +542,7 @@ class Scheduler:
             # Don't fail the build yet, reset it for retry on another store
             # but we must stop any background transfer task first.
             await build.stop_transfer()
-            build.reset_for_retry(store.id, build.transfer_task)
+            build.reset_for_retry(store.store_id, build.transfer_task)
             self.trigger()
         except Exception:
             log.exception("build_crashed", build_id=build.id)

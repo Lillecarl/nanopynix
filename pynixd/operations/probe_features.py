@@ -107,7 +107,7 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
 
         log.info(
             "features_probed",
-            store_id=store.id,
+            store_id=store.store_id,
             feature_matrix={k: sorted(v) for k, v in feature_matrix.items()},
         )
         return ProbeFeaturesResponse(feature_matrix=feature_matrix)

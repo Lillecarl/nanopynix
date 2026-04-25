@@ -87,7 +87,7 @@ class ProbeSystemsRequest(OpRequest[ProbeSystemsResponse]):
 
         systems = {system for system, (_, ok) in zip(candidates, results, strict=True) if ok}
 
-        log.info("systems_probed", store_id=store.id, systems=sorted(systems))
+        log.info("systems_probed", store_id=store.store_id, systems=sorted(systems))
         return ProbeSystemsResponse(systems=systems)
 
 
@@ -138,17 +138,17 @@ async def _send_probe(
             BuildResultStatus.RESOLVES_TO_ALREADY_VALID,
         )
         if accepted:
-            log.debug("probe_accepted", store_id=store.id, probe=name)
+            log.debug("probe_accepted", store_id=store.store_id, probe=name)
         else:
             log.debug(
                 "probe_denied",
-                store_id=store.id,
+                store_id=store.store_id,
                 probe=name,
                 status=resp.result.status,
                 error_msg=resp.result.error_msg,
             )
     except Exception as e:
-        log.debug("probe_exception", store_id=store.id, probe=name, error=str(e))
+        log.debug("probe_exception", store_id=store.store_id, probe=name, error=str(e))
         return name, False
     else:
         return name, accepted

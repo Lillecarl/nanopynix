@@ -1,60 +1,38 @@
-"""NAR streaming benchmarks.
-
-Measures throughput and overhead for NAR transfers between stores:
-- Big NAR: single large path, measures MB/s throughput
-- Many small NARs: thousands of tiny paths, measures ops/s overhead
-- Compares copy_paths (batched AddMultipleToStore) vs pipe_nar_from (per-path)
-- NAR serving: how fast each store type can serve NARs via nar_from_path
-
-Store types are parametrized so each test runs against:
-- local-socket: system daemon Unix socket
-- ssh-subprocess: SSH channel -> nix-daemon --stdio (localhost)
-- ssh-socket: SSH tunnel -> daemon Unix socket (localhost)
-
-Small NAR pipe/serve tests add a concurrency dimension (1, 4, 8 parallel
-operations) to measure transport multiplexing. SSH concurrency is capped
-at 8 to stay within OpenSSH's default MaxSessions=10 limit.
-
-Chunk sizes are parameterized to find the optimal buffer size.
-Set PYNIXD_BENCH_CHUNKS to a comma-separated list of sizes in KB
-(default: "64,256,1024,4096").
+"""Benchmarks for NAR streaming and path copying performance.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
-import subprocess
+import os
 import time
+from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 import structlog
-from conftest import NIX_BIN, _record, rmtree_robust
-from environs import env
+from environs import Env
 
 from pynixd import wire
-from pynixd.operations.nar_from_path import NarFromPathRequest
+from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
-from pynixd.store import (
-    LocalSocketStore,
-    SSHSocketStore,
-    SSHSubprocessStore,
-    Store,
-)
+from pynixd.store import LocalSocketStore, SSHSocketStore, SSHSubprocessStore, Store
 from pynixd.store_path import StorePath
+from tests.conftest import NIX_BIN, rmtree_robust
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from pynixd.types.path_info import ValidPathInfo
 
-    from pynixd.operations.base import ValidPathInfo
+from pynixd.store.transfer import pipe_nar_store_to_store, stream_paths_store_to_store
+
 
 log = structlog.get_logger(__name__)
 
 
 BENCH_DST = Path("/tmp/pynixd-bench-dst")
 
+env = Env()
 _SSH_USER = env.str("USER", "root")
 
 _CHUNK_SIZES_KB = env.list("PYNIXD_BENCH_CHUNKS", [64, 256, 1024, 4096], subcast=int)
@@ -63,28 +41,24 @@ _STORE_TYPES = ["local-socket", "ssh-socket"]
 
 _CONCURRENCY_LEVELS = [1, 4, 8]
 
-_MAX_TRANSFERS = 10
-
 
 async def _make_store(store_type: str) -> Store:
     """Create a store that reads from the system store."""
     if store_type == "local-socket":
-        return LocalSocketStore(id="local-socket", max_transfers=_MAX_TRANSFERS)
+        return LocalSocketStore(store_id="local-socket")
     if store_type == "ssh-subprocess":
         return SSHSubprocessStore(
             host="127.0.0.1",
-            id="ssh-subprocess",
+            store_id="ssh-subprocess",
             port=22,
             username=_SSH_USER,
-            max_transfers=_MAX_TRANSFERS,
         )
     if store_type == "ssh-socket":
         return SSHSocketStore(
             host="127.0.0.1",
-            id="ssh-socket",
+            store_id="ssh-socket",
             port=22,
             username=_SSH_USER,
-            max_transfers=_MAX_TRANSFERS,
         )
     raise ValueError(f"Unknown store type: {store_type}")
 
@@ -101,175 +75,212 @@ async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
 async def dst_store() -> AsyncIterator[LocalSocketStore]:
     rmtree_robust(BENCH_DST)
     BENCH_DST.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+
     s = LocalSocketStore(
-        id="bench-dst",
+        store_id="bench-dst",
         store_path=BENCH_DST,
-        max_transfers=_MAX_TRANSFERS,
+        nix_bin=str(NIX_BIN),
     )
     yield s
     await s.close()
 
 
-async def _get_big_path() -> StorePath:
-    """Find a large NAR path in the local store (>100MB)."""
-    # Just use something common like 'nix' if it exists
-    out = subprocess.check_output(  # noqa: ASYNC221
-        [NIX_BIN, "path-info", "--json", "nixpkgs#nix"],
-        text=True,
-    )
-
-    data = json.loads(out)
-    return StorePath(data[0]["path"])
+def _set_chunk_size(kb: int) -> int:
+    old = wire._CHUNK_SIZE
+    wire._CHUNK_SIZE = kb * 1024
+    return old
 
 
-async def _get_small_paths(n: int = 1000) -> list[StorePath]:
-    """Find n small NAR paths in the local store."""
-    out = subprocess.check_output(  # noqa: ASYNC221
-        [NIX_BIN, "query", "--all", "--limit", str(n)],
-        text=True,
-    )
-    return [StorePath(p) for p in out.splitlines() if p.strip()]
+def _store_label(s: Store) -> str:
+    if isinstance(s, LocalSocketStore):
+        return "local"
+    if isinstance(s, SSHSocketStore):
+        return "ssh-socket"
+    if isinstance(s, SSHSubprocessStore):
+        return "ssh-subprocess"
+    return "unknown"
 
 
-@pytest.mark.benchmark
-@pytest.mark.parametrize("chunk_size_kb", _CHUNK_SIZES_KB)
-async def test_bench_nar_big_throughput(
-    request: pytest.FixtureRequest,
-    bench_store: Store,
-    dst_store: LocalSocketStore,
-    chunk_size_kb: int,
-) -> None:
-    """Measure throughput for a large NAR transfer."""
-    path = await _get_big_path()
-    resp = await bench_store.execute(QueryPathInfoRequest(path=path))
-    assert resp.valid and resp.info
-    info = resp.info.with_path(path)
-
-    log.info("starting_big_nar_bench", path=path, size_mb=info.nar_size / 1e6)
-
-    start = time.perf_counter()
-    await dst_store.pipe_nar_from(bench_store, path, info)
-    elapsed = time.perf_counter() - start
-
-    mb_per_s = (info.nar_size / 1e6) / elapsed
-    _record(
-        request,
-        "nar_throughput",
-        store=bench_store.id,
-        chunk_kb=chunk_size_kb,
-        mb_per_s=mb_per_s,
-        size_mb=info.nar_size / 1e6,
-    )
-
-
-@pytest.mark.benchmark
-@pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
-async def test_bench_nar_small_pipe(
-    request: pytest.FixtureRequest,
-    bench_store: Store,
-    dst_store: LocalSocketStore,
-    concurrency: int,
-) -> None:
-    """Measure overhead for piping many small NARs one-by-one."""
-    paths = (await _get_small_paths(100))[:100]  # Smaller sample for speed
-    infos = []
+async def _pick_a_path(s: Store, need_no_refs: bool = False) -> StorePath:
+    resp = await s.execute(QueryAllValidPathsRequest())
+    paths = list(resp.paths)
+    # Prefer something sizeable but not insane
     for p in paths:
-        resp = await bench_store.execute(QueryPathInfoRequest(path=p))
-        if resp.valid and resp.info:
-            infos.append(resp.info.with_path(p))
-
-    log.info("starting_small_nar_pipe_bench", count=len(infos), concurrency=concurrency)
-
-    semaphore = asyncio.Semaphore(concurrency)
-
-    async def pipe_one(p: StorePath, i: ValidPathInfo):
-        async with semaphore:
-            await dst_store.pipe_nar_from(bench_store, p, i)
-
-    start = time.perf_counter()
-    await asyncio.gather(*[pipe_one(i.path, i) for i in infos])
-    elapsed = time.perf_counter() - start
-
-    ops_per_s = len(infos) / elapsed
-    _record(
-        request,
-        "nar_pipe_overhead",
-        store=bench_store.id,
-        concurrency=concurrency,
-        ops_per_s=ops_per_s,
-    )
+        if p.endswith(".drv"):
+            continue
+        info_resp = await s.execute(QueryPathInfoRequest(path=p))
+        info = info_resp.info
+        if info and 100_000 < info.nar_size < 10_000_000:
+            if need_no_refs and info.references - {p}:
+                continue
+            return p
+    return paths[0]
 
 
-@pytest.mark.benchmark
-async def test_bench_nar_small_batch(
-    request: pytest.FixtureRequest,
-    bench_store: Store,
-    dst_store: LocalSocketStore,
-) -> None:
-    """Measure overhead for batched AddMultipleToStore."""
-    paths = await _get_small_paths(100)
-    log.info("starting_small_nar_batch_bench", count=len(paths))
-
-    start = time.perf_counter()
-    # stream_paths_to handles closure and batching
-    await bench_store.stream_paths_to(dst_store, paths)
-    elapsed = time.perf_counter() - start
-
-    ops_per_s = len(paths) / elapsed
-    _record(
-        request,
-        "nar_batch_overhead",
-        store=bench_store.id,
-        ops_per_s=ops_per_s,
-    )
-
-
-@pytest.mark.benchmark
-@pytest.mark.parametrize("concurrency", _CONCURRENCY_LEVELS)
-async def test_bench_nar_serve(
-    request: pytest.FixtureRequest,
-    bench_store: Store,
-    concurrency: int,
-) -> None:
-    """Measure how fast a store can serve NARs via nar_from_path."""
-    paths = await _get_small_paths(100)
-    infos = []
+async def _pick_small_paths(s: Store, limit: int = 100) -> list[tuple[StorePath, ValidPathInfo]]:
+    resp = await s.execute(QueryAllValidPathsRequest())
+    paths = list(resp.paths)
+    picked = []
     for p in paths:
-        resp = await bench_store.execute(QueryPathInfoRequest(path=p))
-        if resp.valid and resp.info:
-            infos.append(resp.info.with_path(p))
+        if p.endswith(".drv"):
+            continue
+        info_resp = await s.execute(QueryPathInfoRequest(path=p))
+        if info_resp.info:
+            picked.append((p, info_resp.info.with_path(p)))
+            if len(picked) >= limit:
+                break
+    return picked
 
-    log.info("starting_nar_serve_bench", count=len(infos), concurrency=concurrency)
 
-    semaphore = asyncio.Semaphore(concurrency)
+async def _create_big_path(size_mb: int) -> StorePath:
+    """Use nix-store --add to create a deterministic large path in system store."""
+    tmp = Path(f"/tmp/pynixd-bench-big-{size_mb}m")
+    if not tmp.exists():
+        with open(tmp, "wb") as f:
+            f.write(os.urandom(size_mb * 1024 * 1024))
 
-    async def serve_one(p: StorePath, i: ValidPathInfo):
-        async with semaphore:
-            # We don't actually write anywhere, just drain the bytes
-            class DrainingWriter(wire.NixWriter):
-                def write(self, data: bytes):
-                    pass
+    from tests.conftest import run_subproc
+    rc, stdout, _, _ = await run_subproc([str(NIX_BIN), "store", "add-path", str(tmp)])
+    assert rc == 0
+    return StorePath(stdout.strip())
 
-                async def drain(self):
-                    pass
 
-                async def is_dirty(self):
-                    return False
+@pytest.mark.benchmark
+@pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
+async def test_bench_nar_streaming_latency(bench_store: Store, dst_store: Store, chunk_kb: int):
+    """Benchmark: stream a single ~1MB path via pipe_nar_from."""
+    store_path = await _pick_a_path(bench_store)
+    info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
+    info = info_resp.info.with_path(store_path) if info_resp.info else None
+    assert info is not None
 
-            await bench_store.execute(
-                NarFromPathRequest(path=p),
-                client=DrainingWriter(),  # type: ignore[arg-type]
-            )
+    label = _store_label(bench_store)
+    old = _set_chunk_size(chunk_kb)
+    try:
+        start = time.monotonic()
+        await pipe_nar_store_to_store(bench_store, dst_store, store_path, info)
+        elapsed = time.monotonic() - start
+    finally:
+        wire._CHUNK_SIZE = old
 
-    start = time.perf_counter()
-    await asyncio.gather(*[serve_one(i.path, i) for i in infos])
-    elapsed = time.perf_counter() - start
+    log.info(
+        "bench_nar_latency",
+        store=label,
+        chunk_kb=chunk_kb,
+        size_kb=info.nar_size // 1024,
+        elapsed_ms=int(elapsed * 1000),
+    )
 
-    ops_per_s = len(infos) / elapsed
-    _record(
-        request,
-        "nar_serve_overhead",
-        store=bench_store.id,
-        concurrency=concurrency,
-        ops_per_s=ops_per_s,
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
+async def test_bench_nar_streaming_throughput(bench_store: Store, dst_store: Store, chunk_kb: int):
+    """Benchmark: stream a 100MB NAR via pipe_nar_from at various chunk sizes."""
+    store_path = await _create_big_path(100)
+    info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
+    info = info_resp.info.with_path(store_path) if info_resp.info else None
+    assert info is not None
+
+    label = _store_label(bench_store)
+    old = _set_chunk_size(chunk_kb)
+    try:
+        start = time.monotonic()
+        await pipe_nar_store_to_store(bench_store, dst_store, store_path, info)
+        elapsed = time.monotonic() - start
+    finally:
+        wire._CHUNK_SIZE = old
+
+    mbps = 100 / elapsed
+    log.info(
+        "bench_nar_throughput",
+        store=label,
+        chunk_kb=chunk_kb,
+        elapsed_s=round(elapsed, 2),
+        mb_per_s=round(mbps, 2),
+    )
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
+async def test_bench_copy_paths_latency(bench_store: Store, dst_store: Store, chunk_kb: int):
+    """Benchmark: stream a single ~1MB path via copy_paths."""
+    store_path = await _pick_a_path(bench_store, need_no_refs=True)
+    info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
+    info = info_resp.info
+    assert info is not None
+
+    label = _store_label(bench_store)
+    old = _set_chunk_size(chunk_kb)
+    try:
+        start = time.monotonic()
+        await stream_paths_store_to_store(bench_store, dst_store, [store_path])
+        elapsed = time.monotonic() - start
+    finally:
+        wire._CHUNK_SIZE = old
+
+    log.info(
+        "bench_copy_paths_latency",
+        store=label,
+        chunk_kb=chunk_kb,
+        size_kb=info.nar_size // 1024,
+        elapsed_ms=int(elapsed * 1000),
+    )
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
+async def test_bench_copy_paths_throughput(bench_store: Store, dst_store: Store, chunk_kb: int):
+    """Benchmark: stream a 100MB NAR via copy_paths at various chunk sizes."""
+    store_path = await _create_big_path(100)
+    info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
+    info = info_resp.info
+    assert info is not None
+
+    label = _store_label(bench_store)
+    old = _set_chunk_size(chunk_kb)
+    try:
+        start = time.monotonic()
+        await stream_paths_store_to_store(bench_store, dst_store, [store_path])
+        elapsed = time.monotonic() - start
+    finally:
+        wire._CHUNK_SIZE = old
+
+    mbps = 100 / elapsed
+    log.info(
+        "bench_copy_paths_throughput",
+        store=label,
+        chunk_kb=chunk_kb,
+        elapsed_s=round(elapsed, 2),
+        mb_per_s=round(mbps, 2),
+    )
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
+async def test_bench_copy_paths_batch(bench_store: Store, dst_store: Store, chunk_kb: int):
+    """Benchmark: stream 1000 small paths in a single batch.
+
+    Tests the efficiency of AddMultipleToStore compared to per-path calls.
+    Should show massive gains on SSH stores where round-trips matter.
+    """
+    picked = await _pick_small_paths(bench_store, 1000)
+    assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
+    paths = [p for p, _ in picked]
+
+    label = _store_label(bench_store)
+    old = _set_chunk_size(chunk_kb)
+    try:
+        start = time.monotonic()
+        await stream_paths_store_to_store(bench_store, dst_store, paths)
+        elapsed = time.monotonic() - start
+    finally:
+        wire._CHUNK_SIZE = old
+
+    log.info(
+        "bench_copy_paths_batch",
+        store=label,
+        chunk_kb=chunk_kb,
+        count=len(paths),
+        elapsed_ms=int(elapsed * 1000),
+        paths_per_s=int(len(paths) / elapsed),
     )

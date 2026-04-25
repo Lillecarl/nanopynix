@@ -35,7 +35,7 @@ async def test_feature_probe_in_memory() -> None:
     rmtree_robust(store_path)
     kwargs = get_test_store_kwargs(nix_config=FEATURE_NIX_CONFIG)
     store: LocalSocketStore | SSHSubprocessStore = LocalSocketStore(
-        id="feature-probe",
+        store_id="feature-probe",
         store_path=store_path,
         **kwargs,
     )
@@ -59,7 +59,7 @@ async def test_feature_probe_in_memory() -> None:
 async def test_feature_probe_nixbuild_net() -> None:
     store = SSHSubprocessStore(
         host="eu.nixbuild.net",
-        id="nixbuild-net",
+        store_id="nixbuild-net",
         username="lillecarl",
         client_keys=[Path("~/.ssh/id_ed25519")],
     )

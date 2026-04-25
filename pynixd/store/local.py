@@ -40,7 +40,7 @@ class LocalSocketStore(Store):
 
     def __init__(
         self,
-        id: str | None = None,
+        store_id: str | None = None,
         store_path: Path | None = None,
         socket_path: Path | None = None,
         feature_matrix: dict[str, set[str]] | None = None,
@@ -62,7 +62,7 @@ class LocalSocketStore(Store):
             self.socket_path = DAEMON_SOCKET_PATH
 
         super().__init__(
-            id=id or f"local-socket:{self.socket_path}",
+            store_id=store_id or f"local-socket:{self.socket_path}",
             store_path=store_path,
             feature_matrix=feature_matrix,
             probe=probe,
@@ -175,7 +175,7 @@ class LocalSocketStore(Store):
 
     async def create_conn(self) -> Connection:
         await self.ensure_daemon()
-        conn_id = f"{self.id}-{self.conn_counter}"
+        conn_id = f"{self.store_id}-{self.conn_counter}"
         log.debug(
             "connecting_daemon_socket",
             socket_path=str(self.socket_path),

@@ -18,6 +18,9 @@ from tests.conftest import (
     run_subproc,
 )
 
+from pynixd.store.transfer import stream_paths_store_to_store
+
+
 log = structlog.get_logger(__name__)
 
 
@@ -44,7 +47,7 @@ async def test_stream_nar() -> None:
 
     # Source store is the system store (/)
     src_store = LocalSocketStore(
-        id="system",
+        store_id="system",
         store_path=Path("/"),
         **get_test_store_kwargs(no_probe=True),
     )
@@ -53,7 +56,7 @@ async def test_stream_nar() -> None:
     dst_path = STORE_PREFIX / "test-stream-nar"
     rmtree_robust(dst_path)
     dst_store = LocalSocketStore(
-        id="test-stream-nar",
+        store_id="test-stream-nar",
         store_path=dst_path,
         **get_test_store_kwargs(no_probe=True),
     )
@@ -64,8 +67,8 @@ async def test_stream_nar() -> None:
         is_valid_src = await src_store.execute(IsValidPathRequest(path=store_path))
         assert is_valid_src.valid, f"Path {store_path} not valid in system store"
 
-        # Use stream_paths_to which handles the NAR piping
-        await src_store.stream_paths_to(dst_store, [store_path])
+        # Use stream_paths_store_to_store which handles the NAR piping
+        await stream_paths_store_to_store(src_store, dst_store, [store_path])
 
         # Verify it now exists in dst
         is_valid_dst_after = await dst_store.execute(

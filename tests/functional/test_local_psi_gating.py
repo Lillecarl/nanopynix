@@ -36,7 +36,7 @@ async def test_local_socket_store_gating(tmp_path: Path) -> None:
 
     settings = PynixdSettings(gate_timeout=0.2)  # short timeout for testing
     store = LocalSocketStore(
-        id="test-gate",
+        store_id="test-gate",
         store_path=tmp_path,
         settings=settings,
         **get_test_store_kwargs(no_probe=True),
@@ -85,7 +85,7 @@ async def test_gate_wait_timeout_success(tmp_path: Path) -> None:
 
     settings = PynixdSettings(gate_timeout=2.0)
     store = LocalSocketStore(
-        id="test-gate-timeout",
+        store_id="test-gate-timeout",
         store_path=tmp_path,
         settings=settings,
         **get_test_store_kwargs(no_probe=True),

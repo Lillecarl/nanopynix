@@ -28,7 +28,7 @@ from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import (
     RegisterDrvOutputRequest,
 )
-from pynixd.store import LocalSocketStore
+from pynixd.store import LocalSocketStore, Store
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
@@ -37,6 +37,7 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
+from pynixd.store.transfer import stream_paths_store_to_store
 from tests.nix_config import NixConfig
 
 CA_NIX = Path(__file__).resolve().parent.parent / "nix"
@@ -331,7 +332,7 @@ async def main() -> None:
 
     root_kwargs = get_test_store_kwargs(nix_config=CA_NIX_CONFIG)
     root_store = LocalSocketStore(
-        id="deferred-replay-root",
+        store_id="deferred-replay-root",
         store_path=root_path,
         **root_kwargs,
     )
@@ -511,7 +512,7 @@ async def main() -> None:
     rmtree_robust(test_path)
 
     test_store = LocalSocketStore(
-        id="deferred-replay-resolve",
+        store_id="deferred-replay-resolve",
         store_path=test_path,
         **root_kwargs,
     )
@@ -523,11 +524,12 @@ async def main() -> None:
         deferred_drv_path,
         StorePath(ca_out_path),
     }
-    await LocalSocketStore.stream_paths_store_to_store(
+    await stream_paths_store_to_store(
         root_store,
         test_store,
-        transfer_paths,
+        {StorePath(ca_out_path)},
     )
+
 
     # Register CA realisation
     realisation_cmd = [
@@ -587,7 +589,7 @@ async def main() -> None:
         nix_resolved_drv_path = StorePath(resolved_rows[0][0])
         print(f"Nix's resolved .drv path: {nix_resolved_drv_path}")
         # Transfer it to test store
-        await LocalSocketStore.stream_paths_store_to_store(
+        await stream_paths_store_to_store(
             root_store,
             test_store,
             {nix_resolved_drv_path},

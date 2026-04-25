@@ -27,7 +27,7 @@ async def test_htpasswd_auth(tmp_path: Path) -> None:
     ht.save()
 
     local_store = LocalSocketStore(
-        id="local",
+        store_id="local",
         store_path=Path("/"),
         **get_test_store_kwargs(no_probe=True),
     )
@@ -76,7 +76,7 @@ async def test_htpasswd_fallback_to_single_user(tmp_path: Path) -> None:
     - None: This test only checks HTTP authentication fallback without triggering Store operations
     """
     local_store = LocalSocketStore(
-        id="local",
+        store_id="local",
         store_path=Path("/"),
         **get_test_store_kwargs(no_probe=True),
     )

@@ -43,7 +43,7 @@ class _SSHStoreMixin(Store):
     backoff: float
     max_backoff: float
     last_failure: float
-    id: str
+    store_id: str
 
     INITIAL_BACKOFF: float = 1.0
     MAX_BACKOFF: float = 60.0
@@ -152,7 +152,7 @@ class _SSHStoreMixin(Store):
             now = time.monotonic()
             wait = self.last_failure + self.backoff - now
             if self.last_failure > 0 and wait > 0:
-                log.info("ssh_backoff", store_id=self.id, backoff_seconds=wait)
+                log.info("ssh_backoff", store_id=self.store_id, backoff_seconds=wait)
                 await asyncio.sleep(wait)
 
             try:
@@ -183,7 +183,7 @@ class _SSHStoreMixin(Store):
                 self.record_failure()
                 log.warning(
                     "ssh_connect_failed",
-                    store_id=self.id,
+                    store_id=self.store_id,
                     next_retry_seconds=self.backoff,
                 )
                 raise
@@ -218,7 +218,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
     def __init__(
         self,
         host: str,
-        id: str | None = None,
+        store_id: str | None = None,
         port: int = 22,
         username: str | None = None,
         store_path: Path = Path("/"),
@@ -229,7 +229,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
         nix_bin: str = "nix",
     ) -> None:
         super().__init__(
-            id=id or f"ssh:{username or ''}@{host}:{port}",
+            store_id=store_id or f"ssh:{username or ''}@{host}:{port}",
             store_path=store_path,
             feature_matrix=feature_matrix,
             probe=probe,
@@ -243,7 +243,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
 
     async def create_conn(self) -> Connection:
         ssh_conn = await self.ensure_ssh()
-        conn_id = f"{self.id}-{self.conn_counter}"
+        conn_id = f"{self.store_id}-{self.conn_counter}"
         if self.store_path and self.store_path != Path("/"):
             cmd = f"{self.nix_bin} daemon --store {self.store_path} --stdio"
         elif self.nix_bin != "nix":
@@ -294,7 +294,7 @@ class SSHSocketStore(_SSHStoreMixin):
     def __init__(
         self,
         host: str,
-        id: str | None = None,
+        store_id: str | None = None,
         port: int = 22,
         username: str | None = None,
         socket_path: Path = DAEMON_SOCKET_PATH,
@@ -304,7 +304,7 @@ class SSHSocketStore(_SSHStoreMixin):
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
     ) -> None:
         super().__init__(
-            id=id or f"ssh-socket:{username or ''}@{host}:{port}",
+            store_id=store_id or f"ssh-socket:{username or ''}@{host}:{port}",
             feature_matrix=feature_matrix,
             probe=probe,
         )
@@ -316,7 +316,7 @@ class SSHSocketStore(_SSHStoreMixin):
 
     async def create_conn(self) -> Connection:
         ssh_conn = await self.ensure_ssh()
-        conn_id = f"{self.id}-{self.conn_counter}"
+        conn_id = f"{self.store_id}-{self.conn_counter}"
         log.debug(
             "tunneling_to_socket",
             socket_path=str(self.socket_path),

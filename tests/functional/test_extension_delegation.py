@@ -52,7 +52,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
     rmtree_robust(store_b_path)
     store_b_path.mkdir(parents=True, exist_ok=True)
     store_b = LocalSocketStore(
-        id="b-local",
+        store_id="b-local",
         store_path=store_b_path,
         **get_test_store_kwargs(no_probe=True),
     )
@@ -82,7 +82,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
         # 2. Start Server A (Proxy)
         # It has server_b as a store.
         store_a_b = SSHSubprocessStore(
-            id="builder-b",
+            store_id="builder-b",
             host="127.0.0.1",
             port=port_b,
             username=server_b.username,
@@ -93,7 +93,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
 
         # Server A's local store doesn't have a DB and doesn't support extensions
         store_a = LocalSocketStore(
-            id="a-local",
+            store_id="a-local",
             store_path=Path("/"),
             use_db=False,
             **get_test_store_kwargs(no_probe=True),
@@ -125,7 +125,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
             # 3. Test delegation: Connect to Server A via Unix socket
             # This will trigger DaemonProxy.execute which should delegate to Server B
             # because Server A's local store (store_a) doesn't have the info.
-            client_store = LocalSocketStore(id="client", socket_path=unix_path_a)
+            client_store = LocalSocketStore(store_id="client", socket_path=unix_path_a)
             resp_a = await client_store.execute(req)
 
             assert path in resp_a.infos

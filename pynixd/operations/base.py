@@ -78,7 +78,7 @@ OP_REGISTRY: dict[int, type[OpRequest[Any]]] = {}
 
 
 @dataclass
-class OpRequest[Resp: "OpResponse"](ABC):
+class OpRequest[Resp: OpResponse](ABC):
     """Base class for operation requests.
 
     Subclasses that set ``op`` in their own class body are automatically

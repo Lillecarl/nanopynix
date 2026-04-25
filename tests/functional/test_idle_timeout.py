@@ -21,7 +21,7 @@ async def test_idle_timeout(tmp_path: Path):
     store_path.mkdir()
 
     local_store = LocalSocketStore(
-        id="local",
+        store_id="local",
         store_path=store_path,
         **get_test_store_kwargs(no_probe=True),
     )

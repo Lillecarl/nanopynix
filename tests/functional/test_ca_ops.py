@@ -56,7 +56,7 @@ async def test_ca_simple_build_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        id="ca-root",
+        store_id="ca-root",
         store_path=store_path,
         **_ca_test_store_kwargs(),
     )
@@ -94,7 +94,7 @@ async def test_ca_multi_output_build_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        id="ca-root-multi",
+        store_id="ca-root-multi",
         store_path=store_path,
         **_ca_test_store_kwargs(),
     )
@@ -134,7 +134,7 @@ async def test_ca_depends_on_ca_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        id="ca-root-depends",
+        store_id="ca-root-depends",
         store_path=store_path,
         **_ca_test_store_kwargs(),
     )
@@ -172,7 +172,7 @@ async def test_non_ca_depends_on_ca_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        id="ca-root-non-ca-depends",
+        store_id="ca-root-non-ca-depends",
         store_path=store_path,
         **_ca_test_store_kwargs(),
     )
@@ -439,7 +439,7 @@ async def test_ca_query_derivation_output_map_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        id="ca-root-qdom",
+        store_id="ca-root-qdom",
         store_path=store_path,
         **_ca_test_store_kwargs(),
     )
@@ -678,7 +678,7 @@ async def test_text_hashed_ca_build_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        id="ca-root-text",
+        store_id="ca-root-text",
         store_path=store_path,
         **_ca_test_store_kwargs(),
     )

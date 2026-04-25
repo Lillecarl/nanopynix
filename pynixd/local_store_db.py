@@ -277,8 +277,8 @@ class LocalStoreDB:
             return cls(
                 db_path=None,
                 store_path=store_path,
-                read_only=read_only,
-                active=False,
+                read_only=True,
+                regtime_flush_interval=regtime_flush_interval,
             )
         else:
             log.info(
@@ -287,7 +287,6 @@ class LocalStoreDB:
                 mode="read-write" if not read_only else "read-only",
             )
             return instance
-
 
     # ── Internal utility queries ──────────────────────────────────────
     # These are not operation dispatches but internal helpers used by

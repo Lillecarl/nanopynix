@@ -94,7 +94,7 @@ class GarbageCollector:
         total_freed = 0
         for store, result in zip(stores_for_tasks, results, strict=True):
             if isinstance(result, BaseException):
-                log.warning("gc_store_failed", store_id=store.id, error=result)
+                log.warning("gc_store_failed", store_id=store.store_id, error=result)
             elif isinstance(result, CollectGarbageResponse):
                 total_deleted += len(result.paths_deleted)
                 total_freed += result.bytes_freed
@@ -123,7 +123,7 @@ class GarbageCollector:
         if resp.paths_deleted:
             log.info(
                 "gc_store_complete",
-                store_id=store.id,
+                store_id=store.store_id,
                 paths_deleted=len(resp.paths_deleted),
                 bytes_freed=resp.bytes_freed,
             )
