@@ -5,6 +5,7 @@ Local Nix daemon store implementation.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shlex
 from pathlib import Path
@@ -120,6 +121,10 @@ class LocalSocketStore(Store):
 
         self.daemon_ready = asyncio.Event()
 
+        if self.socket_path.exists():
+            log.info("removing_stale_socket", socket_path=str(self.socket_path))
+            self.socket_path.unlink()
+
         path = self.store_path or Path("/")
         socket_dir = self.socket_path.parent
         socket_dir.mkdir(parents=True, exist_ok=True)
@@ -182,15 +187,30 @@ class LocalSocketStore(Store):
         )
 
     async def _probe_socket(self) -> bool:
-        """Try to connect to socket_path; return True if reachable."""
+        """Perform a full daemon handshake to verify a live Nix daemon.
+
+        Connects to socket_path, does the protocol handshake, and cleanly
+        closes. Returns True only if a real Nix daemon responded.
+        """
         try:
-            _r, w = await asyncio.open_unix_connection(str(self.socket_path))
+            r, w = await asyncio.open_unix_connection(str(self.socket_path))
         except (ConnectionRefusedError, ConnectionResetError, FileNotFoundError, OSError):
             return False
-        else:
-            w.close()
-            await w.wait_closed()
-            return True
+
+        conn = Connection(
+            UnixNixReader(r, identifier="probe"),
+            UnixNixWriter(w, identifier="probe"),
+            "probe",
+            store_path=self.store_path,
+        )
+        try:
+            await conn.connect()
+        except Exception:
+            with contextlib.suppress(Exception):
+                await conn.close()
+            return False
+        await conn.close()
+        return True
 
     async def create_conn(self) -> Connection:
         await self.ensure_daemon()
