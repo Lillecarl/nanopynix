@@ -75,6 +75,7 @@ class LocalSocketStore(Store):
         self.monitor_enabled = monitor
         self.daemon_proc: asyncio.subprocess.Process | None = None
         self.daemon_ready: asyncio.Event | None = None
+        self._daemon_log_task: asyncio.Task | None = None
         self.extra_env = extra_env or {}
         self.extra_args = extra_args or []
         self.settings = settings or PynixdSettings()
@@ -157,10 +158,16 @@ class LocalSocketStore(Store):
         self.daemon_proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
+
+        if self.daemon_proc.stdout:
+            self._daemon_log_task = asyncio.create_task(
+                self._stream_daemon_output(self.daemon_ready),
+                name="daemon-log-forwarder",
+            )
 
         # Wait for socket file to appear
         for _ in range(100):
@@ -192,6 +199,8 @@ class LocalSocketStore(Store):
                 )
             if await self._probe_socket():
                 log.info("daemon_socket_ready", socket_path=str(self.socket_path))
+                if self._daemon_log_task and not self._daemon_log_task.done():
+                    self._daemon_log_task.cancel()
                 await asyncio.sleep(0.1)
                 self.daemon_ready.set()
                 return
@@ -203,6 +212,28 @@ class LocalSocketStore(Store):
         raise RuntimeError(
             f"Managed daemon socket not accepting connections "
             f"at {self.socket_path} within 5s (pid={self.daemon_proc.pid}): {stderr_output!r}",
+        )
+
+    async def _stream_daemon_output(self, stop: asyncio.Event) -> None:
+        """Forward daemon stdout/stderr to structlog until stop is set."""
+        assert self.daemon_proc is not None
+        assert self.daemon_proc.stdout is not None
+        assert self.daemon_proc.stderr is not None
+
+        async def _forward(stream: asyncio.StreamReader | None, label: str) -> None:
+            if stream is None:
+                return
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                log.info(f"daemon_{label}", msg=line.decode(errors="replace").rstrip())
+                if stop.is_set():
+                    return
+
+        await asyncio.gather(
+            _forward(self.daemon_proc.stdout, "stdout"),
+            _forward(self.daemon_proc.stderr, "stderr"),
         )
 
     async def _probe_socket(self) -> bool:
@@ -254,6 +285,8 @@ class LocalSocketStore(Store):
         await super().close()
         if self.monitor:
             await self.monitor.stop()
+        if self._daemon_log_task and not self._daemon_log_task.done():
+            self._daemon_log_task.cancel()
         if self.daemon_proc is not None:
             self.daemon_proc.terminate()
             try:
