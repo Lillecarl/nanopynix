@@ -89,18 +89,28 @@ class LocalSocketStore(Store):
         await super().start()
 
     async def ensure_daemon(self) -> None:
-        """Spawn a managed daemon if needed (first call only).
+        """Ensure a daemon is reachable, spawning one if needed.
 
-        Uses an Event to coordinate concurrent callers — only the first
-        spawns the daemon; others wait for it to be ready.
+        For managed stores (store_path != /), always spawns a daemon.
+
+        For unmanaged stores (store_path = /), probes the socket first.
+        If the socket is already accepting connections, no daemon is
+        spawned. Otherwise, auto-spawns a daemon and owns its lifecycle.
+
+        Uses an Event to coordinate concurrent callers.
         """
-        if not self.managed:
-            return
         if self.daemon_proc is not None:
-            # Daemon already spawned — wait for it to be ready
             if self.daemon_ready is not None:
                 await self.daemon_ready.wait()
             return
+
+        if not self.managed:
+            if await self._probe_socket():
+                return
+            log.info(
+                "socket_not_reachable_auto_spawning",
+                socket_path=str(self.socket_path),
+            )
 
         self.daemon_ready = asyncio.Event()
 
@@ -153,25 +163,28 @@ class LocalSocketStore(Store):
 
         # Socket file exists but daemon may not be listening yet — probe
         for _attempt in range(100):
-            try:
-                _r, w = await asyncio.open_unix_connection(str(self.socket_path))
-                w.close()
-                await w.wait_closed()
+            if await self._probe_socket():
                 log.info("daemon_socket_ready", socket_path=str(self.socket_path))
-
-                # Tiny breathe time to ensure the daemon has processed the close
-                # and is ready for the next "real" connection.
                 await asyncio.sleep(0.1)
-            except (ConnectionRefusedError, ConnectionResetError):
-                await asyncio.sleep(0.05)
-            else:
                 self.daemon_ready.set()
                 return
+            await asyncio.sleep(0.05)
 
         raise RuntimeError(
             f"Managed daemon socket exists but not accepting connections "
             f"at {self.socket_path} within 5s (pid={self.daemon_proc.pid})",
         )
+
+    async def _probe_socket(self) -> bool:
+        """Try to connect to socket_path; return True if reachable."""
+        try:
+            _r, w = await asyncio.open_unix_connection(str(self.socket_path))
+        except (ConnectionRefusedError, ConnectionResetError, FileNotFoundError, OSError):
+            return False
+        else:
+            w.close()
+            await w.wait_closed()
+            return True
 
     async def create_conn(self) -> Connection:
         await self.ensure_daemon()
@@ -196,7 +209,7 @@ class LocalSocketStore(Store):
         await super().close()
         if self.monitor:
             await self.monitor.stop()
-        if self.managed and self.daemon_proc is not None:
+        if self.daemon_proc is not None:
             self.daemon_proc.terminate()
             try:
                 await asyncio.wait_for(self.daemon_proc.wait(), timeout=5.0)
