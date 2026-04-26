@@ -12,8 +12,8 @@ See PynixdSettings for the full list.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
+import signal
 
 import structlog
 from environs import env
@@ -21,15 +21,28 @@ from environs import env
 from .config import PynixdSettings
 from .instance import Server
 
+log = structlog.get_logger(__name__)
+
 
 async def async_main() -> None:
     settings = PynixdSettings()
     local_store, stores = settings.to_stores()
 
     server = Server(local_store=local_store, stores=stores, settings=settings)
+    shutdown_event = asyncio.Event()
+
+    loop = asyncio.get_running_loop()
+
+    def _signal_handler() -> None:
+        log.info("shutdown_signal_received")
+        shutdown_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _signal_handler)
+
     try:
         await server.start()
-        await server.wait_finished()
+        await asyncio.gather(server.wait_finished(), shutdown_event.wait(), return_exceptions=True)
     finally:
         await server.close()
 
@@ -57,8 +70,7 @@ def main() -> None:
         cache_logger_on_first_use=True,
     )
 
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(async_main())
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
