@@ -34,17 +34,19 @@ async def async_main() -> None:
     loop = asyncio.get_running_loop()
 
     def _signal_handler() -> None:
+        if shutdown_event.is_set():
+            log.info("forced_shutdown")
+            raise SystemExit(1)
         log.info("shutdown_signal_received")
         shutdown_event.set()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
 
-    try:
-        await server.start()
-        await asyncio.gather(server.wait_finished(), shutdown_event.wait(), return_exceptions=True)
-    finally:
-        await server.close()
+    await server.start()
+
+    await shutdown_event.wait()
+    await server.close()
 
 
 def main() -> None:
