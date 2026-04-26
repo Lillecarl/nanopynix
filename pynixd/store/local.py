@@ -166,14 +166,30 @@ class LocalSocketStore(Store):
         for _ in range(100):
             if self.socket_path.exists():
                 break
+            if self.daemon_proc.returncode is not None:
+                stderr_output = ""
+                if self.daemon_proc.stderr:
+                    stderr_output = (await self.daemon_proc.stderr.read()).decode(errors="replace")
+                raise RuntimeError(
+                    f"Managed daemon exited early with code {self.daemon_proc.returncode} "
+                    f"(pid={self.daemon_proc.pid}): {stderr_output!r}",
+                )
             await asyncio.sleep(0.1)
         else:
             raise RuntimeError(
-                f"Managed daemon did not create socket at {self.socket_path} within 5s (pid={self.daemon_proc.pid})",
+                f"Managed daemon did not create socket at {self.socket_path} within 10s (pid={self.daemon_proc.pid})",
             )
 
         # Socket file exists but daemon may not be listening yet — probe
         for _attempt in range(100):
+            if self.daemon_proc.returncode is not None:
+                stderr_output = ""
+                if self.daemon_proc.stderr:
+                    stderr_output = (await self.daemon_proc.stderr.read()).decode(errors="replace")
+                raise RuntimeError(
+                    f"Managed daemon exited with code {self.daemon_proc.returncode} "
+                    f"(pid={self.daemon_proc.pid}): {stderr_output!r}",
+                )
             if await self._probe_socket():
                 log.info("daemon_socket_ready", socket_path=str(self.socket_path))
                 await asyncio.sleep(0.1)
@@ -181,9 +197,12 @@ class LocalSocketStore(Store):
                 return
             await asyncio.sleep(0.05)
 
+        stderr_output = ""
+        if self.daemon_proc.stderr:
+            stderr_output = (await self.daemon_proc.stderr.read()).decode(errors="replace")
         raise RuntimeError(
-            f"Managed daemon socket exists but not accepting connections "
-            f"at {self.socket_path} within 5s (pid={self.daemon_proc.pid})",
+            f"Managed daemon socket not accepting connections "
+            f"at {self.socket_path} within 5s (pid={self.daemon_proc.pid}): {stderr_output!r}",
         )
 
     async def _probe_socket(self) -> bool:
