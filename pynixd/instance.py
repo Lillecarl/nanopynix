@@ -145,12 +145,17 @@ class Server:
                 await asyncio.sleep(5)
 
     async def add_store(self, store: Store) -> None:
-        """Add a remote store to the server, linking it to the central DB and path tracker."""
-        local_store = self.local_store
-        store.db = local_store.db
-        store.tracker = self.path_tracker.get_instance(store.store_id, is_local=False)
+        """Add a store to the server, setting up path tracking for scheduling.
 
-        if local_store.db is not None:
+        Stores already configured with a tracker (e.g. local_store) keep
+        theirs. Remote stores get a path tracker instance linked to the
+        central DB so the scheduler knows which paths they have.
+        """
+        if store.tracker.parent is None:
+            store.tracker = self.path_tracker.get_instance(store.store_id, is_local=False)
+
+        local_store = self.local_store
+        if local_store.db is not None and store.tracker.parent is not None:
             paths = await local_store.db.get_known_paths(store.store_id)
             if paths:
                 store.tracker.add_known_paths(paths, update_regtime=False)

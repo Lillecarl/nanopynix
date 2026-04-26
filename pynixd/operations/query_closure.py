@@ -80,7 +80,7 @@ class QueryClosureRequest(OpRequest[QueryClosureResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryClosureResponse:
-        if (db := store.native_db) is not None:
+        if (db := store.db) is not None:
             seeds_json = json.dumps([str(p) for p in self.paths])
             async with db.execute(QUERY_CLOSURE, (seeds_json,)) as cursor:
                 rows = await cursor.fetchall()

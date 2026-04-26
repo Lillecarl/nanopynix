@@ -120,8 +120,8 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         sig = sign_path_info(key, self.info)
         self.info.sigs.add(sig)
 
-        if store.db is not None:
-            async with store.db.acquire_conn() as conn:
+        if (db := store.db) is not None:
+            async with db.acquire_conn() as conn:
                 await conn.execute(
                     """UPDATE ValidPaths SET sigs = CASE
                        WHEN sigs = '' THEN ? ELSE sigs || ' ' || ? END

@@ -188,13 +188,6 @@ class Store(ABC):
         return True
 
     @property
-    def native_db(self) -> LocalStoreDB | None:
-        """The local SQLite DB if it is the native database for this store root."""
-        if self.db is not None and self.db.active and self.db.store_path == self.store_path:
-            return self.db
-        return None
-
-    @property
     def signing_key_names(self) -> list[str]:
         """List of signing key names configured on this store."""
         return list(self.signing_keys.keys())

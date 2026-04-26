@@ -98,7 +98,7 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         if not self.drv_paths:
             return DerivationOutputsBatchResponse(outputs={})
 
-        if (db := store.native_db) is not None:
+        if (db := store.db) is not None:
             paths_json = json.dumps([str(p) for p in self.drv_paths])
             async with db.execute(
                 QUERY_DERIVATION_OUTPUTS_BATCH,

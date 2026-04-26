@@ -125,7 +125,7 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
 
         infos: dict[StorePath, ValidPathInfo] = dict(cached)
 
-        if (db := store.native_db) is not None:
+        if (db := store.db) is not None:
             paths_json = json.dumps([str(p) for p in uncached])
             async with db.execute(QUERY_PATH_INFOS_BATCH, (paths_json,)) as cursor:
                 rows = await cursor.fetchall()

@@ -63,7 +63,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
         suppress_last: bool = False,
     ) -> QueryAllValidPathsResponse:
         try:
-            if (db := store.native_db) is not None:
+            if (db := store.db) is not None:
                 async with db.execute(QUERY_ALL_VALID_PATHS) as cursor:
                     rows = await cursor.fetchall()
                 resp = QueryAllValidPathsResponse(paths={StorePath(r[0]) for r in rows})

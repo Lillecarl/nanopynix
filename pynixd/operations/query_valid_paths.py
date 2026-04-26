@@ -84,7 +84,7 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryValidPathsResponse:
-        if (db := store.native_db) is not None:
+        if (db := store.db) is not None:
             paths_json = json.dumps([str(p) for p in self.paths])
             async with db.execute(
                 QUERY_VALID_PATHS,
