@@ -118,7 +118,19 @@ class DaemonProxy:
         if self.version >= wire.proto(1, 38):
             client_features = await self.r.read_string_set()
             log.debug("client_features", client_features=client_features)
-            self.w.write_string_set(get_extension_features())  # our features
+
+            our_features = get_extension_features()
+
+            # Aggregated feature_matrix from all backends + local store
+            for store in [*list(self.stores.values()), self.local_store]:
+                fm = store._feature_matrix
+                if fm:
+                    for system, features in fm.items():
+                        our_features.add(f"feature_matrix:{system}")
+                        for feat in features:
+                            our_features.add(f"feature_matrix:{system}:{feat}")
+
+            self.w.write_string_set(our_features)  # our features
             await self.w.drain()
 
         if await self.r.read_uint64():  # sendCpu

@@ -149,6 +149,34 @@ class Store(ABC):
         self.nix_version = conn.nix_version
         self.features = conn.features
 
+        # Check for announced feature_matrix to skip probing
+        if self._feature_matrix is None and any(f.startswith("feature_matrix:") for f in conn.features):
+            fm: dict[str, set[str]] = {}
+            for f in conn.features:
+                if not f.startswith("feature_matrix:"):
+                    continue
+                parts = f.split(":")
+                if len(parts) == 2:  # feature_matrix:$system
+                    system = parts[1]
+                    if system not in fm:
+                        fm[system] = set()
+                elif len(parts) == 3:  # feature_matrix:$system:$feature
+                    system, feat = parts[1], parts[2]
+                    if system not in fm:
+                        fm[system] = set()
+                    fm[system].add(feat)
+
+            if fm:
+                self._feature_matrix = fm
+                self.probe_state = ProbeState.PROBED
+                self._probe_event.set()
+                log.info(
+                    "store_probed_via_handshake",
+                    store_id=self.store_id,
+                    systems=sorted(fm.keys()),
+                    feature_matrix={k: sorted(v) for k, v in fm.items()},
+                )
+
     async def _create_conn_with_counter(self) -> Connection:
         """Wrap create_conn to increment the counter."""
         self.conn_counter += 1
@@ -375,6 +403,11 @@ class Store(ABC):
         # backend resources (daemon/SSH) are fully initialized.
         async with self.pool.acquire("probe"):
             pass
+
+        # If _on_connection_created already set us to PROBED (e.g. via handshake), stop.
+        if self.probe_state == ProbeState.PROBED:
+            log.debug("probe_skipped_probed_via_handshake", store_id=self.store_id)
+            return
 
         if not self._probe:
             self.probe_state = ProbeState.PROBED
