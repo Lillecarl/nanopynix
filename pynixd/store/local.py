@@ -14,7 +14,7 @@ import structlog
 
 from ..config import PynixdSettings
 from ..connection import Connection
-from ..monitor import create_monitor
+from ..monitor import DummyResourceMonitor, create_monitor
 from ..wire import UnixNixReader, UnixNixWriter
 from .base import Store
 
@@ -49,6 +49,7 @@ class LocalSocketStore(Store):
         extra_env: dict[str, str] | None = None,
         extra_args: list[str] | None = None,
         use_db: bool = True,
+        monitor: bool = True,
         settings: PynixdSettings | None = None,
     ) -> None:
         if store_path is None:
@@ -70,6 +71,7 @@ class LocalSocketStore(Store):
         self.managed = managed
         self.nix_bin = nix_bin
         self.use_db = use_db
+        self.monitor_enabled = monitor
         self.daemon_proc: asyncio.subprocess.Process | None = None
         self.daemon_ready: asyncio.Event | None = None
         self.extra_env = extra_env or {}
@@ -77,7 +79,11 @@ class LocalSocketStore(Store):
         self.settings = settings or PynixdSettings()
 
         # Resource Monitoring
-        self.monitor: ResourceMonitor | None = create_monitor(self.gate, self.settings)
+        self.monitor: ResourceMonitor | None = (
+            create_monitor(self.gate, self.settings)
+            if self.monitor_enabled
+            else DummyResourceMonitor(self.gate, self.settings)
+        )
 
     @property
     def db_enabled(self) -> bool:

@@ -77,6 +77,7 @@ class LocalSocketStoreSpec(BaseModel):
     extra_env: dict[str, str] | None = None
     extra_args: list[str] | None = None
     use_db: bool = True
+    monitor: bool = True
 
     def to_store(self) -> Store:
         from .store import LocalSocketStore
@@ -92,6 +93,7 @@ class LocalSocketStoreSpec(BaseModel):
             extra_env=self.extra_env,
             extra_args=self.extra_args,
             use_db=self.use_db,
+            monitor=self.monitor,
         )
 
 
