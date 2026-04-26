@@ -1,12 +1,11 @@
-"""Performance benchmarks for pynixd operation dispatch and local DB.
-"""
+"""Performance benchmarks for pynixd operation dispatch and local DB."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import structlog
@@ -18,6 +17,9 @@ from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore, SSHSocketStore, SSHSubprocessStore, Store
 from pynixd.store_path import StorePath
 from tests.conftest import NIX_BIN, rmtree_robust
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 log = structlog.get_logger(__name__)
 

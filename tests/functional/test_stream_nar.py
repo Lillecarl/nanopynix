@@ -9,6 +9,7 @@ import structlog
 
 from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.store import LocalSocketStore
+from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
@@ -17,9 +18,6 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
-
-from pynixd.store.transfer import stream_paths_store_to_store
-
 
 log = structlog.get_logger(__name__)
 

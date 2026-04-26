@@ -33,6 +33,7 @@ from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest
 from pynixd.store import LocalSocketStore, Store
+from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
@@ -41,7 +42,6 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
-from pynixd.store.transfer import stream_paths_store_to_store
 from tests.nix_config import NixConfig
 
 CA_NIX = Path(__file__).resolve().parent.parent / "nix"

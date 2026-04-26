@@ -1,12 +1,11 @@
-"""Benchmarks for NAR streaming and path copying performance.
-"""
+"""Benchmarks for NAR streaming and path copying performance."""
 
 from __future__ import annotations
 
 import asyncio
 import os
 import time
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,10 +21,11 @@ from pynixd.store_path import StorePath
 from tests.conftest import NIX_BIN, rmtree_robust
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from pynixd.types.path_info import ValidPathInfo
 
 from pynixd.store.transfer import pipe_nar_store_to_store, stream_paths_store_to_store
-
 
 log = structlog.get_logger(__name__)
 
@@ -135,11 +135,12 @@ async def _pick_small_paths(s: Store, limit: int = 100) -> list[tuple[StorePath,
 async def _create_big_path(size_mb: int) -> StorePath:
     """Use nix-store --add to create a deterministic large path in system store."""
     tmp = Path(f"/tmp/pynixd-bench-big-{size_mb}m")
-    if not tmp.exists():
-        with open(tmp, "wb") as f:
+    if not tmp.exists():  # noqa: ASYNC240
+        with tmp.open("wb") as f:  # noqa: ASYNC230
             f.write(os.urandom(size_mb * 1024 * 1024))
 
     from tests.conftest import run_subproc
+
     rc, stdout, _, _ = await run_subproc([str(NIX_BIN), "store", "add-path", str(tmp)])
     assert rc == 0
     return StorePath(stdout.strip())

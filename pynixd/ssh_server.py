@@ -50,7 +50,7 @@ class _NixSSHServer(asyncssh.SSHServer):
 
 
 async def start_ssh_server(
-    stores: Mapping[str, Store],
+    stores: Mapping[str, Store],  # noqa: ARG001
     local_store: Store,
     scheduler: Scheduler | None,
     host: str = "127.0.0.1",

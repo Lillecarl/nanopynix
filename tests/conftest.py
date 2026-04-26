@@ -474,7 +474,9 @@ def rmtree_robust(path: str | Path) -> None:
 def rmtree_robust_glob(pattern: str) -> None:
     """Remove all directories matching a glob pattern."""
     import glob
-    for path_str in glob.glob(pattern):
+
+    # Use glob.glob for absolute paths, which Path().glob doesn't handle well
+    for path_str in glob.glob(pattern):  # noqa: PTH207
         rmtree_robust(Path(path_str))
 
 

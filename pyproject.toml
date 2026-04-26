@@ -102,6 +102,8 @@ ignore = [
     # unused method arguments — protocol interfaces have uniform signatures
     # (from_reader, to_writer, execute, handle) where not every param is used
     "ARG002",
+    # long exception messages are acceptable — custom subclasses would be excessive
+    "TRY003",
 ]
 
 [tool.ruff.lint.flake8-type-checking]

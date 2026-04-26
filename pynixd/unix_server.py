@@ -27,7 +27,7 @@ log = structlog.get_logger(__name__)
 
 
 async def start_unix_server(
-    stores: Mapping[str, Store],
+    stores: Mapping[str, Store],  # noqa: ARG001
     local_store: Store,
     scheduler: Scheduler | None,
     socket_path: Path,

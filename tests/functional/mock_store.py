@@ -1,5 +1,4 @@
-"""Mock Store implementations for unit and functional tests.
-"""
+"""Mock Store implementations for unit and functional tests."""
 
 from __future__ import annotations
 
@@ -140,6 +139,7 @@ class MockStore(Store):
     def cpu_util(self) -> CpuUtil | None:
         """Mocked CPU utilization."""
         from pynixd.psi import CpuUtil
+
         return CpuUtil(utilization=self.cpu_utilization_val, cores=1.0, throttled_pct=0.0)
 
     @property
@@ -188,25 +188,24 @@ class MockStore(Store):
 
         if req_type == QueryAllValidPathsResponse:
             return cast("Resp", QueryAllValidPathsResponse(paths=self.tracker.known_paths))
-
         if isinstance(request, QueryClosureWithInfoRequest):
             # Just return some dummy info for everything
             from pynixd.types.path_info import ValidPathInfo
-            infos = []
-            for p in request.paths:
-                infos.append(
-                    ValidPathInfo(
-                        path=p,
-                        deriver=StorePath(""),
-                        nar_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000",
-                        nar_size=1024,
-                        references=set(),
-                        registration_time=0,
-                        ultimate=1,
-                        sigs=set(),
-                        ca="",
-                    )
+
+            infos = [
+                ValidPathInfo(
+                    path=p,
+                    deriver=StorePath(""),
+                    nar_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                    nar_size=1024,
+                    references=set(),
+                    registration_time=0,
+                    ultimate=1,
+                    sigs=set(),
+                    ca="",
                 )
+                for p in request.paths
+            ]
             return cast("Resp", QueryClosureWithInfoResponse(infos=infos))
 
         log.warning(
@@ -230,6 +229,6 @@ class MockStore(Store):
         # Record the operation for test verification
         async with self.transfer_conn() as conn:
             # We know it's a MockConnection which has op_log
-            cast(Any, conn).op_log.append(type(request).__name__)
+            cast("Any", conn).op_log.append(type(request).__name__)
 
         return await self.execute_mock(request)

@@ -29,6 +29,7 @@ from pynixd.operations.ca_derivations import (
     RegisterDrvOutputRequest,
 )
 from pynixd.store import LocalSocketStore, Store
+from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
@@ -37,7 +38,6 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
-from pynixd.store.transfer import stream_paths_store_to_store
 from tests.nix_config import NixConfig
 
 CA_NIX = Path(__file__).resolve().parent.parent / "nix"
@@ -519,17 +519,11 @@ async def main() -> None:
     await test_store.ensure_daemon()
 
     # Transfer needed paths: CA .drv + CA output + deferred .drv
-    transfer_paths: set[StorePath] = {
-        ca_drv_path,
-        deferred_drv_path,
-        StorePath(ca_out_path),
-    }
     await stream_paths_store_to_store(
         root_store,
         test_store,
         {StorePath(ca_out_path)},
     )
-
 
     # Register CA realisation
     realisation_cmd = [
@@ -612,10 +606,10 @@ async def main() -> None:
 
                 # Verify the output on disk
                 from pynixd.operations.query_derivation_output_map import (
-                    QueryDerivationOutputMapRequest as QDOM,
+                    QueryDerivationOutputMapRequest as QdomRequest,
                 )
 
-                outmap = await test_store.execute(QDOM(path=nix_resolved_drv_path))
+                outmap = await test_store.execute(QdomRequest(path=nix_resolved_drv_path))
                 print(f"  Output map after build: {outmap.items}")
 
                 # Read the output file
