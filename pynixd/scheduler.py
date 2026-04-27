@@ -58,11 +58,13 @@ class Scheduler:
         self,
         ctx: PynixdContext,
         read_drv_fn: DerivationReader | None = None,
+        defer_no_store_failures: bool = False,
     ) -> None:
         self.ctx = ctx
         self.queue = BuildQueue()
         self.stores = ctx.stores
         self.local_store = ctx.local_store
+        self.defer_no_store_failures = defer_no_store_failures
 
         self.ranker = TelemetryStoreRanker(ctx.settings)
         self.allocator = BuildAllocator(self.stores, self.local_store, self.ranker)
@@ -331,13 +333,22 @@ class Scheduler:
                 override_in_flight=override_in_flight,
             )
 
-            # If NO store will ever support this platform/features, fail it statelessly
-            if not ranked and not any(
-                s.supports_derivation(
-                    build.platform,
-                    build.request.derivation.effective_required_features,
+            # If NO store will ever support this platform/features, fail it statelessly.
+            # When defer_no_store_failures is set (scheduler mode with dynamic
+            # builders), we skip this check — builds queue until a compatible
+            # builder store is added. In the future, this should be replaced
+            # with a configurable expected feature matrix so that builds for
+            # genuinely unsupported platforms still fail.
+            if (
+                not ranked
+                and not any(
+                    s.supports_derivation(
+                        build.platform,
+                        build.request.derivation.effective_required_features,
+                    )
+                    for s in self.stores.values()
                 )
-                for s in self.stores.values()
+                and not self.defer_no_store_failures
             ):
                 reasons = self.allocator.incompatibility_reasons(
                     build.platform,

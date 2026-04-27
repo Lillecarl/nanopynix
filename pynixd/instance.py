@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from aiohttp import web
 
 from . import wire
-from .config import PynixdSettings
+from .config import PynixdSettings, ScheduleMode
 from .context import PynixdContext
 from .gc import GarbageCollector
 from .http_server import PynixdHttpServer
@@ -64,7 +64,10 @@ class Server:
             path_tracker=path_tracker,
         )
 
-        self.ctx.scheduler = Scheduler(self.ctx)
+        self.ctx.scheduler = Scheduler(
+            self.ctx,
+            defer_no_store_failures=settings.schedule_mode == ScheduleMode.scheduler,
+        )
 
         self.background_tasks: list[asyncio.Task[Any]] = []
         self.ssh_server: asyncssh.SSHAcceptor | None = None
