@@ -17,6 +17,7 @@ dependencies = [
     "passlib",
     "cachetools",
     "prometheus_client",
+    "anyio",
 ]
 
 [project.optional-dependencies]

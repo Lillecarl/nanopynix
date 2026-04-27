@@ -2,7 +2,8 @@
 asyncssh SSH server that speaks the nix-daemon protocol.
 
 Accepts SSH connections, authenticates, and spawns a DaemonProxy
-for each `nix-daemon --stdio` exec request.
+for each `nix-daemon --stdio` exec request. Also provides an SFTP
+subsystem restricted to PSI/cgroup monitoring files.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from . import wire
 from .config import ScheduleMode
 from .operations.base import Role
 from .proxy import DaemonProxy
+from .sftp_server import PSIMonitorSFTPServer
 from .wire import SSHNixReader, SSHNixWriter
 
 if TYPE_CHECKING:
@@ -125,6 +127,7 @@ async def start_ssh_server(
         server_host_keys=[host_key],
         server_factory=_NixSSHServer,
         process_factory=handle_client,
+        sftp_factory=PSIMonitorSFTPServer,
         encoding=None,
     )
     bound_port = server.get_port()

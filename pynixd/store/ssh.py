@@ -82,7 +82,16 @@ class _SSHStoreMixin(Store):
 
         async def sftp_read(path: str) -> str:
             async with sftp.open(path, "r") as f:
-                return await f.read()
+                attrs = await f.stat()
+                if attrs.size:
+                    return await f.read()
+                chunks = []
+                while True:
+                    chunk = await f.read(65536)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                return "".join(chunks)
 
         async def sftp_exists(path: str) -> bool:
             try:
