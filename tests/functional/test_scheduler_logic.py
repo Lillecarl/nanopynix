@@ -516,3 +516,206 @@ async def test_scheduler_feature_matching():
         await asyncio.sleep(0.01)
 
     assert queued_build.assigned_store_id == "full"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_fails_build_for_unknown_platform():
+    """Builds for platforms not in any store or dynamic_feature_matrix fail immediately."""
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
+        local_store=local_store,
+        stores={},
+        path_tracker=PathTracker(db=None),
+    )
+    scheduler = Scheduler(ctx)
+
+    drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
+    local_store.tracker.add_known_path(drv_path)
+    request = BuildDerivationRequest(
+        drv_path=drv_path,
+        derivation=BasicDerivation(platform="aarch64-darwin"),
+    )
+
+    build_id, _ = await scheduler.build_derivation(
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="aarch64-darwin",
+    )
+
+    await scheduler.schedule()
+
+    build = scheduler.queue.by_id[build_id]
+    assert build.is_done
+    result = build.future.result()
+    assert result.result.status == BuildResultStatus.MISC_FAILURE
+
+
+@pytest.mark.asyncio
+async def test_scheduler_queues_build_for_dynamic_platform():
+    """Builds for platforms in dynamic_feature_matrix stay pending instead of failing."""
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
+        local_store=local_store,
+        stores={},
+        path_tracker=PathTracker(db=None),
+    )
+    scheduler = Scheduler(ctx)
+    scheduler.add_dynamic_feature("aarch64-darwin")
+
+    drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
+    local_store.tracker.add_known_path(drv_path)
+    request = BuildDerivationRequest(
+        drv_path=drv_path,
+        derivation=BasicDerivation(platform="aarch64-darwin"),
+    )
+
+    build_id, _ = await scheduler.build_derivation(
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="aarch64-darwin",
+    )
+
+    await scheduler.schedule()
+
+    build = scheduler.queue.by_id[build_id]
+    assert not build.is_done
+    assert build.is_pending
+
+
+@pytest.mark.asyncio
+async def test_scheduler_queues_build_for_dynamic_platform_with_features():
+    """Builds requiring features in dynamic_feature_matrix stay pending."""
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
+        local_store=local_store,
+        stores={},
+        path_tracker=PathTracker(db=None),
+    )
+    scheduler = Scheduler(ctx)
+    scheduler.add_dynamic_features({"aarch64-darwin": {"kvm", "big-parallel"}})
+
+    drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
+    local_store.tracker.add_known_path(drv_path)
+    derivation = BasicDerivation(platform="aarch64-darwin")
+    derivation.env["requiredSystemFeatures"] = "kvm"
+    request = BuildDerivationRequest(drv_path=drv_path, derivation=derivation)
+
+    build_id, _ = await scheduler.build_derivation(
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="aarch64-darwin",
+    )
+
+    await scheduler.schedule()
+
+    build = scheduler.queue.by_id[build_id]
+    assert not build.is_done
+
+
+@pytest.mark.asyncio
+async def test_scheduler_fails_build_for_missing_dynamic_feature():
+    """Builds requiring features NOT in dynamic_feature_matrix still fail."""
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
+        local_store=local_store,
+        stores={},
+        path_tracker=PathTracker(db=None),
+    )
+    scheduler = Scheduler(ctx)
+    scheduler.add_dynamic_feature("aarch64-darwin")
+
+    drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
+    local_store.tracker.add_known_path(drv_path)
+    derivation = BasicDerivation(platform="aarch64-darwin")
+    derivation.env["requiredSystemFeatures"] = "kvm"
+    request = BuildDerivationRequest(drv_path=drv_path, derivation=derivation)
+
+    build_id, _ = await scheduler.build_derivation(
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="aarch64-darwin",
+    )
+
+    await scheduler.schedule()
+
+    build = scheduler.queue.by_id[build_id]
+    assert build.is_done
+    result = build.future.result()
+    assert result.result.status == BuildResultStatus.MISC_FAILURE
+
+
+@pytest.mark.asyncio
+async def test_add_store_dynamic_registers_feature_matrix():
+    """add_store(dynamic=True) merges the store's feature_matrix into dynamic_feature_matrix."""
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+    remote = MockStore("remote", feature_matrix={"aarch64-darwin": {"kvm"}})
+
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
+        local_store=local_store,
+        stores={},
+        path_tracker=PathTracker(db=None),
+    )
+    scheduler = Scheduler(ctx)
+    scheduler.add_store("remote", remote, dynamic=True)
+
+    assert "aarch64-darwin" in scheduler.dynamic_feature_matrix
+    assert "kvm" in scheduler.dynamic_feature_matrix["aarch64-darwin"]
+
+    # Now remove the store — dynamic_feature_matrix should persist
+    scheduler.stores.pop("remote", None)
+    assert "aarch64-darwin" in scheduler.dynamic_feature_matrix
+
+
+@pytest.mark.asyncio
+async def test_dynamic_feature_matrix_survives_store_removal():
+    """After a dynamic store is removed, builds for its platform still queue."""
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+    remote = MockStore("remote", feature_matrix={"aarch64-darwin": set()})
+    remote.responses[BuildDerivationRequest] = BuildDerivationResponse(
+        result=BuildResult(status=BuildResultStatus.BUILT),
+    )
+
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
+        local_store=local_store,
+        stores={},
+        path_tracker=PathTracker(db=None),
+    )
+    scheduler = Scheduler(ctx)
+    scheduler.add_store("remote", remote, dynamic=True)
+
+    # Remove the store
+    scheduler.stores.pop("remote", None)
+
+    # Enqueue a build for the removed store's platform
+    drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
+    local_store.tracker.add_known_path(drv_path)
+    request = BuildDerivationRequest(
+        drv_path=drv_path,
+        derivation=BasicDerivation(platform="aarch64-darwin"),
+    )
+
+    build_id, _ = await scheduler.build_derivation(
+        request,
+        client=None,
+        required_paths={drv_path},
+        platform="aarch64-darwin",
+    )
+
+    await scheduler.schedule()
+
+    build = scheduler.queue.by_id[build_id]
+    assert not build.is_done

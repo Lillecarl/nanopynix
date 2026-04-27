@@ -58,13 +58,12 @@ class Scheduler:
         self,
         ctx: PynixdContext,
         read_drv_fn: DerivationReader | None = None,
-        defer_no_store_failures: bool = False,
     ) -> None:
         self.ctx = ctx
         self.queue = BuildQueue()
         self.stores = ctx.stores
         self.local_store = ctx.local_store
-        self.defer_no_store_failures = defer_no_store_failures
+        self._dynamic_feature_matrix: dict[str, set[str]] = {}
 
         self.ranker = TelemetryStoreRanker(ctx.settings)
         self.allocator = BuildAllocator(self.stores, self.local_store, self.ranker)
@@ -74,6 +73,29 @@ class Scheduler:
         self.running = False
         self.last_activity_at: float = asyncio.get_event_loop().time()
 
+    @property
+    def dynamic_feature_matrix(self) -> dict[str, set[str]]:
+        return self._dynamic_feature_matrix
+
+    def add_dynamic_feature(self, system: str, feature: str = "") -> None:
+        """Register that a system+feature combo may become available.
+
+        Used by Kubernetes controllers or config to declare that builders
+        for a given platform exist, even if no store is currently connected.
+        Builds requiring these features will queue instead of failing.
+        """
+        self._dynamic_feature_matrix.setdefault(system, set())
+        if feature:
+            self._dynamic_feature_matrix[system].add(feature)
+        self.trigger()
+
+    def add_dynamic_features(self, feature_matrix: dict[str, set[str]]) -> None:
+        """Merge an entire feature_matrix into the dynamic matrix."""
+        for system, features in feature_matrix.items():
+            self._dynamic_feature_matrix.setdefault(system, set())
+            self._dynamic_feature_matrix[system] |= features
+        self.trigger()
+
     def record_activity(self) -> None:
         """Update last activity timestamp."""
         self.last_activity_at = asyncio.get_event_loop().time()
@@ -82,17 +104,30 @@ class Scheduler:
         """Signal that a scheduling pass is needed."""
         self.trigger_event.set()
 
-    def add_store(self, store_id: str, store: Store) -> None:
-        """Dynamically add a new store to the scheduler."""
-        log.info("adding_store_dynamically", store_id=store_id)
-        # We need to update both our mapping and the allocator's mapping
-        # Since self.stores is often passed as a dict to __init__,
-        # we ensure it's a mutable dict.
+    def add_store(self, store_id: str, store: Store, dynamic: bool = False) -> None:
+        """Dynamically add a new store to the scheduler.
+
+        If dynamic=True, the store's feature_matrix is also registered in
+        the dynamic_feature_matrix so that builds for this platform continue
+        to queue even after the store is removed.
+        """
+        log.info("adding_store_dynamically", store_id=store_id, dynamic=dynamic)
         if not isinstance(self.stores, dict):
             self.stores = dict(self.stores)
         self.stores[store_id] = store
         self.allocator.stores = self.stores
+        if dynamic and store.feature_matrix:
+            self.add_dynamic_features(store.feature_matrix)
         self.trigger()
+
+    def _dynamic_supports(self, system: str, features: set[str] | None = None) -> bool:
+        """Check if the dynamic_feature_matrix declares support for a system+features combo."""
+        sys_features = self._dynamic_feature_matrix.get(system)
+        if sys_features is None:
+            return False
+        if not features:
+            return True
+        return features.issubset(sys_features)
 
     async def remove_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
         """Gracefully drain and remove a store."""
@@ -333,12 +368,11 @@ class Scheduler:
                 override_in_flight=override_in_flight,
             )
 
-            # If NO store will ever support this platform/features, fail it statelessly.
-            # When defer_no_store_failures is set (scheduler mode with dynamic
-            # builders), we skip this check — builds queue until a compatible
-            # builder store is added. In the future, this should be replaced
-            # with a configurable expected feature matrix so that builds for
-            # genuinely unsupported platforms still fail.
+            # If NO store (live or dynamic) will ever support this
+            # platform/features, fail it statelessly. Builds for platforms
+            # declared in the dynamic_feature_matrix are kept pending — a
+            # compatible builder store may be connected later.
+            dynamic_supports = self._dynamic_supports(build.platform, build_features)
             if (
                 not ranked
                 and not any(
@@ -348,7 +382,7 @@ class Scheduler:
                     )
                     for s in self.stores.values()
                 )
-                and not self.defer_no_store_failures
+                and not dynamic_supports
             ):
                 reasons = self.allocator.incompatibility_reasons(
                     build.platform,

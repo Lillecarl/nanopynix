@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from aiohttp import web
 
 from . import wire
-from .config import PynixdSettings, ScheduleMode
+from .config import PynixdSettings
 from .context import PynixdContext
 from .gc import GarbageCollector
 from .http_server import PynixdHttpServer
@@ -64,10 +64,7 @@ class Server:
             path_tracker=path_tracker,
         )
 
-        self.ctx.scheduler = Scheduler(
-            self.ctx,
-            defer_no_store_failures=settings.schedule_mode == ScheduleMode.scheduler,
-        )
+        self.ctx.scheduler = Scheduler(self.ctx)
 
         self.background_tasks: list[asyncio.Task[Any]] = []
         self.ssh_server: asyncssh.SSHAcceptor | None = None
@@ -147,8 +144,12 @@ class Server:
                 log.exception("idle_watcher_error")
                 await asyncio.sleep(5)
 
-    async def add_store(self, store: Store) -> None:
+    async def add_store(self, store: Store, dynamic: bool = False) -> None:
         """Add a store to the server, setting up path tracking for scheduling.
+
+        If dynamic=True, the store's feature_matrix is also registered in
+        the scheduler's dynamic_feature_matrix, so builds for that platform
+        continue to queue even after the store is removed.
 
         Stores already configured with a tracker (e.g. local_store) keep
         theirs. Remote stores get a path tracker instance linked to the
@@ -169,7 +170,7 @@ class Server:
         self.stores[store.store_id] = store
 
         if self.scheduler:
-            self.scheduler.add_store(store.store_id, store)
+            self.scheduler.add_store(store.store_id, store, dynamic=dynamic)
 
     async def remove_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
         """Remove a remote store, cleaning DB records and closing connections."""
