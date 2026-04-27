@@ -13,6 +13,7 @@ import asyncssh
 import structlog
 
 from . import wire
+from .config import ScheduleMode
 from .operations.base import Role
 from .proxy import DaemonProxy
 from .wire import SSHNixReader, SSHNixWriter
@@ -57,6 +58,7 @@ async def start_ssh_server(
     port: int = 0,
     host_key_path: Path | None = None,
     admin_users: set[str] | None = None,
+    schedule_mode: ScheduleMode | None = None,
 ) -> asyncssh.SSHAcceptor:
     """Start the SSH server.
 
@@ -107,6 +109,7 @@ async def start_ssh_server(
                 scheduler=scheduler,
                 role=role,
                 username=username,
+                schedule_mode=schedule_mode or ScheduleMode.auto,
             )
             await proxy.run()
         except Exception:

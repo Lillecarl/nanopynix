@@ -305,6 +305,7 @@ class Server:
                 port=s.ssh_port,
                 host_key_path=s.ssh_host_key,
                 admin_users=s.admin_users,
+                schedule_mode=s.schedule_mode,
             )
 
         if s.unix_path:
@@ -313,6 +314,7 @@ class Server:
                 local_store=local_store,
                 scheduler=self.scheduler,
                 socket_path=s.unix_path,
+                schedule_mode=s.schedule_mode,
             )
 
         if s.http_port is not None or s.https_port is not None:

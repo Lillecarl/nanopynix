@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from .config import ScheduleMode
 from .operations.base import Role
 from .proxy import DaemonProxy
 from .wire import UnixNixReader, UnixNixWriter
@@ -31,6 +32,7 @@ async def start_unix_server(
     local_store: Store,
     scheduler: Scheduler | None,
     socket_path: Path,
+    schedule_mode: ScheduleMode | None = None,
 ) -> asyncio.Server:
     """Start a Unix socket server.
 
@@ -58,6 +60,7 @@ async def start_unix_server(
                 scheduler=scheduler,
                 role=Role.ADMIN,
                 username="local",
+                schedule_mode=schedule_mode or ScheduleMode.auto,
             )
             await proxy.run()
         except Exception:

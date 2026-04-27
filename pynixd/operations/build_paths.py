@@ -77,8 +77,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 
         await self.from_reader(ctx.proxy.r, ctx.version)
 
-        # Bypass scheduler if no remote stores are configured (simple proxy mode)
-        if ctx.proxy.scheduler is None or not ctx.proxy.scheduler.stores:
+        if not ctx.proxy.use_scheduler_for_builds:
             self.logger.debug("handle_local_mode_fallback")
             result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
 
@@ -94,6 +93,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
             self.logger.debug("responded_op")
             return result
 
+        assert ctx.proxy.scheduler is not None
         self.logger.debug("BuildPaths len(paths)=%d", len(self.derived_paths))
         result = await ctx.proxy.scheduler.build_derived_paths(
             self.derived_paths,
@@ -173,8 +173,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
 
         await self.from_reader(ctx.proxy.r, ctx.version)
 
-        # Bypass scheduler if no remote stores are configured (simple proxy mode)
-        if ctx.proxy.scheduler is None or not ctx.proxy.scheduler.stores:
+        if not ctx.proxy.use_scheduler_for_builds:
             self.logger.debug("handle_local_mode_fallback")
             result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
 
@@ -190,6 +189,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
             self.logger.debug("responded_op")
             return result
 
+        assert ctx.proxy.scheduler is not None
         self.logger.debug(
             "build_paths_with_results_decomposed",
             num_derivations=len(self.derived_paths),

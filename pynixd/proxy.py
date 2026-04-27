@@ -13,6 +13,7 @@ import asyncssh
 import structlog
 
 from . import wire
+from .config import ScheduleMode
 from .connection import ClientConn
 from .exceptions import BackendError, OpNotImplementedError
 from .operations import OP_REGISTRY
@@ -55,6 +56,7 @@ class DaemonProxy:
         scheduler: Scheduler | None = None,
         role: Role = Role.USER,
         username: str = "unknown",
+        schedule_mode: ScheduleMode = ScheduleMode.auto,
     ) -> None:
         self.r = client_r
         self.w = client_w
@@ -64,6 +66,7 @@ class DaemonProxy:
         self.version: int = wire.PROTOCOL_VERSION
         self.role: Role = role
         self.username: str = username
+        self.schedule_mode: ScheduleMode = schedule_mode
 
     @property
     def build_queue(self) -> BuildQueue | None:
@@ -76,6 +79,21 @@ class DaemonProxy:
     @property
     def stores(self) -> Mapping[str, Store]:
         return self.scheduler.stores if self.scheduler else {}
+
+    @property
+    def use_scheduler_for_builds(self) -> bool:
+        """Whether builds should go through the scheduler queue.
+
+        In 'auto' mode, uses scheduler when builder stores are configured.
+        In 'scheduler' mode, always uses scheduler (builds queue even with
+        no builders). In 'proxy' mode, never uses scheduler.
+        """
+        if self.schedule_mode == ScheduleMode.proxy:
+            return False
+        if self.schedule_mode == ScheduleMode.scheduler:
+            return True
+        # auto: scheduler if there are builder stores
+        return self.scheduler is not None and bool(self.scheduler.stores)
 
     async def run(self) -> None:
         """Run the full session lifecycle."""

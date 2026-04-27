@@ -78,8 +78,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         await self.from_reader(ctx.proxy.r, ctx.version)
 
-        # Bypass scheduler if no remote stores are configured (simple proxy mode)
-        if ctx.proxy.scheduler is None or not ctx.proxy.scheduler.stores:
+        if not ctx.proxy.use_scheduler_for_builds:
             self.logger.debug("handle_local_mode_fallback")
             result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
 
@@ -104,6 +103,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         # We DO NOT add request.drv_path to required_paths because the client
         # provides the derivation contents over the wire and often doesn't
         # upload the .drv file itself to the remote builder.
+        assert ctx.proxy.scheduler is not None
         build_id, future = await ctx.proxy.scheduler.build_derivation(
             self,
             ctx.proxy.client,

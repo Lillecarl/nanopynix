@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -12,6 +13,13 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+
+class ScheduleMode(StrEnum):
+    auto = "auto"
+    proxy = "proxy"
+    scheduler = "scheduler"
+
 
 if TYPE_CHECKING:
     from .store import (
@@ -253,6 +261,7 @@ class PynixdSettings(BaseSettings):
     gc_builder_max_age: int = 3600
 
     # Scheduling & Telemetry
+    schedule_mode: ScheduleMode = ScheduleMode.auto
     ranking: StoreRankingSettings = Field(default_factory=StoreRankingSettings)
 
     # Resource Monitoring
