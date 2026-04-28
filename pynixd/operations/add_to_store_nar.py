@@ -8,12 +8,9 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from ..exceptions import BackendError
-from ..stderr import StderrError, read_stream
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import (
-    OperationLogs,
     OpRequest,
     OpResponse,
     RequestContext,
@@ -88,39 +85,18 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
                 await self.to_writer(conn.w, conn.version)
                 await conn.w.drain()
 
-                logs = OperationLogs()
-                error = None
-
-                async def read_stderr():
-                    nonlocal error
-                    try:
-                        async for msg in read_stream(conn.r):
-                            logs.add(msg)
-                            if isinstance(msg, StderrError):
-                                error = BackendError(f"Backend error: {msg.msg}")
-                                raise error  # noqa: TRY301
-                            if client:
-                                await client.queue.put(msg)
-                    except Exception as e:
-                        if not error:
-                            error = e
-                        raise
-
                 async def write_payload():
                     assert self.async_provider is not None
                     await self.async_provider(conn.w)
                     await conn.w.drain()
 
-                try:
-                    async with asyncio.TaskGroup() as tg:
-                        tg.create_task(read_stderr())
-                        tg.create_task(write_payload())
-                except (Exception, ExceptionGroup):
-                    if error:
-                        raise error from None
-                    raise
+                async with asyncio.TaskGroup() as tg:
+                    resp_task = tg.create_task(
+                        AddToStoreNarResponse().from_reader(conn.r, conn.version, client),
+                    )
+                    tg.create_task(write_payload())
 
-                return AddToStoreNarResponse(logs=logs)
+                return await resp_task
 
         return await super().execute(store, client, suppress_last)
 
