@@ -32,8 +32,11 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueryPathInfoResponse(OpResponse):
-    valid: bool = False
     info: UnkeyedValidPathInfo | None = None
+
+    @property
+    def valid(self) -> bool:
+        return self.info is not None
 
     async def from_reader(
         self,
@@ -48,9 +51,9 @@ class QueryPathInfoResponse(OpResponse):
             client=client,
             buffer=buffer_logs,
         )
-        self.valid = await reader.read_uint64() != 0
+        is_valid = await reader.read_uint64() != 0
         self.info = None
-        if self.valid:
+        if is_valid:
             self.info = await UnkeyedValidPathInfo().from_reader(reader)
         return self
 
@@ -58,8 +61,9 @@ class QueryPathInfoResponse(OpResponse):
         self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer", valid=self.valid, info=self.info)
         self.logs.to_writer(writer)
-        writer.write_uint64(1 if self.valid and self.info is not None else 0)
-        if self.valid and self.info is not None:
+        writer.write_uint64(1 if self.valid else 0)
+        if self.valid:
+            assert self.info is not None
             # Explicitly use the base class method to avoid writing the path
             # (which ValidPathInfo.to_writer would do).
             UnkeyedValidPathInfo.to_writer(self.info, writer)
@@ -99,13 +103,13 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
         cached = store.get_path_info(self.path)
         if cached is not None:
             store.tracker.add_known_path(self.path)
-            return QueryPathInfoResponse(valid=True, info=cached)
+            return QueryPathInfoResponse(info=cached)
 
         if (db := store.db) is not None:
             async with db.execute(QUERY_PATH_INFO, (self.path,)) as cursor:
                 row = await cursor.fetchone()
             if row is None:
-                return QueryPathInfoResponse(valid=False)
+                return QueryPathInfoResponse()
 
             _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
 
@@ -125,7 +129,7 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
             )
             store.tracker.add_known_path(self.path)
             store.add_path_info(info.with_path(self.path))
-            return QueryPathInfoResponse(valid=True, info=info)
+            return QueryPathInfoResponse(info=info)
 
         resp = await store.call(self, client=client, suppress_last=suppress_last)
         if resp.valid:
