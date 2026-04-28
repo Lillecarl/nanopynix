@@ -80,14 +80,13 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> AddToStoreNarResponse:
-        if self.async_provider:
+        if provider := self.async_provider:
             async with store.transfer_conn() as conn:
                 await self.to_writer(conn.w, conn.version)
                 await conn.w.drain()
 
                 async def write_payload():
-                    assert self.async_provider is not None
-                    await self.async_provider(conn.w)
+                    await provider(conn.w)
                     await conn.w.drain()
 
                 async with asyncio.TaskGroup() as tg:

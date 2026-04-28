@@ -216,9 +216,8 @@ class LocalSocketStore(Store):
 
     async def _stream_daemon_output(self, stop: asyncio.Event) -> None:
         """Forward daemon stdout/stderr to structlog until stop is set."""
-        assert self.daemon_proc is not None
-        assert self.daemon_proc.stdout is not None
-        assert self.daemon_proc.stderr is not None
+        if not self.daemon_proc or not self.daemon_proc.stdout or not self.daemon_proc.stderr:
+            return
 
         async def _forward(stream: asyncio.StreamReader | None, label: str) -> None:
             if stream is None:

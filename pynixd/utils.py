@@ -14,7 +14,7 @@ def nix32_encode(data: bytes) -> str:
     Nix uses a custom base-32 encoding (5 bits per character, LSB first)
     with the alphabet ``0123456789abcdfghijklmnpqrsvwxyz``.
     """
-    if len(data) == 0:
+    if not data:
         return ""
     size = len(data)
     result_len = (size * 8 - 1) // 5 + 1

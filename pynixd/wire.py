@@ -135,7 +135,7 @@ class SSHNixReader(NixReader):
             self.reader._datatype,
             [],
         )
-        return any(isinstance(chunk, (bytes, bytearray)) and len(chunk) > 0 for chunk in buf)
+        return any(isinstance(chunk, (bytes, bytearray)) and chunk for chunk in buf)
 
 
 _UNIX_READ_AHEAD = 16 * 1024  # read-ahead size to amortize syscall overhead
@@ -157,7 +157,7 @@ class UnixNixReader(NixReader):
         return await self.reader.readexactly(n)
 
     def _transport_is_dirty(self) -> bool:
-        return len(self.reader._buffer) > 0  # type: ignore[attr-defined]
+        return bool(self.reader._buffer)  # type: ignore[attr-defined]
 
 
 class NixWriter:
@@ -484,13 +484,13 @@ class FramedReader(NixReader):
             await self._src.readexactly(size)
 
     async def is_dirty(self) -> bool:
-        if len(self._buf) - self._pos > 0:
+        if self._pos < len(self._buf):
             return True
         return await self._src.is_dirty()
 
     @property
     def at_eof(self) -> bool:
-        return self._eof and (len(self._buf) - self._pos) == 0
+        return self._eof and self._pos == len(self._buf)
 
 
 class FramedWriter(NixWriter):

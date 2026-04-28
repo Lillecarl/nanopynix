@@ -230,7 +230,7 @@ class ByteCollector(NixWriter):
         pass
 
     async def is_dirty(self) -> bool:
-        return len(self._buf) > 0
+        return bool(self._buf)
 
     def getvalue(self) -> bytes:
         return bytes(self._buf)

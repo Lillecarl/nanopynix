@@ -74,11 +74,11 @@ class SchedulerBuildRequest:
     def build_completed(self, build_id: int) -> bool:
         """Remove build from active set. Returns True if request is complete."""
         self.active_build_ids.discard(build_id)
-        return len(self.active_build_ids) == 0
+        return not self.active_build_ids
 
     def resolve_if_done(self) -> bool:
         """Resolve the future if all active builds are done."""
-        if len(self.active_build_ids) == 0 and not self.future.done():
+        if not self.active_build_ids and not self.future.done():
             self.future.set_result(dict(self.results))
             return True
         return False

@@ -103,7 +103,9 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         # We DO NOT add request.drv_path to required_paths because the client
         # provides the derivation contents over the wire and often doesn't
         # upload the .drv file itself to the remote builder.
-        assert ctx.proxy.scheduler is not None
+        if ctx.proxy.scheduler is None:
+            raise RuntimeError("BuildDerivation requires a configured scheduler")
+
         build_id, future = await ctx.proxy.scheduler.build_derivation(
             self,
             ctx.proxy.client,
