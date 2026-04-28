@@ -21,6 +21,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import brotli
 import lz4.frame
 import structlog
@@ -287,13 +288,13 @@ class PynixdHttpServer:
             path=str(temp_path),
             filename=filename,
         )
-        loop = asyncio.get_running_loop()
-        # Ensure we use run_in_executor for the file write to keep event loop non-blocking
-        with temp_path.open("wb") as f:
+        # Use anyio.open_file for async file writing to keep event loop non-blocking
+        async with await anyio.open_file(temp_path, "wb") as f:
             async for chunk in request.content.iter_any():
-                await loop.run_in_executor(None, f.write, chunk)
+                await f.write(chunk)
 
-        log.info("nar_upload_complete", hash=hash_part, size=temp_path.stat().st_size)
+        nar_size = (await anyio.Path(temp_path).stat()).st_size
+        log.info("nar_upload_complete", hash=hash_part, size=nar_size)
         return web.Response(status=HTTPStatus.OK, text="ok\n")
 
     async def handle_put_narinfo(self, request: web.Request) -> web.Response:
