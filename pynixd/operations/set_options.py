@@ -6,15 +6,17 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from .. import wire
+from ..stderr import StderrNext
+from ..types.auth import Role
 from .base import (
     OperationLogs,
     OpRequest,
     OpResponse,
+    RequestContext,
 )
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..store import Store
     from ..wire import NixReader, NixWriter
 
 # Silence SetOptions by default — it's extremely verbose
@@ -105,16 +107,15 @@ class SetOptionsRequest(OpRequest[SetOptionsResponse]):
         )
         return self
 
-    async def execute(
-        self,
-        store: Store,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-    ) -> SetOptionsResponse:
-        # We don't forward SetOptions to the local store daemon as it would
-        # mess with our own proxy's session state if it was a real daemon.
-        # We just return SetOptionsResponse.
-        return SetOptionsResponse()
+    async def handle(self, ctx: RequestContext) -> SetOptionsResponse | None:
+        await self.from_reader(ctx.proxy.r, ctx.version)
+        if ctx.proxy.role == Role.ADMIN:
+            return await ctx.proxy.execute(self)
+
+        resp = SetOptionsResponse()
+        msg = StderrNext("pynixd: SetOptions ignored (no-op)")
+        resp.logs.add(msg)
+        return resp
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
