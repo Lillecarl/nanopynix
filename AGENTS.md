@@ -45,7 +45,7 @@ Pynixd will adversise 1.38 support even if local_store is 1.35 and translate whe
 - **Type Safety**:
   - NEVER use string type hints (e.g., `"Store"`). Use `from __future__ import annotations` where needed for `TYPE_CHECKING` imports and forward references.
   - Use `if TYPE_CHECKING:` blocks for cross-module imports.
-  - **Imports**: All imports should be at the top of the file. Lazy imports inside functions are only acceptable to break circular import cycles.
+  - **Imports**: All imports should be at the top of the file (or inside `if TYPE_CHECKING:` blocks) whenever possible. Lazy imports inside functions are only acceptable to break circular import cycles.
 - **No-ops**: Restricted operations (like `SetOptions`, `AddPermRoot`, `AddIndirectRoot`) must be implemented as no-ops for regular users by overriding their `handle` method (not `execute`). If the user has `Role.ADMIN`, the operation should be executed normally. For other users, it should return success (`0` or `EmptyResponse`) and log its status via `StderrNext` for transparency. `execute` must always perform the actual upstream daemon operation.
 - **HTTP Cache Streaming**: If a NAR transfer fails after the `200 OK` header is sent, the server MUST abruptly close the connection to signal failure to the client. Full buffering to avoid this is not supported due to memory constraints.
 - **pathlib.Path**: Use pathlib.Path when dealing with any strings that aren't Nix daemon protocol related. Convert to string as late as possible if needed
