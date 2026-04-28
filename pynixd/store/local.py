@@ -231,10 +231,9 @@ class LocalSocketStore(Store):
                 if stop.is_set():
                     return
 
-        await asyncio.gather(
-            _forward(self.daemon_proc.stdout, "stdout"),
-            _forward(self.daemon_proc.stderr, "stderr"),
-        )
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(_forward(self.daemon_proc.stdout, "stdout"))
+            tg.create_task(_forward(self.daemon_proc.stderr, "stderr"))
 
     async def _probe_socket(self) -> bool:
         """Perform a full daemon handshake to verify a live Nix daemon.

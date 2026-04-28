@@ -88,16 +88,39 @@ class GarbageCollector:
             local_max_age=self.local_max_age,
         )
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
         total_deleted = 0
         total_freed = 0
-        for store, result in zip(stores_for_tasks, results, strict=True):
-            if isinstance(result, BaseException):
-                log.warning("gc_store_failed", store_id=store.store_id, error=result)
-            elif isinstance(result, CollectGarbageResponse):
-                total_deleted += len(result.paths_deleted)
-                total_freed += result.bytes_freed
+        store_tasks: list[tuple[Store, asyncio.Task[CollectGarbageResponse | None]]] = []
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                # GC builders with builder lifetime
+                for store in self.stores.values():
+                    t = tg.create_task(self.gc_store(store, builder_stale))
+                    store_tasks.append((store, t))
+
+                # GC local store with local lifetime
+                if local_stale:
+                    t = tg.create_task(self.gc_store(self.local_store, local_stale))
+                    store_tasks.append((self.local_store, t))
+        except* Exception as eg:
+            # TaskGroup cancels other tasks on first failure.
+            # We use except* (Python 3.11+) to handle individual exceptions
+            # in the ExceptionGroup if we wanted, but here we just want to
+            # make sure we don't crash the GC loop.
+            log.warning("gc_pass_interrupted_by_error", errors=eg.exceptions)
+
+        for store, t in store_tasks:
+            try:
+                if not t.cancelled():
+                    result = t.result()
+                    if isinstance(result, CollectGarbageResponse):
+                        total_deleted += len(result.paths_deleted)
+                        total_freed += result.bytes_freed
+            except Exception as e:
+                # Individual task failure already logged/caught by TaskGroup?
+                # Actually task.result() will re-raise if it failed.
+                log.warning("gc_store_result_failed", store_id=store.store_id, error=str(e))
 
         log.info(
             "gc_pass_complete",

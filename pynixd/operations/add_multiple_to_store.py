@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -72,27 +71,21 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
             # We must run forward_stream and the response reader concurrently
             # because the backend might send logs while we are still sending data.
             # If we don't read the logs, the backend's output buffer fills and it blocks.
-
-            # Use a task to read the response (including logs)
-            resp_task = asyncio.create_task(
-                AddMultipleToStoreResponse().from_reader(conn.r, conn.version),
-            )
-
-            try:
-                infos = await self.forward_stream(ctx.proxy.r, conn.w)
-                resp = await resp_task
-                resp.logs.messages.append(
-                    StderrNext("pynixd: AddMultipleToStore forwarding complete"),
+            async with asyncio.TaskGroup() as tg:
+                resp_task = tg.create_task(
+                    AddMultipleToStoreResponse().from_reader(conn.r, conn.version),
                 )
 
-                ctx.proxy.local_store.add_path_infos(infos)
-                ctx.proxy.local_store.tracker.add_known_paths({i.path for i in infos})
-                return resp
-            finally:
-                if not resp_task.done():
-                    resp_task.cancel()
-                    with contextlib.suppress(Exception, asyncio.CancelledError):
-                        await resp_task
+                infos = await self.forward_stream(ctx.proxy.r, conn.w)
+                resp = await resp_task
+
+            resp.logs.messages.append(
+                StderrNext("pynixd: AddMultipleToStore forwarding complete"),
+            )
+
+            ctx.proxy.local_store.add_path_infos(infos)
+            ctx.proxy.local_store.tracker.add_known_paths({i.path for i in infos})
+            return resp
 
     async def forward_stream(
         self,

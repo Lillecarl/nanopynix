@@ -291,7 +291,9 @@ class Server:
         self.ctx._stores.clear()
 
         if stores_to_add:
-            await asyncio.gather(*[self.add_store(s) for s in stores_to_add])
+            async with asyncio.TaskGroup() as tg:
+                for s in stores_to_add:
+                    tg.create_task(self.add_store(s))
 
         if self.ctx.scheduler:
             self.background_tasks.append(
@@ -357,14 +359,12 @@ class Server:
 
     async def wait_finished(self) -> None:
         """Wait for the server listeners to close."""
-        wait_tasks = []
-        if self.ssh_server:
-            wait_tasks.append(asyncio.create_task(self.ssh_server.wait_closed()))
-        if self.unix_server:
-            wait_tasks.append(asyncio.create_task(self.unix_server.wait_closed()))
-
-        if wait_tasks:
-            await asyncio.gather(*wait_tasks)
+        if self.ssh_server or self.unix_server:
+            async with asyncio.TaskGroup() as tg:
+                if self.ssh_server:
+                    tg.create_task(self.ssh_server.wait_closed())
+                if self.unix_server:
+                    tg.create_task(self.unix_server.wait_closed())
         elif self.http_server or self.https_server:
             while self._started:  # noqa: ASYNC110 — long-running server keep-alive loop
                 await asyncio.sleep(1)

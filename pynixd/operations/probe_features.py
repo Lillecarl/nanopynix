@@ -97,10 +97,12 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
                     ),
                 )
 
-        results = await asyncio.gather(*probes)
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(p) for p in probes]
+
         feature_matrix: dict[str, set[str]] = {s: set() for s in self.systems}
-        for (system, feature), (_, ok) in zip(probe_keys, results, strict=True):
-            if ok:
+        for (system, feature), t in zip(probe_keys, tasks, strict=True):
+            if t.result()[1]:
                 feature_matrix[system].add(feature)
 
         store.feature_matrix = feature_matrix

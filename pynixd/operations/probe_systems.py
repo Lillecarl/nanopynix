@@ -72,20 +72,21 @@ class ProbeSystemsRequest(OpRequest[ProbeSystemsResponse]):
     ) -> ProbeSystemsResponse:
         candidates = self.systems or PROBE_SYSTEMS
 
-        results = await asyncio.gather(
-            *[
-                _send_probe(
-                    store,
-                    f"probe-system-{s}",
-                    s,
-                    "",
-                    ["-c", f"echo {s} > $out"],
+        async with asyncio.TaskGroup() as tg:
+            tasks = [
+                tg.create_task(
+                    _send_probe(
+                        store,
+                        f"probe-system-{s}",
+                        s,
+                        "",
+                        ["-c", f"echo {s} > $out"],
+                    )
                 )
                 for s in candidates
-            ],
-        )
+            ]
 
-        systems = {system for system, (_, ok) in zip(candidates, results, strict=True) if ok}
+        systems = {system for system, t in zip(candidates, tasks, strict=True) if t.result()[1]}
 
         log.info("systems_probed", store_id=store.store_id, systems=sorted(systems))
         return ProbeSystemsResponse(systems=systems)
