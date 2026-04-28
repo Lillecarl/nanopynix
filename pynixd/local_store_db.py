@@ -490,7 +490,7 @@ class LocalStoreDB:
         """Stop flush task, flush pending writes, close database."""
         if self.flush_task is not None:
             self.flush_task.cancel()
-            with suppress(asyncio.CancelledError):
+            with suppress(Exception, asyncio.CancelledError):
                 await self.flush_task
             self.flush_task = None
         await self.flush_regtime()

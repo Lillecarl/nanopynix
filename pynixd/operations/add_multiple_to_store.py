@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -77,15 +78,21 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
                 AddMultipleToStoreResponse().from_reader(conn.r, conn.version),
             )
 
-            infos = await self.forward_stream(ctx.proxy.r, conn.w)
-            resp = await resp_task
-            resp.logs.messages.append(
-                StderrNext("pynixd: AddMultipleToStore forwarding complete"),
-            )
+            try:
+                infos = await self.forward_stream(ctx.proxy.r, conn.w)
+                resp = await resp_task
+                resp.logs.messages.append(
+                    StderrNext("pynixd: AddMultipleToStore forwarding complete"),
+                )
 
-            ctx.proxy.local_store.add_path_infos(infos)
-            ctx.proxy.local_store.tracker.add_known_paths({i.path for i in infos})
-        return resp
+                ctx.proxy.local_store.add_path_infos(infos)
+                ctx.proxy.local_store.tracker.add_known_paths({i.path for i in infos})
+                return resp
+            finally:
+                if not resp_task.done():
+                    resp_task.cancel()
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+                        await resp_task
 
     async def forward_stream(
         self,

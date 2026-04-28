@@ -240,7 +240,7 @@ class ConnectionPool:
         """Close all pooled connections and stop sweep task."""
         if self.sweep_task is not None:
             self.sweep_task.cancel()
-            with suppress(asyncio.CancelledError):
+            with suppress(Exception, asyncio.CancelledError):
                 await self.sweep_task
             self.sweep_task = None
 

@@ -69,7 +69,7 @@ class ClientConn:
         """Stop the drain task."""
         if self.drain_task is not None:
             self.drain_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await self.drain_task
             self.drain_task = None
 

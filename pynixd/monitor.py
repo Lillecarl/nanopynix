@@ -100,7 +100,7 @@ class ResourceMonitor(ABC):
         self.running = False
         if self.task:
             self.task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await self.task
 
 

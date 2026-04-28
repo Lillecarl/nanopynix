@@ -401,7 +401,7 @@ class Server:
 
         for task in self.background_tasks:
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await task
         self.background_tasks.clear()
 

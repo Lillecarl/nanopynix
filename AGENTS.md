@@ -90,6 +90,12 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 - Do NOT use `tee` when redirecting — it doubles context consumption.
 - If you must limit output, use `tail -N` on the file afterwards, never pipe the command itself.
 - You do NOT need to specify pytest timeout, the configured 120s is enough per test.
+
+## 8. Async Task & Lifecycle Rules
+- **Task Tracking**: All background tasks created via `asyncio.create_task` MUST be tracked (e.g., in a list or as a class attribute) and properly cleaned up during the component's `close()` or `stop()` method.
+- **Graceful Shutdown**: When awaiting a cancelled background task during shutdown, ALWAYS use `with contextlib.suppress(Exception, asyncio.CancelledError):`. This ensures that if a task failed with an unhandled exception during its lifetime, that exception does not crash the shutdown sequence.
+- **Orphaned Tasks**: When spawning a helper task for a specific operation (e.g., a concurrent response reader), use a `try...finally` block to ensure the task is cancelled and awaited if the primary operation fails.
+
 #### Good examples
 - just test
 - just precommit

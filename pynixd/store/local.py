@@ -287,6 +287,8 @@ class LocalSocketStore(Store):
             await self.monitor.stop()
         if self._daemon_log_task and not self._daemon_log_task.done():
             self._daemon_log_task.cancel()
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                await self._daemon_log_task
         if self.daemon_proc is not None:
             self.daemon_proc.terminate()
             try:
