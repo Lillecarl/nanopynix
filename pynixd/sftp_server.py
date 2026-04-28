@@ -7,7 +7,6 @@ over SFTP while restricting access to everything else.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -55,7 +54,7 @@ class PSIMonitorSFTPServer(asyncssh.SFTPServer):
     """
 
     def _resolve(self, path: bytes) -> str:
-        return os.path.realpath(path.decode())
+        return str(Path(path.decode()).resolve())
 
     def _is_allowed_path(self, path: str) -> bool:
         return path in _ALLOWED_PATHS or path in _ALLOWED_DIRS

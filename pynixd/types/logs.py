@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Self
 
+from .. import constants
+from ..exceptions import BackendError
+from ..stderr import StderrError, read_stream
+
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..stderr import StderrMsg
@@ -19,8 +23,6 @@ class OperationLogs:
 
     @property
     def error(self):
-        from ..stderr import StderrError
-
         for msg in self.messages:
             if isinstance(msg, StderrError):
                 return msg
@@ -37,8 +39,6 @@ class OperationLogs:
         self.messages.append(msg)
 
     def to_writer(self, writer: NixWriter) -> None:
-        from .. import constants
-
         for msg in self.messages:
             msg.to_writer(writer)
         writer.write_uint64(constants.STDERR_LAST)
@@ -49,9 +49,6 @@ class OperationLogs:
         client: ClientConn | None = None,
         buffer: bool = True,
     ) -> Self:
-        from ..exceptions import BackendError
-        from ..stderr import StderrError, read_stream
-
         async for msg in read_stream(reader):
             if client:
                 await client.queue.put(msg)
