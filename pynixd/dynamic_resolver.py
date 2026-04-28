@@ -314,8 +314,12 @@ class DynamicDerivationResolver:
                                 )
                                 inner_outs = inner_parsed.output_paths()
                                 actual_path = inner_outs.get(inner_output_name)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                log.warning(
+                                    "resolve_dynamic_read_drv_failed",
+                                    drv_path=str(level1_path),
+                                    error=str(e),
+                                )
 
                         if actual_path:
                             dynamic_output_paths[(dyn_drv_path, outer_output, inner_output_name)] = actual_path

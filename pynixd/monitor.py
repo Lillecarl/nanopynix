@@ -184,7 +184,8 @@ class GenericResourcePoller(ResourceMonitor):
                     log.info("resource_poller_psi_unavailable")
                     has_psi = False
                 except Exception:
-                    pass
+                    log.exception("resource_poller_psi_error")
+                    has_psi = False
 
                 # 3. Read Memory
                 meminfo = None
@@ -213,7 +214,7 @@ class GenericResourcePoller(ResourceMonitor):
                 except (PermissionError, FileNotFoundError, OSError):
                     log.info("resource_poller_memory_unavailable")
                 except Exception:
-                    pass
+                    log.exception("resource_poller_memory_error")
 
                 # 4. Read CPU util
                 cpu_util = None
@@ -231,7 +232,7 @@ class GenericResourcePoller(ResourceMonitor):
                 except (PermissionError, FileNotFoundError, OSError):
                     log.info("resource_poller_cpu_unavailable")
                 except Exception:
-                    pass
+                    log.exception("resource_poller_cpu_error")
 
                 # 5. Update Health and Gate
                 self.health = SystemHealth(

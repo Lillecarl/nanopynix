@@ -204,8 +204,12 @@ class BuildDecomposer:
                     drv_request.derivation.is_dynamic = parsed.is_dynamic
                 except FileNotFoundError:
                     pass
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(
+                        "decomposer_read_drv_failed",
+                        drv_path=str(drv_request.drv_path),
+                        error=str(e),
+                    )
 
             drv_path_str = str(drv_request.drv_path)
             required_paths: set[StorePath] = set()
