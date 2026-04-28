@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -10,9 +11,11 @@ import structlog
 from pynixd.operations.sign_path_info import SignPathInfoRequest
 
 from ..exceptions import BackendError
+from ..stderr import StderrError, read_stream
 from ..store_path import StorePath
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import (
+    OperationLogs,
     OpRequest,
     OpResponse,
     RequestContext,
@@ -99,13 +102,42 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
                 await self.to_writer(conn.w, conn.version)
                 await conn.w.drain()
 
-                try:
+                logs = OperationLogs()
+                error = None
+
+                async def read_stderr():
+                    nonlocal error
+                    try:
+                        async for msg in read_stream(conn.r):
+                            logs.add(msg)
+                            if isinstance(msg, StderrError):
+                                error = BackendError(f"Backend error: {msg.msg}")
+                                raise error  # noqa: TRY301
+                            if client:
+                                await client.queue.put(msg)
+                    except Exception as e:
+                        if not error:
+                            error = e
+                        raise
+
+                async def write_payload():
+                    assert self.async_provider is not None
                     await self.async_provider(conn.w)
                     await conn.w.drain()
-                except Exception as e:
-                    raise BackendError(f"Failed to send store content: {e}") from e
 
-                return await AddToStoreResponse().from_reader(conn.r, conn.version)
+                try:
+                    async with asyncio.TaskGroup() as tg:
+                        tg.create_task(read_stderr())
+                        tg.create_task(write_payload())
+                except (Exception, ExceptionGroup):
+                    if error:
+                        raise error from None
+                    raise
+
+                resp = AddToStoreResponse()
+                resp.logs = logs
+                resp.info = await ValidPathInfo().from_reader(conn.r)
+                return resp
 
         return await super().execute(store, client, suppress_last)
 
@@ -115,6 +147,14 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         async with ctx.proxy.local_store.transfer_conn() as conn:
             await self.forward(ctx.proxy.r, conn.w)
             await conn.w.drain()
+
+            # We don't concurrently read stderr here because we are forwarding
+            # raw bytes from the client. If the daemon errors, the client's
+            # forward will eventually fail or timeout.
+            # However, for consistency with execute(), we should ideally read
+            # logs concurrently here too. But forward() is synchronous-ish
+            # (awaits reads/writes).
+
             resp = await AddToStoreResponse().from_reader(conn.r, conn.version)
             if resp.info is not None:
                 resp.info = (

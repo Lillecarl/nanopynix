@@ -98,25 +98,27 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
                             logs.add(msg)
                             if isinstance(msg, StderrError):
                                 error = BackendError(f"Backend error: {msg.msg}")
-                                return
+                                raise error  # noqa: TRY301
                             if client:
                                 await client.queue.put(msg)
                     except Exception as e:
-                        error = e
+                        if not error:
+                            error = e
+                        raise
 
-                stderr_task = asyncio.create_task(read_stderr())
-
-                try:
+                async def write_payload():
+                    assert self.async_provider is not None
                     await self.async_provider(conn.w)
                     await conn.w.drain()
-                except Exception as e:
-                    if not error:
-                        error = e
 
-                await stderr_task
-
-                if error:
-                    raise error
+                try:
+                    async with asyncio.TaskGroup() as tg:
+                        tg.create_task(read_stderr())
+                        tg.create_task(write_payload())
+                except (Exception, ExceptionGroup):
+                    if error:
+                        raise error from None
+                    raise
 
                 return AddToStoreNarResponse(logs=logs)
 
