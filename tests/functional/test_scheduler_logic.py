@@ -320,7 +320,7 @@ async def test_scheduler_decomposition_and_ordering():
     )
 
     # Inject deterministic derivation reader
-    def mock_read_drv(_store_path, drv_path):
+    async def mock_read_drv(_store_path, drv_path):
         if str(drv_path) == str(leaf_path):
             return leaf_drv
         if str(drv_path) == str(root_path):

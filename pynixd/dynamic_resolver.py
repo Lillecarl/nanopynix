@@ -43,6 +43,8 @@ log = structlog.get_logger(__name__)
 class DynamicDerivationResolver:
     """Handles resolution of CA and dynamic derivations during the build lifecycle."""
 
+    read_drv_fn: DerivationReader
+
     def __init__(
         self,
         scheduler: Scheduler,
@@ -130,7 +132,7 @@ class DynamicDerivationResolver:
         drv_path = build.request.drv_path
 
         try:
-            parsed = self.read_drv_fn(self.local_store.store_path, drv_path)
+            parsed = await self.read_drv_fn(self.local_store.store_path, drv_path)
         except FileNotFoundError:
             log.warning(
                 "resolve_deferred_drv_not_found",
@@ -257,7 +259,7 @@ class DynamicDerivationResolver:
         drv_path = build.request.drv_path
 
         try:
-            parsed = self.read_drv_fn(self.local_store.store_path, drv_path)
+            parsed = await self.read_drv_fn(self.local_store.store_path, drv_path)
         except FileNotFoundError:
             log.warning(
                 "resolve_dynamic_drv_not_found",
@@ -308,7 +310,7 @@ class DynamicDerivationResolver:
                         # that was already built or enqueued elsewhere.
                         if not actual_path:
                             try:
-                                inner_parsed = self.read_drv_fn(
+                                inner_parsed = await self.read_drv_fn(
                                     self.local_store.store_path,
                                     level1_path,
                                 )
@@ -500,7 +502,7 @@ class DynamicDerivationResolver:
                 )
 
                 try:
-                    inner_parsed = self.read_drv_fn(self.local_store.store_path, out_sp)
+                    inner_parsed = await self.read_drv_fn(self.local_store.store_path, out_sp)
                 except FileNotFoundError:
                     log.warning(
                         "trampoline_drv_not_found",
@@ -516,7 +518,7 @@ class DynamicDerivationResolver:
                     )
                     continue
 
-                inner_basic = to_basic_derivation(
+                inner_basic = await to_basic_derivation(
                     inner_parsed,
                     self.local_store.store_path,
                 )

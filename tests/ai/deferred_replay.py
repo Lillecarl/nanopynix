@@ -168,8 +168,8 @@ async def main() -> None:
     deferred_drv_path = StorePath(stdout.strip())
     print(f"Deferred .drv path: {deferred_drv_path}")
 
-    ca_parsed = read_drv_file(root_store.store_path, ca_drv_path)
-    deferred_parsed = read_drv_file(root_store.store_path, deferred_drv_path)
+    ca_parsed = await read_drv_file(root_store.store_path, ca_drv_path)
+    deferred_parsed = await read_drv_file(root_store.store_path, deferred_drv_path)
 
     for o in deferred_parsed.outputs:
         print(f"  output: name={o.name} path={o.path!r} hash_algo={o.hash_algo!r}")

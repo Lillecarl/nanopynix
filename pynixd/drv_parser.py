@@ -36,6 +36,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict
 
+import anyio
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -492,21 +494,21 @@ class _Parser:
         )
 
 
-def extract_platforms(derived_paths: set[DerivedPath], store_path: Path) -> set[str]:
+async def extract_platforms(derived_paths: set[DerivedPath], store_path: Path) -> set[str]:
     """Extract the set of platforms from derived paths by peeking at .drv files."""
     platforms: set[str] = set()
     for dp in derived_paths:
         drv_path = dp.drv_path
         if drv_path.endswith(".drv"):
             try:
-                parsed = read_drv_file(store_path, drv_path)
+                parsed = await read_drv_file(store_path, drv_path)
                 platforms.add(parsed.platform)
             except FileNotFoundError:
                 pass
     return platforms
 
 
-def collect_required_paths(
+async def collect_required_paths(
     derived_paths: set[DerivedPath],
     store_path: Path,
 ) -> set[StorePath]:
@@ -527,7 +529,7 @@ def collect_required_paths(
     while queue:
         drv_path = queue.pop()
         try:
-            parsed = read_drv_file(store_path, drv_path)
+            parsed = await read_drv_file(store_path, drv_path)
         except FileNotFoundError:
             continue
         paths.update(parsed.input_srcs)
@@ -547,7 +549,7 @@ def collect_required_paths(
 
             # Resolve output names to store paths
             try:
-                dyn_parsed = read_drv_file(store_path, dyn_drv_path)
+                dyn_parsed = await read_drv_file(store_path, dyn_drv_path)
             except FileNotFoundError:
                 continue
             all_outputs = dyn_parsed.output_paths()
@@ -564,7 +566,7 @@ def collect_required_paths(
     return paths
 
 
-def collect_output_paths(
+async def collect_output_paths(
     derived_paths: set[DerivedPath],
     store_path: Path,
 ) -> list[StorePath]:
@@ -585,7 +587,7 @@ def collect_output_paths(
     output_paths: list[StorePath] = []
     for drv_path, wanted_outputs in drv_map.items():
         try:
-            parsed = read_drv_file(store_path, drv_path)
+            parsed = await read_drv_file(store_path, drv_path)
         except FileNotFoundError:
             continue
         all_outputs = parsed.output_paths()
@@ -599,7 +601,7 @@ def collect_output_paths(
     return output_paths
 
 
-def to_basic_derivation(
+async def to_basic_derivation(
     parsed: ParsedDerivation,
     store_path: Path,
     output_cache: dict[StorePath, dict[str, StorePath]] | None = None,
@@ -643,7 +645,7 @@ def to_basic_derivation(
 
         # Fall back to reading the .drv file
         try:
-            input_parsed = read_drv_file(store_path, drv_path)
+            input_parsed = await read_drv_file(store_path, drv_path)
         except FileNotFoundError:
             # Can't resolve — add the drv itself as a dependency
             input_srcs.add(StorePath(drv_path))
@@ -670,7 +672,7 @@ def parse_drv(content: str) -> ParsedDerivation:
     return _Parser(content).parse_derivation()
 
 
-def read_drv_file(
+async def read_drv_file(
     store_path: Path,
     drv_store_path: StorePath | str,
 ) -> ParsedDerivation:
@@ -686,5 +688,5 @@ def read_drv_file(
     # drv_store_path is like "/nix/store/xxx.drv"
     # On disk it's at "{store_path}/nix/store/xxx.drv"
     fs_path = store_path / str(drv_store_path).lstrip("/")
-    with fs_path.open() as f:
-        return parse_drv(f.read())
+    content = await anyio.Path(fs_path).read_text()
+    return parse_drv(content)

@@ -29,6 +29,8 @@ log = structlog.get_logger(__name__)
 class BuildDecomposer:
     """Decomposes high-level build requests into individual derivation builds."""
 
+    read_drv_fn: DerivationReader
+
     def __init__(
         self,
         scheduler: Scheduler,
@@ -112,7 +114,7 @@ class BuildDecomposer:
             visited.add(sp)
             dp = drv_to_derived.get(str(sp), DerivedPath(sp))
             try:
-                parsed = dp.to_derivation(
+                parsed = await dp.to_derivation(
                     self.local_store.store_path,
                     reader_fn=self.read_drv_fn,
                 )
@@ -134,7 +136,7 @@ class BuildDecomposer:
                 if dyn_drv_path not in to_build:
                     # Check if this dynamic dep's outputs are already available
                     try:
-                        dyn_parsed = self.read_drv_fn(
+                        dyn_parsed = await self.read_drv_fn(
                             self.local_store.store_path,
                             dyn_drv_path,
                         )
@@ -167,7 +169,7 @@ class BuildDecomposer:
             if parsed is None:
                 continue
 
-            basic = to_basic_derivation(
+            basic = await to_basic_derivation(
                 parsed,
                 self.local_store.store_path,
                 output_cache=output_cache,
@@ -197,7 +199,7 @@ class BuildDecomposer:
                 drv_request.derivation.is_dynamic = parsed_cache[drv_request.drv_path].is_dynamic
             else:
                 try:
-                    parsed = self.read_drv_fn(
+                    parsed = await self.read_drv_fn(
                         self.local_store.store_path,
                         drv_request.drv_path,
                     )

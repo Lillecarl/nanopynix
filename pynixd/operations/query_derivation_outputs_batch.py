@@ -122,7 +122,7 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         outputs: dict[StorePath, dict[str, StorePath]] = {}
         for drv_path in self.drv_paths:
             try:
-                parsed = read_drv_file(store.store_path, drv_path)
+                parsed = await read_drv_file(store.store_path, drv_path)
                 outputs[drv_path] = parsed.output_paths()
             except FileNotFoundError:
                 pass

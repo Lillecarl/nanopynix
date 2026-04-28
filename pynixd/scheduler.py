@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -48,7 +48,7 @@ from .store.transfer import stream_paths_store_to_store
 
 log = structlog.get_logger(__name__)
 
-DerivationReader = Callable[[Path, "StorePath"], "ParsedDerivation"]
+DerivationReader = Callable[[Path, "StorePath"], Awaitable["ParsedDerivation"]]
 
 
 class Scheduler:

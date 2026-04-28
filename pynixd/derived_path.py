@@ -177,14 +177,14 @@ def dp_output_names(dp: DerivedPathUnion) -> set[str]:
     return set()
 
 
-def dp_to_derivation(dp: DerivedPathUnion, store_path: Path) -> ParsedDerivation:
-    return read_drv_file(store_path, dp_drv_path(dp))
+async def dp_to_derivation(dp: DerivedPathUnion, store_path: Path) -> ParsedDerivation:
+    return await read_drv_file(store_path, dp_drv_path(dp))
 
 
-def dp_to_outputs(dp: DerivedPathUnion, store_path: Path) -> set[StorePath]:
+async def dp_to_outputs(dp: DerivedPathUnion, store_path: Path) -> set[StorePath]:
     names = dp_output_names(dp)
     try:
-        parsed = dp_to_derivation(dp, store_path)
+        parsed = await dp_to_derivation(dp, store_path)
     except (FileNotFoundError, OSError):
         return set()
     all_outputs = parsed.output_paths()
@@ -234,17 +234,17 @@ class DerivedPath(StorePath):
     def output_names(self) -> set[str]:
         return dp_output_names(self._derived)
 
-    def to_derivation(
+    async def to_derivation(
         self,
         store_path: Path,
         reader_fn: Any = None,
     ) -> ParsedDerivation:
         if reader_fn is not None:
-            return reader_fn(store_path, self.drv_path)
-        return dp_to_derivation(self._derived, store_path)
+            return await reader_fn(store_path, self.drv_path)
+        return await dp_to_derivation(self._derived, store_path)
 
-    def to_outputs(self, store_path: Path) -> set[StorePath]:
-        return dp_to_outputs(self._derived, store_path)
+    async def to_outputs(self, store_path: Path) -> set[StorePath]:
+        return await dp_to_outputs(self._derived, store_path)
 
     @property
     def is_nested(self) -> bool:

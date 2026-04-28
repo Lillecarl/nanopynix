@@ -150,7 +150,7 @@ async def main() -> None:
     print("=" * 70)
     print("Step 3: Inspect producingDrv .drv structure")
     print("=" * 70)
-    parsed_producing = read_drv_file(root_store.store_path, producing_drv_path)
+    parsed_producing = await read_drv_file(root_store.store_path, producing_drv_path)
     print(f"is_dynamic: {parsed_producing.is_dynamic}")
     print(
         f"outputs: {[(o.name, o.path, o.hash_algo, o.hash_value) for o in parsed_producing.outputs]}",
@@ -199,7 +199,7 @@ async def main() -> None:
 
             # Parse with pynixd
             try:
-                wrapper_parsed = read_drv_file(root_store.store_path, wrapper_drv_path)
+                wrapper_parsed = await read_drv_file(root_store.store_path, wrapper_drv_path)
                 print(f"wrapper is_dynamic: {wrapper_parsed.is_dynamic}")
                 print(
                     f"wrapper outputs: {[(o.name, o.path, o.hash_algo, o.hash_value) for o in wrapper_parsed.outputs]}",
@@ -323,7 +323,7 @@ async def main() -> None:
     # For a CA text-hashed drv, we compute it from the .drv content.
 
     try:
-        basic = to_basic_derivation(parsed_producing, root_store.store_path)
+        basic = await to_basic_derivation(parsed_producing, root_store.store_path)
         aterm = _unparse_basic_derivation(basic, mask_outputs=True)
         h = hashlib.sha256(aterm.encode()).hexdigest()
         drv_output_id = DrvOutput(f"sha256:{h}!out")
