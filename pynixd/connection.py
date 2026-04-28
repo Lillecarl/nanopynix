@@ -81,31 +81,40 @@ class ClientConn:
     async def drain_loop(self) -> None:
         """Consume stderr messages from the queue and write to client."""
 
-        while True:
-            msg = await self.queue.get()
-            try:
-                # Use a buffer to batch multiple messages into a single write() call.
-                # This avoids O(N^2) performance issues in asyncio transport's
-                # get_write_buffer_size() when the buffer contains many small pieces.
-                buf = ByteCollector()
-                if msg is not None:
-                    msg.to_writer(buf)
+        try:
+            while True:
+                msg = await self.queue.get()
+                try:
+                    # Use a buffer to batch multiple messages into a single write() call.
+                    # This avoids O(N^2) performance issues in asyncio transport's
+                    # get_write_buffer_size() when the buffer contains many small pieces.
+                    buf = ByteCollector()
+                    if msg is not None:
+                        msg.to_writer(buf)
 
-                # Batch: grab any additional messages already queued
-                while not self.queue.empty():
-                    extra = self.queue.get_nowait()
-                    if extra is not None:
-                        extra.to_writer(buf)
+                    # Batch: grab any additional messages already queued
+                    while not self.queue.empty():
+                        extra = self.queue.get_nowait()
+                        if extra is not None:
+                            extra.to_writer(buf)
+                        self.queue.task_done()
+
+                    data = buf.getvalue()
+                    if data:
+                        self.w.write(data)
+
+                    # Flush buffered writes to the socket
+                    await self.w.drain()
+                finally:
                     self.queue.task_done()
-
-                data = buf.getvalue()
-                if data:
-                    self.w.write(data)
-
-                # Flush buffered writes to the socket
-                await self.w.drain()
-            finally:
-                self.queue.task_done()
+        except (OSError, EOFError):
+            # Broken pipe or connection reset is expected when client disconnects
+            # during log forwarding.
+            log.debug("drain_loop_connection_lost")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("drain_loop_crashed")
 
 
 # ── Connection ──────────────────────────────────────────────────────

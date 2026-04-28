@@ -187,7 +187,7 @@ class MockStore(Store):
             return cast("Resp", QueryValidPathsResponse(paths=request.paths))
 
         if req_type == QueryAllValidPathsResponse:
-            return cast("Resp", QueryAllValidPathsResponse(paths=self.tracker.known_paths))
+            return cast("Resp", QueryAllValidPathsResponse(paths=set(self.tracker.known_paths)))
         if isinstance(request, QueryClosureWithInfoRequest):
             # Just return some dummy info for everything
             from pynixd.types.path_info import ValidPathInfo

@@ -66,7 +66,7 @@ async def test_scheduler_load_balancing():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={"remote1": remote1},
+        _stores={"remote1": remote1},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -134,7 +134,7 @@ async def test_scheduler_skips_saturated_store():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={"remote1": remote1},
+        _stores={"remote1": remote1},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -210,7 +210,7 @@ async def test_scheduler_proactive_transfer():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={"busy": remote_busy, "idle": remote_idle},
+        _stores={"busy": remote_busy, "idle": remote_idle},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -274,7 +274,7 @@ async def test_scheduler_decomposition_and_ordering():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={"remote1": remote1},
+        _stores={"remote1": remote1},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -413,7 +413,7 @@ async def test_scheduler_cpu_utilization():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={"hot": remote_hot, "cold": remote_cold},
+        _stores={"hot": remote_hot, "cold": remote_cold},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -480,7 +480,7 @@ async def test_scheduler_feature_matching():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={"plain": remote_plain, "full": remote_full},
+        _stores={"plain": remote_plain, "full": remote_full},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -526,7 +526,7 @@ async def test_scheduler_fails_build_for_unknown_platform():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={},
+        _stores={},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -561,7 +561,7 @@ async def test_scheduler_queues_build_for_dynamic_platform():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={},
+        _stores={},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -596,7 +596,7 @@ async def test_scheduler_queues_build_for_dynamic_platform_with_features():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={},
+        _stores={},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -629,7 +629,7 @@ async def test_scheduler_fails_build_for_missing_dynamic_feature():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={},
+        _stores={},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -665,17 +665,18 @@ async def test_add_store_dynamic_registers_feature_matrix():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={},
+        _stores={},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
-    scheduler.add_store("remote", remote, dynamic=True)
+    ctx._stores["remote"] = remote
+    scheduler.on_store_added(remote, dynamic=True)
 
     assert "aarch64-darwin" in scheduler.dynamic_feature_matrix
     assert "kvm" in scheduler.dynamic_feature_matrix["aarch64-darwin"]
 
     # Now remove the store — dynamic_feature_matrix should persist
-    scheduler.stores.pop("remote", None)
+    ctx._stores.pop("remote", None)
     assert "aarch64-darwin" in scheduler.dynamic_feature_matrix
 
 
@@ -691,14 +692,15 @@ async def test_dynamic_feature_matrix_survives_store_removal():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        stores={},
+        _stores={},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
-    scheduler.add_store("remote", remote, dynamic=True)
+    ctx._stores["remote"] = remote
+    scheduler.on_store_added(remote, dynamic=True)
 
     # Remove the store
-    scheduler.stores.pop("remote", None)
+    ctx._stores.pop("remote", None)
 
     # Enqueue a build for the removed store's platform
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")

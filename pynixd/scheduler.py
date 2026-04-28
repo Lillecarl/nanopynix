@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,17 +61,20 @@ class Scheduler:
     ) -> None:
         self.ctx = ctx
         self.queue = BuildQueue()
-        self.stores = ctx.stores
         self.local_store = ctx.local_store
         self._dynamic_feature_matrix: dict[str, set[str]] = {}
 
         self.ranker = TelemetryStoreRanker(ctx.settings)
-        self.allocator = BuildAllocator(self.stores, self.local_store, self.ranker)
+        self.allocator = BuildAllocator(self.ctx.stores, self.local_store, self.ranker)
         self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
         self.dynamic_resolver = DynamicDerivationResolver(self, read_drv_fn=read_drv_fn)
         self.trigger_event = asyncio.Event()
         self.running = False
         self.last_activity_at: float = asyncio.get_event_loop().time()
+
+    @property
+    def stores(self) -> Mapping[str, Store]:
+        return self.ctx.stores
 
     @property
     def dynamic_feature_matrix(self) -> dict[str, set[str]]:
@@ -104,18 +107,14 @@ class Scheduler:
         """Signal that a scheduling pass is needed."""
         self.trigger_event.set()
 
-    def add_store(self, store_id: str, store: Store, dynamic: bool = False) -> None:
-        """Dynamically add a new store to the scheduler.
+    def on_store_added(self, store: Store, dynamic: bool = False) -> None:
+        """Hook called by Server when a new store is added.
 
         If dynamic=True, the store's feature_matrix is also registered in
         the dynamic_feature_matrix so that builds for this platform continue
         to queue even after the store is removed.
         """
-        log.info("adding_store_dynamically", store_id=store_id, dynamic=dynamic)
-        if not isinstance(self.stores, dict):
-            self.stores = dict(self.stores)
-        self.stores[store_id] = store
-        self.allocator.stores = self.stores
+        log.info("store_added_to_scheduler", store_id=store.store_id, dynamic=dynamic)
         if dynamic and store.feature_matrix:
             self.add_dynamic_features(store.feature_matrix)
         self.trigger()
@@ -129,14 +128,14 @@ class Scheduler:
             return True
         return features.issubset(sys_features)
 
-    async def remove_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
-        """Gracefully drain and remove a store."""
-        store = self.stores.get(store_id)
+    async def drain_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
+        """Gracefully drain and stop using a store for new builds."""
+        store = self.ctx.stores.get(store_id)
         if not store:
             return
 
         log.info(
-            "removing_store_dynamically",
+            "draining_store_in_scheduler",
             store_id=store_id,
             drain_timeout=drain_timeout,
         )
@@ -165,19 +164,10 @@ class Scheduler:
                         store_id=store_id,
                     )
                     build.build_task.cancel()
-                if build.transfer_task and not build.transfer_task.done():
-                    build.transfer_task.cancel()
 
                 # Requeue: reset state so it can be picked up by another store
-                build.reset_for_retry(store_id, build.transfer_task)
+                build.reset_for_retry(store_id)
 
-        # 3. Final Removal
-        if not isinstance(self.stores, dict):
-            self.stores = dict(self.stores)
-        self.stores.pop(store_id, None)
-        self.allocator.stores = self.stores
-        await store.close()
-        log.info("store_removed_dynamically", store_id=store_id)
         self.trigger()
 
     async def build_derivation(
@@ -579,15 +569,12 @@ class Scheduler:
                 store_id=store.store_id,
                 reason=str(e),
             )
-            await build.stop_transfer()
-            build.reset_for_busy(build.transfer_task)
+            build.reset_for_busy()
             self.trigger()
         except (BackendError, InfrastructureError) as e:
             log.warning("build_failed_retryable", build_id=build.id, error=str(e))
             # Don't fail the build yet, reset it for retry on another store
-            # but we must stop any background transfer task first.
-            await build.stop_transfer()
-            build.reset_for_retry(store.store_id, build.transfer_task)
+            build.reset_for_retry(store.store_id)
             self.trigger()
         except Exception:
             log.exception("build_crashed", build_id=build.id)

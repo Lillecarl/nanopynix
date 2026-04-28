@@ -25,7 +25,8 @@ from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
+    from collections.abc import Set as AbstractSet
     from contextlib import AbstractAsyncContextManager
 
     from ..connection import ClientConn, Connection
@@ -98,13 +99,23 @@ class Store(ABC):
         self.consecutive_failures: int = 0
         self.cooldown_until: float = 0.0
         self.db: LocalStoreDB | None = None
-        self.features: set[str] = set()
+        self._features: set[str] = set()
         self.probe_state: ProbeState = ProbeState.NOT_PROBED
         self._probe_event: asyncio.Event = asyncio.Event()
-        self.signing_keys: dict[str, SecretKey] = {}
+        self._signing_keys: dict[str, SecretKey] = {}
         self._holder_task: asyncio.Task | None = None
         self.draining: bool = False
         self._started: bool = False
+
+    @property
+    def features(self) -> AbstractSet[str]:
+        """Read-only view of features supported by this store."""
+        return self._features
+
+    @property
+    def signing_keys(self) -> Mapping[str, SecretKey]:
+        """Read-only mapping of signing keys configured on this store."""
+        return self._signing_keys
 
     async def __aenter__(self) -> Self:
         await self.start()
@@ -147,7 +158,7 @@ class Store(ABC):
         """Update store metadata from a newly created connection."""
         self.version = conn.version
         self.nix_version = conn.nix_version
-        self.features = conn.features
+        self._features = conn.features
 
         # Check for announced feature_matrix to skip probing
         if self._feature_matrix is None and any(f.startswith("feature_matrix:") for f in conn.features):
@@ -190,11 +201,11 @@ class Store(ABC):
     @property
     def signing_key_names(self) -> list[str]:
         """List of signing key names configured on this store."""
-        return list(self.signing_keys.keys())
+        return list(self._signing_keys.keys())
 
     def get_signing_key(self, name: str) -> SecretKey:
         """Get a signing key by name."""
-        key = self.signing_keys.get(name)
+        key = self._signing_keys.get(name)
         if key is None:
             raise KeyError(f"Signing key '{name}' not found")
         return key

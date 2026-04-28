@@ -21,11 +21,9 @@ from .sftp_server import PSIMonitorSFTPServer
 from .wire import SSHNixReader, SSHNixWriter
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from pathlib import Path
 
-    from .scheduler import Scheduler
-    from .store import Store
+    from .context import PynixdContext
 
 log = structlog.get_logger(__name__)
 
@@ -53,9 +51,7 @@ class _NixSSHServer(asyncssh.SSHServer):
 
 
 async def start_ssh_server(
-    stores: Mapping[str, Store],  # noqa: ARG001
-    local_store: Store,
-    scheduler: Scheduler | None,
+    ctx: PynixdContext,
     host: str = "127.0.0.1",
     port: int = 0,
     host_key_path: Path | None = None,
@@ -65,12 +61,12 @@ async def start_ssh_server(
     """Start the SSH server.
 
     Args:
-        stores: Store instances (shared across clients)
-        local_store: Shared local Store for client connections
-        scheduler: Shared scheduler (None in local mode)
+        ctx: Shared application context
         host: Listen address
         port: Listen port (0 for random available port)
         host_key_path: Path to SSH host key
+        admin_users: Set of usernames with admin privileges
+        schedule_mode: Scheduling mode for this listener
 
     Returns:
         The asyncssh acceptor instance.
@@ -107,8 +103,7 @@ async def start_ssh_server(
             proxy = DaemonProxy(
                 SSHNixReader(process.stdin, identifier="client"),
                 SSHNixWriter(process.stdout, identifier="client"),
-                local_store=local_store,
-                scheduler=scheduler,
+                ctx=ctx,
                 role=role,
                 username=username,
                 schedule_mode=schedule_mode or ScheduleMode.auto,

@@ -18,29 +18,24 @@ from .proxy import DaemonProxy
 from .wire import UnixNixReader, UnixNixWriter
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from pathlib import Path
 
-    from .scheduler import Scheduler
-    from .store import Store
+    from .context import PynixdContext
 
 log = structlog.get_logger(__name__)
 
 
 async def start_unix_server(
-    stores: Mapping[str, Store],  # noqa: ARG001
-    local_store: Store,
-    scheduler: Scheduler | None,
+    ctx: PynixdContext,
     socket_path: Path,
     schedule_mode: ScheduleMode | None = None,
 ) -> asyncio.Server:
     """Start a Unix socket server.
 
     Args:
-        stores: Store instances (shared across clients)
-        local_store: Shared local Store for client connections
-        scheduler: Shared scheduler (None in local mode)
+        ctx: Shared application context
         socket_path: Path for the Unix domain socket
+        schedule_mode: Scheduling mode for this listener
 
     Returns:
         The asyncio.Server instance.
@@ -56,8 +51,7 @@ async def start_unix_server(
             proxy = DaemonProxy(
                 UnixNixReader(reader, identifier="client"),
                 UnixNixWriter(writer, identifier="client"),
-                local_store=local_store,
-                scheduler=scheduler,
+                ctx=ctx,
                 role=Role.ADMIN,
                 username="local",
                 schedule_mode=schedule_mode or ScheduleMode.auto,

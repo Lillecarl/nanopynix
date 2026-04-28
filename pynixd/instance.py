@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import asyncssh
     from aiohttp import web
 
@@ -60,7 +62,7 @@ class Server:
         self.ctx = PynixdContext(
             settings=settings,
             local_store=local_store,
-            stores=stores,
+            _stores=stores,
             path_tracker=path_tracker,
         )
 
@@ -81,7 +83,7 @@ class Server:
         return self.ctx.local_store
 
     @property
-    def stores(self) -> dict[str, Store]:
+    def stores(self) -> Mapping[str, Store]:
         return self.ctx.stores
 
     @property
@@ -167,19 +169,20 @@ class Server:
 
         await store.start()
 
-        self.stores[store.store_id] = store
+        # Server is the primary owner and mutator of the stores collection
+        self.ctx._stores[store.store_id] = store
 
         if self.scheduler:
-            self.scheduler.add_store(store.store_id, store, dynamic=dynamic)
+            self.scheduler.on_store_added(store, dynamic=dynamic)
 
     async def remove_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
         """Remove a remote store, cleaning DB records and closing connections."""
         if self.scheduler:
-            await self.scheduler.remove_store(store_id, drain_timeout=drain_timeout)
+            # First, drain the store in the scheduler to cancel/requeue jobs
+            await self.scheduler.drain_store(store_id, drain_timeout=drain_timeout)
 
-        # Scheduler.remove_store already popped it from allocator/stores,
-        # but we also pop from self.stores for consistency.
-        store = self.stores.pop(store_id, None)
+        # Then remove from the context
+        store = self.ctx._stores.pop(store_id, None)
         if store is None:
             log.warning("remove_store_not_found", store_id=store_id)
             return
@@ -188,7 +191,8 @@ class Server:
         if local_store.db is not None:
             await local_store.db.remove_store_paths(store_id)
 
-        # Scheduler.remove_store already closed it
+        # Finally, close the store connection
+        await store.close()
         log.info("removed_store", store_id=store_id)
 
     @property
@@ -254,7 +258,6 @@ class Server:
             raise RuntimeError("Server already started")
         self._started = True
         local_store = self.ctx.local_store
-        stores = self.ctx.stores
 
         await local_store.start()
 
@@ -285,7 +288,7 @@ class Server:
         # Gather stores to add and then clear the context mapping to ensure
         # add_store (which populates it) starts from a clean state for these IDs.
         stores_to_add = list(self.ctx.stores.values())
-        self.ctx.stores.clear()
+        self.ctx._stores.clear()
 
         if stores_to_add:
             await asyncio.gather(*[self.add_store(s) for s in stores_to_add])
@@ -302,9 +305,7 @@ class Server:
         s = self.settings
         if s.ssh_port is not None:
             self.ssh_server = await start_ssh_server(
-                stores=stores,
-                local_store=local_store,
-                scheduler=self.scheduler,
+                ctx=self.ctx,
                 host=s.ssh_host,
                 port=s.ssh_port,
                 host_key_path=s.ssh_host_key,
@@ -314,9 +315,7 @@ class Server:
 
         if s.unix_path:
             self.unix_server = await start_unix_server(
-                stores=stores,
-                local_store=local_store,
-                scheduler=self.scheduler,
+                ctx=self.ctx,
                 socket_path=s.unix_path,
                 schedule_mode=s.schedule_mode,
             )
@@ -409,4 +408,4 @@ class Server:
         await self.local_store.close()
         for store in self.stores.values():
             await store.close()
-        self.stores.clear()
+        self.ctx._stores.clear()

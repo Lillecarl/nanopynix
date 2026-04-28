@@ -67,21 +67,31 @@ class ConnectionPool:
         while self.idle_conns:
             await asyncio.sleep(self.idle_ttl / 2)
             now = time.monotonic()
-            still_idle: list[tuple[Connection, float]] = []
-            for conn, returned_at in self.idle_conns:
+
+            expired: list[tuple[Connection, float]] = []
+            for item in self.idle_conns:
+                conn, returned_at = item
                 if now - returned_at >= self.idle_ttl:
-                    log.debug(
-                        "pool_closing_expired_idle",
-                        store_id=self.store_id,
-                        conn_id=conn.id,
-                    )
-                    if conn in self.all_conns:
-                        self.all_conns.remove(conn)
-                    with suppress(Exception):
-                        await conn.close()
-                else:
-                    still_idle.append((conn, returned_at))
-            self.idle_conns = still_idle
+                    expired.append(item)
+
+            # Remove from tracking lists synchronously to prevent race conditions
+            # with connections returned during the 'await conn.close()' yields below.
+            for item in expired:
+                if item in self.idle_conns:
+                    self.idle_conns.remove(item)
+                conn = item[0]
+                if conn in self.all_conns:
+                    self.all_conns.remove(conn)
+
+            # Perform the async closures safely
+            for conn, _ in expired:
+                log.debug(
+                    "pool_closing_expired_idle",
+                    store_id=self.store_id,
+                    conn_id=conn.id,
+                )
+                with suppress(Exception):
+                    await conn.close()
 
     async def get_or_create_conn(self) -> Connection:
         """Pop an idle connection or create a new one."""

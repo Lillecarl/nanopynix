@@ -103,7 +103,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
 
                     try:
                         verified = await store.execute(
-                            QueryValidPathsRequest(paths=store.tracker.known_paths),
+                            QueryValidPathsRequest(paths=set(store.tracker.known_paths)),
                             client=client,
                             suppress_last=suppress_last,
                         )
@@ -122,7 +122,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                         # Or should we clear? The previous behavior was to clear.
                         # But for persistence test, we want to keep.
                         return QueryAllValidPathsResponse(
-                            paths=store.tracker.known_paths,
+                            paths=set(store.tracker.known_paths),
                         )
                 raise
             else:
@@ -130,4 +130,4 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
         except Exception:
             self.logger.warning("sync_paths_failed", store_id=store.store_id)
             # Do NOT clear known_paths here, it might have been loaded from DB
-            return QueryAllValidPathsResponse(paths=store.tracker.known_paths)
+            return QueryAllValidPathsResponse(paths=set(store.tracker.known_paths))

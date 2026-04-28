@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from collections.abc import Set as AbstractSet
 
     from .local_store_db import LocalStoreDB
     from .store_path import StorePath
@@ -26,20 +27,25 @@ class PathTrackerInstance:
     ) -> None:
         self.store_id = store_id
         self.parent = parent
-        self.known_paths: set[StorePath] = initial_paths or set()
+        self._known_paths: set[StorePath] = initial_paths or set()
         self.is_local = is_local
 
+    @property
+    def known_paths(self) -> AbstractSet[StorePath]:
+        """Read-only view of paths tracked by this instance."""
+        return self._known_paths
+
     def has_path(self, path: StorePath) -> bool:
-        return path in self.known_paths
+        return path in self._known_paths
 
     def has_all_paths(self, paths: set[StorePath]) -> bool:
-        return paths.issubset(self.known_paths)
+        return paths.issubset(self._known_paths)
 
     def count_common_paths(self, paths: set[StorePath]) -> int:
-        return len(paths & self.known_paths)
+        return len(paths & self._known_paths)
 
     def add_known_path(self, path: StorePath, *, update_regtime: bool = True) -> None:
-        self.known_paths.add(path)
+        self._known_paths.add(path)
         if self.parent is not None:
             self.parent.notify_path_added(
                 self.store_id,
@@ -57,11 +63,34 @@ class PathTrackerInstance:
         path_set = set(paths)
         if not path_set:
             return
-        self.known_paths.update(path_set)
+        self._known_paths.update(path_set)
         if self.parent is not None:
             self.parent.notify_paths_added(
                 self.store_id,
                 path_set,
+                update_regtime=update_regtime,
+                is_local=self.is_local,
+            )
+
+    def remove_known_paths(
+        self,
+        paths: Iterable[StorePath],
+        *,
+        update_regtime: bool = False,
+    ) -> None:
+        """Remove paths from the known set and notify parent."""
+        to_remove = set(paths)
+        removed = self._known_paths & to_remove
+        if not removed:
+            return
+
+        self._known_paths -= removed
+
+        if self.parent is not None:
+            self.parent.notify_paths_replaced(
+                self.store_id,
+                added=set(),
+                removed=removed,
                 update_regtime=update_regtime,
                 is_local=self.is_local,
             )
@@ -74,10 +103,10 @@ class PathTrackerInstance:
     ) -> None:
         """Replace the current known paths with a new set."""
         new_paths = set(paths)
-        removed = self.known_paths - new_paths
-        added = new_paths - self.known_paths
+        removed = self._known_paths - new_paths
+        added = new_paths - self._known_paths
 
-        self.known_paths = new_paths
+        self._known_paths = new_paths
 
         if self.parent is not None:
             self.parent.notify_paths_replaced(

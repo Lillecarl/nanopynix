@@ -42,7 +42,7 @@ async def test_scheduler_flood_queueing():
     ctx = PynixdContext(
         settings=settings,
         local_store=local_store,
-        stores={"remote1": remote1, "remote2": remote2},
+        _stores={"remote1": remote1, "remote2": remote2},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -153,7 +153,7 @@ async def test_scheduler_locality_priority():
     ctx = PynixdContext(
         settings=settings,
         local_store=local_store,
-        stores={"remote_a": remote_a, "remote_b": remote_b},
+        _stores={"remote_a": remote_a, "remote_b": remote_b},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)

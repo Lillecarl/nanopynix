@@ -474,9 +474,15 @@ class LocalStoreDB:
         try:
             while True:
                 await asyncio.sleep(self.regtime_flush_interval)
-                await self.flush_regtime()
+                try:
+                    await self.flush_regtime()
+                except Exception:
+                    log.exception("db_flush_loop_iteration_failed")
         except asyncio.CancelledError:
-            await self.flush_regtime()
+            with suppress(Exception):
+                await self.flush_regtime()
+        except Exception:
+            log.exception("db_flush_loop_crashed")
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 

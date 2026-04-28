@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .config import PynixdSettings
     from .local_store_db import LocalStoreDB
     from .path_tracker import PathTracker
@@ -21,7 +23,12 @@ class PynixdContext:
 
     settings: PynixdSettings
     local_store: Store
-    stores: dict[str, Store]
+    _stores: dict[str, Store]
     path_tracker: PathTracker
     db: LocalStoreDB | None = None
     scheduler: Scheduler | None = None
+
+    @property
+    def stores(self) -> Mapping[str, Store]:
+        """Read-only view of connected remote stores."""
+        return self._stores

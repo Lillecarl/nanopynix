@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from .build_queue import BuildQueue
+    from .context import PynixdContext
     from .scheduler import Scheduler
     from .store import Store
     from .wire import NixReader, NixWriter
@@ -52,8 +53,7 @@ class DaemonProxy:
         self,
         client_r: NixReader,
         client_w: NixWriter,
-        local_store: Store,
-        scheduler: Scheduler | None = None,
+        ctx: PynixdContext,
         role: Role = Role.USER,
         username: str = "unknown",
         schedule_mode: ScheduleMode = ScheduleMode.auto,
@@ -61,12 +61,19 @@ class DaemonProxy:
         self.r = client_r
         self.w = client_w
         self.client = ClientConn(w=self.w)
-        self.local_store = local_store
-        self.scheduler = scheduler
+        self.ctx = ctx
         self.version: int = wire.PROTOCOL_VERSION
         self.role: Role = role
         self.username: str = username
         self.schedule_mode: ScheduleMode = schedule_mode
+
+    @property
+    def local_store(self) -> Store:
+        return self.ctx.local_store
+
+    @property
+    def scheduler(self) -> Scheduler | None:
+        return self.ctx.scheduler
 
     @property
     def build_queue(self) -> BuildQueue | None:
@@ -78,7 +85,7 @@ class DaemonProxy:
 
     @property
     def stores(self) -> Mapping[str, Store]:
-        return self.scheduler.stores if self.scheduler else {}
+        return self.ctx.stores
 
     @property
     def use_scheduler_for_builds(self) -> bool:

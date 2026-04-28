@@ -26,6 +26,8 @@ from .operations.base import (
 from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from .connection import ClientConn
     from .derived_path import DerivedPath
     from .store_path import StorePath
@@ -61,9 +63,8 @@ class QueuedBuild:
     finished_at: float | None = field(default=None, repr=False)
     retries: int = 0
     failed_backends: list[str] = field(default_factory=list)
+    store_failures: dict[str, int] = field(default_factory=dict)
     build_task: asyncio.Task | None = field(default=None, repr=False)
-    transfer_task: asyncio.Task | None = field(default=None, repr=False)
-    transfer_cancel: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
     # Build DAG: build IDs this build depends on (must complete before this
     # can be scheduled). Populated during decomposition for CA dependency
@@ -102,10 +103,6 @@ class QueuedBuild:
         return self.build_task is not None and not self.build_task.done()
 
     @property
-    def is_transferring(self) -> bool:
-        return self.transfer_task is not None and not self.transfer_task.done()
-
-    @property
     def is_done(self) -> bool:
         return self.future.done()
 
@@ -113,50 +110,28 @@ class QueuedBuild:
     def is_pending(self) -> bool:
         return not self.is_building and not self.is_done
 
-    async def stop_transfer(self) -> None:
-        """Signal proactive transfer to stop after current path and wait.
-
-        Uses an Event rather than task.cancel() so we finish the in-flight
-        NAR transfer before stopping. Cancelling mid-stream would leave the
-        worker store in an inconsistent state — the store would have a partial
-        path that it thinks is valid but isn't complete.
-        """
-        if self.is_transferring:
-            self.transfer_cancel.set()
-            assert self.transfer_task is not None
-            await self.transfer_task
-
-    def reset_for_retry(
-        self,
-        failed_store_id: str,
-        old_transfer_task: asyncio.Task | None,
-    ) -> None:
+    def reset_for_retry(self, failed_store_id: str) -> None:
         """Reset state for retry on next scheduling pass.
 
         Called after a build or infrastructure failure. The build will
-        be re-scheduled to a different store if available.
-
-        old_transfer_task: the task that stop_transfer() was awaiting.
-        Only clears transfer_task if no new transfer was started in the gap.
+        be re-scheduled to a different store if available, or the same
+        store if it hasn't exceeded the per-backend retry limit.
         """
         self.retries += 1
-        self.failed_backends.append(failed_store_id)
-        self.build_task = None
         self.started_at = None
-        # Don't kill a new transfer that started while stop_transfer() was awaiting
-        if self.transfer_task is old_transfer_task:
-            self.transfer_task = None
-        self.transfer_cancel = asyncio.Event()
+        self.build_task = None
 
-    def reset_for_busy(self, old_transfer_task: asyncio.Task | None) -> None:
+        # Only blacklist store if it has failed multiple times for this build
+        self.store_failures[failed_store_id] = self.store_failures.get(failed_store_id, 0) + 1
+        if self.store_failures[failed_store_id] >= 3 and failed_store_id not in self.failed_backends:
+            self.failed_backends.append(failed_store_id)
+
+    def reset_for_busy(self) -> None:
         """Reset state because store was temporarily busy/stressed.
         Does NOT increment retries or add to failed_backends.
         """
         self.build_task = None
         self.started_at = None
-        if self.transfer_task is old_transfer_task:
-            self.transfer_task = None
-        self.transfer_cancel = asyncio.Event()
 
     @property
     def wait_time(self) -> float | None:
@@ -247,13 +222,28 @@ class BuildQueue:
     """Global queue for build operations with deduplication."""
 
     def __init__(self) -> None:
-        self.queue: list[QueuedBuild] = []
-        self.by_key: dict[BuildKey, QueuedBuild] = {}  # For deduplication
-        self.by_id: dict[int, QueuedBuild] = {}  # For DAG lookups
-        self.requests: dict[int, SchedulerBuildRequest] = {}
+        self._queue: list[QueuedBuild] = []
+        self._by_key: dict[BuildKey, QueuedBuild] = {}  # For deduplication
+        self._by_id: dict[int, QueuedBuild] = {}  # For DAG lookups
+        self._requests: dict[int, SchedulerBuildRequest] = {}
         self.next_id: int = 1
         self.next_request_id: int = 1
         self.lock: asyncio.Lock = asyncio.Lock()
+
+    @property
+    def queue(self) -> Sequence[QueuedBuild]:
+        """Read-only view of the current build queue."""
+        return self._queue
+
+    @property
+    def by_id(self) -> Mapping[int, QueuedBuild]:
+        """Read-only mapping of build_id to QueuedBuild."""
+        return self._by_id
+
+    @property
+    def requests(self) -> Mapping[int, SchedulerBuildRequest]:
+        """Read-only mapping of request_id to SchedulerBuildRequest."""
+        return self._requests
 
     async def create_request(
         self,
@@ -273,7 +263,7 @@ class BuildQueue:
                 future=future,
             )
             self.next_request_id += 1
-            self.requests[req.id] = req
+            self._requests[req.id] = req
             return req.id, req
 
     async def enqueue(
@@ -299,14 +289,14 @@ class BuildQueue:
 
         async with self.lock:
             # Check for duplicate — dedup with queued or in-progress builds
-            if key in self.by_key:
-                existing = self.by_key[key]
+            if key in self._by_key:
+                existing = self._by_key[key]
                 if not existing.is_done:
                     log.debug("build_deduped", id=existing.id)
                     if scheduler_request_id is not None and existing.scheduler_request_id is None:
                         existing.scheduler_request_id = scheduler_request_id
                         if derived_paths_for_request:
-                            sched_req = self.requests.get(scheduler_request_id)
+                            sched_req = self._requests.get(scheduler_request_id)
                             if sched_req is not None:
                                 sched_req.add_build(
                                     existing.id,
@@ -329,12 +319,12 @@ class BuildQueue:
                 scheduler_request_id=scheduler_request_id,
             )
             self.next_id += 1
-            heapq.heappush(self.queue, build)
-            self.by_key[key] = build
-            self.by_id[build.id] = build
+            heapq.heappush(self._queue, build)
+            self._by_key[key] = build
+            self._by_id[build.id] = build
 
             if scheduler_request_id is not None and derived_paths_for_request:
-                sched_req = self.requests.get(scheduler_request_id)
+                sched_req = self._requests.get(scheduler_request_id)
                 if sched_req is not None:
                     sched_req.add_build(build.id, derived_paths_for_request)
 
@@ -352,7 +342,7 @@ class BuildQueue:
         """Get all non-done builds sorted by ID."""
         async with self.lock:
             return sorted(
-                [b for b in self.queue if not b.is_done],
+                [b for b in self._queue if not b.is_done],
                 key=lambda b: b.id,
             )
 
@@ -362,7 +352,7 @@ class BuildQueue:
         Called after decomposition to link inter-drv dependencies.
         """
         async with self.lock:
-            build = self.by_id.get(build_id)
+            build = self._by_id.get(build_id)
             if build is not None:
                 build.depends_on = depends_on
 
@@ -376,10 +366,11 @@ class BuildQueue:
         Returns the client connection for the caller to use.
         """
         async with self.lock:
-            for b in self.queue:
+            for b in self._queue:
                 if b.id == build_id:
                     b.finished_at = time.monotonic()
-                    b.future.set_result(response)
+                    if not b.future.done():
+                        b.future.set_result(response)
                     log.info("build_completed", build_id=build_id)
 
                     metrics.QUEUE_SIZE.labels(status="building").dec()
@@ -398,7 +389,7 @@ class BuildQueue:
         Returns the client connection for the caller to use.
         """
         async with self.lock:
-            for b in self.queue:
+            for b in self._queue:
                 if b.id == build_id:
                     b.finished_at = time.monotonic()
                     response = BuildDerivationResponse(
@@ -407,7 +398,8 @@ class BuildQueue:
                             error_msg=error_msg,
                         ),
                     )
-                    b.future.set_result(response)
+                    if not b.future.done():
+                        b.future.set_result(response)
                     log.info("build_failed", build_id=build_id, error_msg=error_msg)
 
                     metrics.QUEUE_SIZE.labels(status="pending").dec()
@@ -420,15 +412,15 @@ class BuildQueue:
     async def cleanup_completed(self) -> int:
         """Remove completed builds from queue, return count removed."""
         async with self.lock:
-            completed = [b for b in self.queue if b.is_done]
+            completed = [b for b in self._queue if b.is_done]
             removed_count = len(completed)
             if removed_count == 0:
                 return 0
 
-            self.queue = [b for b in self.queue if not b.is_done]
+            self._queue = [b for b in self._queue if not b.is_done]
             # Rebuild by_key and by_id
-            self.by_key = {BuildKey.from_request(b.request): b for b in self.queue}
-            self.by_id = {b.id: b for b in self.queue}
+            self._by_key = {BuildKey.from_request(b.request): b for b in self._queue}
+            self._by_id = {b.id: b for b in self._queue}
 
             metrics.QUEUE_SIZE.labels(status="done").dec(removed_count)
             return removed_count
@@ -437,9 +429,9 @@ class BuildQueue:
         """Get count of builds with given status (non-async, thread-safe for reading)."""
         match status:
             case "pending":
-                return len([b for b in self.queue if b.is_pending])
+                return len([b for b in self._queue if b.is_pending])
             case "running":
-                return len([b for b in self.queue if b.is_building])
+                return len([b for b in self._queue if b.is_building])
             case "done":
-                return len([b for b in self.queue if b.is_done])
+                return len([b for b in self._queue if b.is_done])
         return 0

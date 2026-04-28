@@ -129,5 +129,5 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
         suppress_last: bool = False,
     ) -> CollectGarbageResponse:
         resp = await super().execute(store, client, suppress_last)
-        store.tracker.known_paths -= resp.paths_deleted
+        store.tracker.remove_known_paths(resp.paths_deleted)
         return resp
