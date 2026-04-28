@@ -414,7 +414,7 @@ class Scheduler:
                 # If all compatible stores have already failed this build,
                 # it's permanently stuck — fail it now with a clear message.
                 compatible = [s for s in self.stores.values() if s.supports_derivation(build.platform, build_features)]
-                if compatible and all(s.store_id in build.failed_backends for s in compatible):
+                if compatible and all(build.is_blacklisted(s.store_id) for s in compatible):
                     failed_ids = [s.store_id for s in compatible]
                     error_msg = (
                         f"All compatible stores failed for {build.platform}"

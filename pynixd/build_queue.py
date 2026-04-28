@@ -1,10 +1,4 @@
-"""
-Build queue with deduplication and DAG-aware scheduling.
-
-All builds go through this queue - the scheduler decides when and where
-to execute them based on locality, DAG dependencies (via input_srcs),
-and available slots.
-"""
+"""Queued build tracking for the scheduler."""
 
 from __future__ import annotations
 
@@ -17,36 +11,86 @@ from typing import TYPE_CHECKING, Self
 import structlog
 
 from . import metrics
-from .operations.base import (
-    BuildMode,
-    BuildResult,
-    BuildResultStatus,
-    UnkeyedValidPathInfo,
-)
-from .operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
+from .operations.build_derivation import BuildDerivationResponse
+from .types.build import BuildResult, BuildResultStatus
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from .connection import ClientConn
     from .derived_path import DerivedPath
+    from .operations.build_derivation import BuildDerivationRequest
     from .store_path import StorePath
+    from .types.build import BuildMode
+    from .types.path_info import UnkeyedValidPathInfo
 
 log = structlog.get_logger(__name__)
+
+MAX_STORE_RETRIES = 3
+
+
+@dataclass(frozen=True)
+class BuildKey:
+    """Unique key for a build based on drv_path and input sources.
+    Used for deduplication.
+    """
+
+    drv_path: StorePath
+    input_srcs: frozenset[StorePath]
+
+    @classmethod
+    def from_request(cls, request: BuildDerivationRequest) -> Self:
+        return cls(
+            drv_path=request.drv_path,
+            input_srcs=frozenset(request.derivation.input_srcs),
+        )
+
+
+@dataclass
+class SchedulerBuildRequest:
+    """Tracks the full lifecycle of a build_derived_paths() call.
+
+    Individual QueuedBuilds come and go (completing, spawning trampoline
+    derivations, etc.), but this request future stays until all paths
+    the client asked for are satisfied.
+    """
+
+    id: int
+    derived_paths: set[DerivedPath]
+    build_mode: BuildMode
+    client: ClientConn | None
+    future: asyncio.Future[dict[DerivedPath, BuildResult]]
+    active_build_ids: set[int] = field(default_factory=set)
+    all_build_ids: set[int] = field(default_factory=set)
+    build_to_derived: dict[int, set[DerivedPath]] = field(default_factory=dict)
+    results: dict[DerivedPath, BuildResult] = field(default_factory=dict)
+
+    def add_build(self, build_id: int, derived_paths: set[DerivedPath]) -> None:
+        """Track a new build as part of this request."""
+        self.active_build_ids.add(build_id)
+        self.all_build_ids.add(build_id)
+        self.build_to_derived[build_id] = derived_paths
+
+    def build_completed(self, build_id: int) -> bool:
+        """Remove build from active set. Returns True if request is complete."""
+        self.active_build_ids.discard(build_id)
+        return len(self.active_build_ids) == 0
+
+    def resolve_if_done(self) -> bool:
+        """Resolve the future if all active builds are done."""
+        if len(self.active_build_ids) == 0 and not self.future.done():
+            self.future.set_result(dict(self.results))
+            return True
+        return False
 
 
 @dataclass
 class QueuedBuild:
-    """A build job in the queue.
+    """State for a single derivation build task.
 
-    All builds are decomposed into individual BuildDerivationRequests
-    before enqueueing. BuildPaths/BuildPathsWithResults are split in the
-    proxy layer.
-
-    State is derived from task fields rather than an explicit status enum:
-    - is_pending: no build task started, not done
-    - is_building: build_task running
-    - is_transferring: transfer_task running
+    Lifecycle:
+    - is_pending: queued but not assigned
+    - is_building: task spawned and running
     - is_done: future resolved
     """
 
@@ -62,7 +106,6 @@ class QueuedBuild:
     started_at: float | None = field(default=None, repr=False)
     finished_at: float | None = field(default=None, repr=False)
     retries: int = 0
-    failed_backends: list[str] = field(default_factory=list)
     store_failures: dict[str, int] = field(default_factory=dict)
     build_task: asyncio.Task | None = field(default=None, repr=False)
 
@@ -110,6 +153,10 @@ class QueuedBuild:
     def is_pending(self) -> bool:
         return not self.is_building and not self.is_done
 
+    def is_blacklisted(self, store_id: str) -> bool:
+        """Check if a specific store has exceeded the retry limit for this build."""
+        return self.store_failures.get(store_id, 0) >= MAX_STORE_RETRIES
+
     def reset_for_retry(self, failed_store_id: str) -> None:
         """Reset state for retry on next scheduling pass.
 
@@ -121,14 +168,12 @@ class QueuedBuild:
         self.started_at = None
         self.build_task = None
 
-        # Only blacklist store if it has failed multiple times for this build
+        # Increment failure count for this specific store
         self.store_failures[failed_store_id] = self.store_failures.get(failed_store_id, 0) + 1
-        if self.store_failures[failed_store_id] >= 3 and failed_store_id not in self.failed_backends:
-            self.failed_backends.append(failed_store_id)
 
     def reset_for_busy(self) -> None:
         """Reset state because store was temporarily busy/stressed.
-        Does NOT increment retries or add to failed_backends.
+        Does NOT increment retries or change failure counts.
         """
         self.build_task = None
         self.started_at = None
@@ -149,73 +194,17 @@ class QueuedBuild:
 
     @property
     def total_time(self) -> float | None:
-        """Seconds between enqueue and finish."""
+        """Total seconds between enqueue and finish."""
         if self.finished_at is None:
             return None
         return self.finished_at - self.enqueued_at
 
     @property
     def description(self) -> str:
-        """Short description for logging."""
-        return self.request.drv_path
-
-
-@dataclass(frozen=True)
-class BuildKey:
-    """Key for deduplication."""
-
-    drv_path: StorePath
-    input_srcs: frozenset[StorePath] = frozenset()
-
-    @classmethod
-    def from_request(cls, request: BuildDerivationRequest) -> Self:
-        return cls(
-            drv_path=request.drv_path,
-            input_srcs=frozenset(request.derivation.input_srcs),
-        )
-
-
-@dataclass
-class SchedulerBuildRequest:
-    """Tracks the full lifecycle of a build_derived_paths() call.
-
-    Individual QueuedBuilds come and go (completing, spawning trampoline
-    inner builds), but the SchedulerBuildRequest persists until all
-    transitive builds are done.
-
-    The future resolves with a dict mapping each original DerivedPath
-    to its terminal BuildResult (innermost build for dynamic chains).
-    """
-
-    id: int
-    derived_paths: set[DerivedPath]
-    build_mode: BuildMode
-    client: ClientConn | None
-    future: asyncio.Future[dict[DerivedPath, BuildResult]]
-    results: dict[DerivedPath, BuildResult] = field(default_factory=dict)
-    active_build_ids: set[int] = field(default_factory=set)
-    all_build_ids: set[int] = field(default_factory=set)
-    # Maps build_id -> DerivedPath(s) it ultimately satisfies.
-    # For trampoline builds, the inner build inherits the same DerivedPath.
-    build_to_derived: dict[int, set[DerivedPath]] = field(default_factory=dict)
-
-    def add_build(self, build_id: int, derived_paths: set[DerivedPath]) -> None:
-        """Track a new build as part of this request."""
-        self.active_build_ids.add(build_id)
-        self.all_build_ids.add(build_id)
-        self.build_to_derived[build_id] = derived_paths
-
-    def build_completed(self, build_id: int) -> bool:
-        """Remove build from active set. Returns True if request is complete."""
-        self.active_build_ids.discard(build_id)
-        return len(self.active_build_ids) == 0
-
-    def resolve_if_done(self) -> bool:
-        """Resolve the future if all active builds are done."""
-        if len(self.active_build_ids) == 0 and not self.future.done():
-            self.future.set_result(dict(self.results))
-            return True
-        return False
+        """A human-readable description of the build."""
+        pname = self.request.derivation.env.get("pname", "unknown")
+        version = self.request.derivation.env.get("version", "unknown")
+        return f"{pname}-{version}"
 
 
 class BuildQueue:

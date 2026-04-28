@@ -163,7 +163,7 @@ class BuildAllocator:
                 continue
             if not store.supports_derivation(build.platform, build_features):
                 continue
-            if store_id in build.failed_backends:
+            if build.is_blacklisted(store_id):
                 continue
 
             candidates.append(store)

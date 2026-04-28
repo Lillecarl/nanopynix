@@ -437,7 +437,6 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
             required_paths={},
             future=loop.create_future(),
             platform="x86_64-linux",
-            failed_backends=[],
         )
 
         ranked = scheduler.allocator.rank_stores(build, {})
