@@ -17,6 +17,8 @@ import hashlib
 import sys
 from pathlib import Path
 
+import anyio
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pynixd.derivation_resolution import _unparse_basic_derivation
@@ -123,7 +125,7 @@ async def main() -> None:
 
     # Verify it's a .drv file
     full_path = root_path / str(producing_out).lstrip("/")
-    content = full_path.read_text()
+    content = await anyio.Path(full_path).read_text()
     assert content.startswith("Derive("), f"Expected Derive(), got: {content[:80]}"
     print(f"Output IS a derivation file: {content[:80]}...")
 
@@ -194,7 +196,7 @@ async def main() -> None:
         # Show ATerm
         aterm_path = root_path / str(wrapper_drv_path).lstrip("/")
         if aterm_path.exists():
-            aterm = aterm_path.read_text()
+            aterm = await anyio.Path(aterm_path).read_text()
             print(f"wrapper .drv ATerm (first 300 chars): {aterm[:300]}...")
 
             # Parse with pynixd
@@ -265,7 +267,7 @@ async def main() -> None:
         print(f"wrapper output: {wrapper_out}")
         wrapper_content_path = root_path / str(wrapper_out).lstrip("/")
         if wrapper_content_path.exists():
-            content = wrapper_content_path.read_text().strip()
+            content = await anyio.Path(wrapper_content_path).read_text().strip()
             print(f"wrapper content: {content!r}")
             print(f"matches hello content: {content == 'hello'}")
     else:

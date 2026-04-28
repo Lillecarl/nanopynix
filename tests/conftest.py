@@ -506,7 +506,7 @@ async def cleanup_extra_stores(pynixd_server: Server | tuple | None):
         store_path = store.store_path
         await actual_server.remove_store(sid)
         if store_path and str(store_path).startswith(str(SESSION_STORE_PREFIX)):
-            rmtree_robust(store_path)
+            await asyncio.to_thread(rmtree_robust, store_path)
 
 
 async def run_subproc(

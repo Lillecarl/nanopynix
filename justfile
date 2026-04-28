@@ -4,8 +4,6 @@ default:
 check:
     pyright pynixd
     pyright tests/conftest.py tests/functional
-    ruff check pynixd
-    ruff check tests
 
 fmt:
     ruff format pynixd

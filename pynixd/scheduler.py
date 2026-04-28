@@ -387,7 +387,7 @@ class Scheduler:
                 client = await self.queue.fail(build.id, error_msg)
                 if client is not None:
                     for line in error_msg.split("\n"):
-                        client.queue.put_nowait(StderrNext(text=f"pynixd: {line}\n"))
+                        await client.queue.put(StderrNext(text=f"pynixd: {line}\n"))
                 if build.scheduler_request_id is not None:
                     await self.dynamic_resolver.on_build_complete_failed(
                         build,
@@ -424,7 +424,7 @@ class Scheduler:
                     client = await self.queue.fail(build.id, error_msg)
                     if client is not None:
                         for line in error_msg.split("\n"):
-                            client.queue.put_nowait(
+                            await client.queue.put(
                                 StderrNext(text=f"pynixd: {line}\n"),
                             )
                     if build.scheduler_request_id is not None:

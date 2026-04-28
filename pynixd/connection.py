@@ -58,7 +58,7 @@ class ClientConn:
 
     def __init__(self, w: NixWriter) -> None:
         self.w = w
-        self.queue: asyncio.Queue[stderr.StderrMsg | None] = asyncio.Queue()
+        self.queue: asyncio.Queue[stderr.StderrMsg | None] = asyncio.Queue(maxsize=1000)
         self.drain_task: asyncio.Task | None = None
 
     def start(self) -> None:

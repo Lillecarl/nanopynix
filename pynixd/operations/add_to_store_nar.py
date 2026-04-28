@@ -100,7 +100,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
                                 error = BackendError(f"Backend error: {msg.msg}")
                                 return
                             if client:
-                                client.queue.put_nowait(msg)
+                                await client.queue.put(msg)
                     except Exception as e:
                         error = e
 

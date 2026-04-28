@@ -271,7 +271,7 @@ class DaemonProxy:
 
     async def send_error(self, msg: str) -> None:
         """Send a STDERR_ERROR to the client."""
-        self.client.queue.put_nowait(
+        await self.client.queue.put(
             StderrError(
                 error_type="Error",
                 level=0,
@@ -279,6 +279,6 @@ class DaemonProxy:
                 msg=msg,
                 have_pos=0,
                 traces=[],
-            ),
+            )
         )
         await self.client.flush()

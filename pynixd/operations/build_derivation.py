@@ -128,7 +128,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             and response.result.error_msg
             and response.logs.messages
         ):
-            ctx.proxy.client.queue.put_nowait(
+            await ctx.proxy.client.queue.put(
                 StderrNext(text=f"pynixd: {response.result.error_msg}\n"),
             )
         self.logger.debug("responded_op")

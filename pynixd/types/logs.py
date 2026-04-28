@@ -54,7 +54,7 @@ class OperationLogs:
 
         async for msg in read_stream(reader):
             if client:
-                client.queue.put_nowait(msg)
+                await client.queue.put(msg)
             if buffer:
                 self.add(msg)
             if isinstance(msg, StderrError):
