@@ -21,6 +21,7 @@ pkgs.mkShell {
     pkgs.just
     pkgs.pyright
     pkgs.ruff
+    pkgs.pyupgrade
     pkgs.sqlite
   ];
   shellHook = ''

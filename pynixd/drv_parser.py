@@ -41,7 +41,6 @@ import anyio
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .derived_path import DerivedPath
 
 from .store_path import StorePath
 from .types import BasicDerivation, DerivationOutput, OutputKind
@@ -507,113 +506,6 @@ class _Parser:
             is_dynamic=True,
             dynamic_input_drvs=dynamic_input_drvs,
         )
-
-
-async def extract_platforms(derived_paths: set[DerivedPath], store_path: Path) -> set[str]:
-    """Extract the set of platforms from derived paths by peeking at .drv files."""
-    platforms: set[str] = set()
-    for dp in derived_paths:
-        drv_path = dp.drv_path
-        if drv_path.endswith(".drv"):
-            try:
-                parsed = await read_drv_file(store_path, drv_path)
-                platforms.add(parsed.platform)
-            except FileNotFoundError:
-                pass
-    return platforms
-
-
-async def collect_required_paths(
-    derived_paths: set[DerivedPath],
-    store_path: Path,
-) -> set[StorePath]:
-    """Collect the full transitive closure of store paths needed for BuildPaths.
-
-    Recursively walks inputDrvs to collect every .drv file and input source
-    the backend's nix-daemon will need to resolve the full build graph.
-    """
-    paths: set[StorePath] = set()
-    queue: list[StorePath] = []
-
-    for dp in derived_paths:
-        drv_path = StorePath(dp.drv_path)
-        if drv_path not in paths:
-            paths.add(drv_path)
-            queue.append(drv_path)
-
-    while queue:
-        drv_path = queue.pop()
-        try:
-            parsed = await read_drv_file(store_path, drv_path)
-        except FileNotFoundError:
-            continue
-        paths.update(parsed.input_srcs)
-
-        # Traditional input derivations
-        for input_drv in parsed.input_drvs:
-            if input_drv not in paths:
-                paths.add(input_drv)
-                queue.append(input_drv)
-
-        # Dynamic input derivations (DrvWithVersion format)
-
-        for dyn_drv_path, output_deps in parsed.dynamic_input_drvs.items():
-            if dyn_drv_path not in paths:
-                paths.add(dyn_drv_path)
-                queue.append(dyn_drv_path)
-
-            # Resolve output names to store paths
-            try:
-                dyn_parsed = await read_drv_file(store_path, dyn_drv_path)
-            except FileNotFoundError:
-                continue
-            all_outputs = dyn_parsed.output_paths()
-
-            for output_name, nested_names in output_deps.items():
-                # The output path itself
-                if output_name in all_outputs:
-                    paths.add(all_outputs[output_name])
-                # Nested deps are also outputs from the same dynamic drv
-                for nested_name in nested_names:
-                    if nested_name in all_outputs:
-                        paths.add(all_outputs[nested_name])
-
-    return paths
-
-
-async def collect_output_paths(
-    derived_paths: set[DerivedPath],
-    store_path: Path,
-) -> list[StorePath]:
-    """Collect expected output paths from derived paths by reading .drv files.
-
-    Used after a BuildPaths completes to know which outputs to pull.
-    """
-    # Parse derived paths into {drv_path: {output_name, ...}}
-    drv_map: dict[StorePath, set[str]] = {}
-    for dp in derived_paths:
-        drv_path = StorePath(dp.drv_path)
-        outputs = dp.output_names
-        if drv_path in drv_map:
-            drv_map[drv_path].update(outputs)
-        else:
-            drv_map[drv_path] = outputs
-
-    output_paths: list[StorePath] = []
-    for drv_path, wanted_outputs in drv_map.items():
-        try:
-            parsed = await read_drv_file(store_path, drv_path)
-        except FileNotFoundError:
-            continue
-        all_outputs = parsed.output_paths()
-        if "*" in wanted_outputs:
-            output_paths.extend(p for p in all_outputs.values() if p)
-        else:
-            for name in wanted_outputs:
-                p = all_outputs.get(name)
-                if p:
-                    output_paths.append(p)
-    return output_paths
 
 
 async def to_basic_derivation(

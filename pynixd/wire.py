@@ -69,9 +69,6 @@ class NixReader:
     async def read_uint64(self) -> int:
         return _UINT64_STRUCT.unpack(await self.readexactly(8))[0]
 
-    async def read_bool(self) -> bool:
-        return await self.read_uint64() != 0
-
     async def read_optional_uint64(self) -> int | None:
         tag = await self.read_uint64()
         if tag == 0:
@@ -194,9 +191,6 @@ class NixWriter:
         if not vals:
             return
         self.write(struct.pack(f"<{len(vals)}Q", *vals))
-
-    def write_bool(self, val: bool) -> None:
-        self.write_uint64(1 if val else 0)
 
     def write_optional_uint64(self, val: int | None) -> None:
         if val is None:
@@ -357,44 +351,6 @@ async def stream_parse_nar(
     return None
 
 
-async def discard_nar(src: NixReader) -> None:
-    """Discard a NAR archive by reading until it ends.
-
-    The NAR format is self-delimiting. We track "(" / ")" depth to know
-    when the NAR ends. The token after "contents" is binary file data.
-    """
-    depth: int = 0
-    after_contents: bool = False
-
-    while True:
-        length: int = await src.read_uint64()
-        if length > 0:
-            data: bytes = await src.readexactly(length)
-            pad: int = _nar_pad(length)
-            if pad:
-                await src.readexactly(pad)
-        else:
-            data = b""
-
-        if after_contents:
-            after_contents = False
-            continue
-
-        try:
-            tok: str = data.decode("ascii")
-        except (UnicodeDecodeError, ValueError):
-            continue
-
-        if tok == "(":
-            depth += 1
-        elif tok == ")":
-            depth -= 1
-            if depth == 0:
-                break
-        elif tok == "contents":
-            after_contents = True
-
-
 async def forward_framed(src: NixReader, dst: NixWriter) -> None:
     """Forward framed data (chunks terminated by size=0) from src to dst.
 
@@ -410,15 +366,6 @@ async def forward_framed(src: NixReader, dst: NixWriter) -> None:
         dst.write_uint64(size)
         dst.write(data)
     await dst.drain()
-
-
-async def discard_framed(src: NixReader) -> None:
-    """Read and discard framed data (chunks terminated by size=0)."""
-    while True:
-        size = await src.read_uint64()
-        if size == 0:
-            break
-        await src.readexactly(size)
 
 
 class FramedReader(NixReader):
@@ -577,21 +524,6 @@ async def stream_nar(
                 dst.write(pad_data)
             # Large tokens are always file data (after "contents")
             after_contents = False
-
-
-async def copy_nar_to_framed(
-    src: NixReader,
-    dst: NixWriter,
-    chunk_size: int = _CHUNK_SIZE,
-) -> None:
-    """Read raw NAR from src, write as framed data to dst.
-
-    Framed output: [uint64 size][data]... [uint64 0] (terminator).
-    Memory bound: ~chunk_size buffered at a time.
-    """
-    fw = FramedWriter(dst)
-    await stream_nar(src, fw, chunk_size)
-    await fw.finalize()
 
 
 async def pipe_raw_to_framed(

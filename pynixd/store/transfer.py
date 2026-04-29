@@ -8,7 +8,6 @@ import structlog
 
 from .. import wire
 from ..operations.add_multiple_to_store import AddMultipleToStoreRequest
-from ..operations.add_to_store_nar import AddToStoreNarRequest
 from ..operations.nar_from_path import NarFromPathRequest
 from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
 from ..store_path import StorePath
@@ -112,30 +111,3 @@ async def stream_paths_store_to_store(
     # 4. Update destination store's knowledge
     dst.add_path_infos(set(to_transfer))
     dst.tracker.add_known_paths({i.path for i in to_transfer})
-
-
-async def pipe_nar_store_to_store(
-    src: Store,
-    dst: Store,
-    path: StorePath,
-    info: ValidPathInfo,
-) -> None:
-    """Stream a single NAR from src store to dst store."""
-    async with dst.transfer_conn() as dst_conn, src.transfer_conn() as src_conn:
-        await NarFromPathRequest(path=path).to_writer(src_conn.w, src_conn.version)
-        await src_conn.w.drain()
-
-        nar_request = AddToStoreNarRequest(
-            info=info,
-            repair=0,
-            dont_check_sigs=1,
-        )
-        await nar_request.to_writer(dst_conn.w, dst_conn.version)
-
-        await wire.pipe_raw_to_framed(
-            src_conn.r,
-            dst_conn.w,
-            info.nar_size,
-        )
-
-        await nar_request.response_type().from_reader(dst_conn.r, dst_conn.version)

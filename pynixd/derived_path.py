@@ -181,18 +181,6 @@ async def dp_to_derivation(dp: DerivedPathUnion, store_path: Path) -> ParsedDeri
     return await read_drv_file(store_path, dp_drv_path(dp))
 
 
-async def dp_to_outputs(dp: DerivedPathUnion, store_path: Path) -> set[StorePath]:
-    names = dp_output_names(dp)
-    try:
-        parsed = await dp_to_derivation(dp, store_path)
-    except (FileNotFoundError, OSError):
-        return set()
-    all_outputs = parsed.output_paths()
-    if "*" in names:
-        return {p for p in all_outputs.values() if p != StorePath("")}
-    return {p for n, p in all_outputs.items() if n in names and p != StorePath("")}
-
-
 def dp_is_nested(dp: DerivedPathUnion) -> bool:
     if isinstance(dp, DerivedPathBuilt):
         return isinstance(dp.drv_path, SingleDerivedPathBuilt)
@@ -242,9 +230,6 @@ class DerivedPath(StorePath):
         if reader_fn is not None:
             return await reader_fn(store_path, self.drv_path)
         return await dp_to_derivation(self._derived, store_path)
-
-    async def to_outputs(self, store_path: Path) -> set[StorePath]:
-        return await dp_to_outputs(self._derived, store_path)
 
     @property
     def is_nested(self) -> bool:

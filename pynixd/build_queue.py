@@ -404,22 +404,6 @@ class BuildQueue:
                     return b.client
         raise ValueError(f"Build {build_id} not found")
 
-    async def cleanup_completed(self) -> int:
-        """Remove completed builds from queue, return count removed."""
-        async with self.lock:
-            completed = [b for b in self._queue if b.is_done]
-            removed_count = len(completed)
-            if removed_count == 0:
-                return 0
-
-            self._queue = [b for b in self._queue if not b.is_done]
-            # Rebuild by_key and by_id
-            self._by_key = {BuildKey.from_request(b.request): b for b in self._queue}
-            self._by_id = {b.id: b for b in self._queue}
-
-            metrics.QUEUE_SIZE.labels(status="done").dec(removed_count)
-            return removed_count
-
     def count(self, status: str) -> int:
         """Get count of builds with given status (non-async, thread-safe for reading)."""
         match status:

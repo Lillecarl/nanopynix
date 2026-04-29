@@ -50,24 +50,11 @@ STORE_CPU_UTILIZATION = Gauge(
     ["store_id"],
 )
 
-STORE_AVAILABLE_SLOTS = Gauge(
-    "pynixd_store_available_slots",
-    "Current number of available build slots on a backend store",
-    ["store_id"],
-)
 
 STORE_HEALTHY = Gauge(
     "pynixd_store_healthy",
     "Health status of a backend store (1 = healthy, 0 = unhealthy)",
     ["store_id"],
-)
-
-# --- Transfer Metrics ---
-
-PATHS_TRANSFERRED = Counter(
-    "pynixd_paths_transferred_total",
-    "Number of paths moved between stores",
-    ["source", "destination"],
 )
 
 

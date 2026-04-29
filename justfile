@@ -11,7 +11,10 @@ fmt:
     ruff format tests
     ruff check --fix tests
 
-proper: check fmt
+upgrade:
+    pyupgrade --py313-plus
+
+proper: check fmt upgrade
 
 # Run tests
 test:

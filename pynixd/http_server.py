@@ -44,16 +44,6 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
-_STORE_PREFIX = "/nix/store/"
-
-
-def strip_store_prefix(path: StorePath | str) -> str:
-    """'/nix/store/abc-foo' → 'abc-foo'"""
-    path_str = str(path)
-    if path_str.startswith(_STORE_PREFIX):
-        return path_str[len(_STORE_PREFIX) :]
-    return path_str
-
 
 class PynixdHttpServer:
     """Unified HTTP server for pynixd.

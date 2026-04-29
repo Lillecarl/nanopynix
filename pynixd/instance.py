@@ -27,7 +27,7 @@ from .local_store_db import LocalStoreDB
 from .path_tracker import PathTracker
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
-from .store import LocalSocketStore, Store, get_current_system
+from .store import LocalSocketStore, Store
 from .types.ids import StoreId
 from .unix_server import start_unix_server
 
@@ -179,7 +179,10 @@ class Server:
             self.scheduler.on_store_added(store, dynamic=dynamic)
 
     async def remove_store(self, store_id: StoreId, drain_timeout: float = 300.0) -> None:
-        """Remove a remote store, cleaning DB records and closing connections."""
+        """Remove a remote store, cleaning DB records and closing connections.
+
+        NOTE: Used by external projects — do not remove.
+        """
         if self.scheduler:
             # First, drain the store in the scheduler to cancel/requeue jobs
             await self.scheduler.drain_store(store_id, drain_timeout=drain_timeout)
@@ -209,7 +212,6 @@ class Server:
 
         # Finally, close the store connection
         await store.close()
-        log.info("removed_store", store_id=store_id)
 
     @property
     def host(self) -> str:
@@ -235,31 +237,6 @@ class Server:
                 return f"ssh-ng://{username}@{self.host}?port={self.port}"
 
         return f"ssh-ng://{username}@{self.host}:{self.port}"
-
-    def builder_uri(
-        self,
-        max_jobs: int = 4,
-        implementation: NixImplementation = NixImplementation.NIX,
-    ) -> str:
-        """Builder spec for --builders."""
-        system = get_current_system()
-        return f"{self.uri(implementation)} {system} - {max_jobs}"
-
-    def uri_for(
-        self,
-        uri_format: str,
-        implementation: NixImplementation = NixImplementation.NIX,
-    ) -> str:
-        """Return URI in the given format."""
-        if uri_format == "ssh-ng":
-            return self.uri(implementation)
-        if uri_format == "unix":
-            if not self.settings.unix_path:
-                return ""
-            uri = f"unix://{self.settings.unix_path}"
-            uri += f"?root={self.local_store.store_path}"
-            return uri
-        return self.uri(implementation)
 
     async def __aenter__(self) -> Server:
         await self.start()
@@ -372,18 +349,6 @@ class Server:
 
         if not (self.ssh_server or self.unix_server or self.http_server or self.https_server):
             log.warning("no_servers_started")
-
-    async def wait_finished(self) -> None:
-        """Wait for the server listeners to close."""
-        if self.ssh_server or self.unix_server:
-            async with asyncio.TaskGroup() as tg:
-                if self.ssh_server:
-                    tg.create_task(self.ssh_server.wait_closed())
-                if self.unix_server:
-                    tg.create_task(self.unix_server.wait_closed())
-        elif self.http_server or self.https_server:
-            while self._started:  # noqa: ASYNC110 — long-running server keep-alive loop
-                await asyncio.sleep(1)
 
     async def close(self) -> None:
         """Gracefully shut down the server."""

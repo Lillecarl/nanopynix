@@ -19,7 +19,6 @@ from . import constants
 from .exceptions import BackendError
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import AsyncIterator
 
     from .wire import NixReader, NixWriter
@@ -183,9 +182,6 @@ class StderrError:
 # Union of all stderr message types
 StderrMsg = StderrNext | StderrStartActivity | StderrStopActivity | StderrResult | StderrError
 
-# Sentinel returned when the stream ends with STDERR_LAST
-LAST = object()
-
 # ── Parsers mapping msg_type → class ─────────────────────────────
 
 _PARSERS: dict[int, type[StderrMsg]] = {
@@ -195,19 +191,6 @@ _PARSERS: dict[int, type[StderrMsg]] = {
     constants.STDERR_RESULT: StderrResult,
     constants.STDERR_ERROR: StderrError,
 }
-
-_TYPE_NAMES: dict[int, str] = {
-    constants.STDERR_NEXT: "STDERR_NEXT",
-    constants.STDERR_LAST: "STDERR_LAST",
-    constants.STDERR_ERROR: "STDERR_ERROR",
-    constants.STDERR_START_ACTIVITY: "STDERR_START_ACTIVITY",
-    constants.STDERR_STOP_ACTIVITY: "STDERR_STOP_ACTIVITY",
-    constants.STDERR_RESULT: "STDERR_RESULT",
-}
-
-
-def msg_type_name(code: int) -> str:
-    return _TYPE_NAMES.get(code, f"UNKNOWN(0x{code:x})")
 
 
 # ── Stream reader ────────────────────────────────────────────────
@@ -269,31 +252,3 @@ async def drain(
             if raise_on_error:
                 raise BackendError(f"Backend error: {msg.msg}")
     return last_error
-
-
-async def collect(
-    r: NixReader,
-    queue: asyncio.Queue[StderrMsg | None],
-) -> StderrError | None:
-    """Read stderr from backend and put messages on a queue.
-
-    Reads until STDERR_LAST. Non-error messages are put on the queue
-    for the drain task to write to the client. StderrError is returned
-    (not queued) so the caller can handle it — e.g. retry on another
-    backend, record health info, etc.
-
-    Args:
-        r: Backend reader (source of stderr messages)
-        queue: Queue for the client drain task to consume
-
-    Returns:
-        StderrError if the backend reported an error, else None.
-    """
-    async for msg in read_stream(r):
-        if isinstance(msg, StderrError):
-            # Forward to client so they see the error, but return it
-            # to the caller for health/retry decisions.
-            queue.put_nowait(msg)
-            return msg
-        queue.put_nowait(msg)
-    return None

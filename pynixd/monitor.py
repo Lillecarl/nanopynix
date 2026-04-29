@@ -48,15 +48,6 @@ class ResourceGate:
         self.mem_clear.set()
         self.io_clear.set()
 
-    async def wait_cpu_clear(self, timeout: float = 5.0) -> None:  # noqa: ASYNC109
-        """Wait for CPU pressure to drop below threshold."""
-        try:
-            await asyncio.wait_for(self.cpu_clear.wait(), timeout=timeout)
-        except TimeoutError:
-            raise ResourceExhaustedError(
-                "CPU pressure remains too high after timeout",
-            ) from None
-
     async def wait_mem_clear(self, timeout: float = 5.0) -> None:  # noqa: ASYNC109
         """Wait for Memory pressure to drop below threshold."""
         try:
@@ -64,15 +55,6 @@ class ResourceGate:
         except TimeoutError:
             raise ResourceExhaustedError(
                 "Memory pressure remains too high after timeout",
-            ) from None
-
-    async def wait_io_clear(self, timeout: float = 5.0) -> None:  # noqa: ASYNC109
-        """Wait for IO pressure to drop below threshold."""
-        try:
-            await asyncio.wait_for(self.io_clear.wait(), timeout=timeout)
-        except TimeoutError:
-            raise ResourceExhaustedError(
-                "IO pressure remains too high after timeout",
             ) from None
 
 

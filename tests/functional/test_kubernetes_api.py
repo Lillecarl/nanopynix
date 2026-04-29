@@ -122,7 +122,6 @@ async def test_prometheus_metrics_endpoint():
 
             # Check for our custom metrics
             assert "pynixd_build_queue_size" in text
-            assert "pynixd_store_available_slots" in text
 
     finally:
         await server.close()
