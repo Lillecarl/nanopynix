@@ -39,7 +39,7 @@ from .operations.add_to_store import AddToStoreRequest
 from .operations.base import UnkeyedValidPathInfo
 from .operations.ca_derivations import RegisterDrvOutputRequest
 from .store_path import StorePath
-from .types.derivation import DerivationOutput, OutputKind
+from .types.derivation import OutputKind
 
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild
@@ -209,14 +209,8 @@ class DerivationResolver:
         has_resolve_trigger = False
         has_dynamic_inputs = bool(parsed.dynamic_input_drvs)
 
-        for output in parsed.outputs:
-            kind = DerivationOutput(
-                path=output.path,
-                method=output.hash_algo,
-                hash_digest=output.hash_value,
-            ).kind
-
-            if kind == OutputKind.DEFERRED or kind == OutputKind.CA_FLOATING or kind == OutputKind.IMPURE:
+        for kind in parsed.output_kinds():
+            if kind in (OutputKind.DEFERRED, OutputKind.CA_FLOATING, OutputKind.IMPURE):
                 has_resolve_trigger = True
 
         # Nix: dynamic inputs (childMap) always trigger resolution.

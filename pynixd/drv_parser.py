@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from .derived_path import DerivedPath
 
 from .store_path import StorePath
-from .types import BasicDerivation, DerivationOutput
+from .types import BasicDerivation, DerivationOutput, OutputKind
 
 
 class NixDerivationOutputShow(TypedDict, total=False):
@@ -125,6 +125,21 @@ class ParsedDerivation:
     def output_paths(self) -> dict[str, StorePath]:
         """Return {output_name: output_path} for all outputs."""
         return {o.name: StorePath(o.path) for o in self.outputs}
+
+    def output_kinds(self) -> list[OutputKind]:
+        """Return the OutputKind for each output.
+
+        Avoids callers needing to construct DerivationOutput objects.
+        """
+        result: list[OutputKind] = []
+        for o in self.outputs:
+            dop = DerivationOutput(
+                path=o.path,
+                method=o.hash_algo,
+                hash_digest=o.hash_value,
+            )
+            result.append(dop.kind)
+        return result
 
     def to_json(self, drv_path: StorePath | str) -> dict[str, NixDerivationShow]:
         """Serialize to the same JSON format as `nix derivation show`.
