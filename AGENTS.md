@@ -66,7 +66,11 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 - **Verify Before Rewrite**: Before using `write_file` to "fix" a large file, you MUST have read the *entire* file in the current turn to ensure no data loss.
 - **VCS Truth**: If `jj status` or `jj diff` contradicts your internal model of the changes, re-sync by reading the files from disk before taking further action. Do not guess.
 
-## 7. Test Suite Rules
+## 7. Documentation & Onboarding
+- **Glossary**: A comprehensive `GLOSSARY.md` is maintained in the repository root. It defines both foundational Nix terminology (NAR, StorePath, etc.) and `pynixd`-specific concepts (Trampolining, Three-Tier Execution).
+- **Living Document**: The glossary is NOT exhaustive. All contributors (including AI agents) MUST expand the glossary when introducing or clarifying complex architectural patterns, specialized terminology, or non-obvious domain concepts.
+
+## 8. Test Suite Rules
 
 ### Directory Structure
 - **`tests/functional/`** — active end-to-end and integration tests
