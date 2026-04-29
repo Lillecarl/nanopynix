@@ -20,6 +20,7 @@ inputDrvs).
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import structlog
@@ -357,7 +358,8 @@ class DerivationResolver:
             await fw.finalize()
 
         resolved_drv_path: StorePath | None = None
-        for target_store in {self.local_store, store}:
+
+        async def upload(target_store: Store) -> StorePath | None:
             add_req = AddToStoreRequest(
                 path_name=name_for_add,
                 cam="text:sha256",
@@ -370,14 +372,13 @@ class DerivationResolver:
                 if resp.info is not None:
                     target_store.tracker.add_known_path(resp.info.path)
                     target_store.add_path_info(resp.info)
-                    if resolved_drv_path is None:
-                        resolved_drv_path = resp.info.path
                     log.debug(
                         "resolved_drv_added_to_store",
                         build_id=build.id,
                         store_id=target_store.store_id,
                         resolved_drv_path=resp.info.path,
                     )
+                    return resp.info.path
             except Exception:
                 log.warning(
                     "resolved_drv_add_to_store_failed",
@@ -385,6 +386,16 @@ class DerivationResolver:
                     store_id=target_store.store_id,
                     exc_info=True,
                 )
+            return None
+
+        targets = {self.local_store, store}
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(upload(s)) for s in targets]
+
+        for t in tasks:
+            path = t.result()
+            if path is not None and resolved_drv_path is None:
+                resolved_drv_path = path
 
         if resolved_drv_path is None:
             log.error("resolve_add_failed", build_id=build.id)
