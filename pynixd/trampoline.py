@@ -22,7 +22,7 @@ from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import StorePath
 
 if TYPE_CHECKING:
-    from .build_queue import QueuedBuild
+    from .build_queue import QueuedBuild, SchedulerBuildRequest
     from .derived_path import DerivedPath
     from .operations.base import BasicDerivation
     from .operations.build_derivation import BuildDerivationResponse
@@ -176,7 +176,7 @@ class Trampoline:
         self,
         build: QueuedBuild,
         build_resp: BuildDerivationResponse,
-        sched_req,
+        sched_req: SchedulerBuildRequest,
         parent_dps: set,
     ) -> None:
         """Enqueue inner builds for .drv outputs produced by a dynamic build."""
@@ -269,9 +269,9 @@ class Trampoline:
                 original_derived_paths=[str(dp) for dp in parent_dps],
             )
 
-            self.link_dynamic_deps(build, inner_build_id, inner_basic)
+            self._link_dynamic_deps(build, inner_build_id, inner_basic)
 
-    def link_dynamic_deps(
+    def _link_dynamic_deps(
         self,
         outer_build: QueuedBuild,
         inner_build_id: BuildId,
