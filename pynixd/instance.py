@@ -192,10 +192,20 @@ class Server:
 
         local_store = self.local_store
         if local_store.db is not None:
-            # We don't have remove_store_paths in the DB anymore,
-            # we use clear_store_known_paths? No, we don't have it either.
-            # I will skip the DB part for now until I confirm the correct method name.
-            pass
+            try:
+                async with local_store.db.acquire_conn() as conn:
+                    await conn.execute(
+                        "DELETE FROM PynixdKnownPaths WHERE storeId = ?",
+                        (str(store_id),),
+                    )
+                    await conn.commit()
+                    log.info("removed_store_path_data", store_id=store_id)
+            except Exception:
+                log.warning(
+                    "remove_store_db_cleanup_failed",
+                    store_id=store_id,
+                    exc_info=True,
+                )
 
         # Finally, close the store connection
         await store.close()
