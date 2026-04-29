@@ -94,7 +94,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
             return result
 
         assert ctx.proxy.scheduler is not None
-        self.logger.debug("BuildPaths len(paths)=%d", len(self.derived_paths))
+        self.logger.debug("build_paths_count", count=len(self.derived_paths))
         result = await ctx.proxy.scheduler.build_derived_paths(
             self.derived_paths,
             self.build_mode,
