@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import time
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -76,7 +77,7 @@ class Server:
         self.https_server: web.AppRunner | None = None
         self.https_bound_port: int | None = None
         self._started = False
-        self._last_activity_at: float = asyncio.get_event_loop().time()
+        self._last_activity_at: float = time.monotonic()
 
     @property
     def local_store(self) -> Store:
@@ -100,7 +101,7 @@ class Server:
 
     def record_activity(self) -> None:
         """Update last activity timestamp."""
-        now = asyncio.get_event_loop().time()
+        now = time.monotonic()
         self._last_activity_at = now
         if self.ctx.scheduler:
             self.ctx.scheduler.record_activity()
@@ -116,7 +117,7 @@ class Server:
         while True:
             try:
                 await asyncio.sleep(1)
-                now = asyncio.get_event_loop().time()
+                now = time.monotonic()
 
                 # Activity from BuildQueue
                 last_activity = self._last_activity_at
@@ -141,6 +142,7 @@ class Server:
                     # We do this in a separate task to avoid blocking the watcher
                     _close_task = asyncio.create_task(self.close())
                     _close_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+                    self.background_tasks.append(_close_task)
                     break
             except Exception:
                 log.exception("idle_watcher_error")

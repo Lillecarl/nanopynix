@@ -70,7 +70,7 @@ class Scheduler:
         self.dynamic_resolver = DynamicDerivationResolver(self, read_drv_fn=read_drv_fn)
         self.trigger_event = asyncio.Event()
         self.running = False
-        self.last_activity_at: float = asyncio.get_event_loop().time()
+        self.last_activity_at: float = time.monotonic()
 
     @property
     def stores(self) -> Mapping[str, Store]:
@@ -101,7 +101,7 @@ class Scheduler:
 
     def record_activity(self) -> None:
         """Update last activity timestamp."""
-        self.last_activity_at = asyncio.get_event_loop().time()
+        self.last_activity_at = time.monotonic()
 
     def trigger(self) -> None:
         """Signal that a scheduling pass is needed."""

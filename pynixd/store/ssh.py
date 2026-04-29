@@ -8,7 +8,7 @@ import asyncio
 import contextlib
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import asyncssh
 import structlog
@@ -44,6 +44,7 @@ class _SSHStoreMixin(Store):
     max_backoff: float
     last_failure: float
     store_id: str
+    _bg_tasks: set[asyncio.Task[Any]]
 
     INITIAL_BACKOFF: float = 1.0
     MAX_BACKOFF: float = 60.0
@@ -57,6 +58,7 @@ class _SSHStoreMixin(Store):
     ) -> None:
         self.conn = None
         self.ssh_lock = asyncio.Lock()
+        self._bg_tasks = set()
         self.backoff = self.INITIAL_BACKOFF
         self.max_backoff = self.MAX_BACKOFF
         self.last_failure = 0.0
@@ -103,8 +105,9 @@ class _SSHStoreMixin(Store):
 
         if self.monitor is None or isinstance(self.monitor, DummyResourceMonitor):
             if self.monitor:
-                _stop_task = asyncio.create_task(self.monitor.stop())
-                _stop_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+                task = asyncio.create_task(self.monitor.stop())
+                self._bg_tasks.add(task)
+                task.add_done_callback(self._bg_tasks.discard)
             self.monitor = GenericResourcePoller(
                 self.gate,
                 self.settings,
@@ -116,8 +119,9 @@ class _SSHStoreMixin(Store):
     def stop_psi_polling(self) -> None:
         """Cancel the resource polling task."""
         if self.monitor is not None:
-            _stop_task = asyncio.create_task(self.monitor.stop())
-            _stop_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+            task = asyncio.create_task(self.monitor.stop())
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
             self.monitor = None
 
     @property

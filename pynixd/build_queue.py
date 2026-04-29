@@ -241,7 +241,7 @@ class BuildQueue:
         client: ClientConn | None,
     ) -> tuple[int, SchedulerBuildRequest]:
         """Create a SchedulerBuildRequest and return it."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[DerivedPath, BuildResult]] = loop.create_future()
         async with self.lock:
             req = SchedulerBuildRequest(
@@ -295,7 +295,7 @@ class BuildQueue:
                 # else: done, create new entry
 
             # Create new build with future
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             future: asyncio.Future[BuildDerivationResponse] = loop.create_future()
             build = QueuedBuild(
                 id=self.next_id,
