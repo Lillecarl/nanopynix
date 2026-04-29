@@ -11,6 +11,11 @@ Two resolution modes (unified in one method):
 
 Also handles registering CA realisations on builder stores so they
 can resolve their own deferred outputs.
+
+The resolution decision mirrors Nix's ``Derivation::shouldResolve()``:
+resolution is needed when any output is Deferred, CAFloating, or Impure,
+or when any input comes from a dynamic derivation (childMap in
+inputDrvs).
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from .operations.add_to_store import AddToStoreRequest
 from .operations.base import UnkeyedValidPathInfo
 from .operations.ca_derivations import RegisterDrvOutputRequest
 from .store_path import StorePath
+from .types.derivation import DerivationOutput, OutputKind
 
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild
@@ -126,22 +132,30 @@ class DerivationResolver:
     async def resolve(self, build: QueuedBuild, store: Store) -> None:
         """Resolve placeholders in a derivation before building.
 
-        Reads the .drv file to determine whether to do a deferred
-        (inputDrv) or dynamic (DrvWithVersion) resolution, then
-        mutates build.request and build.required_paths with the
-        resolved derivation and paths.
-        """
-        if not build.depends_on:
-            return
+        Mirrors ``Nix::Derivation::shouldResolve()`` + ``tryResolve()``:
 
+        1. Read the .drv file from disk to inspect its outputs and
+           inputDrvs (these are not in the wire BasicDerivation).
+        2. If any output is Deferred, CAFloating, or Impure, or if
+           any inputDrv has a childMap (dynamic derivation input),
+           the derivation needs resolution.
+        3. Collect resolved paths from dependency builds' CA realisations.
+        4. Rewrite placeholders via ``resolve_derivation`` or
+           ``resolve_dynamic_derivation`` and upload the resolved .drv.
+        5. Mutate ``build.request`` and ``build.required_paths``.
+        """
         drv_path = build.request.drv_path
+
         parsed = await self._read_drv(drv_path, build.id)
         if parsed is None:
             return
 
+        if not self._should_resolve(parsed):
+            return
+
         dep_realisations = self._collect_dep_realisations(build)
 
-        if build.dynamic_input_drvs and parsed.dynamic_input_drvs:
+        if parsed.dynamic_input_drvs:
             dynamic_output_paths = await self._build_dynamic_output_paths(
                 build,
                 dep_realisations,
@@ -155,14 +169,12 @@ class DerivationResolver:
                 dynamic_output_paths,
             )
             output_paths_for_build = set(dynamic_output_paths.values())
-        elif parsed.input_drvs:
+        else:
             flat_paths = self._flatten_realisations(parsed.input_drvs, dep_realisations)
             if not flat_paths:
                 return
             resolved = drv_resolve_derivation(parsed, drv_path, flat_paths)
             output_paths_for_build = set(flat_paths.values())
-        else:
-            return
 
         await self._add_resolved_drv(build, store, resolved, drv_path)
         self._populate_required_paths(build, resolved, output_paths_for_build)
@@ -173,8 +185,50 @@ class DerivationResolver:
             drv_path=drv_path,
             resolved_drv_path=build.request.drv_path,
             output_paths={n: o.path for n, o in resolved.outputs.items()},
-            mode="dynamic" if build.dynamic_input_drvs else "deferred",
+            mode="dynamic" if parsed.dynamic_input_drvs else "deferred",
         )
+
+    # ── Resolution decision (mirrors Nix) ────────────────────────────
+
+    def _should_resolve(
+        self,
+        parsed: ParsedDerivation,
+    ) -> bool:
+        """Determine whether a derivation needs resolution before building.
+
+        Mirrors Nix's ``Derivation::shouldResolve()`` at
+        ``src/libstore/derivations.cc:1125-1156``.
+
+        Returns True if any of these hold:
+        - Any output is Deferred (``("", "", "")`` — depends on a floating CA)
+        - Any output is CAFloating (``("", "r:sha256", "")``)
+        - Any output is Impure (``("", "...", "impure")``)
+        - Any inputDrv has a childMap (dynamic derivation — DrvWithVersion)
+        - The derivation has inputDrvs AND at least one of the above
+          output conditions (the inputDrvs contain placeholders to rewrite)
+        """
+        has_resolve_trigger = False
+        has_dynamic_inputs = bool(parsed.dynamic_input_drvs)
+
+        for output in parsed.outputs:
+            kind = DerivationOutput(
+                path=output.path,
+                method=output.hash_algo,
+                hash_digest=output.hash_value,
+            ).kind
+
+            if kind == OutputKind.DEFERRED or kind == OutputKind.CA_FLOATING or kind == OutputKind.IMPURE:
+                has_resolve_trigger = True
+
+        # Nix: dynamic inputs (childMap) always trigger resolution.
+        if has_dynamic_inputs:
+            return True
+
+        # Nix: Deferred, CAFloating, or Impure outputs only trigger
+        # resolution when there are inputDrvs to rewrite.  A pure
+        # floating CA derivation with no inputs doesn't need resolution
+        # (the build produces outputs naturally).
+        return has_resolve_trigger and bool(parsed.input_drvs)
 
     # ── Internal helpers ─────────────────────────────────────────────
 
