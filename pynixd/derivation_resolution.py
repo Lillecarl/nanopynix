@@ -32,7 +32,6 @@ from .utils import nix32_encode
 if TYPE_CHECKING:
     from .drv_parser import ParsedDerivation
 
-NIX32_CHARS = "0123456789abcdfghijklmnpqrsvwxyz"
 STORE_DIR = "/nix/store"
 
 
