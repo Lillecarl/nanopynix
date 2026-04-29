@@ -270,7 +270,10 @@ class Store(ABC):
             return features.issubset(sys_features)
         if not features:
             return True
-        return True
+        # Unprobed store — reject platform-specific features that
+        # could not exist on an arbitrary system (e.g. kvm on Darwin).
+        _platform_specific = frozenset({"kvm", "apple-virt"})
+        return features.isdisjoint(_platform_specific)
 
     # ── Circuit breaker ──────────────────────────────────────────────
 
