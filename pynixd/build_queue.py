@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import heapq
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
@@ -142,10 +141,6 @@ class QueuedBuild:
         default_factory=dict,
         repr=False,
     )
-
-    # For heap ordering
-    def __lt__(self, other: Self) -> bool:
-        return self.id < other.id
 
     @property
     def is_building(self) -> bool:
@@ -316,7 +311,7 @@ class BuildQueue:
                 scheduler_request_id=scheduler_request_id,
             )
             self.next_id += 1
-            heapq.heappush(self._queue, build)
+            self._queue.append(build)
             self._by_key[key] = build
             self._by_id[build.id] = build
 
