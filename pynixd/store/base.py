@@ -146,7 +146,7 @@ class Store(ABC):
             log.debug("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
         except Exception:
             # Not critical during startup; operations will re-sync if needed
-            log.warning("store_paths_sync_failed", store_id=self.store_id)
+            log.exception("store_paths_sync_failed", store_id=self.store_id)
 
         # 3. Activate monitoring if configured
         if self.monitor:

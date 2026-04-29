@@ -128,6 +128,6 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
             else:
                 return resp
         except Exception:
-            self.logger.warning("sync_paths_failed", store_id=store.store_id)
+            self.logger.exception("sync_paths_failed", store_id=store.store_id)
             # Do NOT clear known_paths here, it might have been loaded from DB
             return QueryAllValidPathsResponse(paths=set(store.tracker.known_paths))

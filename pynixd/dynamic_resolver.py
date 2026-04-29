@@ -534,7 +534,7 @@ class DynamicDerivationResolver:
                             update_regtime=False,
                         )
                     except Exception:
-                        log.warning(
+                        log.exception(
                             "trampoline_unknown_srcs_check_failed",
                             build_id=build.id,
                             inner_drv_path=out_sp,

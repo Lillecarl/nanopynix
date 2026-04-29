@@ -254,6 +254,7 @@ class LocalSocketStore(Store):
         try:
             await conn.connect()
         except Exception:
+            log.debug("probe_connection_failed", exc_info=True)
             with contextlib.suppress(Exception):
                 await conn.close()
             return False
