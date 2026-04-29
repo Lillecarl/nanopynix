@@ -160,6 +160,7 @@ class DerivationResolver:
             dynamic_output_paths = await self._build_dynamic_output_paths(
                 build,
                 dep_realisations,
+                parsed.dynamic_input_drvs,
             )
             if not dynamic_output_paths:
                 return
@@ -286,6 +287,7 @@ class DerivationResolver:
         self,
         build: QueuedBuild,
         dep_realisations: dict[StorePath, dict[str, StorePath]],
+        dynamic_input_drvs: dict[StorePath, dict[str, list[str]]],
     ) -> dict[tuple[StorePath, str, str], StorePath]:
         """Build the dynamic_output_paths map for DrvWithVersion resolution.
 
@@ -296,7 +298,7 @@ class DerivationResolver:
         """
         dynamic_output_paths: dict[tuple[StorePath, str, str], StorePath] = {}
 
-        for dyn_drv_path, output_deps in build.dynamic_input_drvs.items():
+        for dyn_drv_path, output_deps in dynamic_input_drvs.items():
             outer_outputs = dep_realisations.get(dyn_drv_path, {})
 
             for outer_output, inner_outputs in output_deps.items():
