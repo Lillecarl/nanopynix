@@ -177,7 +177,7 @@ class Trampoline:
         build: QueuedBuild,
         build_resp: BuildDerivationResponse,
         sched_req: SchedulerBuildRequest,
-        parent_dps: set,
+        parent_dps: set[DerivedPath],
     ) -> None:
         """Enqueue inner builds for .drv outputs produced by a dynamic build."""
         drv_outputs = build_resp.result.built_outputs
