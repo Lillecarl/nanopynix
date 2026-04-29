@@ -399,7 +399,10 @@ class BuildQueue:
                         b.future.set_result(response)
                     log.info("build_failed", build_id=build_id, error_msg=error_msg)
 
-                    metrics.QUEUE_SIZE.labels(status="pending").dec()
+                    if b.is_building:
+                        metrics.QUEUE_SIZE.labels(status="building").dec()
+                    else:
+                        metrics.QUEUE_SIZE.labels(status="pending").dec()
                     metrics.QUEUE_SIZE.labels(status="done").inc()
                     metrics.BUILDS_COMPLETED.labels(status="failure").inc()
 
