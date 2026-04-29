@@ -64,38 +64,6 @@ def downstream_placeholder(drv_path: StorePath, output_name: str) -> str:
     return "/" + nix32_encode(h)
 
 
-def downstream_placeholder_from_chain(
-    chain: list[tuple[StorePath, str]],
-) -> str:
-    """Compute a DownstreamPlaceholder from a derivation output chain.
-
-    Given a chain like [(producingDrv, "out")] for producingDrv^out,
-    or [(producingDrv, "out"), (None, "out")] for producingDrv^out^out,
-    recursively computes the placeholder.
-
-    The first element is the base drv path + output name (unknownCaOutput).
-    Subsequent elements represent unknownDerivation layers (drv_path is None).
-
-    Corresponds to Nix's DownstreamPlaceholder::fromSingleDerivedPathBuilt().
-    """
-    if not chain:
-        raise ValueError("Empty chain")
-
-    base_drv, base_output = chain[0]
-    hash_part = str(base_drv).rsplit("/", 1)[-1].split("-", 1)[0]
-    drv_name = _nix_drv_name(base_drv)
-    clear_text = f"nix-upstream-output:{hash_part}:{_output_path_name(drv_name, base_output)}"
-    current_hash = hashlib.sha256(clear_text.encode()).digest()
-
-    for _, output_name in chain[1:]:
-        current_hash = downstream_placeholder_unknown_derivation_raw(
-            current_hash,
-            output_name,
-        )
-
-    return "/" + nix32_encode(current_hash)
-
-
 def downstream_placeholder_unknown_derivation(
     parent_placeholder_hash: bytes,
     output_name: str,
