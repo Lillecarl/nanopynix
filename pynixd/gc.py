@@ -65,20 +65,7 @@ class GarbageCollector:
         # Local store uses longer lifetime — filter to older paths
         local_stale = await self.db.query_stale_paths(self.local_max_age)
 
-        tasks = []
-        stores_for_tasks: list[Store] = []
-
-        # GC builders with builder lifetime
-        for store in self.stores.values():
-            tasks.append(self.gc_store(store, builder_stale))
-            stores_for_tasks.append(store)
-
-        # GC local store with local lifetime
-        if local_stale:
-            tasks.append(self.gc_store(self.local_store, local_stale))
-            stores_for_tasks.append(self.local_store)
-
-        if not tasks:
+        if not self.stores and not local_stale:
             return
 
         log.info(
