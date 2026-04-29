@@ -205,6 +205,36 @@ def _hash_derivation_modulo(
     return dict.fromkeys(drv.outputs, h)
 
 
+def _resolve_deferred_outputs(
+    resolved: BasicDerivation,
+    drv_name: str,
+) -> BasicDerivation:
+    """Convert Deferred outputs to InputAddressed and compute output paths.
+
+    Given a resolved BasicDerivation, computes hashDerivationModulo and
+    replaces any Deferred outputs (``("", "", "")``) with concrete
+    InputAddressed paths derived from the hash.
+    """
+    hash_modulo = _hash_derivation_modulo(resolved, mask_outputs=True)
+
+    new_outputs: dict[str, DerivationOutput] = {}
+    for name, o in resolved.outputs.items():
+        if o.path == "" and o.method == "" and o.hash_digest == "":
+            h = hash_modulo[name]
+            out_path = _make_output_path(name, h, drv_name)
+            new_outputs[name] = DerivationOutput(
+                path=out_path,
+                method="",
+                hash_digest="",
+            )
+            resolved.env[name] = out_path
+        else:
+            new_outputs[name] = o
+
+    resolved.outputs = new_outputs
+    return resolved
+
+
 def _rewrite_strings(s: str, rewrites: dict[str, str]) -> str:
     for old, new in rewrites.items():
         if old == new:
@@ -262,24 +292,7 @@ def resolve_derivation(
         is_dynamic=drv.is_dynamic,
     )
 
-    hash_modulo = _hash_derivation_modulo(resolved, mask_outputs=True)
-
-    new_outputs: dict[str, DerivationOutput] = {}
-    for name, o in resolved.outputs.items():
-        if o.path == "" and o.method == "" and o.hash_digest == "":
-            h = hash_modulo[name]
-            out_path = _make_output_path(name, h, drv_name)
-            new_outputs[name] = DerivationOutput(
-                path=out_path,
-                method="",
-                hash_digest="",
-            )
-            resolved.env[name] = out_path
-        else:
-            new_outputs[name] = o
-
-    resolved.outputs = new_outputs
-    return resolved
+    return _resolve_deferred_outputs(resolved, drv_name)
 
 
 def resolve_dynamic_derivation(
@@ -372,21 +385,4 @@ def resolve_dynamic_derivation(
         is_dynamic=drv.is_dynamic,
     )
 
-    hash_modulo = _hash_derivation_modulo(resolved, mask_outputs=True)
-
-    new_outputs: dict[str, DerivationOutput] = {}
-    for name, o in resolved.outputs.items():
-        if o.path == "" and o.method == "" and o.hash_digest == "":
-            h = hash_modulo[name]
-            out_path = _make_output_path(name, h, drv_name)
-            new_outputs[name] = DerivationOutput(
-                path=out_path,
-                method="",
-                hash_digest="",
-            )
-            resolved.env[name] = out_path
-        else:
-            new_outputs[name] = o
-
-    resolved.outputs = new_outputs
-    return resolved
+    return _resolve_deferred_outputs(resolved, drv_name)
