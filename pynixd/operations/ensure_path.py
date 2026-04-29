@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
-from .base import OperationLogs, OpRequest, OpResponse
+from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -25,7 +25,7 @@ class EnsurePathResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader)
         self.value = await reader.read_uint64()
         return self
 

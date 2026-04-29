@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from .. import wire
 from ..store_path import StorePath
-from .base import OperationLogs, OpRequest, OpResponse
+from .base import OpRequest, OpResponse
 
 QUERY_VALID_PATHS = """
 SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
@@ -32,7 +32,7 @@ class QueryValidPathsResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(
+        await self.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,

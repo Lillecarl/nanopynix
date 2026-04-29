@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import StderrNext
 from ..types.auth import Role
-from .base import OperationLogs, OpRequest, OpResponse, RequestContext
+from .base import OpRequest, OpResponse, RequestContext
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -26,7 +26,7 @@ class AddPermRootResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(
+        await self.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,

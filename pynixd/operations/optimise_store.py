@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from .base import OperationLogs, OpRequest, OpResponse, RequestContext, Role
+from .base import OpRequest, OpResponse, RequestContext, Role
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -24,7 +24,7 @@ class OptimiseStoreResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader)
         self.value = await reader.read_uint64()
         return self
 

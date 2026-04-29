@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
 from .add_signatures import AddSignaturesRequest
 from .base import (
-    OperationLogs,
     OpRequest,
     OpResponse,
     RequestContext,
@@ -35,7 +34,7 @@ class SignPathInfoResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(
+        await self.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,

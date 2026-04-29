@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import DerivedPath
 from ..store_path import StorePath
-from .base import OperationLogs, OpRequest, OpResponse
+from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -30,7 +30,7 @@ class QueryMissingResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader)
         self.will_build = await reader.read_string_set(StorePath)
         self.will_substitute = await reader.read_string_set(StorePath)
         self.unknown = await reader.read_string_set(StorePath)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from .base import OperationLogs, OpRequest, OpResponse, SubstitutablePathInfo
+from .base import OpRequest, OpResponse, SubstitutablePathInfo
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -25,7 +25,7 @@ class QuerySubstitutablePathInfoResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(reader)
+        await self.logs.from_reader(reader)
         self.found = await reader.read_uint64() != 0
         self.info = None
         if self.found:

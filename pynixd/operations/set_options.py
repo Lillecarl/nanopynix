@@ -9,7 +9,6 @@ from .. import wire
 from ..stderr import StderrNext
 from ..types.auth import Role
 from .base import (
-    OperationLogs,
     OpRequest,
     OpResponse,
     RequestContext,
@@ -32,7 +31,7 @@ class SetOptionsResponse(OpResponse):
         buffer_logs: bool = True,
     ) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logs = await OperationLogs().from_reader(
+        await self.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
