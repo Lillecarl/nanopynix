@@ -11,6 +11,8 @@ fmt:
     ruff format tests
     ruff check --fix tests
 
+proper: check fmt
+
 # Run tests
 test:
     pytest tests/functional

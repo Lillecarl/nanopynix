@@ -39,7 +39,9 @@ The concrete mapping between a derivation output and its final `StorePath`. For 
 An output path that cannot be calculated before the build (common in CA derivations). These are resolved "on the fly" by the `DynamicDerivationResolver`.
 
 ### Trampolining
-A Nix-native concept for "unknown output" building (common in CA derivations). It is the process where a build is intercepted because it has "deferred" dependencies that must be resolved first. Once resolved (possibly by triggering sub-builds), the original derivation is updated and re-injected into the build process. In `pynixd`, this is handled by the `DynamicDerivationResolver`.
+A Nix-native concept for "unknown output" building (common in CA derivations). It is the process where a build is intercepted because it has "deferred" dependencies that must be resolved first. Once resolved (possibly by triggering sub-builds), the original derivation is updated and re-injected into the build process. In `pynixd`:
+- **`DerivationResolver`** handles pre-build resolution (deferred output, dynamic DrvWithVersion)
+- **`Trampoline`** handles post-build inner-build enqueuing and DAG rewiring
 
 ## pynixd Architecture
 

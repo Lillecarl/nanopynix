@@ -24,14 +24,14 @@ import structlog
 from . import metrics
 from .allocator import TINY_BUILD_THRESHOLD_MS, BuildAllocator, TelemetryStoreRanker
 from .build_queue import BuildQueue, QueuedBuild
-from .ca_realisation_manager import CaRealisationManager
 from .decomposer import BuildDecomposer
+from .derivation_resolver import DerivationResolver
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .operations.base import BuildMode, UnkeyedValidPathInfo
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .stderr import StderrNext
 from .store_path import StorePath
-from .unknown_output_resolver import UnknownOutputResolver
+from .trampoline import Trampoline
 
 if TYPE_CHECKING:
     from .connection import ClientConn
@@ -69,8 +69,8 @@ class Scheduler:
         self.ranker = TelemetryStoreRanker(ctx.settings)
         self.allocator = BuildAllocator(self.ctx.stores, self.local_store, self.ranker)
         self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
-        self.ca_realisation_manager = CaRealisationManager(self)
-        self.unknown_output_resolver = UnknownOutputResolver(self, read_drv_fn=read_drv_fn)
+        self.derivation_resolver = DerivationResolver(self, read_drv_fn=read_drv_fn)
+        self.trampoline = Trampoline(self, read_drv_fn=read_drv_fn)
         self.trigger_event = asyncio.Event()
         self.running = False
         self.last_activity_at: float = time.monotonic()
@@ -392,7 +392,7 @@ class Scheduler:
                     for line in error_msg.split("\n"):
                         await client.queue.put(StderrNext(text=f"pynixd: {line}\n"))
                 if build.scheduler_request_id is not None:
-                    await self.unknown_output_resolver.on_build_complete_failed(
+                    await self.trampoline.on_build_complete_failed(
                         build,
                         error_msg,
                     )
@@ -431,7 +431,7 @@ class Scheduler:
                                 StderrNext(text=f"pynixd: {line}\n"),
                             )
                     if build.scheduler_request_id is not None:
-                        await self.unknown_output_resolver.on_build_complete_failed(
+                        await self.trampoline.on_build_complete_failed(
                             build,
                             error_msg,
                         )
@@ -470,12 +470,8 @@ class Scheduler:
                 # on the target builder store so it can resolve deferred
                 # derivation output paths.
                 if build.depends_on:
-                    await self.ca_realisation_manager.register_dep_realisations(build, store)
-                    await self.unknown_output_resolver.resolve_deferred_derivation(
-                        build,
-                        store,
-                    )
-                    await self.unknown_output_resolver.resolve_dynamic_derivation(build, store)
+                    await self.derivation_resolver.register_dep_realisations(build, store)
+                    await self.derivation_resolver.resolve(build, store)
 
                 # Strip pynixd-handled features from requiredSystemFeatures.
                 # After resolution, the backend daemon doesn't need to see
@@ -545,7 +541,7 @@ class Scheduler:
                     )
 
                     # Register CA realisations after outputs are in local store
-                    await self.ca_realisation_manager.register_built_outputs(build, resp)
+                    await self.derivation_resolver.register_built_outputs(build, resp)
 
                     # 4. Record build statistics
                     if self.local_store.db:
@@ -583,7 +579,7 @@ class Scheduler:
             log.exception("build_crashed", build_id=build.id)
             await self.queue.fail(build.id, "Internal scheduler error")
             if build.scheduler_request_id is not None:
-                await self.unknown_output_resolver.on_build_complete_failed(
+                await self.trampoline.on_build_complete_failed(
                     build,
                     "Internal scheduler error",
                 )
@@ -595,5 +591,5 @@ class Scheduler:
         if build_resp is not None:
             await self.queue.complete(build.id, build_resp)
             if build.scheduler_request_id is not None:
-                await self.unknown_output_resolver.on_build_complete(build, build_resp)
+                await self.trampoline.on_build_complete(build, build_resp)
             self.trigger()
