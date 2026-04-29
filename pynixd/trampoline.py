@@ -19,7 +19,7 @@ from .drv_parser import read_drv_file, to_basic_derivation
 from .operations.base import BuildResult, BuildResultStatus, UnkeyedValidPathInfo
 from .operations.build_derivation import BuildDerivationRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
-from .store_path import StorePath
+from .store_path import DrvOutput, StorePath
 
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild, SchedulerBuildRequest
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from .operations.base import BasicDerivation
     from .operations.build_derivation import BuildDerivationResponse
     from .scheduler import DerivationReader, Scheduler
+    from .types.ca import Realisation
     from .types.ids import BuildId
 
 log = structlog.get_logger(__name__)
@@ -131,7 +132,7 @@ class Trampoline:
         build: QueuedBuild,
         is_dynamic: bool,
         has_nested_dp: bool,
-        drv_outputs: dict,
+        drv_outputs: dict[DrvOutput, Realisation],
     ) -> bool:
         """Decide whether the trampoline should fire for this build.
 
