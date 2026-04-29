@@ -214,6 +214,7 @@ class DerivationResolver:
         for kind in parsed.output_kinds():
             if kind in (OutputKind.DEFERRED, OutputKind.CA_FLOATING, OutputKind.IMPURE):
                 has_resolve_trigger = True
+                break
 
         # Nix: dynamic inputs (childMap) always trigger resolution.
         if has_dynamic_inputs:
