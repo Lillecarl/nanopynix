@@ -104,7 +104,6 @@ class Store(ABC):
         self.probe_state: ProbeState = ProbeState.NOT_PROBED
         self._probe_event: asyncio.Event = asyncio.Event()
         self._signing_keys: dict[str, SecretKey] = {}
-        self._holder_task: asyncio.Task | None = None
         self.draining: bool = False
         self._started: bool = False
 
