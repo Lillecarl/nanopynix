@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .path_tracker import PathTracker
     from .scheduler import Scheduler
     from .store.base import Store
+    from .types.ids import StoreId
 
 
 @dataclass
@@ -23,12 +24,12 @@ class PynixdContext:
 
     settings: PynixdSettings
     local_store: Store
-    _stores: dict[str, Store]
+    _stores: dict[StoreId, Store]
     path_tracker: PathTracker
     db: LocalStoreDB | None = None
     scheduler: Scheduler | None = None
 
     @property
-    def stores(self) -> Mapping[str, Store]:
+    def stores(self) -> Mapping[StoreId, Store]:
         """Read-only view of connected remote stores."""
         return self._stores

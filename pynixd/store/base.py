@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from ..psi import CpuUtil, MemInfo
     from ..signing import SecretKey
     from ..store_path import StorePath
+    from ..types.ids import StoreId
 
 log = structlog.get_logger(__name__)
 
@@ -66,7 +67,7 @@ class Store(ABC):
 
     def __init__(
         self,
-        store_id: str,
+        store_id: StoreId,
         store_path: Path = Path("/"),
         idle_ttl: float = _DEFAULT_IDLE_TTL,
         feature_matrix: dict[str, set[str]] | None = None,

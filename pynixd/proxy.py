@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from .context import PynixdContext
     from .scheduler import Scheduler
     from .store import Store
+    from .types.ids import StoreId
     from .wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
@@ -84,7 +85,7 @@ class DaemonProxy:
         return self.scheduler.trigger if self.scheduler else None
 
     @property
-    def stores(self) -> Mapping[str, Store]:
+    def stores(self) -> Mapping[StoreId, Store]:
         return self.ctx.stores
 
     @property

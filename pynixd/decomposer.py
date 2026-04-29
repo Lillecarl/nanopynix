@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .connection import ClientConn
     from .drv_parser import ParsedDerivation
     from .scheduler import DerivationReader, Scheduler
+    from .types.ids import BuildId
 
 log = structlog.get_logger(__name__)
 
@@ -192,7 +193,7 @@ class BuildDecomposer:
                 update_regtime=False,
             )
 
-        drv_to_build_id: dict[str, int] = {}
+        drv_to_build_id: dict[str, BuildId] = {}
 
         for _dp, _output_names, drv_request in resolved:
             if drv_request.drv_path in parsed_cache:
@@ -247,7 +248,7 @@ class BuildDecomposer:
             if parsed is None:
                 continue
 
-            depends_on: set[int] = set()
+            depends_on: set[BuildId] = set()
             for input_drv in parsed.input_drvs:
                 dep_id = drv_to_build_id.get(str(input_drv))
                 if dep_id is not None and dep_id != drv_to_build_id.get(drv_path_str):

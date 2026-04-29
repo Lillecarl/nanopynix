@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from .local_store_db import LocalStoreDB
     from .store import Store
     from .store_path import StorePath
+    from .types.ids import StoreId
 
 log = structlog.get_logger(__name__)
 
@@ -36,7 +37,7 @@ class GarbageCollector:
         if ctx.db is None:
             raise ValueError("GarbageCollector requires a database")
         self.db: LocalStoreDB = ctx.db
-        self.stores: Mapping[str, Store] = ctx.stores
+        self.stores: Mapping[StoreId, Store] = ctx.stores
         self.local_store: Store = ctx.local_store
         self.interval = ctx.settings.gc_interval
         self.local_max_age = ctx.settings.gc_local_max_age

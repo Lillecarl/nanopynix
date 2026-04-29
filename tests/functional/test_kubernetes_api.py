@@ -10,6 +10,7 @@ from pynixd.operations.build_derivation import (
     BuildDerivationResponse,
 )
 from pynixd.store_path import StorePath
+from pynixd.types.ids import StoreId
 from tests.functional.mock_store import MockStore
 
 
@@ -74,7 +75,7 @@ async def test_dynamic_store_management():
         # 3. Remove store with short timeout (force kill)
         # We start the removal in background because it will wait for the build
         remove_task = asyncio.create_task(
-            server.remove_store("remote1", drain_timeout=0.1),
+            server.remove_store(StoreId("remote1"), drain_timeout=0.1),
         )
 
         # Wait for drain timeout to trigger hard-kill

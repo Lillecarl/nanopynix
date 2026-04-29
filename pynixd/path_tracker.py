@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
     from .local_store_db import LocalStoreDB
     from .store_path import StorePath
+    from .types.ids import StoreId
 
 
 class PathTrackerInstance:
@@ -20,7 +21,7 @@ class PathTrackerInstance:
 
     def __init__(
         self,
-        store_id: str,
+        store_id: StoreId,
         parent: PathTracker | None = None,
         initial_paths: set[StorePath] | None = None,
         is_local: bool = False,
@@ -101,40 +102,38 @@ class PathTrackerInstance:
         *,
         update_regtime: bool = True,
     ) -> None:
-        """Replace the current known paths with a new set."""
+        """Replace all known paths and notify parent."""
+        old_paths = self._known_paths
         new_paths = set(paths)
-        removed = self._known_paths - new_paths
-        added = new_paths - self._known_paths
-
         self._known_paths = new_paths
 
         if self.parent is not None:
             self.parent.notify_paths_replaced(
                 self.store_id,
-                added,
-                removed,
+                added=new_paths - old_paths,
+                removed=old_paths - new_paths,
                 update_regtime=update_regtime,
                 is_local=self.is_local,
             )
 
 
 class PathTracker:
-    """Centralized path tracking coordinator owned by the Server.
+    """Central authority for path locality.
 
-    Synchronizes in-memory path states of remote stores with the central
-    LocalStoreDB to persist caching and update GC registration times.
+    Optionally backed by LocalStoreDB for persistent tracking of
+    remote store contents.
     """
 
-    def __init__(self, db: LocalStoreDB | None) -> None:
+    def __init__(self, db: LocalStoreDB | None = None) -> None:
         self.db = db
 
-    def get_instance(
+    def create_instance(
         self,
-        store_id: str,
-        is_local: bool = False,
+        store_id: StoreId,
         initial_paths: set[StorePath] | None = None,
+        is_local: bool = False,
     ) -> PathTrackerInstance:
-        """Create a tracked instance for a store."""
+        """Create a new instance linked to this tracker."""
         return PathTrackerInstance(
             store_id=store_id,
             parent=self,
@@ -144,10 +143,11 @@ class PathTracker:
 
     def notify_path_added(
         self,
-        store_id: str,
+        store_id: StoreId,
         path: StorePath,
-        update_regtime: bool,
-        is_local: bool,
+        *,
+        update_regtime: bool = True,
+        is_local: bool = False,
     ) -> None:
         if self.db is None:
             return
@@ -158,10 +158,11 @@ class PathTracker:
 
     def notify_paths_added(
         self,
-        store_id: str,
+        store_id: StoreId,
         paths: set[StorePath],
-        update_regtime: bool,
-        is_local: bool,
+        *,
+        update_regtime: bool = True,
+        is_local: bool = False,
     ) -> None:
         if self.db is None:
             return
@@ -172,11 +173,12 @@ class PathTracker:
 
     def notify_paths_replaced(
         self,
-        store_id: str,
+        store_id: StoreId,
         added: set[StorePath],
         removed: set[StorePath],
-        update_regtime: bool,
-        is_local: bool,
+        *,
+        update_regtime: bool = True,
+        is_local: bool = False,
     ) -> None:
         if self.db is None:
             return
@@ -186,4 +188,4 @@ class PathTracker:
             if added:
                 self.db.mark_known_paths(store_id, added)
             if removed:
-                self.db.mark_removed_known_paths(store_id, removed)
+                self.db.unmark_known_paths(store_id, removed)

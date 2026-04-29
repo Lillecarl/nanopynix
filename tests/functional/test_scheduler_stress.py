@@ -17,6 +17,7 @@ from pynixd.operations.build_derivation import (
 from pynixd.path_tracker import PathTracker
 from pynixd.scheduler import Scheduler
 from pynixd.store_path import StorePath
+from pynixd.types.ids import StoreId
 from tests.functional.mock_store import MockStore
 
 log = structlog.get_logger(__name__)
@@ -42,7 +43,7 @@ async def test_scheduler_flood_queueing():
     ctx = PynixdContext(
         settings=settings,
         local_store=local_store,
-        _stores={"remote1": remote1, "remote2": remote2},
+        _stores={StoreId("remote1"): remote1, StoreId("remote2"): remote2},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -153,7 +154,7 @@ async def test_scheduler_locality_priority():
     ctx = PynixdContext(
         settings=settings,
         local_store=local_store,
-        _stores={"remote_a": remote_a, "remote_b": remote_b},
+        _stores={StoreId("remote_a"): remote_a, StoreId("remote_b"): remote_b},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)

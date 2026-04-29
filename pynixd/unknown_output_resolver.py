@@ -25,7 +25,6 @@ from .operations.base import (
 from .operations.build_derivation import (
     BuildDerivationRequest,
 )
-from .operations.ca_derivations import RegisterDrvOutputRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import StorePath
 
@@ -36,12 +35,15 @@ if TYPE_CHECKING:
     from .operations.build_derivation import BuildDerivationResponse
     from .scheduler import DerivationReader, Scheduler
     from .store import Store
+    from .types.ids import BuildId
 
 log = structlog.get_logger(__name__)
 
 
-class DynamicDerivationResolver:
-    """Handles resolution of CA and dynamic derivations during the build lifecycle."""
+class UnknownOutputResolver:
+    """Handles resolution of derivations with unknown outputs (deferred or dynamic)
+    during the build lifecycle.
+    """
 
     read_drv_fn: DerivationReader
 
@@ -54,67 +56,6 @@ class DynamicDerivationResolver:
         self.local_store = scheduler.local_store
         self.queue = scheduler.queue
         self.read_drv_fn = read_drv_fn or read_drv_file
-
-    async def register_dep_realisations(self, build: QueuedBuild, store: Store) -> None:
-        """Register CA realisations from completed dependency builds on the
-        target builder store so it can resolve deferred output paths.
-        """
-        for dep_id in build.depends_on:
-            dep_build = self.queue.by_id.get(dep_id)
-            if dep_build is None or not dep_build.ca_realisations:
-                continue
-
-            if store is self.local_store:
-                # Realisations already registered on local store during
-                # the dependency build's completion
-                continue
-
-            for realisation in dep_build.ca_realisations:
-                try:
-                    reg_req = RegisterDrvOutputRequest(realisation=realisation)
-                    log.debug(
-                        "registering_dep_realisation_on_builder",
-                        build_id=build.id,
-                        dep_build_id=dep_id,
-                        store_id=store.store_id,
-                        realisation=realisation,
-                    )
-                    await store.call(reg_req, suppress_last=True)
-                    log.debug(
-                        "registered_dep_realisation_on_builder",
-                        build_id=build.id,
-                        dep_build_id=dep_id,
-                        store_id=store.store_id,
-                    )
-                except Exception as exc:
-                    log.warning(
-                        "register_dep_realisation_failed",
-                        build_id=build.id,
-                        dep_build_id=dep_id,
-                        store_id=store.store_id,
-                        exc_info=True,
-                        error=str(exc),
-                    )
-
-    async def register_built_outputs(
-        self,
-        build: QueuedBuild,
-        resp: BuildDerivationResponse,
-    ) -> None:
-        """Register CA realisations from a completed build on the local store."""
-        if not resp.result.built_outputs:
-            return
-
-        for drv_output_str, realisation in resp.result.built_outputs.items():
-            try:
-                reg_req = RegisterDrvOutputRequest(realisation=realisation)
-                await self.local_store.execute(reg_req, suppress_last=True)
-            except Exception:
-                log.warning(
-                    "register_drv_output_failed",
-                    drv_output=drv_output_str,
-                    exc_info=True,
-                )
 
     async def resolve_deferred_derivation(
         self,
@@ -624,7 +565,7 @@ class DynamicDerivationResolver:
     def link_dynamic_deps(
         self,
         outer_build: QueuedBuild,
-        inner_build_id: int,
+        inner_build_id: BuildId,
         inner_derivation: BasicDerivation,
     ) -> None:
         """After trampoline enqueues an inner build, add DAG edges from

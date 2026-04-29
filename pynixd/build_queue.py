@@ -6,13 +6,14 @@ import asyncio
 import heapq
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import structlog
 
 from . import metrics
 from .operations.build_derivation import BuildDerivationResponse
 from .types.build import BuildResult, BuildResultStatus
+from .types.ids import BuildId, RequestId, StoreId
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from .operations.build_derivation import BuildDerivationRequest
     from .store_path import StorePath
     from .types.build import BuildMode
+    from .types.ca import Realisation
     from .types.path_info import UnkeyedValidPathInfo
 
 log = structlog.get_logger(__name__)
@@ -55,23 +57,23 @@ class SchedulerBuildRequest:
     the client asked for are satisfied.
     """
 
-    id: int
+    id: RequestId
     derived_paths: set[DerivedPath]
     build_mode: BuildMode
     client: ClientConn | None
     future: asyncio.Future[dict[DerivedPath, BuildResult]]
-    active_build_ids: set[int] = field(default_factory=set)
-    all_build_ids: set[int] = field(default_factory=set)
-    build_to_derived: dict[int, set[DerivedPath]] = field(default_factory=dict)
+    active_build_ids: set[BuildId] = field(default_factory=set)
+    all_build_ids: set[BuildId] = field(default_factory=set)
+    build_to_derived: dict[BuildId, set[DerivedPath]] = field(default_factory=dict)
     results: dict[DerivedPath, BuildResult] = field(default_factory=dict)
 
-    def add_build(self, build_id: int, derived_paths: set[DerivedPath]) -> None:
+    def add_build(self, build_id: BuildId, derived_paths: set[DerivedPath]) -> None:
         """Track a new build as part of this request."""
         self.active_build_ids.add(build_id)
         self.all_build_ids.add(build_id)
         self.build_to_derived[build_id] = derived_paths
 
-    def build_completed(self, build_id: int) -> bool:
+    def build_completed(self, build_id: BuildId) -> bool:
         """Remove build from active set. Returns True if request is complete."""
         self.active_build_ids.discard(build_id)
         return not self.active_build_ids
@@ -94,7 +96,7 @@ class QueuedBuild:
     - is_done: future resolved
     """
 
-    id: int  # Global incrementing ID
+    id: BuildId  # Global incrementing ID
     request: BuildDerivationRequest  # The request to forward to the backend
     client: ClientConn | None  # Client connection for stderr forwarding
     required_paths: dict[StorePath, UnkeyedValidPathInfo]
@@ -106,27 +108,31 @@ class QueuedBuild:
     started_at: float | None = field(default=None, repr=False)
     finished_at: float | None = field(default=None, repr=False)
     retries: int = 0
-    store_failures: dict[str, int] = field(default_factory=dict)
-    build_task: asyncio.Task | None = field(default=None, repr=False)
+    store_failures: dict[StoreId, int] = field(default_factory=dict)
+    build_task: asyncio.Task[Any] | None = field(default=None, repr=False)
 
     # Build DAG: build IDs this build depends on (must complete before this
     # can be scheduled). Populated during decomposition for CA dependency
     # ordering.
-    depends_on: set[int] = field(default_factory=set)
+    depends_on: set[BuildId] = field(default_factory=set)
+
+    # Track which builds depend on this one (reversed depends_on)
+    # Used for efficient DAG updates when a build completes.
+    dependents: set[BuildId] = field(default_factory=set, repr=False)
 
     # CA realisations from this build's outputs, populated after successful
     # build completion. Used to register realisations on builder stores
     # before building dependent (deferred) derivations.
-    ca_realisations: list[dict] = field(default_factory=list, repr=False)
+    ca_realisations: list[Realisation] = field(default_factory=list, repr=False)
 
     # The store that was assigned to execute this build, set when
     # execute_build begins.
-    assigned_store_id: str | None = field(default=None)
+    assigned_store_id: StoreId | None = field(default=None)
 
     # Back-reference to the SchedulerBuildRequest this build belongs to.
     # Set when the build is enqueued via build_derived_paths().
     # None for standalone build_derivation() calls.
-    scheduler_request_id: int | None = field(default=None)
+    scheduler_request_id: RequestId | None = field(default=None)
 
     # Dynamic input derivations from DrvWithVersion .drv files.
     # {drv_path: {output_name: [nested_output_name, ...], ...}}
@@ -153,11 +159,11 @@ class QueuedBuild:
     def is_pending(self) -> bool:
         return not self.is_building and not self.is_done
 
-    def is_blacklisted(self, store_id: str) -> bool:
+    def is_blacklisted(self, store_id: StoreId) -> bool:
         """Check if a specific store has exceeded the retry limit for this build."""
         return self.store_failures.get(store_id, 0) >= MAX_STORE_RETRIES
 
-    def reset_for_retry(self, failed_store_id: str) -> None:
+    def reset_for_retry(self, failed_store_id: StoreId) -> None:
         """Reset state for retry on next scheduling pass.
 
         Called after a build or infrastructure failure. The build will
@@ -213,10 +219,10 @@ class BuildQueue:
     def __init__(self) -> None:
         self._queue: list[QueuedBuild] = []
         self._by_key: dict[BuildKey, QueuedBuild] = {}  # For deduplication
-        self._by_id: dict[int, QueuedBuild] = {}  # For DAG lookups
-        self._requests: dict[int, SchedulerBuildRequest] = {}
-        self.next_id: int = 1
-        self.next_request_id: int = 1
+        self._by_id: dict[BuildId, QueuedBuild] = {}  # For DAG lookups
+        self._requests: dict[RequestId, SchedulerBuildRequest] = {}
+        self.next_id = 1
+        self.next_request_id = 1
         self.lock: asyncio.Lock = asyncio.Lock()
 
     @property
@@ -225,12 +231,12 @@ class BuildQueue:
         return self._queue
 
     @property
-    def by_id(self) -> Mapping[int, QueuedBuild]:
+    def by_id(self) -> Mapping[BuildId, QueuedBuild]:
         """Read-only mapping of build_id to QueuedBuild."""
         return self._by_id
 
     @property
-    def requests(self) -> Mapping[int, SchedulerBuildRequest]:
+    def requests(self) -> Mapping[RequestId, SchedulerBuildRequest]:
         """Read-only mapping of request_id to SchedulerBuildRequest."""
         return self._requests
 
@@ -239,13 +245,14 @@ class BuildQueue:
         derived_paths: set[DerivedPath],
         build_mode: BuildMode,
         client: ClientConn | None,
-    ) -> tuple[int, SchedulerBuildRequest]:
+    ) -> tuple[RequestId, SchedulerBuildRequest]:
         """Create a SchedulerBuildRequest and return it."""
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[DerivedPath, BuildResult]] = loop.create_future()
         async with self.lock:
+            req_id = RequestId(self.next_request_id)
             req = SchedulerBuildRequest(
-                id=self.next_request_id,
+                id=req_id,
                 derived_paths=derived_paths,
                 build_mode=build_mode,
                 client=client,
@@ -262,9 +269,9 @@ class BuildQueue:
         required_paths: dict[StorePath, UnkeyedValidPathInfo],
         platform: str = "",
         expected_duration: int | None = None,
-        scheduler_request_id: int | None = None,
+        scheduler_request_id: RequestId | None = None,
         derived_paths_for_request: set[DerivedPath] | None = None,
-    ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
+    ) -> tuple[BuildId, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue (deduplicates if already present).
 
         Returns (build_id, future) - caller awaits the future for the response.
@@ -297,8 +304,9 @@ class BuildQueue:
             # Create new build with future
             loop = asyncio.get_running_loop()
             future: asyncio.Future[BuildDerivationResponse] = loop.create_future()
+            build_id = BuildId(self.next_id)
             build = QueuedBuild(
-                id=self.next_id,
+                id=build_id,
                 request=request,
                 client=client,
                 required_paths=required_paths,
@@ -335,7 +343,7 @@ class BuildQueue:
                 key=lambda b: b.id,
             )
 
-    async def set_depends_on(self, build_id: int, depends_on: set[int]) -> None:
+    async def set_depends_on(self, build_id: BuildId, depends_on: set[BuildId]) -> None:
         """Set the build DAG dependencies for a build.
 
         Called after decomposition to link inter-drv dependencies.
@@ -347,7 +355,7 @@ class BuildQueue:
 
     async def complete(
         self,
-        build_id: int,
+        build_id: BuildId,
         response: BuildDerivationResponse,
     ) -> ClientConn | None:
         """Mark build as completed, resolve the future.
@@ -372,7 +380,7 @@ class BuildQueue:
                     return b.client
         raise ValueError(f"Build {build_id} not found")
 
-    async def fail(self, build_id: int, error_msg: str) -> ClientConn | None:
+    async def fail(self, build_id: BuildId, error_msg: str) -> ClientConn | None:
         """Mark build as failed, resolve future with an error response.
 
         Returns the client connection for the caller to use.

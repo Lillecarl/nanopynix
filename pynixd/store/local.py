@@ -16,6 +16,7 @@ import structlog
 from ..config import PynixdSettings
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, create_monitor
+from ..types.ids import StoreId
 from ..wire import UnixNixReader, UnixNixWriter
 from .base import Store
 
@@ -41,7 +42,7 @@ class LocalSocketStore(Store):
 
     def __init__(
         self,
-        store_id: str | None = None,
+        store_id: str | StoreId,
         store_path: Path | None = None,
         socket_path: Path | None = None,
         feature_matrix: dict[str, set[str]] | None = None,
@@ -64,7 +65,7 @@ class LocalSocketStore(Store):
             self.socket_path = DAEMON_SOCKET_PATH
 
         super().__init__(
-            store_id=store_id or f"local-socket:{self.socket_path}",
+            store_id=StoreId(store_id),
             store_path=store_path,
             feature_matrix=feature_matrix,
             probe=probe,

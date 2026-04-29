@@ -17,6 +17,7 @@ from .build import (
 from .build import (
     BuiltOutput as BuiltOutput,
 )
+from .ca import Realisation as Realisation
 from .context import RequestContext as RequestContext
 from .derivation import (
     BasicDerivation as BasicDerivation,
@@ -27,6 +28,9 @@ from .derivation import (
 from .derivation import (
     OutputKind as OutputKind,
 )
+from .ids import BuildId as BuildId
+from .ids import RequestId as RequestId
+from .ids import StoreId as StoreId
 from .logs import OperationLogs as OperationLogs
 from .path_info import (
     SubstitutablePathInfo as SubstitutablePathInfo,

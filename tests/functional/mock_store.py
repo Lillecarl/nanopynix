@@ -16,6 +16,7 @@ from pynixd.operations.query_closure_with_info import QueryClosureWithInfoReques
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
 from pynixd.store.base import Store
 from pynixd.store_path import StorePath
+from pynixd.types.ids import StoreId
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -114,14 +115,14 @@ class MockStore(Store):
 
     def __init__(
         self,
-        store_id: str,
+        store_id: str | StoreId,
         feature_matrix: dict[str, set[str]] | None = None,
         cpu_utilization: float = 0.0,
     ) -> None:
         # We pass probe=False to disable the background task that normally
         # tries to run 'nix show-derivation' on real stores.
         super().__init__(
-            store_id=store_id,
+            store_id=StoreId(store_id),
             store_path=Path(f"/mock/{store_id}"),
             feature_matrix=feature_matrix,
             probe=False,

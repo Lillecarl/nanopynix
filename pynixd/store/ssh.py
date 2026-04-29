@@ -17,6 +17,7 @@ from .. import wire
 from ..config import PynixdSettings
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, GenericResourcePoller, ResourceMonitor
+from ..types.ids import StoreId
 from ..wire import SSHNixReader, SSHNixWriter
 from .base import Store
 
@@ -231,7 +232,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
     def __init__(
         self,
         host: str,
-        store_id: str | None = None,
+        store_id: str | StoreId | None = None,
         port: int = 22,
         username: str | None = None,
         store_path: Path = Path("/"),
@@ -242,7 +243,9 @@ class SSHSubprocessStore(_SSHStoreMixin):
         nix_bin: str = "nix",
     ) -> None:
         super().__init__(
-            store_id=store_id or f"ssh:{username or ''}@{host}:{port}",
+            store_id=StoreId(store_id)
+            if isinstance(store_id, str)
+            else (store_id or StoreId(f"ssh:{username or ''}@{host}:{port}")),
             store_path=store_path,
             feature_matrix=feature_matrix,
             probe=probe,
@@ -307,7 +310,7 @@ class SSHSocketStore(_SSHStoreMixin):
     def __init__(
         self,
         host: str,
-        store_id: str | None = None,
+        store_id: StoreId | None = None,
         port: int = 22,
         username: str | None = None,
         socket_path: Path = DAEMON_SOCKET_PATH,
@@ -317,7 +320,7 @@ class SSHSocketStore(_SSHStoreMixin):
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
     ) -> None:
         super().__init__(
-            store_id=store_id or f"ssh-socket:{username or ''}@{host}:{port}",
+            store_id=store_id or StoreId(f"ssh-socket:{username or ''}@{host}:{port}"),
             feature_matrix=feature_matrix,
             probe=probe,
         )

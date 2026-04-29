@@ -13,6 +13,7 @@ from ..store_path import DrvOutput, StorePath
 
 if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
+    from .ca import Realisation
 
 
 class BuildResultStatus(IntEnum):
@@ -110,7 +111,7 @@ class BuildResult:
     stop_time: int = 0
     cpu_user: int | None = None
     cpu_system: int | None = None
-    built_outputs: dict[DrvOutput, dict] = field(default_factory=dict)
+    built_outputs: dict[DrvOutput, Realisation] = field(default_factory=dict)
 
     async def from_reader(self, reader: NixReader, version: int) -> BuildResult:
         from .. import wire

@@ -14,6 +14,8 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from .types.ids import StoreId
+
 
 class ScheduleMode(StrEnum):
     auto = "auto"
@@ -92,7 +94,7 @@ class LocalSocketStoreSpec(BaseModel):
 
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return LocalSocketStore(
-            store_id=self.store_id,
+            store_id=StoreId(self.store_id) if self.store_id else StoreId("local-socket"),
             store_path=self.store_path,
             socket_path=self.socket_path,
             feature_matrix=feature_matrix,
@@ -121,7 +123,7 @@ class LocalSubprocessStoreSpec(BaseModel):
 
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return LocalSocketStore(
-            store_id=self.store_id,
+            store_id=StoreId(self.store_id) if self.store_id else StoreId("local-socket"),
             store_path=self.store_path,
             feature_matrix=feature_matrix,
             probe=feature_matrix is None,
@@ -150,7 +152,9 @@ class SSHSubprocessStoreSpec(BaseModel):
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return SSHSubprocessStore(
             host=self.host,
-            store_id=self.store_id,
+            store_id=StoreId(self.store_id)
+            if self.store_id
+            else StoreId(f"ssh:{self.username or ''}@{self.host}:{self.port}"),
             port=self.port,
             username=self.username,
             store_path=self.store_path,
@@ -178,7 +182,9 @@ class SSHSocketStoreSpec(BaseModel):
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return SSHSocketStore(
             host=self.host,
-            store_id=self.store_id,
+            store_id=StoreId(self.store_id)
+            if self.store_id
+            else StoreId(f"ssh-socket:{self.username or ''}@{self.host}:{self.port}"),
             port=self.port,
             username=self.username,
             socket_path=self.socket_path,
@@ -284,17 +290,19 @@ class PynixdSettings(BaseSettings):
 
         return (init_settings, env_settings, _ConfigFileSource(settings_cls))
 
-    def to_stores(self) -> tuple[Store, dict[str, Store]]:
+    def to_stores(self) -> tuple[Store, dict[StoreId, Store]]:
         """Convert all store specs to live Store instances, separating out 'local'."""
         from .store import LocalSocketStore
 
-        stores: dict[str, Store] = {}
+        stores: dict[StoreId, Store] = {}
         for spec in self.stores:
             store = spec.to_store()
             stores[store.store_id] = store
 
         local_store = (
-            stores.pop("local") if "local" in stores else LocalSocketStore(store_id="local", store_path=Path("/"))
+            stores.pop(StoreId("local"))
+            if StoreId("local") in stores
+            else LocalSocketStore(store_id=StoreId("local"), store_path=Path("/"))
         )
 
         return local_store, stores

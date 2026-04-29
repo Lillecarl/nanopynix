@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from .build_queue import QueuedBuild
     from .config import PynixdSettings
     from .store import Store
+    from .types.ids import StoreId
 
 log = structlog.get_logger(__name__)
 
@@ -23,7 +24,7 @@ TINY_BUILD_THRESHOLD_MS = 2500
 
 @dataclass
 class RankedStore:
-    store_id: str
+    store_id: StoreId
     score: float
     store: Store
 
@@ -53,8 +54,8 @@ class StoreRanker(ABC):
         self,
         build: QueuedBuild,
         stores: list[Store],
-        assigned_this_pass: Mapping[str, int],
-        override_in_flight: Mapping[str, int] | None = None,
+        assigned_this_pass: Mapping[StoreId, int],
+        override_in_flight: Mapping[StoreId, int] | None = None,
     ) -> RankedStores:
         """Score and sort available stores for the given build."""
         ...
@@ -70,8 +71,8 @@ class TelemetryStoreRanker(StoreRanker):
         self,
         build: QueuedBuild,
         stores: list[Store],
-        assigned_this_pass: Mapping[str, int],
-        override_in_flight: Mapping[str, int] | None = None,
+        assigned_this_pass: Mapping[StoreId, int],
+        override_in_flight: Mapping[StoreId, int] | None = None,
     ) -> RankedStores:
         ranked = []
         for store in stores:
@@ -136,11 +137,11 @@ class TelemetryStoreRanker(StoreRanker):
 
 
 class BuildAllocator:
-    """Ranks and selects stores for a build using a pluggable ranker."""
+    """Orchestrates ranking and selection of stores for builds."""
 
     def __init__(
         self,
-        stores: Mapping[str, Store],
+        stores: Mapping[StoreId, Store],
         local_store: Store,
         ranker: StoreRanker,
     ) -> None:
@@ -151,8 +152,8 @@ class BuildAllocator:
     def rank_stores(
         self,
         build: QueuedBuild,
-        assigned_this_pass: Mapping[str, int],
-        override_in_flight: Mapping[str, int] | None = None,
+        assigned_this_pass: Mapping[StoreId, int],
+        override_in_flight: Mapping[StoreId, int] | None = None,
     ) -> RankedStores:
         """Rank stores for a build using the injected ranker."""
         build_features = build.request.derivation.effective_required_features

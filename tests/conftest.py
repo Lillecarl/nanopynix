@@ -21,6 +21,7 @@ from environs import env
 from pynixd import Server
 from pynixd.store import LocalSocketStore
 from pynixd.testing import clear_test_stash
+from pynixd.types.ids import StoreId
 from tests.nix_config import NixConfig
 
 if TYPE_CHECKING:
@@ -634,12 +635,12 @@ async def pynixd_server(
     rmtree_robust(socket_path)
 
     local_store = LocalSocketStore(
-        store_id="local",
+        store_id=StoreId("local"),
         store_path=local_path,
         **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG),
     )
     builder_store = LocalSocketStore(
-        store_id="builder",
+        store_id=StoreId("builder"),
         store_path=builder_path,
         **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG),
     )
@@ -648,7 +649,7 @@ async def pynixd_server(
 
     async with Server(
         local_store=local_store,
-        stores={"builder": builder_store},
+        stores={StoreId("builder"): builder_store},
         ssh_port=SESSION_SSH_PORT,
         http_port=SESSION_HTTP_PORT,
         unix_path=socket_path,

@@ -31,6 +31,7 @@ from pynixd.operations.query_valid_paths import (
 from pynixd.path_tracker import PathTracker
 from pynixd.scheduler import Scheduler
 from pynixd.store_path import StorePath
+from pynixd.types.ids import StoreId
 from tests.functional.mock_store import MockStore
 
 """
@@ -66,7 +67,7 @@ async def test_scheduler_load_balancing():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        _stores={"remote1": remote1},
+        _stores={StoreId("remote1"): remote1},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -103,7 +104,7 @@ async def test_scheduler_load_balancing():
             break
         await asyncio.sleep(0.01)
 
-    assert queued_build.assigned_store_id == "remote1"
+    assert queued_build.assigned_store_id == StoreId("remote1")
 
     # 6. Wait for completion
     resp = await future
@@ -122,8 +123,8 @@ async def test_scheduler_skips_saturated_store():
     - Build is assigned only after a slot is manually released.
     """
 
-    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
-    remote1 = MockStore("remote1", feature_matrix={"x86_64-linux": set()})
+    local_store = MockStore(StoreId("local"), feature_matrix={"x86_64-linux": set()})
+    remote1 = MockStore(StoreId("remote1"), feature_matrix={"x86_64-linux": set()})
 
     # Simulate saturation by manually incrementing active connections
     # A concurrency penalty of 50.0 per connection will push the score below 0.0
@@ -134,7 +135,7 @@ async def test_scheduler_skips_saturated_store():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        _stores={"remote1": remote1},
+        _stores={StoreId("remote1"): remote1},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -178,7 +179,7 @@ async def test_scheduler_skips_saturated_store():
         if queued_build.assigned_store_id is not None:
             break
         await asyncio.sleep(0.01)
-    assert queued_build.assigned_store_id == "remote1"
+    assert queued_build.assigned_store_id == StoreId("remote1")
 
 
 @pytest.mark.asyncio
@@ -210,7 +211,7 @@ async def test_scheduler_proactive_transfer():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        _stores={"busy": remote_busy, "idle": remote_idle},
+        _stores={StoreId("busy"): remote_busy, StoreId("idle"): remote_idle},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -274,7 +275,7 @@ async def test_scheduler_decomposition_and_ordering():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        _stores={"remote1": remote1},
+        _stores={StoreId("remote1"): remote1},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -413,7 +414,7 @@ async def test_scheduler_cpu_utilization():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        _stores={"hot": remote_hot, "cold": remote_cold},
+        _stores={StoreId("hot"): remote_hot, StoreId("cold"): remote_cold},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -480,7 +481,7 @@ async def test_scheduler_feature_matching():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         local_store=local_store,
-        _stores={"plain": remote_plain, "full": remote_full},
+        _stores={StoreId("plain"): remote_plain, StoreId("full"): remote_full},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -669,14 +670,14 @@ async def test_add_store_dynamic_registers_feature_matrix():
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
-    ctx._stores["remote"] = remote
+    ctx._stores[StoreId("remote")] = remote
     scheduler.on_store_added(remote, dynamic=True)
 
     assert "aarch64-darwin" in scheduler.dynamic_feature_matrix
     assert "kvm" in scheduler.dynamic_feature_matrix["aarch64-darwin"]
 
     # Now remove the store — dynamic_feature_matrix should persist
-    ctx._stores.pop("remote", None)
+    ctx._stores.pop(StoreId("remote"), None)
     assert "aarch64-darwin" in scheduler.dynamic_feature_matrix
 
 
@@ -696,11 +697,11 @@ async def test_dynamic_feature_matrix_survives_store_removal():
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
-    ctx._stores["remote"] = remote
+    ctx._stores[StoreId("remote")] = remote
     scheduler.on_store_added(remote, dynamic=True)
 
     # Remove the store
-    ctx._stores.pop("remote", None)
+    ctx._stores.pop(StoreId("remote"), None)
 
     # Enqueue a build for the removed store's platform
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")

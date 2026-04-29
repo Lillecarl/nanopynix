@@ -16,6 +16,7 @@ from pynixd.operations.query_valid_paths import (
 )
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
+from pynixd.types.ids import StoreId
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
@@ -90,7 +91,7 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
 
     async with Server(
         local_store=pynixd_local,
-        stores={"remote": pynixd_remote},
+        stores={StoreId("remote"): pynixd_remote},
         ssh_port=None,
     ):
         # Manually add a path to the remote store
@@ -120,7 +121,7 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
 
     async with Server(
         local_store=pynixd_local_2,
-        stores={"remote": pynixd_remote_2},
+        stores={StoreId("remote"): pynixd_remote_2},
         ssh_port=None,
     ):
         # Check if the path was loaded from DB and verified
@@ -157,7 +158,7 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
 
     async with Server(
         local_store=pynixd_local,
-        stores={"remote": pynixd_remote},
+        stores={StoreId("remote"): pynixd_remote},
         ssh_port=None,
     ):
         pynixd_remote.tracker.add_known_path(path_valid)
@@ -198,7 +199,7 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
 
     async with Server(
         local_store=pynixd_local_2,
-        stores={"remote": pynixd_remote_2},
+        stores={StoreId("remote"): pynixd_remote_2},
         ssh_port=None,
     ):
         # path_stale should be gone from memory
@@ -210,7 +211,7 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
         await pynixd_local_2.db.flush_regtime()
 
         # Check DB directly
-        db_paths = await pynixd_local_2.db.get_known_paths("remote")
+        db_paths = await pynixd_local_2.db.get_known_paths(StoreId("remote"))
         assert path_valid in db_paths
         assert path_stale not in db_paths
         log.info("cleanup_verified")
@@ -241,7 +242,7 @@ async def test_is_valid_path_isolation(tmp_path: Path) -> None:
 
     async with Server(
         local_store=pynixd_local,
-        stores={"remote": pynixd_remote},
+        stores={StoreId("remote"): pynixd_remote},
         ssh_port=None,
     ):
         # 1. Add a path to LOCAL store only

@@ -12,6 +12,7 @@ import structlog
 from pynixd import Server
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
+from pynixd.types.ids import StoreId
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
@@ -92,7 +93,7 @@ async def test_pynixd_delegation_build(tmp_path: Path) -> None:
 
         async with Server(
             local_store=store_a,
-            stores={"builder-b": store_a_b},
+            stores={StoreId("builder-b"): store_a_b},
             ssh_port=None,
             unix_path=unix_path_a,
             http_port=None,

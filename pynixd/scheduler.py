@@ -24,13 +24,14 @@ import structlog
 from . import metrics
 from .allocator import TINY_BUILD_THRESHOLD_MS, BuildAllocator, TelemetryStoreRanker
 from .build_queue import BuildQueue, QueuedBuild
+from .ca_realisation_manager import CaRealisationManager
 from .decomposer import BuildDecomposer
-from .dynamic_resolver import DynamicDerivationResolver
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .operations.base import BuildMode, UnkeyedValidPathInfo
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .stderr import StderrNext
 from .store_path import StorePath
+from .unknown_output_resolver import UnknownOutputResolver
 
 if TYPE_CHECKING:
     from .connection import ClientConn
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
     )
     from .operations.build_paths import BuildPathsWithResultsResponse
     from .store import Store
+    from .types.ids import BuildId, RequestId, StoreId
 
 from .store.transfer import stream_paths_store_to_store
 
@@ -67,13 +69,14 @@ class Scheduler:
         self.ranker = TelemetryStoreRanker(ctx.settings)
         self.allocator = BuildAllocator(self.ctx.stores, self.local_store, self.ranker)
         self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
-        self.dynamic_resolver = DynamicDerivationResolver(self, read_drv_fn=read_drv_fn)
+        self.ca_realisation_manager = CaRealisationManager(self)
+        self.unknown_output_resolver = UnknownOutputResolver(self, read_drv_fn=read_drv_fn)
         self.trigger_event = asyncio.Event()
         self.running = False
         self.last_activity_at: float = time.monotonic()
 
     @property
-    def stores(self) -> Mapping[str, Store]:
+    def stores(self) -> Mapping[StoreId, Store]:
         return self.ctx.stores
 
     @property
@@ -128,7 +131,7 @@ class Scheduler:
             return True
         return features.issubset(sys_features)
 
-    async def drain_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
+    async def drain_store(self, store_id: StoreId, drain_timeout: float = 300.0) -> None:
         """Gracefully drain and stop using a store for new builds."""
         store = self.ctx.stores.get(store_id)
         if not store:
@@ -176,9 +179,9 @@ class Scheduler:
         client: ClientConn | None,
         required_paths: set[StorePath] | dict[StorePath, UnkeyedValidPathInfo],
         platform: str = "",
-        scheduler_request_id: int | None = None,
+        scheduler_request_id: RequestId | None = None,
         derived_paths_for_request: set[DerivedPath] | None = None,
-    ) -> tuple[int, asyncio.Future[BuildDerivationResponse]]:
+    ) -> tuple[BuildId, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue and trigger the scheduler."""
         hint = None
         if self.local_store.db:
@@ -289,12 +292,12 @@ class Scheduler:
 
         # Count builds assigned to each store to avoid double-counting with s.in_flight
         # which already includes some/all building jobs that have acquired connections.
-        assigned_count: dict[str, int] = {s.store_id: 0 for s in self.stores.values()}
+        assigned_count: dict[StoreId, int] = {s.store_id: 0 for s in self.stores.values()}
         for build in pending:
             if build.is_building and build.assigned_store_id:
                 assigned_count[build.assigned_store_id] += 1
 
-        override_in_flight: dict[str, int] = {
+        override_in_flight: dict[StoreId, int] = {
             s.store_id: max(s.in_flight, assigned_count[s.store_id]) for s in self.stores.values()
         }
 
@@ -323,7 +326,7 @@ class Scheduler:
         # Load balancing: prefer backends with the most relevant paths already present
         # and with free resources.
         waiting_slot: list[QueuedBuild] = []
-        assigned_this_pass: dict[str, int] = {}
+        assigned_this_pass: dict[StoreId, int] = {}
 
         for build in schedulable:
             # 1. Check for "Tiny Build" fast-track to local store
@@ -389,7 +392,7 @@ class Scheduler:
                     for line in error_msg.split("\n"):
                         await client.queue.put(StderrNext(text=f"pynixd: {line}\n"))
                 if build.scheduler_request_id is not None:
-                    await self.dynamic_resolver.on_build_complete_failed(
+                    await self.unknown_output_resolver.on_build_complete_failed(
                         build,
                         error_msg,
                     )
@@ -428,7 +431,7 @@ class Scheduler:
                                 StderrNext(text=f"pynixd: {line}\n"),
                             )
                     if build.scheduler_request_id is not None:
-                        await self.dynamic_resolver.on_build_complete_failed(
+                        await self.unknown_output_resolver.on_build_complete_failed(
                             build,
                             error_msg,
                         )
@@ -467,12 +470,12 @@ class Scheduler:
                 # on the target builder store so it can resolve deferred
                 # derivation output paths.
                 if build.depends_on:
-                    await self.dynamic_resolver.register_dep_realisations(build, store)
-                    await self.dynamic_resolver.resolve_deferred_derivation(
+                    await self.ca_realisation_manager.register_dep_realisations(build, store)
+                    await self.unknown_output_resolver.resolve_deferred_derivation(
                         build,
                         store,
                     )
-                    await self.dynamic_resolver.resolve_dynamic_derivation(build, store)
+                    await self.unknown_output_resolver.resolve_dynamic_derivation(build, store)
 
                 # Strip pynixd-handled features from requiredSystemFeatures.
                 # After resolution, the backend daemon doesn't need to see
@@ -542,7 +545,7 @@ class Scheduler:
                     )
 
                     # Register CA realisations after outputs are in local store
-                    await self.dynamic_resolver.register_built_outputs(build, resp)
+                    await self.ca_realisation_manager.register_built_outputs(build, resp)
 
                     # 4. Record build statistics
                     if self.local_store.db:
@@ -580,10 +583,11 @@ class Scheduler:
             log.exception("build_crashed", build_id=build.id)
             await self.queue.fail(build.id, "Internal scheduler error")
             if build.scheduler_request_id is not None:
-                await self.dynamic_resolver.on_build_complete_failed(
+                await self.unknown_output_resolver.on_build_complete_failed(
                     build,
                     "Internal scheduler error",
                 )
+
             self.trigger()
 
         # Release semaphore FIRST, then complete and trigger
@@ -591,5 +595,5 @@ class Scheduler:
         if build_resp is not None:
             await self.queue.complete(build.id, build_resp)
             if build.scheduler_request_id is not None:
-                await self.dynamic_resolver.on_build_complete(build, build_resp)
+                await self.unknown_output_resolver.on_build_complete(build, build_resp)
             self.trigger()

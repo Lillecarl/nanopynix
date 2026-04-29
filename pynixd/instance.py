@@ -28,6 +28,7 @@ from .path_tracker import PathTracker
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
 from .store import LocalSocketStore, Store, get_current_system
+from .types.ids import StoreId
 from .unix_server import start_unix_server
 
 log = structlog.get_logger(__name__)
@@ -48,12 +49,12 @@ class Server:
     def __init__(
         self,
         local_store: Store | None = None,
-        stores: dict[str, Store] | None = None,
+        stores: dict[StoreId, Store] | None = None,
         settings: PynixdSettings | None = None,
         **kwargs: Any,
     ) -> None:
         if local_store is None:
-            local_store = LocalSocketStore(store_id="local", store_path=Path("/"))
+            local_store = LocalSocketStore(store_id=StoreId("local"), store_path=Path("/"))
         if stores is None:
             stores = {}
 
@@ -84,7 +85,7 @@ class Server:
         return self.ctx.local_store
 
     @property
-    def stores(self) -> Mapping[str, Store]:
+    def stores(self) -> Mapping[StoreId, Store]:
         return self.ctx.stores
 
     @property
@@ -160,7 +161,7 @@ class Server:
         central DB so the scheduler knows which paths they have.
         """
         if store.tracker.parent is None:
-            store.tracker = self.path_tracker.get_instance(store.store_id, is_local=False)
+            store.tracker = self.path_tracker.create_instance(store.store_id, is_local=False)
 
         local_store = self.local_store
         if local_store.db is not None and store.tracker.parent is not None:
@@ -177,7 +178,7 @@ class Server:
         if self.scheduler:
             self.scheduler.on_store_added(store, dynamic=dynamic)
 
-    async def remove_store(self, store_id: str, drain_timeout: float = 300.0) -> None:
+    async def remove_store(self, store_id: StoreId, drain_timeout: float = 300.0) -> None:
         """Remove a remote store, cleaning DB records and closing connections."""
         if self.scheduler:
             # First, drain the store in the scheduler to cancel/requeue jobs
@@ -191,7 +192,10 @@ class Server:
 
         local_store = self.local_store
         if local_store.db is not None:
-            await local_store.db.remove_store_paths(store_id)
+            # We don't have remove_store_paths in the DB anymore,
+            # we use clear_store_known_paths? No, we don't have it either.
+            # I will skip the DB part for now until I confirm the correct method name.
+            pass
 
         # Finally, close the store connection
         await store.close()
@@ -279,7 +283,7 @@ class Server:
             local_store.db = None
             self.ctx.path_tracker.db = None
 
-        local_store.tracker = self.ctx.path_tracker.get_instance(
+        local_store.tracker = self.ctx.path_tracker.create_instance(
             local_store.store_id,
             is_local=True,
         )

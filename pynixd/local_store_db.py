@@ -30,6 +30,8 @@ from .store_path import StorePath
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from .types.ids import StoreId
+
 log = structlog.get_logger(__name__)
 
 
@@ -151,8 +153,8 @@ class LocalStoreDB:
         self.regtime_flush_interval = regtime_flush_interval
 
         self.pending_regtime: set[StorePath] = set()
-        self.pending_known_paths: dict[str, set[StorePath]] = {}
-        self.pending_removed_known_paths: dict[str, set[StorePath]] = {}
+        self.pending_known_paths: dict[StoreId, set[StorePath]] = {}
+        self.pending_removed_known_paths: dict[StoreId, set[StorePath]] = {}
         self.flush_task: asyncio.Task[None] | None = None
 
         self._all_conns: list[aiosqlite.Connection] = []
@@ -317,14 +319,14 @@ class LocalStoreDB:
         if self.active and not self.read_only:
             self.pending_regtime.update(paths)
 
-    def mark_known_paths(self, store_id: str, paths: set[StorePath]) -> None:
+    def mark_known_paths(self, store_id: StoreId, paths: set[StorePath]) -> None:
         """Queue paths to be recorded as known on a specific store."""
         if self.active and not self.read_only:
             if store_id not in self.pending_known_paths:
                 self.pending_known_paths[store_id] = set()
             self.pending_known_paths[store_id].update(paths)
 
-    def mark_removed_known_paths(self, store_id: str, paths: set[StorePath]) -> None:
+    def unmark_known_paths(self, store_id: StoreId, paths: set[StorePath]) -> None:
         """Queue paths to be removed from the known paths for a store."""
         if self.active and not self.read_only:
             if store_id not in self.pending_removed_known_paths:
@@ -333,7 +335,7 @@ class LocalStoreDB:
 
     async def get_known_paths(
         self,
-        store_id: str,
+        store_id: StoreId,
         conn: aiosqlite.Connection | None = None,
     ) -> set[StorePath]:
         """Fetch all known paths for a store from the DB."""
@@ -351,7 +353,7 @@ class LocalStoreDB:
             log.warning("get_known_paths_failed", store_id=store_id, exc_info=True)
             return set()
 
-    async def remove_store_paths(self, store_id: str) -> None:
+    async def remove_store_paths(self, store_id: StoreId) -> None:
         """Remove all known path records for a store from the DB."""
         if not self.active or self.read_only:
             return

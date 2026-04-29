@@ -38,6 +38,7 @@ from pynixd.operations.query_closure_with_info import (
 from pynixd.psi import CpuUtil
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
+from pynixd.types.ids import BuildId, StoreId
 from tests.conftest import STORE_PREFIX, get_test_store_kwargs, rmtree_robust
 
 if TYPE_CHECKING:
@@ -163,7 +164,7 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
 
     async with Server(
         local_store=pynixd_local,
-        stores={"remote": pynixd_remote},
+        stores={StoreId("remote"): pynixd_remote},
         ssh_port=None,
         unix_path=pynixd_local_path / "socket",
     ) as server:
@@ -241,7 +242,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
 
     async with Server(
         local_store=pynixd_local,
-        stores={"remote": pynixd_remote},
+        stores={StoreId("remote"): pynixd_remote},
         ssh_port=None,
         unix_path=pynixd_local_path / "socket",
     ) as server:
@@ -414,7 +415,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
 
     async with Server(
         local_store=pynixd_local,
-        stores={"busy": pynixd_busy, "free": pynixd_free},
+        stores={StoreId("busy"): pynixd_busy, StoreId("free"): pynixd_free},
         ssh_port=None,
         unix_path=pynixd_local_path / "socket",
     ) as server:
@@ -429,9 +430,9 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
             derivation=drv,
         )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         build = QueuedBuild(
-            id=1,
+            id=BuildId(1),
             request=req,
             client=None,
             required_paths={},

@@ -16,6 +16,7 @@ from pynixd.operations.query_path_infos import (
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
 from pynixd.testing import get_test_value
+from pynixd.types.ids import StoreId
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
@@ -103,7 +104,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
 
         async with Server(
             local_store=store_a,
-            stores={"builder-b": store_a_b},
+            stores={StoreId("builder-b"): store_a_b},
             ssh_port=0,
             unix_path=unix_path_a,
         ) as server_a:

@@ -24,6 +24,7 @@ from .base import (
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..types.ca import Realisation
     from ..wire import NixReader, NixWriter
 
 
@@ -63,7 +64,7 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     name: ClassVar[str] = "RegisterDrvOutput"
     op: ClassVar[int] = 42
     response_type: ClassVar[type[OpResponse]] = RegisterDrvOutputResponse
-    realisation: dict = field(default_factory=dict)
+    realisation: Realisation = field(default_factory=dict)  # type: ignore[arg-type]
 
     async def from_reader(
         self,
