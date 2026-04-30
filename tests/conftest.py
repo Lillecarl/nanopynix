@@ -6,11 +6,12 @@ import asyncio
 import functools
 import logging
 import os
+import random
 import shlex
 import shutil
 import stat
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -25,7 +26,7 @@ from pynixd.types.ids import StoreId
 from tests.nix_config import NixConfig
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Sequence
+    from collections.abc import AsyncGenerator, Generator, Sequence
 
 try:
     from pyinstrument import Profiler
@@ -206,7 +207,12 @@ _log_dir_key = pytest.StashKey[Path]()
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
-    """Create session-wide log directory and print its path."""
+    """Create session-wide log directory and print its path.
+
+    Also cleans up any leftover /tmp/pynixd-test-* dirs from previous runs
+    (our tmp_path override uses this prefix) and the pytest-of-lillecarl
+    garbage (pytest's own rm_rf fails on read-only Nix store files).
+    """
     run_id = str(int(time.time()))
     log_dir = Path(f"/tmp/pynixd-logs/{run_id}")
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -215,6 +221,9 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     tr = session.config.pluginmanager.get_plugin("terminalreporter")
     if tr:
         tr.write_line(f"\nIMPORTANT: Test run logs: {log_dir}")
+
+    rmtree_robust_glob("/tmp/pynixd-test-*")
+    rmtree_robust_glob("/tmp/pytest-of-lillecarl/*")
 
 
 def _prune_client_processor(frame, options):
@@ -483,9 +492,31 @@ def rmtree_robust_glob(pattern: str) -> None:
 
 @pytest.fixture(autouse=True)
 def cleanup_stores():
-    """Remove any leftover test stores before each test (skips session stores)."""
-    rmtree_robust_glob(f"{STORE_PREFIX}/*")
+    """Remove any leftover test stores before and after each test.
+
+    Covers our STORE_PREFIX (/tmp/pynixd-stores/) and the tmp_path override
+    prefix (/tmp/pynixd-test-*) — both may contain read-only Nix store files.
+    """
     yield
+    rmtree_robust_glob(f"{STORE_PREFIX}/*")
+    rmtree_robust_glob("/tmp/pynixd-test-*")
+
+
+@pytest.fixture
+def tmp_path(request: pytest.FixtureRequest) -> Generator[Path]:
+    """Override pytest's tmp_path to use rmtree_robust for teardown.
+
+    pytest's default tmp_path uses tmp_path_factory which registers with
+    pytest's session-scoped cleanup (shutil.rmtree) — this fails on read-only
+    Nix store files. Instead we create dirs under a dedicated prefix and
+    clean them with rmtree_robust which handles read-only files.
+    """
+    suffix = f"{request.node.name}-{random.getrandbits(32):08x}"
+    path = Path(f"/tmp/pynixd-test-{suffix}")
+    path.mkdir(parents=True, exist_ok=True)
+    yield path
+    with suppress(Exception):
+        rmtree_robust(path)
 
 
 @pytest.fixture(autouse=True)

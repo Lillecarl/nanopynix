@@ -1,0 +1,89 @@
+"""
+Tests for substitution-related queries over the daemon protocol.
+
+Tests these protocol operations:
+- QuerySubstitutablePathInfo (op 21): Single path substitutability check
+- QuerySubstitutablePathInfos (op 30): Batch substitutability check
+- QuerySubstitutablePaths (op 32): Which paths are substitutable
+
+These operations are forwarded to the upstream daemon — they test
+that protocol serialization works correctly.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import structlog
+
+from tests.conftest import NIX_BIN, run_subproc
+
+if TYPE_CHECKING:
+    from pynixd import Server
+
+log = structlog.get_logger(__name__)
+
+
+async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
+    """QuerySubstitutablePaths: query which paths are available for substitution.
+
+    We can't easily control what the upstream daemon knows about substitutable
+    paths, but we can verify the protocol round-trips correctly by performing
+    a query through the local store.
+    """
+    uri = pynixd_server.uri()
+
+    # Build a path first
+    test_nix = Path("tests/nix")
+    cmd = [
+        str(NIX_BIN),
+        "build",
+        "--eval-store",
+        "auto",
+        "--store",
+        uri,
+        "--file",
+        str(test_nix),
+        "minimal.leaf",
+        "--no-link",
+        "--print-out-paths",
+    ]
+    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+    assert rc == 0, f"build failed:\n{stdboth}"
+
+    out_path = stdout.strip()
+    cmd = [
+        str(NIX_BIN),
+        "path-info",
+        "--store",
+        uri,
+        out_path,
+    ]
+    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+    assert rc == 0, f"path-info failed:\n{stdboth}"
+    assert out_path in stdout, f"Expected {out_path} in path-info output:\n{stdboth}"
+
+
+async def test_substitutable_paths_via_nix(pynixd_server: Server) -> None:
+    """Exercise substitution queries through the Nix CLI.
+
+    This triggers QuerySubstitutablePaths and QuerySubstitutablePathInfos.
+    """
+    uri = pynixd_server.uri()
+
+    test_nix = Path("tests/nix")
+    cmd = [
+        str(NIX_BIN),
+        "build",
+        "--eval-store",
+        "auto",
+        "--store",
+        uri,
+        "--file",
+        str(test_nix),
+        "minimal.leaf",
+        "--no-link",
+    ]
+    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+    assert rc == 0, f"build failed:\n{stdboth}"

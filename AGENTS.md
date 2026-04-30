@@ -99,6 +99,7 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 - Do NOT use `tee` when redirecting — it doubles context consumption.
 - If you must limit output, use `tail -N` on the file afterwards, never pipe the command itself.
 - You do NOT need to specify pytest timeout, the configured 120s is enough per test.
+- **Timeouts**: `just precommit` runs the full functional test suite (3min+) — set timeout=300 (5 min) for Bash tool calls. Unit tests (`pytest tests/unit/`) complete in seconds — timeout=60000 is fine.
 
 ## 8. Async Task & Lifecycle Rules
 - **Structured Concurrency**: For short-lived, bounded concurrent operations (e.g., fanning out requests, concurrent streams within a single handler, or parallel passes like GC), ALWAYS prefer `asyncio.TaskGroup` over `asyncio.gather` or manual `create_task` management.

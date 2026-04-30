@@ -240,6 +240,29 @@ class BytesWriter(NixWriter):
         return bytes(self._buf)
 
 
+class BytesReader(NixReader):
+    """A NixReader that reads from an in-memory bytes buffer.
+
+    Mirrors BytesWriter for roundtrip testing: write with BytesWriter,
+    then read back with BytesReader.
+    """
+
+    def __init__(self, data: bytes, identifier: str = "memory") -> None:
+        super().__init__(identifier=identifier)
+        self._data = data
+        self._pos = 0
+
+    async def readexactly(self, n: int) -> bytes:
+        if self._pos + n > len(self._data):
+            have = len(self._data) - self._pos
+            raise EOFError(
+                f"BytesReader: need {n} bytes, have {have} remaining (total {len(self._data)}, at offset {self._pos})",
+            )
+        result = self._data[self._pos : self._pos + n]
+        self._pos += n
+        return result
+
+
 class SSHNixWriter(NixWriter):
     def __init__(self, writer: asyncssh.SSHWriter, identifier: str = "unknown") -> None:
         super().__init__(identifier=identifier)
