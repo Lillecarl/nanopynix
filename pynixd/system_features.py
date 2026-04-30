@@ -57,9 +57,12 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
 #
 # recursive-nix is NOT here — the builder truly needs nix available at
 # runtime to execute recursive builds.
+#
+# ca-derivations is NOT here — Lix's daemon cannot parse floating CA
+# outputs in BuildDerivation, so the allocator must keep this feature
+# to correctly exclude incompatible builders.
 PYNIXD_HANDLED_FEATURES: frozenset[str] = frozenset(
     {
-        SystemFeature.CA_DERIVATIONS,
         SystemFeature.DYNAMIC_DERIVATIONS,
     },
 )

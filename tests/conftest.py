@@ -345,12 +345,16 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.obj = _wrap_with_asyncio_timeout(item, default_timeout)
             item.obj._pynixd_timeout_wrapped = True  # type: ignore[reportAttributeAccessIssue]
 
-    # Lix client: skip tests requiring CA/dynamic derivations
+    # Lix: skip tests requiring CA/dynamic derivations when either the
+    # client, local store, or builder store uses Lix (Lix's daemon cannot
+    # parse floating CA outputs in BuildDerivation).
     client_bin = config.getoption("client_bin", "nix")
-    if client_bin == "lix":
+    local_bin = config.getoption("local_bin", "nix")
+    builder_bin = config.getoption("builder_bin", "nix")
+    if "lix" in (client_bin, local_bin, builder_bin):
         for item in items:
             if item.get_closest_marker("ca_derivations"):
-                item.add_marker(pytest.mark.skip(reason="Not supported with Lix client"))
+                item.add_marker(pytest.mark.skip(reason="Not supported with Lix"))
 
 
 def _wrap_with_asyncio_timeout(item: pytest.Function, default_timeout: float):

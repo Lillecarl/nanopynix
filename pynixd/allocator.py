@@ -226,10 +226,13 @@ class BuildAllocator:
     def strip_handled_features(build: QueuedBuild) -> None:
         """Remove pynixd-handled features from requiredSystemFeatures in env.
 
-        After resolution, features like ca-derivations are no longer relevant
-        to the backend daemon — pynixd already converted the derivation.
-        Stripping them allows Lix stores (no ca-derivations support) to build
-        resolved CA derivations that are now plain InputAddressed builds.
+        Only strips features that pynixd has actually resolved. If the
+        derivation still has CA or dynamic outputs, those features are
+        kept so the allocator can correctly match stores.
+
+        This prevents sending unresolved CA/dynamic derivations to stores
+        (like Lix) whose builders don't support the corresponding protocol
+        operations.
         """
 
         raw = build.request.derivation.env.get("requiredSystemFeatures", "")
@@ -239,7 +242,21 @@ class BuildAllocator:
         stripped = features & PYNIXD_HANDLED_FEATURES
         if not stripped:
             return
-        remaining = features - PYNIXD_HANDLED_FEATURES
+
+        # Only strip features that the derivation no longer needs
+        # (i.e., they were actually resolved by the resolver).
+        still_ca = any(o.is_ca for o in build.request.derivation.outputs.values())
+        still_dynamic = any(
+            o.is_dynamic_output for o in build.request.derivation.outputs.values()
+        )
+        if still_ca:
+            stripped.discard("ca-derivations")
+        if still_dynamic:
+            stripped.discard("dynamic-derivations")
+
+        if not stripped:
+            return
+        remaining = features - stripped
         new_val = " ".join(sorted(remaining))
         build.request.derivation.env["requiredSystemFeatures"] = new_val
         log.debug(
