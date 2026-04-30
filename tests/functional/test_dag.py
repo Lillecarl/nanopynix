@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -11,11 +10,14 @@ import structlog
 from pynixd.store import get_current_system
 from tests.conftest import (
     NIX_BIN,
+    TEST_NIX,
     run_subproc,
     set_log_levels,
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pynixd import Server
 
 log = structlog.get_logger(__name__)
@@ -31,7 +33,7 @@ async def test_builders(pynixd_server: Server, tmp_path: Path) -> None:
     - QueryPathInfo: Queries path info
     - QueryValidPaths: Queries valid paths
     """
-    test_nix = Path("tests/nix")
+    test_nix = TEST_NIX
 
     client_store_path = tmp_path / "client-store"
     client_store_path.mkdir(parents=True, exist_ok=True)
@@ -70,7 +72,7 @@ async def test_store(pynixd_server: Server, tmp_path: Path) -> None:
     - QueryMissing: Queries missing paths
     - QueryValidPaths: Queries valid paths
     """
-    test_nix = Path("tests/nix")
+    test_nix = TEST_NIX
 
     with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
         uri = pynixd_server.uri()

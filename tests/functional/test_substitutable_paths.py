@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from tests.conftest import NIX_BIN, run_subproc
+from tests.conftest import NIX_BIN, TEST_NIX, run_subproc
 
 if TYPE_CHECKING:
     from pynixd import Server
@@ -35,7 +35,7 @@ async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
     uri = pynixd_server.uri()
 
     # Build a path first
-    test_nix = Path("tests/nix")
+    test_nix = TEST_NIX
     cmd = [
         str(NIX_BIN),
         "build",
@@ -72,7 +72,7 @@ async def test_substitutable_paths_via_nix(pynixd_server: Server) -> None:
     """
     uri = pynixd_server.uri()
 
-    test_nix = Path("tests/nix")
+    test_nix = TEST_NIX
     cmd = [
         str(NIX_BIN),
         "build",

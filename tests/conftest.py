@@ -182,6 +182,7 @@ def get_test_store_kwargs(
 
 STORE_PREFIX = Path("/tmp/pynixd-stores")
 SESSION_STORE_PREFIX = Path("/tmp/pynixd-session-stores")
+TEST_NIX = Path("tests/nix")
 
 _NO_PROBE_FEATURE_MATRIX: dict[str, set[str]] = {
     "x86_64-linux": {

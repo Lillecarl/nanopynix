@@ -9,7 +9,6 @@ Tests are split into two parts:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -342,7 +341,9 @@ class TestOperationLogs:
         r = BytesReader(w.get_bytes())
         result = await OperationLogs().from_reader(r)
         assert len(result.messages) == 2
+        assert isinstance(result.messages[0], StderrNext)
         assert result.messages[0].text == "test log"
+        assert isinstance(result.messages[1], StderrNext)
         assert result.messages[1].text == "another log"
 
     async def test_with_start_activity(self):
@@ -1071,7 +1072,7 @@ class TestQueryRealisationSerialization:
         from pynixd.operations.ca_derivations import QueryRealisationResponse
 
         resp = QueryRealisationResponse(
-            realisations=[json.dumps({"id": "test"})],
+            realisations=[{"id": "test"}],
         )
         result = await _serialize_deserialize_response(QueryRealisationResponse, resp)
         assert result.realisations == resp.realisations
@@ -1081,7 +1082,9 @@ class TestRegisterDrvOutputSerialization:
     async def test_request(self):
         from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
 
-        req = RegisterDrvOutputRequest(realisation=json.dumps({"out": "test"}))
+        req = RegisterDrvOutputRequest(
+            realisation={"id": "test", "outPath": "/nix/store/test"},
+        )
         result = await _serialize_deserialize_request(RegisterDrvOutputRequest, req)
         assert result.realisation == req.realisation
 

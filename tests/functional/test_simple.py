@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,11 +11,14 @@ import structlog
 from pynixd.store import get_current_system
 from tests.conftest import (
     NIX_BIN,
+    TEST_NIX,
     run_subproc,
     set_log_levels,
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pyinstrument
 
     from pynixd import Server
@@ -39,7 +41,7 @@ async def test_builders(
     - QueryMissing: Queries missing paths
     - QueryValidPaths: Queries valid paths
     """
-    test_nix = Path("tests/nix")
+    test_nix = TEST_NIX
     client_store_path = tmp_path / "client-store"
 
     uri = pynixd_server.uri()
@@ -83,7 +85,7 @@ async def test_store(
     - QueryMissing: Queries missing paths
     - QueryValidPaths: Queries valid paths
     """
-    test_nix = Path("tests/nix")
+    test_nix = TEST_NIX
 
     with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
         uri = pynixd_server.uri()

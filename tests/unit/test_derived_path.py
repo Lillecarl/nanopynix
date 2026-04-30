@@ -100,6 +100,7 @@ class TestParseDerivedPath:
         dp = parse_derived_path("/nix/store/abc.drv")
         assert isinstance(dp, DerivedPathBuilt)
         assert isinstance(dp.outputs, OutputsAll)
+        assert isinstance(dp.drv_path, SingleDerivedPathOpaque)
         assert dp.drv_path.path == StorePath("/nix/store/abc.drv")
 
     def test_built_with_output(self):
@@ -112,11 +113,13 @@ class TestParseDerivedPath:
         dp = parse_derived_path("/nix/store/abc.drv^out^lib")
         assert isinstance(dp, DerivedPathBuilt)
         assert dp_is_nested(dp) is True
+        assert isinstance(dp.drv_path, SingleDerivedPathBuilt)
         assert dp.drv_path.output == "out"
 
     def test_multiple_outputs(self):
         dp = parse_derived_path("/nix/store/abc.drv^out,lib")
         assert isinstance(dp, DerivedPathBuilt)
+        assert isinstance(dp.outputs, OutputsNames)
         assert dp.outputs.names == {"out", "lib"}
 
 
@@ -124,6 +127,7 @@ class TestParseDerivedPathLegacy:
     def test_legacy_built_with_output(self):
         dp = parse_derived_path_legacy("/nix/store/abc.drv!out")
         assert isinstance(dp, DerivedPathBuilt)
+        assert isinstance(dp.outputs, OutputsNames)
         assert dp.outputs.names == {"out"}
 
     def test_legacy_bare_drv(self):

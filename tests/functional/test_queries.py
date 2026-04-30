@@ -11,6 +11,7 @@ import structlog
 
 from tests.conftest import (
     NIX_BIN,
+    TEST_NIX,
     run_subproc,
 )
 
@@ -27,7 +28,7 @@ async def query_env(pynixd_server: Server):
     """Set up a pynixd server with some initial paths."""
     uri = pynixd_server.uri()
 
-    test_nix = Path("tests/nix")
+    test_nix = TEST_NIX
     cmd = [
         NIX_BIN,
         "build",
@@ -82,7 +83,7 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
     - QueryValidPaths: Queries valid paths
     """
     server, uri, out_path = query_env
-    test_nix = Path("tests/nix")
+    test_nix = TEST_NIX
 
     # Build another thing that depends on 'out_path'
     cmd = [
@@ -214,7 +215,7 @@ async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None
     """
     server, uri, out_path = query_env
 
-    test_nix = Path("tests/nix")
+    test_nix = TEST_NIX
     cmd = [
         NIX_BIN,
         "build",
