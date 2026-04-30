@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 import structlog
 
 from tests.conftest import (
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.timeout(60)
 async def test_rbac_ssh_admin_vs_user(pynixd_server: Server) -> None:
     """Verify that SSH admin can GC, but SSH user cannot.
 
@@ -41,6 +43,7 @@ async def test_rbac_ssh_admin_vs_user(pynixd_server: Server) -> None:
     assert rc_admin == 0
 
 
+@pytest.mark.timeout(60)
 async def test_rbac_unix_implicit_admin(pynixd_server: Server) -> None:
     """Verify that Unix socket connections are implicit admins.
 

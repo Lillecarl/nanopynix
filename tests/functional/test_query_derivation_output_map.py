@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 import structlog
 
 from tests.conftest import NIX_BIN, TEST_NIX, run_subproc
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.timeout(60)
 async def test_query_derivation_output_map(pynixd_server: Server) -> None:
     """Build a derivation and query its output map.
 

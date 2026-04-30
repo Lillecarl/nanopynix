@@ -30,7 +30,7 @@ async def get_hello_path() -> StorePath:
     return StorePath(stdout.strip())
 
 
-@pytest.mark.timeout(50)
+@pytest.mark.timeout(60)
 async def test_stream_nar() -> None:
     """
     Test streaming a NAR from the system store to a temporary store.

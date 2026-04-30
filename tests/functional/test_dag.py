@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import pytest
 import structlog
 
 from pynixd.store import get_current_system
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.timeout(60)
 async def test_builders(pynixd_server: Server, tmp_path: Path) -> None:
     """Build nix/standard.dag via --builders.
 
@@ -62,6 +64,7 @@ async def test_builders(pynixd_server: Server, tmp_path: Path) -> None:
     assert rc == 0, f"build failed:\n{stdboth}"
 
 
+@pytest.mark.timeout(60)
 async def test_store(pynixd_server: Server, tmp_path: Path) -> None:
     """Build nix/standard.dag via --store.
 

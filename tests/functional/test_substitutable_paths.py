@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 import structlog
 
 from tests.conftest import NIX_BIN, TEST_NIX, run_subproc
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.timeout(60)
 async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
     """QuerySubstitutablePaths: query which paths are available for substitution.
 
@@ -65,6 +67,7 @@ async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
     assert out_path in stdout, f"Expected {out_path} in path-info output:\n{stdboth}"
 
 
+@pytest.mark.timeout(60)
 async def test_substitutable_paths_via_nix(pynixd_server: Server) -> None:
     """Exercise substitution queries through the Nix CLI.
 

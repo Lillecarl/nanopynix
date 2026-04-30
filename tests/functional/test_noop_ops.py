@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 import structlog
 
 from tests.conftest import NIX_BIN, run_subproc
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.timeout(60)
 async def test_noop_operations_do_not_crash(pynixd_server: Server) -> None:
     """All no-op operations should not crash the server.
 
