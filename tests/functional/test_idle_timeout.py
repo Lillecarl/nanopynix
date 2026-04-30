@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.no_pynixd
-@pytest.mark.asyncio
 async def test_idle_timeout(tmp_path: Path):
     """Verify that pynixd shuts down after idleness."""
     store_path = tmp_path / "store"

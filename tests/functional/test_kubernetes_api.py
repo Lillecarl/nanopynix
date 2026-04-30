@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 
 import aiohttp
@@ -14,7 +16,6 @@ from pynixd.types.ids import StoreId
 from tests.functional.mock_store import MockStore
 
 
-@pytest.mark.asyncio
 async def test_dynamic_store_management():
     """Verify adding and removing stores at runtime works correctly."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
@@ -98,7 +99,6 @@ async def test_dynamic_store_management():
         await server.close()
 
 
-@pytest.mark.asyncio
 async def test_prometheus_metrics_endpoint():
     """Verify that the /metrics endpoint serves Prometheus data."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})

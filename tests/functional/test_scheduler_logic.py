@@ -47,7 +47,6 @@ PSI-aware routing) with zero flakiness and high speed.
 """
 
 
-@pytest.mark.asyncio
 async def test_scheduler_load_balancing():
     """Verify that the scheduler correctly assigns builds to idle remote stores.
 
@@ -111,7 +110,6 @@ async def test_scheduler_load_balancing():
     assert resp.result.status == BuildResultStatus.BUILT
 
 
-@pytest.mark.asyncio
 async def test_scheduler_skips_saturated_store():
     """Verify that the scheduler waits for available slots instead of over-subscribing.
 
@@ -182,7 +180,6 @@ async def test_scheduler_skips_saturated_store():
     assert queued_build.assigned_store_id == StoreId("remote1")
 
 
-@pytest.mark.asyncio
 async def test_scheduler_proactive_transfer():
     """Verify that the scheduler proactively pulls paths to an idle store.
 
@@ -257,7 +254,6 @@ async def test_scheduler_proactive_transfer():
     assert remote_idle.tracker.has_path(drv_path)
 
 
-@pytest.mark.asyncio
 async def test_scheduler_decomposition_and_ordering():
     """Verify that BuildDecomposer correctly resolves a DAG and the Scheduler respects it.
 
@@ -387,7 +383,6 @@ async def test_scheduler_decomposition_and_ordering():
     assert results.results[0].result.status == BuildResultStatus.BUILT
 
 
-@pytest.mark.asyncio
 async def test_scheduler_cpu_utilization():
     """Verify that the scheduler avoids stores with high CPU utilization (PSI aware).
 
@@ -451,7 +446,6 @@ async def test_scheduler_cpu_utilization():
     assert queued_build.assigned_store_id == "cold"
 
 
-@pytest.mark.asyncio
 async def test_scheduler_feature_matching():
     """Verify that the scheduler respects Store system/feature matrix requirements.
 
@@ -519,7 +513,6 @@ async def test_scheduler_feature_matching():
     assert queued_build.assigned_store_id == "full"
 
 
-@pytest.mark.asyncio
 async def test_scheduler_fails_build_for_unknown_platform():
     """Builds for platforms not in any store or dynamic_feature_matrix fail immediately."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
@@ -554,7 +547,6 @@ async def test_scheduler_fails_build_for_unknown_platform():
     assert result.result.status == BuildResultStatus.MISC_FAILURE
 
 
-@pytest.mark.asyncio
 async def test_scheduler_queues_build_for_dynamic_platform():
     """Builds for platforms in dynamic_feature_matrix stay pending instead of failing."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
@@ -589,7 +581,6 @@ async def test_scheduler_queues_build_for_dynamic_platform():
     assert build.is_pending
 
 
-@pytest.mark.asyncio
 async def test_scheduler_queues_build_for_dynamic_platform_with_features():
     """Builds requiring features in dynamic_feature_matrix stay pending."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
@@ -622,7 +613,6 @@ async def test_scheduler_queues_build_for_dynamic_platform_with_features():
     assert not build.is_done
 
 
-@pytest.mark.asyncio
 async def test_scheduler_fails_build_for_missing_dynamic_feature():
     """Builds requiring features NOT in dynamic_feature_matrix still fail."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
@@ -657,7 +647,6 @@ async def test_scheduler_fails_build_for_missing_dynamic_feature():
     assert result.result.status == BuildResultStatus.MISC_FAILURE
 
 
-@pytest.mark.asyncio
 async def test_add_store_dynamic_registers_feature_matrix():
     """add_store(dynamic=True) merges the store's feature_matrix into dynamic_feature_matrix."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
@@ -681,7 +670,6 @@ async def test_add_store_dynamic_registers_feature_matrix():
     assert "aarch64-darwin" in scheduler.dynamic_feature_matrix
 
 
-@pytest.mark.asyncio
 async def test_dynamic_feature_matrix_survives_store_removal():
     """After a dynamic store is removed, builds for its platform still queue."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})

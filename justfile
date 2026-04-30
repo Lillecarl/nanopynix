@@ -3,7 +3,7 @@ default:
 
 check:
     pyright pynixd
-    pyright tests/conftest.py tests/functional
+    pyright tests/conftest.py tests/functional tests/unit
 
 fmt:
     ruff format pynixd

@@ -30,7 +30,6 @@ class MockMonitor(ResourceMonitor):
             await asyncio.sleep(1)
 
 
-@pytest.mark.asyncio
 async def test_local_socket_store_gating(tmp_path: Path) -> None:
     """Test that LocalSocketStore gates connections based on memory gate state."""
 
@@ -79,7 +78,6 @@ async def test_local_socket_store_gating(tmp_path: Path) -> None:
         await store.close()
 
 
-@pytest.mark.asyncio
 async def test_gate_wait_timeout_success(tmp_path: Path) -> None:
     """Test that gating succeeds if pressure subsides within timeout."""
 

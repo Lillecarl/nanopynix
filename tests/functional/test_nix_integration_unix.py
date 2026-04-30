@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest
@@ -38,7 +40,6 @@ async def pynixd_server(tmp_path: Path):
 
 
 @pytest.mark.no_pynixd
-@pytest.mark.asyncio
 async def test_nix_build_via_unix(pynixd_server):
     """Verify that 'nix build' works when using pynixd via Unix socket."""
     server, socket_path, store_path = pynixd_server
@@ -77,7 +78,6 @@ async def test_nix_build_via_unix(pynixd_server):
 
 
 @pytest.mark.no_pynixd
-@pytest.mark.asyncio
 async def test_nix_copy_via_unix(pynixd_server, tmp_path: Path):
     """Verify 'nix copy' works against pynixd via Unix socket."""
     server, socket_path, store_path = pynixd_server

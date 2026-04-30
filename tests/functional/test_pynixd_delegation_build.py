@@ -28,7 +28,6 @@ log = structlog.get_logger(__name__)
 
 
 @pytest.mark.no_pynixd
-@pytest.mark.asyncio
 @pytest.mark.timeout(120)
 async def test_pynixd_delegation_build(tmp_path: Path) -> None:
     """Test that pynixd can delegate build OPs to another pynixd instance.
