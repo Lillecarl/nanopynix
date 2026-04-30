@@ -16,6 +16,8 @@ import nacl.signing
 from environs import env
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .operations.base import ValidPathInfo
     from .store_path import StorePath
 
@@ -43,6 +45,12 @@ class SecretKey:
     name: str = ""
 
     @classmethod
+    def from_file(cls, path: Path) -> SecretKey:
+        """Load a secret key from a Nix-format file."""
+        text = path.read_text().strip()
+        return cls._parse(text)
+
+    @classmethod
     def from_string(cls, text: str) -> SecretKey:
         """Parse a secret key from a Nix-format string."""
         return cls._parse(text.strip())
@@ -65,6 +73,11 @@ class SecretKey:
             name=name,
         )
 
+    @property
+    def public_key_bytes(self) -> bytes:
+        """The 32-byte Ed25519 public key."""
+        return bytes(self._signing_key.verify_key)
+
     def sign(self, data: bytes) -> bytes:
         """Sign data, returning a 64-byte Ed25519 signature."""
         return self._signing_key.sign(data).signature
@@ -73,6 +86,10 @@ class SecretKey:
         """Sign a fingerprint string, return ``<name>:<base64>`` signature."""
         sig = self.sign(fingerprint.encode("utf-8"))
         return f"{self.name}:{b64encode(sig).decode()}"
+
+    def public_key_string(self) -> str:
+        """Return the public key in Nix ``<name>:<base64>`` format."""
+        return f"{self.name}:{b64encode(self.public_key_bytes).decode()}"
 
 
 def fingerprint(

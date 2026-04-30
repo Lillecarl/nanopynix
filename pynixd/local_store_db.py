@@ -84,6 +84,10 @@ GET_KNOWN_PATHS = """
 SELECT path FROM PynixdKnownPaths WHERE storeId = ?
 """
 
+DELETE_STORE_KNOWN_PATHS = """
+DELETE FROM PynixdKnownPaths WHERE storeId = ?
+"""
+
 INSERT_BUILD_STATS = """
 INSERT OR REPLACE INTO DerivationStats
 (pname, version, platform, serialized_drv, cpu_user_us, cpu_system_us, duration_ms, last_built_at)
@@ -348,6 +352,18 @@ class LocalStoreDB:
         except Exception:
             log.warning("get_known_paths_failed", store_id=store_id, exc_info=True)
             return set()
+
+    async def remove_store_paths(self, store_id: StoreId) -> None:
+        """Remove all known path records for a store from the DB."""
+        if not self.active or self.read_only:
+            return
+        try:
+            async with self.acquire_conn() as db:
+                await db.execute(DELETE_STORE_KNOWN_PATHS, (store_id,))
+                await db.commit()
+            log.info("removed_store_paths", store_id=store_id)
+        except Exception:
+            log.warning("remove_store_paths_failed", store_id=store_id, exc_info=True)
 
     async def record_build_stats(
         self,

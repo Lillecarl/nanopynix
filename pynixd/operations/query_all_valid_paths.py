@@ -91,25 +91,40 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                     count=len(resp.paths),
                 )
             except Exception as e:
-                if store.tracker.known_paths:
-                    # If we already have paths (e.g. from DB on startup), verify them
-                    # since the full sync failed.
+                # Try to get known paths from DB first, fallback to in-memory tracker
+                known_paths: set[StorePath] | None = None
+                if store.tracker.parent is not None and store.tracker.parent.db is not None:
+                    known_paths = await store.tracker.parent.db.get_known_paths(store.store_id)
+                known_paths = known_paths or set(store.tracker.known_paths)
+
+                if known_paths:
                     self.logger.info(
                         "verifying_cached_paths",
                         store_id=store.store_id,
                         error=str(e),
-                        count=len(store.tracker.known_paths),
+                        count=len(known_paths),
                     )
 
                     try:
                         verified = await store.execute(
-                            QueryValidPathsRequest(paths=set(store.tracker.known_paths)),
+                            QueryValidPathsRequest(
+                                paths=known_paths,
+                                substitute=0,
+                            ),
                             client=client,
                             suppress_last=suppress_last,
                         )
-                        store.tracker.set_known_paths(
-                            verified.paths,
-                            update_regtime=False,
+                        # Remove stale paths — only keep the verified ones
+                        stale = known_paths - verified.paths
+                        if stale:
+                            store.tracker.remove_known_paths(stale)
+                        store.tracker.add_known_paths(verified.paths)
+                        self.logger.info(
+                            "sync_paths_verified",
+                            store_id=store.store_id,
+                            total=len(known_paths),
+                            verified=len(verified.paths),
+                            removed=len(stale),
                         )
                         return QueryAllValidPathsResponse(paths=verified.paths)
                     except Exception as e2:
@@ -118,16 +133,10 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                             store_id=store.store_id,
                             error=str(e2),
                         )
-                        # Keep existing paths, better to be stale than empty for now?
-                        # Or should we clear? The previous behavior was to clear.
-                        # But for persistence test, we want to keep.
-                        return QueryAllValidPathsResponse(
-                            paths=set(store.tracker.known_paths),
-                        )
+                        return QueryAllValidPathsResponse(paths=known_paths)
                 raise
             else:
                 return resp
         except Exception:
             self.logger.exception("sync_paths_failed", store_id=store.store_id)
-            # Do NOT clear known_paths here, it might have been loaded from DB
-            return QueryAllValidPathsResponse(paths=set(store.tracker.known_paths))
+            return QueryAllValidPathsResponse(paths=set())
