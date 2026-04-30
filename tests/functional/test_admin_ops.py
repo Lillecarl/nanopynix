@@ -15,7 +15,13 @@ from typing import TYPE_CHECKING
 import pytest
 import structlog
 
-from tests.conftest import NIX_BIN, run_subproc
+from tests.conftest import (
+    NIX_BIN,
+    run_subproc,
+    ssh_admin_uri,
+    ssh_user_uri,
+    unix_session_uri,
+)
 
 if TYPE_CHECKING:
     from pynixd import Server
@@ -29,11 +35,7 @@ async def test_optimise_store_admin(pynixd_server: Server) -> None:
 
     Uses Unix socket (implicit admin).
     """
-    from tests.conftest import SESSION_STORE_PREFIX
-
-    socket_path = SESSION_STORE_PREFIX / "pynixd.sock"
-    local_path = pynixd_server.local_store.store_path
-    uri = f"unix://{socket_path}?root={local_path}"
+    uri = unix_session_uri(pynixd_server)
     cmd = [str(NIX_BIN), "store", "optimise", "--store", uri]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"OptimiseStore failed:\n{stdboth}"
@@ -42,7 +44,7 @@ async def test_optimise_store_admin(pynixd_server: Server) -> None:
 @pytest.mark.timeout(120)
 async def test_optimise_store_non_admin(pynixd_server: Server) -> None:
     """OptimiseStore as non-admin should be rejected."""
-    uri = f"ssh-ng://regular-user@127.0.0.1:{pynixd_server.port}"
+    uri = ssh_user_uri(pynixd_server)
     cmd = [str(NIX_BIN), "store", "optimise", "--store", uri]
     rc, stdout, stderr, stdboth = await run_subproc(cmd, expected_retcode=None)
     assert rc != 0, "OptimiseStore should fail for non-admin"
@@ -52,11 +54,7 @@ async def test_optimise_store_non_admin(pynixd_server: Server) -> None:
 @pytest.mark.timeout(120)
 async def test_verify_store_admin(pynixd_server: Server) -> None:
     """VerifyStore as admin should succeed."""
-    from tests.conftest import SESSION_STORE_PREFIX
-
-    socket_path = SESSION_STORE_PREFIX / "pynixd.sock"
-    local_path = pynixd_server.local_store.store_path
-    uri = f"unix://{socket_path}?root={local_path}"
+    uri = unix_session_uri(pynixd_server)
     cmd = [str(NIX_BIN.parent / "nix-store"), "--verify", "--store", uri]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"VerifyStore failed:\n{stdboth}"
@@ -65,7 +63,7 @@ async def test_verify_store_admin(pynixd_server: Server) -> None:
 @pytest.mark.timeout(120)
 async def test_verify_store_non_admin(pynixd_server: Server) -> None:
     """VerifyStore as non-admin should be rejected."""
-    uri = f"ssh-ng://regular-user@127.0.0.1:{pynixd_server.port}"
+    uri = ssh_user_uri(pynixd_server)
     cmd = [str(NIX_BIN.parent / "nix-store"), "--verify", "--store", uri]
     rc, stdout, stderr, stdboth = await run_subproc(cmd, expected_retcode=None)
     assert rc != 0, "VerifyStore should fail for non-admin"
@@ -79,7 +77,7 @@ async def test_add_build_log_non_admin(pynixd_server: Server) -> None:
     This is tricky to trigger via CLI — it's used internally by builders.
     Instead, test via SSH as non-admin.
     """
-    uri = f"ssh-ng://regular-user@127.0.0.1:{pynixd_server.port}"
+    uri = ssh_user_uri(pynixd_server)
     # Attempt to run a build that might trigger AddBuildLog
     # We verify the build still works — if AddBuildLog is rejected it's fine
     cmd = [
@@ -105,7 +103,7 @@ async def test_add_signatures_via_store(pynixd_server: Server) -> None:
     This operation is forwarded to the upstream daemon.
     We build a path first, then test that signatures can be added by admin.
     """
-    uri = f"ssh-ng://admin-user@127.0.0.1:{pynixd_server.port}"
+    uri = ssh_admin_uri(pynixd_server)
 
     # Build a path
     cmd = [

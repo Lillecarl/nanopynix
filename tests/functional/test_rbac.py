@@ -8,8 +8,10 @@ import structlog
 
 from tests.conftest import (
     NIX_BIN,
-    SESSION_STORE_PREFIX,
     run_subproc,
+    ssh_admin_uri,
+    ssh_user_uri,
+    unix_session_uri,
 )
 
 if TYPE_CHECKING:
@@ -24,7 +26,7 @@ async def test_rbac_ssh_admin_vs_user(pynixd_server: Server) -> None:
     Store operations triggered:
     - None: This test only checks RBAC authentication/authorization without triggering Store operations
     """
-    uri_user = f"ssh-ng://regular-user@127.0.0.1:{pynixd_server.port}"
+    uri_user = ssh_user_uri(pynixd_server)
     cmd_user = [str(NIX_BIN), "store", "gc", "--store", uri_user]
     rc_user, stdout_user, stderr_user, stdboth_user = await run_subproc(
         cmd_user,
@@ -33,7 +35,7 @@ async def test_rbac_ssh_admin_vs_user(pynixd_server: Server) -> None:
     assert rc_user != 0
     assert "requires administrative privileges" in stdboth_user
 
-    uri_admin = f"ssh-ng://admin-user@127.0.0.1:{pynixd_server.port}"
+    uri_admin = ssh_admin_uri(pynixd_server)
     cmd_admin = [str(NIX_BIN), "store", "gc", "--store", uri_admin]
     rc_admin, stdout_admin, stderr_admin, stdboth_admin = await run_subproc(cmd_admin)
     assert rc_admin == 0
@@ -45,9 +47,7 @@ async def test_rbac_unix_implicit_admin(pynixd_server: Server) -> None:
     Store operations triggered:
     - None: This test only checks RBAC authentication/authorization without triggering Store operations
     """
-    socket_path = SESSION_STORE_PREFIX / "pynixd.sock"
-    local_path = pynixd_server.local_store.store_path
-    uri = f"unix://{socket_path}?root={local_path}"
+    uri = unix_session_uri(pynixd_server)
     cmd = [str(NIX_BIN), "store", "gc", "--store", uri]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0

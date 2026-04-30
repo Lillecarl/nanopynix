@@ -16,7 +16,13 @@ from typing import TYPE_CHECKING
 import pytest
 import structlog
 
-from tests.conftest import NIX_BIN, run_subproc
+from tests.conftest import (
+    NIX_BIN,
+    run_subproc,
+    ssh_admin_uri,
+    ssh_user_uri,
+    unix_session_uri,
+)
 
 if TYPE_CHECKING:
     from pynixd import Server
@@ -30,7 +36,7 @@ async def test_collect_garbage_admin(pynixd_server: Server) -> None:
 
     Uses the SSH admin-user to trigger GC on the remote store.
     """
-    uri = f"ssh-ng://admin-user@127.0.0.1:{pynixd_server.port}"
+    uri = ssh_admin_uri(pynixd_server)
     cmd = [str(NIX_BIN), "store", "gc", "--store", uri, "--max", "0"]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"GC as admin failed:\n{stdboth}"
@@ -41,7 +47,7 @@ async def test_collect_garbage_admin(pynixd_server: Server) -> None:
 @pytest.mark.timeout(120)
 async def test_collect_garbage_non_admin(pynixd_server: Server) -> None:
     """GC as non-admin user should be rejected."""
-    uri = f"ssh-ng://regular-user@127.0.0.1:{pynixd_server.port}"
+    uri = ssh_user_uri(pynixd_server)
     cmd = [str(NIX_BIN), "store", "gc", "--store", uri, "--max", "0"]
     rc, stdout, stderr, stdboth = await run_subproc(cmd, expected_retcode=None)
     assert rc != 0, "GC should fail for non-admin"
@@ -51,11 +57,7 @@ async def test_collect_garbage_non_admin(pynixd_server: Server) -> None:
 @pytest.mark.timeout(120)
 async def test_collect_garbage_unix_admin(pynixd_server: Server) -> None:
     """GC over Unix socket (implicit admin) should succeed."""
-    from tests.conftest import SESSION_STORE_PREFIX
-
-    socket_path = SESSION_STORE_PREFIX / "pynixd.sock"
-    local_path = pynixd_server.local_store.store_path
-    uri = f"unix://{socket_path}?root={local_path}"
+    uri = unix_session_uri(pynixd_server)
     cmd = [str(NIX_BIN), "store", "gc", "--store", uri, "--max", "0"]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"GC over Unix socket failed:\n{stdboth}"

@@ -184,6 +184,24 @@ STORE_PREFIX = Path("/tmp/pynixd-stores")
 SESSION_STORE_PREFIX = Path("/tmp/pynixd-session-stores")
 TEST_NIX = Path("tests/nix")
 
+
+def ssh_admin_uri(server: Server) -> str:
+    """Return an SSH URI for admin-user on the given server."""
+    return f"ssh-ng://admin-user@127.0.0.1:{server.port}"
+
+
+def ssh_user_uri(server: Server) -> str:
+    """Return an SSH URI for regular-user on the given server."""
+    return f"ssh-ng://regular-user@127.0.0.1:{server.port}"
+
+
+def unix_session_uri(server: Server) -> str:
+    """Return a Unix socket URI pointing to the session server."""
+    socket_path = SESSION_STORE_PREFIX / "pynixd.sock"
+    local_path = server.local_store.store_path
+    return f"unix://{socket_path}?root={local_path}"
+
+
 _NO_PROBE_FEATURE_MATRIX: dict[str, set[str]] = {
     "x86_64-linux": {
         "nixos-test",
