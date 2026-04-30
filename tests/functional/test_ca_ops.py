@@ -11,12 +11,13 @@ import structlog
 
 from pynixd.store import LocalSocketStore
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     SESSION_STORE_PREFIX,
     STORE_PREFIX,
     get_test_store_kwargs,
     rmtree_robust,
     run_subproc,
+    server_uri,
 )
 from tests.nix_config import NixConfig
 
@@ -44,10 +45,11 @@ def _ca_test_store_kwargs(**overrides) -> dict:
 @pytest.fixture
 async def ca_env(pynixd_server: Server):
     """Set up a pynixd server with CA-derivations enabled."""
-    yield pynixd_server, pynixd_server.uri()
+    yield pynixd_server, server_uri(pynixd_server)
 
 
 @pytest.mark.no_pynixd
+@pytest.mark.ca_derivations
 async def test_ca_simple_build_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -65,7 +67,7 @@ async def test_ca_simple_build_root_store(
         await store.ensure_daemon()
 
         cmd = [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "build",
             "--store",
             str(store_path),
@@ -86,6 +88,7 @@ async def test_ca_simple_build_root_store(
 
 
 @pytest.mark.no_pynixd
+@pytest.mark.ca_derivations
 async def test_ca_multi_output_build_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -103,7 +106,7 @@ async def test_ca_multi_output_build_root_store(
         await store.ensure_daemon()
 
         cmd = [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "build",
             "--store",
             str(store_path),
@@ -126,6 +129,7 @@ async def test_ca_multi_output_build_root_store(
 
 
 @pytest.mark.no_pynixd
+@pytest.mark.ca_derivations
 async def test_ca_depends_on_ca_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -143,7 +147,7 @@ async def test_ca_depends_on_ca_root_store(
         await store.ensure_daemon()
 
         cmd = [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "build",
             "--store",
             str(store_path),
@@ -164,6 +168,7 @@ async def test_ca_depends_on_ca_root_store(
 
 
 @pytest.mark.no_pynixd
+@pytest.mark.ca_derivations
 async def test_non_ca_depends_on_ca_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -181,7 +186,7 @@ async def test_non_ca_depends_on_ca_root_store(
         await store.ensure_daemon()
 
         cmd = [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "build",
             "--store",
             str(store_path),
@@ -201,6 +206,7 @@ async def test_non_ca_depends_on_ca_root_store(
         await store.close()
 
 
+@pytest.mark.ca_derivations
 async def test_ca_simple_via_pynixd(profiler: pyinstrument.Profiler, ca_env) -> None:
     """Build a CA floating derivation through pynixd.
 
@@ -214,7 +220,7 @@ async def test_ca_simple_via_pynixd(profiler: pyinstrument.Profiler, ca_env) -> 
     server, uri = ca_env
 
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--eval-store",
         "auto",
@@ -236,6 +242,7 @@ async def test_ca_simple_via_pynixd(profiler: pyinstrument.Profiler, ca_env) -> 
     assert rc == 0, f"CA simple build via pynixd failed:\n{stdboth}"
 
 
+@pytest.mark.ca_derivations
 async def test_ca_multi_output_via_pynixd(
     profiler: pyinstrument.Profiler,
     ca_env,
@@ -252,7 +259,7 @@ async def test_ca_multi_output_via_pynixd(
     server, uri = ca_env
 
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--eval-store",
         "auto",
@@ -276,6 +283,7 @@ async def test_ca_multi_output_via_pynixd(
     assert len(paths) == 2, f"Expected 2 outputs, got {len(paths)}: {paths}"
 
 
+@pytest.mark.ca_derivations
 async def test_ca_depends_on_ca_via_pynixd(
     profiler: pyinstrument.Profiler,
     ca_env,
@@ -292,7 +300,7 @@ async def test_ca_depends_on_ca_via_pynixd(
     server, uri = ca_env
 
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--eval-store",
         "auto",
@@ -315,6 +323,7 @@ async def test_ca_depends_on_ca_via_pynixd(
     assert stdout.strip().startswith("/nix/store/"), f"Unexpected output: {stdout}"
 
 
+@pytest.mark.ca_derivations
 async def test_non_ca_depends_on_ca_via_pynixd(
     profiler: pyinstrument.Profiler,
     ca_env,
@@ -331,7 +340,7 @@ async def test_non_ca_depends_on_ca_via_pynixd(
     server, uri = ca_env
 
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--eval-store",
         "auto",
@@ -354,6 +363,7 @@ async def test_non_ca_depends_on_ca_via_pynixd(
     assert stdout.strip().startswith("/nix/store/"), f"Unexpected output: {stdout}"
 
 
+@pytest.mark.ca_derivations
 async def test_ca_query_derivation_output_map_via_pynixd(
     profiler: pyinstrument.Profiler,
     ca_env,
@@ -376,7 +386,7 @@ async def test_ca_query_derivation_output_map_via_pynixd(
 
     # Build the CA derivation first
     build_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--eval-store",
         "auto",
@@ -398,7 +408,7 @@ async def test_ca_query_derivation_output_map_via_pynixd(
 
     # Get the .drv path
     eval_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "eval",
         "--store",
         uri,
@@ -414,7 +424,7 @@ async def test_ca_query_derivation_output_map_via_pynixd(
 
     # Query the output map — exercises QueryDerivationOutputMap (op 41)
     info_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "path-info",
         "--store",
         uri,
@@ -431,6 +441,7 @@ async def test_ca_query_derivation_output_map_via_pynixd(
 
 
 @pytest.mark.no_pynixd
+@pytest.mark.ca_derivations
 async def test_ca_query_derivation_output_map_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -448,7 +459,7 @@ async def test_ca_query_derivation_output_map_root_store(
 
     # Build the CA derivation
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--store",
         str(store_path),
@@ -466,7 +477,7 @@ async def test_ca_query_derivation_output_map_root_store(
 
     # Get the .drv path
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "eval",
         "--store",
         str(store_path),
@@ -483,7 +494,7 @@ async def test_ca_query_derivation_output_map_root_store(
     # Query the CA derivation's output map via nix path-info.
     # This exercises QueryDerivationOutputMap (op 41) and RegisterDrvOutput (op 42).
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "path-info",
         "--store",
         str(store_path),
@@ -498,6 +509,7 @@ async def test_ca_query_derivation_output_map_root_store(
     assert "ca" in info[out_path], f"Expected 'ca' field in {info[out_path]}"
 
 
+@pytest.mark.ca_derivations
 async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) -> None:
     """Build a nested dynamic derivation (producingDrv^out^out) through pynixd.
 
@@ -521,7 +533,7 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
 
     # First, get producingDrv's .drv path
     eval_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "eval",
         "--option",
         "builders",
@@ -541,7 +553,7 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
     # Build producingDrv^out^out (nested: the out output of the
     # out output's .drv)
     build_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--option",
         "builders",
@@ -574,9 +586,10 @@ DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
 @pytest.fixture
 async def dyn_env(pynixd_server: Server):
     """Set up a pynixd server with dynamic-derivations enabled."""
-    yield pynixd_server, pynixd_server.uri()
+    yield pynixd_server, server_uri(pynixd_server)
 
 
+@pytest.mark.ca_derivations
 async def test_dynamic_drv_producing_via_pynixd(
     profiler: pyinstrument.Profiler,
     dyn_env,
@@ -603,7 +616,7 @@ async def test_dynamic_drv_producing_via_pynixd(
 
     # Build producingDrv + hello together (both needed for producingDrv's input_srcs)
     build_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--option",
         "builders",
@@ -638,7 +651,7 @@ async def test_dynamic_drv_producing_via_pynixd(
 
     # Query the derivation output map to verify realisation registration
     eval_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "eval",
         "--store",
         uri,
@@ -653,7 +666,7 @@ async def test_dynamic_drv_producing_via_pynixd(
     drv_path = drv_out.strip()
 
     info_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "path-info",
         "--store",
         uri,
@@ -670,6 +683,7 @@ async def test_dynamic_drv_producing_via_pynixd(
 
 
 @pytest.mark.no_pynixd
+@pytest.mark.ca_derivations
 async def test_text_hashed_ca_build_root_store(
     profiler: pyinstrument.Profiler,
 ) -> None:
@@ -687,7 +701,7 @@ async def test_text_hashed_ca_build_root_store(
         await store.ensure_daemon()
 
         cmd = [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "build",
             "--store",
             str(store_path),
@@ -712,6 +726,7 @@ async def test_text_hashed_ca_build_root_store(
         await store.close()
 
 
+@pytest.mark.ca_derivations
 async def test_text_hashed_ca_build_via_pynixd(
     profiler: pyinstrument.Profiler,
     ca_env,
@@ -732,7 +747,7 @@ async def test_text_hashed_ca_build_via_pynixd(
     server, uri = ca_env
 
     build_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--option",
         "builders",
@@ -758,7 +773,7 @@ async def test_text_hashed_ca_build_via_pynixd(
 
     # Get the .drv path
     eval_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "eval",
         "--store",
         uri,
@@ -774,7 +789,7 @@ async def test_text_hashed_ca_build_via_pynixd(
 
     # Query the output map — exercises QueryDerivationOutputMap for text-hashed CA
     info_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "path-info",
         "--store",
         uri,
@@ -790,6 +805,7 @@ async def test_text_hashed_ca_build_via_pynixd(
     assert "ca" in info[out_path], f"Expected 'ca' field in {info[out_path]}"
 
 
+@pytest.mark.ca_derivations
 async def test_dynamic_drv_wrapper_via_pynixd(
     profiler: pyinstrument.Profiler,
     dyn_env,
@@ -808,7 +824,7 @@ async def test_dynamic_drv_wrapper_via_pynixd(
     """
     server, uri = dyn_env
     build_cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--option",
         "builders",

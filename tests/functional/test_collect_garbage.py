@@ -17,8 +17,9 @@ import pytest
 import structlog
 
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     run_subproc,
+    server_uri,
     ssh_admin_uri,
     ssh_user_uri,
     unix_session_uri,
@@ -37,7 +38,7 @@ async def test_collect_garbage_admin(pynixd_server: Server) -> None:
     Uses the SSH admin-user to trigger GC on the remote store.
     """
     uri = ssh_admin_uri(pynixd_server)
-    cmd = [str(NIX_BIN), "store", "gc", "--store", uri, "--max", "0"]
+    cmd = [str(CLIENT_BIN), "store", "gc", "--store", uri, "--max", "0"]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"GC as admin failed:\n{stdboth}"
     # GC should report freed bytes or "0 bytes"
@@ -48,7 +49,7 @@ async def test_collect_garbage_admin(pynixd_server: Server) -> None:
 async def test_collect_garbage_non_admin(pynixd_server: Server) -> None:
     """GC as non-admin user should be rejected."""
     uri = ssh_user_uri(pynixd_server)
-    cmd = [str(NIX_BIN), "store", "gc", "--store", uri, "--max", "0"]
+    cmd = [str(CLIENT_BIN), "store", "gc", "--store", uri, "--max", "0"]
     rc, stdout, stderr, stdboth = await run_subproc(cmd, expected_retcode=None)
     assert rc != 0, "GC should fail for non-admin"
     assert "requires administrative privileges" in stdboth
@@ -58,6 +59,6 @@ async def test_collect_garbage_non_admin(pynixd_server: Server) -> None:
 async def test_collect_garbage_unix_admin(pynixd_server: Server) -> None:
     """GC over Unix socket (implicit admin) should succeed."""
     uri = unix_session_uri(pynixd_server)
-    cmd = [str(NIX_BIN), "store", "gc", "--store", uri, "--max", "0"]
+    cmd = [str(CLIENT_BIN), "store", "gc", "--store", uri, "--max", "0"]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"GC over Unix socket failed:\n{stdboth}"

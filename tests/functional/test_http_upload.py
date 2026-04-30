@@ -15,11 +15,12 @@ from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     SESSION_HTTP_PASS,
     SESSION_HTTP_USER,
     get_test_store_kwargs,
     run_subproc,
+    server_uri,
 )
 
 if TYPE_CHECKING:
@@ -33,12 +34,12 @@ HTTP_AUTH_HEADER = "Basic " + base64.b64encode(f"{SESSION_HTTP_USER}:{SESSION_HT
 async def get_hello_path() -> StorePath:
     """Build nixpkgs#hello and return its store path."""
     rc, stdout, stderr, _ = await run_subproc(
-        [str(NIX_BIN), "path-info", "nixpkgs#hello"],
+        [str(CLIENT_BIN), "path-info", "nixpkgs#hello"],
     )
     if rc != 0:
-        await run_subproc([str(NIX_BIN), "build", "nixpkgs#hello"])
+        await run_subproc([str(CLIENT_BIN), "build", "nixpkgs#hello"])
         rc, stdout, stderr, _ = await run_subproc(
-            [str(NIX_BIN), "path-info", "nixpkgs#hello"],
+            [str(CLIENT_BIN), "path-info", "nixpkgs#hello"],
         )
     return StorePath(stdout.strip())
 
@@ -47,7 +48,7 @@ async def get_no_refs_path() -> StorePath:
     """Create a path with no references and return its store path."""
     rc, stdout, stderr, _ = await run_subproc(
         [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "build",
             "--no-link",
             "--print-out-paths",
@@ -144,7 +145,7 @@ async def test_nix_copy_to_http(
     # Nix copy expects URL with embedded credentials for basic auth
     auth_url = f"http://{SESSION_HTTP_USER}:{SESSION_HTTP_PASS}@127.0.0.1:{pynixd_server.http_bound_port}"
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "copy",
         "--to",
         auth_url,

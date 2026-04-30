@@ -16,8 +16,9 @@ import pytest
 import structlog
 
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     run_subproc,
+    server_uri,
     ssh_admin_uri,
     ssh_user_uri,
     unix_session_uri,
@@ -36,7 +37,7 @@ async def test_optimise_store_admin(pynixd_server: Server) -> None:
     Uses Unix socket (implicit admin).
     """
     uri = unix_session_uri(pynixd_server)
-    cmd = [str(NIX_BIN), "store", "optimise", "--store", uri]
+    cmd = [str(CLIENT_BIN), "store", "optimise", "--store", uri]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"OptimiseStore failed:\n{stdboth}"
 
@@ -45,26 +46,28 @@ async def test_optimise_store_admin(pynixd_server: Server) -> None:
 async def test_optimise_store_non_admin(pynixd_server: Server) -> None:
     """OptimiseStore as non-admin should be rejected."""
     uri = ssh_user_uri(pynixd_server)
-    cmd = [str(NIX_BIN), "store", "optimise", "--store", uri]
+    cmd = [str(CLIENT_BIN), "store", "optimise", "--store", uri]
     rc, stdout, stderr, stdboth = await run_subproc(cmd, expected_retcode=None)
     assert rc != 0, "OptimiseStore should fail for non-admin"
     assert "requires administrative privileges" in stdboth
 
 
+@pytest.mark.legacy_nix_commands
 @pytest.mark.timeout(120)
 async def test_verify_store_admin(pynixd_server: Server) -> None:
     """VerifyStore as admin should succeed."""
     uri = unix_session_uri(pynixd_server)
-    cmd = [str(NIX_BIN.parent / "nix-store"), "--verify", "--store", uri]
+    cmd = [str(CLIENT_BIN.parent / "nix-store"), "--verify", "--store", uri]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"VerifyStore failed:\n{stdboth}"
 
 
+@pytest.mark.legacy_nix_commands
 @pytest.mark.timeout(120)
 async def test_verify_store_non_admin(pynixd_server: Server) -> None:
     """VerifyStore as non-admin should be rejected."""
     uri = ssh_user_uri(pynixd_server)
-    cmd = [str(NIX_BIN.parent / "nix-store"), "--verify", "--store", uri]
+    cmd = [str(CLIENT_BIN.parent / "nix-store"), "--verify", "--store", uri]
     rc, stdout, stderr, stdboth = await run_subproc(cmd, expected_retcode=None)
     assert rc != 0, "VerifyStore should fail for non-admin"
     assert "requires administrative privileges" in stdboth
@@ -81,7 +84,7 @@ async def test_add_build_log_non_admin(pynixd_server: Server) -> None:
     # Attempt to run a build that might trigger AddBuildLog
     # We verify the build still works — if AddBuildLog is rejected it's fine
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--store",
         uri,
@@ -107,7 +110,7 @@ async def test_add_signatures_via_store(pynixd_server: Server) -> None:
 
     # Build a path
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--eval-store",
         "auto",

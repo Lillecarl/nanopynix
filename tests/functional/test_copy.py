@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     run_subproc,
+    server_uri,
 )
 
 if TYPE_CHECKING:
@@ -25,15 +26,15 @@ async def test_copy(pynixd_server: Server):
     - RegisterDrvOutput: Registers derivation output
     """
 
-    await run_subproc([NIX_BIN, "build", "nixpkgs#hello"])
+    await run_subproc([CLIENT_BIN, "build", "nixpkgs#hello"])
     await run_subproc(
         [
-            NIX_BIN,
+            CLIENT_BIN,
             "copy",
             "--from",
             "daemon",
             "--to",
-            pynixd_server.uri(),
+            server_uri(pynixd_server),
             "nixpkgs#hello",
         ],
     )

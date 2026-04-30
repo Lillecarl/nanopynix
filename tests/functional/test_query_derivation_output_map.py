@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 import structlog
 
-from tests.conftest import NIX_BIN, TEST_NIX, run_subproc
+from tests.conftest import CLIENT_BIN, TEST_NIX, run_subproc, server_uri
 
 if TYPE_CHECKING:
     from pynixd import Server
@@ -28,11 +28,11 @@ async def test_query_derivation_output_map(pynixd_server: Server) -> None:
     QueryDerivationOutputMap maps output names to store paths.
     After a successful build, it should return the realized paths.
     """
-    uri = pynixd_server.uri()
+    uri = server_uri(pynixd_server)
 
     test_nix = TEST_NIX
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--eval-store",
         "auto",

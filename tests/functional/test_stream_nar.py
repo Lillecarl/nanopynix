@@ -12,7 +12,7 @@ from pynixd.store import LocalSocketStore
 from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
     rmtree_robust,
@@ -25,7 +25,7 @@ log = structlog.get_logger(__name__)
 async def get_hello_path() -> StorePath:
     """Build nixpkgs#hello and return its store path."""
     rc, stdout, stderr, _ = await run_subproc(
-        [str(NIX_BIN), "build", "nixpkgs#hello", "--no-link", "--print-out-paths"],
+        [str(CLIENT_BIN), "build", "nixpkgs#hello", "--no-link", "--print-out-paths"],
     )
     return StorePath(stdout.strip())
 

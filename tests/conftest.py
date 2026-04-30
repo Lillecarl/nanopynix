@@ -20,6 +20,7 @@ import structlog
 from environs import env
 
 from pynixd import Server
+from pynixd.instance import NixImplementation
 from pynixd.store import LocalSocketStore
 from pynixd.testing import clear_test_stash
 from pynixd.types.ids import StoreId
@@ -136,7 +137,27 @@ def set_log_levels(levels: dict[str, int]):
 
 
 NIX_BIN = env.path("NIX_BIN")
-LIX_BIN = env.path("LIX_BIN")
+LIX_BIN = env.path("LIX_BIN", None) or NIX_BIN
+
+CLIENT_BIN: Path = NIX_BIN  # Overridden in pytest_configure based on --client-bin
+
+
+def pytest_addoption(parser):
+    parser.addoption("--client-bin", choices=["nix", "lix"], default="nix")
+    parser.addoption("--local-bin", choices=["nix", "lix"], default="nix")
+    parser.addoption("--builder-bin", choices=["nix", "lix"], default="nix")
+
+
+def pytest_configure(config):
+    global CLIENT_BIN
+    CLIENT_BIN = LIX_BIN if config.getoption("client_bin") == "lix" else NIX_BIN
+
+
+def server_uri(server: Server) -> str:
+    """Return server URI in format appropriate for the current client binary."""
+    if CLIENT_BIN == LIX_BIN:
+        return server.uri(NixImplementation.LIX)
+    return server.uri(NixImplementation.NIX)
 
 
 DEFAULT_SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
@@ -187,11 +208,15 @@ TEST_NIX = Path("tests/nix")
 
 def ssh_admin_uri(server: Server) -> str:
     """Return an SSH URI for admin-user on the given server."""
+    if CLIENT_BIN == LIX_BIN:
+        return f"ssh-ng://admin-user@127.0.0.1?port={server.port}"
     return f"ssh-ng://admin-user@127.0.0.1:{server.port}"
 
 
 def ssh_user_uri(server: Server) -> str:
     """Return an SSH URI for regular-user on the given server."""
+    if CLIENT_BIN == LIX_BIN:
+        return f"ssh-ng://regular-user@127.0.0.1?port={server.port}"
     return f"ssh-ng://regular-user@127.0.0.1:{server.port}"
 
 
@@ -319,6 +344,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         ):
             item.obj = _wrap_with_asyncio_timeout(item, default_timeout)
             item.obj._pynixd_timeout_wrapped = True  # type: ignore[reportAttributeAccessIssue]
+
+    # Lix client: skip tests requiring CA/dynamic derivations
+    client_bin = config.getoption("client_bin", "nix")
+    if client_bin == "lix":
+        for item in items:
+            if item.get_closest_marker("ca_derivations"):
+                item.add_marker(pytest.mark.skip(reason="Not supported with Lix client"))
 
 
 def _wrap_with_asyncio_timeout(item: pytest.Function, default_timeout: float):
@@ -684,15 +716,18 @@ async def pynixd_server(
     rmtree_robust(builder_path)
     rmtree_robust(socket_path)
 
+    local_bin = LIX_BIN if request.config.getoption("local_bin") == "lix" else NIX_BIN
+    builder_bin = LIX_BIN if request.config.getoption("builder_bin") == "lix" else NIX_BIN
+
     local_store = LocalSocketStore(
         store_id=StoreId("local"),
         store_path=local_path,
-        **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG),
+        **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG, nix_bin=str(local_bin)),
     )
     builder_store = LocalSocketStore(
         store_id=StoreId("builder"),
         store_path=builder_path,
-        **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG),
+        **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG, nix_bin=str(builder_bin)),
     )
 
     upload_dir = tmp_path_factory.mktemp("http-uploads")

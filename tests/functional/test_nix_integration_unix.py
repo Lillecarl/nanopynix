@@ -6,7 +6,7 @@ import pytest
 
 from pynixd import Server
 from pynixd.store import LocalSocketStore
-from tests.conftest import get_test_store_kwargs, run_subproc
+from tests.conftest import CLIENT_BIN, get_test_store_kwargs, run_subproc
 
 """
 End-to-End Nix Integration Tests via Unix Socket
@@ -57,7 +57,7 @@ async def test_nix_build_via_unix(pynixd_server):
     expr_path.write_text(nix_expr)  # noqa: ASYNC240 — test setup
 
     cmd = [
-        "nix",
+        str(CLIENT_BIN),
         "build",
         "--file",
         str(expr_path),
@@ -78,6 +78,7 @@ async def test_nix_build_via_unix(pynixd_server):
 
 
 @pytest.mark.no_pynixd
+@pytest.mark.legacy_nix_commands
 async def test_nix_copy_via_unix(pynixd_server, tmp_path: Path):
     """Verify 'nix copy' works against pynixd via Unix socket."""
     server, socket_path, store_path = pynixd_server
@@ -88,12 +89,12 @@ async def test_nix_copy_via_unix(pynixd_server, tmp_path: Path):
 
     # Setup: add to system store
     rc, stdout, stderr, stdboth = await run_subproc(
-        ["nix-store", "--add", str(dummy_file)],
+        [str(CLIENT_BIN.parent / "nix-store"), "--add", str(dummy_file)],
     )
     assert rc == 0
     system_path = stdout.strip()
 
-    cmd = ["nix", "copy", "--to", uri, system_path]
+    cmd = [str(CLIENT_BIN), "copy", "--to", uri, system_path]
 
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0

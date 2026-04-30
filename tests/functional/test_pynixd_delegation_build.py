@@ -14,6 +14,7 @@ from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
 from tests.conftest import (
+    CLIENT_BIN,
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
@@ -121,7 +122,7 @@ async def test_pynixd_delegation_build(tmp_path: Path) -> None:
             expr_file.write_text(nix_expr)
 
             cmd = [
-                str(NIX_BIN),
+                str(CLIENT_BIN),
                 "build",
                 "--file",
                 str(expr_file),

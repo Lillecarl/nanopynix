@@ -15,13 +15,14 @@ from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     SESSION_HTTP_PASS,
     SESSION_HTTP_USER,
     STORE_PREFIX,
     get_test_store_kwargs,
     rmtree_robust,
     run_subproc,
+    server_uri,
 )
 
 if TYPE_CHECKING:
@@ -149,7 +150,7 @@ async def test_cache_as_substituter() -> None:
         subst_store_path.mkdir(parents=True, exist_ok=True)
 
         cmd = [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "copy",
             "--to",
             f"file://{subst_store_path}",
@@ -163,7 +164,7 @@ async def test_cache_as_substituter() -> None:
 
         # Verify it exists in the new store
         cmd = [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "store",
             "ls",
             "--store",

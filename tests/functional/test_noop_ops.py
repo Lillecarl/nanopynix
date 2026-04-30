@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 import structlog
 
-from tests.conftest import NIX_BIN, run_subproc
+from tests.conftest import CLIENT_BIN, run_subproc, server_uri
 
 if TYPE_CHECKING:
     from pynixd import Server
@@ -30,11 +30,11 @@ async def test_noop_operations_do_not_crash(pynixd_server: Server) -> None:
     - AddTempRoot (during add/store)
     - AddPermRoot / AddIndirectRoot (during --add-root)
     """
-    uri = pynixd_server.uri()
+    uri = server_uri(pynixd_server)
 
     # Any nix command triggers SetOptions
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "store",
         "add",
         "--store",

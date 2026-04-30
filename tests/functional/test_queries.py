@@ -10,9 +10,10 @@ import pytest
 import structlog
 
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     TEST_NIX,
     run_subproc,
+    server_uri,
 )
 
 if TYPE_CHECKING:
@@ -26,11 +27,11 @@ log = structlog.get_logger(__name__)
 @pytest.fixture
 async def query_env(pynixd_server: Server):
     """Set up a pynixd server with some initial paths."""
-    uri = pynixd_server.uri()
+    uri = server_uri(pynixd_server)
 
     test_nix = TEST_NIX
     cmd = [
-        NIX_BIN,
+        CLIENT_BIN,
         "build",
         "--eval-store",
         "auto",
@@ -46,7 +47,7 @@ async def query_env(pynixd_server: Server):
     assert rc == 0, f"Initial build failed:\n{stdboth}"
 
     cmd = [
-        NIX_BIN.parent / "nix-instantiate",
+        CLIENT_BIN.parent / "nix-instantiate",
         "--impure",
         test_nix,
         "-A",
@@ -57,7 +58,7 @@ async def query_env(pynixd_server: Server):
     drv_path = stdout.strip()
 
     cmd = [
-        NIX_BIN.parent / "nix-store",
+        CLIENT_BIN.parent / "nix-store",
         "-q",
         "--outputs",
         drv_path,
@@ -70,6 +71,7 @@ async def query_env(pynixd_server: Server):
     yield pynixd_server, uri, out_path
 
 
+@pytest.mark.legacy_nix_commands
 async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify QueryReferrers via 'nix-store -q --referrers'.
 
@@ -87,7 +89,7 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
 
     # Build another thing that depends on 'out_path'
     cmd = [
-        NIX_BIN,
+        CLIENT_BIN,
         "build",
         "--eval-store",
         "auto",
@@ -104,7 +106,7 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
 
     # Get dep_path locally
     cmd = [
-        NIX_BIN.parent / "nix-instantiate",
+        CLIENT_BIN.parent / "nix-instantiate",
         "--impure",
         test_nix,
         "-A",
@@ -115,7 +117,7 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
     dep_drv = stdout.strip()
 
     cmd = [
-        NIX_BIN.parent / "nix-store",
+        CLIENT_BIN.parent / "nix-store",
         "-q",
         "--outputs",
         dep_drv,
@@ -126,7 +128,7 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
 
     # No nix3 equivalent exists for --referrers (no `nix store referrers`).
     cmd = [
-        NIX_BIN.parent / "nix-store",
+        CLIENT_BIN.parent / "nix-store",
         "--store",
         uri,
         "-q",
@@ -161,7 +163,7 @@ async def test_query_path_from_hash_part(
     hash_part = m.group(1)
 
     cmd = [
-        NIX_BIN,
+        CLIENT_BIN,
         "store",
         "path-from-hash-part",
         "--store",
@@ -173,6 +175,7 @@ async def test_query_path_from_hash_part(
     assert stdout.strip() == out_path
 
 
+@pytest.mark.legacy_nix_commands
 async def test_query_valid_derivers(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify QueryValidDerivers via 'nix-store -q --deriver'.
 
@@ -187,9 +190,9 @@ async def test_query_valid_derivers(profiler: pyinstrument.Profiler, query_env) 
     server, uri, out_path = query_env
 
     # Could use `nix path-info --derivation <store-path>` as a nix3 equivalent,
-    # but `nix-store -q --deriver` is kept for consistency with other query tests.
+    # but `nix-store -q --deriver` is kept for consistency with other query tes…
     cmd = [
-        NIX_BIN.parent / "nix-store",
+        CLIENT_BIN.parent / "nix-store",
         "--store",
         uri,
         "-q",
@@ -217,7 +220,7 @@ async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None
 
     test_nix = TEST_NIX
     cmd = [
-        NIX_BIN,
+        CLIENT_BIN,
         "build",
         "--eval-store",
         "auto",
@@ -233,6 +236,7 @@ async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None
     assert rc == 0
 
 
+@pytest.mark.legacy_nix_commands
 async def test_find_roots(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify FindRoots via 'nix-store --gc --print-roots'.
 
@@ -241,9 +245,9 @@ async def test_find_roots(profiler: pyinstrument.Profiler, query_env) -> None:
     """
     server, uri, out_path = query_env
 
-    # No nix3 equivalent exists for --print-roots (`nix store gc` has no such flag).
+    # No nix3 equivalent exists for --print-roots (`nix store gc` has no such f…
     cmd = [
-        NIX_BIN.parent / "nix-store",
+        CLIENT_BIN.parent / "nix-store",
         "--store",
         uri,
         "--gc",

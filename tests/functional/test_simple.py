@@ -10,9 +10,10 @@ import structlog
 
 from pynixd.store import get_current_system
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     TEST_NIX,
     run_subproc,
+    server_uri,
     set_log_levels,
 )
 
@@ -44,12 +45,12 @@ async def test_builders(
     test_nix = TEST_NIX
     client_store_path = tmp_path / "client-store"
 
-    uri = pynixd_server.uri()
+    uri = server_uri(pynixd_server)
     system = get_current_system()
     builder_spec = f"{uri} {system}"
 
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--store",
         str(client_store_path),
@@ -88,10 +89,10 @@ async def test_store(
     test_nix = TEST_NIX
 
     with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):
-        uri = pynixd_server.uri()
+        uri = server_uri(pynixd_server)
 
         cmd = [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "build",
             "--eval-store",
             "auto",

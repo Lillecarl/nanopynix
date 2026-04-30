@@ -18,11 +18,12 @@ from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
     rmtree_robust,
     run_subproc,
+    server_uri,
 )
 
 if TYPE_CHECKING:
@@ -79,7 +80,7 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
 
     # We need a path that actually exists in the remote store so verification succeeds
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "store",
         "add-path",
         "justfile",
@@ -247,7 +248,7 @@ async def test_is_valid_path_isolation(tmp_path: Path) -> None:
     ):
         # 1. Add a path to LOCAL store only
         cmd = [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "store",
             "add-path",
             "justfile",

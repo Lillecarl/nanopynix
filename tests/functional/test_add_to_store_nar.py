@@ -9,8 +9,9 @@ import pytest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store_path import StorePath
 from tests.conftest import (
-    NIX_BIN,
+    CLIENT_BIN,
     run_subproc,
+    server_uri,
 )
 
 if TYPE_CHECKING:
@@ -34,11 +35,11 @@ async def test_add_to_store_nar(pynixd_server: Server, tmp_path: Path):
 
     rc, stdout, stderr, _ = await run_subproc(
         [
-            str(NIX_BIN),
+            str(CLIENT_BIN),
             "store",
             "add-path",
             "--store",
-            pynixd_server.uri(),
+            server_uri(pynixd_server),
             str(test_file),
         ],
     )

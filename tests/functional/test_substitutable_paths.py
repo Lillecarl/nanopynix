@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 import structlog
 
-from tests.conftest import NIX_BIN, TEST_NIX, run_subproc
+from tests.conftest import CLIENT_BIN, TEST_NIX, run_subproc, server_uri
 
 if TYPE_CHECKING:
     from pynixd import Server
@@ -34,12 +34,12 @@ async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
     paths, but we can verify the protocol round-trips correctly by performing
     a query through the local store.
     """
-    uri = pynixd_server.uri()
+    uri = server_uri(pynixd_server)
 
     # Build a path first
     test_nix = TEST_NIX
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--eval-store",
         "auto",
@@ -56,7 +56,7 @@ async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
 
     out_path = stdout.strip()
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "path-info",
         "--store",
         uri,
@@ -73,11 +73,11 @@ async def test_substitutable_paths_via_nix(pynixd_server: Server) -> None:
 
     This triggers QuerySubstitutablePaths and QuerySubstitutablePathInfos.
     """
-    uri = pynixd_server.uri()
+    uri = server_uri(pynixd_server)
 
     test_nix = TEST_NIX
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--eval-store",
         "auto",
