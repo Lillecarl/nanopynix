@@ -1,4 +1,10 @@
-"""QueryDerivationOutputsBatch operation request/response types."""
+"""QueryDerivationOutputsBatch extension (op 106, pynixd-internal).
+
+Batch reads derivation outputs from the local SQLite DerivationOutputs table
+or falls back to parsing .drv files.  This is NOT the deprecated wire protocol
+op 22 (QueryDerivationOutputs) — that op is not implemented in pynixd;
+pynixd uses QueryDerivationOutputMap (op 41) instead.
+"""
 
 from __future__ import annotations
 

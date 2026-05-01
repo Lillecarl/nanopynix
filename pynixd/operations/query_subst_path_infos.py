@@ -1,4 +1,8 @@
-"""QuerySubstitutablePathInfos operation request/response types."""
+"""QuerySubstitutablePathInfos operation request/response types.
+
+Deprecated in favor of QuerySubstitutablePaths (op 32).
+Kept for backward compatibility with older daemon protocol versions.
+"""
 
 from __future__ import annotations
 
