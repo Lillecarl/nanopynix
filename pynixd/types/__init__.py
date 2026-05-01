@@ -41,3 +41,5 @@ from .path_info import (
 from .path_info import (
     ValidPathInfo as ValidPathInfo,
 )
+from .aliases import OutputMap as OutputMap
+from .aliases import OutputName as OutputName

@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
 
 from .store_path import StorePath
+from .types.aliases import OutputMap
 from .types import BasicDerivation, DerivationOutput, OutputKind
 
 
@@ -511,7 +512,7 @@ class _Parser:
 async def to_basic_derivation(
     parsed: ParsedDerivation,
     store_path: Path,
-    output_cache: dict[StorePath, dict[str, StorePath]] | None = None,
+    output_cache: OutputMap | None = None,
 ) -> BasicDerivation:
     """Convert a ParsedDerivation to a BasicDerivation (wire protocol format).
 

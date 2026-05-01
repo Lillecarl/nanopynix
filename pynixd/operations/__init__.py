@@ -22,7 +22,7 @@ from . import query_all_valid_paths as query_all_valid_paths
 from . import query_closure as query_closure
 from . import query_closure_with_info as query_closure_with_info
 from . import query_derivation_output_map as query_derivation_output_map
-from . import query_derivation_outputs_batch as query_derivation_outputs_batch
+from . import query_derivation_output_map_batch as query_derivation_output_map_batch
 from . import query_missing as query_missing
 from . import query_path_from_hash_part as query_path_from_hash_part
 from . import query_path_info as query_path_info

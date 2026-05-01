@@ -1254,33 +1254,34 @@ class TestQueryClosureWithInfoSerialization:
         assert result.infos[0].path == info.path
 
 
-class TestDerivationOutputsBatchSerialization:
-    """QueryDerivationOutputsBatch (op 106, extension) — batch output query."""
+class TestDerivationOutputMapBatchSerialization:
+    """QueryDerivationOutputMapBatch (op 106, extension) — batch output map query."""
 
     async def test_request(self):
-        from pynixd.operations.query_derivation_outputs_batch import (
-            QueryDerivationOutputsBatchRequest,
+        from pynixd.operations.query_derivation_output_map_batch import (
+            QueryDerivationOutputMapBatchRequest,
         )
 
         paths = {StorePath("/nix/store/a.drv"), StorePath("/nix/store/b.drv")}
-        req = QueryDerivationOutputsBatchRequest(drv_paths=paths)
-        result = await _serialize_deserialize_request(QueryDerivationOutputsBatchRequest, req)
+        req = QueryDerivationOutputMapBatchRequest(drv_paths=paths)
+        result = await _serialize_deserialize_request(QueryDerivationOutputMapBatchRequest, req)
         assert result.drv_paths == paths
 
     async def test_response(self):
-        from pynixd.operations.query_derivation_outputs_batch import (
-            DerivationOutputsBatchResponse,
+        from pynixd.operations.query_derivation_output_map_batch import (
+            DerivationOutputMapBatchResponse,
         )
+        from pynixd.types.aliases import OutputMap
 
-        outputs = {
+        outputs: OutputMap = {
             StorePath("/nix/store/a.drv"): {"out": StorePath("/nix/store/a-foo")},
             StorePath("/nix/store/b.drv"): {
                 "out": StorePath("/nix/store/b-bar"),
                 "lib": StorePath("/nix/store/b-lib"),
             },
         }
-        resp = DerivationOutputsBatchResponse(outputs=outputs)
-        result = await _serialize_deserialize_response(DerivationOutputsBatchResponse, resp)
+        resp = DerivationOutputMapBatchResponse(outputs=outputs)
+        result = await _serialize_deserialize_response(DerivationOutputMapBatchResponse, resp)
         assert len(result.outputs) == 2
         assert result.outputs[StorePath("/nix/store/a.drv")] == {"out": StorePath("/nix/store/a-foo")}
         assert result.outputs[StorePath("/nix/store/b.drv")]["lib"] == StorePath("/nix/store/b-lib")

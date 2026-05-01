@@ -1,6 +1,6 @@
-"""QueryDerivationOutputsBatch extension (op 106, pynixd-internal).
+"""QueryDerivationOutputMapBatch extension (op 106, pynixd-internal).
 
-Batch reads derivation outputs from the local SQLite DerivationOutputs table
+Batch reads derivation output maps from the local SQLite DerivationOutputs table
 or falls back to parsing .drv files.  This is NOT the deprecated wire protocol
 op 22 (QueryDerivationOutputs) — that op is not implemented in pynixd;
 pynixd uses QueryDerivationOutputMap (op 41) instead.
@@ -15,9 +15,10 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..drv_parser import read_drv_file
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
+from ..types.aliases import OutputMap
 from .base import OpRequest, OpResponse
 
-QUERY_DERIVATION_OUTPUTS_BATCH = """
+QUERY_DERIVATION_OUTPUT_MAP_BATCH = """
 SELECT vp_drv.path, do.id, do.path
 FROM DerivationOutputs do
 JOIN ValidPaths vp_drv ON do.drv = vp_drv.id
@@ -31,10 +32,13 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class DerivationOutputsBatchResponse(OpResponse):
-    """{drv_path: {output_name: output_path}}."""
+class DerivationOutputMapBatchResponse(OpResponse):
+    """{drv_path: {output_name: output_path_or_none}}.
 
-    outputs: dict[StorePath, dict[str, StorePath]] = field(default_factory=dict)
+    Output paths can be None when the output hasn't been realised yet.
+    """
+
+    outputs: OutputMap = field(default_factory=dict)
 
     @property
     def is_not_found(self) -> bool:
@@ -54,11 +58,11 @@ class DerivationOutputsBatchResponse(OpResponse):
         for _ in range(n):
             drv_path = await reader.read_string(StorePath)
             m = await reader.read_uint64()
-            drv_outputs: dict[str, StorePath] = {}
+            drv_outputs: dict[str, StorePath | None] = {}
             for _ in range(m):
                 name = await reader.read_string()
                 path = await reader.read_string(StorePath)
-                drv_outputs[name] = path
+                drv_outputs[name] = path if path else None
             self.outputs[drv_path] = drv_outputs
         return self
 
@@ -72,15 +76,18 @@ class DerivationOutputsBatchResponse(OpResponse):
             writer.write_uint64(len(drv_outputs))
             for name, path in drv_outputs.items():
                 writer.write_string(name)
-                writer.write_string(path)
+                if path is not None:
+                    writer.write_string(path)
+                else:
+                    writer.write_string("")
 
 
 @dataclass
-class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchResponse]):
-    name: ClassVar[str] = "QueryDerivationOutputsBatch"
+class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchResponse]):
+    name: ClassVar[str] = "QueryDerivationOutputMapBatch"
     op: ClassVar[int] = 106
     is_extension: ClassVar[bool] = True
-    response_type: ClassVar[type[OpResponse]] = DerivationOutputsBatchResponse
+    response_type: ClassVar[type[OpResponse]] = DerivationOutputMapBatchResponse
     is_query: ClassVar[bool] = True
     drv_paths: set[StorePath] = field(default_factory=set)
 
@@ -100,24 +107,24 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         store: Store,
         client: ClientConn | None = None,
         suppress_last: bool = False,
-    ) -> DerivationOutputsBatchResponse:
+    ) -> DerivationOutputMapBatchResponse:
         if not self.drv_paths:
-            return DerivationOutputsBatchResponse(outputs={})
+            return DerivationOutputMapBatchResponse(outputs={})
 
         if (db := store.db) is not None:
             paths_json = json.dumps([str(p) for p in self.drv_paths])
             async with db.execute(
-                QUERY_DERIVATION_OUTPUTS_BATCH,
+                QUERY_DERIVATION_OUTPUT_MAP_BATCH,
                 (paths_json,),
             ) as cursor:
                 rows = await cursor.fetchall()
 
-            result: dict[StorePath, dict[str, StorePath]] = {}
+            result: OutputMap = {}
             for drv_path, output_name, output_path in rows:
-                result.setdefault(StorePath(drv_path), {})[output_name] = StorePath(
-                    output_path,
+                result.setdefault(StorePath(drv_path), {})[output_name] = (
+                    StorePath(output_path) if output_path else None
                 )
-            return DerivationOutputsBatchResponse(outputs=result)
+            return DerivationOutputMapBatchResponse(outputs=result)
 
         # Try delegation via wire (if talking to another pynixd)
         try:
@@ -125,11 +132,12 @@ class QueryDerivationOutputsBatchRequest(OpRequest[DerivationOutputsBatchRespons
         except OpNotImplementedError:
             pass  # Backend doesn't support the extension, fall back to local file reading
 
-        outputs: dict[StorePath, dict[str, StorePath]] = {}
+        outputs: OutputMap = {}
         for drv_path in self.drv_paths:
             try:
                 parsed = await read_drv_file(store.store_path, drv_path)
-                outputs[drv_path] = parsed.output_paths()
+                out = parsed.output_paths()
+                outputs[drv_path] = {k: v for k, v in out.items()}
             except FileNotFoundError:
                 pass
-        return DerivationOutputsBatchResponse(outputs=outputs)
+        return DerivationOutputMapBatchResponse(outputs=outputs)

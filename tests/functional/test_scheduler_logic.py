@@ -16,9 +16,9 @@ from pynixd.operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )
-from pynixd.operations.query_derivation_outputs_batch import (
-    DerivationOutputsBatchResponse,
-    QueryDerivationOutputsBatchRequest,
+from pynixd.operations.query_derivation_output_map_batch import (
+    DerivationOutputMapBatchResponse,
+    QueryDerivationOutputMapBatchRequest,
 )
 from pynixd.operations.query_missing import (
     QueryMissingRequest,
@@ -285,7 +285,7 @@ async def test_scheduler_decomposition_and_ordering():
         will_build={leaf_path, root_path},
     )
     local_store.responses[QueryValidPathsRequest] = QueryValidPathsResponse(paths=set())
-    local_store.responses[QueryDerivationOutputsBatchRequest] = DerivationOutputsBatchResponse(
+    local_store.responses[QueryDerivationOutputMapBatchRequest] = DerivationOutputMapBatchResponse(
         outputs={leaf_path: {"out": StorePath("/nix/store/leaf-out")}},
     )
 

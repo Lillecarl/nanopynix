@@ -11,8 +11,8 @@ from .operations.build_derivation import (
     BuildDerivationRequest,
 )
 from .operations.build_paths import BuildPathsWithResultsResponse
-from .operations.query_derivation_outputs_batch import (
-    QueryDerivationOutputsBatchRequest,
+from .operations.query_derivation_output_map_batch import (
+    QueryDerivationOutputMapBatchRequest,
 )
 from .operations.query_missing import QueryMissingRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
@@ -156,7 +156,7 @@ class BuildDecomposer:
         output_cache = None
         if all_input_drvs:
             resp = await self.local_store.execute(
-                QueryDerivationOutputsBatchRequest(drv_paths=all_input_drvs),
+                QueryDerivationOutputMapBatchRequest(drv_paths=all_input_drvs),
             )
             output_cache = resp.outputs or {}
 

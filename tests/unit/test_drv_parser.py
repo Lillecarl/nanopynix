@@ -19,6 +19,7 @@ import pytest
 
 from pynixd.drv_parser import OutputInfo, ParsedDerivation, parse_drv
 from pynixd.store_path import StorePath
+from pynixd.types.aliases import OutputMap
 from pynixd.types.derivation import OutputKind
 
 NIX_BIN = os.environ.get("NIX_BIN", "nix")
@@ -369,7 +370,7 @@ class TestToBasicDerivation:
         parsed = parse_drv(drv_content)
         drv = next(iter(parsed.input_drvs.keys()))
         out_name = parsed.input_drvs[drv][0]
-        cache = {drv: {out_name: StorePath(f"/nix/store/realized-{out_name}")}}
+        cache: OutputMap = {drv: {out_name: StorePath(f"/nix/store/realized-{out_name}")}}
         result = await to_basic_derivation(parsed, Path("/tmp/fake-store"), output_cache=cache)
         assert StorePath(f"/nix/store/realized-{out_name}") in result.input_srcs
 
