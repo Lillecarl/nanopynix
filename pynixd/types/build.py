@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, ClassVar
 import structlog
 
 from ..store_path import DrvOutput, StorePath
+from .aliases import ContentAddress, NARHash
 
 if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
@@ -52,10 +53,10 @@ class BuiltOutput:
     """A built output - either plain path or content-addressed (CA) format."""
 
     out_path: StorePath = field(default_factory=lambda: StorePath(""))
-    ca: str = ""
+    ca: ContentAddress = ""
     hash: str = ""
     hash_algo: str = ""
-    nar_hash: str = ""
+    nar_hash: NARHash = ""
     nar_size: int = 0
     reference: str = ""
 

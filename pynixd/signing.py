@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import nacl.signing
 from environs import env
 
-from .types.aliases import StorePathSet
+from .types.aliases import NARHash, StorePathSet
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -95,7 +95,7 @@ class SecretKey:
 
 def fingerprint(
     store_path: StorePath,
-    nar_hash: str,
+    nar_hash: NARHash,
     nar_size: int,
     references: StorePathSet,
 ) -> str:

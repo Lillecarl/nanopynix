@@ -19,3 +19,13 @@ An output path is None when it hasn't been realised yet.
 
 type StorePathSet = set[StorePath]
 """Set of store paths — the protocol ``Set<StorePath>``."""
+
+type NARHash = str
+"""Base16-encoded SHA256 NAR hash without algorithm prefix."""
+
+type ContentAddress = str
+"""Content-addressed store path identifier in ``method:hash`` format.
+
+E.g. ``text:sha256:abc123...`` or ``fixed:r:sha256:def456...``.
+Empty string means the path is input-addressed.
+"""

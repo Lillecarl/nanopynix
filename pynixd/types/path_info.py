@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..store_path import StorePath
 
-from .aliases import StorePathSet
+from .aliases import ContentAddress, NARHash, StorePathSet
 if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
 
@@ -17,13 +17,13 @@ class UnkeyedValidPathInfo:
     """Metadata for a store path (without the path itself)."""
 
     deriver: StorePath = field(default_factory=lambda: StorePath(""))
-    nar_hash: str = ""
+    nar_hash: NARHash = ""
     references: StorePathSet = field(default_factory=set)
     registration_time: int = 0
     nar_size: int = 0
     ultimate: int = 0
     sigs: set[str] = field(default_factory=set)
-    ca: str = ""
+    ca: ContentAddress = ""
 
     async def from_reader(self, reader: NixReader) -> UnkeyedValidPathInfo:
         self.deriver = await reader.read_string(StorePath)
