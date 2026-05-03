@@ -22,6 +22,7 @@ JOIN ValidPaths vp ON c.id = vp.id
 """
 
 from ..types.aliases import StorePathSet
+
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store

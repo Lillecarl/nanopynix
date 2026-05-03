@@ -36,6 +36,7 @@ ORDER BY vp.id ASC
 """
 
 from ..types.aliases import StorePathSet
+
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store

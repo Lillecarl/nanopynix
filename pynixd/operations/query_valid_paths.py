@@ -15,6 +15,7 @@ SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
 """
 
 from ..types.aliases import StorePathSet
+
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store

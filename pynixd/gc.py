@@ -17,15 +17,14 @@ from typing import TYPE_CHECKING
 import structlog
 
 from .operations.collect_garbage import CollectGarbageRequest, CollectGarbageResponse
-
 from .types.aliases import StorePathSet
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from .context import PynixdContext
     from .local_store_db import LocalStoreDB
     from .store import Store
-    from .store_path import StorePath
     from .types.ids import StoreId
 
 log = structlog.get_logger(__name__)

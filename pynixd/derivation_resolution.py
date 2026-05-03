@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING
 
 from .operations.base import BasicDerivation, DerivationOutput
 from .store_path import StorePath
+from .types.aliases import StorePathSet
 from .utils import nix32_encode
 
-from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from .drv_parser import ParsedDerivation
 

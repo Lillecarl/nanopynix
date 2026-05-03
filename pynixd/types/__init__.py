@@ -4,6 +4,11 @@ Shared types and enums for Nix daemon operations.
 
 from __future__ import annotations
 
+from .aliases import ContentAddress as ContentAddress
+from .aliases import NARHash as NARHash
+from .aliases import OutputMap as OutputMap
+from .aliases import OutputName as OutputName
+from .aliases import StorePathSet as StorePathSet
 from .auth import Role as Role
 from .build import (
     BuildMode as BuildMode,
@@ -41,8 +46,3 @@ from .path_info import (
 from .path_info import (
     ValidPathInfo as ValidPathInfo,
 )
-from .aliases import ContentAddress as ContentAddress
-from .aliases import NARHash as NARHash
-from .aliases import OutputMap as OutputMap
-from .aliases import OutputName as OutputName
-from .aliases import StorePathSet as StorePathSet

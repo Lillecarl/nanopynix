@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import StderrNext
 from ..store_path import StorePath
+from ..types.aliases import StorePathSet
 from .base import (
     BasicDerivation,
     BuildMode,
@@ -16,7 +17,6 @@ from .base import (
     RequestContext,
 )
 
-from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..wire import NixReader, NixWriter

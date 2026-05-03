@@ -246,9 +246,7 @@ class BuildAllocator:
         # Only strip features that the derivation no longer needs
         # (i.e., they were actually resolved by the resolver).
         still_ca = any(o.is_ca for o in build.request.derivation.outputs.values())
-        still_dynamic = any(
-            o.is_dynamic_output for o in build.request.derivation.outputs.values()
-        )
+        still_dynamic = any(o.is_dynamic_output for o in build.request.derivation.outputs.values())
         if still_ca:
             stripped.discard("ca-derivations")
         if still_dynamic:

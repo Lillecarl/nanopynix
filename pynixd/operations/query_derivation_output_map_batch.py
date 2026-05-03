@@ -62,7 +62,7 @@ class DerivationOutputMapBatchResponse(OpResponse):
             for _ in range(m):
                 name = await reader.read_string()
                 path = await reader.read_string(StorePath)
-                drv_outputs[name] = path if path else None
+                drv_outputs[name] = path or None
             self.outputs[drv_path] = drv_outputs
         return self
 

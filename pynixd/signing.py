@@ -16,6 +16,7 @@ import nacl.signing
 from environs import env
 
 from .types.aliases import NARHash, StorePathSet
+
 if TYPE_CHECKING:
     from pathlib import Path
 

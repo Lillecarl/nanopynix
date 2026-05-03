@@ -17,8 +17,8 @@ from .operations.query_derivation_output_map_batch import (
 from .operations.query_missing import QueryMissingRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import StorePath
-
 from .types.aliases import StorePathSet
+
 if TYPE_CHECKING:
     from .connection import ClientConn
     from .drv_parser import ParsedDerivation

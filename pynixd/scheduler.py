@@ -32,8 +32,8 @@ from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .stderr import StderrNext
 from .store_path import StorePath
 from .trampoline import Trampoline
-
 from .types.aliases import StorePathSet
+
 if TYPE_CHECKING:
     from .connection import ClientConn
     from .context import PynixdContext

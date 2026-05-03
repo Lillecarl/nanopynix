@@ -11,6 +11,7 @@ import structlog
 from pynixd.operations.sign_path_info import SignPathInfoRequest
 
 from ..store_path import StorePath
+from ..types.aliases import StorePathSet
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import (
     OpRequest,
@@ -19,7 +20,6 @@ from .base import (
     ValidPathInfo,
 )
 
-from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 

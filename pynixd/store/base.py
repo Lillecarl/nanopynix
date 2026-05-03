@@ -22,9 +22,9 @@ from ..operations.probe_systems import ProbeSystemsRequest
 from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
 from ..path_tracker import PathTrackerInstance
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
+from ..types.aliases import StorePathSet
 from .pool import ConnectionPool
 
-from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
     from collections.abc import Set as AbstractSet

@@ -11,8 +11,8 @@ from ..operations.add_multiple_to_store import AddMultipleToStoreRequest
 from ..operations.nar_from_path import NarFromPathRequest
 from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
 from ..store_path import StorePath
-
 from ..types.aliases import StorePathSet
+
 if TYPE_CHECKING:
     import asyncio
     from collections.abc import Iterable

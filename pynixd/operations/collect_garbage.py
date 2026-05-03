@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
+from ..types.aliases import StorePathSet
 from .base import (
     OpRequest,
     OpResponse,
@@ -13,7 +14,6 @@ from .base import (
     Role,
 )
 
-from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store

@@ -43,8 +43,8 @@ if TYPE_CHECKING:
 
 
 from .store_path import StorePath
-from .types.aliases import OutputMap, StorePathSet
 from .types import BasicDerivation, DerivationOutput, OutputKind
+from .types.aliases import OutputMap, StorePathSet
 
 
 class NixDerivationOutputShow(TypedDict, total=False):

@@ -20,8 +20,8 @@ from .operations.base import BuildResult, BuildResultStatus, UnkeyedValidPathInf
 from .operations.build_derivation import BuildDerivationRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import DrvOutput, StorePath
-
 from .types.aliases import StorePathSet
+
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild, SchedulerBuildRequest
     from .derived_path import DerivedPath

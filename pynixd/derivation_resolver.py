@@ -40,9 +40,9 @@ from .operations.add_to_store import AddToStoreRequest
 from .operations.base import UnkeyedValidPathInfo
 from .operations.ca_derivations import RegisterDrvOutputRequest
 from .store_path import StorePath
+from .types.aliases import StorePathSet
 from .types.derivation import OutputKind
 
-from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild
     from .drv_parser import ParsedDerivation
