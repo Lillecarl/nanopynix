@@ -35,6 +35,7 @@ JOIN ValidPaths vp ON c.id = vp.id
 ORDER BY vp.id ASC
 """
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
@@ -84,7 +85,7 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
     is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = QueryClosureWithInfoResponse
     is_query: ClassVar[bool] = True
-    paths: set[StorePath] = field(default_factory=set)
+    paths: StorePathSet = field(default_factory=set)
 
     async def from_reader(
         self,
@@ -182,8 +183,8 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
             pending = next_pending
 
         sorted_infos: list[ValidPathInfo] = []
-        visited: set[StorePath] = set()
-        visiting: set[StorePath] = set()
+        visited: StorePathSet = set()
+        visiting: StorePathSet = set()
 
         def visit(p: StorePath) -> None:
             if p in visited:

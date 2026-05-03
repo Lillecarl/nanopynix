@@ -14,6 +14,7 @@ QUERY_VALID_PATHS = """
 SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
 """
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueryValidPathsResponse(OpResponse):
-    paths: set[StorePath] = field(default_factory=set)
+    paths: StorePathSet = field(default_factory=set)
 
     async def from_reader(
         self,
@@ -53,7 +54,7 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
     op: ClassVar[int] = 31
     response_type: ClassVar[type[OpResponse]] = QueryValidPathsResponse
     is_query: ClassVar[bool] = True
-    paths: set[StorePath] = field(default_factory=set)
+    paths: StorePathSet = field(default_factory=set)
     substitute: int = 0
 
     async def from_reader(

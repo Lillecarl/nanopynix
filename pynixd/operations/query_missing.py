@@ -9,6 +9,7 @@ from ..derived_path import DerivedPath
 from ..store_path import StorePath
 from .base import OpRequest, OpResponse
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..wire import NixReader, NixWriter
@@ -16,9 +17,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueryMissingResponse(OpResponse):
-    will_build: set[StorePath] = field(default_factory=set)
-    will_substitute: set[StorePath] = field(default_factory=set)
-    unknown: set[StorePath] = field(default_factory=set)
+    will_build: StorePathSet = field(default_factory=set)
+    will_substitute: StorePathSet = field(default_factory=set)
+    unknown: StorePathSet = field(default_factory=set)
     download_size: int = 0
     nar_size: int = 0
 

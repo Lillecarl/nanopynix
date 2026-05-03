@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import nacl.signing
 from environs import env
 
+from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -96,7 +97,7 @@ def fingerprint(
     store_path: StorePath,
     nar_hash: str,
     nar_size: int,
-    references: set[StorePath],
+    references: StorePathSet,
 ) -> str:
     """Build the Nix fingerprint string that gets signed.
 

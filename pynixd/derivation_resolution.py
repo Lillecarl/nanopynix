@@ -29,6 +29,7 @@ from .operations.base import BasicDerivation, DerivationOutput
 from .store_path import StorePath
 from .utils import nix32_encode
 
+from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from .drv_parser import ParsedDerivation
 
@@ -231,7 +232,7 @@ def resolve_derivation(
     drv_name = _nix_drv_name(drv_path)
 
     rewrites: dict[str, str] = {}
-    new_input_srcs: set[StorePath] = set(drv.input_srcs)
+    new_input_srcs: StorePathSet = set(drv.input_srcs)
 
     for input_drv_path, output_names in drv.input_drvs.items():
         for output_name in output_names:
@@ -288,7 +289,7 @@ def resolve_dynamic_derivation(
     drv_name = _nix_drv_name(drv_path)
 
     rewrites: dict[str, str] = {}
-    new_input_srcs: set[StorePath] = set(drv.input_srcs)
+    new_input_srcs: StorePathSet = set(drv.input_srcs)
 
     # Handle regular input_drvs (same as resolve_derivation)
     for input_drv_path, output_names in drv.input_drvs.items():

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from ..store_path import StorePath
 from ..system_features import PYNIXD_HANDLED_FEATURES
 
+from .aliases import StorePathSet
 if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
 
@@ -88,7 +89,7 @@ class DerivationOutput:
 @dataclass
 class BasicDerivation:
     outputs: dict[str, DerivationOutput] = field(default_factory=dict)
-    input_srcs: set[StorePath] = field(default_factory=set)
+    input_srcs: StorePathSet = field(default_factory=set)
     platform: str = ""
     builder: str = ""
     args: list[str] = field(default_factory=list)

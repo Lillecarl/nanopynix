@@ -11,6 +11,7 @@ from .query_valid_paths import QueryValidPathsRequest
 
 QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueryAllValidPathsResponse(OpResponse):
-    paths: set[StorePath] = field(default_factory=set)
+    paths: StorePathSet = field(default_factory=set)
 
     async def from_reader(
         self,
@@ -92,7 +93,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                 )
             except Exception as e:
                 # Try to get known paths from DB first, fallback to in-memory tracker
-                known_paths: set[StorePath] | None = None
+                known_paths: StorePathSet | None = None
                 if store.tracker.parent is not None and store.tracker.parent.db is not None:
                     known_paths = await store.tracker.parent.db.get_known_paths(store.store_id)
                 known_paths = known_paths or set(store.tracker.known_paths)

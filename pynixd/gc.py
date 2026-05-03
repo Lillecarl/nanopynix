@@ -18,6 +18,7 @@ import structlog
 
 from .operations.collect_garbage import CollectGarbageRequest, CollectGarbageResponse
 
+from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -119,7 +120,7 @@ class GarbageCollector:
     async def gc_store(
         self,
         store: Store,
-        paths: set[StorePath],
+        paths: StorePathSet,
     ) -> CollectGarbageResponse | None:
         """Run CollectGarbage on a single store."""
         if not store.is_healthy:

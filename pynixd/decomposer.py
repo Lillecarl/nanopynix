@@ -18,6 +18,7 @@ from .operations.query_missing import QueryMissingRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import StorePath
 
+from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from .connection import ClientConn
     from .drv_parser import ParsedDerivation
@@ -93,12 +94,12 @@ class BuildDecomposer:
                 drv_to_derived.setdefault(dp.drv_path, dp)
 
         parsed_cache: dict[StorePath, ParsedDerivation] = {}
-        all_planned_outputs: set[StorePath] = set()
-        all_input_drvs: set[StorePath] = set()
+        all_planned_outputs: StorePathSet = set()
+        all_input_drvs: StorePathSet = set()
 
         # Collect all derivations that need to be built, including
         # those referenced via dynamic_input_drvs.
-        to_build: set[StorePath] = set()
+        to_build: StorePathSet = set()
         for sp in missing_resp.will_build | missing_resp.unknown:
             to_build.add(StorePath(sp))
 
@@ -107,7 +108,7 @@ class BuildDecomposer:
         # will_build because the .drv file is a valid path but its
         # outputs haven't been built yet.
         queue = list(to_build)
-        visited: set[StorePath] = set()
+        visited: StorePathSet = set()
         while queue:
             sp = queue.pop(0)
             if sp in visited:
@@ -161,7 +162,7 @@ class BuildDecomposer:
             output_cache = resp.outputs or {}
 
         resolved: list[tuple[DerivedPath, set[str], BuildDerivationRequest]] = []
-        all_input_srcs: set[StorePath] = set()
+        all_input_srcs: StorePathSet = set()
 
         for sp in to_build:
             dp = drv_to_derived.get(str(sp), DerivedPath(sp))
@@ -215,7 +216,7 @@ class BuildDecomposer:
                     )
 
             drv_path_str = str(drv_request.drv_path)
-            required_paths: set[StorePath] = set()
+            required_paths: StorePathSet = set()
             for inp in drv_request.derivation.input_srcs:
                 required_paths.add(
                     StorePath(inp, extrainfo=f"input_src of {drv_path_str}"),

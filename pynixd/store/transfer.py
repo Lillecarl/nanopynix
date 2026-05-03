@@ -12,6 +12,7 @@ from ..operations.nar_from_path import NarFromPathRequest
 from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
 from ..store_path import StorePath
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     import asyncio
     from collections.abc import Iterable
@@ -34,7 +35,7 @@ async def stream_paths_store_to_store(
     Bypasses the normal handle() path, so we update dst knowledge manually.
     Only transfers paths that dst doesn't already have.
     """
-    paths_set: set[StorePath] = {StorePath(p) for p in paths}
+    paths_set: StorePathSet = {StorePath(p) for p in paths}
     if not paths_set:
         return
 

@@ -19,6 +19,7 @@ from .base import (
     ValidPathInfo,
 )
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -61,7 +62,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     response_type: ClassVar[type[OpResponse]] = AddToStoreResponse
     path_name: str = ""
     cam: str = ""  # ContentAddressMethodWithAlgo
-    references: set[StorePath] = field(default_factory=set)
+    references: StorePathSet = field(default_factory=set)
     repair: int = 0
     async_provider: Callable[[NixWriter], Awaitable[None]] | None = None
 

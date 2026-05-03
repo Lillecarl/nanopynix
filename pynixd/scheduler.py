@@ -33,6 +33,7 @@ from .stderr import StderrNext
 from .store_path import StorePath
 from .trampoline import Trampoline
 
+from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from .connection import ClientConn
     from .context import PynixdContext
@@ -177,7 +178,7 @@ class Scheduler:
         self,
         request: BuildDerivationRequest,
         client: ClientConn | None,
-        required_paths: set[StorePath] | dict[StorePath, UnkeyedValidPathInfo],
+        required_paths: StorePathSet | dict[StorePath, UnkeyedValidPathInfo],
         platform: str = "",
         scheduler_request_id: RequestId | None = None,
         derived_paths_for_request: set[DerivedPath] | None = None,
@@ -512,7 +513,7 @@ class Scheduler:
 
                 # 3. Pull outputs back to local store if build succeeded
                 if resp.result.status == 0:
-                    ca_output_paths: set[StorePath] = set()
+                    ca_output_paths: StorePathSet = set()
                     if resp.result.built_outputs:
                         for realisation in resp.result.built_outputs.values():
                             out_path = realisation.get("outPath")

@@ -16,3 +16,6 @@ type OutputMap = dict[StorePath, dict[OutputName, StorePath | None]]
 ``{drv_path: {output_name: output_path_or_none}}``
 An output path is None when it hasn't been realised yet.
 """
+
+type StorePathSet = set[StorePath]
+"""Set of store paths — the protocol ``Set<StorePath>``."""

@@ -31,6 +31,7 @@ JOIN ValidPaths vp_ref ON r.reference = vp_ref.id
 WHERE vp_referrer.path IN (SELECT value FROM json_each(?))
 """
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
@@ -81,7 +82,7 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
     is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = QueryPathInfosResponse
     is_query: ClassVar[bool] = True
-    paths: set[StorePath] = field(default_factory=set)
+    paths: StorePathSet = field(default_factory=set)
 
     async def from_reader(
         self,
@@ -131,7 +132,7 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
             async with db.execute(QUERY_REFERENCES_BATCH, (paths_json,)) as cursor:
                 ref_rows = await cursor.fetchall()
 
-            refs_map: dict[StorePath, set[StorePath]] = {}
+            refs_map: dict[StorePath, StorePathSet] = {}
             for referrer, reference in ref_rows:
                 refs_map.setdefault(StorePath(referrer), set()).add(
                     StorePath(reference),

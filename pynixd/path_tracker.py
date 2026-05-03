@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from collections.abc import Set as AbstractSet
@@ -23,12 +24,12 @@ class PathTrackerInstance:
         self,
         store_id: StoreId,
         parent: PathTracker | None = None,
-        initial_paths: set[StorePath] | None = None,
+        initial_paths: StorePathSet | None = None,
         is_local: bool = False,
     ) -> None:
         self.store_id = store_id
         self.parent = parent
-        self._known_paths: set[StorePath] = initial_paths or set()
+        self._known_paths: StorePathSet = initial_paths or set()
         self.is_local = is_local
 
     @property
@@ -39,10 +40,10 @@ class PathTrackerInstance:
     def has_path(self, path: StorePath) -> bool:
         return path in self._known_paths
 
-    def has_all_paths(self, paths: set[StorePath]) -> bool:
+    def has_all_paths(self, paths: StorePathSet) -> bool:
         return paths.issubset(self._known_paths)
 
-    def count_common_paths(self, paths: set[StorePath]) -> int:
+    def count_common_paths(self, paths: StorePathSet) -> int:
         return len(paths & self._known_paths)
 
     def add_known_path(self, path: StorePath, *, update_regtime: bool = True) -> None:
@@ -130,7 +131,7 @@ class PathTracker:
     def create_instance(
         self,
         store_id: StoreId,
-        initial_paths: set[StorePath] | None = None,
+        initial_paths: StorePathSet | None = None,
         is_local: bool = False,
     ) -> PathTrackerInstance:
         """Create a new instance linked to this tracker."""
@@ -159,7 +160,7 @@ class PathTracker:
     def notify_paths_added(
         self,
         store_id: StoreId,
-        paths: set[StorePath],
+        paths: StorePathSet,
         *,
         update_regtime: bool = True,
         is_local: bool = False,
@@ -174,8 +175,8 @@ class PathTracker:
     def notify_paths_replaced(
         self,
         store_id: StoreId,
-        added: set[StorePath],
-        removed: set[StorePath],
+        added: StorePathSet,
+        removed: StorePathSet,
         *,
         update_regtime: bool = True,
         is_local: bool = False,

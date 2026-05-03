@@ -21,6 +21,7 @@ from .operations.build_derivation import BuildDerivationRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import DrvOutput, StorePath
 
+from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild, SchedulerBuildRequest
     from .derived_path import DerivedPath
@@ -284,7 +285,7 @@ class Trampoline:
         """
         outer_drv_path = StorePath(outer_build.request.drv_path)
         inner_outputs = inner_derivation.output_paths()
-        inner_output_paths: set[StorePath] = {p for p in inner_outputs.values() if p != StorePath("")}
+        inner_output_paths: StorePathSet = {p for p in inner_outputs.values() if p != StorePath("")}
 
         for other_build in self.queue.by_id.values():
             if other_build.is_done:

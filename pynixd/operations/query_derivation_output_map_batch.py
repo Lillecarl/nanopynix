@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..drv_parser import read_drv_file
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
-from ..types.aliases import OutputMap
+from ..types.aliases import OutputMap, StorePathSet
 from .base import OpRequest, OpResponse
 
 QUERY_DERIVATION_OUTPUT_MAP_BATCH = """
@@ -89,7 +89,7 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
     is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = DerivationOutputMapBatchResponse
     is_query: ClassVar[bool] = True
-    drv_paths: set[StorePath] = field(default_factory=set)
+    drv_paths: StorePathSet = field(default_factory=set)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..store_path import StorePath
 
+from .aliases import StorePathSet
 if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
 
@@ -17,7 +18,7 @@ class UnkeyedValidPathInfo:
 
     deriver: StorePath = field(default_factory=lambda: StorePath(""))
     nar_hash: str = ""
-    references: set[StorePath] = field(default_factory=set)
+    references: StorePathSet = field(default_factory=set)
     registration_time: int = 0
     nar_size: int = 0
     ultimate: int = 0
@@ -180,7 +181,7 @@ class SubstitutablePathInfo:
     """Metadata for a substitutable path (missing but available)."""
 
     deriver: StorePath = field(default_factory=lambda: StorePath(""))
-    references: set[StorePath] = field(default_factory=set)
+    references: StorePathSet = field(default_factory=set)
     download_size: int = 0
     nar_size: int = 0
 

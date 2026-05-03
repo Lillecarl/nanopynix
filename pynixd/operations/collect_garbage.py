@@ -13,6 +13,7 @@ from .base import (
     Role,
 )
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class CollectGarbageResponse(OpResponse):
-    paths_deleted: set[StorePath] = field(default_factory=set)
+    paths_deleted: StorePathSet = field(default_factory=set)
     bytes_freed: int = 0
     _obsolete: int = 0
 
@@ -62,7 +63,7 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
     op: ClassVar[int] = 20
     response_type: ClassVar[type[OpResponse]] = CollectGarbageResponse
     action: int = 0
-    paths_to_delete: set[StorePath] = field(default_factory=set)
+    paths_to_delete: StorePathSet = field(default_factory=set)
     ignore_liveness: int = 0
     max_freed: int = 0
     _obsolete1: int = 0

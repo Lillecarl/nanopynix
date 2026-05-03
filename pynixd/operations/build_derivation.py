@@ -16,6 +16,7 @@ from .base import (
     RequestContext,
 )
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..wire import NixReader, NixWriter
@@ -96,7 +97,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         # input_srcs contains all required dependencies (sources and other .drvs).
         # We don't need to perform extra discovery or closure expansion.
         drv_path_str = str(self.drv_path)
-        required_paths: set[StorePath] = {
+        required_paths: StorePathSet = {
             StorePath(inp, extrainfo=f"input_src of {drv_path_str}") for inp in self.derivation.input_srcs
         }
 

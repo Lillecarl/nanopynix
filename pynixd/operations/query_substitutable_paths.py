@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..store_path import StorePath
 from .base import OpRequest, OpResponse
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..wire import NixReader, NixWriter
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class QuerySubstitutablePathsResponse(OpResponse):
-    paths: set[StorePath] = field(default_factory=set)
+    paths: StorePathSet = field(default_factory=set)
 
     async def from_reader(
         self,
@@ -42,7 +43,7 @@ class QuerySubstitutablePathsRequest(OpRequest[QuerySubstitutablePathsResponse])
     op: ClassVar[int] = 32
     response_type: ClassVar[type[OpResponse]] = QuerySubstitutablePathsResponse
     is_query: ClassVar[bool] = True
-    paths: set[StorePath] = field(default_factory=set)
+    paths: StorePathSet = field(default_factory=set)
 
     async def from_reader(
         self,

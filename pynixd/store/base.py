@@ -24,6 +24,7 @@ from ..path_tracker import PathTrackerInstance
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
     from collections.abc import Set as AbstractSet
@@ -313,10 +314,10 @@ class Store(ABC):
     def has_path(self, path: StorePath) -> bool:
         return path in self.tracker.known_paths
 
-    def has_all_paths(self, paths: set[StorePath]) -> bool:
+    def has_all_paths(self, paths: StorePathSet) -> bool:
         return paths.issubset(self.tracker.known_paths)
 
-    def count_common_paths(self, paths: set[StorePath]) -> int:
+    def count_common_paths(self, paths: StorePathSet) -> int:
         return len(paths & self.tracker.known_paths)
 
     async def call(

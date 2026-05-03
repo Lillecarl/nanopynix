@@ -42,6 +42,7 @@ from .operations.ca_derivations import RegisterDrvOutputRequest
 from .store_path import StorePath
 from .types.derivation import OutputKind
 
+from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild
     from .drv_parser import ParsedDerivation
@@ -411,7 +412,7 @@ class DerivationResolver:
         self,
         build: QueuedBuild,
         resolved: BasicDerivation,
-        output_paths: set[StorePath],
+        output_paths: StorePathSet,
     ) -> None:
         """Add resolved drv, output paths, input_srcs, and derivation
         outputs to build.required_paths.

@@ -21,6 +21,7 @@ SELECT vp.path FROM closure c
 JOIN ValidPaths vp ON c.id = vp.id
 """
 
+from ..types.aliases import StorePathSet
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueryClosureResponse(OpResponse):
-    paths: set[StorePath] = field(default_factory=set)
+    paths: StorePathSet = field(default_factory=set)
 
     @property
     def is_not_found(self) -> bool:
@@ -61,7 +62,7 @@ class QueryClosureRequest(OpRequest[QueryClosureResponse]):
     is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = QueryClosureResponse
     is_query: ClassVar[bool] = True
-    paths: set[StorePath] = field(default_factory=set)
+    paths: StorePathSet = field(default_factory=set)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:
         self.logger = self.logger.bind(identifier=reader.identifier)

@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
 
 from .store_path import StorePath
-from .types.aliases import OutputMap
+from .types.aliases import OutputMap, StorePathSet
 from .types import BasicDerivation, DerivationOutput, OutputKind
 
 
@@ -93,7 +93,7 @@ class ParsedDerivation:
 
     input_drvs: dict[StorePath, list[str]] = field(default_factory=dict)
 
-    input_srcs: set[StorePath] = field(default_factory=set)
+    input_srcs: StorePathSet = field(default_factory=set)
 
     platform: str = ""
     builder: str = ""
@@ -536,7 +536,7 @@ async def to_basic_derivation(
     }
 
     # Start with the explicit input sources
-    input_srcs: set[StorePath] = set(parsed.input_srcs)
+    input_srcs: StorePathSet = set(parsed.input_srcs)
 
     # Resolve inputDrvs: for each input drv, look up its output paths
     # and add them to input_srcs (this is what nix does before sending

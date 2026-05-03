@@ -27,6 +27,7 @@ import structlog
 
 from .store_path import StorePath
 
+from .types.aliases import StorePathSet
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -152,9 +153,9 @@ class LocalStoreDB:
         self.read_only: bool = read_only
         self.regtime_flush_interval = regtime_flush_interval
 
-        self.pending_regtime: set[StorePath] = set()
-        self.pending_known_paths: dict[StoreId, set[StorePath]] = {}
-        self.pending_removed_known_paths: dict[StoreId, set[StorePath]] = {}
+        self.pending_regtime: StorePathSet = set()
+        self.pending_known_paths: dict[StoreId, StorePathSet] = {}
+        self.pending_removed_known_paths: dict[StoreId, StorePathSet] = {}
         self.flush_task: asyncio.Task[None] | None = None
 
         self._all_conns: list[aiosqlite.Connection] = []
@@ -294,7 +295,7 @@ class LocalStoreDB:
     # These are not operation dispatches but internal helpers used by
     # non-operation code (GC, build planner, http cache).
 
-    async def query_stale_paths(self, max_age_seconds: int) -> set[StorePath] | None:
+    async def query_stale_paths(self, max_age_seconds: int) -> StorePathSet | None:
         """Find paths with registrationTime older than max_age_seconds ago."""
         if not self.active:
             return None
@@ -314,19 +315,19 @@ class LocalStoreDB:
         if self.active and not self.read_only:
             self.pending_regtime.add(path)
 
-    def mark_paths(self, paths: set[StorePath]) -> None:
+    def mark_paths(self, paths: StorePathSet) -> None:
         """Queue multiple paths for registration time update."""
         if self.active and not self.read_only:
             self.pending_regtime.update(paths)
 
-    def mark_known_paths(self, store_id: StoreId, paths: set[StorePath]) -> None:
+    def mark_known_paths(self, store_id: StoreId, paths: StorePathSet) -> None:
         """Queue paths to be recorded as known on a specific store."""
         if self.active and not self.read_only:
             if store_id not in self.pending_known_paths:
                 self.pending_known_paths[store_id] = set()
             self.pending_known_paths[store_id].update(paths)
 
-    def unmark_known_paths(self, store_id: StoreId, paths: set[StorePath]) -> None:
+    def unmark_known_paths(self, store_id: StoreId, paths: StorePathSet) -> None:
         """Queue paths to be removed from the known paths for a store."""
         if self.active and not self.read_only:
             if store_id not in self.pending_removed_known_paths:
@@ -337,7 +338,7 @@ class LocalStoreDB:
         self,
         store_id: StoreId,
         conn: aiosqlite.Connection | None = None,
-    ) -> set[StorePath]:
+    ) -> StorePathSet:
         """Fetch all known paths for a store from the DB."""
         if not self.active:
             return set()
