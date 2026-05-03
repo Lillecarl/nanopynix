@@ -20,7 +20,6 @@ from .operations.base import BuildResult, BuildResultStatus, UnkeyedValidPathInf
 from .operations.build_derivation import BuildDerivationRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import DrvOutput, StorePath
-from .types.aliases import StorePathSet
 
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild, SchedulerBuildRequest
@@ -28,6 +27,7 @@ if TYPE_CHECKING:
     from .operations.base import BasicDerivation
     from .operations.build_derivation import BuildDerivationResponse
     from .scheduler import DerivationReader, Scheduler
+    from .types.aliases import StorePathSet
     from .types.ca import Realisation
     from .types.ids import BuildId
 

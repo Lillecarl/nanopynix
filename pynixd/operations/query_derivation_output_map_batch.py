@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..drv_parser import read_drv_file
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
-from ..types.aliases import OutputMap, StorePathSet
 from .base import OpRequest, OpResponse
 
 QUERY_DERIVATION_OUTPUT_MAP_BATCH = """
@@ -28,6 +27,7 @@ WHERE vp_drv.path IN (SELECT value FROM json_each(?))
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..types.aliases import OutputMap, StorePathSet
     from ..wire import NixReader, NixWriter
 
 
@@ -137,7 +137,7 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
             try:
                 parsed = await read_drv_file(store.store_path, drv_path)
                 out = parsed.output_paths()
-                outputs[drv_path] = {k: v for k, v in out.items()}
+                outputs[drv_path] = dict(out.items())
             except FileNotFoundError:
                 pass
         return DerivationOutputMapBatchResponse(outputs=outputs)

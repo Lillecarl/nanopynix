@@ -41,10 +41,11 @@ import anyio
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .types.aliases import OutputMap, StorePathSet
+
 
 from .store_path import StorePath
 from .types import BasicDerivation, DerivationOutput, OutputKind
-from .types.aliases import OutputMap, StorePathSet
 
 
 class NixDerivationOutputShow(TypedDict, total=False):

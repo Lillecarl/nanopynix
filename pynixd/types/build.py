@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING, ClassVar
 import structlog
 
 from ..store_path import DrvOutput, StorePath
-from .aliases import ContentAddress, NARHash
 
 if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
+    from .aliases import ContentAddress, NARHash
     from .ca import Realisation
 
 

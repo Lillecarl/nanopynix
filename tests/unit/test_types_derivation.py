@@ -223,8 +223,8 @@ class TestBasicDerivation:
 
         drv = BasicDerivation(env={"requiredSystemFeatures": "kvm ca-derivations"})
         effective = drv.effective_required_features
-        assert "ca-derivations" not in effective  # handled by pynixd
-        assert effective == {"kvm"}
+        assert "ca-derivations" in effective  # no longer stripped (Lix can't serve CA)
+        assert effective == {"kvm", "ca-derivations"}
 
 
 class TestExhaustiveOutputKind:

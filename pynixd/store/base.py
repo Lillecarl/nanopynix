@@ -22,7 +22,6 @@ from ..operations.probe_systems import ProbeSystemsRequest
 from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
 from ..path_tracker import PathTrackerInstance
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
-from ..types.aliases import StorePathSet
 from .pool import ConnectionPool
 
 if TYPE_CHECKING:
@@ -40,6 +39,7 @@ if TYPE_CHECKING:
     from ..psi import CpuUtil, MemInfo
     from ..signing import SecretKey
     from ..store_path import StorePath
+    from ..types.aliases import StorePathSet
     from ..types.ids import StoreId
 
 log = structlog.get_logger(__name__)

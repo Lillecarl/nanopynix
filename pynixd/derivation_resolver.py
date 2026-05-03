@@ -40,7 +40,6 @@ from .operations.add_to_store import AddToStoreRequest
 from .operations.base import UnkeyedValidPathInfo
 from .operations.ca_derivations import RegisterDrvOutputRequest
 from .store_path import StorePath
-from .types.aliases import StorePathSet
 from .types.derivation import OutputKind
 
 if TYPE_CHECKING:
@@ -50,6 +49,7 @@ if TYPE_CHECKING:
     from .operations.build_derivation import BuildDerivationResponse
     from .scheduler import DerivationReader, Scheduler
     from .store import Store
+    from .types.aliases import StorePathSet
 
 log = structlog.get_logger(__name__)
 

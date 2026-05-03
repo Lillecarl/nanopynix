@@ -27,11 +27,11 @@ from typing import TYPE_CHECKING
 
 from .operations.base import BasicDerivation, DerivationOutput
 from .store_path import StorePath
-from .types.aliases import StorePathSet
 from .utils import nix32_encode
 
 if TYPE_CHECKING:
     from .drv_parser import ParsedDerivation
+    from .types.aliases import StorePathSet
 
 STORE_DIR = "/nix/store"
 

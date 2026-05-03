@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..store_path import StorePath
-from .aliases import ContentAddress, NARHash, StorePathSet
 
 if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
+    from .aliases import ContentAddress, NARHash, StorePathSet
 
 
 @dataclass

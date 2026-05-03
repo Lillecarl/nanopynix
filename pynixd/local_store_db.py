@@ -26,11 +26,11 @@ import aiosqlite
 import structlog
 
 from .store_path import StorePath
-from .types.aliases import StorePathSet
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from .types.aliases import StorePathSet
     from .types.ids import StoreId
 
 log = structlog.get_logger(__name__)

@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING
 
 from ..store_path import StorePath
 from ..system_features import PYNIXD_HANDLED_FEATURES
-from .aliases import StorePathSet
 
 if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
+    from .aliases import StorePathSet
 
 
 class OutputKind(Enum):

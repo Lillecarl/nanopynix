@@ -15,13 +15,12 @@ from typing import TYPE_CHECKING
 import nacl.signing
 from environs import env
 
-from .types.aliases import NARHash, StorePathSet
-
 if TYPE_CHECKING:
     from pathlib import Path
 
     from .operations.base import ValidPathInfo
     from .store_path import StorePath
+    from .types.aliases import NARHash, StorePathSet
 
 
 # Nix32 alphabet (kept for reference; encoding is in utils.py)

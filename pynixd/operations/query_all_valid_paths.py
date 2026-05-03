@@ -11,11 +11,11 @@ from .query_valid_paths import QueryValidPathsRequest
 
 QUERY_ALL_VALID_PATHS = "SELECT path FROM ValidPaths"
 
-from ..types.aliases import StorePathSet
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..types.aliases import StorePathSet
     from ..wire import NixReader, NixWriter
 
 

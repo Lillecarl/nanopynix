@@ -32,7 +32,6 @@ from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .stderr import StderrNext
 from .store_path import StorePath
 from .trampoline import Trampoline
-from .types.aliases import StorePathSet
 
 if TYPE_CHECKING:
     from .connection import ClientConn
@@ -45,6 +44,7 @@ if TYPE_CHECKING:
     )
     from .operations.build_paths import BuildPathsWithResultsResponse
     from .store import Store
+    from .types.aliases import StorePathSet
     from .types.ids import BuildId, RequestId, StoreId
 
 from .store.transfer import stream_paths_store_to_store

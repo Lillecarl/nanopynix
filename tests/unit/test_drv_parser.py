@@ -11,16 +11,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import pytest
 
 from pynixd.drv_parser import OutputInfo, ParsedDerivation, parse_drv
 from pynixd.store_path import StorePath
-from pynixd.types.aliases import OutputMap
 from pynixd.types.derivation import OutputKind
+
+if TYPE_CHECKING:
+    from pynixd.types.aliases import OutputMap
 
 NIX_BIN = os.environ.get("NIX_BIN", "nix")
 _PROBES_NIX = Path(__file__).parent.parent.parent / "tests" / "nix" / "drv-probes.nix"

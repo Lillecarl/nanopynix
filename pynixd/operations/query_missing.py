@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import DerivedPath
 from ..store_path import StorePath
-from ..types.aliases import StorePathSet
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..types.aliases import StorePathSet
     from ..wire import NixReader, NixWriter
 
 

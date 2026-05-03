@@ -18,7 +18,7 @@ proper: check fmt upgrade
 
 # Run tests
 test:
-    pytest tests/functional
+    pytest tests/functional tests/unit
 
 # aitest: check
 #     #!/usr/bin/env bash

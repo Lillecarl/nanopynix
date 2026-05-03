@@ -10,7 +10,7 @@ Tests are split into two parts:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -18,6 +18,9 @@ from pynixd.derived_path import DerivedPath
 from pynixd.drv_parser import parse_drv
 from pynixd.operations import OP_REGISTRY
 from pynixd.store_path import DrvOutput, StorePath
+
+if TYPE_CHECKING:
+    from pynixd.types.aliases import OutputMap
 from pynixd.types.build import BuildMode, BuildResult, BuildResultStatus
 from pynixd.types.derivation import BasicDerivation, DerivationOutput
 from pynixd.types.logs import OperationLogs
@@ -1271,7 +1274,6 @@ class TestDerivationOutputMapBatchSerialization:
         from pynixd.operations.query_derivation_output_map_batch import (
             DerivationOutputMapBatchResponse,
         )
-        from pynixd.types.aliases import OutputMap
 
         outputs: OutputMap = {
             StorePath("/nix/store/a.drv"): {"out": StorePath("/nix/store/a-foo")},
