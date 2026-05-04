@@ -12,6 +12,13 @@ from typing import TYPE_CHECKING
 
 import asyncssh
 from anyio import Path as AsyncPath
+from asyncssh.constants import (
+    FX_NO_SUCH_FILE,
+    FX_PERMISSION_DENIED,
+    FXF_CREAT,
+    FXF_TRUNC,
+    FXF_WRITE,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -61,12 +68,12 @@ class PSIMonitorSFTPServer(asyncssh.SFTPServer):
 
     def _check_allowed(self, path: bytes) -> None:
         if not self._is_allowed_path(self._resolve(path)):
-            raise asyncssh.SFTPError(asyncssh.FX_NO_SUCH_FILE, "Access denied")
+            raise asyncssh.SFTPError(FX_NO_SUCH_FILE, "Access denied")
 
     def open(self, path: bytes, pflags: int, attrs: asyncssh.SFTPAttrs) -> object:
         self._check_allowed(path)
-        if pflags & (asyncssh.FXF_WRITE | asyncssh.FXF_CREAT | asyncssh.FXF_TRUNC):
-            raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        if pflags & (FXF_WRITE | FXF_CREAT | FXF_TRUNC):
+            raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
         return super().open(path, pflags, attrs)
 
     def stat(self, path: bytes):
@@ -87,34 +94,34 @@ class PSIMonitorSFTPServer(asyncssh.SFTPServer):
                 yield entry
 
     def setstat(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def fsetstat(self, file_obj: object, attrs: asyncssh.SFTPAttrs) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def remove(self, path: bytes) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def mkdir(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def rmdir(self, path: bytes) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def rename(self, oldpath: bytes, newpath: bytes) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def symlink(self, oldpath: bytes, newpath: bytes) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def write(self, file_obj: object, offset: int, data: bytes) -> int:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def link(self, oldpath: bytes, newpath: bytes) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def lock(self, file_obj: object, offset: int, length: int, flags: int) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
 
     def unlock(self, file_obj: object, offset: int, length: int) -> None:
-        raise asyncssh.SFTPError(asyncssh.FX_PERMISSION_DENIED, "Read only")
+        raise asyncssh.SFTPError(FX_PERMISSION_DENIED, "Read only")
