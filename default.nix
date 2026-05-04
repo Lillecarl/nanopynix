@@ -2,12 +2,12 @@
   pkgs ?
     let
       nixPath = builtins.tryEval (import <nixpkgs> { });
-      nixOnline = fetchTree {
+      nixOnline = import (fetchTree {
         type = "github";
         owner = "nixos";
         repo = "nixpkgs";
-        rev = "nixos-unstable";
-      };
+        ref = "nixpkgs-unstable";
+      }) { };
     in
     if nixPath.success then nixPath.value else nixOnline,
   lib ? pkgs.lib,
@@ -59,8 +59,7 @@ let
       python.pkgs.pytest
       python.pkgs.pytest-asyncio
       python.pkgs.pytest-timeout
-      python.pkgs.pytest-forked
-    ];
+   ];
 
     meta = {
       description = "Python Nix daemon protocol proxy over SSH";
@@ -84,7 +83,6 @@ let
           ps.pytest
           ps.pytest-asyncio
           ps.pytest-timeout
-          ps.pytest-forked
           ps.pyinstrument
         ]))
       ];
@@ -109,7 +107,6 @@ let
           ps.pytest
           ps.pytest-asyncio
           ps.pytest-timeout
-          ps.pytest-forked
         ]
       );
     in

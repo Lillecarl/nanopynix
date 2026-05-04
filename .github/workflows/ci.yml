@@ -21,4 +21,4 @@ jobs:
         run: nix build --version
 
       - name: Run checks
-        run: nix develop --file shell.nix --command just precommit
+        run: nix develop --impure --file shell.nix --command just precommit
