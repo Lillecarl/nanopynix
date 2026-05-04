@@ -292,3 +292,21 @@ The `tests/ai/` and `conftest.py` entries suppress BLE for test helper scripts w
 | `ISC` | Implicit string concatenation; would need review |
 | `ICN` | Import conventions; current aliases are intentional |
 | `DTZ` | datetimez; codebase uses `time.monotonic()` not `datetime.now()`
+
+---
+
+## 9. Todo Housekeeping (2026-05-04)
+
+Moved to `completed/`:
+- `imports.md` — all lazy imports fixed
+- `test_signing.md` — signing tests exist in unit + functional
+- `test_queries.md` — query tests exist in functional
+- `test_maintenance.md` — GC/optimise/verify tests exist
+- `dynamic_derivations/README.md` → `dynamic_derivations/completed/README.md` — all 7 tasks DONE
+
+Still pending:
+- `conform` (this file) — 17 PT violations tracked
+- `test_resilience.md` — only `test_idle_timeout.py` exists; no backend disconnection/reconnect tests
+- `max_transfers.md` — config value not changed
+- `compare_build_decomposition.md` — no comparison tests implemented
+- `recursive_nix/README.md` — research only, not implemented

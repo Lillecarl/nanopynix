@@ -14,3 +14,15 @@ Implement functional tests for "plumbing" query operations used by advanced Nix 
 - [ ] Queries return accurate data from the backend.
 - [ ] Large result sets (e.g., many referrers) are handled correctly.
 - [ ] `QueryMissing` correctly accounts for paths available in `pynixd`'s cache vs the backend.
+
+---
+
+## Completion (2026-05-04)
+
+**Advanced query operations tested.** `tests/functional/test_queries.py` covers:
+- QueryReferrers (via `nix-store -q --referrers`)
+- QueryPathFromHashPart (via `nix store path-from-hash-part`)
+- QueryValidDerivers (via `nix-store -q --deriver`)
+- QueryMissing (via `nix build --dry-run`)
+- FindRoots (via `nix-store --gc --print-roots`)
+All tests pass.

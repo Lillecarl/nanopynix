@@ -17,3 +17,12 @@ Implement functional tests for store maintenance and integrity operations.
 - [ ] GC correctly updates `pynixd` internal state.
 - [ ] Operations return success/failure consistent with the backend.
 - [ ] Large deletions don't cause timeouts or memory issues.
+
+---
+
+## Completion (2026-05-04)
+
+**Maintenance operations tested.** `tests/functional/test_collect_garbage.py` covers
+GC as admin, non-admin, and via Unix socket. `tests/functional/test_admin_ops.py` covers
+OptimiseStore, VerifyStore, AddBuildLog, and AddSignatures — all with admin/non-admin gating.
+All tests pass.

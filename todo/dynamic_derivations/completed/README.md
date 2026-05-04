@@ -48,3 +48,12 @@ Experimental Nix feature: derivations whose outputs are themselves derivations (
 - `BuildPaths` accepts `DerivedPath::Built` with nested `^` references
 - No new daemon ops — dynamic derivations use existing BuildPaths/BuildDerivation
 - After resolution, dynamic derivations become regular `Derive(...)` (no `DrvWithVersion`)
+
+---
+
+## Completion (2026-05-04)
+
+**All 7 dynamic derivation tasks completed.** Each subtask documented in
+`todo/dynamic_derivations/completed/01-extend-derived-path.md` through `07-fix-query-realisation-wire-format.md`.
+Text-hashed CA resolution, trampoline, DAG linking, wrapper resolution, and DrvOutput type safety all
+implemented and verified via functional tests (`tests/functional/test_ca_ops.py`).

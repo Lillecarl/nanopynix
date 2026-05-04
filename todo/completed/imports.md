@@ -215,3 +215,11 @@ With `from __future__ import annotations`, annotations are strings at runtime, b
 | 231 | `cast("Any", conn)` |
 
 **Fix:** Change `cast("Type", value)` → `cast(Type, value)`. The type is already imported (or available under `TYPE_CHECKING`). Since `from __future__ import annotations` is in effect, the annotation-style cast still requires the type to be importable at runtime — but `cast` already does, since it's called at runtime. Moving type-checking-only imports out of `TYPE_CHECKING` for `cast` targets is the right tradeoff.
+
+---
+
+## Completion (2026-05-04)
+
+**All lazy imports fixed.** 12 source files modified, ~85 imports promoted to top-level.
+Verified with `just cheap` (0 pyright errors, 0 ruff errors) after each edit.
+Committed at `nvmqtyqm`.
