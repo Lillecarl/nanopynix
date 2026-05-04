@@ -45,7 +45,7 @@ def _ca_test_store_kwargs(**overrides) -> dict:
 @pytest.fixture
 async def ca_env(pynixd_server: Server):
     """Set up a pynixd server with CA-derivations enabled."""
-    yield pynixd_server, server_uri(pynixd_server)
+    return pynixd_server, server_uri(pynixd_server)
 
 
 @pytest.mark.no_pynixd
@@ -586,7 +586,7 @@ DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
 @pytest.fixture
 async def dyn_env(pynixd_server: Server):
     """Set up a pynixd server with dynamic-derivations enabled."""
-    yield pynixd_server, server_uri(pynixd_server)
+    return pynixd_server, server_uri(pynixd_server)
 
 
 @pytest.mark.ca_derivations

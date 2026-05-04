@@ -394,7 +394,7 @@ def clear_instrumentation():
     """Clear internal test stash before each test."""
 
     clear_test_stash()
-    yield
+    return
 
 
 @pytest.fixture(scope="session")

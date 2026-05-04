@@ -68,7 +68,7 @@ async def query_env(pynixd_server: Server):
     out_path = stdout.strip()
     assert out_path.startswith("/nix/store/"), f"Unexpected path: {out_path}"
 
-    yield pynixd_server, uri, out_path
+    return pynixd_server, uri, out_path
 
 
 @pytest.mark.legacy_nix_commands

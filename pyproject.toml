@@ -95,8 +95,16 @@ select = [
     "UP",
     # flake8-quotes
     "Q",
-    # flake8-quotes
-    "Q",
+    # flake8-future-annotations
+    "FA",
+    # flake8-pytest-style
+    "PT",
+    # flake8-blind-except
+    "BLE",
+    # flake8-todos
+    "TD",
+    # flake8-logging
+    "LOG",
 ]
 
 ignore = [
@@ -112,6 +120,8 @@ ignore = [
     "ARG002",
     # long exception messages are acceptable — custom subclasses would be excessive
     "TRY003",
+    # blind except — production code always logs before passing; AGENTS.md convention
+    "BLE001",
 ]
 
 [tool.ruff.lint.flake8-type-checking]
@@ -119,6 +129,10 @@ quote-annotations = true
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ERA001", "RUF059", "F401", "T201", "ARG001"]
+# tests/ai are scripts, not standard tests — BLE/print patterns intentional
+"tests/ai/**" = ["ERA001", "RUF059", "F401", "T201", "ARG001", "BLE001"]
+# conftest rmtree_robust uses bare except intentionally for error recovery
+"tests/conftest.py" = ["ERA001", "RUF059", "F401", "T201", "ARG001", "BLE001"]
 
 [tool.ruff.format]
 docstring-code-format = true
