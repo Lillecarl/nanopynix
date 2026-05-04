@@ -282,6 +282,12 @@ class LocalSocketStore(Store):
 
     async def close(self) -> None:
         """Close stores, stop monitor and terminate managed daemon if any."""
+        # TODO: Solidify subprocess management to prevent zombie "nix daemon" processes.
+        # When tests fail or exceptions are raised during daemon startup, the daemon
+        # subprocess may not be properly reaped. Consider:
+        # - Using a process group / session leader for the daemon so all children can be killed together
+        # - Adding a test fixture that finds and kills stray nix daemon processes after test runs
+        # - Using `start_new_session=True` in create_subprocess_exec and killing the process group on cleanup
         await super().close()
         if self.monitor:
             await self.monitor.stop()
