@@ -12,7 +12,7 @@ fmt:
     ruff check --fix tests
 
 upgrade:
-    pyupgrade --py313-plus
+    pyupgrade --py313-plus $(find pynixd tests -name '*.py')
 
 proper: check fmt upgrade
 
