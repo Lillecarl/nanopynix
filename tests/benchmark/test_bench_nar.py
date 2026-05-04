@@ -237,10 +237,10 @@ async def test_bench_copy_paths_throughput(bench_store: Store, dst_store: Store,
 @pytest.mark.benchmark
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
 async def test_bench_copy_paths_batch(bench_store: Store, dst_store: Store, chunk_kb: int):
-    """Benchmark: stream 1000 small paths in a single batch.
+    """Benchmark: stream 100 small paths (.drv files) in a single batch.
 
-    Tests the efficiency of AddMultipleToStore compared to per-path calls.
-    Should show massive gains on SSH stores where round-trips matter.
+    Tests the efficiency of AddMultipleToStore for small files.
+    Uses .drv files since they are always small and abundant.
     """
     picked = await _pick_small_paths(bench_store, 100)
     assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
