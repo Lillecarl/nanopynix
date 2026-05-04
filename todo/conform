@@ -232,6 +232,13 @@ The daemon-spawning pattern in this file is the last remaining use of bare subpr
 
 ---
 
+## 8. Documentation Fixes Applied
+
+### 8.1 `AGENTS.md:81` — Stale Store Prefix
+
+Documented `/tmp/pynixd-store-` (singular, trailing dash) but actual code has `STORE_PREFIX = Path("/tmp/pynixd-stores")` (plural, no dash). Fixed to match code.
+---
+
 ## 7. Ruff Plugin Analysis (Added `just cheap`)
 
 ### 7.1 Plugins Added to `pyproject.toml`

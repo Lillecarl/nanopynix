@@ -78,7 +78,7 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 - **`tests/legacy/`** — old tests, do not modify
 
 ### Test Store Conventions
-- All test stores MUST use the `/tmp/pynixd-store-` prefix (defined as `STORE_PREFIX` in `tests/conftest.py`).
+- All test stores MUST use the `/tmp/pynixd-stores` prefix (defined as `STORE_PREFIX` in `tests/conftest.py`).
 - Use `rmtree_robust_glob(f"{STORE_PREFIX}*")` in fixtures to clean up leftover stores.
 - Only a few select tests should run against the root store (`store_path=Path("/")`). Most tests should use isolated stores with the prefix.
 
