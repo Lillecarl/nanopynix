@@ -9,6 +9,7 @@ Tests are split into two categories:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import pytest
 
-from pynixd.drv_parser import OutputInfo, ParsedDerivation, parse_drv
+from pynixd.drv_parser import OutputInfo, ParsedDerivation, parse_drv, to_basic_derivation
 from pynixd.store_path import StorePath
 from pynixd.types.derivation import OutputKind
 
@@ -44,7 +45,6 @@ def probes(drv_probes_path: Path) -> dict[str, tuple[str, str, dict[str, Any]]]:
     Returns {name: (drv_path, drv_content, canonical_derivation_show)}.
     Evaluated once per test session.
     """
-    import asyncio
 
     async def _eval_all():
         # List attribute names using --apply
@@ -358,7 +358,6 @@ class TestToBasicDerivation:
     """to_basic_derivation with mocked output_cache avoids disk I/O."""
 
     async def test_simple_conversion(self, probes):
-        from pynixd.drv_parser import to_basic_derivation
 
         _, drv_content, _ = probes["simple"]
         parsed = parse_drv(drv_content)
@@ -367,7 +366,6 @@ class TestToBasicDerivation:
         assert result.platform == "x86_64-linux"
 
     async def test_with_output_cache(self, probes):
-        from pynixd.drv_parser import to_basic_derivation
 
         _, drv_content, _ = probes["simple"]
         parsed = parse_drv(drv_content)
@@ -378,7 +376,6 @@ class TestToBasicDerivation:
         assert StorePath(f"/nix/store/realized-{out_name}") in result.input_srcs
 
     async def test_cache_missing_adds_drv(self, probes):
-        from pynixd.drv_parser import to_basic_derivation
 
         _, drv_content, _ = probes["simple"]
         parsed = parse_drv(drv_content)

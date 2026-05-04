@@ -11,7 +11,8 @@ import base64
 import nacl.bindings
 import pytest
 
-from pynixd.signing import SecretKey, fingerprint, sign_path_info
+from pynixd.operations.base import ValidPathInfo
+from pynixd.signing import SecretKey, fingerprint, get_default_signing_key, sign_path_info
 from pynixd.store_path import StorePath
 
 _SEED_32 = b"\x00" * 32
@@ -114,7 +115,6 @@ class TestFingerprint:
 
 class TestSignPathInfo:
     def test_sign_path_info_roundtrip(self):
-        from pynixd.operations.base import ValidPathInfo
 
         key = SecretKey._parse(f"test:{_SEED_32_B64}")
         path = StorePath("/nix/store/abc123-foo")
@@ -137,14 +137,12 @@ class TestSignPathInfo:
 class TestGetDefaultSigningKey:
     def test_no_env_var(self, monkeypatch):
         monkeypatch.delenv("PYNIXD_SIGNING_KEY", raising=False)
-        from pynixd.signing import get_default_signing_key
 
         assert get_default_signing_key() is None
 
     def test_with_env_var(self, monkeypatch):
         key_str = f"mykey:{_SEED_32_B64}"
         monkeypatch.setenv("PYNIXD_SIGNING_KEY", key_str)
-        from pynixd.signing import get_default_signing_key
 
         key = get_default_signing_key()
         assert key is not None

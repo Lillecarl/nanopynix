@@ -11,7 +11,7 @@ fmt:
 upgrade:
     pyupgrade --py313-plus $(find pynixd tests -name '*.py')
 
-proper: check fmt upgrade
+cheap: check fmt
 
 # Run tests
 test:

@@ -6,6 +6,8 @@ All tests are pure — no I/O.
 
 from __future__ import annotations
 
+import hashlib
+
 from pynixd.utils import NIX32_CHARS, nix32_encode
 
 
@@ -21,7 +23,6 @@ class TestNix32Encode:
 
     def test_known_nix_hash(self):
         # SHA256 of "hello" as used by Nix, checked against known output
-        import hashlib
 
         digest = hashlib.sha256(b"hello").digest()
         encoded = nix32_encode(digest)
@@ -63,7 +64,6 @@ class TestNix32Encode:
 
     def test_roundtrip_sha256(self):
         """nix32_encode should be consistent with Nix's own encoding."""
-        import hashlib
 
         # Known values: Nix uses nix32 for store path hashes.
         # We can't easily decode nix32 back, but we can verify

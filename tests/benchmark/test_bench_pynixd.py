@@ -15,7 +15,7 @@ from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore, Store
 from pynixd.store_path import StorePath
-from tests.conftest import CLIENT_BIN, rmtree_robust
+from tests.conftest import CLIENT_BIN, rmtree_robust, run_subproc
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -119,7 +119,6 @@ async def test_bench_local_socket_overhead():
 
     Compares pynixd LocalSocketStore against 'nix store query --all' directly.
     """
-    from tests.conftest import run_subproc
 
     # 1. pynixd overhead
     s = LocalSocketStore(store_id="managed", store_path=Path("/"))

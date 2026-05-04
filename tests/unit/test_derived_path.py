@@ -81,7 +81,6 @@ class TestDerivedPathUnion:
         assert dp.to_string_legacy() == "/nix/store/abc.drv!lib,out"
 
     def test_built_nested(self):
-        from pynixd.derived_path import dp_is_nested
 
         inner = SingleDerivedPathOpaque(path=StorePath("/nix/store/abc.drv"))
         middle = SingleDerivedPathBuilt(drv_path=inner, output="out")

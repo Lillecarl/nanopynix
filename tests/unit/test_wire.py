@@ -14,10 +14,78 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from pynixd.constants import proto
 from pynixd.derived_path import DerivedPath
 from pynixd.drv_parser import parse_drv
 from pynixd.operations import OP_REGISTRY
+from pynixd.operations.add_build_log import AddBuildLogRequest, AddBuildLogResponse
+from pynixd.operations.add_indirect_root import AddIndirectRootRequest, AddIndirectRootResponse
+from pynixd.operations.add_multiple_to_store import AddMultipleToStoreRequest, AddMultipleToStoreResponse
+from pynixd.operations.add_perm_root import AddPermRootRequest, AddPermRootResponse
+from pynixd.operations.add_signatures import AddSignaturesRequest, AddSignaturesResponse
+from pynixd.operations.add_temp_root import AddTempRootRequest, AddTempRootResponse
+from pynixd.operations.add_to_store import AddToStoreRequest, AddToStoreResponse
+from pynixd.operations.add_to_store_nar import AddToStoreNarRequest, AddToStoreNarResponse
+from pynixd.operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
+from pynixd.operations.build_paths import (
+    BuildPathsRequest,
+    BuildPathsResponse,
+    BuildPathsWithResultsRequest,
+    BuildPathsWithResultsResponse,
+)
+from pynixd.operations.ca_derivations import (
+    QueryRealisationRequest,
+    QueryRealisationResponse,
+    RegisterDrvOutputRequest,
+    RegisterDrvOutputResponse,
+)
+from pynixd.operations.collect_garbage import CollectGarbageRequest, CollectGarbageResponse
+from pynixd.operations.ensure_path import EnsurePathRequest, EnsurePathResponse
+from pynixd.operations.find_roots import FindRootsEntry, FindRootsRequest, FindRootsResponse
+from pynixd.operations.is_valid_path import IsValidPathRequest, IsValidPathResponse
+from pynixd.operations.nar_from_path import NarFromPathRequest
+from pynixd.operations.optimise_store import OptimiseStoreRequest, OptimiseStoreResponse
+from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest, QueryAllValidPathsResponse
+from pynixd.operations.query_closure import QueryClosureRequest, QueryClosureResponse
+from pynixd.operations.query_closure_with_info import QueryClosureWithInfoRequest, QueryClosureWithInfoResponse
+from pynixd.operations.query_derivation_output_map import (
+    QueryDerivationOutputMapRequest,
+    QueryDerivationOutputMapResponse,
+)
+from pynixd.operations.query_derivation_output_map_batch import (
+    DerivationOutputMapBatchResponse,
+    QueryDerivationOutputMapBatchRequest,
+)
+from pynixd.operations.query_missing import QueryMissingRequest, QueryMissingResponse
+from pynixd.operations.query_path_from_hash_part import (
+    QueryPathFromHashPartRequest,
+    QueryPathFromHashPartResponse,
+)
+from pynixd.operations.query_path_info import QueryPathInfoRequest, QueryPathInfoResponse
+from pynixd.operations.query_path_infos import QueryPathInfosRequest, QueryPathInfosResponse
+from pynixd.operations.query_referrers import QueryReferrersRequest, QueryReferrersResponse
+from pynixd.operations.query_subst_path_info import (
+    QuerySubstitutablePathInfoRequest,
+    QuerySubstitutablePathInfoResponse,
+)
+from pynixd.operations.query_subst_path_infos import (
+    QuerySubstitutablePathInfosRequest,
+    QuerySubstitutablePathInfosResponse,
+    SubstitutablePathInfoEntry,
+)
+from pynixd.operations.query_substitutable_paths import (
+    QuerySubstitutablePathsRequest,
+    QuerySubstitutablePathsResponse,
+)
+from pynixd.operations.query_valid_derivers import QueryValidDeriversRequest, QueryValidDeriversResponse
+from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
+from pynixd.operations.set_options import SetOptionsRequest, SetOptionsResponse
+from pynixd.operations.sign_path_info import SignPathInfoRequest, SignPathInfoResponse
+from pynixd.operations.verify_store import VerifyStoreRequest, VerifyStoreResponse
+from pynixd.stderr import StderrNext, StderrStartActivity
 from pynixd.store_path import DrvOutput, StorePath
+from pynixd.types import KeyedBuildResult
+from pynixd.types.path_info import SubstitutablePathInfo
 
 if TYPE_CHECKING:
     from pynixd.types.aliases import OutputMap
@@ -334,7 +402,6 @@ class TestOperationLogs:
         assert result.messages == logs.messages
 
     async def test_with_next(self):
-        from pynixd.stderr import StderrNext
 
         logs = OperationLogs()
         logs.add(StderrNext("test log"))
@@ -350,7 +417,6 @@ class TestOperationLogs:
         assert result.messages[1].text == "another log"
 
     async def test_with_start_activity(self):
-        from pynixd.stderr import StderrNext, StderrStartActivity
 
         logs = OperationLogs()
         logs.add(StderrNext("before"))
@@ -398,7 +464,6 @@ class TestBuildDerivationSerialization:
     """BuildDerivation (op 36) uses BasicDerivation + BuildMode in request."""
 
     async def test_build_derivation_request(self):
-        from pynixd.operations.build_derivation import BuildDerivationRequest
 
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="/nix/store/abc-foo")},
@@ -418,7 +483,6 @@ class TestBuildDerivationSerialization:
         assert result.build_mode == req.build_mode
 
     async def test_build_derivation_response(self):
-        from pynixd.operations.build_derivation import BuildDerivationResponse
 
         result = BuildResult(status=BuildResultStatus.BUILT, error_msg="")
         resp = BuildDerivationResponse(result=result)
@@ -434,14 +498,12 @@ class TestQueryPathInfoSerialization:
     """QueryPathInfo (op 26) — request is a StorePath, response is UnkeyedValidPathInfo."""
 
     async def test_request(self):
-        from pynixd.operations.query_path_info import QueryPathInfoRequest
 
         req = QueryPathInfoRequest(path=StorePath("/nix/store/abc-foo"))
         result = await _serialize_deserialize_request(QueryPathInfoRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.query_path_info import QueryPathInfoResponse
 
         info = _make_path_info()
         resp = QueryPathInfoResponse(info=info)
@@ -457,14 +519,12 @@ class TestQueryPathInfoSerialization:
 
 class TestIsValidPathSerialization:
     async def test_request(self):
-        from pynixd.operations.is_valid_path import IsValidPathRequest
 
         req = IsValidPathRequest(path=StorePath("/nix/store/abc-foo"))
         result = await _serialize_deserialize_request(IsValidPathRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.is_valid_path import IsValidPathResponse
 
         resp = IsValidPathResponse(valid=True)
         result = await _serialize_deserialize_response(IsValidPathResponse, resp)
@@ -480,7 +540,6 @@ class TestIsValidPathSerialization:
 
 class TestQueryValidPathsSerialization:
     async def test_request(self):
-        from pynixd.operations.query_valid_paths import QueryValidPathsRequest
 
         paths = {StorePath("/nix/store/a-foo"), StorePath("/nix/store/b-bar")}
         req = QueryValidPathsRequest(paths=paths, substitute=1)
@@ -490,8 +549,6 @@ class TestQueryValidPathsSerialization:
 
     async def test_request_no_substitute(self):
         """substitute field only exists in version >= 1.27."""
-        from pynixd.constants import proto
-        from pynixd.operations.query_valid_paths import QueryValidPathsRequest
 
         paths = {StorePath("/nix/store/a-foo")}
         req = QueryValidPathsRequest(paths=paths, substitute=0)
@@ -503,7 +560,6 @@ class TestQueryValidPathsSerialization:
         assert result.paths == paths
 
     async def test_response(self):
-        from pynixd.operations.query_valid_paths import QueryValidPathsResponse
 
         paths = {StorePath("/nix/store/a-foo"), StorePath("/nix/store/b-bar")}
         resp = QueryValidPathsResponse(paths=paths)
@@ -516,7 +572,6 @@ class TestQueryValidPathsSerialization:
 
 class TestAddSignaturesSerialization:
     async def test_request(self):
-        from pynixd.operations.add_signatures import AddSignaturesRequest
 
         req = AddSignaturesRequest(
             path=StorePath("/nix/store/abc-foo"),
@@ -527,7 +582,6 @@ class TestAddSignaturesSerialization:
         assert result.sigs == req.sigs
 
     async def test_response(self):
-        from pynixd.operations.add_signatures import AddSignaturesResponse
 
         resp = AddSignaturesResponse(value=0)
         result = await _serialize_deserialize_response(AddSignaturesResponse, resp)
@@ -543,14 +597,12 @@ class TestAddSignaturesSerialization:
 
 class TestQueryReferrersSerialization:
     async def test_request(self):
-        from pynixd.operations.query_referrers import QueryReferrersRequest
 
         req = QueryReferrersRequest(path=StorePath("/nix/store/abc-foo"))
         result = await _serialize_deserialize_request(QueryReferrersRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.query_referrers import QueryReferrersResponse
 
         paths = {StorePath("/nix/store/a-foo"), StorePath("/nix/store/b-bar")}
         resp = QueryReferrersResponse(paths=paths)
@@ -563,14 +615,12 @@ class TestQueryReferrersSerialization:
 
 class TestEnsurePathSerialization:
     async def test_request(self):
-        from pynixd.operations.ensure_path import EnsurePathRequest
 
         req = EnsurePathRequest(path=StorePath("/nix/store/abc-foo"))
         result = await _serialize_deserialize_request(EnsurePathRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.ensure_path import EnsurePathResponse
 
         resp = EnsurePathResponse(value=1)
         result = await _serialize_deserialize_response(EnsurePathResponse, resp)
@@ -582,14 +632,12 @@ class TestEnsurePathSerialization:
 
 class TestAddTempRootSerialization:
     async def test_request(self):
-        from pynixd.operations.add_temp_root import AddTempRootRequest
 
         req = AddTempRootRequest(path=StorePath("/nix/store/abc-foo"))
         result = await _serialize_deserialize_request(AddTempRootRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.add_temp_root import AddTempRootResponse
 
         resp = AddTempRootResponse(value=1)
         result = await _serialize_deserialize_response(AddTempRootResponse, resp)
@@ -601,14 +649,12 @@ class TestAddTempRootSerialization:
 
 class TestAddIndirectRootSerialization:
     async def test_request(self):
-        from pynixd.operations.add_indirect_root import AddIndirectRootRequest
 
         req = AddIndirectRootRequest(path=StorePath("/nix/store/abc-foo"))
         result = await _serialize_deserialize_request(AddIndirectRootRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.add_indirect_root import AddIndirectRootResponse
 
         resp = AddIndirectRootResponse(value=1)
         result = await _serialize_deserialize_response(AddIndirectRootResponse, resp)
@@ -620,7 +666,6 @@ class TestAddIndirectRootSerialization:
 
 class TestAddPermRootSerialization:
     async def test_request(self):
-        from pynixd.operations.add_perm_root import AddPermRootRequest
 
         req = AddPermRootRequest(store_path="/nix/store/abc-foo", gc_root="/nix/var/nix/gcroots/foo")
         result = await _serialize_deserialize_request(AddPermRootRequest, req)
@@ -628,7 +673,6 @@ class TestAddPermRootSerialization:
         assert result.gc_root == req.gc_root
 
     async def test_response(self):
-        from pynixd.operations.add_perm_root import AddPermRootResponse
 
         resp = AddPermRootResponse(gc_root="/nix/var/nix/gcroots/foo")
         result = await _serialize_deserialize_response(AddPermRootResponse, resp)
@@ -640,14 +684,12 @@ class TestAddPermRootSerialization:
 
 class TestFindRootsSerialization:
     async def test_request(self):
-        from pynixd.operations.find_roots import FindRootsRequest
 
         req = FindRootsRequest()
         result = await _serialize_deserialize_request(FindRootsRequest, req)
         assert result == req  # no fields
 
     async def test_response(self):
-        from pynixd.operations.find_roots import FindRootsEntry, FindRootsResponse
 
         resp = FindRootsResponse(
             roots=[FindRootsEntry(link="/proc/1", target="/nix/store/abc-foo")],
@@ -663,14 +705,12 @@ class TestFindRootsSerialization:
 
 class TestQueryPathFromHashPartSerialization:
     async def test_request(self):
-        from pynixd.operations.query_path_from_hash_part import QueryPathFromHashPartRequest
 
         req = QueryPathFromHashPartRequest(path="abc123")
         result = await _serialize_deserialize_request(QueryPathFromHashPartRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.query_path_from_hash_part import QueryPathFromHashPartResponse
 
         resp = QueryPathFromHashPartResponse(value=StorePath("/nix/store/abc123-foo"))
         result = await _serialize_deserialize_response(QueryPathFromHashPartResponse, resp)
@@ -682,7 +722,6 @@ class TestQueryPathFromHashPartSerialization:
 
 class TestQuerySubstitutablePathsSerialization:
     async def test_request(self):
-        from pynixd.operations.query_substitutable_paths import QuerySubstitutablePathsRequest
 
         paths = {StorePath("/nix/store/a-foo"), StorePath("/nix/store/b-bar")}
         req = QuerySubstitutablePathsRequest(paths=paths)
@@ -690,7 +729,6 @@ class TestQuerySubstitutablePathsSerialization:
         assert result.paths == paths
 
     async def test_response(self):
-        from pynixd.operations.query_substitutable_paths import QuerySubstitutablePathsResponse
 
         paths = {StorePath("/nix/store/a-foo")}
         resp = QuerySubstitutablePathsResponse(paths=paths)
@@ -703,14 +741,12 @@ class TestQuerySubstitutablePathsSerialization:
 
 class TestQueryValidDeriversSerialization:
     async def test_request(self):
-        from pynixd.operations.query_valid_derivers import QueryValidDeriversRequest
 
         req = QueryValidDeriversRequest(path=StorePath("/nix/store/abc-foo"))
         result = await _serialize_deserialize_request(QueryValidDeriversRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.query_valid_derivers import QueryValidDeriversResponse
 
         paths = {StorePath("/nix/store/abc-bar.drv")}
         resp = QueryValidDeriversResponse(paths=paths)
@@ -723,7 +759,6 @@ class TestQueryValidDeriversSerialization:
 
 class TestSetOptionsSerialization:
     async def test_request(self):
-        from pynixd.operations.set_options import SetOptionsRequest
 
         req = SetOptionsRequest(
             keep_failed=0,
@@ -740,7 +775,6 @@ class TestSetOptionsSerialization:
         assert result.overrides == {"foo": "bar"}
 
     async def test_response(self):
-        from pynixd.operations.set_options import SetOptionsResponse
 
         resp = SetOptionsResponse()
         await _serialize_deserialize_response(SetOptionsResponse, resp)
@@ -748,8 +782,6 @@ class TestSetOptionsSerialization:
 
     async def test_request_no_overrides(self):
         """Overrides dict only exists in version >= 1.12."""
-        from pynixd.constants import proto
-        from pynixd.operations.set_options import SetOptionsRequest
 
         req = SetOptionsRequest(keep_failed=0, keep_going=0, max_build_jobs=0)
         w = BytesWriter()
@@ -766,7 +798,6 @@ class TestSetOptionsSerialization:
 
 class TestCollectGarbageSerialization:
     async def test_request(self):
-        from pynixd.operations.collect_garbage import CollectGarbageRequest
 
         req = CollectGarbageRequest(
             action=1,
@@ -780,7 +811,6 @@ class TestCollectGarbageSerialization:
         assert result.max_freed == 1000000
 
     async def test_response(self):
-        from pynixd.operations.collect_garbage import CollectGarbageResponse
 
         resp = CollectGarbageResponse(
             paths_deleted={StorePath("/nix/store/abc-foo")},
@@ -796,14 +826,12 @@ class TestCollectGarbageSerialization:
 
 class TestQueryAllValidPathsSerialization:
     async def test_request(self):
-        from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 
         req = QueryAllValidPathsRequest()
         await _serialize_deserialize_request(QueryAllValidPathsRequest, req)
         # No fields
 
     async def test_response(self):
-        from pynixd.operations.query_all_valid_paths import QueryAllValidPathsResponse
 
         paths = {StorePath("/nix/store/a-foo"), StorePath("/nix/store/b-bar")}
         resp = QueryAllValidPathsResponse(paths=paths)
@@ -816,18 +844,12 @@ class TestQueryAllValidPathsSerialization:
 
 class TestQueryDerivationOutputMapSerialization:
     async def test_request(self):
-        from pynixd.operations.query_derivation_output_map import (
-            QueryDerivationOutputMapRequest,
-        )
 
         req = QueryDerivationOutputMapRequest(path=StorePath("/nix/store/abc.drv"))
         result = await _serialize_deserialize_request(QueryDerivationOutputMapRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.query_derivation_output_map import (
-            QueryDerivationOutputMapResponse,
-        )
 
         resp = QueryDerivationOutputMapResponse(
             items={"out": StorePath("/nix/store/abc-foo"), "lib": None},
@@ -842,7 +864,6 @@ class TestQueryDerivationOutputMapSerialization:
 
 class TestQueryMissingSerialization:
     async def test_request(self):
-        from pynixd.operations.query_missing import QueryMissingRequest
 
         req = QueryMissingRequest(
             derived_paths={
@@ -853,7 +874,6 @@ class TestQueryMissingSerialization:
         assert result.derived_paths == req.derived_paths
 
     async def test_response(self):
-        from pynixd.operations.query_missing import QueryMissingResponse
 
         resp = QueryMissingResponse(
             will_build=set(),
@@ -872,14 +892,12 @@ class TestQueryMissingSerialization:
 
 class TestOptimiseStoreSerialization:
     async def test_request(self):
-        from pynixd.operations.optimise_store import OptimiseStoreRequest
 
         req = OptimiseStoreRequest()
         await _serialize_deserialize_request(OptimiseStoreRequest, req)
         # No fields
 
     async def test_response(self):
-        from pynixd.operations.optimise_store import OptimiseStoreResponse
 
         resp = OptimiseStoreResponse(value=0)
         result = await _serialize_deserialize_response(OptimiseStoreResponse, resp)
@@ -891,7 +909,6 @@ class TestOptimiseStoreSerialization:
 
 class TestVerifyStoreSerialization:
     async def test_request(self):
-        from pynixd.operations.verify_store import VerifyStoreRequest
 
         req = VerifyStoreRequest(check_contents=1, repair=0)
         result = await _serialize_deserialize_request(VerifyStoreRequest, req)
@@ -899,7 +916,6 @@ class TestVerifyStoreSerialization:
         assert result.repair == 0
 
     async def test_response(self):
-        from pynixd.operations.verify_store import VerifyStoreResponse
 
         resp = VerifyStoreResponse(value=0)
         result = await _serialize_deserialize_response(VerifyStoreResponse, resp)
@@ -911,14 +927,12 @@ class TestVerifyStoreSerialization:
 
 class TestAddBuildLogSerialization:
     async def test_request(self):
-        from pynixd.operations.add_build_log import AddBuildLogRequest
 
         req = AddBuildLogRequest(path=StorePath("/nix/store/abc-foo"))
         result = await _serialize_deserialize_request(AddBuildLogRequest, req)
         assert result.path == req.path
 
     async def test_response(self):
-        from pynixd.operations.add_build_log import AddBuildLogResponse
 
         resp = AddBuildLogResponse(value=0)
         result = await _serialize_deserialize_response(AddBuildLogResponse, resp)
@@ -930,7 +944,6 @@ class TestAddBuildLogSerialization:
 
 class TestBuildPathsSerialization:
     async def test_request(self):
-        from pynixd.operations.build_paths import BuildPathsRequest
 
         req = BuildPathsRequest(
             derived_paths={DerivedPath("/nix/store/abc.drv!out")},
@@ -941,7 +954,6 @@ class TestBuildPathsSerialization:
         assert result.build_mode == req.build_mode
 
     async def test_response(self):
-        from pynixd.operations.build_paths import BuildPathsResponse
 
         resp = BuildPathsResponse(value=0)
         result = await _serialize_deserialize_response(BuildPathsResponse, resp)
@@ -950,7 +962,6 @@ class TestBuildPathsSerialization:
 
 class TestBuildPathsWithResultsSerialization:
     async def test_request(self):
-        from pynixd.operations.build_paths import BuildPathsWithResultsRequest
 
         req = BuildPathsWithResultsRequest(
             derived_paths={DerivedPath("/nix/store/abc.drv!out")},
@@ -961,8 +972,6 @@ class TestBuildPathsWithResultsSerialization:
         assert result.build_mode == req.build_mode
 
     async def test_response(self):
-        from pynixd.operations.build_paths import BuildPathsWithResultsResponse
-        from pynixd.types import KeyedBuildResult
 
         result = BuildResult(status=BuildResultStatus.BUILT, error_msg="")
         resp = BuildPathsWithResultsResponse(
@@ -978,19 +987,12 @@ class TestBuildPathsWithResultsSerialization:
 
 class TestQuerySubstitutablePathInfoSerialization:
     async def test_request(self):
-        from pynixd.operations.query_subst_path_info import (
-            QuerySubstitutablePathInfoRequest,
-        )
 
         req = QuerySubstitutablePathInfoRequest(path="/nix/store/abc-foo")
         result = await _serialize_deserialize_request(QuerySubstitutablePathInfoRequest, req)
         assert result.path == req.path
 
     async def test_response_found(self):
-        from pynixd.operations.query_subst_path_info import (
-            QuerySubstitutablePathInfoResponse,
-        )
-        from pynixd.types.path_info import SubstitutablePathInfo
 
         info = SubstitutablePathInfo(
             deriver=StorePath("/nix/store/d.drv"),
@@ -1008,9 +1010,6 @@ class TestQuerySubstitutablePathInfoSerialization:
         assert result.info.download_size == 100
 
     async def test_response_not_found(self):
-        from pynixd.operations.query_subst_path_info import (
-            QuerySubstitutablePathInfoResponse,
-        )
 
         resp = QuerySubstitutablePathInfoResponse(found=False, info=None)
         result = await _serialize_deserialize_response(
@@ -1023,20 +1022,12 @@ class TestQuerySubstitutablePathInfoSerialization:
 
 class TestQuerySubstitutablePathInfosSerialization:
     async def test_request(self):
-        from pynixd.operations.query_subst_path_infos import (
-            QuerySubstitutablePathInfosRequest,
-        )
 
         req = QuerySubstitutablePathInfosRequest(items={"/nix/store/abc": ""})
         result = await _serialize_deserialize_request(QuerySubstitutablePathInfosRequest, req)
         assert result.items == req.items
 
     async def test_response(self):
-        from pynixd.operations.query_subst_path_infos import (
-            QuerySubstitutablePathInfosResponse,
-            SubstitutablePathInfoEntry,
-        )
-        from pynixd.types.path_info import SubstitutablePathInfo
 
         info = SubstitutablePathInfo(
             deriver=StorePath("/nix/store/d.drv"),
@@ -1063,7 +1054,6 @@ class TestQuerySubstitutablePathInfosSerialization:
 
 class TestQueryRealisationSerialization:
     async def test_request(self):
-        from pynixd.operations.ca_derivations import QueryRealisationRequest
 
         req = QueryRealisationRequest(
             drv_output=DrvOutput("sha256:abc123!out"),
@@ -1072,7 +1062,6 @@ class TestQueryRealisationSerialization:
         assert result.drv_output == req.drv_output
 
     async def test_response(self):
-        from pynixd.operations.ca_derivations import QueryRealisationResponse
 
         resp = QueryRealisationResponse(
             realisations=[{"id": "test"}],
@@ -1083,7 +1072,6 @@ class TestQueryRealisationSerialization:
 
 class TestRegisterDrvOutputSerialization:
     async def test_request(self):
-        from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
 
         req = RegisterDrvOutputRequest(
             realisation={"id": "test", "outPath": "/nix/store/test"},
@@ -1092,7 +1080,6 @@ class TestRegisterDrvOutputSerialization:
         assert result.realisation == req.realisation
 
     async def test_response(self):
-        from pynixd.operations.ca_derivations import RegisterDrvOutputResponse
 
         resp = RegisterDrvOutputResponse()
         await _serialize_deserialize_response(RegisterDrvOutputResponse, resp)
@@ -1105,7 +1092,6 @@ class TestNarFromPathSerialization:
     """NarFromPath request has wire serialization even though response is streaming."""
 
     async def test_request(self):
-        from pynixd.operations.nar_from_path import NarFromPathRequest
 
         req = NarFromPathRequest(path=StorePath("/nix/store/abc-foo"))
         result = await _serialize_deserialize_request(NarFromPathRequest, req)
@@ -1114,7 +1100,6 @@ class TestNarFromPathSerialization:
 
 class TestAddToStoreNarSerialization:
     async def test_request(self):
-        from pynixd.operations.add_to_store_nar import AddToStoreNarRequest
 
         info = _make_valid_path_info()
         req = AddToStoreNarRequest(info=info, repair=0, dont_check_sigs=0)
@@ -1123,7 +1108,6 @@ class TestAddToStoreNarSerialization:
         assert result.repair == 0
 
     async def test_response(self):
-        from pynixd.operations.add_to_store_nar import AddToStoreNarResponse
 
         resp = AddToStoreNarResponse()
         await _serialize_deserialize_response(AddToStoreNarResponse, resp)
@@ -1131,14 +1115,12 @@ class TestAddToStoreNarSerialization:
 
 class TestAddMultipleToStoreSerialization:
     async def test_request(self):
-        from pynixd.operations.add_multiple_to_store import AddMultipleToStoreRequest
 
         req = AddMultipleToStoreRequest(repair=0, dont_check_sigs=0)
         result = await _serialize_deserialize_request(AddMultipleToStoreRequest, req)
         assert result.repair == 0
 
     async def test_response(self):
-        from pynixd.operations.add_multiple_to_store import AddMultipleToStoreResponse
 
         resp = AddMultipleToStoreResponse()
         await _serialize_deserialize_response(AddMultipleToStoreResponse, resp)
@@ -1149,7 +1131,6 @@ class TestAddMultipleToStoreSerialization:
 
 class TestSignPathInfoSerialization:
     async def test_request(self):
-        from pynixd.operations.sign_path_info import SignPathInfoRequest
 
         info = _make_valid_path_info()
         req = SignPathInfoRequest(info=info)
@@ -1157,7 +1138,6 @@ class TestSignPathInfoSerialization:
         assert result.info.path == info.path
 
     async def test_response(self):
-        from pynixd.operations.sign_path_info import SignPathInfoResponse
 
         info = _make_valid_path_info()
         resp = SignPathInfoResponse(info=info)
@@ -1170,7 +1150,6 @@ class TestSignPathInfoSerialization:
 
 class TestAddToStoreSerialization:
     async def test_request(self):
-        from pynixd.operations.add_to_store import AddToStoreRequest
 
         req = AddToStoreRequest(
             path_name="test",
@@ -1182,7 +1161,6 @@ class TestAddToStoreSerialization:
         assert result.path_name == req.path_name
 
     async def test_response(self):
-        from pynixd.operations.add_to_store import AddToStoreResponse
 
         info = _make_valid_path_info()
         resp = AddToStoreResponse(info=info)
@@ -1199,7 +1177,6 @@ class TestQueryPathInfosSerialization:
     """QueryPathInfos (op 103, extension) — batch path info query."""
 
     async def test_request(self):
-        from pynixd.operations.query_path_infos import QueryPathInfosRequest
 
         paths = {StorePath("/nix/store/a-foo"), StorePath("/nix/store/b-bar")}
         req = QueryPathInfosRequest(paths=paths)
@@ -1207,7 +1184,6 @@ class TestQueryPathInfosSerialization:
         assert result.paths == paths
 
     async def test_response(self):
-        from pynixd.operations.query_path_infos import QueryPathInfosResponse
 
         info = _make_valid_path_info()
         resp = QueryPathInfosResponse(infos={info.path: info})
@@ -1220,7 +1196,6 @@ class TestQueryClosureSerialization:
     """QueryClosure (op 104, extension) — closure query."""
 
     async def test_request(self):
-        from pynixd.operations.query_closure import QueryClosureRequest
 
         paths = {StorePath("/nix/store/a-foo")}
         req = QueryClosureRequest(paths=paths)
@@ -1228,7 +1203,6 @@ class TestQueryClosureSerialization:
         assert result.paths == paths
 
     async def test_response(self):
-        from pynixd.operations.query_closure import QueryClosureResponse
 
         paths = {StorePath("/nix/store/a-foo"), StorePath("/nix/store/b-bar")}
         resp = QueryClosureResponse(paths=paths)
@@ -1240,7 +1214,6 @@ class TestQueryClosureWithInfoSerialization:
     """QueryClosureWithInfo (op 105, extension) — closure with path info."""
 
     async def test_request(self):
-        from pynixd.operations.query_closure_with_info import QueryClosureWithInfoRequest
 
         paths = {StorePath("/nix/store/a-foo")}
         req = QueryClosureWithInfoRequest(paths=paths)
@@ -1248,7 +1221,6 @@ class TestQueryClosureWithInfoSerialization:
         assert result.paths == paths
 
     async def test_response(self):
-        from pynixd.operations.query_closure_with_info import QueryClosureWithInfoResponse
 
         info = _make_valid_path_info()
         resp = QueryClosureWithInfoResponse(infos=[info])
@@ -1261,9 +1233,6 @@ class TestDerivationOutputMapBatchSerialization:
     """QueryDerivationOutputMapBatch (op 106, extension) — batch output map query."""
 
     async def test_request(self):
-        from pynixd.operations.query_derivation_output_map_batch import (
-            QueryDerivationOutputMapBatchRequest,
-        )
 
         paths = {StorePath("/nix/store/a.drv"), StorePath("/nix/store/b.drv")}
         req = QueryDerivationOutputMapBatchRequest(drv_paths=paths)
@@ -1271,9 +1240,6 @@ class TestDerivationOutputMapBatchSerialization:
         assert result.drv_paths == paths
 
     async def test_response(self):
-        from pynixd.operations.query_derivation_output_map_batch import (
-            DerivationOutputMapBatchResponse,
-        )
 
         outputs: OutputMap = {
             StorePath("/nix/store/a.drv"): {"out": StorePath("/nix/store/a-foo")},

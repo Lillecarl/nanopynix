@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from pynixd.store_path import StorePath
+from pynixd.system_features import PYNIXD_HANDLED_FEATURES
 from pynixd.types.derivation import BasicDerivation, DerivationOutput, OutputKind
 
 
@@ -219,7 +220,6 @@ class TestBasicDerivation:
         assert drv.has_text_hashed
 
     def test_effective_required_features(self):
-        from pynixd.system_features import PYNIXD_HANDLED_FEATURES
 
         drv = BasicDerivation(env={"requiredSystemFeatures": "kvm ca-derivations"})
         effective = drv.effective_required_features

@@ -17,7 +17,7 @@ from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore, Store
 from pynixd.store_path import StorePath
-from tests.conftest import CLIENT_BIN, rmtree_robust
+from tests.conftest import CLIENT_BIN, rmtree_robust, run_subproc
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -116,8 +116,6 @@ async def _create_big_path(size_mb: int) -> StorePath:
     if not tmp.exists():  # noqa: ASYNC240
         with tmp.open("wb") as f:  # noqa: ASYNC230
             f.write(os.urandom(size_mb * 1024 * 1024))
-
-    from tests.conftest import run_subproc
 
     rc, stdout, _, _ = await run_subproc([str(CLIENT_BIN), "store", "add-path", str(tmp)])
     assert rc == 0

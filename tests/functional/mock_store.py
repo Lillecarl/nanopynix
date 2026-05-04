@@ -14,17 +14,17 @@ from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsResponse
 from pynixd.operations.query_closure_with_info import QueryClosureWithInfoRequest, QueryClosureWithInfoResponse
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
+from pynixd.psi import CpuUtil
 from pynixd.store.base import Store
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
+from pynixd.types.path_info import ValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from pynixd.connection import ClientConn, Connection
     from pynixd.operations.base import OpRequest, Resp
-    from pynixd.psi import CpuUtil
-    from pynixd.types.path_info import ValidPathInfo
     from pynixd.wire import NixReader, NixWriter
 
 
@@ -139,7 +139,6 @@ class MockStore(Store):
     @property
     def cpu_util(self) -> CpuUtil | None:
         """Mocked CPU utilization."""
-        from pynixd.psi import CpuUtil
 
         return CpuUtil(utilization=self.cpu_utilization_val, cores=1.0, throttled_pct=0.0)
 
@@ -191,7 +190,6 @@ class MockStore(Store):
             return cast("Resp", QueryAllValidPathsResponse(paths=set(self.tracker.known_paths)))
         if isinstance(request, QueryClosureWithInfoRequest):
             # Just return some dummy info for everything
-            from pynixd.types.path_info import ValidPathInfo
 
             infos = [
                 ValidPathInfo(

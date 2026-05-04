@@ -30,6 +30,9 @@ from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import (
     RegisterDrvOutputRequest,
 )
+from pynixd.operations.query_derivation_output_map import (
+    QueryDerivationOutputMapRequest as QdomRequest,
+)
 from pynixd.store import LocalSocketStore, Store
 from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
@@ -605,9 +608,6 @@ async def main() -> None:
                 print("  SUCCESS!")
 
                 # Verify the output on disk
-                from pynixd.operations.query_derivation_output_map import (
-                    QueryDerivationOutputMapRequest as QdomRequest,
-                )
 
                 outmap = await test_store.execute(QdomRequest(path=nix_resolved_drv_path))
                 print(f"  Output map after build: {outmap.items}")

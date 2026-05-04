@@ -6,6 +6,8 @@ All tests are pure — no I/O, no mocking.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pynixd.store_path import DrvOutput, StorePath
@@ -53,7 +55,6 @@ class TestStorePathProperties:
         assert not sp.is_derivation()
 
     def test_to_path(self):
-        from pathlib import Path
 
         sp = StorePath("/nix/store/abc123-foo")
         assert sp.to_path() == Path("/nix/store/abc123-foo")
