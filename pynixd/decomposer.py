@@ -17,6 +17,7 @@ from .operations.query_derivation_output_map_batch import (
 from .operations.query_missing import QueryMissingRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import StorePath
+from .types.build import BuildResult, BuildResultStatus
 
 if TYPE_CHECKING:
     from .connection import ClientConn
@@ -284,7 +285,18 @@ class BuildDecomposer:
         for dp in derived_paths:
             if isinstance(dp, DerivedPath):
                 br = result_map.get(dp)
-                if br is not None:
-                    keyed_results.append(KeyedBuildResult(derived_path=dp, result=br))
-
+                if br is None:
+                    # Derivation was already valid/cached — synthesise success result
+                    br = BuildResult(
+                        status=BuildResultStatus.ALREADY_VALID,
+                        error_msg="",
+                        times_built=0,
+                        is_non_deterministic=0,
+                        start_time=0,
+                        stop_time=0,
+                        cpu_user=None,
+                        cpu_system=None,
+                        built_outputs={},
+                    )
+                keyed_results.append(KeyedBuildResult(derived_path=dp, result=br))
         return BuildPathsWithResultsResponse(results=keyed_results)
