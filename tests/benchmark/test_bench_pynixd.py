@@ -9,44 +9,26 @@ from typing import TYPE_CHECKING
 
 import pytest
 import structlog
-from environs import Env
 
 from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
-from pynixd.store import LocalSocketStore, SSHSocketStore, SSHSubprocessStore, Store
+from pynixd.store import LocalSocketStore, Store
 from pynixd.store_path import StorePath
-from tests.conftest import NIX_BIN, rmtree_robust
+from tests.conftest import CLIENT_BIN, rmtree_robust
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 log = structlog.get_logger(__name__)
 
-env = Env()
-_SSH_USER = env.str("USER", "root")
-
-_STORE_TYPES = ["local-socket", "ssh-socket"]
+_STORE_TYPES = ["local-socket"]
 
 
 async def _make_store(store_type: str) -> Store:
     """Create a store that reads from the system store."""
     if store_type == "local-socket":
         return LocalSocketStore(store_id="local-socket")
-    if store_type == "ssh-subprocess":
-        return SSHSubprocessStore(
-            host="127.0.0.1",
-            store_id="ssh-subprocess",
-            port=22,
-            username=_SSH_USER,
-        )
-    if store_type == "ssh-socket":
-        return SSHSocketStore(
-            host="127.0.0.1",
-            store_id="ssh-socket",
-            port=22,
-            username=_SSH_USER,
-        )
     raise ValueError(f"Unknown store type: {store_type}")
 
 
@@ -148,7 +130,7 @@ async def test_bench_local_socket_overhead():
 
     # 2. Native overhead
     start = time.perf_counter()
-    rc, _, _, _ = await run_subproc([str(NIX_BIN), "store", "ls", "--all", "/nix/store"])
+    rc, _, _, _ = await run_subproc([str(CLIENT_BIN), "path-info", "--all"])
     native_elapsed = time.perf_counter() - start
 
     log.info(

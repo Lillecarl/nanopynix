@@ -12,13 +12,15 @@ import pytest
 import structlog
 
 from pynixd.instance import Server
-from pynixd.store import LocalSocketStore
+from pynixd.store import LocalSocketStore, get_current_system
 from tests.conftest import (
+    CLIENT_BIN,
     NIX_BIN,
     STORE_PREFIX,
     get_test_store_kwargs,
     rmtree_robust,
     run_subproc,
+    server_uri,
 )
 
 if TYPE_CHECKING:
@@ -47,7 +49,7 @@ async def test_throughput_local() -> None:
 
     log.info("starting_local_baseline")
     cmd = [
-        str(NIX_BIN),
+        str(CLIENT_BIN),
         "build",
         "--max-jobs",
         str(MAX_JOBS),
@@ -179,10 +181,11 @@ async def test_throughput_pynixd(profiler: pyinstrument.Profiler) -> None:
         profiler.reset()
 
         try:
-            builder_spec = server.builder_uri(max_jobs=MAX_JOBS)
+            system = get_current_system()
+            builder_spec = f"{server_uri(server)} {system} - {MAX_JOBS}"
 
             cmd = [
-                str(NIX_BIN),
+                str(CLIENT_BIN),
                 "build",
                 "--store",
                 str(client_path),

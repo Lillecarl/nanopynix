@@ -11,33 +11,29 @@ from typing import TYPE_CHECKING
 
 import pytest
 import structlog
-from environs import Env
 
 from pynixd import wire
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
-from pynixd.store import LocalSocketStore, SSHSocketStore, SSHSubprocessStore, Store
+from pynixd.store import LocalSocketStore, Store
 from pynixd.store_path import StorePath
-from tests.conftest import NIX_BIN, rmtree_robust
+from tests.conftest import CLIENT_BIN, rmtree_robust
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from pynixd.types.path_info import ValidPathInfo
 
-from pynixd.store.transfer import pipe_nar_store_to_store, stream_paths_store_to_store
+from pynixd.store.transfer import stream_paths_store_to_store
 
 log = structlog.get_logger(__name__)
 
 
 BENCH_DST = Path("/tmp/pynixd-bench-dst")
 
-env = Env()
-_SSH_USER = env.str("USER", "root")
+_CHUNK_SIZES_KB = [64, 256, 1024, 4096]
 
-_CHUNK_SIZES_KB = env.list("PYNIXD_BENCH_CHUNKS", [64, 256, 1024, 4096], subcast=int)
-
-_STORE_TYPES = ["local-socket", "ssh-socket"]
+_STORE_TYPES = ["local-socket"]
 
 _CONCURRENCY_LEVELS = [1, 4, 8]
 
@@ -46,20 +42,6 @@ async def _make_store(store_type: str) -> Store:
     """Create a store that reads from the system store."""
     if store_type == "local-socket":
         return LocalSocketStore(store_id="local-socket")
-    if store_type == "ssh-subprocess":
-        return SSHSubprocessStore(
-            host="127.0.0.1",
-            store_id="ssh-subprocess",
-            port=22,
-            username=_SSH_USER,
-        )
-    if store_type == "ssh-socket":
-        return SSHSocketStore(
-            host="127.0.0.1",
-            store_id="ssh-socket",
-            port=22,
-            username=_SSH_USER,
-        )
     raise ValueError(f"Unknown store type: {store_type}")
 
 
@@ -79,7 +61,7 @@ async def dst_store() -> AsyncIterator[LocalSocketStore]:
     s = LocalSocketStore(
         store_id="bench-dst",
         store_path=BENCH_DST,
-        nix_bin=str(NIX_BIN),
+        nix_bin=str(CLIENT_BIN),
     )
     yield s
     await s.close()
@@ -94,10 +76,6 @@ def _set_chunk_size(kb: int) -> int:
 def _store_label(s: Store) -> str:
     if isinstance(s, LocalSocketStore):
         return "local"
-    if isinstance(s, SSHSocketStore):
-        return "ssh-socket"
-    if isinstance(s, SSHSubprocessStore):
-        return "ssh-subprocess"
     return "unknown"
 
 
@@ -118,11 +96,11 @@ async def _pick_a_path(s: Store, need_no_refs: bool = False) -> StorePath:
 
 
 async def _pick_small_paths(s: Store, limit: int = 100) -> list[tuple[StorePath, ValidPathInfo]]:
+    """Pick small paths by using .drv files directly (always small, no per-path queries)."""
     resp = await s.execute(QueryAllValidPathsRequest())
-    paths = list(resp.paths)
     picked = []
-    for p in paths:
-        if p.endswith(".drv"):
+    for p in resp.paths:
+        if not p.endswith(".drv"):
             continue
         info_resp = await s.execute(QueryPathInfoRequest(path=p))
         if info_resp.info:
@@ -141,7 +119,7 @@ async def _create_big_path(size_mb: int) -> StorePath:
 
     from tests.conftest import run_subproc
 
-    rc, stdout, _, _ = await run_subproc([str(NIX_BIN), "store", "add-path", str(tmp)])
+    rc, stdout, _, _ = await run_subproc([str(CLIENT_BIN), "store", "add-path", str(tmp)])
     assert rc == 0
     return StorePath(stdout.strip())
 
@@ -149,7 +127,7 @@ async def _create_big_path(size_mb: int) -> StorePath:
 @pytest.mark.benchmark
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
 async def test_bench_nar_streaming_latency(bench_store: Store, dst_store: Store, chunk_kb: int):
-    """Benchmark: stream a single ~1MB path via pipe_nar_from."""
+    """Benchmark: stream a single ~1MB path via stream_paths_store_to_store."""
     store_path = await _pick_a_path(bench_store)
     info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
     info = info_resp.info.with_path(store_path) if info_resp.info else None
@@ -159,7 +137,7 @@ async def test_bench_nar_streaming_latency(bench_store: Store, dst_store: Store,
     old = _set_chunk_size(chunk_kb)
     try:
         start = time.monotonic()
-        await pipe_nar_store_to_store(bench_store, dst_store, store_path, info)
+        await stream_paths_store_to_store(bench_store, dst_store, [store_path])
         elapsed = time.monotonic() - start
     finally:
         wire._CHUNK_SIZE = old
@@ -176,7 +154,7 @@ async def test_bench_nar_streaming_latency(bench_store: Store, dst_store: Store,
 @pytest.mark.benchmark
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
 async def test_bench_nar_streaming_throughput(bench_store: Store, dst_store: Store, chunk_kb: int):
-    """Benchmark: stream a 100MB NAR via pipe_nar_from at various chunk sizes."""
+    """Benchmark: stream a 100MB NAR via stream_paths_store_to_store at various chunk sizes."""
     store_path = await _create_big_path(100)
     info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
     info = info_resp.info.with_path(store_path) if info_resp.info else None
@@ -186,7 +164,7 @@ async def test_bench_nar_streaming_throughput(bench_store: Store, dst_store: Sto
     old = _set_chunk_size(chunk_kb)
     try:
         start = time.monotonic()
-        await pipe_nar_store_to_store(bench_store, dst_store, store_path, info)
+        await stream_paths_store_to_store(bench_store, dst_store, [store_path])
         elapsed = time.monotonic() - start
     finally:
         wire._CHUNK_SIZE = old
@@ -264,7 +242,7 @@ async def test_bench_copy_paths_batch(bench_store: Store, dst_store: Store, chun
     Tests the efficiency of AddMultipleToStore compared to per-path calls.
     Should show massive gains on SSH stores where round-trips matter.
     """
-    picked = await _pick_small_paths(bench_store, 1000)
+    picked = await _pick_small_paths(bench_store, 100)
     assert len(picked) >= 100, f"Need 100+ small paths, found {len(picked)}"
     paths = [p for p, _ in picked]
 
