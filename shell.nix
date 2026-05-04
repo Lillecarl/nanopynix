@@ -1,9 +1,7 @@
-{
-  pkgs ? import <nixpkgs> { },
-}:
 let
+  default = import ./. { };
+  inherit (default) pkgs;
   inherit (pkgs) lib;
-  default = import ./. { inherit pkgs; };
   python = pkgs.python3.withPackages (
     ps:
     default.package.dependencies

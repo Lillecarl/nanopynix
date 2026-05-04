@@ -20,28 +20,5 @@ jobs:
       - name: Verify Nix
         run: nix build --version
 
-      - name: Setup Python cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            pip-
-
-      - name: Install Python deps
-        run: |
-          pip install -e ".[test]"
-          pip install pyright ruff
-
-      - name: Type checks
-        run: pyright .
-
-      - name: Lint check
-        run: ruff check .
-
-      - name: Format check
-        run: ruff format --check .
-
-      - name: Run tests
-        run: |
-          pytest tests/functional tests/unit -q --tb=short
+      - name: Run checks
+        run: nix develop --file shell.nix --command just precommit
