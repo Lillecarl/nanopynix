@@ -20,5 +20,10 @@ jobs:
       - name: Verify Nix
         run: nix build --version
 
+      - name: Generate SSH key for ssh-ng:// tests
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -q
+
       - name: Run checks
         run: nix develop --impure --file shell.nix --command just precommit
