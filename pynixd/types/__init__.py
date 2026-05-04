@@ -22,6 +22,9 @@ from .build import (
 from .build import (
     BuiltOutput as BuiltOutput,
 )
+from .build import (
+    KeyedBuildResult as KeyedBuildResult,
+)
 from .ca import Realisation as Realisation
 from .context import RequestContext as RequestContext
 from .derivation import (

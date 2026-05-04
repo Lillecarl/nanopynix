@@ -961,12 +961,12 @@ class TestBuildPathsWithResultsSerialization:
         assert result.build_mode == req.build_mode
 
     async def test_response(self):
-        from pynixd.operations.base import KeyedBuildResult
         from pynixd.operations.build_paths import BuildPathsWithResultsResponse
+        from pynixd.types import KeyedBuildResult
 
         result = BuildResult(status=BuildResultStatus.BUILT, error_msg="")
         resp = BuildPathsWithResultsResponse(
-            results=[KeyedBuildResult(derived_path=DerivedPath("/nix/store/abc.drv!out"), result=result)],
+            results=[KeyedBuildResult(path=DerivedPath("/nix/store/abc.drv!out"), result=result)],
         )
         result2 = await _serialize_deserialize_response(BuildPathsWithResultsResponse, resp)
         assert len(result2.results) == 1

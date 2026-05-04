@@ -18,9 +18,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 
 import structlog
 
-from .. import derived_path as derived_path_mod
 from ..exceptions import OpNotImplementedError
-from ..store_path import StorePath
 from ..types import (
     BasicDerivation as BasicDerivation,
 )
@@ -38,6 +36,9 @@ from ..types import (
 )
 from ..types import (
     DerivationOutput as DerivationOutput,
+)
+from ..types import (
+    KeyedBuildResult as KeyedBuildResult,
 )
 from ..types import (
     OperationLogs as OperationLogs,
@@ -192,25 +193,6 @@ class OpResponse(ABC):
 
 # Silence BuildResult debug logs — verbose in hot paths
 logging.getLogger("pynixd.types.BuildResult").setLevel(logging.WARNING)
-
-
-@dataclass
-class KeyedBuildResult:
-    """A build result associated with its derived path."""
-
-    derived_path: derived_path_mod.DerivedPath = field(
-        default_factory=lambda: StorePath(""),
-    )  # type: ignore
-    result: BuildResult = field(default_factory=BuildResult)
-
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.derived_path = await reader.read_string(derived_path_mod.DerivedPath)
-        self.result = await BuildResult().from_reader(reader, version)
-        return self
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string(self.derived_path)
-        await self.result.to_writer(writer, version)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

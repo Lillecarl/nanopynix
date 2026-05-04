@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
 from ..store_path import DrvOutput, StorePath
 
 if TYPE_CHECKING:
+    from ..derived_path import DerivedPath
     from ..wire import NixReader, NixWriter
     from .aliases import ContentAddress, NARHash
     from .ca import Realisation
@@ -167,3 +168,26 @@ class BuildResult:
             for k, v in self.built_outputs.items():
                 writer.write_string(k)
                 writer.write_string(json.dumps(v))
+
+
+@dataclass
+class KeyedBuildResult:
+    """A BuildResult together with its primary key (DerivedPath).
+
+    Mirrors Nix's `KeyedBuildResult`: inherits BuildResult fields and adds
+    the derivation path or store path that was built/substituted.
+    """
+
+    path: DerivedPath = field(default_factory=lambda: StorePath(""))  # type: ignore
+    result: BuildResult = field(default_factory=BuildResult)
+
+    async def from_reader(self, reader: NixReader, version: int) -> Self:
+        from ..derived_path import DerivedPath
+
+        self.path = await reader.read_string(DerivedPath)
+        self.result = await BuildResult().from_reader(reader, version)
+        return self
+
+    async def to_writer(self, writer: NixWriter, version: int) -> None:
+        writer.write_string(self.path)
+        await self.result.to_writer(writer, version)

@@ -298,5 +298,5 @@ class BuildDecomposer:
                         cpu_system=None,
                         built_outputs={},
                     )
-                keyed_results.append(KeyedBuildResult(derived_path=dp, result=br))
+                keyed_results.append(KeyedBuildResult(path=dp, result=br))
         return BuildPathsWithResultsResponse(results=keyed_results)
