@@ -5,9 +5,12 @@ Local Nix daemon store implementation.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import contextlib
 import os
 import shlex
+import signal
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -80,6 +83,10 @@ class LocalSocketStore(Store):
         self.extra_env = extra_env or {}
         self.extra_args = extra_args or []
         self.settings = settings or PynixdSettings()
+
+        # Register atexit handler to ensure daemon is killed even if close() is never called
+        if self.managed:
+            atexit.register(self._atexit_kill_daemon)
 
         # Resource Monitoring
         self.monitor: ResourceMonitor | None = (
@@ -162,6 +169,7 @@ class LocalSocketStore(Store):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            start_new_session=True,
         )
 
         if self.daemon_proc.stdout:
@@ -282,12 +290,6 @@ class LocalSocketStore(Store):
 
     async def close(self) -> None:
         """Close stores, stop monitor and terminate managed daemon if any."""
-        # TODO: Solidify subprocess management to prevent zombie "nix daemon" processes.
-        # When tests fail or exceptions are raised during daemon startup, the daemon
-        # subprocess may not be properly reaped. Consider:
-        # - Using a process group / session leader for the daemon so all children can be killed together
-        # - Adding a test fixture that finds and kills stray nix daemon processes after test runs
-        # - Using `start_new_session=True` in create_subprocess_exec and killing the process group on cleanup
         await super().close()
         if self.monitor:
             await self.monitor.stop()
@@ -295,9 +297,60 @@ class LocalSocketStore(Store):
             self._daemon_log_task.cancel()
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 await self._daemon_log_task
-        if self.daemon_proc is not None:
-            self.daemon_proc.terminate()
-            try:
-                await asyncio.wait_for(self.daemon_proc.wait(), timeout=5.0)
-            except TimeoutError:
-                self.daemon_proc.kill()
+        await self._kill_daemon()
+
+    async def _kill_daemon(self) -> None:
+        """Terminate the managed daemon process and all its children.
+
+        The daemon is spawned with `start_new_session=True`, making it a
+        session leader. Its PID equals the process group ID, so we can
+        kill the entire group with `os.killpg`.
+        """
+        # Unregister atexit handler so we don't double-kill
+        if self.managed:
+            with contextlib.suppress(ValueError):
+                atexit.unregister(self._atexit_kill_daemon)
+
+        if self.daemon_proc is None:
+            return
+        pid = self.daemon_proc.pid
+        log.info("terminating_daemon_process_group", pid=pid)
+
+        # SIGTERM the entire process group (daemon + any children)
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, signal.SIGTERM)
+
+        try:
+            await asyncio.wait_for(self.daemon_proc.wait(), timeout=5.0)
+        except TimeoutError:
+            log.warning("daemon_sigterm_timeout_escalating_to_sigkill", pid=pid)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(pid, signal.SIGKILL)
+
+            # Final wait so the process is reaped
+            with contextlib.suppress(TimeoutError, ProcessLookupError):
+                await asyncio.wait_for(self.daemon_proc.wait(), timeout=2.0)
+
+        self.daemon_proc = None
+        self.daemon_ready = None
+
+    def _atexit_kill_daemon(self) -> None:
+        """Synchronous atexit handler to kill the daemon process group.
+        This is called when the Python process exits without close() having
+        been invoked (e.g., unhandled exception, os._exit, or interpreter crash).
+        """
+        proc = self.daemon_proc
+        if proc is None:
+            return
+
+        pid = proc.pid
+        log.info("atexit_killing_daemon_process_group", pid=pid)
+
+        # Best-effort SIGTERM then SIGKILL synchronously
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, signal.SIGTERM)
+
+        # Very brief synchronous wait — atexit is synchronous, can't asyncio
+        time.sleep(0.5)
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, signal.SIGKILL)

@@ -16,13 +16,14 @@ from .operations.query_derivation_output_map_batch import (
 )
 from .operations.query_missing import QueryMissingRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
-from .store_path import StorePath
+from .store_path import DrvOutput, StorePath
 from .types.build import BuildResult, BuildResultStatus
 
 if TYPE_CHECKING:
     from .connection import ClientConn
     from .drv_parser import ParsedDerivation
     from .scheduler import DerivationReader, Scheduler
+    from .types import Realisation
     from .types.aliases import StorePathSet
     from .types.ids import BuildId
 
@@ -287,6 +288,16 @@ class BuildDecomposer:
                 br = result_map.get(dp)
                 if br is None:
                     # Derivation was already valid/cached — synthesise success result
+                    parsed = parsed_cache.get(StorePath(dp.drv_path))
+                    built_outputs: dict[DrvOutput, Realisation] = {}
+                    if parsed is not None:
+                        for out_name, out_path in parsed.output_paths().items():
+                            # Dummy DrvOutput hash — client only uses output name and path
+                            drv_output = DrvOutput(f"sha256:{0:064x}!{out_name}")
+                            built_outputs[drv_output] = {
+                                "id": str(drv_output),
+                                "outPath": str(out_path),
+                            }
                     br = BuildResult(
                         status=BuildResultStatus.ALREADY_VALID,
                         error_msg="",
@@ -296,7 +307,7 @@ class BuildDecomposer:
                         stop_time=0,
                         cpu_user=None,
                         cpu_system=None,
-                        built_outputs={},
+                        built_outputs=built_outputs,
                     )
                 keyed_results.append(KeyedBuildResult(path=dp, result=br))
         return BuildPathsWithResultsResponse(results=keyed_results)
