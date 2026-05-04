@@ -2,14 +2,11 @@ default:
     @just --list
 
 check:
-    pyright pynixd
-    pyright tests/conftest.py tests/functional tests/unit
+    pyright .
 
 fmt:
-    ruff format pynixd
-    ruff check --fix pynixd
-    ruff format tests
-    ruff check --fix tests
+    ruff format .
+    ruff check --fix .
 
 upgrade:
     pyupgrade --py313-plus $(find pynixd tests -name '*.py')

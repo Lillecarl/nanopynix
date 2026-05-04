@@ -267,7 +267,7 @@ async def main() -> None:
         print(f"wrapper output: {wrapper_out}")
         wrapper_content_path = root_path / str(wrapper_out).lstrip("/")
         if wrapper_content_path.exists():
-            content = await anyio.Path(wrapper_content_path).read_text().strip()
+            content = (await anyio.Path(wrapper_content_path).read_text()).strip()
             print(f"wrapper content: {content!r}")
             print(f"matches hello content: {content == 'hello'}")
     else:
