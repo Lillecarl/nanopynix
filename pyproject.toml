@@ -91,6 +91,12 @@ select = [
     "N",
     # flynt
     "FLY",
+    # pyupgrade
+    "UP",
+    # flake8-quotes
+    "Q",
+    # flake8-quotes
+    "Q",
 ]
 
 ignore = [
