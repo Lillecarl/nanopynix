@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 import structlog
@@ -289,6 +290,12 @@ class BuildDecomposer:
                 if br is None:
                     # Derivation was already valid/cached — synthesise success result
                     parsed = parsed_cache.get(StorePath(dp.drv_path))
+                    if parsed is None:
+                        with contextlib.suppress(FileNotFoundError):
+                            parsed = await dp.to_derivation(
+                                self.local_store.store_path,
+                                reader_fn=self.read_drv_fn,
+                            )
                     built_outputs: dict[DrvOutput, Realisation] = {}
                     if parsed is not None:
                         for out_name, out_path in parsed.output_paths().items():
@@ -296,7 +303,7 @@ class BuildDecomposer:
                             drv_output = DrvOutput(f"sha256:{0:064x}!{out_name}")
                             built_outputs[drv_output] = {
                                 "id": str(drv_output),
-                                "outPath": str(out_path),
+                                "outPath": out_path.name,
                             }
                     br = BuildResult(
                         status=BuildResultStatus.ALREADY_VALID,
@@ -309,5 +316,34 @@ class BuildDecomposer:
                         cpu_system=None,
                         built_outputs=built_outputs,
                     )
+                elif br.status == BuildResultStatus.ALREADY_VALID and not br.built_outputs:
+                    # Backend returned ALREADY_VALID with empty built_outputs;
+                    # synthesise from parsed derivation so client can print paths.
+                    parsed = parsed_cache.get(StorePath(dp.drv_path))
+                    if parsed is None:
+                        with contextlib.suppress(FileNotFoundError):
+                            parsed = await dp.to_derivation(
+                                self.local_store.store_path,
+                                reader_fn=self.read_drv_fn,
+                            )
+                    if parsed is not None:
+                        built_outputs = {}
+                        for out_name, out_path in parsed.output_paths().items():
+                            drv_output = DrvOutput(f"sha256:{0:064x}!{out_name}")
+                            built_outputs[drv_output] = {
+                                "id": str(drv_output),
+                                "outPath": out_path.name,
+                            }
+                        br = BuildResult(
+                            status=br.status,
+                            error_msg=br.error_msg,
+                            times_built=br.times_built,
+                            is_non_deterministic=br.is_non_deterministic,
+                            start_time=br.start_time,
+                            stop_time=br.stop_time,
+                            built_outputs=built_outputs,
+                            cpu_user=br.cpu_user,
+                            cpu_system=br.cpu_system,
+                        )
                 keyed_results.append(KeyedBuildResult(path=dp, result=br))
         return BuildPathsWithResultsResponse(results=keyed_results)
