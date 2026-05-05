@@ -116,6 +116,17 @@ structlog.configure(
 
 log = structlog.get_logger(__name__)
 
+# Ignore nar_integration tests during normal collection — they are run
+# explicitly by path and their pytest_generate_tests is expensive.
+
+
+def pytest_ignore_collect(collection_path: Path) -> bool | None:
+    """Skip nar_integration directory during test collection."""
+    if "nar_integration" in str(collection_path):
+        return True
+    return None
+
+
 logging.getLogger("asyncio").setLevel(logging.INFO)
 logging.getLogger("aiosqlite").setLevel(logging.INFO)
 logging.getLogger("pynixd.store.pool").setLevel(logging.INFO)
