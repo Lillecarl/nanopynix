@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import StderrNext
+from ..types import OperationLogs
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
 from .base import OpRequest, OpResponse, RequestContext, ValidPathInfo
 
@@ -16,16 +17,19 @@ if TYPE_CHECKING:
 
 @dataclass
 class AddMultipleToStoreResponse(OpResponse):
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -33,26 +37,28 @@ class AddMultipleToStoreResponse(OpResponse):
         self.logs.to_writer(writer)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
     """Prefix for AddMultipleToStore (framed data follows)."""
 
     name: ClassVar[str] = "AddMultipleToStore"
     op: ClassVar[int] = 44
     response_type: ClassVar[type[OpResponse]] = AddMultipleToStoreResponse
-    repair: int = 0
-    dont_check_sigs: int = 0
+    repair: int
+    dont_check_sigs: int
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.repair = await reader.read_uint64()
-        self.dont_check_sigs = await reader.read_uint64()
-        self.logger.debug(
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.repair = await reader.read_uint64()
+        obj.dont_check_sigs = await reader.read_uint64()
+        obj.logger.debug(
             "from_reader",
-            repair=self.repair,
-            dont_check_sigs=self.dont_check_sigs,
+            repair=obj.repair,
+            dont_check_sigs=obj.dont_check_sigs,
         )
-        return self
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -62,10 +68,10 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
 
     async def handle(self, ctx: RequestContext) -> AddMultipleToStoreResponse:
         """Override handle because this is a streaming operation."""
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
         async with ctx.proxy.local_store.transfer_conn() as conn:
             # Re-write the request prefix to the backend
-            await self.to_writer(conn.w, conn.version)
+            await self.to_writer(conn.w, ctx.version)
             await conn.w.drain()
 
             # We must run forward_stream and the response reader concurrently
@@ -73,7 +79,7 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
             # If we don't read the logs, the backend's output buffer fills and it blocks.
             async with asyncio.TaskGroup() as tg:
                 resp_task = tg.create_task(
-                    AddMultipleToStoreResponse().from_reader(conn.r, conn.version),
+                    AddMultipleToStoreResponse.from_reader(conn.r, conn.version),
                 )
 
                 infos = await self.forward_stream(ctx.proxy.r, conn.w)
@@ -103,7 +109,7 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
 
         infos: set[ValidPathInfo] = set()
         for _ in range(expected):
-            info = await ValidPathInfo().from_reader(fsrc)
+            info = await ValidPathInfo.from_reader(fsrc)
             infos.add(info)
             self.logger.info(
                 "forward_path_start",

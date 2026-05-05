@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from .base import OpRequest, OpResponse, SubstitutablePathInfo
+from .base import OpRequest, OpResponse, OperationLogs, SubstitutablePathInfo
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -21,20 +21,23 @@ class QuerySubstitutablePathInfoResponse(OpResponse):
     found: bool = False
     info: SubstitutablePathInfo | None = None
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader)
-        self.found = await reader.read_uint64() != 0
-        self.info = None
-        if self.found:
-            self.info = await SubstitutablePathInfo().from_reader(reader, version)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader)
+        obj.found = await reader.read_uint64() != 0
+        obj.info = None
+        if obj.found:
+            obj.info = await SubstitutablePathInfo.from_reader(reader, version)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -53,17 +56,19 @@ class QuerySubstitutablePathInfoRequest(OpRequest[QuerySubstitutablePathInfoResp
     is_query: ClassVar[bool] = True
     path: str = ""
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.path = await reader.read_string()
-        self.logger.debug("from_reader", path=self.path)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.path = await reader.read_string()
+        obj.logger.debug("from_reader", path=obj.path)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

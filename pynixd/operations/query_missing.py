@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import DerivedPath
 from ..store_path import StorePath
+from ..types import OperationLogs
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
@@ -17,27 +18,30 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueryMissingResponse(OpResponse):
-    will_build: StorePathSet = field(default_factory=set)
-    will_substitute: StorePathSet = field(default_factory=set)
-    unknown: StorePathSet = field(default_factory=set)
-    download_size: int = 0
-    nar_size: int = 0
+    will_build: StorePathSet
+    will_substitute: StorePathSet
+    unknown: StorePathSet
+    download_size: int
+    nar_size: int
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader)
-        self.will_build = await reader.read_string_set(StorePath)
-        self.will_substitute = await reader.read_string_set(StorePath)
-        self.unknown = await reader.read_string_set(StorePath)
-        self.download_size = await reader.read_uint64()
-        self.nar_size = await reader.read_uint64()
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader)
+        obj.will_build = await reader.read_string_set(StorePath)
+        obj.will_substitute = await reader.read_string_set(StorePath)
+        obj.unknown = await reader.read_string_set(StorePath)
+        obj.download_size = await reader.read_uint64()
+        obj.nar_size = await reader.read_uint64()
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -55,25 +59,27 @@ class QueryMissingResponse(OpResponse):
         writer.write_uint64(self.nar_size)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class QueryMissingRequest(OpRequest[QueryMissingResponse]):
     name: ClassVar[str] = "QueryMissing"
     op: ClassVar[int] = 40
     response_type: ClassVar[type[OpResponse]] = QueryMissingResponse
     is_query: ClassVar[bool] = True
-    derived_paths: set[DerivedPath] = field(default_factory=set)
+    derived_paths: set[DerivedPath]
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.derived_paths = await reader.read_string_set(DerivedPath)
-        self.logger.debug("from_reader", derived_paths=self.derived_paths)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.derived_paths = await reader.read_string_set(DerivedPath)
+        obj.logger.debug("from_reader", derived_paths=obj.derived_paths)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

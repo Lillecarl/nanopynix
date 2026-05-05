@@ -204,7 +204,7 @@ class Connection:
 
         # If client is provided, we stream logs directly to them and don't buffer
         # locally to save memory on large builds.
-        response = await response_type().from_reader(
+        response = await response_type.from_reader(
             self.r,
             self.version,
             client=client,

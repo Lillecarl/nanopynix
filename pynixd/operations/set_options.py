@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from .. import wire
@@ -11,6 +11,7 @@ from ..types.auth import Role
 from .base import (
     OpRequest,
     OpResponse,
+    OperationLogs,
     RequestContext,
 )
 
@@ -23,20 +24,23 @@ if TYPE_CHECKING:
 
 @dataclass
 class SetOptionsResponse(OpResponse):
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
         )
-        return self
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -44,70 +48,72 @@ class SetOptionsResponse(OpResponse):
         self.logs.to_writer(writer)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class SetOptionsRequest(OpRequest[SetOptionsResponse]):
     name: ClassVar[str] = "SetOptions"
     op: ClassVar[int] = 19
     response_type: ClassVar[type[OpResponse]] = SetOptionsResponse
-    keep_failed: int = 0
-    keep_going: int = 0
-    try_fallback: int = 0
-    verbosity: int = 0
-    max_build_jobs: int = 0
-    max_silent_time: int = 0
-    _obsolete_use_build_hook: int = 0
-    build_verbosity: int = 0
-    _obsolete_log_type: int = 0
-    _obsolete_print_build_trace: int = 0
-    build_cores: int = 0
-    use_substitutes: int = 0
-    overrides: dict[str, str] = field(default_factory=dict)
+    keep_failed: int
+    keep_going: int
+    try_fallback: int
+    verbosity: int
+    max_build_jobs: int
+    max_silent_time: int
+    _obsolete_use_build_hook: int
+    build_verbosity: int
+    _obsolete_log_type: int
+    _obsolete_print_build_trace: int
+    build_cores: int
+    use_substitutes: int
+    overrides: dict[str, str]
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.keep_failed = await reader.read_uint64()
-        self.keep_going = await reader.read_uint64()
-        self.try_fallback = await reader.read_uint64()
-        self.verbosity = await reader.read_uint64()
-        self.max_build_jobs = await reader.read_uint64()
-        self.max_silent_time = await reader.read_uint64()
-        self._obsolete_use_build_hook = await reader.read_uint64()
-        self.build_verbosity = await reader.read_uint64()
-        self._obsolete_log_type = await reader.read_uint64()
-        self._obsolete_print_build_trace = await reader.read_uint64()
-        self.build_cores = await reader.read_uint64()
-        self.use_substitutes = await reader.read_uint64()
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.keep_failed = await reader.read_uint64()
+        obj.keep_going = await reader.read_uint64()
+        obj.try_fallback = await reader.read_uint64()
+        obj.verbosity = await reader.read_uint64()
+        obj.max_build_jobs = await reader.read_uint64()
+        obj.max_silent_time = await reader.read_uint64()
+        obj._obsolete_use_build_hook = await reader.read_uint64()
+        obj.build_verbosity = await reader.read_uint64()
+        obj._obsolete_log_type = await reader.read_uint64()
+        obj._obsolete_print_build_trace = await reader.read_uint64()
+        obj.build_cores = await reader.read_uint64()
+        obj.use_substitutes = await reader.read_uint64()
 
-        self.overrides = {}
+        obj.overrides = {}
         if version >= wire.proto(1, 12):
             n = await reader.read_uint64()
             for _ in range(n):
                 k = await reader.read_string()
                 v = await reader.read_string()
-                self.overrides[k] = v
+                obj.overrides[k] = v
 
-        self.logger.debug(
+        obj.logger.debug(
             "from_reader",
-            keep_failed=self.keep_failed,
-            keep_going=self.keep_going,
-            try_fallback=self.try_fallback,
-            verbosity=self.verbosity,
-            max_build_jobs=self.max_build_jobs,
-            max_silent_time=self.max_silent_time,
-            build_verbosity=self.build_verbosity,
-            build_cores=self.build_cores,
-            use_substitutes=self.use_substitutes,
+            keep_failed=obj.keep_failed,
+            keep_going=obj.keep_going,
+            try_fallback=obj.try_fallback,
+            verbosity=obj.verbosity,
+            max_build_jobs=obj.max_build_jobs,
+            max_silent_time=obj.max_silent_time,
+            build_verbosity=obj.build_verbosity,
+            build_cores=obj.build_cores,
+            use_substitutes=obj.use_substitutes,
         )
-        return self
+        return obj
 
     async def handle(self, ctx: RequestContext) -> SetOptionsResponse | None:
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
         if ctx.proxy.role == Role.ADMIN:
             return await ctx.proxy.execute(self)
 

@@ -43,17 +43,20 @@ class OperationLogs:
             msg.to_writer(writer)
         writer.write_uint64(constants.STDERR_LAST)
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         client: ClientConn | None = None,
         buffer: bool = True,
     ) -> Self:
+        obj = cls.__new__(cls)
+        obj.messages = []
         async for msg in read_stream(reader):
             if client:
                 await client.queue.put(msg)
             if buffer:
-                self.add(msg)
+                obj.add(msg)
             if isinstance(msg, StderrError):
                 raise BackendError(f"Daemon error ({msg.error_type}): {msg.msg}")
-        return self
+        return obj

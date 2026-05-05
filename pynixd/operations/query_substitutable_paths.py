@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
+from ..types import OperationLogs
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
@@ -16,19 +17,22 @@ if TYPE_CHECKING:
 
 @dataclass
 class QuerySubstitutablePathsResponse(OpResponse):
-    paths: StorePathSet = field(default_factory=set)
+    paths: StorePathSet
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader)
-        self.paths = await reader.read_string_set(StorePath)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj.paths = await reader.read_string_set(StorePath)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -37,25 +41,21 @@ class QuerySubstitutablePathsResponse(OpResponse):
         writer.write_string_set(self.paths)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class QuerySubstitutablePathsRequest(OpRequest[QuerySubstitutablePathsResponse]):
     name: ClassVar[str] = "QuerySubstitutablePaths"
     op: ClassVar[int] = 32
     response_type: ClassVar[type[OpResponse]] = QuerySubstitutablePathsResponse
     is_query: ClassVar[bool] = True
-    paths: StorePathSet = field(default_factory=set)
+    paths: StorePathSet
 
-    async def from_reader(
-        self,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.paths = await reader.read_string_set(StorePath)
-        self.logger.debug("from_reader", paths=self.paths)
-        return self
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.paths = await reader.read_string_set(StorePath)
+        obj.logger.debug("from_reader", paths=obj.paths)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

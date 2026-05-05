@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import DerivedPath
 from ..store_path import StorePath
+from ..types import OperationLogs
 from .base import (
     BuildMode,
     KeyedBuildResult,
@@ -24,20 +25,23 @@ if TYPE_CHECKING:
 
 @dataclass
 class BuildPathsResponse(OpResponse):
-    value: int = 0
+    value: int
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        self.value = await reader.read_uint64()
-        self.logger.debug("from_reader", value=self.value)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj.value = await reader.read_uint64()
+        obj.logger.debug("from_reader", value=obj.value)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -46,25 +50,27 @@ class BuildPathsResponse(OpResponse):
         writer.write_uint64(self.value)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class BuildPathsRequest(OpRequest[BuildPathsResponse]):
     name: ClassVar[str] = "BuildPaths"
     op: ClassVar[int] = 9
     response_type: ClassVar[type[OpResponse]] = BuildPathsResponse
     is_build: ClassVar[bool] = True
-    derived_paths: set[DerivedPath] = field(default_factory=set)
-    build_mode: BuildMode = BuildMode.NORMAL
+    derived_paths: set[DerivedPath]
+    build_mode: BuildMode
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.derived_paths = await reader.read_string_set(DerivedPath)
-        self.build_mode = BuildMode(await reader.read_uint64())
-        self.logger.debug(
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.derived_paths = await reader.read_string_set(DerivedPath)
+        obj.build_mode = BuildMode(await reader.read_uint64())
+        obj.logger.debug(
             "from_reader",
-            derived_paths=self.derived_paths,
-            build_mode=self.build_mode,
+            derived_paths=obj.derived_paths,
+            build_mode=obj.build_mode,
         )
-        return self
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -75,7 +81,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
         self.logger.debug("received_op")
 
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
 
         if not ctx.proxy.use_scheduler_for_builds:
             self.logger.debug("handle_local_mode_fallback")
@@ -115,22 +121,25 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 
 @dataclass
 class BuildPathsWithResultsResponse(OpResponse):
-    results: list[KeyedBuildResult] = field(default_factory=list)
+    results: list[KeyedBuildResult]
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
         n = await reader.read_uint64()
-        self.results = []
+        obj.results = []
         for _ in range(n):
-            self.results.append(await KeyedBuildResult().from_reader(reader, version))
-        return self
+            obj.results.append(await KeyedBuildResult.from_reader(reader, version))
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -141,26 +150,28 @@ class BuildPathsWithResultsResponse(OpResponse):
             await entry.to_writer(writer, version)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
     name: ClassVar[str] = "BuildPathsWithResults"
     op: ClassVar[int] = 46
     response_type: ClassVar[type[OpResponse]] = BuildPathsWithResultsResponse
     is_build: ClassVar[bool] = True
-    derived_paths: set[DerivedPath] = field(default_factory=set)
-    build_mode: BuildMode = BuildMode.NORMAL
+    derived_paths: set[DerivedPath]
+    build_mode: BuildMode
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.derived_paths = await reader.read_string_set(DerivedPath)
-        self.build_mode = BuildMode(await reader.read_uint64())
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.derived_paths = await reader.read_string_set(DerivedPath)
+        obj.build_mode = BuildMode(await reader.read_uint64())
 
-        self.logger.debug(
+        obj.logger.debug(
             "from_reader",
-            derived_paths=self.derived_paths,
-            build_mode=self.build_mode,
+            derived_paths=obj.derived_paths,
+            build_mode=obj.build_mode,
         )
-        return self
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -171,7 +182,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
         self.logger.debug("received_op")
 
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
 
         if not ctx.proxy.use_scheduler_for_builds:
             self.logger.debug("handle_local_mode_fallback")

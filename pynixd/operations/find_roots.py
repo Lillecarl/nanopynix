@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
+from ..types import OperationLogs
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
@@ -14,30 +15,33 @@ if TYPE_CHECKING:
 
 @dataclass
 class FindRootsEntry:
-    link: str = ""
-    target: str = ""
+    link: str
+    target: str
 
 
 @dataclass
 class FindRootsResponse(OpResponse):
-    roots: list[FindRootsEntry] = field(default_factory=list)
+    roots: list[FindRootsEntry]
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader)
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader)
         n = await reader.read_uint64()
-        self.roots = []
+        obj.roots = []
         for _ in range(n):
             link = await reader.read_string()
             target = await reader.read_string()
-            self.roots.append(FindRootsEntry(link=link, target=target))
-        return self
+            obj.roots.append(FindRootsEntry(link=link, target=target))
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -55,16 +59,12 @@ class FindRootsRequest(OpRequest[FindRootsResponse]):
     op: ClassVar[int] = 14
     response_type: ClassVar[type[OpResponse]] = FindRootsResponse
 
-    async def from_reader(
-        self,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logger.debug("from_reader")
-        return self
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logger.debug("from_reader")
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

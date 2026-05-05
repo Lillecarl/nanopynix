@@ -9,12 +9,13 @@ pynixd uses QueryDerivationOutputMap (op 41) instead.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..drv_parser import read_drv_file
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
+from ..types import OperationLogs
 from .base import OpRequest, OpResponse
 
 QUERY_DERIVATION_OUTPUT_MAP_BATCH = """
@@ -38,23 +39,26 @@ class DerivationOutputMapBatchResponse(OpResponse):
     Output paths can be None when the output hasn't been realised yet.
     """
 
-    outputs: OutputMap = field(default_factory=dict)
+    outputs: OutputMap
 
     @property
     def is_not_found(self) -> bool:
         return not self.outputs
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
         n = await reader.read_uint64()
-        self.outputs = {}
+        obj.outputs = {}
         for _ in range(n):
             drv_path = await reader.read_string(StorePath)
             m = await reader.read_uint64()
@@ -63,8 +67,8 @@ class DerivationOutputMapBatchResponse(OpResponse):
                 name = await reader.read_string()
                 path = await reader.read_string(StorePath)
                 drv_outputs[name] = path or None
-            self.outputs[drv_path] = drv_outputs
-        return self
+            obj.outputs[drv_path] = drv_outputs
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -82,20 +86,22 @@ class DerivationOutputMapBatchResponse(OpResponse):
                     writer.write_string("")
 
 
-@dataclass
+@dataclass(kw_only=True)
 class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchResponse]):
     name: ClassVar[str] = "QueryDerivationOutputMapBatch"
     op: ClassVar[int] = 106
     is_extension: ClassVar[bool] = True
     response_type: ClassVar[type[OpResponse]] = DerivationOutputMapBatchResponse
     is_query: ClassVar[bool] = True
-    drv_paths: StorePathSet = field(default_factory=set)
+    drv_paths: StorePathSet
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.drv_paths = await reader.read_string_set(StorePath)
-        self.logger.debug("from_reader", drv_paths=self.drv_paths)
-        return self
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.drv_paths = await reader.read_string_set(StorePath)
+        obj.logger.debug("from_reader", drv_paths=obj.drv_paths)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -109,7 +115,7 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
         suppress_last: bool = False,
     ) -> DerivationOutputMapBatchResponse:
         if not self.drv_paths:
-            return DerivationOutputMapBatchResponse(outputs={})
+            return DerivationOutputMapBatchResponse({})
 
         if (db := store.db) is not None:
             paths_json = json.dumps([str(p) for p in self.drv_paths])

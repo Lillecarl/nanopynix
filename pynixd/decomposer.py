@@ -189,7 +189,7 @@ class BuildDecomposer:
         unknown = all_input_srcs - self.local_store.tracker.known_paths
         if unknown:
             valid_resp = await self.local_store.execute(
-                QueryValidPathsRequest(paths=unknown),
+                QueryValidPathsRequest(paths=unknown, substitute=0),
             )
             self.local_store.tracker.add_known_paths(
                 valid_resp.paths,

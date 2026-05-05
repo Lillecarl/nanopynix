@@ -11,10 +11,11 @@ Protocol: 1.32+ only (simplified - no version branching needed)
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import DrvOutput, StorePath
+from ..types import OperationLogs
 from .base import (
     OpRequest,
     OpResponse,
@@ -32,20 +33,23 @@ if TYPE_CHECKING:
 
 @dataclass
 class RegisterDrvOutputResponse(OpResponse):
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
         )
-        return self
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -53,7 +57,7 @@ class RegisterDrvOutputResponse(OpResponse):
         self.logs.to_writer(writer)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     """Request to register a realised derivation output.
 
@@ -63,20 +67,22 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     name: ClassVar[str] = "RegisterDrvOutput"
     op: ClassVar[int] = 42
     response_type: ClassVar[type[OpResponse]] = RegisterDrvOutputResponse
-    realisation: Realisation = field(default_factory=dict)  # type: ignore[arg-type]  # filled by from_reader
+    realisation: Realisation
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
         realisation_json = await reader.read_string()
-        self.realisation = json.loads(realisation_json)
-        self.logger.debug("from_reader", realisation=self.realisation)
-        return self
+        obj.realisation = json.loads(realisation_json)
+        obj.logger.debug("from_reader", realisation=obj.realisation)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -108,27 +114,30 @@ class QueryRealisationResponse(OpResponse):
     Output: Set of Realisations (JSON dicts)
     """
 
-    realisations: list[dict] = field(default_factory=list)
+    realisations: list[dict]
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
         )
         n = await reader.read_uint64()
-        self.realisations = []
+        obj.realisations = []
         for _ in range(n):
             realisation_json = await reader.read_string()
-            self.realisations.append(json.loads(realisation_json))
-        return self
+            obj.realisations.append(json.loads(realisation_json))
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -139,7 +148,7 @@ class QueryRealisationResponse(OpResponse):
             writer.write_string(json.dumps(r))
 
 
-@dataclass
+@dataclass(kw_only=True)
 class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
     """Request to query the realisation of a derivation output."""
 
@@ -147,20 +156,22 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
     op: ClassVar[int] = 43
     response_type: ClassVar[type[OpResponse]] = QueryRealisationResponse
     is_query: ClassVar[bool] = True
-    drv_output: DrvOutput = field(default_factory=DrvOutput)
+    drv_output: DrvOutput
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
         raw = await reader.read_string()
-        self.drv_output = DrvOutput(raw)
-        self.logger.debug("from_reader", drv_output=self.drv_output)
-        return self
+        obj.drv_output = DrvOutput(raw)
+        obj.logger.debug("from_reader", drv_output=obj.drv_output)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

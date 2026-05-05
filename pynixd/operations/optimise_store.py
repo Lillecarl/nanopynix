@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from .base import OpRequest, OpResponse, RequestContext, Role
 
+from .base import OpRequest, OpResponse, OperationLogs, RequestContext, Role
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..wire import NixReader, NixWriter
@@ -14,19 +14,22 @@ if TYPE_CHECKING:
 
 @dataclass
 class OptimiseStoreResponse(OpResponse):
-    value: int = 0
+    value: int
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader)
-        self.value = await reader.read_uint64()
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj.value = await reader.read_uint64()
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -41,16 +44,18 @@ class OptimiseStoreRequest(OpRequest[OptimiseStoreResponse]):
     op: ClassVar[int] = 34
     response_type: ClassVar[type[OpResponse]] = OptimiseStoreResponse
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logger.debug("from_reader")
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logger.debug("from_reader")
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -60,7 +65,7 @@ class OptimiseStoreRequest(OpRequest[OptimiseStoreResponse]):
         self.logger.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)

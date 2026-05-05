@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
 from .add_signatures import AddSignaturesRequest
 from .base import (
+    OperationLogs,
     OpRequest,
     OpResponse,
     RequestContext,
@@ -26,21 +27,20 @@ if TYPE_CHECKING:
 class SignPathInfoResponse(OpResponse):
     info: ValidPathInfo | None = None
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
-            reader,
-            client=client,
-            buffer=buffer_logs,
-        )
-        self.info = await ValidPathInfo().from_reader(reader)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj.info = await ValidPathInfo.from_reader(reader)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -65,17 +65,19 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         prefix = f"{key_name}:"
         return any(sig.startswith(prefix) for sig in self.info.sigs)
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.info = await ValidPathInfo().from_reader(reader)
-        self.logger.debug("from_reader", path=self.info.path)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.info = await ValidPathInfo.from_reader(reader)
+        obj.logger.debug("from_reader", path=obj.info.path)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -87,7 +89,7 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         self.logger.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)

@@ -29,32 +29,36 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class ProbeFeaturesResponse(OpResponse):
-    feature_matrix: dict[str, set[str]] = field(default_factory=dict)
+    feature_matrix: dict[str, set[str]]
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        return self
+        obj = cls.__new__(cls)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         pass
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
     name: ClassVar[str] = "ProbeFeatures"
     op: ClassVar[int] = 109
     response_type: ClassVar[type[OpResponse]] = ProbeFeaturesResponse
 
-    systems: set[str] = field(default_factory=lambda: {"x86_64-linux"})
-    system_features: set[str] = field(default_factory=set)
+    systems: set[str]
+    system_features: set[str]
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        return self
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         pass

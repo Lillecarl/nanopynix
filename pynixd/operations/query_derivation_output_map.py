@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
+from ..types import OperationLogs
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
@@ -16,28 +17,31 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueryDerivationOutputMapResponse(OpResponse):
-    items: dict[str, StorePath | None] = field(default_factory=dict)
+    items: dict[str, StorePath | None]
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
         )
         n = await reader.read_uint64()
-        self.items: dict[str, StorePath | None] = {}
+        obj.items = {}
         for _ in range(n):
             k = await reader.read_string()
             raw = await reader.read_string()
-            self.items[k] = StorePath(raw) if raw else None
-        return self
+            obj.items[k] = StorePath(raw) if raw else None
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -49,25 +53,27 @@ class QueryDerivationOutputMapResponse(OpResponse):
             writer.write_string(v if v is not None else StorePath(""))
 
 
-@dataclass
+@dataclass(kw_only=True)
 class QueryDerivationOutputMapRequest(OpRequest[QueryDerivationOutputMapResponse]):
     name: ClassVar[str] = "QueryDerivationOutputMap"
     op: ClassVar[int] = 41
     response_type: ClassVar[type[OpResponse]] = QueryDerivationOutputMapResponse
     is_query: ClassVar[bool] = True
-    path: StorePath = field(default_factory=lambda: StorePath(""))
+    path: StorePath
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.path = await reader.read_string(StorePath)
-        self.logger.debug("from_reader", path=self.path)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.path = await reader.read_string(StorePath)
+        obj.logger.debug("from_reader", path=obj.path)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

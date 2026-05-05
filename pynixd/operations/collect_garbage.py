@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
+from ..types import OperationLogs
 from .base import (
     OpRequest,
     OpResponse,
@@ -22,27 +23,30 @@ if TYPE_CHECKING:
 
 @dataclass
 class CollectGarbageResponse(OpResponse):
-    paths_deleted: StorePathSet = field(default_factory=set)
-    bytes_freed: int = 0
-    _obsolete: int = 0
+    paths_deleted: StorePathSet
+    bytes_freed: int
+    _obsolete: int
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
         )
-        self.paths_deleted = await reader.read_string_set(StorePath)
-        self.bytes_freed = await reader.read_uint64()
-        self._obsolete = await reader.read_uint64()
-        return self
+        obj.paths_deleted = await reader.read_string_set(StorePath)
+        obj.bytes_freed = await reader.read_uint64()
+        obj._obsolete = await reader.read_uint64()
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -57,42 +61,44 @@ class CollectGarbageResponse(OpResponse):
         writer.write_uint64(self._obsolete)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
     name: ClassVar[str] = "CollectGarbage"
     op: ClassVar[int] = 20
     response_type: ClassVar[type[OpResponse]] = CollectGarbageResponse
-    action: int = 0
-    paths_to_delete: StorePathSet = field(default_factory=set)
-    ignore_liveness: int = 0
-    max_freed: int = 0
-    _obsolete1: int = 0
-    _obsolete2: int = 0
-    _obsolete3: int = 0
+    action: int
+    paths_to_delete: StorePathSet
+    ignore_liveness: int
+    max_freed: int
+    _obsolete1: int
+    _obsolete2: int
+    _obsolete3: int
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.action = await reader.read_uint64()
-        self.paths_to_delete = await reader.read_string_set(StorePath)
-        self.ignore_liveness = await reader.read_uint64()
-        self.max_freed = await reader.read_uint64()
-        self._obsolete1 = await reader.read_uint64()
-        self._obsolete2 = await reader.read_uint64()
-        self._obsolete3 = await reader.read_uint64()
-        self.logger.debug(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.action = await reader.read_uint64()
+        obj.paths_to_delete = await reader.read_string_set(StorePath)
+        obj.ignore_liveness = await reader.read_uint64()
+        obj.max_freed = await reader.read_uint64()
+        obj._obsolete1 = await reader.read_uint64()
+        obj._obsolete2 = await reader.read_uint64()
+        obj._obsolete3 = await reader.read_uint64()
+        obj.logger.debug(
             "from_reader",
-            action=self.action,
-            paths_to_delete=self.paths_to_delete,
-            ignore_liveness=self.ignore_liveness,
-            max_freed=self.max_freed,
+            action=obj.action,
+            paths_to_delete=obj.paths_to_delete,
+            ignore_liveness=obj.ignore_liveness,
+            max_freed=obj.max_freed,
         )
-        return self
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -109,7 +115,7 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
         self.logger.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)

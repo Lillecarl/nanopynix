@@ -18,6 +18,7 @@ from pynixd.build_queue import QueuedBuild
 from pynixd.local_store_db import LocalStoreDB
 from pynixd.operations.base import (
     BasicDerivation,
+    BuildMode,
     BuildResult,
     BuildResultStatus,
     DerivationOutput,
@@ -189,8 +190,8 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
                 "/nix/store/00000000000000000000000000000001-fast-pkg.drv",
             ),
             derivation=drv,
+            build_mode=BuildMode.NORMAL,
         )
-
         # We use the scheduler directly to avoid proxy overhead
         scheduler = server.scheduler
         assert scheduler is not None
@@ -262,12 +263,13 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
 
         # 1. Occupy the only remote slot with a build
         pynixd_remote.build_delays["blocker"] = 10.0
-        blocker_drv = BasicDerivation(platform="x86_64-linux", env={"pname": "blocker"})
+        blocker_drv = BasicDerivation(platform="x86_64-linux", builder="", env={"pname": "blocker"})
         blocker_req = BuildDerivationRequest(
             drv_path=StorePath(
                 "/nix/store/00000000000000000000000000000000-blocker.drv",
             ),
             derivation=blocker_drv,
+            build_mode=BuildMode.NORMAL,
         )
         await scheduler.build_derivation(blocker_req, None, set(), "x86_64-linux")
 
@@ -280,12 +282,12 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
 
         # 2. Enqueue tiny-pkg
         # It should be fast-tracked to LOCAL because remote is full
-        tiny_drv = BasicDerivation(platform="x86_64-linux", env={"pname": "tiny-pkg"})
+        tiny_drv = BasicDerivation(platform="x86_64-linux", builder="", env={"pname": "tiny-pkg"})
         tiny_req = BuildDerivationRequest(
             drv_path=StorePath("/nix/store/00000000000000000000000000000003-tiny.drv"),
             derivation=tiny_drv,
+            build_mode=BuildMode.NORMAL,
         )
-
         id_tiny, fut_tiny = await scheduler.build_derivation(
             tiny_req,
             None,
@@ -422,14 +424,14 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
         scheduler = server.scheduler
         assert scheduler is not None
 
-        drv = BasicDerivation(platform="x86_64-linux", env={"pname": "test-pkg"})
+        drv = BasicDerivation(platform="x86_64-linux", builder="", env={"pname": "test-pkg"})
         req = BuildDerivationRequest(
             drv_path=StorePath(
                 "/nix/store/00000000000000000000000000000000-test-pkg.drv",
             ),
             derivation=drv,
+            build_mode=BuildMode.NORMAL,
         )
-
         loop = asyncio.get_running_loop()
         build = QueuedBuild(
             id=BuildId(1),

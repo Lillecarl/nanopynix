@@ -9,6 +9,7 @@ from ..store_path import StorePath
 from .base import (
     OpRequest,
     OpResponse,
+    OperationLogs,
     UnkeyedValidPathInfo,
 )
 
@@ -37,24 +38,27 @@ class QueryPathInfoResponse(OpResponse):
     def valid(self) -> bool:
         return self.info is not None
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
         )
         is_valid = await reader.read_uint64() != 0
-        self.info = None
+        obj.info = None
         if is_valid:
-            self.info = await UnkeyedValidPathInfo().from_reader(reader)
-        return self
+            obj.info = await UnkeyedValidPathInfo.from_reader(reader)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -76,17 +80,19 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
     is_query: ClassVar[bool] = True
     path: StorePath = field(default_factory=lambda: StorePath(""))
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.path = await reader.read_string(StorePath)
-        self.logger.debug("from_reader", path=self.path)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.path = await reader.read_string(StorePath)
+        obj.logger.debug("from_reader", path=obj.path)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

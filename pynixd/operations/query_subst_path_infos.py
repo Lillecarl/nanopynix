@@ -6,9 +6,10 @@ Kept for backward compatibility with older daemon protocol versions.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
+from ..types import OperationLogs
 from .base import OpRequest, OpResponse, SubstitutablePathInfo
 
 if TYPE_CHECKING:
@@ -18,30 +19,33 @@ if TYPE_CHECKING:
 
 @dataclass
 class SubstitutablePathInfoEntry:
-    path: str = ""
-    info: SubstitutablePathInfo = field(default_factory=SubstitutablePathInfo)
+    path: str
+    info: SubstitutablePathInfo
 
 
 @dataclass
 class QuerySubstitutablePathInfosResponse(OpResponse):
-    entries: list[SubstitutablePathInfoEntry] = field(default_factory=list)
+    entries: list[SubstitutablePathInfoEntry]
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader)
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
         n = await reader.read_uint64()
-        self.entries = []
+        obj.entries = []
         for _ in range(n):
             path = await reader.read_string()
-            info = await SubstitutablePathInfo().from_reader(reader, version)
-            self.entries.append(SubstitutablePathInfoEntry(path=path, info=info))
-        return self
+            info = await SubstitutablePathInfo.from_reader(reader, version)
+            obj.entries.append(SubstitutablePathInfoEntry(path=path, info=info))
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -53,7 +57,7 @@ class QuerySubstitutablePathInfosResponse(OpResponse):
             await entry.info.to_writer(writer, version)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class QuerySubstitutablePathInfosRequest(
     OpRequest[QuerySubstitutablePathInfosResponse],
 ):
@@ -61,24 +65,20 @@ class QuerySubstitutablePathInfosRequest(
     op: ClassVar[int] = 30
     response_type: ClassVar[type[OpResponse]] = QuerySubstitutablePathInfosResponse
     is_query: ClassVar[bool] = True
-    items: dict[str, str] = field(default_factory=dict)
+    items: dict[str, str]
 
-    async def from_reader(
-        self,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
         n = await reader.read_uint64()
-        self.items = {}
+        obj.items = {}
         for _ in range(n):
             k = await reader.read_string()
             v = await reader.read_string()
-            self.items[k] = v
-        self.logger.debug("from_reader", item_count=n)
-        return self
+            obj.items[k] = v
+        obj.logger.debug("from_reader", item_count=n)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

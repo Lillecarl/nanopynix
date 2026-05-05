@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import StderrNext
+from ..types import OperationLogs
 from ..types.auth import Role
 from .base import OpRequest, OpResponse, RequestContext
 
@@ -16,23 +17,26 @@ if TYPE_CHECKING:
 
 @dataclass
 class AddPermRootResponse(OpResponse):
-    gc_root: str = ""
+    gc_root: str
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
         )
-        self.gc_root = await reader.read_string()
-        return self
+        obj.gc_root = await reader.read_string()
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -41,33 +45,35 @@ class AddPermRootResponse(OpResponse):
         writer.write_string(self.gc_root)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class AddPermRootRequest(OpRequest[AddPermRootResponse]):
     name: ClassVar[str] = "AddPermRoot"
     op: ClassVar[int] = 47
     response_type: ClassVar[type[OpResponse]] = AddPermRootResponse
-    store_path: str = ""
-    gc_root: str = ""
+    store_path: str
+    gc_root: str
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.store_path = await reader.read_string()
-        self.gc_root = await reader.read_string()
-        self.logger.debug(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.store_path = await reader.read_string()
+        obj.gc_root = await reader.read_string()
+        obj.logger.debug(
             "from_reader",
-            store_path=self.store_path,
-            gc_root=self.gc_root,
+            store_path=obj.store_path,
+            gc_root=obj.gc_root,
         )
-        return self
+        return obj
 
     async def handle(self, ctx: RequestContext) -> AddPermRootResponse | None:
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
         if ctx.proxy.role == Role.ADMIN:
             return await ctx.proxy.execute(self)
 

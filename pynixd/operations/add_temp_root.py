@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import StderrNext
 from ..store_path import StorePath
+from ..types import OperationLogs
 from ..types.auth import Role
 from .base import OpRequest, OpResponse, RequestContext
 
@@ -17,23 +18,26 @@ if TYPE_CHECKING:
 
 @dataclass
 class AddTempRootResponse(OpResponse):
-    value: int = 0
+    value: int
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
         )
-        self.value = await reader.read_uint64()
-        return self
+        obj.value = await reader.read_uint64()
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -42,21 +46,23 @@ class AddTempRootResponse(OpResponse):
         writer.write_uint64(self.value)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class AddTempRootRequest(OpRequest[AddTempRootResponse]):
     name: ClassVar[str] = "AddTempRoot"
     op: ClassVar[int] = 11
     response_type: ClassVar[type[OpResponse]] = AddTempRootResponse
-    path: StorePath = field(default_factory=lambda: StorePath(""))
+    path: StorePath
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.path = await reader.read_string(StorePath)
-        self.logger.debug("from_reader", path=self.path)
-        return self
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.path = await reader.read_string(StorePath)
+        obj.logger.debug("from_reader", path=obj.path)
+        return obj
 
     async def handle(self, ctx: RequestContext) -> AddTempRootResponse | None:
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
         if ctx.proxy.role == Role.ADMIN:
             return await ctx.proxy.execute(self)
 

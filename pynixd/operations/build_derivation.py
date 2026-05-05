@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import StderrNext
 from ..store_path import StorePath
+from ..types import OperationLogs
 from .base import (
     BasicDerivation,
     BuildMode,
@@ -24,19 +25,22 @@ if TYPE_CHECKING:
 
 @dataclass
 class BuildDerivationResponse(OpResponse):
-    result: BuildResult = field(default_factory=BuildResult)
+    result: BuildResult
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        self.result = await BuildResult().from_reader(reader, version)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj.result = await BuildResult.from_reader(reader, version)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -45,27 +49,29 @@ class BuildDerivationResponse(OpResponse):
         await self.result.to_writer(writer, version)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
     name: ClassVar[str] = "BuildDerivation"
     op: ClassVar[int] = 36
     response_type: ClassVar[type[OpResponse]] = BuildDerivationResponse
     is_build: ClassVar[bool] = True
-    drv_path: StorePath = field(default_factory=lambda: StorePath(""))
-    derivation: BasicDerivation = field(default_factory=BasicDerivation)
-    build_mode: BuildMode = BuildMode.NORMAL
+    drv_path: StorePath
+    derivation: BasicDerivation
+    build_mode: BuildMode
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.drv_path = await reader.read_string(StorePath)
-        self.derivation = await BasicDerivation().from_reader(reader, version)
-        self.build_mode = BuildMode(await reader.read_uint64())
-        self.logger.debug(
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.drv_path = await reader.read_string(StorePath)
+        obj.derivation = await BasicDerivation.from_reader(reader, version)
+        obj.build_mode = BuildMode(await reader.read_uint64())
+        obj.logger.debug(
             "from_reader",
-            drv_path=self.drv_path,
-            build_mode=self.build_mode,
+            drv_path=obj.drv_path,
+            build_mode=obj.build_mode,
         )
-        return self
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -77,7 +83,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
         self.logger.debug("received_op")
 
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
 
         if not ctx.proxy.use_scheduler_for_builds:
             self.logger.debug("handle_local_mode_fallback")

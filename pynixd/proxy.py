@@ -263,7 +263,7 @@ class DaemonProxy:
         )
 
         try:
-            request = req_cls()
+            request = object.__new__(req_cls)
             return await request.handle(ctx)
         except BackendError:
             return None

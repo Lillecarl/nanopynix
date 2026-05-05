@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING, Self
 
 import structlog
 
@@ -104,48 +104,51 @@ class BuiltOutput:
 class BuildResult:
     """Result of a BuildDerivation or BuildPaths operation."""
 
-    logger: ClassVar = structlog.get_logger("pynixd.types.build.BuildResult")
+    logger = structlog.get_logger("pynixd.types.build.BuildResult")
     status: BuildResultStatus = BuildResultStatus.BUILT
     error_msg: str = ""
     times_built: int = 0
     is_non_deterministic: int = 0
     start_time: int = 0
     stop_time: int = 0
+    built_outputs: dict[DrvOutput, Realisation] = field(default_factory=dict)
     cpu_user: int | None = None
     cpu_system: int | None = None
-    built_outputs: dict[DrvOutput, Realisation] = field(default_factory=dict)
 
-    async def from_reader(self, reader: NixReader, version: int) -> BuildResult:
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
         from .. import wire
 
-        self.status = BuildResultStatus(await reader.read_uint64())
-        self.error_msg = await reader.read_string()
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.status = BuildResultStatus(await reader.read_uint64())
+        obj.error_msg = await reader.read_string()
 
-        self.times_built = 0
-        self.is_non_deterministic = 0
-        self.start_time = 0
-        self.stop_time = 0
+        obj.times_built = 0
+        obj.is_non_deterministic = 0
+        obj.start_time = 0
+        obj.stop_time = 0
         if version >= wire.proto(1, 29):
-            self.times_built = await reader.read_uint64()
-            self.is_non_deterministic = await reader.read_uint64()
-            self.start_time = await reader.read_uint64()
-            self.stop_time = await reader.read_uint64()
+            obj.times_built = await reader.read_uint64()
+            obj.is_non_deterministic = await reader.read_uint64()
+            obj.start_time = await reader.read_uint64()
+            obj.stop_time = await reader.read_uint64()
 
-        self.cpu_user = None
-        self.cpu_system = None
+        obj.cpu_user = None
+        obj.cpu_system = None
         if version >= wire.proto(1, 37):
-            self.cpu_user = await reader.read_optional_uint64()
-            self.cpu_system = await reader.read_optional_uint64()
+            obj.cpu_user = await reader.read_optional_uint64()
+            obj.cpu_system = await reader.read_optional_uint64()
 
-        self.built_outputs = {}
+        obj.built_outputs = {}
         if version >= wire.proto(1, 28):
             n = await reader.read_uint64()
             for _ in range(n):
                 drv_output = DrvOutput(await reader.read_string())
                 realisation_json = await reader.read_string()
-                self.built_outputs[drv_output] = json.loads(realisation_json)
+                obj.built_outputs[drv_output] = json.loads(realisation_json)
 
-        return self
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         from .. import wire
@@ -181,12 +184,14 @@ class KeyedBuildResult:
     path: DerivedPath = field(default_factory=lambda: StorePath(""))  # type: ignore[assignment]  # always set by from_reader
     result: BuildResult = field(default_factory=BuildResult)
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
         from ..derived_path import DerivedPath
 
-        self.path = await reader.read_string(DerivedPath)
-        self.result = await BuildResult().from_reader(reader, version)
-        return self
+        obj = cls.__new__(cls)
+        obj.path = await reader.read_string(DerivedPath)
+        obj.result = await BuildResult.from_reader(reader, version)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.path)

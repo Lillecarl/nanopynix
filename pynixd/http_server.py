@@ -411,7 +411,7 @@ class PynixdHttpServer:
 
         log.info("finalizing_upload_to_store", path=vinfo.path)
         try:
-            req = AddToStoreNarRequest(info=vinfo, async_provider=provide_nar)
+            req = AddToStoreNarRequest(info=vinfo, repair=0, dont_check_sigs=0, async_provider=provide_nar)
             await self.store.execute(req)
         except Exception as e:
             log.exception("finalize_upload_failed", path=vinfo.path)

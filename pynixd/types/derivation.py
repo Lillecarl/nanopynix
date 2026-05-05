@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from ..store_path import StorePath
 from ..system_features import PYNIXD_HANDLED_FEATURES
@@ -36,7 +36,7 @@ class OutputKind(Enum):
 
 @dataclass
 class DerivationOutput:
-    path: str = ""
+    path: str
     method: str = ""
     hash_digest: str = ""
 
@@ -86,12 +86,12 @@ class DerivationOutput:
         return self.is_text_hashed and self.hash_digest == ""
 
 
-@dataclass
+@dataclass(kw_only=True)
 class BasicDerivation:
     outputs: dict[str, DerivationOutput] = field(default_factory=dict)
     input_srcs: StorePathSet = field(default_factory=set)
-    platform: str = ""
-    builder: str = ""
+    platform: str
+    builder: str
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     is_dynamic: bool = field(default=False, repr=False)
@@ -137,27 +137,29 @@ class BasicDerivation:
     def has_dynamic_outputs(self) -> bool:
         return any(o.is_dynamic_output for o in self.outputs.values())
 
-    async def from_reader(self, reader: NixReader, version: int) -> BasicDerivation:
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
         n = await reader.read_uint64()
-        self.outputs = {}
+        obj.outputs = {}
         for _ in range(n):
             name = await reader.read_string()
-            self.outputs[name] = DerivationOutput(
+            obj.outputs[name] = DerivationOutput(
                 path=await reader.read_string(),
                 method=await reader.read_string(),
                 hash_digest=await reader.read_string(),
             )
-        self.input_srcs = await reader.read_string_set(StorePath)
-        self.platform = await reader.read_string()
-        self.builder = await reader.read_string()
-        self.args = await reader.read_string_list()
+        obj.input_srcs = await reader.read_string_set(StorePath)
+        obj.platform = await reader.read_string()
+        obj.builder = await reader.read_string()
+        obj.args = await reader.read_string_list()
         n_env = await reader.read_uint64()
-        self.env = {}
+        obj.env = {}
         for _ in range(n_env):
             k = await reader.read_string()
             v = await reader.read_string()
-            self.env[k] = v
-        return self
+            obj.env[k] = v
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_uint64(len(self.outputs))

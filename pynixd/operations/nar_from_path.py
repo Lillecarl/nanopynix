@@ -28,25 +28,24 @@ if TYPE_CHECKING:
 class NarFromPathResponse(OpResponse):
     """Response containing raw NAR data."""
 
-    nar_data: bytes = b""
+    nar_data: bytes
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
-            reader,
-            client=client,
-            buffer=buffer_logs,
-        )
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
         collector = ByteCollector()
         await wire.stream_parse_nar(reader, collector, capture=False)
-        self.nar_data = collector.getvalue()
-        return self
+        obj.nar_data = collector.getvalue()
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -55,27 +54,29 @@ class NarFromPathResponse(OpResponse):
         writer.write(self.nar_data)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     name: ClassVar[str] = "NarFromPath"
     op: ClassVar[int] = 38
     response_type: ClassVar[type[OpResponse]] = NarFromPathResponse
     is_query: ClassVar[bool] = True
-    path: StorePath = field(default_factory=lambda: StorePath(""))
-    nar_size: int = 0
+    path: StorePath
+    nar_size: int
     async_callback: Callable[[bytes], Awaitable[None]] | None = None
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.path = await reader.read_string(StorePath)
-        self.logger.debug("from_reader", path=self.path)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.path = await reader.read_string(StorePath)
+        obj.logger.debug("from_reader", path=obj.path)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -103,7 +104,7 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
                         chunk = await conn.r.readexactly(to_read)
                         await self.async_callback(chunk)
                         remaining -= to_read
-                    return NarFromPathResponse()
+                    return NarFromPathResponse(nar_data=b"")
 
                 data = await conn.r.readexactly(self.nar_size)
                 return NarFromPathResponse(nar_data=data)
@@ -131,10 +132,10 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
         )
 
         async with ctx.proxy.local_store.transfer_conn() as conn:
-            await NarFromPathRequest(path=path).to_writer(conn.w, conn.version)
+            await NarFromPathRequest(path=path, nar_size=nar_size).to_writer(conn.w, conn.version)
             await conn.w.drain()
 
-            logs = await OperationLogs().from_reader(conn.r)
+            logs = await OperationLogs.from_reader(conn.r)
 
             await ctx.proxy.client.flush()
             logs.to_writer(ctx.proxy.w)

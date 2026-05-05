@@ -6,7 +6,7 @@ import aiohttp
 import pytest
 
 from pynixd import Server
-from pynixd.operations.base import BasicDerivation, BuildResult, BuildResultStatus
+from pynixd.operations.base import BasicDerivation, BuildMode, BuildResult, BuildResultStatus
 from pynixd.operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
@@ -42,7 +42,8 @@ async def test_dynamic_store_management():
         local_store.tracker.add_known_path(drv_path)
         request = BuildDerivationRequest(
             drv_path=drv_path,
-            derivation=BasicDerivation(platform="x86_64-linux"),
+            derivation=BasicDerivation(platform="x86_64-linux", builder=""),
+            build_mode=BuildMode.NORMAL,
         )
 
         # Mock build responder

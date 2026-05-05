@@ -62,9 +62,11 @@ class StderrNext:
     code: ClassVar[int] = constants.STDERR_NEXT
     text: str = ""
 
-    async def from_reader(self, r: NixReader) -> StderrNext:
-        self.text = await r.read_string()
-        return self
+    @classmethod
+    async def from_reader(cls, r: NixReader) -> StderrNext:
+        obj = cls.__new__(cls)
+        obj.text = await r.read_string()
+        return obj
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -83,14 +85,16 @@ class StderrStartActivity:
     fields: list[Field] = field(default_factory=list)
     parent: int = 0
 
-    async def from_reader(self, r: NixReader) -> StderrStartActivity:
-        self.act_id = await r.read_uint64()
-        self.level = await r.read_uint64()
-        self.type = await r.read_uint64()
-        self.text = await r.read_string()
-        self.fields = await read_fields(r)
-        self.parent = await r.read_uint64()
-        return self
+    @classmethod
+    async def from_reader(cls, r: NixReader) -> StderrStartActivity:
+        obj = cls.__new__(cls)
+        obj.act_id = await r.read_uint64()
+        obj.level = await r.read_uint64()
+        obj.type = await r.read_uint64()
+        obj.text = await r.read_string()
+        obj.fields = await read_fields(r)
+        obj.parent = await r.read_uint64()
+        return obj
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -109,9 +113,11 @@ class StderrStopActivity:
     code: ClassVar[int] = constants.STDERR_STOP_ACTIVITY
     act_id: int = 0
 
-    async def from_reader(self, r: NixReader) -> StderrStopActivity:
-        self.act_id = await r.read_uint64()
-        return self
+    @classmethod
+    async def from_reader(cls, r: NixReader) -> StderrStopActivity:
+        obj = cls.__new__(cls)
+        obj.act_id = await r.read_uint64()
+        return obj
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -127,11 +133,13 @@ class StderrResult:
     result_type: int = 0
     fields: list[Field] = field(default_factory=list)
 
-    async def from_reader(self, r: NixReader) -> StderrResult:
-        self.act_id = await r.read_uint64()
-        self.result_type = await r.read_uint64()
-        self.fields = await read_fields(r)
-        return self
+    @classmethod
+    async def from_reader(cls, r: NixReader) -> StderrResult:
+        obj = cls.__new__(cls)
+        obj.act_id = await r.read_uint64()
+        obj.result_type = await r.read_uint64()
+        obj.fields = await read_fields(r)
+        return obj
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -152,19 +160,21 @@ class StderrError:
     have_pos: int = 0
     traces: list[tuple[int, str]] = field(default_factory=list)
 
-    async def from_reader(self, r: NixReader) -> StderrError:
-        self.error_type = await r.read_string()
-        self.level = await r.read_uint64()
-        self.name = await r.read_string()
-        self.msg = await r.read_string()
-        self.have_pos = await r.read_uint64()
+    @classmethod
+    async def from_reader(cls, r: NixReader) -> StderrError:
+        obj = cls.__new__(cls)
+        obj.error_type = await r.read_string()
+        obj.level = await r.read_uint64()
+        obj.name = await r.read_string()
+        obj.msg = await r.read_string()
+        obj.have_pos = await r.read_uint64()
         n = await r.read_uint64()
-        self.traces = []
+        obj.traces = []
         for _ in range(n):
             t_pos = await r.read_uint64()
             t_hint = await r.read_string()
-            self.traces.append((t_pos, t_hint))
-        return self
+            obj.traces.append((t_pos, t_hint))
+        return obj
 
     def to_writer(self, w: NixWriter) -> None:
         w.write_uint64(self.code)
@@ -224,7 +234,7 @@ async def read_stream(r: NixReader) -> AsyncIterator[StderrMsg]:
             continue
 
         unknown_streak = 0
-        msg = await parser().from_reader(r)
+        msg = await parser.from_reader(r)
         yield msg
         if isinstance(msg, StderrError):
             return

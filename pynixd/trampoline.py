@@ -114,6 +114,11 @@ class Trampoline:
         failed_result = BuildResult(
             status=BuildResultStatus.MISC_FAILURE,
             error_msg=error_msg,
+            times_built=0,
+            is_non_deterministic=0,
+            start_time=0,
+            stop_time=0,
+            built_outputs={},
         )
         for dp in parent_dps:
             sched_req.results[dp] = failed_result

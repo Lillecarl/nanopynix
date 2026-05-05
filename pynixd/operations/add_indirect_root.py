@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import StderrNext
 from ..store_path import StorePath
+from ..types import OperationLogs
 from ..types.auth import Role
 from .base import OpRequest, OpResponse, RequestContext
 
@@ -17,23 +18,26 @@ if TYPE_CHECKING:
 
 @dataclass
 class AddIndirectRootResponse(OpResponse):
-    value: int = 0
+    value: int
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
             reader,
             client=client,
             buffer=buffer_logs,
         )
-        self.value = await reader.read_uint64()
-        return self
+        obj.value = await reader.read_uint64()
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -42,27 +46,29 @@ class AddIndirectRootResponse(OpResponse):
         writer.write_uint64(self.value)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class AddIndirectRootRequest(OpRequest[AddIndirectRootResponse]):
     name: ClassVar[str] = "AddIndirectRoot"
     op: ClassVar[int] = 12
     response_type: ClassVar[type[OpResponse]] = AddIndirectRootResponse
-    path: StorePath = field(default_factory=lambda: StorePath(""))
+    path: StorePath
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.path = await reader.read_string(StorePath)
-        self.logger.debug("from_reader", path=self.path)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.path = await reader.read_string(StorePath)
+        obj.logger.debug("from_reader", path=obj.path)
+        return obj
 
     async def handle(self, ctx: RequestContext) -> AddIndirectRootResponse | None:
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
         if ctx.proxy.role == Role.ADMIN:
             return await ctx.proxy.execute(self)
 

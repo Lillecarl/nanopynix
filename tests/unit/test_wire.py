@@ -376,7 +376,7 @@ async def _serialize_deserialize_request(req_type, req, version=VERSION):
     r = BytesReader(w.get_bytes())
     op = await r.read_uint64()
     assert op == req_type.op, f"Expected opcode {req_type.op}, got {op}"
-    return await req_type().from_reader(r, version)
+    return await req_type.from_reader(r, version)
 
 
 async def _serialize_deserialize_response(resp_type, resp, version=VERSION):
@@ -384,7 +384,7 @@ async def _serialize_deserialize_response(resp_type, resp, version=VERSION):
     w = BytesWriter()
     await resp.to_writer(w, version)
     r = BytesReader(w.get_bytes())
-    return await resp_type().from_reader(r, version, client=None, buffer_logs=False)
+    return await resp_type.from_reader(r, version, client=None, buffer_logs=False)
 
 
 # ── TestOperationLogs ─────────────────────────────────────────────────────
@@ -556,7 +556,7 @@ class TestQueryValidPathsSerialization:
         await req.to_writer(w, proto(1, 20))
         r = BytesReader(w.get_bytes())
         _ = await r.read_uint64()  # skip opcode
-        result = await QueryValidPathsRequest().from_reader(r, proto(1, 20))
+        result = await QueryValidPathsRequest.from_reader(r, proto(1, 20))
         assert result.paths == paths
 
     async def test_response(self):
@@ -763,8 +763,16 @@ class TestSetOptionsSerialization:
         req = SetOptionsRequest(
             keep_failed=0,
             keep_going=1,
+            try_fallback=0,
+            verbosity=0,
             max_build_jobs=4,
+            max_silent_time=0,
+            _obsolete_use_build_hook=0,
+            build_verbosity=0,
+            _obsolete_log_type=0,
+            _obsolete_print_build_trace=0,
             build_cores=2,
+            use_substitutes=1,
             overrides={"foo": "bar"},
         )
         result = await _serialize_deserialize_request(SetOptionsRequest, req)
@@ -783,13 +791,27 @@ class TestSetOptionsSerialization:
     async def test_request_no_overrides(self):
         """Overrides dict only exists in version >= 1.12."""
 
-        req = SetOptionsRequest(keep_failed=0, keep_going=0, max_build_jobs=0)
+        req = SetOptionsRequest(
+            keep_failed=0,
+            keep_going=0,
+            try_fallback=0,
+            verbosity=0,
+            max_build_jobs=0,
+            max_silent_time=0,
+            _obsolete_use_build_hook=0,
+            build_verbosity=0,
+            _obsolete_log_type=0,
+            _obsolete_print_build_trace=0,
+            build_cores=0,
+            use_substitutes=0,
+            overrides={},
+        )
         w = BytesWriter()
         await req.to_writer(w, proto(1, 10))
         r = BytesReader(w.get_bytes())
         # Skip opcode
         _ = await r.read_uint64()
-        result = await SetOptionsRequest().from_reader(r, proto(1, 10))
+        result = await SetOptionsRequest.from_reader(r, proto(1, 10))
         assert result.overrides == {}
 
 
@@ -804,6 +826,9 @@ class TestCollectGarbageSerialization:
             paths_to_delete={StorePath("/nix/store/abc-foo")},
             ignore_liveness=0,
             max_freed=1000000,
+            _obsolete1=0,
+            _obsolete2=0,
+            _obsolete3=0,
         )
         result = await _serialize_deserialize_request(CollectGarbageRequest, req)
         assert result.action == 1
@@ -815,6 +840,7 @@ class TestCollectGarbageSerialization:
         resp = CollectGarbageResponse(
             paths_deleted={StorePath("/nix/store/abc-foo")},
             bytes_freed=42,
+            _obsolete=0,
         )
         result = await _serialize_deserialize_response(CollectGarbageResponse, resp)
         assert result.paths_deleted == {StorePath("/nix/store/abc-foo")}
@@ -1093,7 +1119,7 @@ class TestNarFromPathSerialization:
 
     async def test_request(self):
 
-        req = NarFromPathRequest(path=StorePath("/nix/store/abc-foo"))
+        req = NarFromPathRequest(path=StorePath("/nix/store/abc-foo"), nar_size=0)
         result = await _serialize_deserialize_request(NarFromPathRequest, req)
         assert result.path == req.path
 

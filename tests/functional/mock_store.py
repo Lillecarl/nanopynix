@@ -12,7 +12,10 @@ from pynixd import metrics, wire
 from pynixd.operations.base import OpResponse
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsResponse
-from pynixd.operations.query_closure_with_info import QueryClosureWithInfoRequest, QueryClosureWithInfoResponse
+from pynixd.operations.query_all_valid_paths import (
+    QueryAllValidPathsRequest,
+    QueryAllValidPathsResponse,
+)
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
 from pynixd.psi import CpuUtil
 from pynixd.store.base import Store
@@ -186,7 +189,7 @@ class MockStore(Store):
         if isinstance(request, QueryValidPathsRequest):
             return cast("Resp", QueryValidPathsResponse(paths=request.paths))
 
-        if req_type == QueryAllValidPathsResponse:
+        if req_type == QueryAllValidPathsRequest:
             return cast("Resp", QueryAllValidPathsResponse(paths=set(self.tracker.known_paths)))
         if isinstance(request, QueryClosureWithInfoRequest):
             # Just return some dummy info for everything

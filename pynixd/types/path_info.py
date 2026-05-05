@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from ..store_path import StorePath
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from .aliases import ContentAddress, NARHash, StorePathSet
 
 
-@dataclass
+@dataclass(kw_only=True)
 class UnkeyedValidPathInfo:
     """Metadata for a store path (without the path itself)."""
 
@@ -25,16 +25,18 @@ class UnkeyedValidPathInfo:
     sigs: set[str] = field(default_factory=set)
     ca: ContentAddress = ""
 
-    async def from_reader(self, reader: NixReader) -> UnkeyedValidPathInfo:
-        self.deriver = await reader.read_string(StorePath)
-        self.nar_hash = await reader.read_string()
-        self.references = await reader.read_string_set(StorePath)
-        self.registration_time = await reader.read_uint64()
-        self.nar_size = await reader.read_uint64()
-        self.ultimate = await reader.read_uint64()
-        self.sigs = await reader.read_string_set()
-        self.ca = await reader.read_string()
-        return self
+    @classmethod
+    async def from_reader(cls, reader: NixReader) -> Self:
+        obj = cls.__new__(cls)
+        obj.deriver = await reader.read_string(StorePath)
+        obj.nar_hash = await reader.read_string()
+        obj.references = await reader.read_string_set(StorePath)
+        obj.registration_time = await reader.read_uint64()
+        obj.nar_size = await reader.read_uint64()
+        obj.ultimate = await reader.read_uint64()
+        obj.sigs = await reader.read_string_set()
+        obj.ca = await reader.read_string()
+        return obj
 
     def to_writer(self, writer: NixWriter) -> None:
         writer.write_string(self.deriver)
@@ -62,11 +64,11 @@ class UnkeyedValidPathInfo:
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ValidPathInfo(UnkeyedValidPathInfo):
     """Metadata for a store path (including the path)."""
 
-    path: StorePath = field(default_factory=lambda: StorePath(""))
+    path: StorePath
 
     def __hash__(self) -> int:
         return hash(self.path)
@@ -76,10 +78,11 @@ class ValidPathInfo(UnkeyedValidPathInfo):
             return False
         return self.path == other.path
 
-    async def from_reader(self, reader: NixReader) -> ValidPathInfo:
+    @classmethod
+    async def from_reader(cls, reader: NixReader) -> Self:
         path = await reader.read_string(StorePath)
-        info = await UnkeyedValidPathInfo().from_reader(reader)
-        return info.with_path(path)
+        info = await UnkeyedValidPathInfo.from_reader(reader)
+        return info.with_path(path)  # type: ignore[return-value]
 
     def to_writer(self, writer: NixWriter) -> None:
         writer.write_string(self.path)
@@ -180,21 +183,23 @@ class ValidPathInfo(UnkeyedValidPathInfo):
 class SubstitutablePathInfo:
     """Metadata for a substitutable path (missing but available)."""
 
-    deriver: StorePath = field(default_factory=lambda: StorePath(""))
-    references: StorePathSet = field(default_factory=set)
-    download_size: int = 0
-    nar_size: int = 0
+    deriver: StorePath
+    references: StorePathSet
+    download_size: int
+    nar_size: int
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
-    ) -> SubstitutablePathInfo:
-        self.deriver = await reader.read_string(StorePath)
-        self.references = await reader.read_string_set(StorePath)
-        self.download_size = await reader.read_uint64()
-        self.nar_size = await reader.read_uint64()
-        return self
+    ) -> Self:
+        obj = cls.__new__(cls)
+        obj.deriver = await reader.read_string(StorePath)
+        obj.references = await reader.read_string_set(StorePath)
+        obj.download_size = await reader.read_uint64()
+        obj.nar_size = await reader.read_uint64()
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.deriver)

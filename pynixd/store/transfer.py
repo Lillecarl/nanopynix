@@ -88,7 +88,7 @@ async def stream_paths_store_to_store(
             fw.write(info.to_bytes())
 
             # Request NAR from source
-            await NarFromPathRequest(path=path).to_writer(
+            await NarFromPathRequest(path=path, nar_size=info.nar_size).to_writer(
                 src_conn.w,
                 src_conn.version,
             )
@@ -107,7 +107,7 @@ async def stream_paths_store_to_store(
 
         await fw.finalize()
         await dst_conn.w.drain()
-        await req.response_type().from_reader(dst_conn.r, dst_conn.version)
+        await req.response_type.from_reader(dst_conn.r, dst_conn.version)
 
     # 4. Update destination store's knowledge
     dst.add_path_infos(set(to_transfer))

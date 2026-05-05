@@ -105,14 +105,17 @@ class TestBasicDerivation:
         """A CA derivation should require Nix."""
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="", method="sha256", hash_digest="")},
+            platform="",
+            builder="",
         )
-        assert not drv.supports_lix()
         assert drv.requires_nix
 
     def test_requires_nix_true_deferred(self):
         """A deferred derivation should require Nix."""
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="", method="", hash_digest="")},
+            platform="",
+            builder="",
         )
         assert not drv.supports_lix()
         assert drv.requires_nix
@@ -121,29 +124,31 @@ class TestBasicDerivation:
         """Dynamic derivations always require Nix, regardless of output types."""
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="/nix/store/abc-foo")},
+            platform="",
+            builder="",
             is_dynamic=True,
         )
         assert not drv.supports_lix()
         assert drv.requires_nix
 
     def test_build_local_true(self):
-        drv = BasicDerivation(env={"preferLocalBuild": "1"})
+        drv = BasicDerivation(env={"preferLocalBuild": "1"}, platform="", builder="")
         assert drv.build_local
 
     def test_build_local_pynixd_fast(self):
-        drv = BasicDerivation(env={"pynixd_fast": "1"})
+        drv = BasicDerivation(env={"pynixd_fast": "1"}, platform="", builder="")
         assert drv.build_local
 
     def test_build_local_false(self):
-        drv = BasicDerivation(env={})
+        drv = BasicDerivation(env={}, platform="", builder="")
         assert not drv.build_local
 
     def test_required_system_features_empty(self):
-        drv = BasicDerivation(env={})
+        drv = BasicDerivation(env={}, platform="", builder="")
         assert drv.required_system_features == set()
 
     def test_required_system_features_parsed(self):
-        drv = BasicDerivation(env={"requiredSystemFeatures": "kvm big-parallel"})
+        drv = BasicDerivation(env={"requiredSystemFeatures": "kvm big-parallel"}, platform="", builder="")
         assert drv.required_system_features == {"kvm", "big-parallel"}
 
     def test_output_paths(self):
@@ -152,6 +157,8 @@ class TestBasicDerivation:
                 "out": DerivationOutput(path="/nix/store/abc-foo"),
                 "lib": DerivationOutput(path="/nix/store/abc-lib"),
             },
+            platform="",
+            builder="",
         )
         paths = drv.output_paths()
         assert paths == {
@@ -177,24 +184,32 @@ class TestBasicDerivation:
     def test_has_dynamic_outputs_true(self):
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="", method="text:sha256", hash_digest="")},
+            platform="",
+            builder="",
         )
         assert drv.has_dynamic_outputs
 
     def test_has_dynamic_outputs_false(self):
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="/nix/store/abc-foo")},
+            platform="",
+            builder="",
         )
         assert not drv.has_dynamic_outputs
 
     def test_has_ca_floating_true(self):
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="", method="sha256", hash_digest="")},
+            platform="",
+            builder="",
         )
         assert drv.has_ca_floating
 
     def test_has_ca_floating_false_for_text(self):
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="", method="text:sha256", hash_digest="")},
+            platform="",
+            builder="",
         )
         # text:sha256 with empty hash is a dynamic output, not CA floating
         assert not drv.has_ca_floating
@@ -202,12 +217,16 @@ class TestBasicDerivation:
     def test_has_deferred_true(self):
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="", method="", hash_digest="")},
+            platform="",
+            builder="",
         )
         assert drv.has_deferred
 
     def test_has_impure_true(self):
         drv = BasicDerivation(
             outputs={"out": DerivationOutput(path="", method="sha256", hash_digest="impure")},
+            platform="",
+            builder="",
         )
         assert drv.has_impure
 
@@ -216,12 +235,15 @@ class TestBasicDerivation:
             outputs={
                 "out": DerivationOutput(path="/nix/store/abc", method="text:sha256", hash_digest="xyz"),
             },
+            platform="",
+            builder="",
         )
+
         assert drv.has_text_hashed
 
     def test_effective_required_features(self):
 
-        drv = BasicDerivation(env={"requiredSystemFeatures": "kvm ca-derivations"})
+        drv = BasicDerivation(env={"requiredSystemFeatures": "kvm ca-derivations"}, platform="", builder="")
         effective = drv.effective_required_features
         assert "ca-derivations" in effective  # no longer stripped (Lix can't serve CA)
         assert effective == {"kvm", "ca-derivations"}

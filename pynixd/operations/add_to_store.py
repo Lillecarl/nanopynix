@@ -11,6 +11,7 @@ import structlog
 from pynixd.operations.sign_path_info import SignPathInfoRequest
 
 from ..store_path import StorePath
+from ..types import OperationLogs
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import (
     OpRequest,
@@ -33,17 +34,20 @@ class AddToStoreResponse(OpResponse):
 
     info: ValidPathInfo | None = None
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        self.info = await ValidPathInfo().from_reader(reader)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj.info = await ValidPathInfo.from_reader(reader)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -53,33 +57,35 @@ class AddToStoreResponse(OpResponse):
             self.info.to_writer(writer)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     """Prefix for AddToStore (framed NAR data follows)."""
 
     name: ClassVar[str] = "AddToStore"
     op: ClassVar[int] = 7
     response_type: ClassVar[type[OpResponse]] = AddToStoreResponse
-    path_name: str = ""
-    cam: str = ""  # ContentAddressMethodWithAlgo
-    references: StorePathSet = field(default_factory=set)
-    repair: int = 0
+    path_name: str
+    cam: str  # ContentAddressMethodWithAlgo
+    references: StorePathSet
+    repair: int
     async_provider: Callable[[NixWriter], Awaitable[None]] | None = None
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.path_name = await reader.read_string()
-        self.cam = await reader.read_string()
-        self.references = await reader.read_string_set(StorePath)
-        self.repair = await reader.read_uint64()
-        self.logger.debug(
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.path_name = await reader.read_string()
+        obj.cam = await reader.read_string()
+        obj.references = await reader.read_string_set(StorePath)
+        obj.repair = await reader.read_uint64()
+        obj.logger.debug(
             "from_reader",
-            path_name=self.path_name,
-            cam=self.cam,
-            references=self.references,
-            repair=self.repair,
+            path_name=obj.path_name,
+            cam=obj.cam,
+            references=obj.references,
+            repair=obj.repair,
         )
-        return self
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -107,7 +113,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
 
                 async with asyncio.TaskGroup() as tg:
                     resp_task = tg.create_task(
-                        AddToStoreResponse().from_reader(conn.r, conn.version, client),
+                        AddToStoreResponse.from_reader(conn.r, conn.version, client),
                     )
                     tg.create_task(write_payload())
 
@@ -129,7 +135,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
             # logs concurrently here too. But forward() is synchronous-ish
             # (awaits reads/writes).
 
-            resp = await AddToStoreResponse().from_reader(conn.r, conn.version)
+            resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
             if resp.info is not None:
                 resp.info = (
                     await ctx.proxy.local_store.execute(

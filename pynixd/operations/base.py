@@ -111,7 +111,7 @@ class OpRequest[Resp: OpResponse](ABC):
         Decodes the request and delegates execution to the stores.
         Streaming operations should override this method.
         """
-        await self.from_reader(ctx.proxy.r, ctx.version)
+        self = await self.from_reader(ctx.proxy.r, ctx.version)
         return await ctx.proxy.execute(self)
 
     async def execute(
@@ -150,14 +150,15 @@ class OpRequest[Resp: OpResponse](ABC):
             suppress_last=suppress_last,
         )
 
+    @classmethod
     @abstractmethod
-    async def from_reader(self, reader: NixReader, version: int) -> Self: ...
+    async def from_reader(cls, reader: NixReader, version: int) -> Self: ...
 
     @abstractmethod
     async def to_writer(self, writer: NixWriter, version: int) -> None: ...
 
 
-@dataclass
+@dataclass(kw_only=True)
 class OpResponse(ABC):
     """Base class for operation responses."""
 
@@ -178,9 +179,10 @@ class OpResponse(ABC):
         """
         return False
 
+    @classmethod
     @abstractmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,

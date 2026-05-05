@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
+from ..types import OperationLogs
 from .base import OpRequest, OpResponse
 from .query_valid_paths import QueryValidPathsRequest
 
@@ -21,19 +22,22 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueryAllValidPathsResponse(OpResponse):
-    paths: StorePathSet = field(default_factory=set)
+    paths: StorePathSet
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        self.paths = await reader.read_string_set(StorePath)
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj.paths = await reader.read_string_set(StorePath)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -49,10 +53,12 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
     response_type: ClassVar[type[OpResponse]] = QueryAllValidPathsResponse
     is_query: ClassVar[bool] = True
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.logger.debug("from_reader")
-        return self
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logger.debug("from_reader")
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

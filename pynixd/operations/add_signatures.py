@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
+from ..types import OperationLogs
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
@@ -15,19 +16,22 @@ if TYPE_CHECKING:
 
 @dataclass
 class AddSignaturesResponse(OpResponse):
-    value: int = 0
+    value: int
 
+    @classmethod
     async def from_reader(
-        self,
+        cls,
         reader: NixReader,
         version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        await self.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        self.value = await reader.read_uint64()
-        return self
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
+        obj.value = await reader.read_uint64()
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
@@ -36,20 +40,22 @@ class AddSignaturesResponse(OpResponse):
         writer.write_uint64(self.value)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class AddSignaturesRequest(OpRequest[AddSignaturesResponse]):
     name: ClassVar[str] = "AddSignatures"
     op: ClassVar[int] = 37
     response_type: ClassVar[type[OpResponse]] = AddSignaturesResponse
-    path: str = ""
-    sigs: set[str] = field(default_factory=set)
+    path: str
+    sigs: set[str]
 
-    async def from_reader(self, reader: NixReader, version: int) -> Self:
-        self.logger = self.logger.bind(identifier=reader.identifier)
-        self.path = await reader.read_string(StorePath)
-        self.sigs = await reader.read_string_set()
-        self.logger.debug("from_reader", path=self.path, sigs=self.sigs)
-        return self
+    @classmethod
+    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=reader.identifier)
+        obj.path = await reader.read_string(StorePath)
+        obj.sigs = await reader.read_string_set()
+        obj.logger.debug("from_reader", path=obj.path, sigs=obj.sigs)
+        return obj
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
