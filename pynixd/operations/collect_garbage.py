@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
@@ -19,6 +20,15 @@ if TYPE_CHECKING:
     from ..store import Store
     from ..types.aliases import StorePathSet
     from ..wire import NixReader, NixWriter
+
+
+class GCAction(IntEnum):
+    """Garbage collection action codes."""
+
+    RETURN_LIVE = 0
+    RETURN_DEAD = 1
+    DELETE_DEAD = 2
+    DELETE_SPECIFIC = 3
 
 
 @dataclass
@@ -66,7 +76,7 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
     name: ClassVar[str] = "CollectGarbage"
     op: ClassVar[int] = 20
     response_type: ClassVar[type[OpResponse]] = CollectGarbageResponse
-    action: int
+    action: GCAction
     paths_to_delete: StorePathSet
     ignore_liveness: int
     max_freed: int
@@ -84,7 +94,7 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
     ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.action = await reader.read_uint64()
+        obj.action = GCAction(await reader.read_uint64())
         obj.paths_to_delete = await reader.read_string_set(StorePath)
         obj.ignore_liveness = await reader.read_uint64()
         obj.max_freed = await reader.read_uint64()

@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from .operations.collect_garbage import CollectGarbageRequest, CollectGarbageResponse
+from .operations.collect_garbage import (
+    CollectGarbageRequest,
+    CollectGarbageResponse,
+    GCAction,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -127,7 +131,7 @@ class GarbageCollector:
 
         resp = await store.execute(
             CollectGarbageRequest(
-                action=3,  # DeleteSpecific
+                action=GCAction.DELETE_SPECIFIC,
                 paths_to_delete=paths,
             ),
         )
