@@ -39,7 +39,11 @@ from pynixd.operations.ca_derivations import (
     RegisterDrvOutputRequest,
     RegisterDrvOutputResponse,
 )
-from pynixd.operations.collect_garbage import CollectGarbageRequest, CollectGarbageResponse
+from pynixd.operations.collect_garbage import (
+    CollectGarbageRequest,
+    CollectGarbageResponse,
+    GCAction,
+)
 from pynixd.operations.ensure_path import EnsurePathRequest, EnsurePathResponse
 from pynixd.operations.find_roots import FindRootsEntry, FindRootsRequest, FindRootsResponse
 from pynixd.operations.is_valid_path import IsValidPathRequest, IsValidPathResponse
@@ -822,7 +826,7 @@ class TestCollectGarbageSerialization:
     async def test_request(self):
 
         req = CollectGarbageRequest(
-            action=1,
+            action=GCAction.RETURN_DEAD,
             paths_to_delete={StorePath("/nix/store/abc-foo")},
             ignore_liveness=0,
             max_freed=1000000,
@@ -831,7 +835,7 @@ class TestCollectGarbageSerialization:
             _obsolete3=0,
         )
         result = await _serialize_deserialize_request(CollectGarbageRequest, req)
-        assert result.action == 1
+        assert result.action == GCAction.RETURN_DEAD
         assert result.paths_to_delete == {StorePath("/nix/store/abc-foo")}
         assert result.max_freed == 1000000
 

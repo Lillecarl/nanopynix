@@ -29,6 +29,7 @@ from pynixd.derivation_resolution import (
 )
 from pynixd.drv_parser import read_drv_file
 from pynixd.operations.add_to_store import AddToStoreRequest
+from pynixd.operations.base import BuildMode
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest
@@ -312,8 +313,8 @@ async def main() -> None:
     build_req = BuildDerivationRequest(
         drv_path=local_resolved_path,
         derivation=resolved_early,
+        build_mode=BuildMode.NORMAL,
     )
-
     print(f"Sending BuildDerivation for {local_resolved_path}")
     print(f"  outputs: {[(n, o.path) for n, o in resolved_early.outputs.items()]}")
 

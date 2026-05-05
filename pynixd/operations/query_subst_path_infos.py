@@ -68,7 +68,11 @@ class QuerySubstitutablePathInfosRequest(
     items: dict[str, str]
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        cls,
+        reader: NixReader,
+        version: int,  # noqa: ARG003
+    ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)
         n = await reader.read_uint64()

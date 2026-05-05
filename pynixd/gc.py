@@ -133,6 +133,11 @@ class GarbageCollector:
             CollectGarbageRequest(
                 action=GCAction.DELETE_SPECIFIC,
                 paths_to_delete=paths,
+                ignore_liveness=0,
+                max_freed=0,
+                _obsolete1=0,
+                _obsolete2=0,
+                _obsolete3=0,
             ),
         )
         if resp.paths_deleted:

@@ -338,7 +338,7 @@ class TestParsedDerivationProperties:
 
 class TestParseDrvEdgeCases:
     def test_invalid_syntax(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError):  # noqa: PT011
             parse_drv("Derive(invalid")
 
     def test_unterminated_string(self):
@@ -350,7 +350,7 @@ class TestParseDrvEdgeCases:
             parse_drv('DrvWithVersion("unknown-version",[]')
 
     def test_empty_text(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError):  # noqa: PT011
             parse_drv("")
 
 

@@ -49,7 +49,7 @@ class DerivationOutputMapBatchResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
+        version: int,  # noqa: ARG003
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
@@ -96,9 +96,12 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
     drv_paths: StorePathSet
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        cls,
+        reader: NixReader,
+        version: int,  # noqa: ARG003
+    ) -> Self:
         obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
         obj.drv_paths = await reader.read_string_set(StorePath)
         obj.logger.debug("from_reader", drv_paths=obj.drv_paths)
         return obj

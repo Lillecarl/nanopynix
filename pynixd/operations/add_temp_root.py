@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import StderrNext
@@ -24,7 +24,7 @@ class AddTempRootResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
+        version: int,  # noqa: ARG003
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
@@ -54,7 +54,11 @@ class AddTempRootRequest(OpRequest[AddTempRootResponse]):
     path: StorePath
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        cls,
+        reader: NixReader,
+        version: int,  # noqa: ARG003
+    ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)
         obj.path = await reader.read_string(StorePath)

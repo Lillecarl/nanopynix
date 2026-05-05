@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
-from .base import OpRequest, OpResponse, OperationLogs
+from .base import OperationLogs, OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -22,9 +22,9 @@ class QueryReferrersResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
+        version: int,  # noqa: ARG003
+        client: ClientConn | None = None,  # noqa: ARG003
+        buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)
@@ -52,9 +52,9 @@ class QueryReferrersRequest(OpRequest[QueryReferrersResponse]):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
+        version: int,  # noqa: ARG003
+        client: ClientConn | None = None,  # noqa: ARG003
+        buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)

@@ -253,7 +253,7 @@ class TestExhaustiveOutputKind:
     """Test all 5 branches of DerivationOutput.kind exhaustively."""
 
     @pytest.mark.parametrize(
-        "name,out,expected",
+        "name,out,expected",  # noqa: PT006
         [
             ("INPUT_ADDRESSED", DerivationOutput(path="/p", method="", hash_digest=""), OutputKind.INPUT_ADDRESSED),
             ("CA_FIXED", DerivationOutput(path="/p", method="sha256", hash_digest="h"), OutputKind.CA_FIXED),

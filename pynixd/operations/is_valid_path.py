@@ -25,7 +25,7 @@ class IsValidPathResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
+        version: int,  # noqa: ARG003
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
@@ -52,7 +52,11 @@ class IsValidPathRequest(OpRequest[IsValidPathResponse]):
     path: StorePath
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        cls,
+        reader: NixReader,
+        version: int,  # noqa: ARG003
+    ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)
         obj.path = await reader.read_string(StorePath)

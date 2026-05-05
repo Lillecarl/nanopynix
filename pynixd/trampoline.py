@@ -234,7 +234,10 @@ class Trampoline:
             if unknown_srcs:
                 try:
                     valid_resp = await self.local_store.execute(
-                        QueryValidPathsRequest(paths=unknown_srcs),
+                        QueryValidPathsRequest(
+                            paths=unknown_srcs,
+                            substitute=0,
+                        ),
                     )
                     self.local_store.tracker.add_known_paths(
                         valid_resp.paths,

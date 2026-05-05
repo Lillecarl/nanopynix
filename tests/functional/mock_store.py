@@ -11,10 +11,13 @@ import structlog
 from pynixd import metrics, wire
 from pynixd.operations.base import OpResponse
 from pynixd.operations.build_derivation import BuildDerivationRequest
-from pynixd.operations.query_all_valid_paths import QueryAllValidPathsResponse
 from pynixd.operations.query_all_valid_paths import (
     QueryAllValidPathsRequest,
     QueryAllValidPathsResponse,
+)
+from pynixd.operations.query_closure_with_info import (
+    QueryClosureWithInfoRequest,
+    QueryClosureWithInfoResponse,
 )
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
 from pynixd.psi import CpuUtil

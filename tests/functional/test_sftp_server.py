@@ -53,7 +53,7 @@ async def test_sftp_stat_denied_path(pynixd_server: Server) -> None:
             await sftp.stat("/etc/passwd")
             raise AssertionError("Expected SFTPError for denied path")
         except asyncssh.SFTPError as e:
-            assert e.code == FX_NO_SUCH_FILE
+            assert e.code == FX_NO_SUCH_FILE  # noqa: PT017
 
 
 async def test_sftp_stat_allowed_dir(pynixd_server: Server) -> None:
@@ -77,7 +77,7 @@ async def test_sftp_scandir_denied_dir(pynixd_server: Server) -> None:
             await sftp.listdir("/etc")
             raise AssertionError("Expected SFTPError for denied path")
         except asyncssh.SFTPError as e:
-            assert e.code == FX_NO_SUCH_FILE
+            assert e.code == FX_NO_SUCH_FILE  # noqa: PT017
 
 
 async def test_sftp_read_allowed_file(pynixd_server: Server) -> None:
@@ -101,7 +101,7 @@ async def test_sftp_read_denied_file(pynixd_server: Server) -> None:
             await sftp.open("/etc/passwd", encoding=None)
             raise AssertionError("Expected SFTPError for denied path")
         except asyncssh.SFTPError as e:
-            assert e.code == FX_NO_SUCH_FILE
+            assert e.code == FX_NO_SUCH_FILE  # noqa: PT017
 
 
 async def test_sftp_write_denied(pynixd_server: Server) -> None:
@@ -111,28 +111,28 @@ async def test_sftp_write_denied(pynixd_server: Server) -> None:
             await sftp.setstat("/proc/meminfo", asyncssh.SFTPAttrs())
             raise AssertionError("Expected SFTPError for setstat")
         except asyncssh.SFTPError as e:
-            assert e.code == FX_PERMISSION_DENIED
+            assert e.code == FX_PERMISSION_DENIED  # noqa: PT017
 
         try:
             await sftp.mkdir("/tmp/malicious")
             raise AssertionError("Expected SFTPError for mkdir")
         except asyncssh.SFTPError as e:
-            assert e.code == FX_PERMISSION_DENIED
+            assert e.code == FX_PERMISSION_DENIED  # noqa: PT017
 
         try:
             await sftp.rmdir("/proc")
             raise AssertionError("Expected SFTPError for rmdir")
         except asyncssh.SFTPError as e:
-            assert e.code == FX_PERMISSION_DENIED
+            assert e.code == FX_PERMISSION_DENIED  # noqa: PT017
 
         try:
             await sftp.remove("/proc/meminfo")
             raise AssertionError("Expected SFTPError for remove")
         except asyncssh.SFTPError as e:
-            assert e.code == FX_PERMISSION_DENIED
+            assert e.code == FX_PERMISSION_DENIED  # noqa: PT017
 
         try:
             await sftp.rename("/proc/meminfo", "/proc/meminfo2")
             raise AssertionError("Expected SFTPError for rename")
         except asyncssh.SFTPError as e:
-            assert e.code == FX_PERMISSION_DENIED
+            assert e.code == FX_PERMISSION_DENIED  # noqa: PT017

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import DerivedPath
@@ -10,6 +10,7 @@ from ..store_path import StorePath
 from ..types import OperationLogs
 from .base import (
     BuildMode,
+    BuildResultStatus,
     KeyedBuildResult,
     OpRequest,
     OpResponse,
@@ -31,7 +32,7 @@ class BuildPathsResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
+        version: int,  # noqa: ARG003
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
@@ -60,7 +61,11 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
     build_mode: BuildMode
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        cls,
+        reader: NixReader,
+        version: int,  # noqa: ARG003
+    ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)
         obj.derived_paths = await reader.read_string_set(DerivedPath)
@@ -160,7 +165,11 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
     build_mode: BuildMode
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        cls,
+        reader: NixReader,
+        version: int,  # noqa: ARG003
+    ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)
         obj.derived_paths = await reader.read_string_set(DerivedPath)
@@ -191,7 +200,12 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
             # Track newly built paths
             if isinstance(result, BuildPathsWithResultsResponse):
                 for kr in result.results:
-                    if kr.result.status == 0:
+                    if kr.result.status in (
+                        BuildResultStatus.BUILT,
+                        BuildResultStatus.SUBSTITUTED,
+                        BuildResultStatus.ALREADY_VALID,
+                        BuildResultStatus.RESOLVES_TO_ALREADY_VALID,
+                    ):
                         for output in kr.result.built_outputs.values():
                             ctx.proxy.local_store.tracker.add_known_path(
                                 StorePath(output["outPath"]).with_store_prefix(),

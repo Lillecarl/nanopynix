@@ -81,7 +81,8 @@ async def test_http_upload(
         **get_test_store_kwargs(no_probe=True),
     )
     info_resp = await root_store.execute(QueryPathInfoRequest(path=path))
-    assert info_resp.valid and info_resp.info
+    assert info_resp.valid
+    assert info_resp.info is not None
     vinfo = info_resp.info.with_path(path)
 
     nar_data = bytearray()

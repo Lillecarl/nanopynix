@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
 from .base import (
+    OperationLogs,
     OpRequest,
     OpResponse,
-    OperationLogs,
     UnkeyedValidPathInfo,
 )
 
@@ -42,7 +42,7 @@ class QueryPathInfoResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
+        version: int,  # noqa: ARG003
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
@@ -84,9 +84,9 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
+        version: int,  # noqa: ARG003
+        client: ClientConn | None = None,  # noqa: ARG003
+        buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)

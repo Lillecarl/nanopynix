@@ -25,7 +25,7 @@ import anyio
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pynixd.drv_parser import ParsedDerivation, read_drv_file
-from pynixd.operations.base import BasicDerivation, DerivationOutput
+from pynixd.operations.base import BasicDerivation, BuildMode, DerivationOutput
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import (
     RegisterDrvOutputRequest,
@@ -595,8 +595,8 @@ async def main() -> None:
         build_req = BuildDerivationRequest(
             drv_path=nix_resolved_drv_path,
             derivation=resolved,
+            build_mode=BuildMode.NORMAL,
         )
-
         print("\nSending BuildDerivation with RESOLVED .drv path")
         print(f"  drv_path: {nix_resolved_drv_path}")
         print(f"  output path: {resolved.outputs['out'].path}")

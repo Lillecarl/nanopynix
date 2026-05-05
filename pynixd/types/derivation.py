@@ -138,7 +138,11 @@ class BasicDerivation:
         return any(o.is_dynamic_output for o in self.outputs.values())
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
+    async def from_reader(
+        cls,
+        reader: NixReader,
+        version: int,  # noqa: ARG003
+    ) -> Self:
         obj = cls.__new__(cls)
         n = await reader.read_uint64()
         obj.outputs = {}

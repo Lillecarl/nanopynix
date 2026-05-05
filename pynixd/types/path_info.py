@@ -192,7 +192,7 @@ class SubstitutablePathInfo:
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
+        version: int,  # noqa: ARG003
     ) -> Self:
         obj = cls.__new__(cls)
         obj.deriver = await reader.read_string(StorePath)

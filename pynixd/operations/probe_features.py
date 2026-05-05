@@ -10,7 +10,7 @@ on Darwin, ``kvm`` on Linux) are correctly detected.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
@@ -34,13 +34,12 @@ class ProbeFeaturesResponse(OpResponse):
     @classmethod
     async def from_reader(
         cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
+        reader: NixReader,  # noqa: ARG003
+        version: int,  # noqa: ARG003
+        client: ClientConn | None = None,  # noqa: ARG003
+        buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
-        obj = cls.__new__(cls)
-        return obj
+        return cls.__new__(cls)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         pass
@@ -56,9 +55,12 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
     system_features: set[str]
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        obj = cls.__new__(cls)
-        return obj
+    async def from_reader(
+        cls,
+        reader: NixReader,  # noqa: ARG003
+        version: int,  # noqa: ARG003
+    ) -> Self:
+        return cls.__new__(cls)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         pass

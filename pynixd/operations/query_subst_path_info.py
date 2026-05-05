@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from .base import OpRequest, OpResponse, OperationLogs, SubstitutablePathInfo
+from .base import OperationLogs, OpRequest, OpResponse, SubstitutablePathInfo
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -26,8 +26,8 @@ class QuerySubstitutablePathInfoResponse(OpResponse):
         cls,
         reader: NixReader,
         version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
+        client: ClientConn | None = None,  # noqa: ARG003
+        buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)
@@ -60,9 +60,9 @@ class QuerySubstitutablePathInfoRequest(OpRequest[QuerySubstitutablePathInfoResp
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
+        version: int,  # noqa: ARG003
+        client: ClientConn | None = None,  # noqa: ARG003
+        buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=reader.identifier)

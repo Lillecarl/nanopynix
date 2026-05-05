@@ -40,7 +40,7 @@ class TestSecretKeyParse:
             SecretKey._parse("bad:" + base64.b64encode(b"\x01" * 16).decode())
 
     def test_parse_empty_key(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError):  # noqa: PT011
             SecretKey._parse("empty:")
 
     def test_public_key_derivation(self):
