@@ -35,8 +35,8 @@ try:
 
     HAS_PYINSTRUMENT = True
 except ImportError:
-    Profiler = None  # type: ignore
-    ConsoleRenderer = None  # type: ignore
+    Profiler: type | None = None
+    ConsoleRenderer: type | None = None
     HAS_PYINSTRUMENT = False
 
 

@@ -63,7 +63,7 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     name: ClassVar[str] = "RegisterDrvOutput"
     op: ClassVar[int] = 42
     response_type: ClassVar[type[OpResponse]] = RegisterDrvOutputResponse
-    realisation: Realisation = field(default_factory=dict)  # type: ignore[arg-type]
+    realisation: Realisation = field(default_factory=dict)  # type: ignore[arg-type]  # filled by from_reader
 
     async def from_reader(
         self,

@@ -143,4 +143,14 @@ package
     lint
     pkgs
     ;
+
+  tests = {
+    simple = pkgs.callPackage ./tests/derivations/simple {
+      pynixd-lib = library;
+    };
+    pytest = pkgs.callPackage ./tests/derivations/pytest {
+      pynixd-lib = library;
+      src = ./.;
+    };
+  };
 }

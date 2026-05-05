@@ -134,7 +134,7 @@ class BuildPathsWithResultsResponse(OpResponse):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", self.results)
+        self.logger.debug("to_writer", results=self.results)
         self.logs.to_writer(writer)
         writer.write_uint64(len(self.results))
         for entry in self.results:

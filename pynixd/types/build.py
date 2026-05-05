@@ -178,7 +178,7 @@ class KeyedBuildResult:
     the derivation path or store path that was built/substituted.
     """
 
-    path: DerivedPath = field(default_factory=lambda: StorePath(""))  # type: ignore
+    path: DerivedPath = field(default_factory=lambda: StorePath(""))  # type: ignore[assignment]  # always set by from_reader
     result: BuildResult = field(default_factory=BuildResult)
 
     async def from_reader(self, reader: NixReader, version: int) -> Self:

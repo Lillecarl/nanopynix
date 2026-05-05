@@ -15,12 +15,13 @@ like `a.drv^out^out` are parsed as Built(Built(Opaque(a.drv), "out"), "out").
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .drv_parser import read_drv_file
 from .store_path import StorePath
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from .drv_parser import ParsedDerivation
@@ -225,10 +226,10 @@ class DerivedPath(StorePath):
     async def to_derivation(
         self,
         store_path: Path,
-        reader_fn: Any = None,
+        reader_fn: Callable[[Path, StorePath], Awaitable[ParsedDerivation]] | None = None,
     ) -> ParsedDerivation:
         if reader_fn is not None:
-            return await reader_fn(store_path, self.drv_path)
+            return await reader_fn(store_path, StorePath(self.drv_path))
         return await dp_to_derivation(self._derived, store_path)
 
     @property

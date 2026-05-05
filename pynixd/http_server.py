@@ -19,7 +19,7 @@ import lzma
 import ssl
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import anyio
 import brotli
@@ -38,6 +38,8 @@ from .operations.query_path_info import QueryPathInfoRequest
 from .store_path import StorePath
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from .local_store_db import LocalStoreDB
     from .store import Store
     from .wire import NixWriter
@@ -106,7 +108,7 @@ class PynixdHttpServer:
     async def auth_middleware(
         self,
         request: web.Request,
-        handler: Any,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
     ) -> web.StreamResponse:
         # Check if we should skip auth for metrics
         if self.enable_metrics and self.metrics_no_auth and request.path == "/metrics":

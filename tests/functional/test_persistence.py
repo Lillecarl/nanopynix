@@ -44,7 +44,7 @@ class NoQueryAllValidPathsStore(LocalSocketStore):
         skip_probe=False,
     ):
         if isinstance(request, QueryAllValidPathsRequest):
-            raise RuntimeError("QueryAllValidPaths not supported")  # noqa: TRY004
+            raise TypeError("QueryAllValidPaths not supported")
         return await super().call(
             request,
             client,
