@@ -10,8 +10,11 @@ Tests these protocol operations:
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from pathlib import Path
 import pytest
 import structlog
 
@@ -100,7 +103,10 @@ async def test_add_build_log_non_admin(pynixd_server: Server) -> None:
 
 
 @pytest.mark.timeout(120)
-async def test_add_signatures_via_store(pynixd_server: Server) -> None:
+async def test_add_signatures_via_store(
+    pynixd_server: Server,
+    tmp_path: Path,
+) -> None:
     """AddSignatures: signing a path via pynixd.
 
     This operation is forwarded to the upstream daemon.
@@ -127,3 +133,53 @@ async def test_add_signatures_via_store(pynixd_server: Server) -> None:
 
     out_path = stdout.strip()
     assert out_path.startswith("/nix/store/"), f"Unexpected output: {out_path}"
+
+    # Generate a signing key
+    key_file = tmp_path / "secret.key"
+    rc, key_stdout, _, _ = await run_subproc(
+        [str(CLIENT_BIN), "key", "generate-secret", "--key-name", "testkey"],
+    )
+    assert rc == 0, "key generation failed"
+    key_file.write_text(key_stdout.strip())
+
+    # Sign the path via pynixd
+    rc, _, _, stdboth = await run_subproc(
+        [
+            str(CLIENT_BIN),
+            "store",
+            "sign",
+            "--key-file",
+            str(key_file),
+            "--store",
+            uri,
+            out_path,
+        ],
+    )
+    assert rc == 0, f"store sign failed:\n{stdboth}"
+
+    # Verify the signature exists
+    rc, info_stdout, _, stdboth = await run_subproc(
+        [
+            str(CLIENT_BIN),
+            "path-info",
+            "--json-format",
+            "2",
+            "--json",
+            "--store",
+            uri,
+            out_path,
+        ],
+    )
+    assert rc == 0, f"path-info failed:\n{stdboth}"
+
+    info = json.loads(info_stdout.strip())
+    # json-format 2 wraps entries under "info" with basename keys
+    entries = info.get("info", info)
+    path_entry = None
+    for key, value in entries.items():
+        if key == out_path.removeprefix("/nix/store/"):
+            path_entry = value
+            break
+    assert path_entry is not None, f"path {out_path} not in path-info output: {info}"
+    sigs = path_entry.get("signatures", [])
+    assert any(sig.startswith("testkey:") for sig in sigs), f"expected testkey signature in {sigs}"

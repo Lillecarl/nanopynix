@@ -11,6 +11,7 @@ from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..store import Store
     from ..wire import NixReader, NixWriter
 
 
@@ -66,3 +67,16 @@ class AddSignaturesRequest(OpRequest[AddSignaturesResponse]):
         writer.write_uint64(self.op)
         writer.write_string(self.path)
         writer.write_string_set(self.sigs)
+
+    async def execute(
+        self,
+        store: Store,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+    ) -> AddSignaturesResponse:
+        resp = await store.call(self, client=client, suppress_last=suppress_last)
+        if resp.value == 1:
+            # Signatures added — invalidate cached path info so the next
+            # QueryPathInfo reads fresh data from the DB.
+            store.path_info_cache.pop(StorePath(self.path), None)
+        return resp
