@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..drv_parser import read_drv_file
 from ..exceptions import OpNotImplementedError
+from ..stderr import OperationLogs
 from ..store_path import StorePath
-from ..types import OperationLogs
 from .base import OpRequest, OpResponse
 
 QUERY_DERIVATION_OUTPUT_MAP_BATCH = """

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from .decomposer import synthesize_already_valid  # noqa: F401
 from .drv_parser import read_drv_file, to_basic_derivation
 from .operations.base import BuildResult, BuildResultStatus, UnkeyedValidPathInfo
 from .operations.build_derivation import BuildDerivationRequest
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
     from .scheduler import DerivationReader, Scheduler
     from .types.aliases import StorePathSet
     from .types.ca import Realisation
-    from .types.ids import BuildId
+    from .types.ids import BuildId, RequestId
 
 log = structlog.get_logger(__name__)
 
@@ -57,60 +58,70 @@ class Trampoline:
         build: QueuedBuild,
         build_resp: BuildDerivationResponse,
     ) -> None:
-        """Handle build completion within a SchedulerBuildRequest."""
-        if build.scheduler_request_id is None:
-            return
-        sched_req = self.queue.requests.get(build.scheduler_request_id)
-        if sched_req is None:
+        """Handle build completion within a SchedulerBuildRequest.
+
+        Notifies all SchedulerBuildRequests that reference this build
+        (supporting multi-request deduplication).
+        """
+        if not build.scheduler_request_ids:
             return
 
-        parent_dps = sched_req.build_to_derived.get(build.id, set())
+        parent_dps_by_req: dict[RequestId, set[DerivedPath]] = {}
+        for req_id in build.scheduler_request_ids:
+            sched_req = self.queue.requests.get(req_id)
+            if sched_req is None:
+                continue
+            parent_dps_by_req[req_id] = sched_req.build_to_derived.get(build.id, set())
 
         derivation = build.request.derivation
         is_dynamic = derivation.has_dynamic_outputs
-        has_nested_dp = any(dp.is_nested for dp in parent_dps)
-
         drv_outputs = build_resp.result.built_outputs
-        trampolined_dps: set[DerivedPath] = set()
         build_succeeded = build_resp.result.status == 0
 
-        should_trampoline = build_succeeded and self._should_trampoline(
-            build,
-            is_dynamic,
-            has_nested_dp,
-            drv_outputs,
-        )
+        for req_id, parent_dps in parent_dps_by_req.items():
+            sched_req = self.queue.requests.get(req_id)
+            if sched_req is None:
+                continue
 
-        if should_trampoline:
-            await self._fire_trampoline(build, build_resp, sched_req, parent_dps)
-            trampolined_dps.update(parent_dps)
+            has_nested_dp = any(dp.is_nested for dp in parent_dps)
+            trampolined_dps: set[DerivedPath] = set()
 
-        non_trampolined_dps = parent_dps - trampolined_dps
-        for dp in non_trampolined_dps:
-            sched_req.results[dp] = build_resp.result
-
-        sched_req.build_completed(build.id)
-
-        if sched_req.resolve_if_done():
-            log.info(
-                "scheduler_request_resolved",
-                request_id=sched_req.id,
-                results=len(sched_req.results),
+            should_trampoline = build_succeeded and self._should_trampoline(
+                build,
+                is_dynamic,
+                has_nested_dp,
+                drv_outputs,
             )
+
+            if should_trampoline:
+                await self._fire_trampoline(build, build_resp, sched_req, parent_dps)
+                trampolined_dps.update(parent_dps)
+
+            non_trampolined_dps = parent_dps - trampolined_dps
+            for dp in non_trampolined_dps:
+                sched_req.results[dp] = build_resp.result
+
+            sched_req.build_completed(build.id)
+
+            if sched_req.resolve_if_done():
+                log.info(
+                    "scheduler_request_resolved",
+                    request_id=sched_req.id,
+                    results=len(sched_req.results),
+                )
 
     async def on_build_complete_failed(
         self,
         build: QueuedBuild,
         error_msg: str,
     ) -> None:
-        """Handle build failure within a SchedulerBuildRequest."""
-        if build.scheduler_request_id is None:
-            return
-        sched_req = self.queue.requests.get(build.scheduler_request_id)
-        if sched_req is None:
+        """Handle build failure within a SchedulerBuildRequest.
+
+        Notifies all SchedulerBuildRequests that reference this build.
+        """
+        if not build.scheduler_request_ids:
             return
 
-        parent_dps = sched_req.build_to_derived.get(build.id, set())
         failed_result = BuildResult(
             status=BuildResultStatus.MISC_FAILURE,
             error_msg=error_msg,
@@ -120,16 +131,23 @@ class Trampoline:
             stop_time=0,
             built_outputs={},
         )
-        for dp in parent_dps:
-            sched_req.results[dp] = failed_result
-        sched_req.build_completed(build.id)
 
-        if sched_req.resolve_if_done():
-            log.info(
-                "scheduler_request_resolved_with_failure",
-                request_id=sched_req.id,
-                error_msg=error_msg,
-            )
+        for req_id in build.scheduler_request_ids:
+            sched_req = self.queue.requests.get(req_id)
+            if sched_req is None:
+                continue
+
+            parent_dps = sched_req.build_to_derived.get(build.id, set())
+            for dp in parent_dps:
+                sched_req.results[dp] = failed_result
+            sched_req.build_completed(build.id)
+
+            if sched_req.resolve_if_done():
+                log.info(
+                    "scheduler_request_resolved_with_failure",
+                    request_id=sched_req.id,
+                    error_msg=error_msg,
+                )
 
     # ── Internal helpers ─────────────────────────────────────────────
 

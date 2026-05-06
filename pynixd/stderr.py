@@ -11,16 +11,18 @@ making _forward_stderr and _drain_stderr trivial consumers.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
 from . import constants
 from .exceptions import BackendError
+from .types.protocol import ActivityType, FieldType, ResultType, Verbosity
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from .connection import ClientConn
     from .wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
@@ -34,8 +36,8 @@ async def read_fields(r: NixReader) -> list[Field]:
     n = await r.read_uint64()
     fields: list[Field] = []
     for _ in range(n):
-        ftype = await r.read_uint64()
-        if ftype == 0:
+        ftype = FieldType(await r.read_uint64())
+        if ftype == FieldType.INT:
             fields.append(await r.read_uint64())
         else:
             fields.append(await r.read_string())
@@ -46,9 +48,10 @@ def write_fields(w: NixWriter, fields: list[Field]) -> None:
     w.write_uint64(len(fields))
     for f in fields:
         if isinstance(f, int):
-            w.write_uint64s([0, f])
+            w.write_uint64(FieldType.INT)
+            w.write_uint64(f)
         else:
-            w.write_uint64(1)
+            w.write_uint64(FieldType.STRING)
             w.write_string(f)
 
 
@@ -79,8 +82,8 @@ class StderrStartActivity:
 
     code: ClassVar[int] = constants.STDERR_START_ACTIVITY
     act_id: int = 0
-    level: int = 0
-    type: int = 0
+    level: Verbosity = Verbosity.NOTICE
+    type: ActivityType = ActivityType.UNKNOWN
     text: str = ""
     fields: list[Field] = field(default_factory=list)
     parent: int = 0
@@ -89,8 +92,8 @@ class StderrStartActivity:
     async def from_reader(cls, r: NixReader) -> StderrStartActivity:
         obj = cls.__new__(cls)
         obj.act_id = await r.read_uint64()
-        obj.level = await r.read_uint64()
-        obj.type = await r.read_uint64()
+        obj.level = Verbosity(await r.read_uint64())
+        obj.type = ActivityType(await r.read_uint64())
         obj.text = await r.read_string()
         obj.fields = await read_fields(r)
         obj.parent = await r.read_uint64()
@@ -130,14 +133,14 @@ class StderrResult:
 
     code: ClassVar[int] = constants.STDERR_RESULT
     act_id: int = 0
-    result_type: int = 0
+    result_type: ResultType = ResultType.PROGRESS
     fields: list[Field] = field(default_factory=list)
 
     @classmethod
     async def from_reader(cls, r: NixReader) -> StderrResult:
         obj = cls.__new__(cls)
         obj.act_id = await r.read_uint64()
-        obj.result_type = await r.read_uint64()
+        obj.result_type = ResultType(await r.read_uint64())
         obj.fields = await read_fields(r)
         return obj
 
@@ -154,7 +157,7 @@ class StderrError:
 
     code: ClassVar[int] = constants.STDERR_ERROR
     error_type: str = ""
-    level: int = 0
+    level: Verbosity = Verbosity.ERROR
     name: str = ""
     msg: str = ""
     have_pos: int = 0
@@ -164,7 +167,7 @@ class StderrError:
     async def from_reader(cls, r: NixReader) -> StderrError:
         obj = cls.__new__(cls)
         obj.error_type = await r.read_string()
-        obj.level = await r.read_uint64()
+        obj.level = Verbosity(await r.read_uint64())
         obj.name = await r.read_string()
         obj.msg = await r.read_string()
         obj.have_pos = await r.read_uint64()
@@ -191,6 +194,54 @@ class StderrError:
 
 # Union of all stderr message types
 StderrMsg = StderrNext | StderrStartActivity | StderrStopActivity | StderrResult | StderrError
+
+
+@dataclass
+class OperationLogs:
+    """Container for stderr messages from an operation."""
+
+    messages: list[StderrMsg] = field(default_factory=list)
+
+    @property
+    def error(self) -> StderrError | None:
+        for msg in self.messages:
+            if isinstance(msg, StderrError):
+                return msg
+        return None
+
+    @property
+    def has_error(self) -> bool:
+        return self.error is not None
+
+    def __bool__(self) -> bool:
+        return not self.has_error
+
+    def add(self, msg: StderrMsg) -> None:
+        self.messages.append(msg)
+
+    def to_writer(self, writer: NixWriter) -> None:
+        for msg in self.messages:
+            msg.to_writer(writer)
+        writer.write_uint64(constants.STDERR_LAST)
+
+    @classmethod
+    async def from_reader(
+        cls,
+        reader: NixReader,
+        client: ClientConn | None = None,
+        buffer: bool = True,
+    ) -> Self:
+        obj = cls.__new__(cls)
+        obj.messages = []
+        async for msg in read_stream(reader):
+            if client:
+                await client.queue.put(msg)
+            if buffer:
+                obj.add(msg)
+            if isinstance(msg, StderrError):
+                raise BackendError(f"Daemon error ({msg.error_type}): {msg.msg}")
+        return obj
+
 
 # ── Parsers mapping msg_type → class ─────────────────────────────
 

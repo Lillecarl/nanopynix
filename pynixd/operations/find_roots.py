@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..types import OperationLogs
+from ..stderr import OperationLogs
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:

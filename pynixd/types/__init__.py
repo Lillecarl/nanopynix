@@ -39,7 +39,6 @@ from .derivation import (
 from .ids import BuildId as BuildId
 from .ids import RequestId as RequestId
 from .ids import StoreId as StoreId
-from .logs import OperationLogs as OperationLogs
 from .path_info import (
     SubstitutablePathInfo as SubstitutablePathInfo,
 )
@@ -49,3 +48,36 @@ from .path_info import (
 from .path_info import (
     ValidPathInfo as ValidPathInfo,
 )
+from .protocol import (
+    ActivityType as ActivityType,
+)
+from .protocol import (
+    FieldType as FieldType,
+)
+from .protocol import (
+    FileIngestionMethod as FileIngestionMethod,
+)
+from .protocol import (
+    GCAction as GCAction,
+)
+from .protocol import (
+    OptTrusted as OptTrusted,
+)
+from .protocol import (
+    ResultType as ResultType,
+)
+from .protocol import (
+    Verbosity as Verbosity,
+)
+
+
+def _export_logs():
+    from ..stderr import OperationLogs
+
+    return OperationLogs
+
+
+# OperationLogs is special due to circular dependencies with stderr
+# We don't export it at the top level of types/__init__.py to avoid
+# early initialization issues. Callers should import from pynixd.stderr
+# or pynixd.operations.base (which re-exports it).

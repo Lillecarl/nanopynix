@@ -8,22 +8,17 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
+from ..stderr import OperationLogs
 from ..store_path import StorePath
-from ..types import OperationLogs
 from ..wire import NixReader, NixWriter, forward_framed
-from .base import (
-    OpRequest,
-    OpResponse,
-    RequestContext,
-    UnkeyedValidPathInfo,
-    ValidPathInfo,
-)
+from .base import OpRequest, OpResponse, UnkeyedValidPathInfo, ValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from ..connection import ClientConn
     from ..store import Store
+    from ..types import RequestContext as RequestContext
 
 
 @dataclass

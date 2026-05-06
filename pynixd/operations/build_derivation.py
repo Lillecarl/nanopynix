@@ -5,20 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..stderr import StderrNext
+from ..stderr import OperationLogs, StderrNext
 from ..store_path import StorePath
-from ..types import OperationLogs
-from .base import (
-    BasicDerivation,
-    BuildMode,
-    BuildResult,
-    OpRequest,
-    OpResponse,
-    RequestContext,
-)
+from .base import BasicDerivation, BuildMode, BuildResult, OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
     from ..wire import NixReader, NixWriter
 

@@ -45,7 +45,7 @@ Pynixd will adversise 1.38 support even if local_store is 1.35 and translate whe
 - **Type Safety**:
   - NEVER use string type hints (e.g., `"Store"`). Use `from __future__ import annotations` where needed for `TYPE_CHECKING` imports and forward references.
   - Use `if TYPE_CHECKING:` blocks for cross-module imports.
-  - **Imports**: All imports should be at the top of the file (or inside `if TYPE_CHECKING:` blocks) whenever possible. Lazy imports inside functions are only acceptable to break circular import cycles.
+  - **Imports**: All imports MUST be at the top of the file (or inside `if TYPE_CHECKING:` blocks). Lazy imports inside functions/methods are strictly forbidden unless they are absolutely necessary to break a circular import cycle. If you introduce a circular dependency, prefer refactoring (e.g., moving shared types to a neutral module) over lazy imports.
   - **Asserts**: NEVER use `assert` statements outside of the `tests/` directory. For runtime validation, use explicit `if not cond: raise RuntimeError(...)`. To satisfy type checkers, use local variable aliasing or explicit `if cond is None` checks.
   - **Asyncio**: 
     - NEVER use `asyncio.get_event_loop()`. Use `asyncio.get_running_loop()` inside async functions. For timestamps, use `time.monotonic()` instead of `loop.time()`.

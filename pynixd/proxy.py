@@ -17,15 +17,11 @@ from .config import ScheduleMode
 from .connection import ClientConn
 from .exceptions import BackendError, OpNotImplementedError
 from .operations import OP_REGISTRY
-from .operations.base import (
-    OpRequest,
-    OpResponse,
-    RequestContext,
-    Resp,
-    Role,
-)
+from .operations.base import OpRequest, OpResponse, Resp, Role
 from .protocol import OptTrusted, get_extension_features
 from .stderr import StderrError
+from .types import RequestContext as RequestContext
+from .types.protocol import Verbosity
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -275,7 +271,7 @@ class DaemonProxy:
         await self.client.queue.put(
             StderrError(
                 error_type="Error",
-                level=0,
+                level=Verbosity.ERROR,
                 name="Error",
                 msg=msg,
                 have_pos=0,

@@ -8,13 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from .. import wire
 from ..store_path import StorePath
 from ..wire import _CHUNK_SIZE, NixReader, NixWriter
-from .base import (
-    ByteCollector,
-    OperationLogs,
-    OpRequest,
-    OpResponse,
-    RequestContext,
-)
+from .base import ByteCollector, OperationLogs, OpRequest, OpResponse
 from .query_path_info import QueryPathInfoRequest
 
 if TYPE_CHECKING:
@@ -22,6 +16,7 @@ if TYPE_CHECKING:
 
     from ..connection import ClientConn
     from ..store import Store
+    from ..types import RequestContext as RequestContext
 
 
 @dataclass

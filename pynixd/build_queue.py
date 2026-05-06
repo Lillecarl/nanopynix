@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -28,23 +28,6 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 MAX_STORE_RETRIES = 3
-
-
-@dataclass(frozen=True)
-class BuildKey:
-    """Unique key for a build based on drv_path and input sources.
-    Used for deduplication.
-    """
-
-    drv_path: StorePath
-    input_srcs: frozenset[StorePath]
-
-    @classmethod
-    def from_request(cls, request: BuildDerivationRequest) -> Self:
-        return cls(
-            drv_path=request.drv_path,
-            input_srcs=frozenset(request.derivation.input_srcs),
-        )
 
 
 @dataclass
@@ -128,10 +111,10 @@ class QueuedBuild:
     # execute_build begins.
     assigned_store_id: StoreId | None = field(default=None)
 
-    # Back-reference to the SchedulerBuildRequest this build belongs to.
-    # Set when the build is enqueued via build_derived_paths().
-    # None for standalone build_derivation() calls.
-    scheduler_request_id: RequestId | None = field(default=None)
+    # BuildRequest(s) this build belongs to.
+    # Multiple requests can share a single build (dedup).
+    # Empty set for standalone build_derivation() calls.
+    scheduler_request_ids: set[RequestId] = field(default_factory=set)
 
     # Dynamic input derivations from DrvWithVersion .drv files.
     # {drv_path: {output_name: [nested_output_name, ...], ...}}
@@ -213,7 +196,7 @@ class BuildQueue:
 
     def __init__(self) -> None:
         self._queue: list[QueuedBuild] = []
-        self._by_key: dict[BuildKey, QueuedBuild] = {}  # For deduplication
+        self._by_path: dict[str, QueuedBuild] = {}  # drv_path -> build for dedup
         self._by_id: dict[BuildId, QueuedBuild] = {}  # For DAG lookups
         self._requests: dict[RequestId, SchedulerBuildRequest] = {}
         self.next_id = 1
@@ -229,6 +212,11 @@ class BuildQueue:
     def by_id(self) -> Mapping[BuildId, QueuedBuild]:
         """Read-only mapping of build_id to QueuedBuild."""
         return self._by_id
+
+    @property
+    def by_path(self) -> Mapping[str, QueuedBuild]:
+        """Read-only mapping of drv_path to QueuedBuild."""
+        return self._by_path
 
     @property
     def requests(self) -> Mapping[RequestId, SchedulerBuildRequest]:
@@ -275,31 +263,35 @@ class BuildQueue:
         If scheduler_request_id is set, the build is tracked as part of that
         SchedulerBuildRequest. derived_paths_for_request maps this build to
         the original DerivedPaths it satisfies.
+
+        Deduplication uses drv_path as the identity — a .drv file is immutable,
+        so the same drv_path always means the same build.
         """
-        key = BuildKey.from_request(request)
+        drv_path = str(request.drv_path)
 
         async with self.lock:
             # Check for duplicate — dedup with queued or in-progress builds
-            if key in self._by_key:
-                existing = self._by_key[key]
-                if not existing.is_done:
-                    log.debug("build_deduped", id=existing.id)
-                    if scheduler_request_id is not None and existing.scheduler_request_id is None:
-                        existing.scheduler_request_id = scheduler_request_id
-                        if derived_paths_for_request:
-                            sched_req = self._requests.get(scheduler_request_id)
-                            if sched_req is not None:
-                                sched_req.add_build(
-                                    existing.id,
-                                    derived_paths_for_request,
-                                )
-                    return existing.id, existing.future
-                # else: done, create new entry
+            existing = self._by_path.get(drv_path)
+            if existing is not None and not existing.is_done:
+                log.debug("build_deduped", id=existing.id)
+                if scheduler_request_id is not None:
+                    existing.scheduler_request_ids.add(scheduler_request_id)
+                    if derived_paths_for_request:
+                        sched_req = self._requests.get(scheduler_request_id)
+                        if sched_req is not None:
+                            sched_req.add_build(
+                                existing.id,
+                                derived_paths_for_request,
+                            )
+                return existing.id, existing.future
 
             # Create new build with future
             loop = asyncio.get_running_loop()
             future: asyncio.Future[BuildDerivationResponse] = loop.create_future()
             build_id = BuildId(self.next_id)
+            scheduler_request_ids: set[RequestId] = (
+                {scheduler_request_id} if scheduler_request_id is not None else set()
+            )
             build = QueuedBuild(
                 id=build_id,
                 request=request,
@@ -308,11 +300,11 @@ class BuildQueue:
                 future=future,
                 platform=platform,
                 expected_duration=expected_duration,
-                scheduler_request_id=scheduler_request_id,
+                scheduler_request_ids=scheduler_request_ids,
             )
             self.next_id += 1
             self._queue.append(build)
-            self._by_key[key] = build
+            self._by_path[drv_path] = build
             self._by_id[build.id] = build
 
             if scheduler_request_id is not None and derived_paths_for_request:
@@ -325,7 +317,7 @@ class BuildQueue:
                 build_id=build.id,
                 description=build.description,
                 required_paths=len(required_paths),
-                scheduler_request_id=scheduler_request_id,
+                request_ids=list(scheduler_request_ids),
             )
             metrics.QUEUE_SIZE.labels(status="pending").inc()
             return build.id, future
@@ -408,6 +400,36 @@ class BuildQueue:
 
                     return b.client
         raise ValueError(f"Build {build_id} not found")
+
+    async def prune_request(self, request_id: RequestId) -> None:
+        """Remove completed builds from the queue if no other request references them.
+
+        Called after a SchedulerBuildRequest resolves. Builds that are still
+        referenced by other requests are kept; only the request id is removed
+        from their set.
+        """
+        async with self.lock:
+            to_remove: list[QueuedBuild] = []
+            for build in self._queue:
+                if request_id in build.scheduler_request_ids:
+                    build.scheduler_request_ids.discard(request_id)
+                    if not build.scheduler_request_ids and build.is_done:
+                        to_remove.append(build)
+
+            for build in to_remove:
+                self._queue.remove(build)
+                self._by_id.pop(build.id, None)
+                drv_path_str = str(build.request.drv_path)
+                if drv_path_str in self._by_path:
+                    del self._by_path[drv_path_str]
+                log.debug(
+                    "build_pruned",
+                    build_id=build.id,
+                    drv_path=drv_path_str,
+                )
+
+            # Also remove the request itself
+            self._requests.pop(request_id, None)
 
     def count(self, status: str) -> int:
         """Get count of builds with given status (non-async, thread-safe for reading)."""

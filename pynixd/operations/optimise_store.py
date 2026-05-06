@@ -5,10 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from .base import OperationLogs, OpRequest, OpResponse, RequestContext, Role
+from .base import OperationLogs, OpRequest, OpResponse, Role
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..types import RequestContext as RequestContext
     from ..wire import NixReader, NixWriter
 
 

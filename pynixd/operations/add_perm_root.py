@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..stderr import StderrNext
-from ..types import OperationLogs
+from ..stderr import OperationLogs, StderrNext
 from ..types.auth import Role
-from .base import OpRequest, OpResponse, RequestContext
+from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..types import RequestContext as RequestContext
     from ..wire import NixReader, NixWriter
 
 

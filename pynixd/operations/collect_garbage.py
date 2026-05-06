@@ -3,32 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import IntEnum
 from typing import TYPE_CHECKING, ClassVar, Self
 
+from ..stderr import OperationLogs
 from ..store_path import StorePath
-from ..types import OperationLogs
-from .base import (
-    OpRequest,
-    OpResponse,
-    RequestContext,
-    Role,
-)
+from ..types import GCAction
+from .base import OpRequest, OpResponse, Role
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
     from ..wire import NixReader, NixWriter
-
-
-class GCAction(IntEnum):
-    """Garbage collection action codes."""
-
-    RETURN_LIVE = 0
-    RETURN_DEAD = 1
-    DELETE_DEAD = 2
-    DELETE_SPECIFIC = 3
 
 
 @dataclass

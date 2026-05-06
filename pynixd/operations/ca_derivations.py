@@ -14,12 +14,9 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
+from ..stderr import OperationLogs
 from ..store_path import DrvOutput, StorePath
-from ..types import OperationLogs
-from .base import (
-    OpRequest,
-    OpResponse,
-)
+from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn

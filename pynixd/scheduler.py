@@ -146,8 +146,6 @@ class Scheduler:
         store.draining = True
         self.trigger()
 
-        # 1. Graceful Drain Phase
-        # Wait for all build slots to be released
         start = time.monotonic()
         while time.monotonic() - start < drain_timeout:
             if store.in_flight == 0:
@@ -156,8 +154,6 @@ class Scheduler:
         else:
             log.warning("drain_timeout_reached", store_id=store_id)
 
-        # 2. Hard-Kill Phase
-        # Find all builds currently assigned to this store and cancel them
         pending = await self.queue.get_pending()
         for build in pending:
             if build.assigned_store_id == store_id:
@@ -168,8 +164,6 @@ class Scheduler:
                         store_id=store_id,
                     )
                     build.build_task.cancel()
-
-                # Requeue: reset state so it can be picked up by another store
                 build.reset_for_retry(store_id)
 
         self.trigger()
@@ -225,14 +219,9 @@ class Scheduler:
         log.info("scheduler_started")
         while self.running:
             try:
-                # Wait for something to happen
                 await self.trigger_event.wait()
                 self.trigger_event.clear()
-
-                # Run a scheduling pass
                 await self.schedule()
-
-                # Wait a bit if we're spinning (shouldn't happen with Event)
                 await asyncio.sleep(0.01)
             except asyncio.CancelledError:
                 break
@@ -252,24 +241,38 @@ class Scheduler:
     async def schedule(self) -> None:
         """The core scheduling logic.
 
-        1. Identifies schedulable builds (inputs ready in local_store).
-        2. Ranks backends for each build based on locality and load.
-        3. Dispatches builds to available slots.
+        1. Populate metadata for builds that need it.
+        2. Filter schedulable vs waiting builds.
+        3. Assign schedulable builds to stores.
+        4. Update store metrics.
         """
         pending = await self.queue.get_pending()
         if not pending:
-            # Still update store metrics even if queue is empty
-            for s in self.stores.values():
-                metrics.STORE_HEALTHY.labels(store_id=s.store_id).set(
-                    1 if s.is_healthy else 0,
-                )
-                if s.cpu_util:
-                    metrics.STORE_CPU_UTILIZATION.labels(store_id=s.store_id).set(
-                        s.cpu_util.utilization,
-                    )
+            self._update_store_metrics()
             return
 
-        # 1. Ensure all builds have closure metadata
+        await self._populate_metadata(pending)
+
+        schedulable, waiting_deps, waiting_paths, override_in_flight = self._filter_schedulable(pending)
+
+        waiting_slot = await self._assign_to_stores(schedulable, override_in_flight)
+
+        self._update_store_metrics()
+
+        log.debug(
+            "scheduling_pass_done",
+            pending=len(pending),
+            waiting_paths=len(waiting_paths),
+            waiting_deps=len(waiting_deps),
+            waiting_slot=len(waiting_slot),
+            in_flight={s.store_id: s.in_flight for s in self.stores.values()},
+            cpu_util={
+                s.store_id: f"{s.cpu_util.utilization:.1f}%" if s.cpu_util else None for s in self.stores.values()
+            },
+        )
+
+    async def _populate_metadata(self, pending: list[QueuedBuild]) -> None:
+        """Ensure all pending builds have closure metadata for required paths."""
         needs_metadata = [b for b in pending if any(info.nar_size == 0 for info in b.required_paths.values())]
         for build in needs_metadata:
             seeds = set(build.required_paths.keys())
@@ -286,13 +289,20 @@ class Scheduler:
             except Exception:
                 log.exception("metadata_query_failed", build_id=build.id)
 
-        # 2. Identify builds ready to execute
+    def _filter_schedulable(
+        self,
+        pending: list[QueuedBuild],
+    ) -> tuple[list[QueuedBuild], list[QueuedBuild], list[QueuedBuild], dict[StoreId, int]]:
+        """Triage pending builds into schedulable, waiting_deps, and waiting_paths.
+
+        Returns (schedulable, waiting_deps, waiting_paths, override_in_flight).
+        override_in_flight accounts for builds assigned this cycle but not yet
+        reflected in `store.in_flight`.
+        """
         schedulable: list[QueuedBuild] = []
         waiting_paths: list[QueuedBuild] = []
         waiting_deps: list[QueuedBuild] = []
 
-        # Count builds assigned to each store to avoid double-counting with s.in_flight
-        # which already includes some/all building jobs that have acquired connections.
         assigned_count: dict[StoreId, int] = {s.store_id: 0 for s in self.stores.values()}
         for build in pending:
             if build.is_building and build.assigned_store_id:
@@ -306,7 +316,6 @@ class Scheduler:
             if build.is_building:
                 continue
 
-            # Check if all DAG dependencies are satisfied
             if build.depends_on:
                 unfinished_deps = {
                     dep_id
@@ -317,30 +326,43 @@ class Scheduler:
                     waiting_deps.append(build)
                     continue
 
-            # Check if all required paths are in local store
             if self.local_store.tracker.has_all_paths(set(build.required_paths.keys())):
                 schedulable.append(build)
             else:
                 waiting_paths.append(build)
 
-        # 3. Assign schedulable builds to backends
-        # Load balancing: prefer backends with the most relevant paths already present
-        # and with free resources.
+        return schedulable, waiting_deps, waiting_paths, override_in_flight
+
+    async def _assign_to_stores(
+        self,
+        schedulable: list[QueuedBuild],
+        override_in_flight: dict[StoreId, int],
+    ) -> list[QueuedBuild]:
+        """Assign schedulable builds to backends.
+
+        Handles tiny-build fast-track, standard remote assignment, and
+        permanent failure for builds with no compatible store.
+
+        Re-checks build state after ranking to avoid TOCTOU races.
+        Returns builds that are waiting for a slot (no store available).
+        """
         waiting_slot: list[QueuedBuild] = []
         assigned_this_pass: dict[StoreId, int] = {}
 
         for build in schedulable:
-            # 1. Check for "Tiny Build" fast-track to local store
-            # We only do this if it's explicitly tiny, not just unknown.
             build_features = build.request.derivation.effective_required_features
+
+            # Check if another pass already assigned this build
+            if build.is_building:
+                continue
+
+            # Tiny build fast-track to local store
             if (
                 build.expected_duration is not None
                 and build.expected_duration <= TINY_BUILD_THRESHOLD_MS
                 and self.local_store.supports_derivation(build.platform, build_features)
                 and self.local_store.in_flight < 4
             ):
-                # Tiny builds are fast-tracked to the local store.
-                # Use in_flight as a soft cap to avoid swamping it.
                 log.info(
                     "build_fasttracked_local",
                     build_id=build.id,
@@ -355,52 +377,18 @@ class Scheduler:
                 )
                 continue
 
-            # 2. Standard remote backend assignment
+            # Standard remote backend assignment
             ranked = self.allocator.rank_stores(
                 build,
                 assigned_this_pass,
                 override_in_flight=override_in_flight,
             )
 
-            # If NO store (live or dynamic) will ever support this
-            # platform/features, fail it statelessly. Builds for platforms
-            # declared in the dynamic_feature_matrix are kept pending — a
-            # compatible builder store may be connected later.
-            dynamic_supports = self._dynamic_supports(build.platform, build_features)
-            if (
-                not ranked
-                and not any(
-                    s.supports_derivation(
-                        build.platform,
-                        build.request.derivation.effective_required_features,
-                    )
-                    for s in self.stores.values()
-                )
-                and not dynamic_supports
-            ):
-                reasons = self.allocator.incompatibility_reasons(
-                    build.platform,
-                    build_features,
-                )
-                error_msg = (
-                    f"No compatible store for {build.platform}"
-                    + (f" (requires {', '.join(sorted(build_features))})" if build_features else "")
-                    + "\n"
-                    + "\n".join(f"  {r}" for r in reasons)
-                )
-                client = await self.queue.fail(build.id, error_msg)
-                if client is not None:
-                    for line in error_msg.split("\n"):
-                        await client.queue.put(StderrNext(text=f"pynixd: {line}\n"))
-                if build.scheduler_request_id is not None:
-                    await self.trampoline.on_build_complete_failed(
-                        build,
-                        error_msg,
-                    )
+            if not ranked and not self._has_compatible_store(build, build_features):
+                await self._fail_no_compatible_store(build, build_features)
                 continue
 
             if ranked:
-                # Take the highest ranked store
                 rs = next(iter(ranked))
                 log.debug(
                     "build_assigned_to_store",
@@ -415,152 +403,87 @@ class Scheduler:
                 )
                 assigned_this_pass[rs.store_id] = assigned_this_pass.get(rs.store_id, 0) + 1
             else:
-                # If all compatible stores have already failed this build,
-                # it's permanently stuck — fail it now with a clear message.
+                # All compatible stores are busy, or this build can't be placed
                 compatible = [s for s in self.stores.values() if s.supports_derivation(build.platform, build_features)]
                 if compatible and all(build.is_blacklisted(s.store_id) for s in compatible):
-                    failed_ids = [s.store_id for s in compatible]
-                    error_msg = (
-                        f"All compatible stores failed for {build.platform}"
-                        + (f" (requires {', '.join(sorted(build_features))})" if build_features else "")
-                        + f": {', '.join(failed_ids)}"
-                    )
-                    client = await self.queue.fail(build.id, error_msg)
-                    if client is not None:
-                        for line in error_msg.split("\n"):
-                            await client.queue.put(
-                                StderrNext(text=f"pynixd: {line}\n"),
-                            )
-                    if build.scheduler_request_id is not None:
-                        await self.trampoline.on_build_complete_failed(
-                            build,
-                            error_msg,
-                        )
+                    await self._fail_all_compatible_blacklisted(build, build_features, compatible)
                     continue
                 waiting_slot.append(build)
 
-        # 4. Update store metrics
+        return waiting_slot
+
+    def _has_compatible_store(
+        self,
+        build: QueuedBuild,
+        build_features: set[str] | None,
+    ) -> bool:
+        """Check if any live or dynamic store could ever support this build."""
+        return any(
+            s.supports_derivation(build.platform, build_features) for s in self.stores.values()
+        ) or self._dynamic_supports(build.platform, build_features)
+
+    async def _fail_no_compatible_store(
+        self,
+        build: QueuedBuild,
+        build_features: set[str] | None,
+    ) -> None:
+        """Permanently fail a build with no compatible store."""
+        error_msg = f"No compatible store for {build.platform}" + (
+            f" (requires {', '.join(sorted(build_features))})" if build_features else ""
+        )
+        client = await self.queue.fail(build.id, error_msg)
+        if client is not None:
+            for line in error_msg.split("\n"):
+                await client.queue.put(StderrNext(text=f"pynixd: {line}\n"))
+        if build.scheduler_request_ids:
+            await self.trampoline.on_build_complete_failed(build, error_msg)
+
+    async def _fail_all_compatible_blacklisted(
+        self,
+        build: QueuedBuild,
+        build_features: set[str] | None,
+        compatible: list[Store],
+    ) -> None:
+        """Permanently fail a build blacklisted by all compatible stores."""
+        failed_ids = [s.store_id for s in compatible]
+        error_msg = (
+            f"All compatible stores failed for {build.platform}"
+            + (f" (requires {', '.join(sorted(build_features))})" if build_features else "")
+            + f": {', '.join(failed_ids)}"
+        )
+        client = await self.queue.fail(build.id, error_msg)
+        if client is not None:
+            for line in error_msg.split("\n"):
+                await client.queue.put(StderrNext(text=f"pynixd: {line}\n"))
+        if build.scheduler_request_ids:
+            await self.trampoline.on_build_complete_failed(build, error_msg)
+
+    def _update_store_metrics(self) -> None:
+        """Update per-store metrics."""
         for s in self.stores.values():
-            metrics.STORE_HEALTHY.labels(store_id=s.store_id).set(1 if s.is_healthy else 0)
+            metrics.STORE_HEALTHY.labels(store_id=s.store_id).set(
+                1 if s.is_healthy else 0,
+            )
             if s.cpu_util:
                 metrics.STORE_CPU_UTILIZATION.labels(store_id=s.store_id).set(
                     s.cpu_util.utilization,
                 )
 
-        log.debug(
-            "scheduling_pass_done",
-            pending=len(pending),
-            waiting_paths=len(waiting_paths),
-            waiting_deps=len(waiting_deps),
-            waiting_slot=len(waiting_slot),
-            in_flight={s.store_id: s.in_flight for s in self.stores.values()},
-            cpu_util={
-                s.store_id: f"{s.cpu_util.utilization:.1f}%" if s.cpu_util else None for s in self.stores.values()
-            },
-        )
-
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
-        """Execute build on a store, handling inputs and outputs."""
+        """Execute build on a store, handling inputs and outputs.
+
+        Internal phases:
+        1. _prepare_build  — CA registration, resolve, strip features, stream inputs
+        2. _execute        — Call backend via build_conn
+        3. _collect_outputs — Pull outputs, register realisations, record stats
+        """
         build.assigned_store_id = store.store_id
         build_resp: BuildDerivationResponse | None = None
         try:
-            # Acquire build connection with semaphore FIRST to limit concurrency
-            # This must be done before any async operations that might block
             async with store.build_conn() as conn:
-                # 0. Register CA realisations from completed dependency builds
-                # on the target builder store so it can resolve deferred
-                # derivation output paths.
-                if build.depends_on:
-                    await self.derivation_resolver.register_dep_realisations(build, store)
-                    await self.derivation_resolver.resolve(build, store)
-
-                # Strip pynixd-handled features from requiredSystemFeatures.
-                # After resolution, the backend daemon doesn't need to see
-                # features like ca-derivations — pynixd already converted the
-                # derivation to a regular InputAddressed BuildDerivation.
-                self.allocator.strip_handled_features(build)
-
-                # 1. Ensure all inputs are present on the builder
-                missing_info = {
-                    p: info for p, info in build.required_paths.items() if p not in store.tracker.known_paths
-                }
-                if missing_info:
-                    missing_size = sum(info.nar_size for info in missing_info.values())
-                    log.debug(
-                        "build_sending_inputs",
-                        build_id=build.id,
-                        store_id=store.store_id,
-                        count=len(missing_info),
-                        size=missing_size,
-                    )
-                    await stream_paths_store_to_store(
-                        self.local_store,
-                        store,
-                        set(missing_info.keys()),
-                    )
-
-                # 2. Trigger build
-                log.debug("build_executing", build_id=build.id, store_id=store.store_id)
-                build.started_at = time.monotonic()
-                if build.wait_time is not None:
-                    metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
-                resp = await conn.call(build.request, client=build.client)
-                log.debug(
-                    "build_executed",
-                    build_id=build.id,
-                    status=resp.result.status,
-                )
-
-                # 3. Pull outputs back to local store if build succeeded
-                if resp.result.status == 0:
-                    ca_output_paths: StorePathSet = set()
-                    if resp.result.built_outputs:
-                        for realisation in resp.result.built_outputs.values():
-                            out_path = realisation.get("outPath")
-                            if out_path:
-                                ca_output_paths.add(
-                                    StorePath(out_path).with_store_prefix(),
-                                )
-                        build.ca_realisations = list(resp.result.built_outputs.values())
-
-                    outputs = build.request.derivation.output_paths()
-                    static_paths = {p for p in outputs.values() if p != StorePath("")}
-                    all_output_paths = static_paths | ca_output_paths
-                    store.tracker.add_known_paths(all_output_paths)
-                    log.info(
-                        "pulling_paths",
-                        store_id=store.store_id,
-                        count=len(all_output_paths),
-                    )
-                    for p in all_output_paths:
-                        log.debug("pulling_path", store_id=store.store_id, path=p)
-                    await stream_paths_store_to_store(store, self.local_store, all_output_paths)
-                    log.debug(
-                        "pulled_paths_into_local_store",
-                        count=len(all_output_paths),
-                        store_id=store.store_id,
-                    )
-
-                    # Register CA realisations after outputs are in local store
-                    await self.derivation_resolver.register_built_outputs(build, resp)
-
-                    # 4. Record build statistics
-                    if self.local_store.db:
-                        pname = build.request.derivation.env.get("pname")
-                        if pname:
-                            duration = int((time.monotonic() - build.started_at) * 1000)
-                            await self.local_store.db.record_build_stats(
-                                pname=pname,
-                                version=build.request.derivation.env.get("version", ""),
-                                platform=build.request.derivation.platform,
-                                serialized_drv=build.request.derivation.serialize_for_stats(),
-                                cpu_user_us=resp.result.cpu_user,
-                                cpu_system_us=resp.result.cpu_system,
-                                duration_ms=duration,
-                            )
-
-                # Capture response for completion AFTER semaphore is released
-                build_resp = resp
+                await self._prepare_build(build, store, conn)
+                build_resp = await self._execute(build, store, conn)
+                await self._collect_outputs(build, store, conn, build_resp)
 
         except ResourceExhaustedError as e:
             log.info(
@@ -573,24 +496,138 @@ class Scheduler:
             self.trigger()
         except (BackendError, InfrastructureError) as e:
             log.warning("build_failed_retryable", build_id=build.id, error=str(e))
-            # Don't fail the build yet, reset it for retry on another store
             build.reset_for_retry(store.store_id)
             self.trigger()
         except Exception:
             log.exception("build_crashed", build_id=build.id)
             await self.queue.fail(build.id, "Internal scheduler error")
-            if build.scheduler_request_id is not None:
+            if build.scheduler_request_ids:
                 await self.trampoline.on_build_complete_failed(
                     build,
                     "Internal scheduler error",
                 )
-
             self.trigger()
 
-        # Release semaphore FIRST, then complete and trigger
-        # This allows new builds to start while we're finalizing
         if build_resp is not None:
             await self.queue.complete(build.id, build_resp)
-            if build.scheduler_request_id is not None:
+            if build.scheduler_request_ids:
                 await self.trampoline.on_build_complete(build, build_resp)
             self.trigger()
+
+    async def _prepare_build(
+        self,
+        build: QueuedBuild,
+        store: Store,
+        conn: object,  # build connection (opaque to this method)
+    ) -> None:
+        """Register CA realisations, resolve deferred derivations, stream inputs.
+
+        All operations that must happen before the build request is sent
+        to the backend daemon.
+        """
+        # 0. Register CA realisations from completed dependency builds
+        if build.depends_on:
+            await self.derivation_resolver.register_dep_realisations(build, store)
+            await self.derivation_resolver.resolve(build, store)
+
+        # Strip pynixd-handled features from requiredSystemFeatures
+        self.allocator.strip_handled_features(build)
+
+        # 1. Ensure all inputs are present on the builder
+        missing_info = {p: info for p, info in build.required_paths.items() if p not in store.tracker.known_paths}
+        if missing_info:
+            missing_size = sum(info.nar_size for info in missing_info.values())
+            log.debug(
+                "build_sending_inputs",
+                build_id=build.id,
+                store_id=store.store_id,
+                count=len(missing_info),
+                size=missing_size,
+            )
+            await stream_paths_store_to_store(
+                self.local_store,
+                store,
+                set(missing_info.keys()),
+            )
+
+    async def _execute(
+        self,
+        build: QueuedBuild,
+        store: Store,
+        conn: object,  # build connection
+    ) -> BuildDerivationResponse:
+        """Call the backend daemon and return the response."""
+        log.debug("build_executing", build_id=build.id, store_id=store.store_id)
+        build.started_at = time.monotonic()
+        if build.wait_time is not None:
+            metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
+
+        resp = await conn.call(build.request, client=build.client)  # type: ignore[union-attr]
+        log.debug(
+            "build_executed",
+            build_id=build.id,
+            status=resp.result.status,
+        )
+        return resp
+
+    async def _collect_outputs(
+        self,
+        build: QueuedBuild,
+        store: Store,
+        conn: object,  # build connection
+        resp: BuildDerivationResponse,
+    ) -> None:
+        """Pull outputs back to local store, register realisations, record stats.
+
+        Runs after a successful build execution.
+        """
+        if resp.result.status != 0:
+            return
+
+        # Pull outputs from remote store to local store
+        ca_output_paths: StorePathSet = set()
+        if resp.result.built_outputs:
+            for realisation in resp.result.built_outputs.values():
+                out_path = realisation.get("outPath")
+                if out_path:
+                    ca_output_paths.add(
+                        StorePath(out_path).with_store_prefix(),
+                    )
+            build.ca_realisations = list(resp.result.built_outputs.values())
+
+        outputs = build.request.derivation.output_paths()
+        static_paths = {p for p in outputs.values() if p != StorePath("")}
+        all_output_paths = static_paths | ca_output_paths
+        store.tracker.add_known_paths(all_output_paths)
+        log.info(
+            "pulling_paths",
+            store_id=store.store_id,
+            count=len(all_output_paths),
+        )
+
+        await stream_paths_store_to_store(store, self.local_store, all_output_paths)
+        log.debug(
+            "pulled_paths_into_local_store",
+            count=len(all_output_paths),
+            store_id=store.store_id,
+        )
+
+        # Register CA realisations after outputs are in local store
+        await self.derivation_resolver.register_built_outputs(build, resp)
+
+        # Record build statistics
+        if self.local_store.db:
+            pname = build.request.derivation.env.get("pname")
+            if pname:
+                started_at = build.started_at
+                if started_at is not None:
+                    duration = int((time.monotonic() - started_at) * 1000)
+                    await self.local_store.db.record_build_stats(
+                        pname=pname,
+                        version=build.request.derivation.env.get("version", ""),
+                        platform=build.request.derivation.platform,
+                        serialized_drv=build.request.derivation.serialize_for_stats(),
+                        cpu_user_us=resp.result.cpu_user,
+                        cpu_system_us=resp.result.cpu_system,
+                        duration_ms=duration,
+                    )

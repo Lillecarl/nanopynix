@@ -93,10 +93,11 @@ from pynixd.types.path_info import SubstitutablePathInfo
 
 if TYPE_CHECKING:
     from pynixd.types.aliases import OutputMap
+from pynixd.stderr import OperationLogs
 from pynixd.types.build import BuildMode, BuildResult, BuildResultStatus
 from pynixd.types.derivation import BasicDerivation, DerivationOutput
-from pynixd.types.logs import OperationLogs
 from pynixd.types.path_info import UnkeyedValidPathInfo, ValidPathInfo
+from pynixd.types.protocol import ActivityType, Verbosity
 from pynixd.wire import (
     PROTOCOL_VERSION,
     BytesReader,
@@ -424,7 +425,11 @@ class TestOperationLogs:
 
         logs = OperationLogs()
         logs.add(StderrNext("before"))
-        logs.add(StderrStartActivity(act_id=1, level=2, type=0, text="", fields=["building"], parent=0))
+        logs.add(
+            StderrStartActivity(
+                act_id=1, level=Verbosity.NOTICE, type=ActivityType.UNKNOWN, text="", fields=["building"], parent=0
+            )
+        )
         logs.add(StderrNext("after"))
         w = BytesWriter()
         logs.to_writer(w)
@@ -768,11 +773,11 @@ class TestSetOptionsSerialization:
             keep_failed=0,
             keep_going=1,
             try_fallback=0,
-            verbosity=0,
+            verbosity=Verbosity.ERROR,
             max_build_jobs=4,
             max_silent_time=0,
             _obsolete_use_build_hook=0,
-            build_verbosity=0,
+            build_verbosity=Verbosity.ERROR,
             _obsolete_log_type=0,
             _obsolete_print_build_trace=0,
             build_cores=2,
@@ -799,11 +804,11 @@ class TestSetOptionsSerialization:
             keep_failed=0,
             keep_going=0,
             try_fallback=0,
-            verbosity=0,
+            verbosity=Verbosity.ERROR,
             max_build_jobs=0,
             max_silent_time=0,
             _obsolete_use_build_hook=0,
-            build_verbosity=0,
+            build_verbosity=Verbosity.ERROR,
             _obsolete_log_type=0,
             _obsolete_print_build_trace=0,
             build_cores=0,

@@ -10,21 +10,17 @@ import structlog
 
 from pynixd.operations.sign_path_info import SignPathInfoRequest
 
+from ..stderr import OperationLogs
 from ..store_path import StorePath
-from ..types import OperationLogs
 from ..wire import NixReader, NixWriter, forward_framed
-from .base import (
-    OpRequest,
-    OpResponse,
-    RequestContext,
-    ValidPathInfo,
-)
+from .base import OpRequest, OpResponse, ValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from ..connection import ClientConn
     from ..store import Store
+    from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
 
 

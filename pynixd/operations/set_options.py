@@ -8,15 +8,12 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from .. import wire
 from ..stderr import StderrNext
 from ..types.auth import Role
-from .base import (
-    OperationLogs,
-    OpRequest,
-    OpResponse,
-    RequestContext,
-)
+from ..types.protocol import Verbosity
+from .base import OperationLogs, OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..types import RequestContext as RequestContext
     from ..wire import NixReader, NixWriter
 
 # Silence SetOptions by default — it's extremely verbose
@@ -56,11 +53,11 @@ class SetOptionsRequest(OpRequest[SetOptionsResponse]):
     keep_failed: int
     keep_going: int
     try_fallback: int
-    verbosity: int
+    verbosity: Verbosity
     max_build_jobs: int
     max_silent_time: int
     _obsolete_use_build_hook: int
-    build_verbosity: int
+    build_verbosity: Verbosity
     _obsolete_log_type: int
     _obsolete_print_build_trace: int
     build_cores: int
@@ -80,11 +77,11 @@ class SetOptionsRequest(OpRequest[SetOptionsResponse]):
         obj.keep_failed = await reader.read_uint64()
         obj.keep_going = await reader.read_uint64()
         obj.try_fallback = await reader.read_uint64()
-        obj.verbosity = await reader.read_uint64()
+        obj.verbosity = Verbosity(await reader.read_uint64())
         obj.max_build_jobs = await reader.read_uint64()
         obj.max_silent_time = await reader.read_uint64()
         obj._obsolete_use_build_hook = await reader.read_uint64()
-        obj.build_verbosity = await reader.read_uint64()
+        obj.build_verbosity = Verbosity(await reader.read_uint64())
         obj._obsolete_log_type = await reader.read_uint64()
         obj._obsolete_print_build_trace = await reader.read_uint64()
         obj.build_cores = await reader.read_uint64()

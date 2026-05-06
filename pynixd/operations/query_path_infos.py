@@ -8,13 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
-from .base import (
-    OperationLogs,
-    OpRequest,
-    OpResponse,
-    UnkeyedValidPathInfo,
-    ValidPathInfo,
-)
+from .base import OperationLogs, OpRequest, OpResponse, UnkeyedValidPathInfo, ValidPathInfo
 from .query_path_info import QueryPathInfoRequest
 
 QUERY_PATH_INFOS_BATCH = """

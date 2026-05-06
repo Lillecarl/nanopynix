@@ -6,12 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
-from .base import (
-    OperationLogs,
-    OpRequest,
-    OpResponse,
-    UnkeyedValidPathInfo,
-)
+from .base import OperationLogs, OpRequest, OpResponse, UnkeyedValidPathInfo
 
 QUERY_PATH_INFO = """
 SELECT path, deriver, hash, registrationTime, narSize, ultimate, sigs, ca

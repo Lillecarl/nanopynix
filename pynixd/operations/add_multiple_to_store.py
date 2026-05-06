@@ -6,13 +6,13 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..stderr import StderrNext
-from ..types import OperationLogs
+from ..stderr import OperationLogs, StderrNext
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
-from .base import OpRequest, OpResponse, RequestContext, ValidPathInfo
+from .base import OpRequest, OpResponse, ValidPathInfo
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..types import RequestContext as RequestContext
 
 
 @dataclass

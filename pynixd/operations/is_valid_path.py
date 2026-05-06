@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
+from ..stderr import OperationLogs
 from ..store_path import StorePath
-from ..types import OperationLogs
 from .base import OpRequest, OpResponse
 
 IS_VALID_PATH = "SELECT 1 FROM ValidPaths WHERE path = ? LIMIT 1"

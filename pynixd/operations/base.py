@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 import structlog
 
 from ..exceptions import OpNotImplementedError
+from ..stderr import OperationLogs as OperationLogs
 from ..types import (
     BasicDerivation as BasicDerivation,
 )
@@ -41,13 +42,7 @@ from ..types import (
     KeyedBuildResult as KeyedBuildResult,
 )
 from ..types import (
-    OperationLogs as OperationLogs,
-)
-from ..types import (
     OutputKind as OutputKind,
-)
-from ..types import (
-    RequestContext as RequestContext,
 )
 from ..types import (
     Role as Role,
@@ -66,6 +61,7 @@ from ..wire import NixReader, NixWriter
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..types import RequestContext as RequestContext
 
 log = structlog.get_logger(__name__)
 
