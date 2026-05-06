@@ -405,3 +405,64 @@ class TestToJson:
         result = parsed.to_json("/nix/store/ca.drv")
         out_entry = result["/nix/store/ca.drv"]["outputs"]["out"]
         assert "path" not in out_entry
+
+
+class TestSerialize:
+    """Tests for ParsedDerivation.serialize() roundtrips."""
+
+    def test_traditional_roundtrip(self):
+        text = (
+            'Derive([("out","/nix/store/result","",""),'
+            '("dev","/nix/store/dev","","")],'
+            '[("/nix/store/dep.drv",["out"])],'
+            '["/nix/store/src"],'
+            '"x86_64-linux","/bin/bash",["-c","true"],'
+            '[("name","test"),("key","value")])'
+        )
+        parsed = parse_drv(text)
+        serialized = parsed.serialize()
+        reparsed = parse_drv(serialized)
+        assert reparsed.serialize() == serialized
+
+    def test_dynamic_roundtrip(self):
+        text = (
+            'DrvWithVersion("xp-dyn-drv",'
+            '[("out","/nix/store/result","","")],'
+            '[("/nix/store/dep.drv",([],[])),'
+            '("/nix/store/simple.drv",["out"])],'
+            '[],"x86_64-linux","/bin/sh",["-c","true"],'
+            '[("name","dyn")])'
+        )
+        parsed = parse_drv(text)
+        serialized = parsed.serialize()
+        reparsed = parse_drv(serialized)
+        assert reparsed.serialize() == serialized
+
+    def test_empty_derivation(self):
+        text = 'Derive([],[],[],"x86_64-linux","/bin/sh",[],[])'
+        parsed = parse_drv(text)
+        assert parsed.serialize() == text
+
+    def test_escaping(self):
+        parsed = ParsedDerivation(
+            outputs=[OutputInfo(name="out", path="", hash_algo="", hash_value="")],
+            input_drvs={},
+            input_srcs=set(),
+            platform="x86_64-linux",
+            builder='/bin/sh -c "echo \\"hello\\""',
+            args=["-c", 'echo "hello"'],
+            env={"key": "value\nwith\ttabs"},
+        )
+        serialized = parsed.serialize()
+        reparsed = parse_drv(serialized)
+        assert reparsed.builder == parsed.builder
+        assert reparsed.args == parsed.args
+        assert reparsed.env == parsed.env
+
+    def test_live_probe_roundtrip(self, probes):
+        """Every live probe must roundtrip idempotently."""
+        for name, drv_content, _ in probes.values():
+            parsed = parse_drv(drv_content)
+            serialized = parsed.serialize()
+            reparsed = parse_drv(serialized)
+            assert reparsed.serialize() == serialized, f"roundtrip failed for {name}"

@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING
 
+from .drv_parser import _aterm_escape
 from .operations.base import BasicDerivation, DerivationOutput
 from .store_path import StorePath
 from .utils import nix32_encode
@@ -123,14 +124,6 @@ def _make_output_path(
 ) -> str:
     name = _output_path_name(drv_name, output_id)
     return _make_store_path(f"output:{output_id}", hash_modulo, name, store_dir)
-
-
-def _aterm_escape(s: str) -> str:
-    s = s.replace("\\", "\\\\")
-    s = s.replace('"', '\\"')
-    s = s.replace("\n", "\\n")
-    s = s.replace("\r", "\\r")
-    return s.replace("\t", "\\t")
 
 
 def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -> str:

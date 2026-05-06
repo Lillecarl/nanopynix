@@ -121,8 +121,8 @@ log = structlog.get_logger(__name__)
 
 
 def pytest_ignore_collect(collection_path: Path) -> bool | None:
-    """Skip nar_integration directory during test collection."""
-    if "nar_integration" in str(collection_path):
+    """Skip integration test directories during normal collection."""
+    if "nar_integration" in str(collection_path) or "drv_integration" in str(collection_path):
         return True
     return None
 

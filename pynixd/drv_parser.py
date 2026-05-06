@@ -76,6 +76,14 @@ class NixDerivationShow(TypedDict):
     system: str
 
 
+def _aterm_escape(s: str) -> str:
+    s = s.replace("\\", "\\\\")
+    s = s.replace('"', '\\"')
+    s = s.replace("\n", "\\n")
+    s = s.replace("\r", "\\r")
+    return s.replace("\t", "\\t")
+
+
 @dataclass
 class OutputInfo:
     """A single derivation output from ATerm parsing."""
@@ -191,6 +199,96 @@ class ParsedDerivation:
             "system": self.platform,
         }
         return {drv_path_str: inner}
+
+    def serialize(self) -> str:
+        """Serialize to ATerm format (the on-disk .drv representation).
+
+        Returns a string in either ``Derive(...)`` or
+        ``DrvWithVersion("xp-dyn-drv", ...)`` format.
+        """
+        if self.is_dynamic:
+            return self._serialize_dynamic()
+        return self._serialize_traditional()
+
+    def _serialize_traditional(self) -> str:
+        parts: list[str] = ["Derive("]
+
+        # Serialize outputs
+        out_parts = [
+            f'("{_aterm_escape(o.name)}","{_aterm_escape(o.path)}",'
+            f'"{_aterm_escape(o.hash_algo)}","{_aterm_escape(o.hash_value)}")'
+            for o in sorted(self.outputs, key=lambda x: x.name)
+        ]
+        parts.append(f"[{','.join(out_parts)}],")
+
+        # Serialize input derivations
+        drv_parts = [
+            f'("{_aterm_escape(str(drv_path))}",[{",".join(f'"{_aterm_escape(o)}"' for o in outputs)}])'
+            for drv_path, outputs in sorted(self.input_drvs.items(), key=lambda x: str(x[0]))
+        ]
+        parts.append(f"[{','.join(drv_parts)}],")
+
+        # Serialize input sources
+        srcs = ",".join(f'"{_aterm_escape(str(p))}"' for p in sorted(str(p) for p in self.input_srcs))
+        parts.append(f"[{srcs}],")
+
+        parts.append(f'"{_aterm_escape(self.platform)}",')
+        parts.append(f'"{_aterm_escape(self.builder)}",')
+
+        args = ",".join(f'"{_aterm_escape(a)}"' for a in self.args)
+        parts.append(f"[{args}],")
+
+        env_parts = [f'("{_aterm_escape(k)}","{_aterm_escape(v)}")' for k, v in sorted(self.env.items())]
+        parts.append(f"[{','.join(env_parts)}]")
+
+        parts.append(")")
+        return "".join(parts)
+
+    def _serialize_dynamic(self) -> str:
+        parts: list[str] = ['DrvWithVersion("xp-dyn-drv",']
+
+        # outputs (same as traditional)
+        out_parts = [
+            f'("{_aterm_escape(o.name)}","{_aterm_escape(o.path)}",'
+            f'"{_aterm_escape(o.hash_algo)}","{_aterm_escape(o.hash_value)}")'
+            for o in sorted(self.outputs, key=lambda x: x.name)
+        ]
+        parts.append(f"[{','.join(out_parts)}],")
+
+        # input_drvs — mixed simple and dynamic entries
+        def _serialize_drv_entry(drv_path: StorePath) -> str:
+            outputs = self.input_drvs.get(drv_path, [])
+            dynamic = self.dynamic_input_drvs.get(drv_path)
+            out_list = ",".join(f'"{_aterm_escape(o)}"' for o in outputs)
+
+            if dynamic is not None:
+                nested_parts = [
+                    f'("{_aterm_escape(nested_name)}",[{",".join(f'"{_aterm_escape(d)}"' for d in nested_deps)}])'
+                    for nested_name, nested_deps in sorted(dynamic.items())
+                ]
+                dynamic_out_names = ",".join(f'"{_aterm_escape(k)}"' for k in sorted(dynamic.keys()))
+                return f'("{_aterm_escape(str(drv_path))}",([{dynamic_out_names}],[{",".join(nested_parts)}]))'
+            return f'("{_aterm_escape(str(drv_path))}",[{out_list}])'
+
+        all_drv_paths = sorted(set(self.input_drvs) | set(self.dynamic_input_drvs), key=str)
+        drv_parts = [_serialize_drv_entry(drv_path) for drv_path in all_drv_paths]
+        parts.append(f"[{','.join(drv_parts)}],")
+
+        # input_srcs
+        srcs = ",".join(f'"{_aterm_escape(str(p))}"' for p in sorted(str(p) for p in self.input_srcs))
+        parts.append(f"[{srcs}],")
+
+        parts.append(f'"{_aterm_escape(self.platform)}",')
+        parts.append(f'"{_aterm_escape(self.builder)}",')
+
+        args = ",".join(f'"{_aterm_escape(a)}"' for a in self.args)
+        parts.append(f"[{args}],")
+
+        env_parts = [f'("{_aterm_escape(k)}","{_aterm_escape(v)}")' for k, v in sorted(self.env.items())]
+        parts.append(f"[{','.join(env_parts)}]")
+
+        parts.append(")")
+        return "".join(parts)
 
 
 _STRING_CHUNK = re.compile(r'([^"\\]*)(["\\])')
