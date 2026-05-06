@@ -407,3 +407,224 @@ def nar_size(data: bytes) -> int:
     if forwarder.complete:
         return offset
     raise ValueError("Incomplete NAR archive in buffer")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# pathlib-like API
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True)
+class NarPath:
+    """A pathlib-like interface for navigating and editing NAR archives.
+
+    Usage::
+
+        # Build a directory NAR
+        root = NarPath()
+        root = (root / "bin" / "hello").write_text("hi", executable=True)
+        data = root.to_nar()
+
+        # Build a single-file NAR
+        root = NarPath().write_text("hello")
+        data = root.to_nar()
+    """
+
+    _root: NarNode = field(default_factory=NarDirectory)
+    _parts: tuple[str, ...] = ()
+
+    @classmethod
+    def from_nar(cls, data: bytes) -> NarPath:
+        """Create a NarPath from raw NAR bytes."""
+        return cls(parse_nar(data), ())
+
+    @classmethod
+    def from_node(cls, node: NarNode) -> NarPath:
+        """Create a NarPath from an existing NarNode."""
+        return cls(node, ())
+
+    def to_nar(self) -> bytes:
+        """Serialize the NAR archive rooted at this path."""
+        return write_nar(self._root)
+
+    @property
+    def name(self) -> str:
+        return self._parts[-1] if self._parts else ""
+
+    @property
+    def parent(self) -> NarPath:
+        return NarPath(self._root, self._parts[:-1])
+
+    def __truediv__(self, other: str) -> NarPath:
+        if not isinstance(other, str):
+            return NotImplemented
+        new_parts = list(self._parts)
+        for segment in other.split("/"):
+            if segment in ("", "."):
+                continue
+            if segment == "..":
+                if new_parts:
+                    new_parts.pop()
+            else:
+                new_parts.append(segment)
+        return NarPath(self._root, tuple(new_parts))
+
+    def __str__(self) -> str:
+        if not self._parts:
+            return "/"
+        return "/" + "/".join(self._parts)
+
+    def __repr__(self) -> str:
+        return f"NarPath({str(self)!r})"
+
+    def _resolve(self) -> NarNode:
+        node = self._root
+        for part in self._parts:
+            if not isinstance(node, NarDirectory):
+                raise ValueError(f"Not a directory: {self}")  # noqa: TRY004
+            for entry in node.entries:
+                if entry.name == part:
+                    node = entry.node
+                    break
+            else:
+                raise ValueError(f"Path not found: {self}")
+        return node
+
+    def exists(self) -> bool:
+        try:
+            self._resolve()
+        except ValueError:
+            return False
+        else:
+            return True
+
+    def is_file(self) -> bool:
+        try:
+            return isinstance(self._resolve(), NarRegular)
+        except ValueError:
+            return False
+
+    def is_dir(self) -> bool:
+        try:
+            return isinstance(self._resolve(), NarDirectory)
+        except ValueError:
+            return False
+
+    def is_symlink(self) -> bool:
+        try:
+            return isinstance(self._resolve(), NarSymlink)
+        except ValueError:
+            return False
+
+    def iterdir(self) -> Iterator[NarPath]:
+        node = self._resolve()
+        if not isinstance(node, NarDirectory):
+            raise ValueError(f"Not a directory: {self}")  # noqa: TRY004
+        for entry in node.entries:
+            yield NarPath(self._root, (*self._parts, entry.name))
+
+    def read_bytes(self) -> bytes:
+        node = self._resolve()
+        if not isinstance(node, NarRegular):
+            raise ValueError(f"Not a regular file: {self}")  # noqa: TRY004
+        return node.contents
+
+    def read_text(self, encoding: str = "utf-8") -> str:
+        return self.read_bytes().decode(encoding)
+
+    def _replace_in_tree(self, new_node: NarNode) -> NarNode:
+        """Rebuild the tree, replacing the node at self._parts."""
+        if not self._parts:
+            return new_node
+
+        def rebuild(node: NarNode, parts: tuple[str, ...]) -> NarNode:
+            assert isinstance(node, NarDirectory)
+            name = parts[0]
+            new_entries = []
+            found = False
+            for entry in node.entries:
+                if entry.name == name:
+                    found = True
+                    if len(parts) == 1:
+                        new_entries.append(NarDirectoryEntry(name=name, node=new_node))
+                    else:
+                        new_entries.append(NarDirectoryEntry(name=name, node=rebuild(entry.node, parts[1:])))
+                else:
+                    new_entries.append(entry)
+            if not found:
+                raise ValueError(f"Path not found: {self}")
+            return NarDirectory(entries=new_entries)
+
+        return rebuild(self._root, self._parts)
+
+    def _insert_child(self, name: str, node: NarNode) -> NarNode:
+        """Insert a child into this directory, returning new root."""
+        target = self._resolve()
+        if not isinstance(target, NarDirectory):
+            raise ValueError(f"Not a directory: {self}")  # noqa: TRY004
+        for entry in target.entries:
+            if entry.name == name:
+                raise ValueError(f"File exists: {name}")
+        new_entries = [*target.entries, NarDirectoryEntry(name=name, node=node)]
+        return self._replace_in_tree(NarDirectory(entries=new_entries))
+
+    def write_bytes(self, data: bytes, *, executable: bool = False) -> NarPath:
+        """Write file contents, returning a NarPath to the root of the new tree.
+
+        When called on the root path (``/``), replaces the root directory
+        with a file — useful for creating single-file NARs.
+        """
+        new_node = NarRegular(contents=data, executable=executable)
+        if self.exists():
+            if self.is_dir() and self._parts:
+                raise ValueError(f"Is a directory: {self}")
+            new_root = self._replace_in_tree(new_node)
+        else:
+            parent = self.parent
+            if not parent.exists():
+                raise ValueError(f"No such directory: {parent}")
+            new_root = parent._insert_child(self.name, new_node)
+        return NarPath(new_root, ())
+
+    def write_text(self, text: str, *, encoding: str = "utf-8", executable: bool = False) -> NarPath:
+        return self.write_bytes(text.encode(encoding), executable=executable)
+
+    def mkdir(self, *, parents: bool = False) -> NarPath:
+        """Create a directory, returning a NarPath to the root of the new tree."""
+        if self.exists():
+            if self.is_dir():
+                return NarPath(self._root, ())
+            raise ValueError(f"File exists: {self}")
+        if not self._parts:
+            raise ValueError("Cannot mkdir root")
+        parent = self.parent
+        if not parent.exists():
+            if not parents:
+                raise ValueError(f"No such directory: {parent}")
+            root = parent.mkdir(parents=True)
+            parent = NarPath(root._root, parent._parts)
+        new_root = parent._insert_child(self.name, NarDirectory())
+        return NarPath(new_root, ())
+
+    def unlink(self) -> NarPath:
+        """Remove this path from its parent, returning a NarPath to the root of the new tree."""
+        if not self.exists():
+            raise ValueError(f"No such file or directory: {self}")
+        if not self._parts:
+            raise ValueError("Cannot unlink root")
+        parent = self.parent
+        target = parent._resolve()
+        if not isinstance(target, NarDirectory):
+            raise ValueError(f"Parent is not a directory: {parent}")  # noqa: TRY004
+        new_entries = [e for e in target.entries if e.name != self.name]
+        new_root = parent._replace_in_tree(NarDirectory(entries=new_entries))
+        return NarPath(new_root, ())
+
+    def chmod(self, *, executable: bool = True) -> NarPath:
+        """Toggle executable flag, returning a NarPath to the root of the new tree."""
+        node = self._resolve()
+        if not isinstance(node, NarRegular):
+            raise ValueError(f"Not a regular file: {self}")  # noqa: TRY004
+        new_node = NarRegular(contents=node.contents, executable=executable)
+        new_root = self._replace_in_tree(new_node)
+        return NarPath(new_root, ())

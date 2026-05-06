@@ -9,6 +9,7 @@ from pynixd.nar import (
     NarDirectoryEntry,
     NarForwarder,
     NarNode,
+    NarPath,
     NarRegular,
     NarSymlink,
     find_nar_entry,
@@ -415,3 +416,215 @@ class TestNarSize:
         data = write_nar(node)
         with pytest.raises(ValueError, match="Incomplete"):
             nar_size(data[: len(data) // 2])
+
+
+class TestNarPath:
+    """Test the pathlib-like NarPath API."""
+
+    async def test_construction_from_nar(self):
+        data = write_nar(NarDirectory(entries=[NarDirectoryEntry(name="a", node=NarRegular(contents=b"hello"))]))
+        root = NarPath.from_nar(data)
+        assert root.is_dir()
+        assert (root / "a").is_file()
+        assert (root / "a").read_bytes() == b"hello"
+
+    async def test_construction_from_node(self):
+        root = NarPath.from_node(NarDirectory())
+        assert root.is_dir()
+
+    async def test_navigation(self):
+        root = NarPath.from_node(NarDirectory())
+        a = root / "a"
+        ab = a / "b"
+        assert ab._parts == ("a", "b")
+        assert ab.parent == a
+        assert ab.name == "b"
+        assert str(ab) == "/a/b"
+        assert repr(ab) == "NarPath('/a/b')"
+
+    async def test_navigation_with_dot_and_dotdot(self):
+        root = NarPath.from_node(NarDirectory())
+        a = root / "a" / "b" / ".." / "c"
+        assert a._parts == ("a", "c")
+
+    async def test_navigation_with_slash(self):
+        root = NarPath.from_node(NarDirectory())
+        p = root / "a/b/c"
+        assert p._parts == ("a", "b", "c")
+
+    async def test_type_checks(self):
+        root = NarPath.from_node(
+            NarDirectory(
+                entries=[
+                    NarDirectoryEntry(name="file", node=NarRegular(contents=b"x")),
+                    NarDirectoryEntry(name="dir", node=NarDirectory()),
+                    NarDirectoryEntry(name="link", node=NarSymlink(target="file")),
+                ]
+            )
+        )
+        assert (root / "file").is_file()
+        assert (root / "file").exists()
+        assert not (root / "file").is_dir()
+        assert not (root / "file").is_symlink()
+        assert (root / "dir").is_dir()
+        assert (root / "link").is_symlink()
+        assert not (root / "missing").exists()
+        assert not (root / "missing").is_file()
+        assert not (root / "missing").is_dir()
+
+    async def test_iterdir(self):
+        root = NarPath.from_node(
+            NarDirectory(
+                entries=[
+                    NarDirectoryEntry(name="a", node=NarRegular(contents=b"1")),
+                    NarDirectoryEntry(name="b", node=NarRegular(contents=b"2")),
+                ]
+            )
+        )
+        names = {p.name for p in root.iterdir()}
+        assert names == {"a", "b"}
+
+    async def test_iterdir_not_a_directory(self):
+        root = NarPath.from_node(NarRegular(contents=b"x"))
+        with pytest.raises(ValueError, match="Not a directory"):
+            list(root.iterdir())
+
+    async def test_read_bytes(self):
+        root = NarPath.from_node(
+            NarDirectory(entries=[NarDirectoryEntry(name="file", node=NarRegular(contents=b"hello"))])
+        )
+        assert (root / "file").read_bytes() == b"hello"
+
+    async def test_read_text(self):
+        root = NarPath.from_node(
+            NarDirectory(entries=[NarDirectoryEntry(name="file", node=NarRegular(contents=b"hello"))])
+        )
+        assert (root / "file").read_text() == "hello"
+
+    async def test_read_not_a_file(self):
+        root = NarPath.from_node(NarDirectory())
+        with pytest.raises(ValueError, match="Not a regular file"):
+            root.read_bytes()
+
+    async def test_write_bytes_new_file(self):
+        root = NarPath.from_node(NarDirectory())
+        root = (root / "file").write_bytes(b"hello")
+        assert (root / "file").read_bytes() == b"hello"
+        assert not (root / "file").is_dir()
+
+    async def test_write_bytes_replace(self):
+        root = NarPath.from_node(
+            NarDirectory(entries=[NarDirectoryEntry(name="file", node=NarRegular(contents=b"old"))])
+        )
+        root = (root / "file").write_bytes(b"new")
+        assert (root / "file").read_bytes() == b"new"
+
+    async def test_write_bytes_executable(self):
+        root = NarPath.from_node(NarDirectory())
+        root = (root / "script").write_bytes(b"#!/bin/sh", executable=True)
+        node = (root / "script")._resolve()
+        assert isinstance(node, NarRegular)
+        assert node.executable
+
+    async def test_write_text(self):
+        root = NarPath.from_node(NarDirectory())
+        root = (root / "file").write_text("hello")
+        assert (root / "file").read_text() == "hello"
+
+    async def test_write_bytes_missing_parent(self):
+        root = NarPath.from_node(NarDirectory())
+        with pytest.raises(ValueError, match="No such directory"):
+            (root / "a" / "file").write_bytes(b"data")
+
+    async def test_write_bytes_on_directory(self):
+        root = NarPath.from_node(NarDirectory(entries=[NarDirectoryEntry(name="a", node=NarDirectory())]))
+        with pytest.raises(ValueError, match="Is a directory"):
+            (root / "a").write_bytes(b"data")
+
+    async def test_mkdir(self):
+        root = NarPath.from_node(NarDirectory())
+        root = (root / "a").mkdir()
+        assert (root / "a").is_dir()
+
+    async def test_mkdir_parents(self):
+        root = NarPath.from_node(NarDirectory())
+        root = (root / "a" / "b").mkdir(parents=True)
+        assert (root / "a").is_dir()
+        assert (root / "a" / "b").is_dir()
+
+    async def test_mkdir_existing(self):
+        root = NarPath.from_node(NarDirectory(entries=[NarDirectoryEntry(name="a", node=NarDirectory())]))
+        root = (root / "a").mkdir()
+        assert (root / "a").is_dir()
+
+    async def test_mkdir_existing_file(self):
+        root = NarPath.from_node(NarDirectory(entries=[NarDirectoryEntry(name="a", node=NarRegular(contents=b"x"))]))
+        with pytest.raises(ValueError, match="File exists"):
+            (root / "a").mkdir()
+
+    async def test_unlink(self):
+        root = NarPath.from_node(NarDirectory(entries=[NarDirectoryEntry(name="a", node=NarRegular(contents=b"x"))]))
+        root = (root / "a").unlink()
+        assert not (root / "a").exists()
+        assert root.is_dir()
+
+    async def test_unlink_root(self):
+        root = NarPath.from_node(NarDirectory())
+        with pytest.raises(ValueError, match="Cannot unlink root"):
+            root.unlink()
+
+    async def test_unlink_missing(self):
+        root = NarPath.from_node(NarDirectory())
+        with pytest.raises(ValueError, match="No such file"):
+            (root / "a").unlink()
+
+    async def test_chmod(self):
+        root = NarPath.from_node(
+            NarDirectory(entries=[NarDirectoryEntry(name="script", node=NarRegular(contents=b"x", executable=False))])
+        )
+        root = (root / "script").chmod(executable=True)
+        node = (root / "script")._resolve()
+        assert isinstance(node, NarRegular)
+        assert node.executable
+
+    async def test_chmod_not_a_file(self):
+        root = NarPath.from_node(NarDirectory())
+        with pytest.raises(ValueError, match="Not a regular file"):
+            root.chmod()
+
+    async def test_immutability(self):
+        root = NarPath.from_node(NarDirectory())
+        child = root / "a"
+        new_root = child.mkdir()
+        assert not child.exists()
+        assert (new_root / "a").exists()
+
+    async def test_to_nar_roundtrip(self):
+        root = NarPath.from_node(NarDirectory())
+        root = (root / "a").mkdir()
+        root = (root / "a" / "file").write_text("hello")
+        root = (root / "a" / "script").write_bytes(b"#!/bin/sh", executable=True)
+        root = (root / "b").write_bytes(b"world")
+        data = root.to_nar()
+        restored = NarPath.from_nar(data)
+        assert (restored / "a" / "file").read_text() == "hello"
+        assert (restored / "a" / "script").read_bytes() == b"#!/bin/sh"
+        script = (restored / "a" / "script")._resolve()
+        assert isinstance(script, NarRegular)
+        assert script.executable
+        assert (restored / "b").read_bytes() == b"world"
+
+    async def test_complex_build(self):
+        root = NarPath.from_node(NarDirectory())
+        root = (root / "nix" / "store" / "abc").mkdir(parents=True)
+        root = (root / "nix" / "store" / "abc" / "bin").mkdir(parents=True)
+        root = (root / "nix" / "store" / "abc" / "lib").mkdir(parents=True)
+        root = (root / "nix" / "store" / "abc" / "bin" / "hello").write_text("hi", executable=True)
+        root = (root / "nix" / "store" / "abc" / "lib" / "libhello.so").write_bytes(b"\x7fELF")
+        root = (root / "nix" / "store" / "abc" / "README").write_text("Read me")
+        assert (root / "nix" / "store" / "abc" / "bin" / "hello").read_text() == "hi"
+        assert (root / "nix" / "store" / "abc" / "lib" / "libhello.so").read_bytes() == b"\x7fELF"
+        assert (root / "nix" / "store" / "abc" / "README").read_text() == "Read me"
+        restored = NarPath.from_nar(root.to_nar())
+        assert (restored / "nix" / "store" / "abc" / "bin" / "hello").read_text() == "hi"
+        assert (restored / "nix" / "store" / "abc" / "lib" / "libhello.so").read_bytes() == b"\x7fELF"
