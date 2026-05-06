@@ -44,7 +44,7 @@ from .types.derivation import OutputKind
 
 if TYPE_CHECKING:
     from .build_queue import QueuedBuild
-    from .drv_parser import ParsedDerivation
+    from .drv_parser import Derivation
     from .operations.base import BasicDerivation
     from .operations.build_derivation import BuildDerivationResponse
     from .scheduler import DerivationReader, Scheduler
@@ -194,7 +194,7 @@ class DerivationResolver:
 
     def _should_resolve(
         self,
-        parsed: ParsedDerivation,
+        parsed: Derivation,
     ) -> bool:
         """Determine whether a derivation needs resolution before building.
 
@@ -233,7 +233,7 @@ class DerivationResolver:
         self,
         drv_path: StorePath,
         build_id: int,
-    ) -> ParsedDerivation | None:
+    ) -> Derivation | None:
         """Read and parse a .drv file from the local store."""
         try:
             return await self.read_drv_fn(self.local_store.store_path, drv_path)

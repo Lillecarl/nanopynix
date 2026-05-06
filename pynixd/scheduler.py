@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from .connection import ClientConn
     from .context import PynixdContext
     from .derived_path import DerivedPath
-    from .drv_parser import ParsedDerivation
+    from .drv_parser import Derivation
     from .operations.build_derivation import (
         BuildDerivationRequest,
         BuildDerivationResponse,
@@ -51,7 +51,7 @@ from .store.transfer import stream_paths_store_to_store
 
 log = structlog.get_logger(__name__)
 
-DerivationReader = Callable[[Path, "StorePath"], Awaitable["ParsedDerivation"]]
+DerivationReader = Callable[[Path, "StorePath"], Awaitable["Derivation"]]
 
 
 class Scheduler:

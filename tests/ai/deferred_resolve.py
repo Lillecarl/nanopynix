@@ -24,7 +24,7 @@ import anyio
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from pynixd.drv_parser import ParsedDerivation, read_drv_file
+from pynixd.drv_parser import Derivation, read_drv_file
 from pynixd.operations.base import BasicDerivation, BuildMode, DerivationOutput
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import (
@@ -213,7 +213,7 @@ def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -
 
 
 def resolve_derivation(
-    drv: ParsedDerivation,
+    drv: Derivation,
     drv_path: StorePath,
     resolved_output_paths: dict[str, StorePath],
 ) -> BasicDerivation:
@@ -265,7 +265,7 @@ def resolve_derivation(
             rewrites[placeholder] = str(actual_path)
             new_input_srcs.add(StorePath(str(actual_path)))
 
-    # Create a BasicDerivation (copy from ParsedDerivation)
+    # Create a BasicDerivation (copy from Derivation)
     resolved = BasicDerivation(
         outputs={
             o.name: DerivationOutput(

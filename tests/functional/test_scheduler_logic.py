@@ -5,7 +5,7 @@ import pytest
 from pynixd.config import PynixdSettings
 from pynixd.context import PynixdContext
 from pynixd.derived_path import DerivedPath
-from pynixd.drv_parser import OutputInfo, ParsedDerivation
+from pynixd.drv_parser import Derivation, OutputInfo
 from pynixd.operations.base import (
     BasicDerivation,
     BuildMode,
@@ -296,7 +296,7 @@ async def test_scheduler_decomposition_and_ordering():
         outputs={leaf_path: {"out": StorePath("/nix/store/leaf-out")}},
     )
 
-    leaf_drv = ParsedDerivation(
+    leaf_drv = Derivation(
         outputs=[
             OutputInfo(
                 name="out",
@@ -309,7 +309,7 @@ async def test_scheduler_decomposition_and_ordering():
         input_srcs=set(),
         platform="x86_64-linux",
     )
-    root_drv = ParsedDerivation(
+    root_drv = Derivation(
         outputs=[
             OutputInfo(
                 name="out",

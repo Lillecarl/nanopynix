@@ -22,7 +22,7 @@ from .types.build import BuildResult, BuildResultStatus
 
 if TYPE_CHECKING:
     from .connection import ClientConn
-    from .drv_parser import ParsedDerivation
+    from .drv_parser import Derivation
     from .scheduler import DerivationReader, Scheduler
     from .types import Realisation
     from .types.aliases import StorePathSet
@@ -96,7 +96,7 @@ class BuildDecomposer:
             if isinstance(dp, DerivedPath):
                 drv_to_derived.setdefault(dp.drv_path, dp)
 
-        parsed_cache: dict[StorePath, ParsedDerivation] = {}
+        parsed_cache: dict[StorePath, Derivation] = {}
         all_planned_outputs: StorePathSet = set()
         all_input_drvs: StorePathSet = set()
 

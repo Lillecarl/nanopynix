@@ -55,7 +55,7 @@ code with no unit tests.
   for given `name` + `hash` combinations
 - Test `_hash_derivation_modulo()` — verify ATerm hashing matches Nix
   (this is the key operation for CA derivation identity)
-- Test `resolve_derivation()` — full end-to-end with mock `ParsedDerivation`
+- Test `resolve_derivation()` — full end-to-end with mock `Derivation`
 - Test `resolve_dynamic_derivation()` — dynamic drv resolution
 - Test `_rewrite_strings()` — verify string replacement ordering
 

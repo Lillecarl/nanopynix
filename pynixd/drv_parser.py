@@ -1,7 +1,7 @@
 """
 Parser for Nix .drv files (ATerm format).
 
-Parses the ATerm representation into a structured ParsedDerivation.
+Parses the ATerm representation into a structured Derivation.
 Handles Derive(...) and DrvWithVersion("xp-dyn-drv",...) formats.
 
 ATerm .drv format (Traditional Derive):
@@ -95,7 +95,7 @@ class OutputInfo:
 
 
 @dataclass
-class ParsedDerivation:
+class Derivation:
     """A parsed .drv file."""
 
     outputs: list[OutputInfo] = field(default_factory=list)
@@ -503,7 +503,7 @@ class _Parser:
         self._expect("]")
         return result
 
-    def parse_derivation(self) -> ParsedDerivation:
+    def parse_derivation(self) -> Derivation:
         """Parse the full Derive(...) or DrvWithVersion(...) term."""
         self._skip_ws()
 
@@ -512,7 +512,7 @@ class _Parser:
             return self._parse_dynamic_derivation()
         return self._parse_traditional_derivation()
 
-    def _parse_traditional_derivation(self) -> ParsedDerivation:
+    def _parse_traditional_derivation(self) -> Derivation:
         """Parse Derive(...) term."""
         self._expect("Derive(")
         self._skip_ws()
@@ -545,7 +545,7 @@ class _Parser:
         self._skip_ws()
         self._expect(")")
 
-        return ParsedDerivation(
+        return Derivation(
             outputs=outputs,
             input_drvs=input_drvs,
             input_srcs=set(input_srcs_list),
@@ -556,7 +556,7 @@ class _Parser:
             is_dynamic=False,
         )
 
-    def _parse_dynamic_derivation(self) -> ParsedDerivation:
+    def _parse_dynamic_derivation(self) -> Derivation:
         """Parse DrvWithVersion("xp-dyn-drv",...) term."""
         self._expect("DrvWithVersion(")
         self._skip_ws()
@@ -595,7 +595,7 @@ class _Parser:
         self._skip_ws()
         self._expect(")")
 
-        return ParsedDerivation(
+        return Derivation(
             outputs=outputs,
             input_drvs=input_drvs,
             input_srcs=set(input_srcs_list),
@@ -609,11 +609,11 @@ class _Parser:
 
 
 async def to_basic_derivation(
-    parsed: ParsedDerivation,
+    parsed: Derivation,
     store_path: Path,
     output_cache: OutputMap | None = None,
 ) -> BasicDerivation:
-    """Convert a ParsedDerivation to a BasicDerivation (wire protocol format).
+    """Convert a Derivation to a BasicDerivation (wire protocol format).
 
     Resolves inputDrvs into concrete output paths and merges them into
     input_srcs, matching what nix does when sending BuildDerivation over
@@ -674,15 +674,15 @@ async def to_basic_derivation(
     )
 
 
-def parse_drv(content: str) -> ParsedDerivation:
-    """Parse a .drv file's content into a ParsedDerivation."""
+def parse_drv(content: str) -> Derivation:
+    """Parse a .drv file's content into a Derivation."""
     return _Parser(content).parse_derivation()
 
 
 async def read_drv_file(
     store_path: Path,
     drv_store_path: StorePath | str,
-) -> ParsedDerivation:
+) -> Derivation:
     """Read and parse a .drv file from a store's filesystem.
 
     Args:

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
-    from .drv_parser import ParsedDerivation
+    from .drv_parser import Derivation
 
 
 # ── OutputsSpec ─────────────────────────────────────────────────────
@@ -178,7 +178,7 @@ def dp_output_names(dp: DerivedPathUnion) -> set[str]:
     return set()
 
 
-async def dp_to_derivation(dp: DerivedPathUnion, store_path: Path) -> ParsedDerivation:
+async def dp_to_derivation(dp: DerivedPathUnion, store_path: Path) -> Derivation:
     return await read_drv_file(store_path, dp_drv_path(dp))
 
 
@@ -226,8 +226,8 @@ class DerivedPath(StorePath):
     async def to_derivation(
         self,
         store_path: Path,
-        reader_fn: Callable[[Path, StorePath], Awaitable[ParsedDerivation]] | None = None,
-    ) -> ParsedDerivation:
+        reader_fn: Callable[[Path, StorePath], Awaitable[Derivation]] | None = None,
+    ) -> Derivation:
         if reader_fn is not None:
             return await reader_fn(store_path, StorePath(self.drv_path))
         return await dp_to_derivation(self._derived, store_path)

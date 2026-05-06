@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import pytest
 
-from pynixd.drv_parser import OutputInfo, ParsedDerivation, parse_drv, to_basic_derivation
+from pynixd.drv_parser import Derivation, OutputInfo, parse_drv, to_basic_derivation
 from pynixd.store_path import StorePath
 from pynixd.types.derivation import OutputKind
 
@@ -300,14 +300,14 @@ class TestDrvWithVersion:
         assert parsed.dynamic_input_drvs[StorePath("/nix/store/dep.drv")] == {}
 
 
-class TestParsedDerivationProperties:
-    """Tests for ParsedDerivation property methods with explicit data."""
+class TestDerivationProperties:
+    """Tests for Derivation property methods with explicit data."""
 
     def test_required_system_features_empty(self):
-        assert ParsedDerivation(env={}).required_system_features == set()
+        assert Derivation(env={}).required_system_features == set()
 
     def test_output_paths(self):
-        parsed = ParsedDerivation(
+        parsed = Derivation(
             outputs=[
                 OutputInfo(name="out", path="/nix/store/abc-foo", hash_algo="", hash_value=""),
             ],
@@ -315,7 +315,7 @@ class TestParsedDerivationProperties:
         assert parsed.output_paths() == {"out": StorePath("/nix/store/abc-foo")}
 
     def test_output_kinds_mixed(self):
-        parsed = ParsedDerivation(
+        parsed = Derivation(
             outputs=[
                 OutputInfo(name="ia", path="/nix/store/a", hash_algo="", hash_value=""),
                 OutputInfo(name="ca", path="", hash_algo="sha256", hash_value="xyz"),
@@ -408,7 +408,7 @@ class TestToJson:
 
 
 class TestSerialize:
-    """Tests for ParsedDerivation.serialize() roundtrips."""
+    """Tests for Derivation.serialize() roundtrips."""
 
     def test_traditional_roundtrip(self):
         text = (
@@ -444,7 +444,7 @@ class TestSerialize:
         assert parsed.serialize() == text
 
     def test_escaping(self):
-        parsed = ParsedDerivation(
+        parsed = Derivation(
             outputs=[OutputInfo(name="out", path="", hash_algo="", hash_value="")],
             input_drvs={},
             input_srcs=set(),

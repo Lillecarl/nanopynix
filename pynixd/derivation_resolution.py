@@ -31,7 +31,7 @@ from .store_path import StorePath
 from .utils import nix32_encode
 
 if TYPE_CHECKING:
-    from .drv_parser import ParsedDerivation
+    from .drv_parser import Derivation
     from .types.aliases import StorePathSet
 
 STORE_DIR = "/nix/store"
@@ -205,7 +205,7 @@ def _rewrite_strings(s: str, rewrites: dict[str, str]) -> str:
 
 
 def resolve_derivation(
-    drv: ParsedDerivation,
+    drv: Derivation,
     drv_path: StorePath,
     resolved_output_paths: dict[str, StorePath],
 ) -> BasicDerivation:
@@ -257,7 +257,7 @@ def resolve_derivation(
 
 
 def resolve_dynamic_derivation(
-    drv: ParsedDerivation,
+    drv: Derivation,
     drv_path: StorePath,
     dynamic_output_paths: dict[tuple[StorePath, str, str], StorePath],
 ) -> BasicDerivation:

@@ -80,4 +80,4 @@ pynixd is a proxy, not a build executor. The backend store runs the sandbox. So:
 - [ ] Should pynixd advertise `recursive-nix` and `ca-derivations` in its own daemon handshake `get_extension_features()`?
 - [ ] How does the `--builders` SSH protocol pass `system-features`? Does pynixd need to propagate it?
 - [ ] For dynamic derivations produced by recursive-nix builds: does pynixd need to do anything special, or does the existing trampoline handle them?
-- [ ] Should `requiredSystemFeatures` be part of `BasicDerivation` (wire format) or only in `ParsedDerivation` (ATerm)?
+- [ ] Should `requiredSystemFeatures` be part of `BasicDerivation` (wire format) or only in `Derivation` (ATerm)?
