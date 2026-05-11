@@ -95,6 +95,7 @@ if TYPE_CHECKING:
     from pynixd.types.aliases import OutputMap
 from pynixd.stderr import OperationLogs
 from pynixd.types.build import BuildMode, BuildResult, BuildResultStatus
+from pynixd.types.context import ReadContext, WriteContext
 from pynixd.types.derivation import BasicDerivation, DerivationOutput
 from pynixd.types.path_info import UnkeyedValidPathInfo, ValidPathInfo
 from pynixd.types.protocol import ActivityType, Verbosity
@@ -371,25 +372,29 @@ VERSION = PROTOCOL_VERSION  # 1.38 = 294
 
 
 async def _serialize_deserialize_request(req_type, req, version=VERSION):
-    """Serialize request with to_writer, deserialize with from_reader.
+    """Serialize request with serialize, deserialize with deserialize.
 
-    to_writer writes [opcode][fields]; from_reader expects [fields] only
+    serialize writes [opcode][fields]; deserialize expects [fields] only
     (opcode already consumed by the dispatch loop). So we skip the opcode.
     """
     w = BytesWriter()
-    await req.to_writer(w, version)
+    w_ctx = WriteContext(writer=w, version=version)
+    await req.serialize(w_ctx)
     r = BytesReader(w.get_bytes())
     op = await r.read_uint64()
     assert op == req_type.op, f"Expected opcode {req_type.op}, got {op}"
-    return await req_type.from_reader(r, version)
+    r_ctx = ReadContext(reader=r, version=version)
+    return await req_type.deserialize(r_ctx)
 
 
 async def _serialize_deserialize_response(resp_type, resp, version=VERSION):
-    """Serialize response with to_writer, deserialize with from_reader, return instance."""
+    """Serialize response with serialize, deserialize with deserialize, return instance."""
     w = BytesWriter()
-    await resp.to_writer(w, version)
+    w_ctx = WriteContext(writer=w, version=version)
+    await resp.serialize(w_ctx)
     r = BytesReader(w.get_bytes())
-    return await resp_type.from_reader(r, version, client=None, buffer_logs=False)
+    r_ctx = ReadContext(reader=r, version=version, client=None, buffer_logs=False)
+    return await resp_type.deserialize(r_ctx)
 
 
 # ── TestOperationLogs ─────────────────────────────────────────────────────
@@ -401,9 +406,11 @@ class TestOperationLogs:
     async def test_empty_logs(self):
         logs = OperationLogs()
         w = BytesWriter()
-        logs.to_writer(w)
+        w_ctx = WriteContext(writer=w, version=VERSION)
+        logs.serialize(w_ctx)
         r = BytesReader(w.get_bytes())
-        result = await OperationLogs().from_reader(r)
+        r_ctx = ReadContext(reader=r, version=VERSION)
+        result = await OperationLogs.deserialize(r_ctx)
         assert result.messages == logs.messages
 
     async def test_with_next(self):
@@ -412,9 +419,11 @@ class TestOperationLogs:
         logs.add(StderrNext("test log"))
         logs.add(StderrNext("another log"))
         w = BytesWriter()
-        logs.to_writer(w)
+        w_ctx = WriteContext(writer=w, version=VERSION)
+        logs.serialize(w_ctx)
         r = BytesReader(w.get_bytes())
-        result = await OperationLogs().from_reader(r)
+        r_ctx = ReadContext(reader=r, version=VERSION)
+        result = await OperationLogs.deserialize(r_ctx)
         assert len(result.messages) == 2
         assert isinstance(result.messages[0], StderrNext)
         assert result.messages[0].text == "test log"
@@ -432,9 +441,11 @@ class TestOperationLogs:
         )
         logs.add(StderrNext("after"))
         w = BytesWriter()
-        logs.to_writer(w)
+        w_ctx = WriteContext(writer=w, version=VERSION)
+        logs.serialize(w_ctx)
         r = BytesReader(w.get_bytes())
-        result = await OperationLogs().from_reader(r)
+        r_ctx = ReadContext(reader=r, version=VERSION)
+        result = await OperationLogs.deserialize(r_ctx)
         assert len(result.messages) == 3
         assert isinstance(result.messages[1], StderrStartActivity)
         assert result.messages[1].act_id == 1
@@ -562,10 +573,12 @@ class TestQueryValidPathsSerialization:
         paths = {StorePath("/nix/store/a-foo")}
         req = QueryValidPathsRequest(paths=paths, substitute=0)
         w = BytesWriter()
-        await req.to_writer(w, proto(1, 20))
+        w_ctx = WriteContext(writer=w, version=proto(1, 20))
+        await req.serialize(w_ctx)
         r = BytesReader(w.get_bytes())
         _ = await r.read_uint64()  # skip opcode
-        result = await QueryValidPathsRequest.from_reader(r, proto(1, 20))
+        r_ctx = ReadContext(reader=r, version=proto(1, 20))
+        result = await QueryValidPathsRequest.deserialize(r_ctx)
         assert result.paths == paths
 
     async def test_response(self):
@@ -816,11 +829,13 @@ class TestSetOptionsSerialization:
             overrides={},
         )
         w = BytesWriter()
-        await req.to_writer(w, proto(1, 10))
+        w_ctx = WriteContext(writer=w, version=proto(1, 10))
+        await req.serialize(w_ctx)
         r = BytesReader(w.get_bytes())
         # Skip opcode
         _ = await r.read_uint64()
-        result = await SetOptionsRequest.from_reader(r, proto(1, 10))
+        r_ctx = ReadContext(reader=r, version=proto(1, 10))
+        result = await SetOptionsRequest.deserialize(r_ctx)
         assert result.overrides == {}
 
 
