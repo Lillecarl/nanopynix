@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types.ca import Realisation
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -52,6 +53,17 @@ class RegisterDrvOutputResponse(OpResponse):
         self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer")
         self.logs.to_writer(writer)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logs.serialize(ctx)
 
 
 @dataclass(kw_only=True)
@@ -85,6 +97,20 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(json.dumps(self.realisation))
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        realisation_json = await ctx.reader.read_string()
+        obj.realisation = json.loads(realisation_json)
+        obj.logger.debug("deserialize", realisation=obj.realisation)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(json.dumps(self.realisation))
 
     async def execute(
         self,
@@ -144,6 +170,25 @@ class QueryRealisationResponse(OpResponse):
         for r in self.realisations:
             writer.write_string(json.dumps(r))
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        n = await ctx.reader.read_uint64()
+        obj.realisations = []
+        for _ in range(n):
+            realisation_json = await ctx.reader.read_string()
+            obj.realisations.append(json.loads(realisation_json))
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logs.serialize(ctx)
+        ctx.writer.write_uint64(len(self.realisations))
+        for r in self.realisations:
+            ctx.writer.write_string(json.dumps(r))
+
 
 @dataclass(kw_only=True)
 class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
@@ -174,6 +219,20 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.drv_output)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        raw = await ctx.reader.read_string()
+        obj.drv_output = DrvOutput(raw)
+        obj.logger.debug("deserialize", drv_output=obj.drv_output)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(self.drv_output)
 
     async def execute(
         self,

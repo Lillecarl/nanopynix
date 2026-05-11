@@ -12,6 +12,7 @@ from .base import OpRequest, OpResponse
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -43,6 +44,20 @@ class AddPermRootResponse(OpResponse):
         self.logger.debug("to_writer", gc_root=self.gc_root)
         self.logs.to_writer(writer)
         writer.write_string(self.gc_root)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        obj.gc_root = await ctx.reader.read_string()
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", gc_root=self.gc_root)
+        self.logs.serialize(ctx)
+        ctx.writer.write_string(self.gc_root)
 
 
 @dataclass(kw_only=True)
@@ -87,3 +102,22 @@ class AddPermRootRequest(OpRequest[AddPermRootResponse]):
         writer.write_uint64(self.op)
         writer.write_string(self.store_path)
         writer.write_string(self.gc_root)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.store_path = await ctx.reader.read_string()
+        obj.gc_root = await ctx.reader.read_string()
+        obj.logger.debug(
+            "deserialize",
+            store_path=obj.store_path,
+            gc_root=obj.gc_root,
+        )
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(self.store_path)
+        ctx.writer.write_string(self.gc_root)

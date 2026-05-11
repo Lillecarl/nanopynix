@@ -13,6 +13,7 @@ from .base import OperationLogs, OpRequest, OpResponse, SubstitutablePathInfo
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -47,6 +48,27 @@ class QuerySubstitutablePathInfoResponse(OpResponse):
         if self.found and self.info is not None:
             await self.info.to_writer(writer, version)
 
+    # ── New-style API (ReadContext / WriteContext) ──────────────
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        obj.found = await ctx.reader.read_uint64() != 0
+        obj.info = None
+        if obj.found:
+            obj.info = await SubstitutablePathInfo.deserialize(ctx)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", found=self.found)
+        self.logs.serialize(ctx)
+        ctx.writer.write_uint64(1 if self.found else 0)
+        if self.found and self.info is not None:
+            await self.info.serialize(ctx)
+
 
 @dataclass
 class QuerySubstitutablePathInfoRequest(OpRequest[QuerySubstitutablePathInfoResponse]):
@@ -74,3 +96,18 @@ class QuerySubstitutablePathInfoRequest(OpRequest[QuerySubstitutablePathInfoResp
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.path)
+
+    # ── New-style API (ReadContext / WriteContext) ──────────────
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.path = await ctx.reader.read_string()
+        obj.logger.debug("deserialize", path=obj.path)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(self.path)

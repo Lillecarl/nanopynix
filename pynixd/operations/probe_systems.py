@@ -22,6 +22,7 @@ from ..operations.base import (
     OpResponse,
 )
 from ..operations.build_derivation import BuildDerivationRequest
+from ..stderr import OperationLogs
 from ..store_path import StorePath
 from ..system_features import PROBE_SYSTEMS
 from ..utils import random_nix32_hash
@@ -29,6 +30,7 @@ from ..utils import random_nix32_hash
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
@@ -51,6 +53,17 @@ class ProbeSystemsResponse(OpResponse):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         pass
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = OperationLogs()
+        obj.systems = set()
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+
 
 @dataclass(kw_only=True)
 class ProbeSystemsRequest(OpRequest[ProbeSystemsResponse]):
@@ -69,6 +82,16 @@ class ProbeSystemsRequest(OpRequest[ProbeSystemsResponse]):
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         pass
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.systems = set()
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
 
     async def execute(
         self,

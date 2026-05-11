@@ -12,6 +12,7 @@ from .base import OpRequest, OpResponse
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types.aliases import StorePathSet
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -40,6 +41,20 @@ class QuerySubstitutablePathsResponse(OpResponse):
         self.logs.to_writer(writer)
         writer.write_string_set(self.paths)
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        obj.paths = await ctx.reader.read_string_set(StorePath)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", paths=self.paths)
+        self.logs.serialize(ctx)
+        ctx.writer.write_string_set(self.paths)
+
 
 @dataclass(kw_only=True)
 class QuerySubstitutablePathsRequest(OpRequest[QuerySubstitutablePathsResponse]):
@@ -65,3 +80,16 @@ class QuerySubstitutablePathsRequest(OpRequest[QuerySubstitutablePathsResponse])
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string_set(self.paths)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.paths = await ctx.reader.read_string_set(StorePath)
+        obj.logger.debug("deserialize", paths=obj.paths)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string_set(self.paths)

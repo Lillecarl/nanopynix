@@ -13,6 +13,7 @@ from .base import OpRequest, OpResponse, ValidPathInfo
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
+    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -35,6 +36,17 @@ class AddMultipleToStoreResponse(OpResponse):
         self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer")
         self.logs.to_writer(writer)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logs.serialize(ctx)
 
 
 @dataclass(kw_only=True)
@@ -69,6 +81,25 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
         writer.write_uint64(self.op)
         writer.write_uint64(self.repair)
         writer.write_uint64(self.dont_check_sigs)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.repair = await ctx.reader.read_uint64()
+        obj.dont_check_sigs = await ctx.reader.read_uint64()
+        obj.logger.debug(
+            "deserialize",
+            repair=obj.repair,
+            dont_check_sigs=obj.dont_check_sigs,
+        )
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_uint64(self.repair)
+        ctx.writer.write_uint64(self.dont_check_sigs)
 
     async def handle(self, ctx: RequestContext) -> AddMultipleToStoreResponse:
         """Override handle because this is a streaming operation."""

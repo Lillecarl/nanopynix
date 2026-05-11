@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from ..store import Store
     from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
+    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -51,6 +52,21 @@ class AddToStoreResponse(OpResponse):
         self.logs.to_writer(writer)
         if self.info is not None:
             self.info.to_writer(writer)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        obj.info = await ValidPathInfo.from_reader(ctx.reader)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", info=self.info)
+        self.logs.serialize(ctx)
+        if self.info is not None:
+            self.info.to_writer(ctx.writer)
 
 
 @dataclass(kw_only=True)
@@ -94,6 +110,31 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
         writer.write_string(self.cam)
         writer.write_string_set(self.references)
         writer.write_uint64(self.repair)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.path_name = await ctx.reader.read_string()
+        obj.cam = await ctx.reader.read_string()
+        obj.references = await ctx.reader.read_string_set(StorePath)
+        obj.repair = await ctx.reader.read_uint64()
+        obj.logger.debug(
+            "deserialize",
+            path_name=obj.path_name,
+            cam=obj.cam,
+            references=obj.references,
+            repair=obj.repair,
+        )
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(self.path_name)
+        ctx.writer.write_string(self.cam)
+        ctx.writer.write_string_set(self.references)
+        ctx.writer.write_uint64(self.repair)
 
     async def execute(
         self,

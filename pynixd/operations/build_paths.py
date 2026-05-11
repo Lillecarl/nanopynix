@@ -13,6 +13,7 @@ from .base import BuildMode, BuildResultStatus, KeyedBuildResult, OpRequest, OpR
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 # ── BuildPaths ───────────────────────────────────────────────────────
@@ -43,6 +44,26 @@ class BuildPathsResponse(OpResponse):
         self.logger.debug("to_writer", value=self.value)
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
+            ctx.reader,
+            client=ctx.client,
+            buffer=ctx.buffer_logs,
+        )
+        obj.value = await ctx.reader.read_uint64()
+        obj.logger.debug("deserialize", value=obj.value)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", value=self.value)
+        self.logs.serialize(ctx)
+        ctx.writer.write_uint64(self.value)
 
 
 @dataclass(kw_only=True)
@@ -76,6 +97,25 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         writer.write_uint64(self.op)
         writer.write_string_set(self.derived_paths)
         writer.write_uint64(self.build_mode.value)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.derived_paths = await ctx.reader.read_string_set(DerivedPath)
+        obj.build_mode = BuildMode(await ctx.reader.read_uint64())
+        obj.logger.debug(
+            "deserialize",
+            derived_paths=obj.derived_paths,
+            build_mode=obj.build_mode,
+        )
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string_set(self.derived_paths)
+        ctx.writer.write_uint64(self.build_mode.value)
 
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
         self.logger.debug("received_op")

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types.aliases import StorePathSet
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -48,6 +49,22 @@ class QueryValidPathsResponse(OpResponse):
         self.logs.to_writer(writer)
         writer.write_string_set(self.paths)
 
+    # ── New-style API (ReadContext / WriteContext) ──────────────
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        obj.paths = await ctx.reader.read_string_set(StorePath)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", paths=self.paths)
+        self.logs.serialize(ctx)
+        ctx.writer.write_string_set(self.paths)
+
 
 @dataclass(kw_only=True)
 class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
@@ -75,6 +92,26 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
         writer.write_string_set(self.paths)
         if version >= wire.proto(1, 27):
             writer.write_uint64(self.substitute)
+
+    # ── New-style API (ReadContext / WriteContext) ──────────────
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.paths = await ctx.reader.read_string_set(StorePath)
+        obj.substitute = 0
+        if ctx.version >= wire.proto(1, 27):
+            obj.substitute = await ctx.reader.read_uint64()
+        obj.logger.debug("deserialize", paths=obj.paths, substitute=obj.substitute)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string_set(self.paths)
+        if ctx.version >= wire.proto(1, 27):
+            ctx.writer.write_uint64(self.substitute)
 
     async def execute(
         self,

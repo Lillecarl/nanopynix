@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -42,6 +43,21 @@ class SignPathInfoResponse(OpResponse):
         self.logs.to_writer(writer)
         if self.info is not None:
             self.info.to_writer(writer)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        obj.info = await ValidPathInfo.deserialize(ctx)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("to_writer", info=self.info)
+        self.logs.serialize(ctx)
+        if self.info is not None:
+            await self.info.serialize(ctx)
 
 
 @dataclass
@@ -78,6 +94,20 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         writer.write_uint64(self.op)
         if self.info is not None:
             self.info.to_writer(writer)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.info = await ValidPathInfo.deserialize(ctx)
+        obj.logger.debug("from_reader", path=obj.info.path)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        if self.info is not None:
+            await self.info.serialize(ctx)
 
     async def handle(self, ctx: RequestContext) -> SignPathInfoResponse | None:
         self.logger.debug("received_op")

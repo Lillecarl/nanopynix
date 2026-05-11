@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
     from .aliases import ContentAddress, NARHash
     from .ca import Realisation
+    from .context import ReadContext, WriteContext
 
 
 class BuildResultStatus(IntEnum):
@@ -150,6 +151,41 @@ class BuildResult:
 
         return obj
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        from .. import wire
+
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.status = BuildResultStatus(await ctx.reader.read_uint64())
+        obj.error_msg = await ctx.reader.read_string()
+
+        obj.times_built = 0
+        obj.is_non_deterministic = 0
+        obj.start_time = 0
+        obj.stop_time = 0
+        if ctx.version >= wire.proto(1, 29):
+            obj.times_built = await ctx.reader.read_uint64()
+            obj.is_non_deterministic = await ctx.reader.read_uint64()
+            obj.start_time = await ctx.reader.read_uint64()
+            obj.stop_time = await ctx.reader.read_uint64()
+
+        obj.cpu_user = None
+        obj.cpu_system = None
+        if ctx.version >= wire.proto(1, 37):
+            obj.cpu_user = await ctx.reader.read_optional_uint64()
+            obj.cpu_system = await ctx.reader.read_optional_uint64()
+
+        obj.built_outputs = {}
+        if ctx.version >= wire.proto(1, 28):
+            n = await ctx.reader.read_uint64()
+            for _ in range(n):
+                drv_output = DrvOutput(await ctx.reader.read_string())
+                realisation_json = await ctx.reader.read_string()
+                obj.built_outputs[drv_output] = json.loads(realisation_json)
+
+        return obj
+
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         from .. import wire
 
@@ -172,6 +208,28 @@ class BuildResult:
                 writer.write_string(k)
                 writer.write_string(json.dumps(v))
 
+    async def serialize(self, ctx: WriteContext) -> None:
+        from .. import wire
+
+        ctx.writer.write_uint64(self.status.value)
+        ctx.writer.write_string(self.error_msg)
+
+        if ctx.version >= wire.proto(1, 29):
+            ctx.writer.write_uint64(self.times_built)
+            ctx.writer.write_uint64(self.is_non_deterministic)
+            ctx.writer.write_uint64(self.start_time)
+            ctx.writer.write_uint64(self.stop_time)
+
+        if ctx.version >= wire.proto(1, 37):
+            ctx.writer.write_optional_uint64(self.cpu_user)
+            ctx.writer.write_optional_uint64(self.cpu_system)
+
+        if ctx.version >= wire.proto(1, 28):
+            ctx.writer.write_uint64(len(self.built_outputs))
+            for k, v in self.built_outputs.items():
+                ctx.writer.write_string(k)
+                ctx.writer.write_string(json.dumps(v))
+
 
 @dataclass
 class KeyedBuildResult:
@@ -193,6 +251,19 @@ class KeyedBuildResult:
         obj.result = await BuildResult.from_reader(reader, version)
         return obj
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        from ..derived_path import DerivedPath
+
+        obj = cls.__new__(cls)
+        obj.path = await ctx.reader.read_string(DerivedPath)
+        obj.result = await BuildResult.deserialize(ctx)
+        return obj
+
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         writer.write_string(self.path)
         await self.result.to_writer(writer, version)
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        ctx.writer.write_string(self.path)
+        await self.result.serialize(ctx)

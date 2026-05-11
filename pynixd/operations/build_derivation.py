@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -40,6 +41,19 @@ class BuildDerivationResponse(OpResponse):
         self.logger.debug("to_writer", result=self.result)
         self.logs.to_writer(writer)
         await self.result.to_writer(writer, version)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        obj.result = await BuildResult.from_reader(ctx.reader, ctx.version)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logs.serialize(ctx)
+        await self.result.to_writer(ctx.writer, ctx.version)
 
 
 @dataclass(kw_only=True)
@@ -72,6 +86,27 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         writer.write_string(self.drv_path)
         await self.derivation.to_writer(writer, version)
         writer.write_uint64(self.build_mode)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.drv_path = await ctx.reader.read_string(StorePath)
+        obj.derivation = await BasicDerivation.from_reader(ctx.reader, ctx.version)
+        obj.build_mode = BuildMode(await ctx.reader.read_uint64())
+        obj.logger.debug(
+            "deserialize",
+            drv_path=obj.drv_path,
+            build_mode=obj.build_mode,
+        )
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(self.drv_path)
+        await self.derivation.to_writer(ctx.writer, ctx.version)
+        ctx.writer.write_uint64(self.build_mode)
 
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
         self.logger.debug("received_op")

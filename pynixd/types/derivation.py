@@ -13,6 +13,7 @@ from ..system_features import PYNIXD_HANDLED_FEATURES
 if TYPE_CHECKING:
     from ..wire import NixReader, NixWriter
     from .aliases import StorePathSet
+    from .context import ReadContext, WriteContext
 
 
 class OutputKind(Enum):
@@ -180,6 +181,46 @@ class BasicDerivation:
         for k, v in sorted(self.env.items()):
             writer.write_string(k)
             writer.write_string(v)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        n = await ctx.reader.read_uint64()
+        obj.outputs = {}
+        for _ in range(n):
+            name = await ctx.reader.read_string()
+            obj.outputs[name] = DerivationOutput(
+                path=await ctx.reader.read_string(),
+                method=await ctx.reader.read_string(),
+                hash_digest=await ctx.reader.read_string(),
+            )
+        obj.input_srcs = await ctx.reader.read_string_set(StorePath)
+        obj.platform = await ctx.reader.read_string()
+        obj.builder = await ctx.reader.read_string()
+        obj.args = await ctx.reader.read_string_list()
+        n_env = await ctx.reader.read_uint64()
+        obj.env = {}
+        for _ in range(n_env):
+            k = await ctx.reader.read_string()
+            v = await ctx.reader.read_string()
+            obj.env[k] = v
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        ctx.writer.write_uint64(len(self.outputs))
+        for name, out in self.outputs.items():
+            ctx.writer.write_string(name)
+            ctx.writer.write_string(out.path)
+            ctx.writer.write_string(out.method)
+            ctx.writer.write_string(out.hash_digest)
+        ctx.writer.write_string_set(self.input_srcs)
+        ctx.writer.write_string(self.platform)
+        ctx.writer.write_string(self.builder)
+        ctx.writer.write_string_list(self.args)
+        ctx.writer.write_uint64(len(self.env))
+        for k, v in sorted(self.env.items()):
+            ctx.writer.write_string(k)
+            ctx.writer.write_string(v)
 
     @property
     def has_ca_floating(self) -> bool:

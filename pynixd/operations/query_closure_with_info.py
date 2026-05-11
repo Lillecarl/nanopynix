@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types.aliases import StorePathSet
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -82,6 +83,27 @@ class QueryClosureWithInfoResponse(OpResponse):
         for info in self.infos:
             info.to_writer(writer)
 
+    # ── New-style API (ReadContext / WriteContext) ──────────────
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        n = await ctx.reader.read_uint64()
+        obj.infos = []
+        for _ in range(n):
+            obj.infos.append(await ValidPathInfo.from_reader(ctx.reader))
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", info_count=len(self.infos))
+        self.logs.serialize(ctx)
+        ctx.writer.write_uint64(len(self.infos))
+        for info in self.infos:
+            info.to_writer(ctx.writer)
+
 
 @dataclass(kw_only=True)
 class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
@@ -108,6 +130,21 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string_set(self.paths)
+
+    # ── New-style API (ReadContext / WriteContext) ──────────────
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.paths = await ctx.reader.read_string_set(StorePath)
+        obj.logger.debug("deserialize", paths=obj.paths)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string_set(self.paths)
 
     async def execute(
         self,

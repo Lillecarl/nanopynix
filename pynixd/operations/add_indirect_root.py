@@ -13,6 +13,7 @@ from .base import OpRequest, OpResponse
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -45,6 +46,25 @@ class AddIndirectRootResponse(OpResponse):
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.from_reader(
+            ctx.reader,
+            client=ctx.client,
+            buffer=ctx.buffer_logs,
+        )
+        obj.value = await ctx.reader.read_uint64()
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("to_writer", value=self.value)
+        self.logs.to_writer(ctx.writer)
+        ctx.writer.write_uint64(self.value)
+
 
 @dataclass(kw_only=True)
 class AddIndirectRootRequest(OpRequest[AddIndirectRootResponse]):
@@ -67,6 +87,14 @@ class AddIndirectRootRequest(OpRequest[AddIndirectRootResponse]):
         obj.logger.debug("from_reader", path=obj.path)
         return obj
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.path = await ctx.reader.read_string(StorePath)
+        obj.logger.debug("from_reader", path=obj.path)
+        return obj
+
     async def handle(self, ctx: RequestContext) -> AddIndirectRootResponse | None:
         self = await self.from_reader(ctx.proxy.r, ctx.version)
         if ctx.proxy.role == Role.ADMIN:
@@ -81,3 +109,8 @@ class AddIndirectRootRequest(OpRequest[AddIndirectRootResponse]):
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.path)
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(self.path)

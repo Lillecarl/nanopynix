@@ -10,6 +10,7 @@ from .base import OperationLogs, OpRequest, OpResponse, Role
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -37,6 +38,21 @@ class VerifyStoreResponse(OpResponse):
         self.logger.debug("to_writer", value=self.value)
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = OperationLogs()
+        await obj.logs.deserialize(ctx)
+        obj.value = await ctx.reader.read_uint64()
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", value=self.value)
+        self.logs.serialize(ctx)
+        ctx.writer.write_uint64(self.value)
 
 
 @dataclass(kw_only=True)
@@ -69,6 +85,25 @@ class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
         writer.write_uint64(self.op)
         writer.write_uint64(self.check_contents)
         writer.write_uint64(self.repair)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.check_contents = await ctx.reader.read_uint64()
+        obj.repair = await ctx.reader.read_uint64()
+        obj.logger.debug(
+            "deserialize",
+            check_contents=obj.check_contents,
+            repair=obj.repair,
+        )
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_uint64(self.check_contents)
+        ctx.writer.write_uint64(self.repair)
 
     async def handle(self, ctx: RequestContext) -> VerifyStoreResponse | None:
         self.logger.debug("received_op")

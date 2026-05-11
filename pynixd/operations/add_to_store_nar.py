@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
+    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -41,6 +42,19 @@ class AddToStoreNarResponse(OpResponse):
         self.logger = self.logger.bind(identifier=writer.identifier)
         self.logger.debug("to_writer")
         self.logs.to_writer(writer)
+
+    # ── New-style API (ReadContext / WriteContext) ──────────────
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logs.serialize(ctx)
 
 
 @dataclass(kw_only=True)
@@ -78,6 +92,28 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
             self.info.to_writer(writer)
         writer.write_uint64(self.repair)
         writer.write_uint64(self.dont_check_sigs)
+
+    # ── New-style API (ReadContext / WriteContext) ──────────────
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        path = await ctx.reader.read_string(StorePath)
+        unkeyed_info = await UnkeyedValidPathInfo.from_reader(ctx.reader)
+        obj.info = unkeyed_info.with_path(path)
+        obj.repair = await ctx.reader.read_uint64()
+        obj.dont_check_sigs = await ctx.reader.read_uint64()
+        obj.logger.debug("deserialize", info=obj.info)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        if self.info is not None:
+            self.info.to_writer(ctx.writer)
+        ctx.writer.write_uint64(self.repair)
+        ctx.writer.write_uint64(self.dont_check_sigs)
 
     async def execute(
         self,

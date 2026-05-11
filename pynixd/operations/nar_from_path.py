@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
+    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -48,6 +49,22 @@ class NarFromPathResponse(OpResponse):
         self.logs.to_writer(writer)
         writer.write(self.nar_data)
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        collector = ByteCollector()
+        await wire.stream_parse_nar(ctx.reader, collector, capture=False)
+        obj.nar_data = collector.getvalue()
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", nar_size=len(self.nar_data))
+        self.logs.serialize(ctx)
+        ctx.writer.write(self.nar_data)
+
 
 @dataclass(kw_only=True)
 class NarFromPathRequest(OpRequest[NarFromPathResponse]):
@@ -73,10 +90,23 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
         obj.logger.debug("from_reader", path=obj.path)
         return obj
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.path = await ctx.reader.read_string(StorePath)
+        obj.logger.debug("deserialize", path=obj.path)
+        return obj
+
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.path)
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(self.path)
 
     async def execute(
         self,

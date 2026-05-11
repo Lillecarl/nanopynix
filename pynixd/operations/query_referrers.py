@@ -11,6 +11,7 @@ from .base import OperationLogs, OpRequest, OpResponse
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types.aliases import StorePathSet
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -39,6 +40,20 @@ class QueryReferrersResponse(OpResponse):
         self.logs.to_writer(writer)
         writer.write_string_set(self.paths)
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        obj.paths = await ctx.reader.read_string_set(StorePath)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", paths=self.paths)
+        self.logs.serialize(ctx)
+        ctx.writer.write_string_set(self.paths)
+
 
 @dataclass
 class QueryReferrersRequest(OpRequest[QueryReferrersResponse]):
@@ -66,3 +81,16 @@ class QueryReferrersRequest(OpRequest[QueryReferrersResponse]):
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.path)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.path = await ctx.reader.read_string(StorePath)
+        obj.logger.debug("deserialize", path=obj.path)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(self.path)

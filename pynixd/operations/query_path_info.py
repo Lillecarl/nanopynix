@@ -22,6 +22,7 @@ WHERE r.referrer = (SELECT id FROM ValidPaths WHERE path = ?)
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -66,6 +67,26 @@ class QueryPathInfoResponse(OpResponse):
             # (which ValidPathInfo.to_writer would do).
             UnkeyedValidPathInfo.to_writer(self.info, writer)
 
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.logs = await OperationLogs.deserialize(ctx)
+        is_valid = await ctx.reader.read_uint64() != 0
+        obj.info = None
+        if is_valid:
+            obj.info = await UnkeyedValidPathInfo.from_reader(ctx.reader)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        self.logger.debug("serialize", valid=self.valid, info=self.info)
+        self.logs.serialize(ctx)
+        ctx.writer.write_uint64(1 if self.valid else 0)
+        if self.valid:
+            assert self.info is not None
+            UnkeyedValidPathInfo.to_writer(self.info, ctx.writer)
+
 
 @dataclass
 class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
@@ -93,6 +114,19 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
         self.logger = self.logger.bind(identifier=writer.identifier)
         writer.write_uint64(self.op)
         writer.write_string(self.path)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        obj = cls.__new__(cls)
+        obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
+        obj.path = await ctx.reader.read_string(StorePath)
+        obj.logger.debug("deserialize", path=obj.path)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        self.logger = self.logger.bind(identifier=ctx.writer.identifier)
+        ctx.writer.write_uint64(self.op)
+        ctx.writer.write_string(self.path)
 
     async def execute(
         self,

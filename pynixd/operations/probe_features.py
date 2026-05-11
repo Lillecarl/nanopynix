@@ -22,6 +22,7 @@ from .probe_systems import _send_probe
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
@@ -44,6 +45,16 @@ class ProbeFeaturesResponse(OpResponse):
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         pass
 
+    @classmethod
+    async def deserialize(
+        cls,
+        ctx: ReadContext,  # noqa: ARG003
+    ) -> Self:
+        return cls.__new__(cls)
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        pass
+
 
 @dataclass(kw_only=True)
 class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
@@ -63,6 +74,16 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
         return cls.__new__(cls)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
+        pass
+
+    @classmethod
+    async def deserialize(
+        cls,
+        ctx: ReadContext,  # noqa: ARG003
+    ) -> Self:
+        return cls.__new__(cls)
+
+    async def serialize(self, ctx: WriteContext) -> None:
         pass
 
     async def execute(
