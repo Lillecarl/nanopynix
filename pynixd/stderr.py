@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from .connection import ClientConn
+    from .types.context import ReadContext, WriteContext
     from .wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
@@ -241,6 +242,17 @@ class OperationLogs:
             if isinstance(msg, StderrError):
                 raise BackendError(f"Daemon error ({msg.error_type}): {msg.msg}")
         return obj
+
+    # ── New-style API (ReadContext / WriteContext) ──────────────
+
+    def serialize(self, ctx: WriteContext) -> None:
+        self.to_writer(ctx.writer)
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext) -> Self:
+        return await cls.from_reader(
+            ctx.reader, client=ctx.client, buffer=ctx.buffer_logs
+        )
 
 
 # ── Parsers mapping msg_type → class ─────────────────────────────
