@@ -13,8 +13,9 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
-    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
+
+from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -111,7 +112,8 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
         self.logger.debug("received_op")
 
-        self = await self.from_reader(ctx.proxy.r, ctx.version)
+        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
+        self = await self.deserialize(r_ctx)
 
         if not ctx.proxy.use_scheduler_for_builds:
             self.logger.debug("handle_local_mode_fallback")

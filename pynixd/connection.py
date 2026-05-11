@@ -29,6 +29,7 @@ from .operations.base import (
     Resp,
 )
 from .protocol import get_extension_features
+from .types.context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -199,17 +200,19 @@ class Connection:
 
         self.op_log.append(op_name)
 
-        await request.to_writer(self.w, self.version)
+        w_ctx = WriteContext(writer=self.w, version=self.version)
+        await request.serialize(w_ctx)
         await self.w.drain()
 
         # If client is provided, we stream logs directly to them and don't buffer
         # locally to save memory on large builds.
-        response = await response_type.from_reader(
-            self.r,
-            self.version,
+        r_ctx = ReadContext(
+            reader=self.r,
+            version=self.version,
             client=client,
             buffer_logs=(client is None),
         )
+        response = await response_type.deserialize(r_ctx)
 
         return cast(Resp, response)  # noqa: TC006
 

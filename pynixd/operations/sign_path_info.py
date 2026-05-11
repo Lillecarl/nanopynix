@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
+from ..types.context import ReadContext
 from .add_signatures import AddSignaturesRequest
 from .base import OperationLogs, OpRequest, OpResponse, Role, ValidPathInfo
 
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
-    from ..types.context import ReadContext, WriteContext
+    from ..types.context import WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -113,7 +114,8 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         self.logger.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        self = await self.from_reader(ctx.proxy.r, ctx.version)
+        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
+        self = await self.deserialize(r_ctx)
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)

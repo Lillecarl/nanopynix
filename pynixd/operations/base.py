@@ -56,13 +56,13 @@ from ..types import (
 from ..types import (
     ValidPathInfo as ValidPathInfo,
 )
+from ..types.context import ReadContext, WriteContext
 from ..wire import NixReader, NixWriter
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext
-    from ..types.context import ReadContext, WriteContext
 
 log = structlog.get_logger(__name__)
 
@@ -108,7 +108,8 @@ class OpRequest[Resp: OpResponse](ABC):
         Decodes the request and delegates execution to the stores.
         Streaming operations should override this method.
         """
-        self = await self.from_reader(ctx.proxy.r, ctx.version)
+        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
+        self = await self.deserialize(r_ctx)
         return await ctx.proxy.execute(self)
 
     async def execute(
@@ -164,9 +165,7 @@ class OpRequest[Resp: OpResponse](ABC):
         """
         if "deserialize" not in cls.__dict__:
             return await cls.from_reader(ctx.reader, ctx.version)
-        raise NotImplementedError(
-            f"{cls.__name__}.deserialize(ctx) must be overridden"
-        )
+        raise NotImplementedError(f"{cls.__name__}.deserialize(ctx) must be overridden")
 
     async def serialize(self, ctx: WriteContext) -> None:
         """New-style serialization entry point.
@@ -178,9 +177,7 @@ class OpRequest[Resp: OpResponse](ABC):
         if "serialize" not in self.__class__.__dict__:
             await self.to_writer(ctx.writer, ctx.version)
             return
-        raise NotImplementedError(
-            f"{type(self).__name__}.serialize(ctx) must be overridden"
-        )
+        raise NotImplementedError(f"{type(self).__name__}.serialize(ctx) must be overridden")
 
 
 @dataclass(kw_only=True)
@@ -227,12 +224,12 @@ class OpResponse(ABC):
         """
         if "deserialize" not in cls.__dict__:
             return await cls.from_reader(
-                ctx.reader, ctx.version,
-                client=ctx.client, buffer_logs=ctx.buffer_logs,
+                ctx.reader,
+                ctx.version,
+                client=ctx.client,
+                buffer_logs=ctx.buffer_logs,
             )
-        raise NotImplementedError(
-            f"{cls.__name__}.deserialize(ctx) must be overridden"
-        )
+        raise NotImplementedError(f"{cls.__name__}.deserialize(ctx) must be overridden")
 
     async def serialize(self, ctx: WriteContext) -> None:
         """New-style serialization entry point.
@@ -244,9 +241,7 @@ class OpResponse(ABC):
         if "serialize" not in type(self).__dict__:
             await self.to_writer(ctx.writer, ctx.version)
             return
-        raise NotImplementedError(
-            f"{type(self).__name__}.serialize(ctx) must be overridden"
-        )
+        raise NotImplementedError(f"{type(self).__name__}.serialize(ctx) must be overridden")
 
 
 # Silence BuildResult debug logs — verbose in hot paths

@@ -250,9 +250,7 @@ class OperationLogs:
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
-        return await cls.from_reader(
-            ctx.reader, client=ctx.client, buffer=ctx.buffer_logs
-        )
+        return await cls.from_reader(ctx.reader, client=ctx.client, buffer=ctx.buffer_logs)
 
 
 # ── Parsers mapping msg_type → class ─────────────────────────────

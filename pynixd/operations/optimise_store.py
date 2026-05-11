@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
+from ..types.context import ReadContext, WriteContext
 from .base import OperationLogs, OpRequest, OpResponse, Role
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext
-    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -46,9 +46,7 @@ class OptimiseStoreResponse(OpResponse):
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
         obj.logs = OperationLogs()
-        await obj.logs.from_reader(
-            ctx.reader, client=ctx.client, buffer=ctx.buffer_logs
-        )
+        await obj.logs.from_reader(ctx.reader, client=ctx.client, buffer=ctx.buffer_logs)
         obj.value = await ctx.reader.read_uint64()
         return obj
 
@@ -99,7 +97,8 @@ class OptimiseStoreRequest(OpRequest[OptimiseStoreResponse]):
         self.logger.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        self = await self.from_reader(ctx.proxy.r, ctx.version)
+        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
+        self = await self.deserialize(r_ctx)
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)

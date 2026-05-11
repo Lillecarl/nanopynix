@@ -21,6 +21,7 @@ from .operations.base import OpRequest, OpResponse, Resp, Role
 from .protocol import OptTrusted, get_extension_features
 from .stderr import StderrError
 from .types import RequestContext as RequestContext
+from .types.context import WriteContext
 from .types.protocol import Verbosity
 
 if TYPE_CHECKING:
@@ -196,7 +197,8 @@ class DaemonProxy:
 
                 if response is not None:
                     await self.client.flush()
-                    await response.to_writer(self.w, self.version)
+                    w_ctx = WriteContext(writer=self.w, version=self.version)
+                    await response.serialize(w_ctx)
                     await self.w.drain()
                 # else: already handled (streaming, error, etc.)
 

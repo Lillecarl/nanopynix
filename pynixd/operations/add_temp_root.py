@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..stderr import OperationLogs, StderrNext
 from ..store_path import StorePath
 from ..types.auth import Role
+from ..types.context import ReadContext, WriteContext
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
-    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -81,7 +81,8 @@ class AddTempRootRequest(OpRequest[AddTempRootResponse]):
         return obj
 
     async def handle(self, ctx: RequestContext) -> AddTempRootResponse | None:
-        self = await self.from_reader(ctx.proxy.r, ctx.version)
+        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
+        self = await self.deserialize(r_ctx)
         if ctx.proxy.role == Role.ADMIN:
             return await ctx.proxy.execute(self)
 

@@ -10,8 +10,9 @@ from .base import OperationLogs, OpRequest, OpResponse, Role
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
-    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
+
+from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -109,7 +110,8 @@ class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
         self.logger.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        self = await self.from_reader(ctx.proxy.r, ctx.version)
+        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
+        self = await self.deserialize(r_ctx)
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)

@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
+from ..types.context import ReadContext, WriteContext
 from .base import OperationLogs, OpRequest, OpResponse, Role
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
-    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -39,7 +39,6 @@ class AddBuildLogResponse(OpResponse):
         self.logger.debug("to_writer", value=self.value)
         self.logs.to_writer(writer)
         writer.write_uint64(self.value)
-
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -104,7 +103,8 @@ class AddBuildLogRequest(OpRequest[AddBuildLogResponse]):
         self.logger.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        self = await self.from_reader(ctx.proxy.r, ctx.version)
+        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
+        self = await self.deserialize(r_ctx)
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)

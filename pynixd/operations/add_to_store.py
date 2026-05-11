@@ -22,7 +22,8 @@ if TYPE_CHECKING:
     from ..store import Store
     from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
-    from ..types.context import ReadContext, WriteContext
+
+from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -176,7 +177,8 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
             # logs concurrently here too. But forward() is synchronous-ish
             # (awaits reads/writes).
 
-            resp = await AddToStoreResponse.from_reader(conn.r, conn.version)
+            r_ctx = ReadContext(reader=conn.r, version=conn.version)
+            resp = await AddToStoreResponse.deserialize(r_ctx)
             if resp.info is not None:
                 resp.info = (
                     await ctx.proxy.local_store.execute(

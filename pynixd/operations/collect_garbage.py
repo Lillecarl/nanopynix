@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..stderr import OperationLogs
 from ..store_path import StorePath
 from ..types import GCAction
+from ..types.context import ReadContext
 from .base import OpRequest, OpResponse, Role
 
 if TYPE_CHECKING:
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
     from ..store import Store
     from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
-    from ..types.context import ReadContext, WriteContext
+    from ..types.context import WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -166,7 +167,8 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
         self.logger.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        self = await self.from_reader(ctx.proxy.r, ctx.version)
+        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
+        self = await self.deserialize(r_ctx)
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
-    from ..types.context import ReadContext, WriteContext
+from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -145,7 +145,8 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         structlog.contextvars.bind_contextvars(operation=type(self).__name__)
         async with ctx.proxy.local_store.transfer_conn() as conn:
             path = await self.forward(ctx.proxy.r, conn.w)
-            resp = await AddToStoreNarResponse.from_reader(conn.r, conn.version)
+            r_ctx = ReadContext(reader=conn.r, version=conn.version)
+            resp = await AddToStoreNarResponse.deserialize(r_ctx)
             ctx.proxy.local_store.tracker.add_known_path(path)
         return resp
 

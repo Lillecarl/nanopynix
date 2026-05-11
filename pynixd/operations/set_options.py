@@ -8,13 +8,14 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from .. import wire
 from ..stderr import StderrNext
 from ..types.auth import Role
+from ..types.context import ReadContext
 from ..types.protocol import Verbosity
 from .base import OperationLogs, OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
-    from ..types.context import ReadContext, WriteContext
+    from ..types.context import WriteContext
     from ..wire import NixReader, NixWriter
 
 # Silence SetOptions by default — it's extremely verbose
@@ -125,7 +126,8 @@ class SetOptionsRequest(OpRequest[SetOptionsResponse]):
         return obj
 
     async def handle(self, ctx: RequestContext) -> SetOptionsResponse | None:
-        self = await self.from_reader(ctx.proxy.r, ctx.version)
+        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
+        self = await self.deserialize(r_ctx)
         if ctx.proxy.role == Role.ADMIN:
             return await ctx.proxy.execute(self)
 
