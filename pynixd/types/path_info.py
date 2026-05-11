@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Self
 from ..store_path import StorePath
 
 if TYPE_CHECKING:
-    from ..wire import NixReader, NixWriter
     from .aliases import ContentAddress, NARHash, StorePathSet
     from .context import ReadContext, WriteContext
 
@@ -25,31 +24,6 @@ class UnkeyedValidPathInfo:
     ultimate: int = 0
     sigs: set[str] = field(default_factory=set)
     ca: ContentAddress = ""
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader) -> Self:
-        obj = cls.__new__(cls)
-        obj.deriver = await reader.read_string(StorePath)
-        obj.nar_hash = await reader.read_string()
-        obj.references = await reader.read_string_set(StorePath)
-        obj.registration_time = await reader.read_uint64()
-        obj.nar_size = await reader.read_uint64()
-        obj.ultimate = await reader.read_uint64()
-        obj.sigs = await reader.read_string_set()
-        obj.ca = await reader.read_string()
-        return obj
-
-    def to_writer(self, writer: NixWriter) -> None:
-        writer.write_string(self.deriver)
-        nar_hash = self.nar_hash
-        nar_hash = nar_hash.removeprefix("sha256:")
-        writer.write_string(nar_hash)
-        writer.write_string_set(self.references)
-        writer.write_uint64(self.registration_time)
-        writer.write_uint64(self.nar_size)
-        writer.write_uint64(self.ultimate)
-        writer.write_string_set(self.sigs)
-        writer.write_string(self.ca)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -105,30 +79,21 @@ class ValidPathInfo(UnkeyedValidPathInfo):
         return self.path == other.path
 
     @classmethod
-    async def from_reader(cls, reader: NixReader) -> Self:
-        path = await reader.read_string(StorePath)
-        info = await UnkeyedValidPathInfo.from_reader(reader)
-        return info.with_path(path)  # type: ignore[return-value]
-
-    def to_writer(self, writer: NixWriter) -> None:
-        writer.write_string(self.path)
-        super().to_writer(writer)
-
-    @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         path = await ctx.reader.read_string(StorePath)
-        info = await UnkeyedValidPathInfo.from_reader(ctx.reader)
+        info = await UnkeyedValidPathInfo.deserialize(ctx)
         return info.with_path(path)  # type: ignore[return-value]
 
     async def serialize(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(self.path)
-        super().to_writer(ctx.writer)
+        super().serialize(ctx)
 
     def to_bytes(self) -> bytes:
         from .. import wire
+        from .context import WriteContext
 
         buf = wire.BytesWriter()
-        self.to_writer(buf)
+        self.serialize(WriteContext(writer=buf, version=0))
         return buf.get_bytes()
 
     @classmethod
@@ -225,19 +190,6 @@ class SubstitutablePathInfo:
     nar_size: int
 
     @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.deriver = await reader.read_string(StorePath)
-        obj.references = await reader.read_string_set(StorePath)
-        obj.download_size = await reader.read_uint64()
-        obj.nar_size = await reader.read_uint64()
-        return obj
-
-    @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         obj = cls.__new__(cls)
         obj.deriver = await ctx.reader.read_string(StorePath)
@@ -245,12 +197,6 @@ class SubstitutablePathInfo:
         obj.download_size = await ctx.reader.read_uint64()
         obj.nar_size = await ctx.reader.read_uint64()
         return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string(self.deriver)
-        writer.write_string_set(self.references)
-        writer.write_uint64(self.download_size)
-        writer.write_uint64(self.nar_size)
 
     async def serialize(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(self.deriver)
