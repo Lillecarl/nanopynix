@@ -11,6 +11,7 @@ from ..operations.add_multiple_to_store import AddMultipleToStoreRequest
 from ..operations.nar_from_path import NarFromPathRequest
 from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
 from ..store_path import StorePath
+from ..types.context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
     import asyncio
@@ -70,7 +71,8 @@ async def stream_paths_store_to_store(
             repair=0,
             dont_check_sigs=1,
         )
-        await req.to_writer(dst_conn.w, dst_conn.version)
+        w_ctx = WriteContext(writer=dst_conn.w, version=dst_conn.version)
+        await req.serialize(w_ctx)
         await dst_conn.w.drain()
 
         fw = dst_conn.w.framed()
@@ -88,10 +90,8 @@ async def stream_paths_store_to_store(
             fw.write(info.to_bytes())
 
             # Request NAR from source
-            await NarFromPathRequest(path=path, nar_size=info.nar_size).to_writer(
-                src_conn.w,
-                src_conn.version,
-            )
+            w_ctx = WriteContext(writer=src_conn.w, version=src_conn.version)
+            await NarFromPathRequest(path=path, nar_size=info.nar_size).serialize(w_ctx)
             await src_conn.w.drain()
 
             # Source will send stderr logs followed by STDERR_LAST before NAR data
@@ -107,7 +107,8 @@ async def stream_paths_store_to_store(
 
         await fw.finalize()
         await dst_conn.w.drain()
-        await req.response_type.from_reader(dst_conn.r, dst_conn.version)
+        r_ctx = ReadContext(reader=dst_conn.r, version=dst_conn.version)
+        await req.response_type.deserialize(r_ctx)
 
     # 4. Update destination store's knowledge
     dst.add_path_infos(set(to_transfer))
