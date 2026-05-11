@@ -38,7 +38,7 @@ class UnkeyedValidPathInfo:
         obj.ca = await ctx.reader.read_string()
         return obj
 
-    async def serialize(self, ctx: WriteContext) -> None:
+    def serialize(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(self.deriver)
         nar_hash = self.nar_hash
         nar_hash = nar_hash.removeprefix("sha256:")
@@ -84,7 +84,7 @@ class ValidPathInfo(UnkeyedValidPathInfo):
         info = await UnkeyedValidPathInfo.deserialize(ctx)
         return info.with_path(path)  # type: ignore[return-value]
 
-    async def serialize(self, ctx: WriteContext) -> None:
+    def serialize(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(self.path)
         super().serialize(ctx)
 
@@ -198,7 +198,7 @@ class SubstitutablePathInfo:
         obj.nar_size = await ctx.reader.read_uint64()
         return obj
 
-    async def serialize(self, ctx: WriteContext) -> None:
+    def serialize(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(self.deriver)
         ctx.writer.write_string_set(self.references)
         ctx.writer.write_uint64(self.download_size)

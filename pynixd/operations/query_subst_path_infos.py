@@ -68,7 +68,7 @@ class QuerySubstitutablePathInfosResponse(OpResponse):
         ctx.writer.write_uint64(len(self.entries))
         for entry in self.entries:
             ctx.writer.write_string(entry.path)
-            await entry.info.serialize(ctx)
+            entry.info.serialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
         self.logger = self.logger.bind(identifier=writer.identifier)

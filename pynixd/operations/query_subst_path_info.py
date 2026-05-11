@@ -67,7 +67,7 @@ class QuerySubstitutablePathInfoResponse(OpResponse):
         self.logs.serialize(ctx)
         ctx.writer.write_uint64(1 if self.found else 0)
         if self.found and self.info is not None:
-            await self.info.serialize(ctx)
+            self.info.serialize(ctx)
 
 
 @dataclass

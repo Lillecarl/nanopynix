@@ -13,7 +13,6 @@ from ..store_path import DrvOutput, StorePath
 
 if TYPE_CHECKING:
     from ..derived_path import DerivedPath
-    from ..wire import NixReader, NixWriter
     from .aliases import ContentAddress, NARHash
     from .ca import Realisation
     from .context import ReadContext, WriteContext
@@ -117,41 +116,6 @@ class BuildResult:
     cpu_system: int | None = None
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        from .. import wire
-
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.status = BuildResultStatus(await reader.read_uint64())
-        obj.error_msg = await reader.read_string()
-
-        obj.times_built = 0
-        obj.is_non_deterministic = 0
-        obj.start_time = 0
-        obj.stop_time = 0
-        if version >= wire.proto(1, 29):
-            obj.times_built = await reader.read_uint64()
-            obj.is_non_deterministic = await reader.read_uint64()
-            obj.start_time = await reader.read_uint64()
-            obj.stop_time = await reader.read_uint64()
-
-        obj.cpu_user = None
-        obj.cpu_system = None
-        if version >= wire.proto(1, 37):
-            obj.cpu_user = await reader.read_optional_uint64()
-            obj.cpu_system = await reader.read_optional_uint64()
-
-        obj.built_outputs = {}
-        if version >= wire.proto(1, 28):
-            n = await reader.read_uint64()
-            for _ in range(n):
-                drv_output = DrvOutput(await reader.read_string())
-                realisation_json = await reader.read_string()
-                obj.built_outputs[drv_output] = json.loads(realisation_json)
-
-        return obj
-
-    @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         from .. import wire
 
@@ -185,28 +149,6 @@ class BuildResult:
                 obj.built_outputs[drv_output] = json.loads(realisation_json)
 
         return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        from .. import wire
-
-        writer.write_uint64(self.status.value)
-        writer.write_string(self.error_msg)
-
-        if version >= wire.proto(1, 29):
-            writer.write_uint64(self.times_built)
-            writer.write_uint64(self.is_non_deterministic)
-            writer.write_uint64(self.start_time)
-            writer.write_uint64(self.stop_time)
-
-        if version >= wire.proto(1, 37):
-            writer.write_optional_uint64(self.cpu_user)
-            writer.write_optional_uint64(self.cpu_system)
-
-        if version >= wire.proto(1, 28):
-            writer.write_uint64(len(self.built_outputs))
-            for k, v in self.built_outputs.items():
-                writer.write_string(k)
-                writer.write_string(json.dumps(v))
 
     async def serialize(self, ctx: WriteContext) -> None:
         from .. import wire
@@ -243,15 +185,6 @@ class KeyedBuildResult:
     result: BuildResult = field(default_factory=BuildResult)
 
     @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        from ..derived_path import DerivedPath
-
-        obj = cls.__new__(cls)
-        obj.path = await reader.read_string(DerivedPath)
-        obj.result = await BuildResult.from_reader(reader, version)
-        return obj
-
-    @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         from ..derived_path import DerivedPath
 
@@ -259,10 +192,6 @@ class KeyedBuildResult:
         obj.path = await ctx.reader.read_string(DerivedPath)
         obj.result = await BuildResult.deserialize(ctx)
         return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_string(self.path)
-        await self.result.to_writer(writer, version)
 
     async def serialize(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(self.path)

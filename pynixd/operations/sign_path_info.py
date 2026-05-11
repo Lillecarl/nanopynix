@@ -58,7 +58,7 @@ class SignPathInfoResponse(OpResponse):
         self.logger.debug("to_writer", info=self.info)
         self.logs.serialize(ctx)
         if self.info is not None:
-            await self.info.serialize(ctx)
+            self.info.serialize(ctx)
 
 
 @dataclass
@@ -108,7 +108,7 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
         self.logger = self.logger.bind(identifier=ctx.writer.identifier)
         ctx.writer.write_uint64(self.op)
         if self.info is not None:
-            await self.info.serialize(ctx)
+            self.info.serialize(ctx)
 
     async def handle(self, ctx: RequestContext) -> SignPathInfoResponse | None:
         self.logger.debug("received_op")
