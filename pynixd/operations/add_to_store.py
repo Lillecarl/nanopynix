@@ -36,30 +36,23 @@ class AddToStoreResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        obj.info = await ValidPathInfo.from_reader(reader)
-        return obj
+        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", info=self.info)
-        self.logs.to_writer(writer)
-        if self.info is not None:
-            self.info.to_writer(writer)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
         obj.logs = await OperationLogs.deserialize(ctx)
-        obj.info = await ValidPathInfo.from_reader(ctx.reader)
+        obj.info = await ValidPathInfo.deserialize(ctx)
         return obj
 
     async def serialize(self, ctx: WriteContext) -> None:
@@ -67,7 +60,7 @@ class AddToStoreResponse(OpResponse):
         self.logger.debug("serialize", info=self.info)
         self.logs.serialize(ctx)
         if self.info is not None:
-            self.info.to_writer(ctx.writer)
+            self.info.serialize(ctx)
 
 
 @dataclass(kw_only=True)
@@ -87,30 +80,14 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.path_name = await reader.read_string()
-        obj.cam = await reader.read_string()
-        obj.references = await reader.read_string_set(StorePath)
-        obj.repair = await reader.read_uint64()
-        obj.logger.debug(
-            "from_reader",
-            path_name=obj.path_name,
-            cam=obj.cam,
-            references=obj.references,
-            repair=obj.repair,
-        )
-        return obj
+        ctx = ReadContext(reader=reader, version=version)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string(self.path_name)
-        writer.write_string(self.cam)
-        writer.write_string_set(self.references)
-        writer.write_uint64(self.repair)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

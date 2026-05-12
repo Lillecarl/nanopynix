@@ -15,8 +15,9 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
-    from ..types.context import WriteContext
     from ..wire import NixReader, NixWriter
+
+from ..types.context import WriteContext
 
 
 @dataclass
@@ -27,23 +28,16 @@ class SignPathInfoResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        obj.info = await ValidPathInfo.from_reader(reader)
-        return obj
+        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", info=self.info)
-        self.logs.to_writer(writer)
-        if self.info is not None:
-            self.info.to_writer(writer)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -80,21 +74,16 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
         client: ClientConn | None = None,  # noqa: ARG003
         buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.info = await ValidPathInfo.from_reader(reader)
-        obj.logger.debug("from_reader", path=obj.info.path)
-        return obj
+        ctx = ReadContext(reader=reader, version=version)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        if self.info is not None:
-            self.info.to_writer(writer)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

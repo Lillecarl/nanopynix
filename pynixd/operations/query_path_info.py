@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
+from ..types.context import ReadContext, WriteContext
 from .base import OperationLogs, OpRequest, OpResponse, UnkeyedValidPathInfo
 
 QUERY_PATH_INFO = """
@@ -22,7 +23,6 @@ WHERE r.referrer = (SELECT id FROM ValidPaths WHERE path = ?)
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
-    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -38,34 +38,16 @@ class QueryPathInfoResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(
-            reader,
-            client=client,
-            buffer=buffer_logs,
-        )
-        is_valid = await reader.read_uint64() != 0
-        obj.info = None
-        if is_valid:
-            obj.info = await UnkeyedValidPathInfo.from_reader(reader)
-        return obj
+        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", valid=self.valid, info=self.info)
-        self.logs.to_writer(writer)
-        writer.write_uint64(1 if self.valid else 0)
-        if self.valid:
-            assert self.info is not None
-            # Explicitly use the base class method to avoid writing the path
-            # (which ValidPathInfo.to_writer would do).
-            UnkeyedValidPathInfo.to_writer(self.info, writer)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -75,7 +57,7 @@ class QueryPathInfoResponse(OpResponse):
         is_valid = await ctx.reader.read_uint64() != 0
         obj.info = None
         if is_valid:
-            obj.info = await UnkeyedValidPathInfo.from_reader(ctx.reader)
+            obj.info = await UnkeyedValidPathInfo.deserialize(ctx)
         return obj
 
     async def serialize(self, ctx: WriteContext) -> None:
@@ -85,7 +67,7 @@ class QueryPathInfoResponse(OpResponse):
         ctx.writer.write_uint64(1 if self.valid else 0)
         if self.valid:
             assert self.info is not None
-            UnkeyedValidPathInfo.to_writer(self.info, ctx.writer)
+            UnkeyedValidPathInfo.serialize(self.info, ctx)
 
 
 @dataclass
@@ -104,16 +86,12 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
         client: ClientConn | None = None,  # noqa: ARG003
         buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.path = await reader.read_string(StorePath)
-        obj.logger.debug("from_reader", path=obj.path)
-        return obj
+        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string(self.path)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

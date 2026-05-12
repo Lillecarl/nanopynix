@@ -28,20 +28,16 @@ class AddToStoreNarResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        return obj
+        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer")
-        self.logs.to_writer(writer)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     # ── New-style API (ReadContext / WriteContext) ──────────────
 
@@ -73,25 +69,14 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        path = await reader.read_string(StorePath)
-        unkeyed_info = await UnkeyedValidPathInfo.from_reader(reader)
-        obj.info = unkeyed_info.with_path(path)
-        obj.repair = await reader.read_uint64()
-        obj.dont_check_sigs = await reader.read_uint64()
-        obj.logger.debug("from_reader", info=obj.info)
-        return obj
+        ctx = ReadContext(reader=reader, version=version)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        if self.info is not None:
-            self.info.to_writer(writer)
-        writer.write_uint64(self.repair)
-        writer.write_uint64(self.dont_check_sigs)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     # ── New-style API (ReadContext / WriteContext) ──────────────
 
@@ -100,7 +85,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
         path = await ctx.reader.read_string(StorePath)
-        unkeyed_info = await UnkeyedValidPathInfo.from_reader(ctx.reader)
+        unkeyed_info = await UnkeyedValidPathInfo.deserialize(ctx)
         obj.info = unkeyed_info.with_path(path)
         obj.repair = await ctx.reader.read_uint64()
         obj.dont_check_sigs = await ctx.reader.read_uint64()
@@ -111,7 +96,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         self.logger = self.logger.bind(identifier=ctx.writer.identifier)
         ctx.writer.write_uint64(self.op)
         if self.info is not None:
-            self.info.to_writer(ctx.writer)
+            self.info.serialize(ctx)
         ctx.writer.write_uint64(self.repair)
         ctx.writer.write_uint64(self.dont_check_sigs)
 
@@ -156,7 +141,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         dst.write_uint64(39)
 
         path = await src.read_string(StorePath)
-        unkeyed_info = await UnkeyedValidPathInfo.from_reader(src)
+        unkeyed_info = await UnkeyedValidPathInfo.deserialize(ReadContext(reader=src, version=1))
         info = unkeyed_info.with_path(path)
 
         repair = await src.read_uint64()
@@ -169,7 +154,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
             dont_check_sigs=dont_check_sigs,
         )
 
-        info.to_writer(dst)
+        info.serialize(WriteContext(writer=dst, version=1))
         dst.write_uint64(repair)
         dst.write_uint64(dont_check_sigs)
 

@@ -13,8 +13,9 @@ from .base import OperationLogs, OpRequest, OpResponse, SubstitutablePathInfo
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
+
+from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -30,23 +31,12 @@ class QuerySubstitutablePathInfoResponse(OpResponse):
         client: ClientConn | None = None,  # noqa: ARG003
         buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(reader)
-        obj.found = await reader.read_uint64() != 0
-        obj.info = None
-        if obj.found:
-            obj.info = await SubstitutablePathInfo.from_reader(reader, version)
-        return obj
+        ctx = ReadContext(reader=reader, version=version)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", found=self.found)
-        self.logs.to_writer(writer)
-        writer.write_uint64(1 if self.found else 0)
-        if self.found and self.info is not None:
-            await self.info.to_writer(writer, version)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     # ── New-style API (ReadContext / WriteContext) ──────────────
 
@@ -82,20 +72,16 @@ class QuerySubstitutablePathInfoRequest(OpRequest[QuerySubstitutablePathInfoResp
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
         client: ClientConn | None = None,  # noqa: ARG003
         buffer_logs: bool = True,  # noqa: ARG003
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.path = await reader.read_string()
-        obj.logger.debug("from_reader", path=obj.path)
-        return obj
+        ctx = ReadContext(reader=reader, version=version)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string(self.path)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     # ── New-style API (ReadContext / WriteContext) ──────────────
 

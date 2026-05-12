@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..exceptions import OpNotImplementedError
 from ..stderr import OperationLogs
 from ..store_path import StorePath
+from ..types.context import ReadContext, WriteContext
 from .base import (
     OpRequest,
     OpResponse,
@@ -41,7 +42,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types.aliases import StorePathSet
-    from ..types.context import ReadContext, WriteContext
     from ..wire import NixReader, NixWriter
 
 
@@ -57,31 +57,16 @@ class QueryClosureWithInfoResponse(OpResponse):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
         client: ClientConn | None = None,
         buffer_logs: bool = True,
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(
-            reader,
-            client=client,
-            buffer=buffer_logs,
-        )
-        n = await reader.read_uint64()
-        obj.infos = []
-        for _ in range(n):
-            obj.infos.append(await ValidPathInfo.from_reader(reader))
-        return obj
+        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", info_count=len(self.infos))
-        self.logs.to_writer(writer)
-        writer.write_uint64(len(self.infos))
-        for info in self.infos:
-            info.to_writer(writer)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     # ── New-style API (ReadContext / WriteContext) ──────────────
 
@@ -93,7 +78,7 @@ class QueryClosureWithInfoResponse(OpResponse):
         n = await ctx.reader.read_uint64()
         obj.infos = []
         for _ in range(n):
-            obj.infos.append(await ValidPathInfo.from_reader(ctx.reader))
+            obj.infos.append(await ValidPathInfo.deserialize(ctx))
         return obj
 
     async def serialize(self, ctx: WriteContext) -> None:
@@ -102,7 +87,7 @@ class QueryClosureWithInfoResponse(OpResponse):
         self.logs.serialize(ctx)
         ctx.writer.write_uint64(len(self.infos))
         for info in self.infos:
-            info.to_writer(ctx.writer)
+            info.serialize(ctx)
 
 
 @dataclass(kw_only=True)
@@ -118,18 +103,14 @@ class QueryClosureWithInfoRequest(OpRequest[QueryClosureWithInfoResponse]):
     async def from_reader(
         cls,
         reader: NixReader,
-        version: int,  # noqa: ARG003
+        version: int,
     ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.paths = await reader.read_string_set(StorePath)
-        obj.logger.debug("from_reader", paths=obj.paths)
-        return obj
+        ctx = ReadContext(reader=reader, version=version)
+        return await cls.deserialize(ctx)
 
     async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string_set(self.paths)
+        ctx = WriteContext(writer=writer, version=version)
+        await self.serialize(ctx)
 
     # ── New-style API (ReadContext / WriteContext) ──────────────
 
