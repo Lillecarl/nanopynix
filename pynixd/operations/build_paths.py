@@ -86,7 +86,8 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
             self.logger.debug("responded_op")
             return result
 
-        assert ctx.proxy.scheduler is not None
+        if ctx.proxy.scheduler is None:
+            raise RuntimeError("scheduler is None")
         self.logger.debug("build_paths_count", count=len(self.derived_paths))
         result = await ctx.proxy.scheduler.build_derived_paths(
             self.derived_paths,
@@ -185,7 +186,8 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
             self.logger.debug("responded_op")
             return result
 
-        assert ctx.proxy.scheduler is not None
+        if ctx.proxy.scheduler is None:
+            raise RuntimeError("scheduler is None")
         self.logger.debug(
             "build_paths_with_results_decomposed",
             num_derivations=len(self.derived_paths),

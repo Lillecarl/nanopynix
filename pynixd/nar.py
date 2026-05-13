@@ -538,7 +538,8 @@ class NarPath:
             return new_node
 
         def rebuild(node: NarNode, parts: tuple[str, ...]) -> NarNode:
-            assert isinstance(node, NarDirectory)
+            if not isinstance(node, NarDirectory):
+                raise TypeError(f"Expected NarDirectory, got {type(node).__name__}")
             name = parts[0]
             new_entries = []
             found = False

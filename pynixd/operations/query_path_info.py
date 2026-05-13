@@ -50,7 +50,8 @@ class QueryPathInfoResponse(OpResponse):
         self.logs.serialize(ctx)
         ctx.writer.write_uint64(1 if self.valid else 0)
         if self.valid:
-            assert self.info is not None
+            if self.info is None:
+                raise RuntimeError("info is None for valid path")
             UnkeyedValidPathInfo.serialize(self.info, ctx)
 
 

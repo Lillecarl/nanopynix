@@ -20,6 +20,7 @@ import structlog
 
 from ..exceptions import OpNotImplementedError
 from ..stderr import OperationLogs as OperationLogs
+from ..testing import set_test_value as set_test_value
 from ..types import (
     BasicDerivation as BasicDerivation,
 )
@@ -127,8 +128,6 @@ class OpRequest[Resp: OpResponse](ABC):
 
             feature_name = type(self).name
             if feature_name in store.features:
-                from ..testing import set_test_value
-
                 set_test_value(f"{feature_name}_delegated", True)
                 return await store.call(
                     self,

@@ -8,13 +8,12 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
-from pynixd.operations.sign_path_info import SignPathInfoRequest
-
 from ..stderr import OperationLogs
 from ..store_path import StorePath
 from ..types.context import ReadContext, WriteContext
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import OpRequest, OpResponse, ValidPathInfo
+from .sign_path_info import SignPathInfoRequest
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -97,7 +96,8 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
                 await conn.w.drain()
 
                 async def write_payload():
-                    assert self.async_provider is not None
+                    if self.async_provider is None:
+                        raise RuntimeError("async_provider is None")
                     await self.async_provider(conn.w)
                     await conn.w.drain()
 

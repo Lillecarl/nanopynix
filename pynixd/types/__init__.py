@@ -69,15 +69,3 @@ from .protocol import (
 from .protocol import (
     Verbosity as Verbosity,
 )
-
-
-def _export_logs():
-    from ..stderr import OperationLogs
-
-    return OperationLogs
-
-
-# OperationLogs is special due to circular dependencies with stderr
-# We don't export it at the top level of types/__init__.py to avoid
-# early initialization issues. Callers should import from pynixd.stderr
-# or pynixd.operations.base (which re-exports it).

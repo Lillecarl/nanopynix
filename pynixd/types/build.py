@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Self
 
 import structlog
 
+from .. import wire
 from ..store_path import DrvOutput, StorePath
 
 if TYPE_CHECKING:
@@ -117,8 +118,6 @@ class BuildResult:
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
-        from .. import wire
-
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
         obj.status = BuildResultStatus(await ctx.reader.read_uint64())
@@ -151,8 +150,6 @@ class BuildResult:
         return obj
 
     async def serialize(self, ctx: WriteContext) -> None:
-        from .. import wire
-
         ctx.writer.write_uint64(self.status.value)
         ctx.writer.write_string(self.error_msg)
 

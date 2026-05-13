@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
+from .. import wire
 from ..store_path import StorePath
+from .context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
     from .aliases import ContentAddress, NARHash, StorePathSet
-    from .context import ReadContext, WriteContext
 
 
 @dataclass(kw_only=True)
@@ -89,9 +90,6 @@ class ValidPathInfo(UnkeyedValidPathInfo):
         super().serialize(ctx)
 
     def to_bytes(self) -> bytes:
-        from .. import wire
-        from .context import WriteContext
-
         buf = wire.BytesWriter()
         self.serialize(WriteContext(writer=buf, version=0))
         return buf.get_bytes()
