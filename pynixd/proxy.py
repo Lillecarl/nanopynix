@@ -197,8 +197,7 @@ class DaemonProxy:
 
                 if response is not None:
                     await self.client.flush()
-                    w_ctx = WriteContext(writer=self.w, version=self.version)
-                    await response.serialize(w_ctx)
+                    await response.serialize(WriteContext.from_proxy(self))
                     await self.w.drain()
                 # else: already handled (streaming, error, etc.)
 
@@ -252,17 +251,16 @@ class DaemonProxy:
             await self.send_error(f"Unhandled operation: {op_num}")
             return None
 
-        # Build request context
-        ctx = RequestContext(
-            proxy=self,
-            role=self.role,
-            version=self.version,
-            username=self.username,
-        )
-
         try:
             request = object.__new__(req_cls)
-            return await request.handle(ctx)
+            return await request.handle(
+                RequestContext(
+                    proxy=self,
+                    role=self.role,
+                    version=self.version,
+                    username=self.username,
+                )
+            )
         except BackendError:
             return None
 

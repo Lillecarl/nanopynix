@@ -56,8 +56,7 @@ class SetOptionsRequest(OpRequest[SetOptionsResponse]):
     overrides: dict[str, str]
 
     async def handle(self, ctx: RequestContext) -> SetOptionsResponse | None:
-        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
-        self = await self.deserialize(r_ctx)
+        self = await self.deserialize(ReadContext.from_request(ctx))
         if ctx.proxy.role == Role.ADMIN:
             return await ctx.proxy.execute(self)
 

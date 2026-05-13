@@ -74,8 +74,7 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     ) -> NarFromPathResponse:
         if self.nar_size > 0:
             async with store.transfer_conn() as conn:
-                w_ctx = WriteContext(writer=conn.w, version=conn.version)
-                await self.serialize(w_ctx)
+                await self.serialize(WriteContext.from_conn(conn))
                 await conn.w.drain()
 
                 # Drain logs from backend before reading payload
@@ -116,12 +115,10 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
         )
 
         async with ctx.proxy.local_store.transfer_conn() as conn:
-            w_ctx = WriteContext(writer=conn.w, version=conn.version)
-            await NarFromPathRequest(path=path, nar_size=nar_size).serialize(w_ctx)
+            await NarFromPathRequest(path=path, nar_size=nar_size).serialize(WriteContext.from_conn(conn))
             await conn.w.drain()
 
-            r_ctx = ReadContext(reader=conn.r, version=conn.version)
-            logs = await OperationLogs.deserialize(r_ctx)
+            logs = await OperationLogs.deserialize(ReadContext.from_conn(conn))
 
             await ctx.proxy.client.flush()
             logs.serialize(WriteContext(writer=ctx.proxy.w, version=ctx.version))

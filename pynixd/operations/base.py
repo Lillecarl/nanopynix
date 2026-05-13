@@ -108,8 +108,7 @@ class OpRequest[Resp: OpResponse](ABC):
         Decodes the request and delegates execution to the stores.
         Streaming operations should override this method.
         """
-        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
-        self = await self.deserialize(r_ctx)
+        self = await self.deserialize(ReadContext.from_request(ctx))
         return await ctx.proxy.execute(self)
 
     async def execute(

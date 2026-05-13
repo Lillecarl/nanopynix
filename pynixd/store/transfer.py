@@ -71,8 +71,7 @@ async def stream_paths_store_to_store(
             repair=0,
             dont_check_sigs=1,
         )
-        w_ctx = WriteContext(writer=dst_conn.w, version=dst_conn.version)
-        await req.serialize(w_ctx)
+        await req.serialize(WriteContext.from_conn(dst_conn))
         await dst_conn.w.drain()
 
         fw = dst_conn.w.framed()
@@ -90,8 +89,7 @@ async def stream_paths_store_to_store(
             fw.write(info.to_bytes())
 
             # Request NAR from source
-            w_ctx = WriteContext(writer=src_conn.w, version=src_conn.version)
-            await NarFromPathRequest(path=path, nar_size=info.nar_size).serialize(w_ctx)
+            await NarFromPathRequest(path=path, nar_size=info.nar_size).serialize(WriteContext.from_conn(src_conn))
             await src_conn.w.drain()
 
             # Source will send stderr logs followed by STDERR_LAST before NAR data
@@ -107,8 +105,7 @@ async def stream_paths_store_to_store(
 
         await fw.finalize()
         await dst_conn.w.drain()
-        r_ctx = ReadContext(reader=dst_conn.r, version=dst_conn.version)
-        await req.response_type.deserialize(r_ctx)
+        await req.response_type.deserialize(ReadContext.from_conn(dst_conn))
 
     # 4. Update destination store's knowledge
     dst.add_path_infos(set(to_transfer))

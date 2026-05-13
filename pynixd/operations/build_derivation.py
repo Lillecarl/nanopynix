@@ -68,8 +68,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
         self.logger.debug("received_op")
 
-        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
-        self = await self.deserialize(r_ctx)
+        self = await self.deserialize(ReadContext.from_request(ctx))
 
         if not ctx.proxy.use_scheduler_for_builds:
             self.logger.debug("handle_local_mode_fallback")

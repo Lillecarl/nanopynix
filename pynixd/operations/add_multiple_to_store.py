@@ -61,21 +61,18 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
 
     async def handle(self, ctx: RequestContext) -> AddMultipleToStoreResponse:
         """Override handle because this is a streaming operation."""
-        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
-        self = await self.deserialize(r_ctx)
+        self = await self.deserialize(ReadContext.from_request(ctx))
         async with ctx.proxy.local_store.transfer_conn() as conn:
             # Re-write the request prefix to the backend
-            w_ctx = WriteContext(writer=conn.w, version=ctx.version)
-            await self.serialize(w_ctx)
+            await self.serialize(WriteContext.from_conn(conn))
             await conn.w.drain()
 
             # We must run forward_stream and the response reader concurrently
             # because the backend might send logs while we are still sending data.
             # If we don't read the logs, the backend's output buffer fills and it blocks.
             async with asyncio.TaskGroup() as tg:
-                resp_ctx = ReadContext(reader=conn.r, version=conn.version)
                 resp_task = tg.create_task(
-                    AddMultipleToStoreResponse.deserialize(resp_ctx),
+                    AddMultipleToStoreResponse.deserialize(ReadContext.from_conn(conn)),
                 )
 
                 infos = await self.forward_stream(ctx.proxy.r, conn.w)

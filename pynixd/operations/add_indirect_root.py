@@ -50,8 +50,7 @@ class AddIndirectRootRequest(OpRequest[AddIndirectRootResponse]):
         return obj
 
     async def handle(self, ctx: RequestContext) -> AddIndirectRootResponse | None:
-        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
-        self = await self.deserialize(r_ctx)
+        self = await self.deserialize(ReadContext.from_request(ctx))
         if ctx.proxy.role == Role.ADMIN:
             return await ctx.proxy.execute(self)
 

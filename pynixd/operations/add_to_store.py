@@ -94,8 +94,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
     ) -> AddToStoreResponse:
         if self.async_provider:
             async with store.transfer_conn() as conn:
-                w_ctx = WriteContext(writer=conn.w, version=conn.version)
-                await self.serialize(w_ctx)
+                await self.serialize(WriteContext.from_conn(conn))
                 await conn.w.drain()
 
                 async def write_payload():
@@ -127,8 +126,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
             # logs concurrently here too. But forward() is synchronous-ish
             # (awaits reads/writes).
 
-            r_ctx = ReadContext(reader=conn.r, version=conn.version)
-            resp = await AddToStoreResponse.deserialize(r_ctx)
+            resp = await AddToStoreResponse.deserialize(ReadContext.from_conn(conn))
             if resp.info is not None:
                 resp.info = (
                     await ctx.proxy.local_store.execute(

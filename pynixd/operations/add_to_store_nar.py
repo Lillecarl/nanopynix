@@ -76,8 +76,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
     ) -> AddToStoreNarResponse:
         if provider := self.async_provider:
             async with store.transfer_conn() as conn:
-                w_ctx = WriteContext(writer=conn.w, version=conn.version)
-                await self.serialize(w_ctx)
+                await self.serialize(WriteContext.from_conn(conn))
                 await conn.w.drain()
 
                 async def write_payload():
@@ -101,8 +100,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         structlog.contextvars.bind_contextvars(operation=type(self).__name__)
         async with ctx.proxy.local_store.transfer_conn() as conn:
             path = await self.forward(ctx.proxy.r, conn.w)
-            r_ctx = ReadContext(reader=conn.r, version=conn.version)
-            resp = await AddToStoreNarResponse.deserialize(r_ctx)
+            resp = await AddToStoreNarResponse.deserialize(ReadContext.from_conn(conn))
             ctx.proxy.local_store.tracker.add_known_path(path)
         return resp
 

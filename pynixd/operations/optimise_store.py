@@ -52,8 +52,7 @@ class OptimiseStoreRequest(OpRequest[OptimiseStoreResponse]):
         self.logger.debug("received_op")
 
         # Must always consume the request to keep protocol in sync
-        r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
-        self = await self.deserialize(r_ctx)
+        self = await self.deserialize(ReadContext.from_request(ctx))
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)
