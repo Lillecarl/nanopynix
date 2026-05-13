@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from ..store import Store
     from ..types.ca import Realisation
     from ..types.context import ReadContext, WriteContext
-    from ..wire import NixReader, NixWriter
 
 
 # ── RegisterDrvOutput (op 42) ─────────────────────────────────────────
@@ -31,29 +30,6 @@ if TYPE_CHECKING:
 
 @dataclass
 class RegisterDrvOutputResponse(OpResponse):
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(
-            reader,
-            client=client,
-            buffer=buffer_logs,
-        )
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer")
-        self.logs.to_writer(writer)
-
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         obj = cls.__new__(cls)
@@ -77,26 +53,6 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     op: ClassVar[int] = 42
     response_type: ClassVar[type[OpResponse]] = RegisterDrvOutputResponse
     realisation: Realisation
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        realisation_json = await reader.read_string()
-        obj.realisation = json.loads(realisation_json)
-        obj.logger.debug("from_reader", realisation=obj.realisation)
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string(json.dumps(self.realisation))
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -140,37 +96,6 @@ class QueryRealisationResponse(OpResponse):
     realisations: list[dict]
 
     @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(
-            reader,
-            client=client,
-            buffer=buffer_logs,
-        )
-        n = await reader.read_uint64()
-        obj.realisations = []
-        for _ in range(n):
-            realisation_json = await reader.read_string()
-            obj.realisations.append(json.loads(realisation_json))
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", realisation_count=len(self.realisations))
-        self.logs.to_writer(writer)
-        writer.write_uint64(len(self.realisations))
-        for r in self.realisations:
-            writer.write_string(json.dumps(r))
-
-    @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
@@ -199,26 +124,6 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
     response_type: ClassVar[type[OpResponse]] = QueryRealisationResponse
     is_query: ClassVar[bool] = True
     drv_output: DrvOutput
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        raw = await reader.read_string()
-        obj.drv_output = DrvOutput(raw)
-        obj.logger.debug("from_reader", drv_output=obj.drv_output)
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string(self.drv_output)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

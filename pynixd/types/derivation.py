@@ -11,7 +11,6 @@ from ..store_path import StorePath
 from ..system_features import PYNIXD_HANDLED_FEATURES
 
 if TYPE_CHECKING:
-    from ..wire import NixReader, NixWriter
     from .aliases import StorePathSet
     from .context import ReadContext, WriteContext
 
@@ -137,50 +136,6 @@ class BasicDerivation:
     @property
     def has_dynamic_outputs(self) -> bool:
         return any(o.is_dynamic_output for o in self.outputs.values())
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        n = await reader.read_uint64()
-        obj.outputs = {}
-        for _ in range(n):
-            name = await reader.read_string()
-            obj.outputs[name] = DerivationOutput(
-                path=await reader.read_string(),
-                method=await reader.read_string(),
-                hash_digest=await reader.read_string(),
-            )
-        obj.input_srcs = await reader.read_string_set(StorePath)
-        obj.platform = await reader.read_string()
-        obj.builder = await reader.read_string()
-        obj.args = await reader.read_string_list()
-        n_env = await reader.read_uint64()
-        obj.env = {}
-        for _ in range(n_env):
-            k = await reader.read_string()
-            v = await reader.read_string()
-            obj.env[k] = v
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        writer.write_uint64(len(self.outputs))
-        for name, out in self.outputs.items():
-            writer.write_string(name)
-            writer.write_string(out.path)
-            writer.write_string(out.method)
-            writer.write_string(out.hash_digest)
-        writer.write_string_set(self.input_srcs)
-        writer.write_string(self.platform)
-        writer.write_string(self.builder)
-        writer.write_string_list(self.args)
-        writer.write_uint64(len(self.env))
-        for k, v in sorted(self.env.items()):
-            writer.write_string(k)
-            writer.write_string(v)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

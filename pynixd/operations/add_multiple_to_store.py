@@ -11,7 +11,6 @@ from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
 from .base import OpRequest, OpResponse, ValidPathInfo
 
 if TYPE_CHECKING:
-    from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
 
 from ..types.context import ReadContext, WriteContext
@@ -19,21 +18,6 @@ from ..types.context import ReadContext, WriteContext
 
 @dataclass
 class AddMultipleToStoreResponse(OpResponse):
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
-
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         obj = cls.__new__(cls)
@@ -55,19 +39,6 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
     response_type: ClassVar[type[OpResponse]] = AddMultipleToStoreResponse
     repair: int
     dont_check_sigs: int
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

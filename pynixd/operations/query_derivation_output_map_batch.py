@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from ..store import Store
     from ..types.aliases import OutputMap, StorePathSet
     from ..types.context import ReadContext, WriteContext
-    from ..wire import NixReader, NixWriter
 
 
 @dataclass
@@ -45,31 +44,6 @@ class DerivationOutputMapBatchResponse(OpResponse):
     @property
     def is_not_found(self) -> bool:
         return not self.outputs
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        n = await reader.read_uint64()
-        obj.outputs = {}
-        for _ in range(n):
-            drv_path = await reader.read_string(StorePath)
-            m = await reader.read_uint64()
-            drv_outputs: dict[str, StorePath | None] = {}
-            for _ in range(m):
-                name = await reader.read_string()
-                path = await reader.read_string(StorePath)
-                drv_outputs[name] = path or None
-            obj.outputs[drv_path] = drv_outputs
-        return obj
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -104,21 +78,6 @@ class DerivationOutputMapBatchResponse(OpResponse):
                 else:
                     ctx.writer.write_string("")
 
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", drv_path_count=len(self.outputs))
-        self.logs.to_writer(writer)
-        writer.write_uint64(len(self.outputs))
-        for drv_path, drv_outputs in self.outputs.items():
-            writer.write_string(drv_path)
-            writer.write_uint64(len(drv_outputs))
-            for name, path in drv_outputs.items():
-                writer.write_string(name)
-                if path is not None:
-                    writer.write_string(path)
-                else:
-                    writer.write_string("")
-
 
 @dataclass(kw_only=True)
 class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchResponse]):
@@ -130,28 +89,12 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
     drv_paths: StorePathSet
 
     @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.drv_paths = await reader.read_string_set(StorePath)
-        obj.logger.debug("from_reader", drv_paths=obj.drv_paths)
-        return obj
-
-    @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
         obj.drv_paths = await ctx.reader.read_string_set(StorePath)
         obj.logger.debug("deserialize", drv_paths=obj.drv_paths)
         return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string_set(self.drv_paths)
 
     async def serialize(self, ctx: WriteContext) -> None:
         self.logger = self.logger.bind(identifier=ctx.writer.identifier)

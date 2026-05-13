@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
-    from ..wire import NixReader, NixWriter
 
 from ..types.context import WriteContext
 
@@ -23,21 +22,6 @@ from ..types.context import WriteContext
 @dataclass
 class SignPathInfoResponse(OpResponse):
     info: ValidPathInfo | None = None
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -69,21 +53,6 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
             return False
         prefix = f"{key_name}:"
         return any(sig.startswith(prefix) for sig in self.info.sigs)
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

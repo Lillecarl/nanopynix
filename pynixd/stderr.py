@@ -22,7 +22,6 @@ from .types.protocol import ActivityType, FieldType, ResultType, Verbosity
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from .connection import ClientConn
     from .types.context import ReadContext, WriteContext
     from .wire import NixReader, NixWriter
 
@@ -220,37 +219,23 @@ class OperationLogs:
     def add(self, msg: StderrMsg) -> None:
         self.messages.append(msg)
 
-    def to_writer(self, writer: NixWriter) -> None:
+    def serialize(self, ctx: WriteContext) -> None:
         for msg in self.messages:
-            msg.to_writer(writer)
-        writer.write_uint64(constants.STDERR_LAST)
+            msg.to_writer(ctx.writer)
+        ctx.writer.write_uint64(constants.STDERR_LAST)
 
     @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        client: ClientConn | None = None,
-        buffer: bool = True,
-    ) -> Self:
+    async def deserialize(cls, ctx: ReadContext) -> Self:
         obj = cls.__new__(cls)
         obj.messages = []
-        async for msg in read_stream(reader):
-            if client:
-                await client.queue.put(msg)
-            if buffer:
+        async for msg in read_stream(ctx.reader):
+            if ctx.client:
+                await ctx.client.queue.put(msg)
+            if ctx.buffer_logs:
                 obj.add(msg)
             if isinstance(msg, StderrError):
                 raise BackendError(f"Daemon error ({msg.error_type}): {msg.msg}")
         return obj
-
-    # ── New-style API (ReadContext / WriteContext) ──────────────
-
-    def serialize(self, ctx: WriteContext) -> None:
-        self.to_writer(ctx.writer)
-
-    @classmethod
-    async def deserialize(cls, ctx: ReadContext) -> Self:
-        return await cls.from_reader(ctx.reader, client=ctx.client, buffer=ctx.buffer_logs)
 
 
 # ── Parsers mapping msg_type → class ─────────────────────────────

@@ -13,45 +13,11 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types.context import ReadContext, WriteContext
-    from ..wire import NixReader, NixWriter
 
 
 @dataclass
 class QueryDerivationOutputMapResponse(OpResponse):
     items: dict[str, StorePath | None]
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(
-            reader,
-            client=client,
-            buffer=buffer_logs,
-        )
-        n = await reader.read_uint64()
-        obj.items = {}
-        for _ in range(n):
-            k = await reader.read_string()
-            raw = await reader.read_string()
-            obj.items[k] = StorePath(raw) if raw else None
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", item_count=len(self.items))
-        self.logs.to_writer(writer)
-        writer.write_uint64(len(self.items))
-        for k, v in self.items.items():
-            writer.write_string(k)
-            writer.write_string(v if v is not None else StorePath(""))
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -83,25 +49,6 @@ class QueryDerivationOutputMapRequest(OpRequest[QueryDerivationOutputMapResponse
     response_type: ClassVar[type[OpResponse]] = QueryDerivationOutputMapResponse
     is_query: ClassVar[bool] = True
     path: StorePath
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.path = await reader.read_string(StorePath)
-        obj.logger.debug("from_reader", path=obj.path)
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string(self.path)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

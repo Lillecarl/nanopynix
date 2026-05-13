@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
     from ..types.context import WriteContext
-    from ..wire import NixReader, NixWriter
 
 
 @dataclass
@@ -25,39 +24,6 @@ class CollectGarbageResponse(OpResponse):
     paths_deleted: StorePathSet
     bytes_freed: int
     _obsolete: int
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(
-            reader,
-            client=client,
-            buffer=buffer_logs,
-        )
-        obj.paths_deleted = await reader.read_string_set(StorePath)
-        obj.bytes_freed = await reader.read_uint64()
-        obj._obsolete = await reader.read_uint64()
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug(
-            "to_writer",
-            paths_deleted=self.paths_deleted,
-            bytes_freed=self.bytes_freed,
-        )
-        self.logs.to_writer(writer)
-        writer.write_string_set(self.paths_deleted)
-        writer.write_uint64(self.bytes_freed)
-        writer.write_uint64(self._obsolete)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -94,43 +60,6 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
     _obsolete1: int
     _obsolete2: int
     _obsolete3: int
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.action = GCAction(await reader.read_uint64())
-        obj.paths_to_delete = await reader.read_string_set(StorePath)
-        obj.ignore_liveness = await reader.read_uint64()
-        obj.max_freed = await reader.read_uint64()
-        obj._obsolete1 = await reader.read_uint64()
-        obj._obsolete2 = await reader.read_uint64()
-        obj._obsolete3 = await reader.read_uint64()
-        obj.logger.debug(
-            "from_reader",
-            action=obj.action,
-            paths_to_delete=obj.paths_to_delete,
-            ignore_liveness=obj.ignore_liveness,
-            max_freed=obj.max_freed,
-        )
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_uint64(self.action)
-        writer.write_string_set(self.paths_to_delete)
-        writer.write_uint64(self.ignore_liveness)
-        writer.write_uint64(self.max_freed)
-        writer.write_uint64(self._obsolete1)
-        writer.write_uint64(self._obsolete2)
-        writer.write_uint64(self._obsolete3)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

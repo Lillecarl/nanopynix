@@ -12,33 +12,13 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from .base import OperationLogs, OpRequest, OpResponse, SubstitutablePathInfo
 
 if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..wire import NixReader, NixWriter
-
-from ..types.context import ReadContext, WriteContext
+    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
 class QuerySubstitutablePathInfoResponse(OpResponse):
     found: bool = False
     info: SubstitutablePathInfo | None = None
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
-
-    # ── New-style API (ReadContext / WriteContext) ──────────────
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -67,23 +47,6 @@ class QuerySubstitutablePathInfoRequest(OpRequest[QuerySubstitutablePathInfoResp
     response_type: ClassVar[type[OpResponse]] = QuerySubstitutablePathInfoResponse
     is_query: ClassVar[bool] = True
     path: str = ""
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
-
-    # ── New-style API (ReadContext / WriteContext) ──────────────
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

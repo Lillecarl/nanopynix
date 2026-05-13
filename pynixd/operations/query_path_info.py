@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..store_path import StorePath
-from ..types.context import ReadContext, WriteContext
 from .base import OperationLogs, OpRequest, OpResponse, UnkeyedValidPathInfo
 
 QUERY_PATH_INFO = """
@@ -23,7 +22,7 @@ WHERE r.referrer = (SELECT id FROM ValidPaths WHERE path = ?)
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
-    from ..wire import NixReader, NixWriter
+    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -33,21 +32,6 @@ class QueryPathInfoResponse(OpResponse):
     @property
     def valid(self) -> bool:
         return self.info is not None
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -77,21 +61,6 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
     response_type: ClassVar[type[OpResponse]] = QueryPathInfoResponse
     is_query: ClassVar[bool] = True
     path: StorePath = field(default_factory=lambda: StorePath(""))
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

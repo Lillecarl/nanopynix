@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..exceptions import OpNotImplementedError
 from ..store_path import StorePath
-from ..types.context import ReadContext, WriteContext
 from .base import OperationLogs, OpRequest, OpResponse, UnkeyedValidPathInfo, ValidPathInfo
 from .query_path_info import QueryPathInfoRequest
 
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types.aliases import StorePathSet
-    from ..wire import NixReader, NixWriter
+    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -42,21 +41,6 @@ class QueryPathInfosResponse(OpResponse):
     @property
     def is_not_found(self) -> bool:
         return not self.infos
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -87,21 +71,6 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
     response_type: ClassVar[type[OpResponse]] = QueryPathInfosResponse
     is_query: ClassVar[bool] = True
     paths: StorePathSet = field(default_factory=set)
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

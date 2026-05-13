@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from .. import wire
 from ..store_path import StorePath
-from ..wire import _CHUNK_SIZE, NixReader, NixWriter
+from ..types.context import ReadContext, WriteContext
+from ..wire import _CHUNK_SIZE
 from .base import ByteCollector, OperationLogs, OpRequest, OpResponse
 from .query_path_info import QueryPathInfoRequest
 
@@ -17,7 +18,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
-    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass
@@ -25,29 +25,6 @@ class NarFromPathResponse(OpResponse):
     """Response containing raw NAR data."""
 
     nar_data: bytes
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        collector = ByteCollector()
-        await wire.stream_parse_nar(reader, collector, capture=False)
-        obj.nar_data = collector.getvalue()
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", nar_size=len(self.nar_data))
-        self.logs.to_writer(writer)
-        writer.write(self.nar_data)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -77,31 +54,12 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     async_callback: Callable[[bytes], Awaitable[None]] | None = None
 
     @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.path = await reader.read_string(StorePath)
-        obj.logger.debug("from_reader", path=obj.path)
-        return obj
-
-    @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
         obj.path = await ctx.reader.read_string(StorePath)
         obj.logger.debug("deserialize", path=obj.path)
         return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string(self.path)
 
     async def serialize(self, ctx: WriteContext) -> None:
         self.logger = self.logger.bind(identifier=ctx.writer.identifier)
@@ -116,7 +74,8 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
     ) -> NarFromPathResponse:
         if self.nar_size > 0:
             async with store.transfer_conn() as conn:
-                await self.to_writer(conn.w, conn.version)
+                w_ctx = WriteContext(writer=conn.w, version=conn.version)
+                await self.serialize(w_ctx)
                 await conn.w.drain()
 
                 # Drain logs from backend before reading payload
@@ -157,13 +116,15 @@ class NarFromPathRequest(OpRequest[NarFromPathResponse]):
         )
 
         async with ctx.proxy.local_store.transfer_conn() as conn:
-            await NarFromPathRequest(path=path, nar_size=nar_size).to_writer(conn.w, conn.version)
+            w_ctx = WriteContext(writer=conn.w, version=conn.version)
+            await NarFromPathRequest(path=path, nar_size=nar_size).serialize(w_ctx)
             await conn.w.drain()
 
-            logs = await OperationLogs.from_reader(conn.r)
+            r_ctx = ReadContext(reader=conn.r, version=conn.version)
+            logs = await OperationLogs.deserialize(r_ctx)
 
             await ctx.proxy.client.flush()
-            logs.to_writer(ctx.proxy.w)
+            logs.serialize(WriteContext(writer=ctx.proxy.w, version=ctx.version))
 
             if nar_size > 0:
                 remaining = nar_size

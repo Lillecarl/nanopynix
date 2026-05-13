@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types.context import ReadContext, WriteContext
-    from ..wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
 
@@ -39,19 +38,6 @@ log = structlog.get_logger(__name__)
 @dataclass
 class ProbeSystemsResponse(OpResponse):
     systems: set[str]
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,  # noqa: ARG003
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,  # noqa: ARG003
-        buffer_logs: bool = True,  # noqa: ARG003
-    ) -> Self:
-        return cls.__new__(cls)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        pass
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -71,17 +57,6 @@ class ProbeSystemsRequest(OpRequest[ProbeSystemsResponse]):
     op: ClassVar[int] = 108
     response_type: ClassVar[type[OpResponse]] = ProbeSystemsResponse
     systems: set[str]
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,  # noqa: ARG003
-        version: int,  # noqa: ARG003
-    ) -> Self:
-        return cls.__new__(cls)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        pass
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

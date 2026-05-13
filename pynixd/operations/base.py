@@ -1,9 +1,9 @@
 """
 Base classes and common types for nix daemon operation serialization.
 
-Each operation has a request and response dataclass with factory methods:
-- from_reader(reader) — reads wire data into a Python object
-- to_writer(writer)   — writes the Python object back to wire
+Each operation has a request and response dataclass with serialization methods:
+- deserialize(ctx) — reads wire data into a Python object
+- serialize(ctx)   — writes the Python object back to wire
 
 These are the canonical way to speak the daemon protocol everywhere:
 proxy, store, backend, scheduler, etc.
@@ -57,7 +57,7 @@ from ..types import (
     ValidPathInfo as ValidPathInfo,
 )
 from ..types.context import ReadContext, WriteContext
-from ..wire import NixReader, NixWriter
+from ..wire import NixWriter
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -90,7 +90,7 @@ class OpRequest[Resp: OpResponse](ABC):
     is_build: ClassVar[bool] = False
     is_extension: ClassVar[bool] = False
     # logger is set per-subclass by __init_subclass__; instances override it
-    # via self.logger = self.logger.bind(identifier=...) in from_reader/to_writer.
+    # via self.logger = self.logger.bind(identifier=...) in deserialize/serialize.
     # Declared without type annotation so dataclass ignores it.
     logger = structlog.get_logger("pynixd.operations.base")
 
@@ -150,34 +150,10 @@ class OpRequest[Resp: OpResponse](ABC):
 
     @classmethod
     @abstractmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self: ...
+    async def deserialize(cls, ctx: ReadContext) -> Self: ...
 
     @abstractmethod
-    async def to_writer(self, writer: NixWriter, version: int) -> None: ...
-
-    @classmethod
-    async def deserialize(cls, ctx: ReadContext) -> Self:
-        """New-style deserialization entry point.
-
-        Subclasses that have been migrated override this method.
-        The default implementation falls back to the old ``from_reader``
-        signature so unmigrated subclasses keep working.
-        """
-        if "deserialize" not in cls.__dict__:
-            return await cls.from_reader(ctx.reader, ctx.version)
-        raise NotImplementedError(f"{cls.__name__}.deserialize(ctx) must be overridden")
-
-    async def serialize(self, ctx: WriteContext) -> None:
-        """New-style serialization entry point.
-
-        Subclasses that have been migrated override this method.
-        The default implementation falls back to the old ``to_writer``
-        signature so unmigrated subclasses keep working.
-        """
-        if "serialize" not in self.__class__.__dict__:
-            await self.to_writer(ctx.writer, ctx.version)
-            return
-        raise NotImplementedError(f"{type(self).__name__}.serialize(ctx) must be overridden")
+    async def serialize(self, ctx: WriteContext) -> None: ...
 
 
 @dataclass(kw_only=True)
@@ -186,7 +162,7 @@ class OpResponse(ABC):
 
     logs: OperationLogs = field(default_factory=OperationLogs)
     # logger is set per-subclass by __init_subclass__; instances override it
-    # via self.logger = self.logger.bind(identifier=...) in from_reader/to_writer.
+    # via self.logger = self.logger.bind(identifier=...) in deserialize/serialize.
     # Declared without type annotation so dataclass ignores it.
     logger = structlog.get_logger("pynixd.operations.base")
 
@@ -203,45 +179,10 @@ class OpResponse(ABC):
 
     @classmethod
     @abstractmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self: ...
+    async def deserialize(cls, ctx: ReadContext) -> Self: ...
 
     @abstractmethod
-    async def to_writer(self, writer: NixWriter, version: int) -> None: ...
-
-    @classmethod
-    async def deserialize(cls, ctx: ReadContext) -> Self:
-        """New-style deserialization entry point.
-
-        Subclasses that have been migrated override this method.
-        The default implementation falls back to the old ``from_reader``
-        signature so unmigrated subclasses keep working.
-        """
-        if "deserialize" not in cls.__dict__:
-            return await cls.from_reader(
-                ctx.reader,
-                ctx.version,
-                client=ctx.client,
-                buffer_logs=ctx.buffer_logs,
-            )
-        raise NotImplementedError(f"{cls.__name__}.deserialize(ctx) must be overridden")
-
-    async def serialize(self, ctx: WriteContext) -> None:
-        """New-style serialization entry point.
-
-        Subclasses that have been migrated override this method.
-        The default implementation falls back to the old ``to_writer``
-        signature so unmigrated subclasses keep working.
-        """
-        if "serialize" not in type(self).__dict__:
-            await self.to_writer(ctx.writer, ctx.version)
-            return
-        raise NotImplementedError(f"{type(self).__name__}.serialize(ctx) must be overridden")
+    async def serialize(self, ctx: WriteContext) -> None: ...
 
 
 # Silence BuildResult debug logs — verbose in hot paths

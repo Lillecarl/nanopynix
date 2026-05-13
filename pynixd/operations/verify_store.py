@@ -8,9 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from .base import OperationLogs, OpRequest, OpResponse, Role
 
 if TYPE_CHECKING:
-    from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
-    from ..wire import NixReader, NixWriter
 
 from ..types.context import ReadContext, WriteContext
 
@@ -18,27 +16,6 @@ from ..types.context import ReadContext, WriteContext
 @dataclass
 class VerifyStoreResponse(OpResponse):
     value: int
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        obj.value = await reader.read_uint64()
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", value=self.value)
-        self.logs.to_writer(writer)
-        writer.write_uint64(self.value)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -63,29 +40,6 @@ class VerifyStoreRequest(OpRequest[VerifyStoreResponse]):
     response_type: ClassVar[type[OpResponse]] = VerifyStoreResponse
     check_contents: int
     repair: int
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.check_contents = await reader.read_uint64()
-        obj.repair = await reader.read_uint64()
-        obj.logger.debug(
-            "from_reader",
-            check_contents=obj.check_contents,
-            repair=obj.repair,
-        )
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_uint64(self.check_contents)
-        writer.write_uint64(self.repair)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

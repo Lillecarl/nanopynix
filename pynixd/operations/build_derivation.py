@@ -10,10 +10,8 @@ from ..store_path import StorePath
 from .base import BasicDerivation, BuildMode, BuildResult, OpRequest, OpResponse
 
 if TYPE_CHECKING:
-    from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
-    from ..wire import NixReader, NixWriter
 
 from ..types.context import ReadContext, WriteContext
 
@@ -21,21 +19,6 @@ from ..types.context import ReadContext, WriteContext
 @dataclass
 class BuildDerivationResponse(OpResponse):
     result: BuildResult
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        ctx = ReadContext(reader=reader, version=version, client=client, buffer_logs=buffer_logs)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -60,15 +43,6 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
     drv_path: StorePath
     derivation: BasicDerivation
     build_mode: BuildMode
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        ctx = ReadContext(reader=reader, version=version)
-        return await cls.deserialize(ctx)
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        ctx = WriteContext(writer=writer, version=version)
-        await self.serialize(ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

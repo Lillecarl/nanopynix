@@ -21,33 +21,11 @@ if TYPE_CHECKING:
     from ..store import Store
     from ..types.aliases import StorePathSet
     from ..types.context import ReadContext, WriteContext
-    from ..wire import NixReader, NixWriter
 
 
 @dataclass
 class QueryValidPathsResponse(OpResponse):
     paths: StorePathSet
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(reader, client=client, buffer=buffer_logs)
-        obj.paths = await reader.read_string_set(StorePath)
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logger.debug("to_writer", paths=self.paths)
-        self.logs.to_writer(writer)
-        writer.write_string_set(self.paths)
 
     # ── New-style API (ReadContext / WriteContext) ──────────────
 
@@ -74,24 +52,6 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
     is_query: ClassVar[bool] = True
     paths: StorePathSet
     substitute: int
-
-    @classmethod
-    async def from_reader(cls, reader: NixReader, version: int) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.paths = await reader.read_string_set(StorePath)
-        obj.substitute = 0
-        if version >= wire.proto(1, 27):
-            obj.substitute = await reader.read_uint64()
-        obj.logger.debug("from_reader", paths=obj.paths, substitute=obj.substitute)
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string_set(self.paths)
-        if version >= wire.proto(1, 27):
-            writer.write_uint64(self.substitute)
 
     # ── New-style API (ReadContext / WriteContext) ──────────────
 

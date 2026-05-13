@@ -12,39 +12,12 @@ from ..types.context import ReadContext, WriteContext
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
-    from ..connection import ClientConn
     from ..types import RequestContext as RequestContext
-    from ..wire import NixReader, NixWriter
 
 
 @dataclass
 class AddTempRootResponse(OpResponse):
     value: int
-
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-        client: ClientConn | None = None,
-        buffer_logs: bool = True,
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.logs = OperationLogs()
-        await obj.logs.from_reader(
-            reader,
-            client=client,
-            buffer=buffer_logs,
-        )
-        obj.value = await reader.read_uint64()
-        return obj
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        self.logs.to_writer(writer)
-        self.logger.debug("to_writer", value=self.value)
-        writer.write_uint64(self.value)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -68,18 +41,6 @@ class AddTempRootRequest(OpRequest[AddTempRootResponse]):
     response_type: ClassVar[type[OpResponse]] = AddTempRootResponse
     path: StorePath
 
-    @classmethod
-    async def from_reader(
-        cls,
-        reader: NixReader,
-        version: int,  # noqa: ARG003
-    ) -> Self:
-        obj = cls.__new__(cls)
-        obj.logger = cls.logger.bind(identifier=reader.identifier)
-        obj.path = await reader.read_string(StorePath)
-        obj.logger.debug("from_reader", path=obj.path)
-        return obj
-
     async def handle(self, ctx: RequestContext) -> AddTempRootResponse | None:
         r_ctx = ReadContext(reader=ctx.proxy.r, version=ctx.version)
         self = await self.deserialize(r_ctx)
@@ -90,11 +51,6 @@ class AddTempRootRequest(OpRequest[AddTempRootResponse]):
         msg = StderrNext(f"pynixd: AddTempRoot {self.path} ignored (no-op)")
         resp.logs.add(msg)
         return resp
-
-    async def to_writer(self, writer: NixWriter, version: int) -> None:
-        self.logger = self.logger.bind(identifier=writer.identifier)
-        writer.write_uint64(self.op)
-        writer.write_string(self.path)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
