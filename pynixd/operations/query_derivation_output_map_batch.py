@@ -18,18 +18,18 @@ from ..stderr import OperationLogs
 from ..store_path import StorePath
 from .base import OpRequest, OpResponse
 
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..store import Store
+    from ..types.aliases import OutputMap, StorePathSet
+    from ..types.context import ReadContext, WriteContext
+
 QUERY_DERIVATION_OUTPUT_MAP_BATCH = """
 SELECT vp_drv.path, do.id, do.path
 FROM DerivationOutputs do
 JOIN ValidPaths vp_drv ON do.drv = vp_drv.id
 WHERE vp_drv.path IN (SELECT value FROM json_each(?))
 """
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..store import Store
-    from ..types.aliases import OutputMap, StorePathSet
-    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

@@ -8,6 +8,11 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..store_path import StorePath
 from .base import OperationLogs, OpRequest, OpResponse, UnkeyedValidPathInfo
 
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..store import Store
+    from ..types.context import ReadContext, WriteContext
+
 QUERY_PATH_INFO = """
 SELECT path, deriver, hash, registrationTime, narSize, ultimate, sigs, ca
 FROM ValidPaths WHERE path = ?
@@ -18,11 +23,6 @@ SELECT vp.path FROM Refs r
 JOIN ValidPaths vp ON r.reference = vp.id
 WHERE r.referrer = (SELECT id FROM ValidPaths WHERE path = ?)
 """
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..store import Store
-    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

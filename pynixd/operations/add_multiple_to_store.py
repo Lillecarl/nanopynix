@@ -7,13 +7,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import OperationLogs, StderrNext
+from ..types.context import ReadContext, WriteContext
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
 from .base import OpRequest, OpResponse, ValidPathInfo
 
 if TYPE_CHECKING:
     from ..types import RequestContext as RequestContext
-
-from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

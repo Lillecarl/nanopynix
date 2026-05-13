@@ -11,6 +11,12 @@ from ..store_path import StorePath
 from .base import OperationLogs, OpRequest, OpResponse, UnkeyedValidPathInfo, ValidPathInfo
 from .query_path_info import QueryPathInfoRequest
 
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..store import Store
+    from ..types.aliases import StorePathSet
+    from ..types.context import ReadContext, WriteContext
+
 QUERY_PATH_INFOS_BATCH = """
 SELECT vp.path, vp.deriver, vp.hash, registrationTime, narSize,
        vp.ultimate, vp.sigs, vp.ca
@@ -25,13 +31,6 @@ JOIN ValidPaths vp_referrer ON r.referrer = vp_referrer.id
 JOIN ValidPaths vp_ref ON r.reference = vp_ref.id
 WHERE vp_referrer.path IN (SELECT value FROM json_each(?))
 """
-
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..store import Store
-    from ..types.aliases import StorePathSet
-    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

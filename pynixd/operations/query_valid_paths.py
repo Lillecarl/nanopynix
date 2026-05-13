@@ -11,16 +11,15 @@ from ..stderr import OperationLogs
 from ..store_path import StorePath
 from .base import OpRequest, OpResponse
 
-QUERY_VALID_PATHS = """
-SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
-"""
-
-
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types.aliases import StorePathSet
     from ..types.context import ReadContext, WriteContext
+
+QUERY_VALID_PATHS = """
+SELECT path FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
+"""
 
 
 @dataclass

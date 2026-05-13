@@ -10,6 +10,13 @@ from ..stderr import OperationLogs
 from ..store_path import StorePath
 from .base import OpRequest, OpResponse
 
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..store import Store
+    from ..types.aliases import StorePathSet
+    from ..types.context import ReadContext, WriteContext
+
+
 QUERY_CLOSURE = """
 WITH RECURSIVE closure(id) AS (
     SELECT id FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
@@ -21,13 +28,6 @@ WITH RECURSIVE closure(id) AS (
 SELECT vp.path FROM closure c
 JOIN ValidPaths vp ON c.id = vp.id
 """
-
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..store import Store
-    from ..types.aliases import StorePathSet
-    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

@@ -17,6 +17,12 @@ from .base import (
 )
 from .query_path_infos import QueryPathInfosRequest
 
+if TYPE_CHECKING:
+    from ..connection import ClientConn
+    from ..store import Store
+    from ..types.aliases import StorePathSet
+    from ..types.context import ReadContext, WriteContext
+
 QUERY_CLOSURE_WITH_INFO = """
 WITH RECURSIVE closure(id) AS (
     SELECT id FROM ValidPaths WHERE path IN (SELECT value FROM json_each(?))
@@ -35,13 +41,6 @@ FROM closure c
 JOIN ValidPaths vp ON c.id = vp.id
 ORDER BY vp.id ASC
 """
-
-
-if TYPE_CHECKING:
-    from ..connection import ClientConn
-    from ..store import Store
-    from ..types.aliases import StorePathSet
-    from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

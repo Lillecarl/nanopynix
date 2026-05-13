@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..store_path import StorePath
 from .base import OperationLogs, OpRequest, OpResponse
 
-QUERY_PATH_FROM_HASH_PART = """
-SELECT path FROM ValidPaths WHERE path >= ? AND path < ? LIMIT 1
-"""
-
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types.context import ReadContext, WriteContext
+
+QUERY_PATH_FROM_HASH_PART = """
+SELECT path FROM ValidPaths WHERE path >= ? AND path < ? LIMIT 1
+"""
 
 
 @dataclass

@@ -7,13 +7,12 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import OperationLogs, StderrNext
 from ..store_path import StorePath
+from ..types.context import ReadContext, WriteContext
 from .base import BasicDerivation, BuildMode, BuildResult, OpRequest, OpResponse
 
 if TYPE_CHECKING:
-    from ..types import RequestContext as RequestContext
+    from ..types import RequestContext
     from ..types.aliases import StorePathSet
-
-from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

@@ -10,6 +10,7 @@ import structlog
 
 from ..stderr import OperationLogs
 from ..store_path import StorePath
+from ..types.context import ReadContext, WriteContext
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import OpRequest, OpResponse, UnkeyedValidPathInfo, ValidPathInfo
 
@@ -19,7 +20,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
-from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

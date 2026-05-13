@@ -5,12 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
+from ..types.context import ReadContext, WriteContext
 from .base import OperationLogs, OpRequest, OpResponse, Role
 
 if TYPE_CHECKING:
     from ..types import RequestContext as RequestContext
-
-from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

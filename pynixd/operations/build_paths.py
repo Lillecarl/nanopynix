@@ -8,12 +8,11 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..derived_path import DerivedPath
 from ..stderr import OperationLogs
 from ..store_path import StorePath
+from ..types.context import ReadContext, WriteContext
 from .base import BuildMode, BuildResultStatus, KeyedBuildResult, OpRequest, OpResponse
 
 if TYPE_CHECKING:
-    from ..types import RequestContext as RequestContext
-
-from ..types.context import ReadContext, WriteContext
+    from ..types import RequestContext
 
 # ── BuildPaths ───────────────────────────────────────────────────────
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..signing import SecretKey, get_default_signing_key, sign_path_info
-from ..types.context import ReadContext
+from ..types.context import ReadContext, WriteContext
 from .add_signatures import AddSignaturesRequest
 from .base import OperationLogs, OpRequest, OpResponse, Role, ValidPathInfo
 
@@ -15,8 +15,6 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
     from ..types import RequestContext as RequestContext
-
-from ..types.context import WriteContext
 
 
 @dataclass

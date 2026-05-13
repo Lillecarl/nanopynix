@@ -7,6 +7,7 @@ This document defines the foundational architectural patterns and engineering st
 - **Committing**: Prefer `jj commit -m "..."` to finish a task. It creates a new revision and provides a clean working copy.
 - **Squashing**: If your changes are a fixup for the last commit, prefer `jj squash --use-destination-message` to keep the commit message or `jj squash -m "..."` to update the commit message
 - **Paging**: Always include `--no-pager` in all `jj` commands to ensure non-interactive execution.
+- **Subagents must NEVER use VCS tools** (no `jj`, no `git`, no `jj squash`, no `jj commit`, nothing). Subagents are strictly limited to reading/writing files and running validation commands (`just cheap`). If a subagent cannot complete its task, it should report the error back to the primary agent and let the primary agent handle it.
 
 ## 2. Core Architectural Pattern: Request-Driven Execution
 `pynixd` follows a strict three-tier execution pattern to separate protocol IO from business logic.
@@ -55,8 +56,14 @@ Pynixd will adversise 1.38 support even if local_store is 1.35 and translate whe
     5. `if TYPE_CHECKING:` block ( LAST among imports — only for type-only imports)
     6. Module-level constants
     7. Code (classes, functions, etc.)
-  - **No redundant aliases**: Never use `from X import Y as Y`. The `as` is a no-op and adds noise.
   - `if TYPE_CHECKING:` blocks must contain ONLY type-only imports (imports not needed at runtime). Runtime local imports must NEVER appear after `if TYPE_CHECKING:`.
+  - **Re-export pattern**: When re-exporting a name from another module (so it's accessible as `module.name` for consumers), use `from .module import Name as Name` — the `as` is required for re-export. Consolidate multiple re-exports into a single multi-line import block. Example:
+    ```python
+    from .constants import (
+        PROTO as PROTO,
+        MAGIC as MAGIC,
+    )
+    ```
   - **Asserts**: NEVER use `assert` statements outside of the `tests/` directory. For runtime validation, use explicit `if not cond: raise RuntimeError(...)`. To satisfy type checkers, use local variable aliasing or explicit `if cond is None` checks.
   - **Asyncio**: 
     - NEVER use `asyncio.get_event_loop()`. Use `asyncio.get_running_loop()` inside async functions. For timestamps, use `time.monotonic()` instead of `loop.time()`.
