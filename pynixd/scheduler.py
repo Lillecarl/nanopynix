@@ -30,6 +30,7 @@ from .exceptions import BackendError, InfrastructureError, ResourceExhaustedErro
 from .operations.base import BuildMode, UnkeyedValidPathInfo
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
 from .stderr import StderrNext
+from .store.transfer import stream_paths_store_to_store
 from .store_path import StorePath
 from .trampoline import Trampoline
 
@@ -46,8 +47,6 @@ if TYPE_CHECKING:
     from .store import Store
     from .types.aliases import StorePathSet
     from .types.ids import BuildId, RequestId, StoreId
-
-from .store.transfer import stream_paths_store_to_store
 
 log = structlog.get_logger(__name__)
 

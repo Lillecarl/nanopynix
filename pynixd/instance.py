@@ -12,12 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    import asyncssh
-    from aiohttp import web
-
 from . import wire
 from .config import PynixdSettings
 from .context import PynixdContext
@@ -30,6 +24,12 @@ from .ssh_server import start_ssh_server
 from .store import LocalSocketStore, Store
 from .types.ids import StoreId
 from .unix_server import start_unix_server
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    import asyncssh
+    from aiohttp import web
 
 log = structlog.get_logger(__name__)
 

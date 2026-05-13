@@ -42,10 +42,21 @@ Pynixd will adversise 1.38 support even if local_store is 1.35 and translate whe
 
 ## 4. Engineering Standards
 - **Validation**: ALWAYS run `just precommit` before committing. This runs `ruff` (formatting/linting), `pyright` (type checking) and functionality tests.
+  - **Subagent validation**: When verifying changes from a subagent, run `just cheap` at most (ruff + pyright). Do NOT run `just precommit` or the full test suite — that's overkill for individual file changes. Save the full test suite for final verification.
 - **Type Safety**:
   - NEVER use string type hints (e.g., `"Store"`). Use `from __future__ import annotations` where needed for `TYPE_CHECKING` imports and forward references.
   - Use `if TYPE_CHECKING:` blocks for cross-module imports.
-  - **Imports**: All imports MUST be at the top of the file (or inside `if TYPE_CHECKING:` blocks). Lazy imports inside functions/methods are strictly forbidden unless they are absolutely necessary to break a circular import cycle. If you introduce a circular dependency, prefer refactoring (e.g., moving shared types to a neutral module) over lazy imports.
+- **Imports**: All imports MUST be at the top of the file (or inside `if TYPE_CHECKING:` blocks). Lazy imports inside functions/methods are strictly forbidden unless they are absolutely necessary to break a circular import cycle. If you introduce a circular dependency, prefer refactoring (e.g., moving shared types to a neutral module) over lazy imports.
+  - **Import ordering** (strict — ruff enforces this):
+    1. `from __future__ import annotations`
+    2. Standard library imports (grouped: `import X`, `from X import Y`)
+    3. Third-party imports
+    4. Local/pynixd imports (`from . import X`, `from ..module import Y`)
+    5. `if TYPE_CHECKING:` block ( LAST among imports — only for type-only imports)
+    6. Module-level constants
+    7. Code (classes, functions, etc.)
+  - **No redundant aliases**: Never use `from X import Y as Y`. The `as` is a no-op and adds noise.
+  - `if TYPE_CHECKING:` blocks must contain ONLY type-only imports (imports not needed at runtime). Runtime local imports must NEVER appear after `if TYPE_CHECKING:`.
   - **Asserts**: NEVER use `assert` statements outside of the `tests/` directory. For runtime validation, use explicit `if not cond: raise RuntimeError(...)`. To satisfy type checkers, use local variable aliasing or explicit `if cond is None` checks.
   - **Asyncio**: 
     - NEVER use `asyncio.get_event_loop()`. Use `asyncio.get_running_loop()` inside async functions. For timestamps, use `time.monotonic()` instead of `loop.time()`.

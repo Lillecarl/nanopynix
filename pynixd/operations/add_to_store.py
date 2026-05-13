@@ -12,6 +12,7 @@ from pynixd.operations.sign_path_info import SignPathInfoRequest
 
 from ..stderr import OperationLogs
 from ..store_path import StorePath
+from ..types.context import ReadContext, WriteContext
 from ..wire import NixReader, NixWriter, forward_framed
 from .base import OpRequest, OpResponse, ValidPathInfo
 
@@ -20,10 +21,8 @@ if TYPE_CHECKING:
 
     from ..connection import ClientConn
     from ..store import Store
-    from ..types import RequestContext as RequestContext
+    from ..types import RequestContext
     from ..types.aliases import StorePathSet
-
-from ..types.context import ReadContext, WriteContext
 
 
 @dataclass

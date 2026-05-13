@@ -38,14 +38,13 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict
 
 import anyio
 
+from .store_path import StorePath
+from .types import BasicDerivation, DerivationOutput, OutputKind
+
 if TYPE_CHECKING:
     from pathlib import Path
 
     from .types.aliases import OutputMap, StorePathSet
-
-
-from .store_path import StorePath
-from .types import BasicDerivation, DerivationOutput, OutputKind
 
 
 class NixDerivationOutputShow(TypedDict, total=False):
