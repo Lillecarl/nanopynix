@@ -432,7 +432,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
         )
         loop = asyncio.get_running_loop()
         build = QueuedBuild(
-            id=BuildId(1),
+            build_id=BuildId(1),
             request=req,
             required_paths={},
             future=loop.create_future(),

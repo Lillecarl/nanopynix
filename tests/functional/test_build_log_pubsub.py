@@ -152,7 +152,7 @@ async def test_build_log_pubsub_late_subscriber_gets_full_history():
     loop = asyncio.get_running_loop()
     future: asyncio.Future[BuildDerivationResponse] = loop.create_future()
     build = QueuedBuild(
-        id=BuildId(1),
+        build_id=BuildId(1),
         request=request,
         required_paths={},
         future=future,

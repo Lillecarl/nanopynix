@@ -279,7 +279,19 @@ class Scheduler:
                 resp = await self.local_store.execute(
                     QueryClosureWithInfoRequest(paths=seeds),
                 )
-                build.required_paths = {info.path: info for info in resp.infos}
+                build.required_paths = {
+                    info.path: UnkeyedValidPathInfo(
+                        deriver=info.deriver,
+                        nar_hash=info.nar_hash,
+                        references=info.references,
+                        registration_time=info.registration_time,
+                        nar_size=info.nar_size,
+                        ultimate=info.ultimate,
+                        sigs=info.sigs,
+                        ca=info.ca,
+                    )
+                    for info in resp.infos
+                }
                 log.debug(
                     "build_metadata_populated",
                     build_id=build.id,

@@ -13,6 +13,7 @@ from . import metrics, wire
 from .operations.build_derivation import BuildDerivationResponse
 from .types.build import BuildResult, BuildResultStatus
 from .types.ids import BuildId, RequestId, StoreId
+from .types.path_info import UnkeyedValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -69,7 +70,6 @@ class SchedulerBuildRequest:
         return False
 
 
-@dataclass
 class QueuedBuild:
     """State for a single derivation build task.
 
@@ -79,67 +79,68 @@ class QueuedBuild:
     - is_done: future resolved
     """
 
-    id: BuildId  # Global incrementing ID
-    request: BuildDerivationRequest  # The request to forward to the backend
-    required_paths: dict[StorePath, UnkeyedValidPathInfo]
-    # All paths the backend needs (input_srcs for BuildDerivation)
-    future: asyncio.Future[BuildDerivationResponse]  # Resolved when done
-    platform: str = ""  # Derivation platform (for backend filtering)
-    expected_duration: int | None = None  # Predicted duration in ms from DB
-    enqueued_at: float = field(default_factory=time.monotonic)
-    started_at: float | None = field(default=None, repr=False)
-    finished_at: float | None = field(default=None, repr=False)
-    retries: int = 0
-    store_failures: dict[StoreId, int] = field(default_factory=dict)
-    build_task: asyncio.Task[Any] | None = field(default=None, repr=False)
+    def __init__(
+        self,
+        build_id: BuildId,
+        request: BuildDerivationRequest,
+        required_paths: dict[StorePath, UnkeyedValidPathInfo],
+        future: asyncio.Future[BuildDerivationResponse],
+        platform: str = "",
+        expected_duration: int | None = None,
+        scheduler_request_ids: set[RequestId] | None = None,
+    ) -> None:
+        self.id = build_id
+        self.request = request
+        self.required_paths = required_paths
+        self.future = future
+        self.platform = platform
+        self.expected_duration = expected_duration
+        self.enqueued_at = time.monotonic()
+        self.started_at: float | None = None
+        self.finished_at: float | None = None
+        self.retries = 0
+        self.store_failures: dict[StoreId, int] = {}
+        self.build_task: asyncio.Task[Any] | None = None
 
-    # Build DAG: build IDs this build depends on (must complete before this
-    # can be scheduled). Populated during decomposition for CA dependency
-    # ordering.
-    depends_on: set[BuildId] = field(default_factory=set)
+        # Build DAG: build IDs this build depends on (must complete before this
+        # can be scheduled). Populated during decomposition for CA dependency
+        # ordering.
+        self.depends_on: set[BuildId] = set()
 
-    # Track which builds depend on this one (reversed depends_on)
-    # Used for efficient DAG updates when a build completes.
-    dependents: set[BuildId] = field(default_factory=set, repr=False)
+        # Track which builds depend on this one (reversed depends_on)
+        # Used for efficient DAG updates when a build completes.
+        self.dependents: set[BuildId] = set()
 
-    # CA realisations from this build's outputs, populated after successful
-    # build completion. Used to register realisations on builder stores
-    # before building dependent (deferred) derivations.
-    ca_realisations: list[Realisation] = field(default_factory=list, repr=False)
+        # CA realisations from this build's outputs, populated after successful
+        # build completion. Used to register realisations on builder stores
+        # before building dependent (deferred) derivations.
+        self.ca_realisations: list[Realisation] = []
 
-    # The store that was assigned to execute this build, set when
-    # execute_build begins.
-    assigned_store_id: StoreId | None = field(default=None)
+        # The store that was assigned to execute this build, set when
+        # execute_build begins.
+        self.assigned_store_id: StoreId | None = None
 
-    # BuildRequest(s) this build belongs to.
-    # Multiple requests can share a single build (dedup).
-    # Empty set for standalone build_derivation() calls.
-    scheduler_request_ids: set[RequestId] = field(default_factory=set)
+        # BuildRequest(s) this build belongs to.
+        # Multiple requests can share a single build (dedup).
+        # Empty set for standalone build_derivation() calls.
+        self.scheduler_request_ids: set[RequestId] = scheduler_request_ids or set()
 
-    # Dynamic input derivations from DrvWithVersion .drv files.
-    # {drv_path: {output_name: [nested_output_name, ...], ...}}
-    # Used by the trampoline to add depends_on edges and required_paths
-    # to this build when a dynamic dep's inner build is enqueued.
-    dynamic_input_drvs: dict[StorePath, dict[str, list[str]]] = field(
-        default_factory=dict,
-        repr=False,
-    )
+        # Dynamic input derivations from DrvWithVersion .drv files.
+        # {drv_path: {output_name: [nested_output_name, ...], ...}}
+        # Used by the trampoline to add depends_on edges and required_paths
+        # to this build when a dynamic dep's inner build is enqueued.
+        self.dynamic_input_drvs: dict[StorePath, dict[str, list[str]]] = {}
 
-    # ── Log pub/sub ────────────────────────────────────────────────────
+        # Append-only byte buffer of all stderr messages (serialized via
+        # NixWriter interface). New subscribers get this replayed on join.
+        self._log_writer = wire.BytesWriter("build_log")
 
-    # Append-only byte buffer of all stderr messages (serialized via
-    # NixWriter interface). New subscribers get this replayed on join.
-    _log_writer: wire.BytesWriter = field(
-        default_factory=lambda: wire.BytesWriter("build_log"),
-        repr=False,
-    )
+        # Client connections subscribed to this build's stderr stream.
+        self.subscribers: list[ClientConn] = []
 
-    # Client connections subscribed to this build's stderr stream.
-    subscribers: list[ClientConn] = field(default_factory=list, repr=False)
-
-    # Guards add_subscriber replay vs post_log_bytes fanout so that a
-    # joining client never misses bytes that arrive during catch-up.
-    _sub_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+        # Guards add_subscriber replay vs post_log_bytes fanout so that a
+        # joining client never misses bytes that arrive during catch-up.
+        self._sub_lock = asyncio.Lock()
 
     @property
     def is_building(self) -> bool:
@@ -360,7 +361,7 @@ class BuildQueue:
                 {scheduler_request_id} if scheduler_request_id is not None else set()
             )
             build = QueuedBuild(
-                id=build_id,
+                build_id=build_id,
                 request=request,
                 required_paths=required_paths,
                 future=future,

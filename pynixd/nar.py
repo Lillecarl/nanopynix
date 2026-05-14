@@ -414,7 +414,6 @@ def nar_size(data: bytes) -> int:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-@dataclass(frozen=True)
 class NarPath:
     """A pathlib-like interface for navigating and editing NAR archives.
 
@@ -430,8 +429,9 @@ class NarPath:
         data = root.to_nar()
     """
 
-    _root: NarNode = field(default_factory=NarDirectory)
-    _parts: tuple[str, ...] = ()
+    def __init__(self, root: NarNode | None = None, parts: tuple[str, ...] = ()) -> None:
+        self._root = root if root is not None else NarDirectory()
+        self._parts = parts
 
     @classmethod
     def from_nar(cls, data: bytes) -> NarPath:
@@ -476,6 +476,14 @@ class NarPath:
 
     def __repr__(self) -> str:
         return f"NarPath({str(self)!r})"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, NarPath):
+            return NotImplemented
+        return self._parts == other._parts
+
+    def __hash__(self) -> int:
+        return hash(self._parts)
 
     def _resolve(self) -> NarNode:
         node = self._root
