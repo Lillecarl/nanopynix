@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..stderr import OperationLogs, StderrNext
+from ..stderr import OperationLogs
 from ..store_path import StorePath
 from ..types.context import ReadContext, WriteContext
 from .base import BasicDerivation, BuildMode, BuildResult, OpRequest, OpResponse
@@ -99,10 +99,11 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
 
         build_id, future = await ctx.proxy.scheduler.build_derivation(
             self,
-            ctx.proxy.client,
             required_paths,
             platform=self.derivation.platform,
         )
+        if ctx.proxy.client is not None:
+            await ctx.proxy.scheduler.queue.subscribe(build_id, ctx.proxy.client)
         self.logger.info(
             "build_derivation_enqueued",
             build_id=build_id,
@@ -110,19 +111,5 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             required_count=len(required_paths),
         )
         response = await future
-
-        if (
-            isinstance(response, BuildDerivationResponse)
-            # Only send StderrNext if the error came from a backend daemon
-            # (response has real daemon logs). Scheduler-generated
-            # incompatibility errors (empty logs) are already sent as
-            # StderrNext by the scheduler — avoid double-reporting.
-            and response.result.status != 0
-            and response.result.error_msg
-            and response.logs.messages
-        ):
-            await ctx.proxy.client.queue.put(
-                StderrNext(text=f"pynixd: {response.result.error_msg}\n"),
-            )
         self.logger.debug("responded_op")
         return response

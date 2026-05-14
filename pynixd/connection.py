@@ -24,7 +24,6 @@ import structlog
 from . import stderr, wire
 from .exceptions import InfrastructureError
 from .operations.base import (
-    ByteCollector,
     OpRequest,
     Resp,
 )
@@ -48,74 +47,40 @@ stderr_log = structlog.get_logger("pynixd.stderr")
 
 
 class ClientConn:
-    """Client connection with a stderr queue for non-blocking forwarding.
+    """Client connection with serialized stderr writing.
 
-    Build tasks put stderr messages on the queue via stderr.collect().
-    A drain task serializes messages to the client socket — no lock needed
-    since the drain task is the sole writer of stderr data.
+    Multiple tasks can call send() concurrently; the internal lock
+    ensures only one write+drain cycle runs at a time.
+    No background drain task needed.
 
     Call flush() before writing the response to ensure all stderr is sent.
     """
 
     def __init__(self, w: NixWriter) -> None:
         self.w = w
-        self.queue: asyncio.Queue[stderr.StderrMsg | None] = asyncio.Queue(maxsize=1000)
-        self.drain_task: asyncio.Task | None = None
+        self._write_lock = asyncio.Lock()
 
-    def start(self) -> None:
-        """Start the background drain task."""
-        self.drain_task = asyncio.create_task(self.drain_loop())
+    async def send(self, msg: stderr.StderrMsg) -> None:
+        """Send a stderr message to the client. Safe to call from multiple tasks."""
+        buf = wire.BytesWriter("client")
+        msg.to_writer(buf)
+        data = buf.get_bytes()
+        if data:
+            async with self._write_lock:
+                self.w.write(data)
+                await self.w.drain()
 
-    async def stop(self) -> None:
-        """Stop the drain task."""
-        if self.drain_task is not None:
-            self.drain_task.cancel()
-            with contextlib.suppress(Exception, asyncio.CancelledError):
-                await self.drain_task
-            self.drain_task = None
+    async def send_raw(self, data: bytes) -> None:
+        """Send raw bytes to the client. Safe to call from multiple tasks."""
+        if data:
+            async with self._write_lock:
+                self.w.write(data)
+                await self.w.drain()
 
     async def flush(self) -> None:
-        """Wait until all queued stderr messages have been written and flushed."""
-        await self.queue.join()
-        await self.w.drain()
-
-    async def drain_loop(self) -> None:
-        """Consume stderr messages from the queue and write to client."""
-
-        try:
-            while True:
-                msg = await self.queue.get()
-                try:
-                    # Use a buffer to batch multiple messages into a single write() call.
-                    # This avoids O(N^2) performance issues in asyncio transport's
-                    # get_write_buffer_size() when the buffer contains many small pieces.
-                    buf = ByteCollector()
-                    if msg is not None:
-                        msg.to_writer(buf)
-
-                    # Batch: grab any additional messages already queued
-                    while not self.queue.empty():
-                        extra = self.queue.get_nowait()
-                        if extra is not None:
-                            extra.to_writer(buf)
-                        self.queue.task_done()
-
-                    data = buf.getvalue()
-                    if data:
-                        self.w.write(data)
-
-                    # Flush buffered writes to the socket
-                    await self.w.drain()
-                finally:
-                    self.queue.task_done()
-        except (OSError, EOFError):
-            # Broken pipe or connection reset is expected when client disconnects
-            # during log forwarding.
-            log.debug("drain_loop_connection_lost")
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.exception("drain_loop_crashed")
+        """Wait until all pending writes are complete and OS buffer is drained."""
+        async with self._write_lock:
+            await self.w.drain()
 
 
 # ── Connection ──────────────────────────────────────────────────────
@@ -186,7 +151,7 @@ class Connection:
 
         Args:
             request: Request object with ClassVars for op and response_type
-            client: If provided, queue stderr to this client's drain task
+            client: If provided, stream stderr to this client via send()
             suppress_last: If True, consume STDERR_LAST
                 but don't write it to client
             raise_on_error: If True, raise BackendError on stderr errors
@@ -203,8 +168,6 @@ class Connection:
         await request.serialize(WriteContext.from_conn(self))
         await self.w.drain()
 
-        # If client is provided, we stream logs directly to them and don't buffer
-        # locally to save memory on large builds.
         response = await response_type.deserialize(
             ReadContext.from_conn(self, client=client),
         )

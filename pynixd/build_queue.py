@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from . import metrics
+from . import metrics, wire
 from .operations.build_derivation import BuildDerivationResponse
 from .types.build import BuildResult, BuildResultStatus
 from .types.ids import BuildId, RequestId, StoreId
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from .connection import ClientConn
     from .derived_path import DerivedPath
     from .operations.build_derivation import BuildDerivationRequest
+    from .stderr import StderrMsg
     from .store_path import StorePath
     from .types.build import BuildMode
     from .types.ca import Realisation
@@ -80,7 +81,6 @@ class QueuedBuild:
 
     id: BuildId  # Global incrementing ID
     request: BuildDerivationRequest  # The request to forward to the backend
-    client: ClientConn | None  # Client connection for stderr forwarding
     required_paths: dict[StorePath, UnkeyedValidPathInfo]
     # All paths the backend needs (input_srcs for BuildDerivation)
     future: asyncio.Future[BuildDerivationResponse]  # Resolved when done
@@ -124,6 +124,27 @@ class QueuedBuild:
         default_factory=dict,
         repr=False,
     )
+
+    # ── Log pub/sub ────────────────────────────────────────────────────
+
+    # Append-only byte buffer of all stderr messages (serialized).
+    # New subscribers get this replayed on join.
+    _log_buf: bytearray = field(default_factory=bytearray, repr=False)
+
+    # Client connections subscribed to this build's stderr stream.
+    subscribers: list[ClientConn] = field(default_factory=list, repr=False)
+
+    _buf_writer: wire.BytesWriter = field(
+        default_factory=lambda: wire.BytesWriter("build_log"),
+        repr=False,
+    )
+
+    @staticmethod
+    def _serialize_msg(msg: StderrMsg) -> bytes:
+        """Serialize a StderrMsg to bytes."""
+        w = wire.BytesWriter("build_log")
+        msg.to_writer(w)
+        return w.get_bytes()
 
     @property
     def is_building(self) -> bool:
@@ -190,6 +211,54 @@ class QueuedBuild:
         version = self.request.derivation.env.get("version", "unknown")
         return f"{pname}-{version}"
 
+    # ── Log pub/sub methods ───────────────────────────────────────────
+
+    def post_log(self, msg: StderrMsg) -> bytes:
+        """Serialize and store a log entry. Returns the raw bytes."""
+        raw = self._serialize_msg(msg)
+        self._log_buf.extend(raw)
+        return raw
+
+    async def post_log_bytes(self, raw: bytes) -> None:
+        """Fan out raw log bytes to all subscribers via TaskGroup.
+
+        Dead subscribers (send failure) are removed automatically.
+        """
+        if not self.subscribers or not raw:
+            return
+        tasks: list[asyncio.Task[None]] = []
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tasks.extend(tg.create_task(sub.send_raw(raw)) for sub in self.subscribers)
+        except* Exception:
+            dead = [
+                i
+                for i, t in enumerate(tasks)
+                if t.done() and t.exception() is not None and not isinstance(t.exception(), asyncio.CancelledError)
+            ]
+            for i in reversed(dead):
+                self.subscribers.pop(i)
+
+    async def post_log_and_fanout(self, msg: StderrMsg) -> None:
+        """Store a log entry and fan out to all subscribers."""
+        raw = self.post_log(msg)
+        await self.post_log_bytes(raw)
+
+    async def add_subscriber(self, client: ClientConn) -> None:
+        """Register a client to receive this build's logs.
+
+        Replays the full logged history so far, then the client
+        receives new entries in real-time via post_log_bytes.
+        If replay fails (broken connection), the subscriber is not added.
+        """
+        if self._log_buf:
+            try:
+                await client.send_raw(bytes(self._log_buf))
+            except Exception:
+                log.debug("subscriber_replay_failed", build_id=self.id)
+                return
+        self.subscribers.append(client)
+
 
 class BuildQueue:
     """Global queue for build operations with deduplication."""
@@ -248,7 +317,6 @@ class BuildQueue:
     async def enqueue(
         self,
         request: BuildDerivationRequest,
-        client: ClientConn | None,
         required_paths: dict[StorePath, UnkeyedValidPathInfo],
         platform: str = "",
         expected_duration: int | None = None,
@@ -295,7 +363,6 @@ class BuildQueue:
             build = QueuedBuild(
                 id=build_id,
                 request=request,
-                client=client,
                 required_paths=required_paths,
                 future=future,
                 platform=platform,
@@ -322,6 +389,18 @@ class BuildQueue:
             metrics.QUEUE_SIZE.labels(status="pending").inc()
             return build.id, future
 
+    async def subscribe(self, build_id: BuildId, client: ClientConn) -> bool:
+        """Subscribe a client to a build's log stream.
+
+        Returns True if the build was found and subscriber added.
+        """
+        async with self.lock:
+            build = self._by_id.get(build_id)
+            if build is None:
+                return False
+            await build.add_subscriber(client)
+            return True
+
     async def get_pending(self) -> list[QueuedBuild]:
         """Get all non-done builds sorted by ID."""
         async with self.lock:
@@ -344,11 +423,8 @@ class BuildQueue:
         self,
         build_id: BuildId,
         response: BuildDerivationResponse,
-    ) -> ClientConn | None:
-        """Mark build as completed, resolve the future.
-
-        Returns the client connection for the caller to use.
-        """
+    ) -> None:
+        """Mark build as completed, resolve the future."""
         async with self.lock:
             for b in self._queue:
                 if b.id == build_id:
@@ -364,14 +440,11 @@ class BuildQueue:
                     if b.build_time is not None:
                         metrics.BUILD_DURATION.observe(b.build_time)
 
-                    return b.client
+                    return
         raise ValueError(f"Build {build_id} not found")
 
-    async def fail(self, build_id: BuildId, error_msg: str) -> ClientConn | None:
-        """Mark build as failed, resolve future with an error response.
-
-        Returns the client connection for the caller to use.
-        """
+    async def fail(self, build_id: BuildId, error_msg: str) -> None:
+        """Mark build as failed, resolve future with an error response."""
         async with self.lock:
             for b in self._queue:
                 if b.id == build_id:
@@ -398,7 +471,7 @@ class BuildQueue:
                     metrics.QUEUE_SIZE.labels(status="done").inc()
                     metrics.BUILDS_COMPLETED.labels(status="failure").inc()
 
-                    return b.client
+                    return
         raise ValueError(f"Build {build_id} not found")
 
     async def prune_request(self, request_id: RequestId) -> None:

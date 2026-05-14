@@ -281,7 +281,6 @@ class Trampoline:
 
             inner_build_id, _inner_future = await self.scheduler.build_derivation(
                 inner_req,
-                sched_req.client,
                 required_paths,
                 platform=inner_basic.platform,
                 scheduler_request_id=sched_req.id,

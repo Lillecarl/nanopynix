@@ -230,7 +230,7 @@ class OperationLogs:
         obj.messages = []
         async for msg in read_stream(ctx.reader):
             if ctx.client:
-                await ctx.client.queue.put(msg)
+                await ctx.client.send(msg)
             if ctx.buffer_logs:
                 obj.add(msg)
             if isinstance(msg, StderrError):

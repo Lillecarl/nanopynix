@@ -89,7 +89,6 @@ async def test_scheduler_load_balancing():
 
     build_id, future = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="x86_64-linux",
     )
@@ -156,7 +155,6 @@ async def test_scheduler_skips_saturated_store():
 
     build_id, _future = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="x86_64-linux",
     )
@@ -231,7 +229,6 @@ async def test_scheduler_proactive_transfer():
 
     build_id, _future = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="x86_64-linux",
     )
@@ -436,7 +433,6 @@ async def test_scheduler_cpu_utilization():
 
     build_id, _future = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="x86_64-linux",
     )
@@ -503,7 +499,6 @@ async def test_scheduler_feature_matching():
 
     build_id, _future = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="x86_64-linux",
     )
@@ -543,7 +538,6 @@ async def test_scheduler_fails_build_for_unknown_platform():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="aarch64-darwin",
     )
@@ -579,7 +573,6 @@ async def test_scheduler_queues_build_for_dynamic_platform():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="aarch64-darwin",
     )
@@ -612,7 +605,6 @@ async def test_scheduler_queues_build_for_dynamic_platform_with_features():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="aarch64-darwin",
     )
@@ -644,7 +636,6 @@ async def test_scheduler_fails_build_for_missing_dynamic_feature():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="aarch64-darwin",
     )
@@ -712,7 +703,6 @@ async def test_dynamic_feature_matrix_survives_store_removal():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        client=None,
         required_paths={drv_path},
         platform="aarch64-darwin",
     )

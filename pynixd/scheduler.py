@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,7 +36,7 @@ from .store_path import StorePath
 from .trampoline import Trampoline
 
 if TYPE_CHECKING:
-    from .connection import ClientConn
+    from .connection import ClientConn, Connection
     from .context import PynixdContext
     from .derived_path import DerivedPath
     from .drv_parser import Derivation
@@ -170,7 +171,6 @@ class Scheduler:
     async def build_derivation(
         self,
         request: BuildDerivationRequest,
-        client: ClientConn | None,
         required_paths: StorePathSet | dict[StorePath, UnkeyedValidPathInfo],
         platform: str = "",
         scheduler_request_id: RequestId | None = None,
@@ -193,7 +193,6 @@ class Scheduler:
 
         res = await self.queue.enqueue(
             request,
-            client,
             required_paths,
             platform,
             expected_duration=hint,
@@ -201,6 +200,7 @@ class Scheduler:
             derived_paths_for_request=derived_paths_for_request,
         )
         self.trigger()
+        return res
         return res
 
     async def build_derived_paths(
@@ -430,10 +430,9 @@ class Scheduler:
         error_msg = f"No compatible store for {build.platform}" + (
             f" (requires {', '.join(sorted(build_features))})" if build_features else ""
         )
-        client = await self.queue.fail(build.id, error_msg)
-        if client is not None:
-            for line in error_msg.split("\n"):
-                await client.queue.put(StderrNext(text=f"pynixd: {line}\n"))
+        await self.queue.fail(build.id, error_msg)
+        for line in error_msg.split("\n"):
+            await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
         if build.scheduler_request_ids:
             await self.trampoline.on_build_complete_failed(build, error_msg)
 
@@ -450,10 +449,9 @@ class Scheduler:
             + (f" (requires {', '.join(sorted(build_features))})" if build_features else "")
             + f": {', '.join(failed_ids)}"
         )
-        client = await self.queue.fail(build.id, error_msg)
-        if client is not None:
-            for line in error_msg.split("\n"):
-                await client.queue.put(StderrNext(text=f"pynixd: {line}\n"))
+        await self.queue.fail(build.id, error_msg)
+        for line in error_msg.split("\n"):
+            await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
         if build.scheduler_request_ids:
             await self.trampoline.on_build_complete_failed(build, error_msg)
 
@@ -481,6 +479,9 @@ class Scheduler:
         try:
             async with store.build_conn() as conn:
                 await self._prepare_build(build, store, conn)
+                await build.post_log_and_fanout(
+                    StderrNext(text=f"pynixd: starting build on {store.store_id} at {datetime.now(UTC).isoformat()}\n")
+                )
                 build_resp = await self._execute(build, store, conn)
                 await self._collect_outputs(build, store, conn, build_resp)
 
@@ -495,10 +496,14 @@ class Scheduler:
             self.trigger()
         except (BackendError, InfrastructureError) as e:
             log.warning("build_failed_retryable", build_id=build.id, error=str(e))
+            await build.post_log_and_fanout(
+                StderrNext(text=f"pynixd: build failed on {store.store_id}, retrying: {e}\n")
+            )
             build.reset_for_retry(store.store_id)
             self.trigger()
         except Exception:
             log.exception("build_crashed", build_id=build.id)
+            await build.post_log_and_fanout(StderrNext(text="pynixd: internal scheduler error, failing build\n"))
             await self.queue.fail(build.id, "Internal scheduler error")
             if build.scheduler_request_ids:
                 await self.trampoline.on_build_complete_failed(
@@ -553,15 +558,25 @@ class Scheduler:
         self,
         build: QueuedBuild,
         store: Store,
-        conn: object,  # build connection
+        conn: Connection,
     ) -> BuildDerivationResponse:
-        """Call the backend daemon and return the response."""
+        """Call the backend daemon and return the response.
+
+        Sends the request via conn.call() without a client. Stderr is
+        buffered in the response, then fanned out to the build's subscribers.
+        """
         log.debug("build_executing", build_id=build.id, store_id=store.store_id)
         build.started_at = time.monotonic()
         if build.wait_time is not None:
             metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
 
-        resp = await conn.call(build.request, client=build.client)  # type: ignore[union-attr]
+        resp = await conn.call(build.request)
+        if resp.logs.messages:
+            for msg in resp.logs.messages:
+                await build.post_log_and_fanout(msg)
+        if resp.result.status != 0 and resp.result.error_msg:
+            for line in resp.result.error_msg.split("\n"):
+                await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
         log.debug(
             "build_executed",
             build_id=build.id,

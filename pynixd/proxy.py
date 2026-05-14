@@ -102,7 +102,6 @@ class DaemonProxy:
 
     async def run(self) -> None:
         """Run the full session lifecycle."""
-        self.client.start()
         try:
             await self.handshake()
             await self.op_loop()
@@ -110,8 +109,6 @@ class DaemonProxy:
             log.debug("client_disconnected")
         except Exception:
             log.exception("session_error")
-        finally:
-            await self.client.stop()
 
     # ── Handshake ────────────────────────────────────────────────────
 
@@ -268,7 +265,7 @@ class DaemonProxy:
 
     async def send_error(self, msg: str) -> None:
         """Send a STDERR_ERROR to the client."""
-        await self.client.queue.put(
+        await self.client.send(
             StderrError(
                 error_type="Error",
                 level=Verbosity.ERROR,

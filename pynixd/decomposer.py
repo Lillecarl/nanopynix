@@ -312,12 +312,13 @@ class BuildDecomposer:
             )
             build_id, _future = await self.scheduler.build_derivation(
                 drv_request,
-                client,
                 required_paths,
                 platform=drv_request.derivation.platform,
                 scheduler_request_id=sched_req.id,
                 derived_paths_for_request={_dp},
             )
+            if client is not None:
+                await self.queue.subscribe(build_id, client)
             drv_to_build_id[drv_path_str] = build_id
             log.info(
                 "build_derivation_enqueued",
