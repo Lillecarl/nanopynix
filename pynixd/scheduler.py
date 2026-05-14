@@ -160,7 +160,7 @@ class Scheduler:
                 if build.build_task and not build.build_task.done():
                     log.info(
                         "cancelling_build_for_store_removal",
-                        build_id=build.id,
+                        build_id=build.build_id,
                         store_id=store_id,
                     )
                     build.build_task.cancel()
@@ -294,11 +294,11 @@ class Scheduler:
                 }
                 log.debug(
                     "build_metadata_populated",
-                    build_id=build.id,
+                    build_id=build.build_id,
                     paths=len(build.required_paths),
                 )
             except Exception:
-                log.exception("metadata_query_failed", build_id=build.id)
+                log.exception("metadata_query_failed", build_id=build.build_id)
 
     def _filter_schedulable(
         self,
@@ -376,7 +376,7 @@ class Scheduler:
             ):
                 log.info(
                     "build_fasttracked_local",
-                    build_id=build.id,
+                    build_id=build.build_id,
                     duration=build.expected_duration,
                 )
                 metrics.QUEUE_SIZE.labels(status="pending").dec()
@@ -403,7 +403,7 @@ class Scheduler:
                 rs = next(iter(ranked))
                 log.debug(
                     "build_assigned_to_store",
-                    build_id=build.id,
+                    build_id=build.build_id,
                     store_id=rs.store_id,
                     score=rs.score,
                 )
@@ -442,7 +442,7 @@ class Scheduler:
         error_msg = f"No compatible store for {build.platform}" + (
             f" (requires {', '.join(sorted(build_features))})" if build_features else ""
         )
-        await self.queue.fail(build.id, error_msg)
+        await self.queue.fail(build.build_id, error_msg)
         for line in error_msg.split("\n"):
             await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
         if build.scheduler_request_ids:
@@ -461,7 +461,7 @@ class Scheduler:
             + (f" (requires {', '.join(sorted(build_features))})" if build_features else "")
             + f": {', '.join(failed_ids)}"
         )
-        await self.queue.fail(build.id, error_msg)
+        await self.queue.fail(build.build_id, error_msg)
         for line in error_msg.split("\n"):
             await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
         if build.scheduler_request_ids:
@@ -500,23 +500,23 @@ class Scheduler:
         except ResourceExhaustedError as e:
             log.info(
                 "build_deferred_busy",
-                build_id=build.id,
+                build_id=build.build_id,
                 store_id=store.store_id,
                 reason=str(e),
             )
             build.reset_for_busy()
             self.trigger()
         except (BackendError, InfrastructureError) as e:
-            log.warning("build_failed_retryable", build_id=build.id, error=str(e))
+            log.warning("build_failed_retryable", build_id=build.build_id, error=str(e))
             await build.post_log_and_fanout(
                 StderrNext(text=f"pynixd: build failed on {store.store_id}, retrying: {e}\n")
             )
             build.reset_for_retry(store.store_id)
             self.trigger()
         except Exception:
-            log.exception("build_crashed", build_id=build.id)
+            log.exception("build_crashed", build_id=build.build_id)
             await build.post_log_and_fanout(StderrNext(text="pynixd: internal scheduler error, failing build\n"))
-            await self.queue.fail(build.id, "Internal scheduler error")
+            await self.queue.fail(build.build_id, "Internal scheduler error")
             if build.scheduler_request_ids:
                 await self.trampoline.on_build_complete_failed(
                     build,
@@ -525,7 +525,7 @@ class Scheduler:
             self.trigger()
 
         if build_resp is not None:
-            await self.queue.complete(build.id, build_resp)
+            await self.queue.complete(build.build_id, build_resp)
             if build.scheduler_request_ids:
                 await self.trampoline.on_build_complete(build, build_resp)
             self.trigger()
@@ -555,7 +555,7 @@ class Scheduler:
             missing_size = sum(info.nar_size for info in missing_info.values())
             log.debug(
                 "build_sending_inputs",
-                build_id=build.id,
+                build_id=build.build_id,
                 store_id=store.store_id,
                 count=len(missing_info),
                 size=missing_size,
@@ -577,7 +577,7 @@ class Scheduler:
         Sends the request via conn.call() without a client. Stderr is
         buffered in the response, then fanned out to the build's subscribers.
         """
-        log.debug("build_executing", build_id=build.id, store_id=store.store_id)
+        log.debug("build_executing", build_id=build.build_id, store_id=store.store_id)
         build.started_at = time.monotonic()
         if build.wait_time is not None:
             metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
@@ -591,7 +591,7 @@ class Scheduler:
                 await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
         log.debug(
             "build_executed",
-            build_id=build.id,
+            build_id=build.build_id,
             status=resp.result.status,
         )
         return resp

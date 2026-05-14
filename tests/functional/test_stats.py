@@ -296,7 +296,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
         # 3. Verify it's building on LOCAL
         while True:
             pending = await scheduler.queue.get_pending()
-            tiny_build = next((b for b in pending if b.id == id_tiny), None)
+            tiny_build = next((b for b in pending if b.build_id == id_tiny), None)
             if tiny_build and tiny_build.is_building:
                 # We can't easily check 'store_id' on build, but we can check if
                 # it started while blocker is still running.

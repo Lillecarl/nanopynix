@@ -71,7 +71,7 @@ class Trampoline:
             sched_req = self.queue.requests.get(req_id)
             if sched_req is None:
                 continue
-            parent_dps_by_req[req_id] = sched_req.build_to_derived.get(build.id, set())
+            parent_dps_by_req[req_id] = sched_req.build_to_derived.get(build.build_id, set())
 
         derivation = build.request.derivation
         is_dynamic = derivation.has_dynamic_outputs
@@ -101,7 +101,7 @@ class Trampoline:
             for dp in non_trampolined_dps:
                 sched_req.results[dp] = build_resp.result
 
-            sched_req.build_completed(build.id)
+            sched_req.build_completed(build.build_id)
 
             if sched_req.resolve_if_done():
                 log.info(
@@ -137,10 +137,10 @@ class Trampoline:
             if sched_req is None:
                 continue
 
-            parent_dps = sched_req.build_to_derived.get(build.id, set())
+            parent_dps = sched_req.build_to_derived.get(build.build_id, set())
             for dp in parent_dps:
                 sched_req.results[dp] = failed_result
-            sched_req.build_completed(build.id)
+            sched_req.build_completed(build.build_id)
 
             if sched_req.resolve_if_done():
                 log.info(
@@ -218,7 +218,7 @@ class Trampoline:
 
             log.info(
                 "trampoline_detected",
-                build_id=build.id,
+                build_id=build.build_id,
                 output_name=output_name,
                 inner_drv_path=out_sp,
             )
@@ -231,14 +231,14 @@ class Trampoline:
             except FileNotFoundError:
                 log.warning(
                     "trampoline_drv_not_found",
-                    build_id=build.id,
+                    build_id=build.build_id,
                     inner_drv_path=out_sp,
                 )
                 continue
             except Exception:
                 log.exception(
                     "trampoline_drv_parse_failed",
-                    build_id=build.id,
+                    build_id=build.build_id,
                     inner_drv_path=out_sp,
                 )
                 continue
@@ -264,7 +264,7 @@ class Trampoline:
                 except Exception:
                     log.exception(
                         "trampoline_unknown_srcs_check_failed",
-                        build_id=build.id,
+                        build_id=build.build_id,
                         inner_drv_path=out_sp,
                     )
 
@@ -289,7 +289,7 @@ class Trampoline:
 
             log.info(
                 "trampoline_build_enqueued",
-                parent_build_id=build.id,
+                parent_build_id=build.build_id,
                 inner_build_id=inner_build_id,
                 inner_drv_path=out_sp,
                 scheduler_request_id=sched_req.id,
@@ -324,9 +324,9 @@ class Trampoline:
                 other_build.depends_on.add(inner_build_id)
                 log.info(
                     "dynamic_dep_linked",
-                    dependent_build_id=other_build.id,
+                    dependent_build_id=other_build.build_id,
                     inner_build_id=inner_build_id,
-                    outer_build_id=outer_build.id,
+                    outer_build_id=outer_build.build_id,
                 )
 
             for p in inner_output_paths:
@@ -334,6 +334,6 @@ class Trampoline:
                     other_build.required_paths[p] = UnkeyedValidPathInfo()
                     log.debug(
                         "dynamic_dep_required_path_added",
-                        dependent_build_id=other_build.id,
+                        dependent_build_id=other_build.build_id,
                         path=p,
                     )

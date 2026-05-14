@@ -96,7 +96,7 @@ class DerivationResolver:
                     reg_req = RegisterDrvOutputRequest(realisation=realisation)
                     log.debug(
                         "registering_dep_realisation_on_builder",
-                        build_id=build.id,
+                        build_id=build.build_id,
                         dep_build_id=dep_id,
                         store_id=store.store_id,
                         realisation=realisation,
@@ -105,7 +105,7 @@ class DerivationResolver:
                 except Exception as exc:
                     log.warning(
                         "register_dep_realisation_failed",
-                        build_id=build.id,
+                        build_id=build.build_id,
                         dep_build_id=dep_id,
                         store_id=store.store_id,
                         error=str(exc),
@@ -148,7 +148,7 @@ class DerivationResolver:
         """
         drv_path = build.request.drv_path
 
-        parsed = await self._read_drv(drv_path, build.id)
+        parsed = await self._read_drv(drv_path, build.build_id)
         if parsed is None:
             return
 
@@ -183,7 +183,7 @@ class DerivationResolver:
 
         log.info(
             "resolved_derivation",
-            build_id=build.id,
+            build_id=build.build_id,
             drv_path=drv_path,
             resolved_drv_path=build.request.drv_path,
             output_paths={n: o.path for n, o in resolved.outputs.items()},
@@ -308,7 +308,7 @@ class DerivationResolver:
                 if level1_path is None:
                     log.warning(
                         "resolve_dynamic_no_outer_output",
-                        build_id=build.id,
+                        build_id=build.build_id,
                         drv_path=dyn_drv_path,
                         output=outer_output,
                     )
@@ -378,7 +378,7 @@ class DerivationResolver:
                     target_store.add_path_info(resp.info)
                     log.debug(
                         "resolved_drv_added_to_store",
-                        build_id=build.id,
+                        build_id=build.build_id,
                         store_id=target_store.store_id,
                         resolved_drv_path=resp.info.path,
                     )
@@ -386,7 +386,7 @@ class DerivationResolver:
             except Exception:
                 log.warning(
                     "resolved_drv_add_to_store_failed",
-                    build_id=build.id,
+                    build_id=build.build_id,
                     store_id=target_store.store_id,
                     exc_info=True,
                 )
@@ -402,7 +402,7 @@ class DerivationResolver:
                 resolved_drv_path = path
 
         if resolved_drv_path is None:
-            log.error("resolve_add_failed", build_id=build.id)
+            log.error("resolve_add_failed", build_id=build.build_id)
             return
 
         build.request.drv_path = resolved_drv_path

@@ -89,7 +89,7 @@ class QueuedBuild:
         expected_duration: int | None = None,
         scheduler_request_ids: set[RequestId] | None = None,
     ) -> None:
-        self.id = build_id
+        self.build_id = build_id
         self.request = request
         self.required_paths = required_paths
         self.future = future
@@ -255,7 +255,7 @@ class QueuedBuild:
                 try:
                     await client.send_raw(self._log_writer.get_bytes())
                 except Exception:
-                    log.debug("subscriber_replay_failed", build_id=self.id)
+                    log.debug("subscriber_replay_failed", build_id=self.build_id)
                     return
             self.subscribers.append(client)
 
@@ -341,17 +341,17 @@ class BuildQueue:
             # Check for duplicate — dedup with queued or in-progress builds
             existing = self._by_path.get(drv_path)
             if existing is not None and not existing.is_done:
-                log.debug("build_deduped", id=existing.id)
+                log.debug("build_deduped", id=existing.build_id)
                 if scheduler_request_id is not None:
                     existing.scheduler_request_ids.add(scheduler_request_id)
                     if derived_paths_for_request:
                         sched_req = self._requests.get(scheduler_request_id)
                         if sched_req is not None:
                             sched_req.add_build(
-                                existing.id,
+                                existing.build_id,
                                 derived_paths_for_request,
                             )
-                return existing.id, existing.future
+                return existing.build_id, existing.future
 
             # Create new build with future
             loop = asyncio.get_running_loop()
@@ -372,22 +372,22 @@ class BuildQueue:
             self.next_id += 1
             self._queue.append(build)
             self._by_path[drv_path] = build
-            self._by_id[build.id] = build
+            self._by_id[build.build_id] = build
 
             if scheduler_request_id is not None and derived_paths_for_request:
                 sched_req = self._requests.get(scheduler_request_id)
                 if sched_req is not None:
-                    sched_req.add_build(build.id, derived_paths_for_request)
+                    sched_req.add_build(build.build_id, derived_paths_for_request)
 
             log.info(
                 "build_enqueued",
-                build_id=build.id,
+                build_id=build.build_id,
                 description=build.description,
                 required_paths=len(required_paths),
                 request_ids=list(scheduler_request_ids),
             )
             metrics.QUEUE_SIZE.labels(status="pending").inc()
-            return build.id, future
+            return build.build_id, future
 
     async def subscribe(self, build_id: BuildId, client: ClientConn) -> bool:
         """Subscribe a client to a build's log stream.
@@ -406,7 +406,7 @@ class BuildQueue:
         async with self.lock:
             return sorted(
                 [b for b in self._queue if not b.is_done],
-                key=lambda b: b.id,
+                key=lambda b: b.build_id,
             )
 
     async def set_depends_on(self, build_id: BuildId, depends_on: set[BuildId]) -> None:
@@ -427,7 +427,7 @@ class BuildQueue:
         """Mark build as completed, resolve the future."""
         async with self.lock:
             for b in self._queue:
-                if b.id == build_id:
+                if b.build_id == build_id:
                     b.finished_at = time.monotonic()
                     if not b.future.done():
                         b.future.set_result(response)
@@ -447,7 +447,7 @@ class BuildQueue:
         """Mark build as failed, resolve future with an error response."""
         async with self.lock:
             for b in self._queue:
-                if b.id == build_id:
+                if b.build_id == build_id:
                     b.finished_at = time.monotonic()
                     response = BuildDerivationResponse(
                         result=BuildResult(
@@ -491,13 +491,13 @@ class BuildQueue:
 
             for build in to_remove:
                 self._queue.remove(build)
-                self._by_id.pop(build.id, None)
+                self._by_id.pop(build.build_id, None)
                 drv_path_str = str(build.request.drv_path)
                 if drv_path_str in self._by_path:
                     del self._by_path[drv_path_str]
                 log.debug(
                     "build_pruned",
-                    build_id=build.id,
+                    build_id=build.build_id,
                     drv_path=drv_path_str,
                 )
 

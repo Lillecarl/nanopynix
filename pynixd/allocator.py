@@ -259,7 +259,7 @@ class BuildAllocator:
         build.request.derivation.env["requiredSystemFeatures"] = new_val
         log.debug(
             "stripped_handled_features",
-            build_id=build.id,
+            build_id=build.build_id,
             stripped=sorted(stripped),
             remaining=sorted(remaining),
         )
