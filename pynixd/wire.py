@@ -239,6 +239,9 @@ class BytesWriter(NixWriter):
     def get_bytes(self) -> bytes:
         return bytes(self._buf)
 
+    def tell(self) -> int:
+        return len(self._buf)
+
 
 class BytesReader(NixReader):
     """A NixReader that reads from an in-memory bytes buffer.

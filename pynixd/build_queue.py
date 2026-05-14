@@ -127,24 +127,15 @@ class QueuedBuild:
 
     # ── Log pub/sub ────────────────────────────────────────────────────
 
-    # Append-only byte buffer of all stderr messages (serialized).
-    # New subscribers get this replayed on join.
-    _log_buf: bytearray = field(default_factory=bytearray, repr=False)
-
-    # Client connections subscribed to this build's stderr stream.
-    subscribers: list[ClientConn] = field(default_factory=list, repr=False)
-
-    _buf_writer: wire.BytesWriter = field(
+    # Append-only byte buffer of all stderr messages (serialized via
+    # NixWriter interface). New subscribers get this replayed on join.
+    _log_writer: wire.BytesWriter = field(
         default_factory=lambda: wire.BytesWriter("build_log"),
         repr=False,
     )
 
-    @staticmethod
-    def _serialize_msg(msg: StderrMsg) -> bytes:
-        """Serialize a StderrMsg to bytes."""
-        w = wire.BytesWriter("build_log")
-        msg.to_writer(w)
-        return w.get_bytes()
+    # Client connections subscribed to this build's stderr stream.
+    subscribers: list[ClientConn] = field(default_factory=list, repr=False)
 
     @property
     def is_building(self) -> bool:
@@ -215,9 +206,9 @@ class QueuedBuild:
 
     def post_log(self, msg: StderrMsg) -> bytes:
         """Serialize and store a log entry. Returns the raw bytes."""
-        raw = self._serialize_msg(msg)
-        self._log_buf.extend(raw)
-        return raw
+        before = self._log_writer.tell()
+        msg.to_writer(self._log_writer)
+        return self._log_writer.get_bytes()[before:]
 
     async def post_log_bytes(self, raw: bytes) -> None:
         """Fan out raw log bytes to all subscribers via TaskGroup.
@@ -251,9 +242,9 @@ class QueuedBuild:
         receives new entries in real-time via post_log_bytes.
         If replay fails (broken connection), the subscriber is not added.
         """
-        if self._log_buf:
+        if self._log_writer.tell():
             try:
-                await client.send_raw(bytes(self._log_buf))
+                await client.send_raw(self._log_writer.get_bytes())
             except Exception:
                 log.debug("subscriber_replay_failed", build_id=self.id)
                 return
