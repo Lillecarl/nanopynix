@@ -132,6 +132,7 @@ async def test_build_log_pubsub_real_nix(
     log.info("nix_log_client1", log=log1)
     log.info("nix_log_client2", log=log2)
 
+    # Both clients must have identical, complete logs.
+    assert log1 == log2, f"client logs differ:\nclient1:\n{log1}\n---\nclient2:\n{log2}"
     for i in range(1, 11):
         assert str(i) in log1, f"client1 nix log missing line '{i}':\n{log1}"
-        assert str(i) in log2, f"client2 nix log missing line '{i}':\n{log2}"

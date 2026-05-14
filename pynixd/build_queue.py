@@ -137,6 +137,10 @@ class QueuedBuild:
     # Client connections subscribed to this build's stderr stream.
     subscribers: list[ClientConn] = field(default_factory=list, repr=False)
 
+    # Guards add_subscriber replay vs post_log_bytes fanout so that a
+    # joining client never misses bytes that arrive during catch-up.
+    _sub_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+
     @property
     def is_building(self) -> bool:
         return self.build_task is not None and not self.build_task.done()
@@ -217,18 +221,21 @@ class QueuedBuild:
         """
         if not self.subscribers or not raw:
             return
-        tasks: list[asyncio.Task[None]] = []
-        try:
-            async with asyncio.TaskGroup() as tg:
-                tasks.extend(tg.create_task(sub.send_raw(raw)) for sub in self.subscribers)
-        except* Exception:
-            dead = [
-                i
-                for i, t in enumerate(tasks)
-                if t.done() and t.exception() is not None and not isinstance(t.exception(), asyncio.CancelledError)
-            ]
-            for i in reversed(dead):
-                self.subscribers.pop(i)
+        async with self._sub_lock:
+            if not self.subscribers:
+                return
+            tasks: list[asyncio.Task[None]] = []
+            try:
+                async with asyncio.TaskGroup() as tg:
+                    tasks.extend(tg.create_task(sub.send_raw(raw)) for sub in self.subscribers)
+            except* Exception:
+                dead = [
+                    i
+                    for i, t in enumerate(tasks)
+                    if t.done() and t.exception() is not None and not isinstance(t.exception(), asyncio.CancelledError)
+                ]
+                for i in reversed(dead):
+                    self.subscribers.pop(i)
 
     async def post_log_and_fanout(self, msg: StderrMsg) -> None:
         """Store a log entry and fan out to all subscribers."""
@@ -242,13 +249,14 @@ class QueuedBuild:
         receives new entries in real-time via post_log_bytes.
         If replay fails (broken connection), the subscriber is not added.
         """
-        if self._log_writer.tell():
-            try:
-                await client.send_raw(self._log_writer.get_bytes())
-            except Exception:
-                log.debug("subscriber_replay_failed", build_id=self.id)
-                return
-        self.subscribers.append(client)
+        async with self._sub_lock:
+            if self._log_writer.tell():
+                try:
+                    await client.send_raw(self._log_writer.get_bytes())
+                except Exception:
+                    log.debug("subscriber_replay_failed", build_id=self.id)
+                    return
+            self.subscribers.append(client)
 
 
 class BuildQueue:
