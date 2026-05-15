@@ -48,6 +48,12 @@ _CHUNK_SIZE = env.int("PYNIXD_CHUNK_SIZE", 1024 * 1024)
 
 _SSH_WINDOW_SIZE = env.int("PYNIXD_SSH_WINDOW", 16 * 1024 * 1024)
 
+_SSH_READ_AHEAD = 16 * 1024  # read-ahead size to amortize asyncssh lock overhead
+
+_UNIX_READ_AHEAD = 16 * 1024  # read-ahead size to amortize syscall overhead
+
+_UINT64_STRUCT = struct.Struct("<Q")
+
 
 def _nar_pad(n: int) -> int:
     """Return number of padding bytes needed for 8-byte alignment."""
@@ -109,9 +115,6 @@ class NixReader:
         return False
 
 
-_SSH_READ_AHEAD = 16 * 1024  # read-ahead size to amortize asyncssh lock overhead
-
-
 class SSHNixReader(NixReader):
     def __init__(self, reader: asyncssh.SSHReader, identifier: str = "unknown") -> None:
         super().__init__(identifier=identifier)
@@ -133,12 +136,6 @@ class SSHNixReader(NixReader):
             [],
         )
         return any(isinstance(chunk, (bytes, bytearray)) and chunk for chunk in buf)
-
-
-_UNIX_READ_AHEAD = 16 * 1024  # read-ahead size to amortize syscall overhead
-
-
-_UINT64_STRUCT = struct.Struct("<Q")
 
 
 class UnixNixReader(NixReader):
@@ -526,7 +523,7 @@ async def stream_nar(
             else:
                 try:
                     tok: str = data.decode("ascii") if data else ""
-                except (UnicodeDecodeError, ValueError):
+                except UnicodeDecodeError:
                     tok = ""
                 if tok == "(":
                     depth += 1

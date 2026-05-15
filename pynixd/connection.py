@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     )
 
 log = structlog.get_logger(__name__)
-stderr_log = structlog.get_logger("pynixd.stderr")
 
 
 # ── Shared types ────────────────────────────────────────────────────

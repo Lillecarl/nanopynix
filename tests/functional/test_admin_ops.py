@@ -13,8 +13,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from pathlib import Path
 import pytest
 import structlog
 
@@ -28,6 +26,8 @@ from tests.conftest import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pynixd import Server
 
 log = structlog.get_logger(__name__)

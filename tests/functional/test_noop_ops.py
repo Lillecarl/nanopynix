@@ -44,4 +44,4 @@ async def test_noop_operations_do_not_crash(pynixd_server: Server) -> None:
         "/etc/hostname",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(cmd, expected_retcode=0)
-    assert "pynixd:" in stdboth.lower() or rc == 0, f"store add via pynixd failed:\n{stdboth}"
+    assert rc == 0, f"store add via pynixd failed:\n{stdboth}"

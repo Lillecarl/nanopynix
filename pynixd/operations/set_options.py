@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from ..types import RequestContext as RequestContext
     from ..types.context import WriteContext
 
-# Silence SetOptions by default — it's extremely verbose
+# SetOptions is handled as a no-op for non-admin users (see handle() below).
 
 
 @dataclass

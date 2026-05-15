@@ -69,6 +69,8 @@ async def test_builders(
         env={"NIX_STATE_DIR": str(client_store_path / "var/nix")},
     )
     assert rc == 0, f"build failed:\n{stdboth}"
+    out_path = stdout.strip()
+    assert out_path.startswith("/nix/store/"), f"Expected store path, got: {out_path}"
 
 
 @pytest.mark.timeout(60)
@@ -106,3 +108,5 @@ async def test_store(
         ]
         rc, stdout, stderr, stdboth = await run_subproc(cmd)
         assert rc == 0, f"build failed:\n{stdboth}"
+        out_path = stdout.strip()
+        assert out_path.startswith("/nix/store/"), f"Expected store path, got: {out_path}"

@@ -7,6 +7,7 @@ It also updates the path tracker when resolved paths are found.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -42,6 +43,24 @@ async def test_query_derivation_output_map(pynixd_server: Server) -> None:
         str(test_nix),
         "minimal.leaf",
         "--no-link",
+        "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"build failed:\n{stdboth}"
+
+    out_path = stdout.strip()
+    assert out_path.startswith("/nix/store/"), f"Expected store path, got: {out_path}"
+
+    # QueryDerivationOutputMap: query the output map for the derivation
+    cmd = [
+        str(CLIENT_BIN),
+        "path-info",
+        "--store",
+        uri,
+        "--json",
+        out_path,
+    ]
+    rc, stdout, stderr, stdboth = await run_subproc(cmd)
+    assert rc == 0, f"path-info failed:\n{stdboth}"
+    info = json.loads(stdout)
+    assert out_path in info, f"Expected {out_path} in path-info output"

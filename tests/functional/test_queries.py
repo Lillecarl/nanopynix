@@ -190,7 +190,7 @@ async def test_query_valid_derivers(profiler: pyinstrument.Profiler, query_env) 
     server, uri, out_path = query_env
 
     # Could use `nix path-info --derivation <store-path>` as a nix3 equivalent,
-    # but `nix-store -q --deriver` is kept for consistency with other query tes…
+    # but `nix-store -q --deriver` is kept for consistency with other query tests.
     cmd = [
         CLIENT_BIN.parent / "nix-store",
         "--store",

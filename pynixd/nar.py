@@ -10,7 +10,9 @@ import io
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING
+
+from .wire import _nar_pad
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -62,10 +64,7 @@ NarNode = NarDirectory | NarRegular | NarSymlink
 # Low-level: padded string encoding
 # ═════════════════════════════════════════════════════════════════════════════
 
-
-def _pad_size(n: int) -> int:
-    """Return number of padding bytes needed for 8-byte alignment."""
-    return (8 - (n % 8)) % 8
+# _nar_pad is imported from wire.py for 8-byte alignment calculation.
 
 
 def _write_padded_string(buf: io.BytesIO, s: str) -> None:
@@ -74,7 +73,7 @@ def _write_padded_string(buf: io.BytesIO, s: str) -> None:
     length = len(encoded)
     buf.write(struct.pack("<Q", length))
     buf.write(encoded)
-    buf.write(b"\x00" * _pad_size(length))
+    buf.write(b"\x00" * _nar_pad(length))
 
 
 def _read_padded_string(data: bytes, offset: int) -> tuple[str, int]:
@@ -85,7 +84,7 @@ def _read_padded_string(data: bytes, offset: int) -> tuple[str, int]:
     length = struct.unpack_from("<Q", data, offset)[0]
     offset += 8
     body = data[offset : offset + length].decode("ascii")
-    offset += length + _pad_size(length)
+    offset += length + _nar_pad(length)
     return body, offset
 
 
@@ -120,7 +119,7 @@ def _write_node(buf: io.BytesIO, node: NarNode) -> None:
         length = len(node.contents)
         buf.write(struct.pack("<Q", length))
         buf.write(node.contents)
-        buf.write(b"\x00" * _pad_size(length))
+        buf.write(b"\x00" * _nar_pad(length))
         _write_padded_string(buf, ")")
 
     elif isinstance(node, NarSymlink):
@@ -129,7 +128,7 @@ def _write_node(buf: io.BytesIO, node: NarNode) -> None:
         _write_padded_string(buf, node.target)
         _write_padded_string(buf, ")")
     else:
-        assert_never(node)
+        raise TypeError(f"Unknown NAR node type: {type(node).__name__}")
 
 
 def write_nar(node: NarNode) -> bytes:
@@ -208,7 +207,7 @@ def _read_node(data: bytes, offset: int) -> tuple[NarNode, int]:
         length = struct.unpack_from("<Q", data, offset)[0]
         offset += 8
         contents = data[offset : offset + length]
-        offset += length + _pad_size(length)
+        offset += length + _nar_pad(length)
 
         offset = _expect_padded_string(data, offset, ")")
         return NarRegular(contents=contents, executable=executable), offset
@@ -318,7 +317,7 @@ class NarForwarder:
             self._body_len = struct.unpack("<Q", self._buf[:8])[0]
             self._in_body = True
 
-        pad = _pad_size(self._body_len)
+        pad = _nar_pad(self._body_len)
         need = 8 + self._body_len + pad
         if len(self._buf) < need:
             return None

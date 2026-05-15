@@ -236,7 +236,7 @@ async def test_ca_simple_via_pynixd(profiler: pyinstrument.Profiler, ca_env) -> 
     rc, stdout, stderr, stdboth = await run_subproc(
         cmd,
         nix_config=CA_NIX_CONFIG,
-        expected_retcode=None,
+        expected_retcode=0,
     )
     log.info("ca_simple_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
     assert rc == 0, f"CA simple build via pynixd failed:\n{stdboth}"
@@ -275,7 +275,7 @@ async def test_ca_multi_output_via_pynixd(
     rc, stdout, stderr, stdboth = await run_subproc(
         cmd,
         nix_config=CA_NIX_CONFIG,
-        expected_retcode=None,
+        expected_retcode=0,
     )
     log.info("ca_multi_output_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
     assert rc == 0, f"CA multi-output build via pynixd failed:\n{stdboth}"
@@ -316,7 +316,7 @@ async def test_ca_depends_on_ca_via_pynixd(
     rc, stdout, stderr, stdboth = await run_subproc(
         cmd,
         nix_config=CA_NIX_CONFIG,
-        expected_retcode=None,
+        expected_retcode=0,
     )
     log.info("ca_depends_on_ca_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
     assert rc == 0, f"CA depends-on-CA build via pynixd failed:\n{stdboth}"
@@ -356,7 +356,7 @@ async def test_non_ca_depends_on_ca_via_pynixd(
     rc, stdout, stderr, stdboth = await run_subproc(
         cmd,
         nix_config=CA_NIX_CONFIG,
-        expected_retcode=None,
+        expected_retcode=0,
     )
     log.info("non_ca_depends_on_ca_via_pynixd", rc=rc, stdout=stdout, stderr=stderr)
     assert rc == 0, f"Non-CA depends-on-CA build via pynixd failed:\n{stdboth}"
@@ -402,7 +402,7 @@ async def test_ca_query_derivation_output_map_via_pynixd(
     rc, stdout, stderr, stdboth = await run_subproc(
         build_cmd,
         nix_config=CA_NIX_CONFIG,
-        expected_retcode=None,
+        expected_retcode=0,
     )
     assert rc == 0, f"CA build via pynixd failed:\n{stdboth}"
 
@@ -567,7 +567,7 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
     rc, stdout, stderr, stdboth = await run_subproc(
         build_cmd,
         nix_config=DYN_NIX_CONFIG,
-        expected_retcode=None,
+        expected_retcode=0,
     )
     assert rc == 0, f"Dynamic trampoline build failed:\n{stdboth}"
     out_path = stdout.strip()
@@ -633,7 +633,7 @@ async def test_dynamic_drv_producing_via_pynixd(
     rc, stdout, stderr, stdboth = await run_subproc(
         build_cmd,
         nix_config=DYN_NIX_CONFIG,
-        expected_retcode=None,
+        expected_retcode=0,
     )
     assert rc == 0, f"producingDrv build via pynixd failed:\n{stdboth}"
     producing_out = stdout.strip()
@@ -764,7 +764,7 @@ async def test_text_hashed_ca_build_via_pynixd(
     rc, stdout, stderr, stdboth = await run_subproc(
         build_cmd,
         nix_config=CA_NIX_CONFIG,
-        expected_retcode=None,
+        expected_retcode=0,
     )
     assert rc == 0, f"Text-hashed CA build via pynixd failed:\n{stdboth}"
     out_path = stdout.strip()
@@ -841,7 +841,7 @@ async def test_dynamic_drv_wrapper_via_pynixd(
     rc, stdout, stderr, stdboth = await run_subproc(
         build_cmd,
         nix_config=DYN_NIX_CONFIG,
-        expected_retcode=None,
+        expected_retcode=0,
     )
     assert rc == 0, f"Wrapper build via pynixd failed:\n{stdboth}"
     out_path = stdout.strip()

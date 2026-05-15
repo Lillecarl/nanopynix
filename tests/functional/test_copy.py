@@ -26,7 +26,7 @@ async def test_copy(pynixd_server: Server):
     - RegisterDrvOutput: Registers derivation output
     """
 
-    await run_subproc([CLIENT_BIN, "build", "nixpkgs#hello"])
+    await run_subproc([CLIENT_BIN, "build", "nixpkgs#hello", "--no-link"])
     await run_subproc(
         [
             CLIENT_BIN,

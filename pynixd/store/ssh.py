@@ -44,7 +44,7 @@ class _SSHStoreMixin(Store):
     backoff: float
     max_backoff: float
     last_failure: float
-    store_id: str
+    store_id: StoreId
     _bg_tasks: set[asyncio.Task[Any]]
 
     INITIAL_BACKOFF: float = 1.0
@@ -301,7 +301,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
         await self.close_ssh()
 
 
-DAEMON_SOCKET_PATH = Path("/nix/var/nix/daemon-socket/socket")
+_DAEMON_SOCKET_PATH = Path("/nix/var/nix/daemon-socket/socket")
 
 
 class SSHSocketStore(_SSHStoreMixin):
@@ -313,7 +313,7 @@ class SSHSocketStore(_SSHStoreMixin):
         store_id: StoreId | None = None,
         port: int = 22,
         username: str | None = None,
-        socket_path: Path = DAEMON_SOCKET_PATH,
+        socket_path: Path = _DAEMON_SOCKET_PATH,
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
         monitor: bool = True,

@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from .decomposer import synthesize_already_valid  # noqa: F401
 from .drv_parser import read_drv_file, to_basic_derivation
 from .operations.base import BuildResult, BuildResultStatus, UnkeyedValidPathInfo
 from .operations.build_derivation import BuildDerivationRequest

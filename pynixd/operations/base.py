@@ -60,6 +60,9 @@ from ..types import (
 from ..types.context import ReadContext, WriteContext
 from ..wire import NixWriter
 
+# Silence BuildResult debug logs — verbose in hot paths
+logging.getLogger("pynixd.types.BuildResult").setLevel(logging.WARNING)
+
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
@@ -181,10 +184,6 @@ class OpResponse(ABC):
 
     @abstractmethod
     async def serialize(self, ctx: WriteContext) -> None: ...
-
-
-# Silence BuildResult debug logs — verbose in hot paths
-logging.getLogger("pynixd.types.BuildResult").setLevel(logging.WARNING)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

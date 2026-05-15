@@ -201,7 +201,6 @@ class Scheduler:
         )
         self.trigger()
         return res
-        return res
 
     async def build_derived_paths(
         self,

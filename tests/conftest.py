@@ -120,11 +120,9 @@ log = structlog.get_logger(__name__)
 # explicitly by path and their pytest_generate_tests is expensive.
 
 
-def pytest_ignore_collect(collection_path: Path) -> bool | None:
+def pytest_ignore_collect(collection_path: Path) -> bool:
     """Skip integration test directories during normal collection."""
-    if "nar_integration" in str(collection_path) or "drv_integration" in str(collection_path):
-        return True
-    return None
+    return "nar_integration" in str(collection_path) or "drv_integration" in str(collection_path)
 
 
 logging.getLogger("asyncio").setLevel(logging.INFO)
@@ -530,8 +528,8 @@ def rmtree_robust(path: str | Path) -> None:
             try:
                 Path(path).chmod(stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
                 func(path)
-            except Exception:
-                pass
+            except OSError:
+                pass  # Best-effort cleanup; ignore failures
 
         shutil.rmtree(path, onerror=handle_errors)
     else:
@@ -541,10 +539,10 @@ def rmtree_robust(path: str | Path) -> None:
             try:
                 path.chmod(stat.S_IWRITE | stat.S_IREAD)
                 path.unlink()
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except OSError:
+                pass  # Best-effort cleanup; ignore failures
+        except OSError:
+            pass  # Best-effort cleanup; ignore failures
 
 
 def rmtree_robust_glob(pattern: str) -> None:
@@ -716,12 +714,6 @@ async def pynixd_server(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> AsyncGenerator[Server]:
     """Session-scoped shared pynixd server (autouse)."""
-    # Check if any test in the session needs a session server.
-    # Actually, autouse session fixtures can't easily check markers of the current test.
-    # But we can check the command line or just let it run.
-
-    # Wait! I'll make it NOT autouse, but requested by functional tests.
-    # Or just let it run but don't bind to it if not needed.
 
     local_path = SESSION_STORE_PREFIX / "local"
     builder_path = SESSION_STORE_PREFIX / "builder"

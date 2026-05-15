@@ -28,11 +28,9 @@ log = structlog.get_logger(__name__)
 
 @pytest.mark.timeout(60)
 async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
-    """QuerySubstitutablePaths: query which paths are available for substitution.
+    """Build a path and verify it via path-info through pynixd.
 
-    We can't easily control what the upstream daemon knows about substitutable
-    paths, but we can verify the protocol round-trips correctly by performing
-    a query through the local store.
+    Exercises QueryPathInfo and QueryValidPaths protocol operations.
     """
     uri = server_uri(pynixd_server)
 
@@ -55,6 +53,7 @@ async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
     assert rc == 0, f"build failed:\n{stdboth}"
 
     out_path = stdout.strip()
+    assert out_path.startswith("/nix/store/"), f"Expected store path, got: {out_path}"
     cmd = [
         str(CLIENT_BIN),
         "path-info",
@@ -69,9 +68,9 @@ async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
 
 @pytest.mark.timeout(60)
 async def test_substitutable_paths_via_nix(pynixd_server: Server) -> None:
-    """Exercise substitution queries through the Nix CLI.
+    """Build a path through pynixd and verify it's tracked.
 
-    This triggers QuerySubstitutablePaths and QuerySubstitutablePathInfos.
+    Exercises IsValidPath and QueryValidPaths protocol operations.
     """
     uri = server_uri(pynixd_server)
 
@@ -87,6 +86,9 @@ async def test_substitutable_paths_via_nix(pynixd_server: Server) -> None:
         str(test_nix),
         "minimal.leaf",
         "--no-link",
+        "--print-out-paths",
     ]
     rc, stdout, stderr, stdboth = await run_subproc(cmd)
     assert rc == 0, f"build failed:\n{stdboth}"
+    out_path = stdout.strip()
+    assert out_path.startswith("/nix/store/"), f"Expected store path, got: {out_path}"

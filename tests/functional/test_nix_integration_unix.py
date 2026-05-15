@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -56,25 +57,27 @@ async def test_nix_build_via_unix(pynixd_server):
     expr_path = Path("/tmp/pynixd-it-test.nix")
     expr_path.write_text(nix_expr)  # noqa: ASYNC240 — test setup
 
-    cmd = [
-        str(CLIENT_BIN),
-        "build",
-        "--file",
-        str(expr_path),
-        "--store",
-        uri,
-        "--no-link",
-        "--print-out-paths",
-        "--impure",
-    ]
+    try:
+        cmd = [
+            str(CLIENT_BIN),
+            "build",
+            "--file",
+            str(expr_path),
+            "--store",
+            uri,
+            "--no-link",
+            "--print-out-paths",
+            "--impure",
+        ]
 
-    rc, stdout, stderr, stdboth = await run_subproc(cmd)
-    assert rc == 0
-    assert "/nix/store/" in stdout
-    # The output path should contain our test string (or the hash)
-    # We can check that the path exists in pynixd's store
-    out_path = stdout.strip()
-    assert server.local_store.tracker.has_path(out_path)
+        rc, stdout, stderr, stdboth = await run_subproc(cmd)
+        assert rc == 0
+        assert "/nix/store/" in stdout
+        out_path = stdout.strip()
+        assert server.local_store.tracker.has_path(out_path)
+    finally:
+        with contextlib.suppress(OSError):
+            expr_path.unlink()  # noqa: ASYNC240 — test cleanup
 
 
 @pytest.mark.no_pynixd

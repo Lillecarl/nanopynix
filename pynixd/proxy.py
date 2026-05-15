@@ -18,11 +18,11 @@ from .connection import ClientConn
 from .exceptions import BackendError, OpNotImplementedError
 from .operations import OP_REGISTRY
 from .operations.base import OpRequest, OpResponse, Resp, Role
-from .protocol import OptTrusted, get_extension_features
+from .protocol import get_extension_features
 from .stderr import StderrError
 from .types import RequestContext as RequestContext
 from .types.context import WriteContext
-from .types.protocol import Verbosity
+from .types.protocol import OptTrusted, Verbosity
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -161,7 +161,7 @@ class DaemonProxy:
         if client_version >= wire.proto(1, 33):
             self.w.write_string(NIX_VERSION)
             if client_version >= wire.proto(1, 35):
-                self.w.write_uint64(OptTrusted.Trusted)
+                self.w.write_uint64(OptTrusted.TRUSTED)
         self.w.write_uint64(wire.STDERR_LAST)
         await self.w.drain()
 

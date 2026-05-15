@@ -27,6 +27,7 @@ class TestRunSubproc:
         - None: This test only checks subprocess execution without triggering Store operations
         """
         rc, stdout, stderr, _ = await run_subproc(["false"], expected_retcode=1)
+        assert rc == 1
 
     async def test_stderr(self):
         """Test subprocess stderr capture.
@@ -49,7 +50,7 @@ class TestRunSubproc:
         )
         assert "foo = bar" in stdout
         assert "baz = qux" in stdout
-        assert "substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/" in stdout
+        assert ("substituters = https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/") in stdout
 
     async def test_nix_config_override(self):
         """Test NIX_CONFIG override behavior.

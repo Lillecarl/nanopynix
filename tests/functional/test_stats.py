@@ -298,14 +298,12 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
             pending = await scheduler.queue.get_pending()
             tiny_build = next((b for b in pending if b.build_id == id_tiny), None)
             if tiny_build and tiny_build.is_building:
-                # We can't easily check 'store_id' on build, but we can check if
-                # it started while blocker is still running.
                 log.info("tiny_build_started", build_id=id_tiny)
                 break
             await asyncio.sleep(0.1)
 
-        # If it were waiting for remote slot, it would be pending.
-        # Success!
+        assert tiny_build is not None
+        assert tiny_build.is_building
 
 
 async def test_levenshtein_sql(tmp_path: Path) -> None:
