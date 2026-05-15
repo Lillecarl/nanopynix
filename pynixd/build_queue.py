@@ -505,7 +505,11 @@ class BuildQueue:
             self._requests.pop(request_id, None)
 
     def count(self, status: str) -> int:
-        """Get count of builds with given status (non-async, thread-safe for reading)."""
+        """Get count of builds with given status.
+
+        Safe to call from async context (no await points, so no
+        interleaving with queue mutations).
+        """
         match status:
             case "pending":
                 return len([b for b in self._queue if b.is_pending])

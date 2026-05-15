@@ -533,7 +533,7 @@ class Scheduler:
         self,
         build: QueuedBuild,
         store: Store,
-        conn: object,  # build connection (opaque to this method)
+        conn: Connection,  # build connection (opaque to this method)
     ) -> None:
         """Register CA realisations, resolve deferred derivations, stream inputs.
 
@@ -599,7 +599,7 @@ class Scheduler:
         self,
         build: QueuedBuild,
         store: Store,
-        conn: object,  # build connection
+        conn: Connection,  # build connection
         resp: BuildDerivationResponse,
     ) -> None:
         """Pull outputs back to local store, register realisations, record stats.
