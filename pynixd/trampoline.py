@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from .drv_parser import read_drv_file, to_basic_derivation
+from .exceptions import BackendError
 from .operations.base import BuildResult, BuildResultStatus, UnkeyedValidPathInfo
 from .operations.build_derivation import BuildDerivationRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
@@ -234,7 +235,7 @@ class Trampoline:
                     inner_drv_path=out_sp,
                 )
                 continue
-            except Exception:
+            except (OSError, ValueError):
                 log.exception(
                     "trampoline_drv_parse_failed",
                     build_id=build.build_id,
@@ -260,7 +261,7 @@ class Trampoline:
                         valid_resp.paths,
                         update_regtime=False,
                     )
-                except Exception:
+                except (BackendError, OSError, ConnectionError):
                     log.exception(
                         "trampoline_unknown_srcs_check_failed",
                         build_id=build.build_id,

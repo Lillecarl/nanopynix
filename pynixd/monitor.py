@@ -161,11 +161,11 @@ class GenericResourcePoller(ResourceMonitor):
                             has_psi = True
                     if has_psi:
                         psi_text = "\n".join(parts)
-                except (PermissionError, FileNotFoundError, OSError):
-                    # Stop trying PSI if we hit a permission issue
+                except (PermissionError, FileNotFoundError):
+                    # PSI not available on this system
                     log.info("resource_poller_psi_unavailable")
                     has_psi = False
-                except Exception:
+                except (OSError, ValueError, IndexError, AttributeError):
                     log.exception("resource_poller_psi_error")
                     has_psi = False
 
@@ -193,9 +193,9 @@ class GenericResourcePoller(ResourceMonitor):
                     elif await self.exists_fn("/proc/meminfo"):
                         text = await self.read_fn("/proc/meminfo")
                         meminfo = parse_meminfo(text)
-                except (PermissionError, FileNotFoundError, OSError):
+                except (PermissionError, FileNotFoundError):
                     log.info("resource_poller_memory_unavailable")
-                except Exception:
+                except (OSError, ValueError, IndexError):
                     log.exception("resource_poller_memory_error")
 
                 # 4. Read CPU util
@@ -211,9 +211,9 @@ class GenericResourcePoller(ResourceMonitor):
                                 self.cpu_cores,
                             )
                         self.cpu_stat_prev = stat
-                except (PermissionError, FileNotFoundError, OSError):
+                except (PermissionError, FileNotFoundError):
                     log.info("resource_poller_cpu_unavailable")
-                except Exception:
+                except (OSError, ValueError, IndexError):
                     log.exception("resource_poller_cpu_error")
 
                 # 5. Update Health and Gate
@@ -330,7 +330,7 @@ class LocalPSIMonitor(ResourceMonitor):
                 await asyncio.sleep(10)
                 self.check_pressure_manually()
 
-        except Exception as e:
+        except (OSError, FileNotFoundError, PermissionError, RuntimeError) as e:
             log.info("psi_notifier_unavailable", reason=str(e))
 
             # Local fallback functions
@@ -389,7 +389,7 @@ class LocalPSIMonitor(ResourceMonitor):
             if snap.io.some_avg10 < self.settings.psi_io_threshold:
                 self.gate.io_clear.set()
 
-        except Exception:
+        except (OSError, ValueError, IndexError, AttributeError):
             log.exception("psi_manual_check_failed")
 
 

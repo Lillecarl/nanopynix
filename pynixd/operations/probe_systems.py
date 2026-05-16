@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import structlog
 
+from ..exceptions import BackendError
 from ..operations.base import (
     BasicDerivation,
     BuildMode,
@@ -152,7 +153,7 @@ async def _send_probe(
                 status=resp.result.status,
                 error_msg=resp.result.error_msg,
             )
-    except Exception as e:
+    except (BackendError, OSError, ConnectionError) as e:
         log.debug("probe_exception", store_id=store.store_id, probe=name, error=str(e))
         return name, False
     else:

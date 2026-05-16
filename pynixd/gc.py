@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from .exceptions import BackendError
 from .operations.collect_garbage import (
     CollectGarbageRequest,
     CollectGarbageResponse,
@@ -109,9 +110,8 @@ class GarbageCollector:
                     if isinstance(result, CollectGarbageResponse):
                         total_deleted += len(result.paths_deleted)
                         total_freed += result.bytes_freed
-            except Exception as e:
-                # Individual task failure already logged/caught by TaskGroup?
-                # Actually task.result() will re-raise if it failed.
+            except (BackendError, OSError, ConnectionError) as e:
+                # Task.result() re-raises the task's exception.
                 log.warning("gc_store_result_failed", store_id=store.store_id, error=str(e))
 
         log.info(

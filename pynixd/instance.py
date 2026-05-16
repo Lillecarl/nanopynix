@@ -10,6 +10,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import aiosqlite
 import structlog
 
 from . import wire
@@ -203,7 +204,7 @@ class Server:
                     )
                     await conn.commit()
                     log.info("removed_store_path_data", store_id=store_id)
-            except Exception:
+            except (aiosqlite.Error, RuntimeError):
                 log.warning(
                     "remove_store_db_cleanup_failed",
                     store_id=store_id,

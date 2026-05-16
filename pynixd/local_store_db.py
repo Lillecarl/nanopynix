@@ -271,7 +271,7 @@ class LocalStoreDB:
                     )
                 await db.execute("SELECT 1 FROM ValidPaths LIMIT 1")
 
-        except Exception as e:
+        except (aiosqlite.Error, OSError) as e:
             log.warning(
                 "nix_db_open_failed",
                 db_path=db_path,
@@ -304,7 +304,7 @@ class LocalStoreDB:
             async with self.execute(QUERY_STALE_PATHS, (cutoff,)) as cursor:
                 rows = await cursor.fetchall()
             return {StorePath(r[0]) for r in rows}
-        except Exception:
+        except aiosqlite.Error:
             log.debug("query_stale_paths_failed", exc_info=True)
             return None
 
@@ -350,7 +350,7 @@ class LocalStoreDB:
                 async with self.execute(GET_KNOWN_PATHS, (store_id,)) as cursor:
                     rows = await cursor.fetchall()
             return {StorePath(r[0]) for r in rows}
-        except Exception:
+        except aiosqlite.Error:
             log.warning("get_known_paths_failed", store_id=store_id, exc_info=True)
             return set()
 
@@ -363,7 +363,7 @@ class LocalStoreDB:
                 await db.execute(DELETE_STORE_KNOWN_PATHS, (store_id,))
                 await db.commit()
             log.info("removed_store_paths", store_id=store_id)
-        except Exception:
+        except aiosqlite.Error:
             log.warning("remove_store_paths_failed", store_id=store_id, exc_info=True)
 
     async def record_build_stats(
@@ -394,7 +394,7 @@ class LocalStoreDB:
                     ),
                 )
                 await db.commit()
-        except Exception:
+        except aiosqlite.Error:
             log.warning("record_build_stats_failed", pname=pname, exc_info=True)
 
     async def get_build_stats_hint(
@@ -424,7 +424,7 @@ class LocalStoreDB:
                 row = await cursor.fetchone()
                 if row and row[0] is not None:
                     return int(row[0])
-        except Exception:
+        except (aiosqlite.Error, ValueError):
             log.debug("get_build_stats_hint_failed", pname=pname, exc_info=True)
         return None
 
@@ -463,7 +463,7 @@ class LocalStoreDB:
                 removed_stores=len(removed_known_paths),
                 elapsed_ms=elapsed * 1000,
             )
-        except Exception:
+        except aiosqlite.Error:
             log.exception("db_flush_failed")
             await self.close_db_pool()
 
@@ -479,7 +479,7 @@ class LocalStoreDB:
                 await asyncio.sleep(self.regtime_flush_interval)
                 try:
                     await self.flush_regtime()
-                except Exception:
+                except aiosqlite.Error:
                     log.exception("db_flush_loop_iteration_failed")
         except asyncio.CancelledError:
             with suppress(Exception):

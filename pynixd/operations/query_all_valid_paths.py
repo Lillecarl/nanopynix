@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
+from ..exceptions import BackendError, OpNotImplementedError
 from ..stderr import OperationLogs
 from ..store_path import StorePath
 from .base import OpRequest, OpResponse
@@ -90,7 +91,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                     store_id=store.store_id,
                     count=len(resp.paths),
                 )
-            except Exception as e:
+            except (BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e:
                 # Try to get known paths from DB first, fallback to in-memory tracker
                 known_paths: StorePathSet | None = None
                 if store.tracker.parent is not None and store.tracker.parent.db is not None:
@@ -127,7 +128,7 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
                             removed=len(stale),
                         )
                         return QueryAllValidPathsResponse(paths=verified.paths)
-                    except Exception as e2:
+                    except (BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e2:
                         self.logger.warning(
                             "path_verification_failed",
                             store_id=store.store_id,

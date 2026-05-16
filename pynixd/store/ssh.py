@@ -191,7 +191,7 @@ class _SSHStoreMixin(Store):
                 if self.monitor_enabled:
                     sftp = await self.conn.start_sftp_client()
                     self.start_psi_polling(sftp)
-            except Exception:
+            except (asyncssh.misc.Error, OSError):
                 self.last_failure = time.monotonic()
                 self.backoff = min(self.backoff * 2, self.MAX_BACKOFF)
                 self.record_failure()
@@ -273,7 +273,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
         )
         try:
             proc = await ssh_conn.create_process(cmd, encoding=None)
-        except Exception:
+        except (asyncssh.misc.Error, OSError):
             self.invalidate_ssh()
             raise
         self.ssh_processes.append(proc)
@@ -340,7 +340,7 @@ class SSHSocketStore(_SSHStoreMixin):
         )
         try:
             r, w = await ssh_conn.open_unix_connection(str(self.socket_path))
-        except Exception:
+        except (asyncssh.misc.Error, OSError):
             self.invalidate_ssh()
             raise
         conn = Connection(

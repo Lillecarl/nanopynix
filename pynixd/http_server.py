@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import bz2
 import contextlib
 import gzip
@@ -128,7 +129,7 @@ class PynixdHttpServer:
         try:
             auth_decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
             user, passwd = auth_decoded.split(":", 1)
-        except Exception:
+        except (ValueError, UnicodeDecodeError, binascii.Error):
             return web.Response(
                 status=HTTPStatus.UNAUTHORIZED,
                 text="Malformed credentials\n",
@@ -301,7 +302,7 @@ class PynixdHttpServer:
 
         try:
             vinfo = ValidPathInfo.from_narinfo(content)
-        except Exception as e:
+        except (ValueError, KeyError, IndexError) as e:
             log.warning("invalid_narinfo_upload", error=str(e))
             return web.Response(
                 status=HTTPStatus.BAD_REQUEST,

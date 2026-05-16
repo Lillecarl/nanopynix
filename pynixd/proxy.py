@@ -105,7 +105,7 @@ class DaemonProxy:
         try:
             await self.handshake()
             await self.op_loop()
-        except (EOFError, BrokenPipeError, ConnectionError, OSError):
+        except (EOFError, BrokenPipeError, ConnectionError, OSError, asyncssh.misc.ConnectionLost):
             log.debug("client_disconnected")
         except Exception:
             log.exception("session_error")

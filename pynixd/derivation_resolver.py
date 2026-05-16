@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+import asyncssh
 import structlog
 
 from .derivation_resolution import (
@@ -36,6 +37,7 @@ from .derivation_resolution import (
     resolve_dynamic_derivation as drv_resolve_dynamic_derivation,
 )
 from .drv_parser import read_drv_file
+from .exceptions import BackendError
 from .operations.add_to_store import AddToStoreRequest
 from .operations.base import UnkeyedValidPathInfo
 from .operations.ca_derivations import RegisterDrvOutputRequest
@@ -102,7 +104,7 @@ class DerivationResolver:
                         realisation=realisation,
                     )
                     await store.call(reg_req, suppress_last=True)
-                except Exception as exc:
+                except (BackendError, OSError, ConnectionError, EOFError, asyncssh.misc.Error) as exc:
                     log.warning(
                         "register_dep_realisation_failed",
                         build_id=build.build_id,
@@ -124,7 +126,7 @@ class DerivationResolver:
             try:
                 reg_req = RegisterDrvOutputRequest(realisation=realisation)
                 await self.local_store.execute(reg_req, suppress_last=True)
-            except Exception:
+            except (BackendError, OSError, ConnectionError):
                 log.warning(
                     "register_drv_output_failed",
                     drv_output=drv_output_str,
@@ -327,7 +329,7 @@ class DerivationResolver:
                                 )
                                 inner_outs = inner_parsed.output_paths()
                                 actual_path = inner_outs.get(inner_output_name)
-                            except Exception as e:
+                            except (OSError, ValueError) as e:
                                 log.warning(
                                     "resolve_dynamic_read_drv_failed",
                                     drv_path=str(level1_path),
@@ -383,7 +385,7 @@ class DerivationResolver:
                         resolved_drv_path=resp.info.path,
                     )
                     return resp.info.path
-            except Exception:
+            except (BackendError, OSError, ConnectionError):
                 log.warning(
                     "resolved_drv_add_to_store_failed",
                     build_id=build.build_id,

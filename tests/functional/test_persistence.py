@@ -8,6 +8,7 @@ import pytest
 import structlog
 
 from pynixd import Server
+from pynixd.exceptions import OpNotImplementedError
 from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_valid_paths import (
@@ -44,7 +45,7 @@ class NoQueryAllValidPathsStore(LocalSocketStore):
         skip_probe=False,
     ):
         if isinstance(request, QueryAllValidPathsRequest):
-            raise TypeError("QueryAllValidPaths not supported")
+            raise OpNotImplementedError("QueryAllValidPaths not supported")
         return await super().call(
             request,
             client,

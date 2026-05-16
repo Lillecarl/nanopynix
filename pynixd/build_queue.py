@@ -254,7 +254,7 @@ class QueuedBuild:
             if self._log_writer.tell():
                 try:
                     await client.send_raw(self._log_writer.get_bytes())
-                except Exception:
+                except (OSError, BrokenPipeError, ConnectionResetError):
                     log.debug("subscriber_replay_failed", build_id=self.build_id)
                     return
             self.subscribers.append(client)
