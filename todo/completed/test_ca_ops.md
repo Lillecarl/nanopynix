@@ -23,7 +23,7 @@ CA derivations require pynixd to handle operations where output paths aren't kno
 - **`test-ca.nix`**: Fixture with 4 CA derivation targets
 - **`tests/functional/test_ca_ops.py`**: 5 root-store tests (PASS), 1 pynixd test (FAIL at `QueryMissing`)
 - **Managed daemon config**: `--extra-experimental-features ca-derivations` via `CA_EXTRA_ARGS` in `_ca_test_store_kwargs()`
-- **Client config**: `CA_NIX_CONFIG = {"extra-experimental-features": "ca-derivations", "substituters": "https://cache.nixos.org"}` — the system daemon substituter MUST be excluded (it's Lix, doesn't support CA)
+- **Client config**: `CA_NIX_CONFIG = {"extra-experimental-features": "ca-derivations", "substituters": "https://nixkube.cachix.org"}` — the system daemon substituter MUST be excluded (it's Lix, doesn't support CA)
 - **Root store builds work**: All 5 root-store tests pass against a managed Nix 2.34 daemon with CA enabled
 
 ---

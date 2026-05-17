@@ -32,9 +32,10 @@ TEST_NIX = Path("tests/nix")
 
 CA_NIX_CONFIG = NixConfig.for_ca_derivations(
     substituters=(
-        "https://cache.nixos.org/",
+        "https://nixkube.cachix.org/",
         "unix:///nix/var/nix/daemon-socket/socket?root=/",
     ),
+    trusted_public_keys=("nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M=",),
 )
 
 
@@ -577,9 +578,10 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
 
 DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
     substituters=(
-        "https://cache.nixos.org/",
+        "https://nixkube.cachix.org/",
         "unix:///nix/var/nix/daemon-socket/socket?root=/",
     ),
+    trusted_public_keys=("nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M=",),
 )
 
 

@@ -6,7 +6,7 @@ copy of the entire NixConfig with the change applied.
 
 Usage:
     cfg = NixConfig()
-    cfg2 = cfg.substituters.add("https://cache.nixos.org")
+        cfg2 = cfg.substituters.add("https://nixkube.cachix.org")
     cfg3 = cfg2.require_sigs.set(False)
     cfg4 = cfg3.experimental_features.add("ca-derivations", "dynamic-derivations")
     print(cfg4.to_nix_conf())
@@ -240,7 +240,7 @@ class NixConfig:
 
     Usage:
         cfg = NixConfig()
-        cfg2 = cfg.substituters.add("https://cache.nixos.org")
+    cfg2 = cfg.substituters.add("https://nixkube.cachix.org")
         cfg3 = cfg2.require_sigs.set(False)
         print(cfg3.to_nix_conf())
 
@@ -567,15 +567,18 @@ class NixConfig:
         cls,
         *,
         substituters: tuple[str, ...] = (
-            "https://cache.nixos.org/",
+            "https://nixkube.cachix.org/",
             "unix:///nix/var/nix/daemon-socket/socket?root=/",
         ),
+        trusted_public_keys: tuple[str, ...] = ("nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M=",),
         require_sigs: bool = False,
         experimental_features: tuple[str, ...] = (),
     ) -> NixConfig:
         cfg = cls()
         for s in substituters:
             cfg = cfg.substituters.add(s)
+        for k in trusted_public_keys:
+            cfg = cfg.trusted_public_keys.add(k)
         cfg = cfg.require_sigs.set(require_sigs)
         for f in experimental_features:
             cfg = cfg.experimental_features.add(f)
@@ -586,11 +589,14 @@ class NixConfig:
         cls,
         *,
         substituters: tuple[str, ...] = (),
+        trusted_public_keys: tuple[str, ...] = (),
         require_sigs: bool = False,
     ) -> NixConfig:
         cfg = cls()
         for s in substituters:
             cfg = cfg.substituters.add(s)
+        for k in trusted_public_keys:
+            cfg = cfg.trusted_public_keys.add(k)
         cfg = cfg.require_sigs.set(require_sigs)
         return cfg.experimental_features.add("ca-derivations", "dynamic-derivations")
 
@@ -599,10 +605,13 @@ class NixConfig:
         cls,
         *,
         substituters: tuple[str, ...] = (),
+        trusted_public_keys: tuple[str, ...] = (),
         require_sigs: bool = False,
     ) -> NixConfig:
         cfg = cls()
         for s in substituters:
             cfg = cfg.substituters.add(s)
+        for k in trusted_public_keys:
+            cfg = cfg.trusted_public_keys.add(k)
         cfg = cfg.require_sigs.set(require_sigs)
         return cfg.experimental_features.add("ca-derivations")

@@ -632,7 +632,8 @@ async def run_subproc(
         config_str = nix_config.to_nix_config_env()
     elif nix_config is not None:
         default_config = {
-            "substituters": "https://cache.nixos.org unix:///nix/var/nix/daemon-socket/socket?root=/",
+            "substituters": "https://nixkube.cachix.org unix:///nix/var/nix/daemon-socket/socket?root=/",
+            "trusted-public-keys": "nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M=",
         }
         merged = default_config | nix_config
         config_str = "\n".join(f"{k} = {v}" for k, v in merged.items())

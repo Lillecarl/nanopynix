@@ -48,9 +48,10 @@ from tests.nix_config import NixConfig
 CA_NIX = Path(__file__).resolve().parent.parent / "nix"
 CA_NIX_CONFIG = NixConfig.for_ca_derivations(
     substituters=(
-        "https://cache.nixos.org/",
+        "https://nixkube.cachix.org/",
         "unix:///nix/var/nix/daemon-socket/socket?root=/",
     ),
+    trusted_public_keys=("nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M=",),
 )
 STORE_DIR = "/nix/store"
 
