@@ -79,6 +79,7 @@ class Server:
         self.https_server: web.AppRunner | None = None
         self.https_bound_port: int | None = None
         self._started = False
+        self._done_event = asyncio.Event()
         self._last_activity_at: float = time.monotonic()
 
     @property
@@ -351,6 +352,15 @@ class Server:
         if not (self.ssh_server or self.unix_server or self.http_server or self.https_server):
             log.warning("no_servers_started")
 
+    async def wait_finished(self) -> None:
+        """Wait for the server to shut down.
+
+        This returns when :meth:`close` has been called and all listeners
+        and background tasks have been cleaned up.  Useful for library
+        integrations that need to block until pynixd is fully stopped.
+        """
+        await self._done_event.wait()
+
     async def close(self) -> None:
         """Gracefully shut down the server."""
         if not self._started:
@@ -391,3 +401,4 @@ class Server:
         for store in self.stores.values():
             await store.close()
         self.ctx._stores.clear()
+        self._done_event.set()
