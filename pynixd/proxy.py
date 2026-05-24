@@ -196,10 +196,10 @@ class DaemonProxy:
                     await self.w.drain()
                 # else: already handled (streaming, error, etc.)
 
-            except Exception:
+            except Exception as ex:
                 log.exception("handle_op_error", name=op_name)
                 await self.client.flush()
-                await self.send_error(f"Internal error handling {op_name}")
+                await self.send_error(f"Internal error handling {op_name}\n{ex}")
 
     # ── Dispatch ─────────────────────────────────────────────────────
 

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..stderr import OperationLogs, StderrNext
+from ..stderr import OperationLogs
 from ..types.context import ReadContext, WriteContext
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
 from .base import OpRequest, OpResponse, ValidPathInfo
@@ -69,17 +70,24 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
             # We must run forward_stream and the response reader concurrently
             # because the backend might send logs while we are still sending data.
             # If we don't read the logs, the backend's output buffer fills and it blocks.
+            async def _read_response() -> AddMultipleToStoreResponse:
+                """Read the backend response with per-task error logging."""
+                try:
+                    return await AddMultipleToStoreResponse.deserialize(
+                        ReadContext.from_conn(conn),
+                    )
+                except Exception:
+                    self.logger.error(
+                        "add_multiple_to_store_response_failed",
+                        traceback=traceback.format_exc(),
+                    )
+                    raise
+
             async with asyncio.TaskGroup() as tg:
-                resp_task = tg.create_task(
-                    AddMultipleToStoreResponse.deserialize(ReadContext.from_conn(conn)),
-                )
+                resp_task = tg.create_task(_read_response())
 
                 infos = await self.forward_stream(ctx.proxy.r, conn.w)
                 resp = await resp_task
-
-            resp.logs.messages.append(
-                StderrNext("pynixd: AddMultipleToStore forwarding complete"),
-            )
 
             ctx.proxy.local_store.add_path_infos(infos)
             ctx.proxy.local_store.tracker.add_known_paths({i.path for i in infos})
