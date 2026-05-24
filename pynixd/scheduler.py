@@ -74,7 +74,6 @@ class Scheduler:
         self.trampoline = Trampoline(self, read_drv_fn=read_drv_fn)
         self.trigger_event = asyncio.Event()
         self.running = False
-        self.last_activity_at: float = time.monotonic()
 
     @property
     def stores(self) -> Mapping[StoreId, Store]:
@@ -102,10 +101,6 @@ class Scheduler:
             self._dynamic_feature_matrix.setdefault(system, set())
             self._dynamic_feature_matrix[system] |= features
         self.trigger()
-
-    def record_activity(self) -> None:
-        """Update last activity timestamp."""
-        self.last_activity_at = time.monotonic()
 
     def trigger(self) -> None:
         """Signal that a scheduling pass is needed."""

@@ -178,8 +178,6 @@ class DaemonProxy:
                 break
 
             req_cls = OP_REGISTRY.get(op_num)
-            if self.scheduler:
-                self.scheduler.record_activity()
             if req_cls is None:
                 log.warning("unknown_op", op_num=op_num)
                 await self.send_error(f"Unsupported operation: {op_num}")

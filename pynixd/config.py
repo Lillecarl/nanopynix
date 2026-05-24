@@ -260,8 +260,6 @@ class PynixdSettings(BaseSettings):
 
     admin_users: set[str] = Field(default_factory=set)
 
-    idle_timeout: int | None = None
-
     gc_interval: float = 3600.0
     gc_local_max_age: int = 604800
     gc_builder_max_age: int = 3600

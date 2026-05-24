@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import time
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -80,7 +79,6 @@ class Server:
         self.https_bound_port: int | None = None
         self._started = False
         self._done_event = asyncio.Event()
-        self._last_activity_at: float = time.monotonic()
 
     @property
     def local_store(self) -> Store:
@@ -101,55 +99,6 @@ class Server:
     @property
     def path_tracker(self) -> PathTracker:
         return self.ctx.path_tracker
-
-    def record_activity(self) -> None:
-        """Update last activity timestamp."""
-        now = time.monotonic()
-        self._last_activity_at = now
-        if self.ctx.scheduler:
-            self.ctx.scheduler.record_activity()
-
-    async def _idleness_watcher(self) -> None:
-        """Monitor idleness and shutdown if timeout reached."""
-        if not self.ctx.settings.idle_timeout:
-            return
-
-        timeout = float(self.ctx.settings.idle_timeout)
-        log.info("idleness_watcher_started", timeout=timeout)
-
-        while True:
-            try:
-                await asyncio.sleep(1)
-                now = time.monotonic()
-
-                # Activity from BuildQueue
-                last_activity = self._last_activity_at
-                if self.ctx.scheduler:
-                    last_activity = max(
-                        last_activity,
-                        self.ctx.scheduler.last_activity_at,
-                    )
-
-                    pending = self.ctx.scheduler.queue.count(status="pending")
-                    running = self.ctx.scheduler.queue.count(status="running")
-                    if pending > 0 or running > 0:
-                        self.record_activity()
-                        last_activity = now
-
-                if now - last_activity > timeout:
-                    log.info(
-                        "idle_timeout_reached",
-                        idle_for=round(now - last_activity, 1),
-                    )
-                    # Signal application exit by closing servers
-                    # We do this in a separate task to avoid blocking the watcher
-                    _close_task = asyncio.create_task(self.close())
-                    _close_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
-                    self.background_tasks.append(_close_task)
-                    break
-            except Exception:
-                log.exception("idle_watcher_error")
-                await asyncio.sleep(5)
 
     async def add_store(self, store: Store, dynamic: bool = False) -> None:
         """Add a store to the server, setting up path tracking for scheduling.
@@ -345,9 +294,6 @@ class Server:
                 )
                 self.https_server = runner
                 self.https_bound_port = port
-
-        if self.settings.idle_timeout:
-            self.background_tasks.append(asyncio.create_task(self._idleness_watcher()))
 
         if not (self.ssh_server or self.unix_server or self.http_server or self.https_server):
             log.warning("no_servers_started")
