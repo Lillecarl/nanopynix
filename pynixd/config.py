@@ -145,6 +145,7 @@ class SSHSubprocessStoreSpec(BaseModel):
     system_features: set[str] = Field(default_factory=set)
     monitor: bool = True
     nix_bin: str = "nix"
+    client_keys: list[Path] = Field(default_factory=list)
 
     def to_store(self) -> Store:
         from .store import SSHSubprocessStore
@@ -162,6 +163,7 @@ class SSHSubprocessStoreSpec(BaseModel):
             probe=feature_matrix is None,
             monitor=self.monitor,
             nix_bin=self.nix_bin,
+            client_keys=list(self.client_keys) if self.client_keys else None,
         )
 
 
@@ -175,6 +177,7 @@ class SSHSocketStoreSpec(BaseModel):
     systems: set[str] | None = None
     system_features: set[str] = Field(default_factory=set)
     monitor: bool = True
+    client_keys: list[Path] = Field(default_factory=list)
 
     def to_store(self) -> Store:
         from .store import SSHSocketStore
@@ -191,6 +194,7 @@ class SSHSocketStoreSpec(BaseModel):
             feature_matrix=feature_matrix,
             probe=feature_matrix is None,
             monitor=self.monitor,
+            client_keys=list(self.client_keys) if self.client_keys else None,
         )
 
 

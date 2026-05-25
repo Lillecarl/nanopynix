@@ -176,13 +176,15 @@ class _SSHStoreMixin(Store):
                     host=self.host,
                     port=self.port,
                 )
-                self.conn = await asyncssh.connect(
-                    self.host,
+                connect_kwargs: dict[str, Any] = dict(
+                    host=self.host,
                     port=self.port,
                     username=self.username,
-                    client_keys=self.client_keys,
                     known_hosts=None,
                 )
+                if self.client_keys is not None:
+                    connect_kwargs["client_keys"] = self.client_keys
+                self.conn = await asyncssh.connect(**connect_kwargs)
                 # Reset backoff on success
                 self.backoff = self.INITIAL_BACKOFF
                 self.last_failure = 0.0
