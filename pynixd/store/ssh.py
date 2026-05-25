@@ -176,12 +176,13 @@ class _SSHStoreMixin(Store):
                     host=self.host,
                     port=self.port,
                 )
-                connect_kwargs: dict[str, Any] = dict(
-                    host=self.host,
-                    port=self.port,
-                    username=self.username,
-                    known_hosts=None,
-                )
+                connect_kwargs: dict[str, Any] = {
+                    "host": self.host,
+                    "port": self.port,
+                    "known_hosts": None,
+                }
+                if self.username is not None:
+                    connect_kwargs["username"] = self.username
                 if self.client_keys is not None:
                     connect_kwargs["client_keys"] = self.client_keys
                 self.conn = await asyncssh.connect(**connect_kwargs)

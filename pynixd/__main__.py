@@ -1,12 +1,8 @@
 """Entry point: python -m pynixd
 
-All configuration is via environment variables and/or a JSON config file:
-
-  PYNIXD_CONFIG        JSON config file path (also read for settings fields)
-  PYNIXD_LOG_LEVEL     Log level: DEBUG, INFO, WARNING, ERROR (default: WARNING)
-
-All other settings use PYNIXD_<FIELD_NAME> env vars (e.g. PYNIXD_SSH_PORT).
-See PynixdSettings for the full list.
+Configuration is via environment variables and/or a JSON config file.
+See PynixdSettings for env var mapping (PYNIXD_<FIELD_NAME>).
+All settings fall through from env vars → config file → defaults.
 """
 
 from __future__ import annotations
@@ -16,7 +12,6 @@ import logging
 import signal
 
 import structlog
-from environs import env
 
 from .config import PynixdSettings
 from .instance import Server
@@ -50,7 +45,8 @@ async def async_main() -> None:
 
 
 def main() -> None:
-    log_level_str = env.str("PYNIXD_LOG_LEVEL", "WARNING").upper()
+    settings = PynixdSettings()
+    log_level_str = settings.log_level.upper()
 
     logging.basicConfig(
         level=log_level_str,

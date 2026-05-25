@@ -54,7 +54,7 @@ class Server:
         **kwargs: Any,
     ) -> None:
         if local_store is None:
-            local_store = LocalSocketStore(store_id=StoreId("local"), store_path=Path("/"))
+            local_store = LocalSocketStore(store_id=StoreId("local"), store_path=Path("/"), monitor=False)
         if stores is None:
             stores = {}
 

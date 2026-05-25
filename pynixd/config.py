@@ -280,6 +280,9 @@ class PynixdSettings(BaseSettings):
     max_cpu_util: float = 90.0  # Fallback: max 90% utilization
     gate_timeout: float = 5.0  # seconds to wait for pressure to subside
 
+    # Logging
+    log_level: str = "WARNING"
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -304,7 +307,7 @@ class PynixdSettings(BaseSettings):
         local_store = (
             stores.pop(StoreId("local"))
             if StoreId("local") in stores
-            else LocalSocketStore(store_id=StoreId("local"), store_path=Path("/"))
+            else LocalSocketStore(store_id=StoreId("local"), store_path=Path("/"), monitor=False)
         )
 
         return local_store, stores

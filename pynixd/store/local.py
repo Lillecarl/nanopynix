@@ -145,7 +145,7 @@ class LocalSocketStore(Store):
             str(path),
             "--option",
             "build-dir",
-            str(path / "tmp" / "nix-builds"),
+            str(path / "nix" / "var" / "nix" / "builds"),
         ]
         cmd.extend(self.extra_args)
 

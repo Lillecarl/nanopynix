@@ -8,6 +8,7 @@ for each client. Used for testing (avoids SSH) and local daemon mode.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING
 
 import structlog
@@ -67,5 +68,6 @@ async def start_unix_server(
         socket_path.unlink()  # noqa: ASYNC240
 
     server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
+    os.chmod(socket_path, 0o666)
     log.info("unix_server_listening", socket_path=socket_path)
     return server

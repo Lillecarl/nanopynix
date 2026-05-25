@@ -6,39 +6,34 @@
 }:
 
 let
-  inherit (lib)
-    mkIf
-    mkOption
-    types
-    literalExpression
-    ;
   cfg = config.services.pynixd;
 
-  configFile = pkgs.writeText "pynixd.json" (builtins.toJSON cfg.settings);
+  jsonFormat = pkgs.formats.json { };
+  configFile = jsonFormat.generate "pynixd.json" cfg.settings;
 in
 {
   options.services.pynixd = {
-    enable = mkOption {
-      type = types.bool;
+    enable = lib.mkOption {
+      type = lib.types.bool;
       default = false;
       description = "Enable pynixd, a Python Nix daemon protocol proxy.";
     };
 
-    package = mkOption {
-      type = types.package;
+    package = lib.mkOption {
+      type = lib.types.package;
       description = "The pynixd package to use.";
-      example = literalExpression "pkgs.pynixd";
+      default = (import ../.. { inherit pkgs; }).package;
     };
 
-    settings = mkOption {
-      type = types.attrs;
+    settings = lib.mkOption {
+      type = jsonFormat.type;
       default = { };
       description = ''
         Extra settings serialized to JSON and passed to pynixd via PYNIXD_CONFIG.
         See PynixdSettings in pynixd/config.py for the full list.
         Defaults: { unix_path = "/run/pynixd/pynixd.sock" }
       '';
-      example = literalExpression ''
+      example = lib.literalExpression ''
         {
           stores = [
             { type = "ssh-subprocess"; host = "builder1"; systems = [ "x86_64-linux" ]; }
@@ -49,15 +44,18 @@ in
     };
   };
 
-  config = mkIf cfg.enable {
-    services.pynixd.settings = {
-      unix_path = lib.mkDefault "/run/pynixd/pynixd.sock";
+  config = lib.mkIf cfg.enable {
+    services.pynixd.settings = lib.mapAttrsRecursive (n: v: lib.mkDefault v) {
+      unix_path = "/run/pynixd/pynixd.sock";
+      ssh_port = null;
+      http_port = null;
     };
     systemd.services.pynixd = {
       description = "pynixd - Python Nix daemon protocol proxy";
       wantedBy = [ "multi-user.target" ];
       after = [ "nix-daemon.service" ];
       wants = [ "nix-daemon.service" ];
+      restartTriggers = [ configFile ];
 
       serviceConfig = {
         Type = "simple";
