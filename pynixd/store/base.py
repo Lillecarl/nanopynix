@@ -73,6 +73,7 @@ class Store(ABC):
         idle_ttl: float = _DEFAULT_IDLE_TTL,
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
+        no_schedule: bool = False,
     ) -> None:
         self.store_id = store_id
         self.store_path = store_path
@@ -106,6 +107,7 @@ class Store(ABC):
         self._probe_event: asyncio.Event = asyncio.Event()
         self._signing_keys: dict[str, SecretKey] = {}
         self.draining: bool = False
+        self.no_schedule: bool = no_schedule
         self._started: bool = False
 
     @property

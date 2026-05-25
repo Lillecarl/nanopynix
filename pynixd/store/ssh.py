@@ -238,6 +238,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
         store_path: Path = Path("/"),
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
+        no_schedule: bool = False,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
         nix_bin: str = "nix",
@@ -249,6 +250,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
             store_path=store_path,
             feature_matrix=feature_matrix,
             probe=probe,
+            no_schedule=no_schedule,
         )
         self.host = host
         self.port = port
@@ -316,6 +318,7 @@ class SSHSocketStore(_SSHStoreMixin):
         socket_path: Path = _DAEMON_SOCKET_PATH,
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
+        no_schedule: bool = False,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
     ) -> None:
@@ -323,6 +326,7 @@ class SSHSocketStore(_SSHStoreMixin):
             store_id=store_id or StoreId(f"ssh-socket:{username or ''}@{host}:{port}"),
             feature_matrix=feature_matrix,
             probe=probe,
+            no_schedule=no_schedule,
         )
         self.host = host
         self.port = port

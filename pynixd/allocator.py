@@ -160,7 +160,7 @@ class BuildAllocator:
         candidates = []
 
         for store_id, store in self.stores.items():
-            if not store.is_healthy or store.draining:
+            if not store.is_healthy or store.draining or store.no_schedule:
                 continue
             if not store.supports_derivation(build.platform, build_features):
                 continue

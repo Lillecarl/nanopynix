@@ -1,14 +1,20 @@
-{ config, pkgs, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 
 let
-  inherit (lib) mkIf mkOption types literalExpression;
+  inherit (lib)
+    mkIf
+    mkOption
+    types
+    literalExpression
+    ;
   cfg = config.services.pynixd;
 
-  mergedSettings = {
-    unix_path = "/run/pynixd/pynixd.sock";
-  } // cfg.settings;
-
-  configFile = pkgs.writeText "pynixd.json" (builtins.toJSON mergedSettings);
+  configFile = pkgs.writeText "pynixd.json" (builtins.toJSON cfg.settings);
 in
 {
   options.services.pynixd = {
@@ -44,6 +50,9 @@ in
   };
 
   config = mkIf cfg.enable {
+    services.pynixd.settings = {
+      unix_path = lib.mkDefault "/run/pynixd/pynixd.sock";
+    };
     systemd.services.pynixd = {
       description = "pynixd - Python Nix daemon protocol proxy";
       wantedBy = [ "multi-user.target" ];

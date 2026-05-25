@@ -144,13 +144,16 @@ package
     pkgs
     ;
 
+  nixosModule = import ./nix/nixos/default.nix;
+
   tests = {
     simple = pkgs.callPackage ./tests/derivations/simple {
       pynixd-lib = library;
     };
     pytest = pkgs.callPackage ./tests/derivations/pytest {
       pynixd-lib = library;
-      src = ./.;
+    src = lib.cleanSource ./.;
+
     };
   };
 }
