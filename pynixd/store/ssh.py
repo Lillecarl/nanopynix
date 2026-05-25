@@ -245,6 +245,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
         nix_bin: str = "nix",
+        priority: float = 1.0,
     ) -> None:
         super().__init__(
             store_id=StoreId(store_id)
@@ -254,6 +255,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
             feature_matrix=feature_matrix,
             probe=probe,
             no_schedule=no_schedule,
+            priority=priority,
         )
         self.host = host
         self.port = port
@@ -324,12 +326,14 @@ class SSHSocketStore(_SSHStoreMixin):
         no_schedule: bool = False,
         monitor: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
+        priority: float = 1.0,
     ) -> None:
         super().__init__(
             store_id=store_id or StoreId(f"ssh-socket:{username or ''}@{host}:{port}"),
             feature_matrix=feature_matrix,
             probe=probe,
             no_schedule=no_schedule,
+            priority=priority,
         )
         self.host = host
         self.port = port

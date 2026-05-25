@@ -124,7 +124,7 @@ class TelemetryStoreRanker(StoreRanker):
             score -= assigned * self.settings.thundering_herd_penalty
 
             if score >= self.settings.min_schedule_score:
-                ranked.append(RankedStore(store.store_id, score, store))
+                ranked.append(RankedStore(store.store_id, score * store.priority, store))
             else:
                 log.debug(
                     "store_ranking_below_threshold",

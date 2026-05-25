@@ -60,3 +60,13 @@ An internal database (SQLite) that tracks which `StorePath`s are available on wh
 ### Ranker / Allocator
 *   **Ranker**: Scores available stores based on telemetry (CPU pressure, latency, etc.).
 *   **Allocator**: Matches a pending build task to the most appropriate store based on ranks and requirements.
+
+### Store Priority (Float Multiplier)
+A per-store multiplier (`priority`, default `1.0`) applied to the telemetry score during ranking. Values > 1.0 make a store more likely to be picked; < 1.0 make it less likely. The `min_schedule_score` threshold is checked against the *raw* score before multiplication, so priority only reorders stores that are already capable. Set in store config:
+```nix
+{
+  type = "ssh-subprocess";
+  host = "builder1";
+  priority = 2.0;  # preferred
+}
+```

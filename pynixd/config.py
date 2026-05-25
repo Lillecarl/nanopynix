@@ -88,6 +88,7 @@ class LocalSocketStoreSpec(BaseModel):
     extra_args: list[str] | None = None
     use_db: bool = True
     monitor: bool = True
+    priority: float = 1.0
 
     def to_store(self) -> Store:
         from .store import LocalSocketStore
@@ -104,6 +105,7 @@ class LocalSocketStoreSpec(BaseModel):
             extra_args=self.extra_args,
             use_db=self.use_db,
             monitor=self.monitor,
+            priority=self.priority,
         )
 
 
@@ -117,6 +119,7 @@ class LocalSubprocessStoreSpec(BaseModel):
     extra_env: dict[str, str] | None = None
     extra_args: list[str] | None = None
     use_db: bool = True
+    priority: float = 1.0
 
     def to_store(self) -> Store:
         from .store import LocalSocketStore
@@ -131,6 +134,7 @@ class LocalSubprocessStoreSpec(BaseModel):
             extra_env=self.extra_env,
             extra_args=self.extra_args,
             use_db=self.use_db,
+            priority=self.priority,
         )
 
 
@@ -146,6 +150,7 @@ class SSHSubprocessStoreSpec(BaseModel):
     monitor: bool = True
     nix_bin: str = "nix"
     client_keys: list[Path] = Field(default_factory=list)
+    priority: float = 1.0
 
     def to_store(self) -> Store:
         from .store import SSHSubprocessStore
@@ -164,6 +169,7 @@ class SSHSubprocessStoreSpec(BaseModel):
             monitor=self.monitor,
             nix_bin=self.nix_bin,
             client_keys=list(self.client_keys) if self.client_keys else None,
+            priority=self.priority,
         )
 
 
@@ -178,6 +184,7 @@ class SSHSocketStoreSpec(BaseModel):
     system_features: set[str] = Field(default_factory=set)
     monitor: bool = True
     client_keys: list[Path] = Field(default_factory=list)
+    priority: float = 1.0
 
     def to_store(self) -> Store:
         from .store import SSHSocketStore
@@ -195,6 +202,7 @@ class SSHSocketStoreSpec(BaseModel):
             probe=feature_matrix is None,
             monitor=self.monitor,
             client_keys=list(self.client_keys) if self.client_keys else None,
+            priority=self.priority,
         )
 
 

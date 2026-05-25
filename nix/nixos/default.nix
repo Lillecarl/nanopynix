@@ -36,7 +36,18 @@ in
       example = lib.literalExpression ''
         {
           stores = [
-            { type = "ssh-subprocess"; host = "builder1"; systems = [ "x86_64-linux" ]; }
+            {
+              type = "ssh-subprocess";
+              host = "builder1";
+              systems = [ "x86_64-linux" ];
+              priority = 2.0;
+            }
+            {
+              type = "ssh-subprocess";
+              host = "builder2";
+              systems = [ "aarch64-linux" ];
+              priority = 0.5;
+            }
           ];
           schedule_mode = "auto";
         }

@@ -74,6 +74,7 @@ class Store(ABC):
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
         no_schedule: bool = False,
+        priority: float = 1.0,
     ) -> None:
         self.store_id = store_id
         self.store_path = store_path
@@ -81,6 +82,7 @@ class Store(ABC):
         self.nix_version: str = ""
         self.idle_ttl = idle_ttl
         self.conn_counter = 0
+        self.priority: float = priority
 
         self.gate = ResourceGate()
         self.pool = ConnectionPool(

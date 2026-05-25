@@ -56,6 +56,7 @@ class LocalSocketStore(Store):
         use_db: bool = True,
         monitor: bool = True,
         settings: PynixdSettings | None = None,
+        priority: float = 1.0,
     ) -> None:
         if store_path is None:
             store_path = Path("/")
@@ -72,6 +73,7 @@ class LocalSocketStore(Store):
             store_path=store_path,
             feature_matrix=feature_matrix,
             probe=probe,
+            priority=priority,
         )
         self.managed = managed
         self.nix_bin = nix_bin
