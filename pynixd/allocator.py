@@ -159,6 +159,16 @@ class BuildAllocator:
         build_features = build.request.derivation.effective_required_features
         candidates = []
 
+        # Include the local store as a candidate alongside remotes
+        if (
+            self.local_store.is_healthy
+            and not self.local_store.draining
+            and not self.local_store.no_schedule
+            and self.local_store.supports_derivation(build.platform, build_features)
+            and not build.is_blacklisted(self.local_store.store_id)
+        ):
+            candidates.append(self.local_store)
+
         for store_id, store in self.stores.items():
             if not store.is_healthy or store.draining or store.no_schedule:
                 continue

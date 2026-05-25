@@ -288,6 +288,11 @@ class PynixdSettings(BaseSettings):
     max_cpu_util: float = 90.0  # Fallback: max 90% utilization
     gate_timeout: float = 5.0  # seconds to wait for pressure to subside
 
+    # Local Store
+    local_store_priority: float = 1.0
+    """Priority multiplier for the local store (default 1.0). Works the same as
+    per-store ``priority`` — multiplies the local store's telemetry score during ranking."""
+
     # Logging
     log_level: str = "WARNING"
 
@@ -315,7 +320,12 @@ class PynixdSettings(BaseSettings):
         local_store = (
             stores.pop(StoreId("local"))
             if StoreId("local") in stores
-            else LocalSocketStore(store_id=StoreId("local"), store_path=Path("/"), monitor=False)
+            else LocalSocketStore(
+                store_id=StoreId("local"),
+                store_path=Path("/"),
+                monitor=False,
+                priority=self.local_store_priority,
+            )
         )
 
         return local_store, stores

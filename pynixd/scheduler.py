@@ -409,9 +409,13 @@ class Scheduler:
                 assigned_this_pass[rs.store_id] = assigned_this_pass.get(rs.store_id, 0) + 1
             else:
                 # All compatible stores are busy, or this build can't be placed
-                compatible = [s for s in self.stores.values() if s.supports_derivation(build.platform, build_features)]
-                if compatible and all(build.is_blacklisted(s.store_id) for s in compatible):
-                    await self._fail_all_compatible_blacklisted(build, build_features, compatible)
+                all_compatible = [
+                    s
+                    for s in [self.local_store, *self.stores.values()]
+                    if s.supports_derivation(build.platform, build_features)
+                ]
+                if all_compatible and all(build.is_blacklisted(s.store_id) for s in all_compatible):
+                    await self._fail_all_compatible_blacklisted(build, build_features, all_compatible)
                     continue
                 waiting_slot.append(build)
 
@@ -423,9 +427,12 @@ class Scheduler:
         build_features: set[str] | None,
     ) -> bool:
         """Check if any live or dynamic store could ever support this build."""
-        return any(
-            s.supports_derivation(build.platform, build_features) for s in self.stores.values()
-        ) or self._dynamic_supports(build.platform, build_features)
+        all_stores = list(self.stores.values())
+        if self.local_store.supports_derivation(build.platform, build_features):
+            return True
+        return any(s.supports_derivation(build.platform, build_features) for s in all_stores) or self._dynamic_supports(
+            build.platform, build_features
+        )
 
     async def _fail_no_compatible_store(
         self,

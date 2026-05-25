@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -77,9 +76,8 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
                         ReadContext.from_conn(conn),
                     )
                 except Exception:
-                    self.logger.error(
+                    self.logger.exception(
                         "add_multiple_to_store_response_failed",
-                        traceback=traceback.format_exc(),
                     )
                     raise
 

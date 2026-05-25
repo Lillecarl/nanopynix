@@ -54,11 +54,17 @@ class Server:
         **kwargs: Any,
     ) -> None:
         if local_store is None:
-            local_store = LocalSocketStore(store_id=StoreId("local"), store_path=Path("/"), monitor=False)
+            settings = settings or PynixdSettings(**kwargs)
+            local_store = LocalSocketStore(
+                store_id=StoreId("local"),
+                store_path=Path("/"),
+                monitor=False,
+                priority=settings.local_store_priority,
+            )
         if stores is None:
             stores = {}
-
         settings = settings or PynixdSettings(**kwargs)
+
         path_tracker = PathTracker(db=None)
 
         self.ctx = PynixdContext(

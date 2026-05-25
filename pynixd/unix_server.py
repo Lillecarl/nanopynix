@@ -8,9 +8,9 @@ for each client. Used for testing (avoids SSH) and local daemon mode.
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import TYPE_CHECKING
 
+import anyio
 import structlog
 
 from .config import ScheduleMode
@@ -64,10 +64,11 @@ async def start_unix_server(
             writer.close()
 
     # Clean up stale socket
-    if socket_path.exists():  # noqa: ASYNC240
-        socket_path.unlink()  # noqa: ASYNC240
+    sock = anyio.Path(socket_path)
+    if await sock.exists():
+        await sock.unlink()
 
     server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
-    os.chmod(socket_path, 0o666)
+    await sock.chmod(0o666)
     log.info("unix_server_listening", socket_path=socket_path)
     return server

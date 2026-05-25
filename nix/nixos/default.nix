@@ -60,6 +60,7 @@ in
       unix_path = "/run/pynixd/pynixd.sock";
       ssh_port = null;
       http_port = null;
+      local_store_priority = 1.0;
     };
     systemd.services.pynixd = {
       description = "pynixd - Python Nix daemon protocol proxy";
