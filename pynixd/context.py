@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from .config import PynixdSettings
-    from .gc import GarbageCollector
     from .local_store_db import LocalStoreDB
     from .path_tracker import PathTracker
     from .scheduler import Scheduler
@@ -29,7 +28,6 @@ class PynixdContext:
     path_tracker: PathTracker
     db: LocalStoreDB | None = None
     scheduler: Scheduler | None = None
-    gc: GarbageCollector | None = None
 
     @property
     def stores(self) -> Mapping[StoreId, Store]:

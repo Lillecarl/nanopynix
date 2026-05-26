@@ -105,10 +105,10 @@ class LocalSocketStore(Store):
     def db_enabled(self) -> bool:
         return self.use_db
 
-    async def start(self) -> None:
+    async def start(self, sync_paths: bool = True) -> None:
         """Spawn managed daemon and initialize the store."""
         await self.ensure_daemon()
-        await super().start()
+        await super().start(sync_paths=sync_paths)
 
     async def ensure_daemon(self) -> None:
         """Ensure a daemon is reachable, spawning one if needed.

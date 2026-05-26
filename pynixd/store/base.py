@@ -133,12 +133,17 @@ class Store(ABC):
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
-    async def start(self) -> None:
+    async def start(self, sync_paths: bool = True) -> None:
         """Explicitly start the store and ensure it is ready for operations.
 
         Subclasses should override this to perform their specific resource
         setup (like spawning a daemon or connecting SSH) and MUST call
         await super().start().
+
+        Args:
+            sync_paths: If True, synchronize known paths from the store
+                into the tracker after probing. Set to False for ephemeral
+                CLI connections that don't use path tracking.
         """
         if self._started:
             return
@@ -149,13 +154,14 @@ class Store(ABC):
         await self.probe()
 
         # 2. Synchronize paths to populate the tracker
-        try:
-            resp = await self.execute(QueryAllValidPathsRequest())
-            self.tracker.add_known_paths(resp.paths)
-            log.debug("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
-        except Exception:
-            # Not critical during startup; operations will re-sync if needed
-            log.exception("store_paths_sync_failed", store_id=self.store_id)
+        if sync_paths:
+            try:
+                resp = await self.execute(QueryAllValidPathsRequest())
+                self.tracker.add_known_paths(resp.paths)
+                log.debug("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
+            except Exception:
+                # Not critical during startup; operations will re-sync if needed
+                log.exception("store_paths_sync_failed", store_id=self.store_id)
 
         # 3. Activate monitoring if configured
         if self.monitor:

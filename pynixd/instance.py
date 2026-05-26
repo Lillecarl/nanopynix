@@ -15,13 +15,15 @@ import structlog
 from . import wire
 from .config import PynixdSettings
 from .context import PynixdContext
-from .gc import GarbageCollector
 from .http_server import PynixdHttpServer
 from .local_store_db import LocalStoreDB
+from .operations.pynixd_collect_garbage import PynixdCollectGarbageRequest
 from .path_tracker import PathTracker
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
+from .stderr import OperationLogs
 from .store import LocalSocketStore, Store
+from .types import PynixdGCAction
 from .types.ids import StoreId
 from .unix_server import start_unix_server
 
@@ -171,6 +173,22 @@ class Server:
         # Finally, close the store connection
         await store.close()
 
+    async def _gc_tick(self) -> None:
+        """Periodic GC loop. Runs at gc_interval."""
+        log.info("gc_loop_started", interval=self.ctx.settings.gc_interval)
+        while True:
+            await asyncio.sleep(self.ctx.settings.gc_interval)
+            try:
+                await PynixdCollectGarbageRequest.run_gc(
+                    self.ctx,
+                    PynixdGCAction.EXECUTE,
+                    logs=OperationLogs(),
+                )
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                log.exception("gc_pass_failed")
+
     @property
     def host(self) -> str:
         return self.settings.ssh_host
@@ -251,10 +269,8 @@ class Server:
                 asyncio.create_task(self.ctx.scheduler.start()),
             )
 
-        if self.ctx.db:
-            gc = GarbageCollector(self.ctx)
-            self.ctx.gc = gc
-            self.background_tasks.append(asyncio.create_task(gc.run()))
+        if self.ctx.db and self.ctx.settings.gc_enabled:
+            self.background_tasks.append(asyncio.create_task(self._gc_tick()))
 
         s = self.settings
         if s.ssh_port is not None:

@@ -69,10 +69,10 @@ class _SSHStoreMixin(Store):
         # self.gate is inherited from Store.__init__
         self.monitor: ResourceMonitor | None = None
 
-    async def start(self) -> None:
+    async def start(self, sync_paths: bool = True) -> None:
         """Establish SSH connection and initialize the store."""
         await self.ensure_ssh()
-        await super().start()
+        await super().start(sync_paths=sync_paths)
 
     def start_psi_polling(self, sftp: asyncssh.SFTPClient) -> None:
         """Start consolidated resource poller over SFTP."""

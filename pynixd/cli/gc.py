@@ -57,7 +57,7 @@ async def _gc_main(args: argparse.Namespace) -> None:
     )
 
     log.warning("gc_debug", step="starting_store")
-    await store.start()
+    await store.start(sync_paths=False)
     log.warning("gc_debug", step="store_started", features=store.features)
 
     try:

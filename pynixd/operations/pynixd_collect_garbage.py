@@ -6,19 +6,32 @@ interval timer). Not forwarded to remote stores — pynixd-server-local.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..stderr import OperationLogs
+import structlog
+
+from ..exceptions import BackendError
+from ..operations.collect_garbage import (
+    CollectGarbageRequest,
+    CollectGarbageResponse,
+    GCAction,
+)
+from ..stderr import OperationLogs, StderrNext
 from ..types import PynixdGCAction
 from ..types import Role as Role
 from ..types.context import ReadContext
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
-    from ..gc import GarbageCollector
+    from ..context import PynixdContext
+    from ..store.base import Store as Store
     from ..types import RequestContext as RequestContext
+    from ..types.aliases import StorePathSet
     from ..types.context import WriteContext
+
+log = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -68,21 +81,165 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
             )
             return None
 
-        gc: GarbageCollector | None = ctx.proxy.ctx.gc
-        if gc is None:
-            self.logger.warning("gc_not_available")
-            await ctx.proxy.send_error(
-                "Garbage collector is not available (no database configured).",
-            )
-            return None
+        response = PynixdCollectGarbageResponse()
+        await self.run_gc(ctx.proxy.ctx, self.action, logs=response.logs)
+        return response
 
-        match self.action:
+    @classmethod
+    async def run_gc(
+        cls,
+        pynixd_ctx: PynixdContext,
+        action: PynixdGCAction,
+        *,
+        logs: OperationLogs,
+    ) -> None:
+        """Execute or dry-run a GC pass across all stores.
+
+        Two-phase GC per store:
+        1. RETURN_DEAD to discover paths not GC-rooted.
+        2. DELETE_SPECIFIC on the intersection of stale and dead paths.
+
+        Failures are appended to ``logs`` as ``StderrNext`` messages so they
+        are forwarded to the client or captured by the ticker.
+        """
+        match action:
             case PynixdGCAction.DRY_RUN:
-                self.logger.info("gc_dry_run", message="Would trigger GC pass (dry-run)")
+                log.info("gc_dry_run", message="Would trigger GC pass (dry-run)")
+                return
 
             case PynixdGCAction.EXECUTE:
-                self.logger.info("gc_execute_start", message="Triggering GC pass")
-                await gc.run_gc_pass()
-                self.logger.info("gc_execute_complete", message="GC pass complete")
+                pass
 
-        return PynixdCollectGarbageResponse()
+        settings = pynixd_ctx.settings
+        if not settings.gc_enabled:
+            log.info("gc_disabled_globally")
+            return
+
+        db = pynixd_ctx.db
+        if db is None:
+            log.info("gc_no_database")
+            return
+
+        stale_cache: dict[int, StorePathSet] = {}
+
+        async def get_stale(age: int) -> StorePathSet:
+            if age not in stale_cache:
+                result = await db.query_stale_paths(age)
+                stale_cache[age] = result or set()
+            return stale_cache[age]
+
+        store_gc_targets: list[tuple[Store, StorePathSet]] = []
+
+        for store in pynixd_ctx.stores.values():
+            if not store.gc_enabled:
+                continue
+            effective_age = store.gc_max_age or settings.gc_builder_max_age
+            paths = await get_stale(effective_age)
+            if paths:
+                store_gc_targets.append((store, paths))
+
+        if pynixd_ctx.local_store.gc_enabled:
+            effective_age = pynixd_ctx.local_store.gc_max_age or settings.gc_local_max_age
+            local_stale = await get_stale(effective_age)
+            if local_stale:
+                store_gc_targets.append((pynixd_ctx.local_store, local_stale))
+
+        if not store_gc_targets:
+            return
+
+        logs.add(
+            StderrNext(f"pynixd: GC pass started on {len(store_gc_targets)} stores"),
+        )
+
+        total_deleted = 0
+        total_freed = 0
+        store_tasks: list[tuple[Store, asyncio.Task[CollectGarbageResponse | None]]] = []
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for store, paths in store_gc_targets:
+                    t = tg.create_task(cls._gc_store(store, paths, logs=logs))
+                    store_tasks.append((store, t))
+        except* Exception as eg:
+            log.warning("gc_pass_interrupted_by_error", errors=eg.exceptions)
+
+        for store, t in store_tasks:
+            try:
+                if not t.cancelled():
+                    result = t.result()
+                    if isinstance(result, CollectGarbageResponse):
+                        total_deleted += len(result.paths_deleted)
+                        total_freed += result.bytes_freed
+            except (BackendError, OSError, ConnectionError) as e:
+                logs.add(StderrNext(f"pynixd: gc_store failed for {store.store_id}: {e}"))
+                log.warning("gc_store_result_failed", store_id=store.store_id, error=str(e))
+
+        logs.add(
+            StderrNext(
+                f"pynixd: GC pass complete: {total_deleted} paths, {total_freed} bytes freed",
+            ),
+        )
+
+    @classmethod
+    async def _gc_store(
+        cls,
+        store: Store,
+        paths: StorePathSet,
+        *,
+        logs: OperationLogs,
+    ) -> CollectGarbageResponse | None:
+        """Run CollectGarbage on a single store.
+
+        Two-phase: first RETURN_DEAD to discover paths that are not
+        GC-rooted, then DELETE_SPECIFIC only on the intersection of
+        stale paths and actually-dead paths.
+        """
+        if not store.is_healthy:
+            return None
+
+        # Phase 1: discover dead (non-rooted) paths
+        try:
+            dead_resp = await store.execute(
+                CollectGarbageRequest(
+                    action=GCAction.RETURN_DEAD,
+                    paths_to_delete=set(),
+                    ignore_liveness=0,
+                    max_freed=0,
+                    _obsolete1=0,
+                    _obsolete2=0,
+                    _obsolete3=0,
+                ),
+            )
+        except BackendError as e:
+            logs.add(StderrNext(f"pynixd: gc RETURN_DEAD failed for {store.store_id}: {e}"))
+            log.warning("gc_return_dead_failed", store_id=store.store_id, error=str(e))
+            return None
+
+        dead_paths = dead_resp.paths_deleted
+        if not dead_paths:
+            return None
+
+        # Phase 2: only delete paths that are both stale and dead
+        to_delete = paths & dead_paths
+        if not to_delete:
+            return None
+
+        resp = await store.execute(
+            CollectGarbageRequest(
+                action=GCAction.DELETE_SPECIFIC,
+                paths_to_delete=to_delete,
+                ignore_liveness=0,
+                max_freed=0,
+                _obsolete1=0,
+                _obsolete2=0,
+                _obsolete3=0,
+            ),
+        )
+        if resp.paths_deleted:
+            log.info(
+                "gc_store_complete",
+                store_id=store.store_id,
+                paths_deleted=len(resp.paths_deleted),
+                bytes_freed=resp.bytes_freed,
+            )
+        return resp
