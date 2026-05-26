@@ -138,14 +138,45 @@ class GarbageCollector:
         store: Store,
         paths: StorePathSet,
     ) -> CollectGarbageResponse | None:
-        """Run CollectGarbage on a single store."""
+        """Run CollectGarbage on a single store.
+
+        Two-phase: first RETURN_DEAD to discover paths that are not
+        GC-rooted, then DELETE_SPECIFIC only on the intersection of
+        stale paths and actually-dead paths.
+        """
         if not store.is_healthy:
+            return None
+
+        # Phase 1: discover dead (non-rooted) paths
+        try:
+            dead_resp = await store.execute(
+                CollectGarbageRequest(
+                    action=GCAction.RETURN_DEAD,
+                    paths_to_delete=set(),
+                    ignore_liveness=0,
+                    max_freed=0,
+                    _obsolete1=0,
+                    _obsolete2=0,
+                    _obsolete3=0,
+                ),
+            )
+        except BackendError:
+            log.warning("gc_return_dead_failed", store_id=store.store_id)
+            return None
+
+        dead_paths = dead_resp.paths_deleted
+        if not dead_paths:
+            return None
+
+        # Phase 2: only delete paths that are both stale and dead
+        to_delete = paths & dead_paths
+        if not to_delete:
             return None
 
         resp = await store.execute(
             CollectGarbageRequest(
                 action=GCAction.DELETE_SPECIFIC,
-                paths_to_delete=paths,
+                paths_to_delete=to_delete,
                 ignore_liveness=0,
                 max_freed=0,
                 _obsolete1=0,
