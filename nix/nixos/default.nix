@@ -71,7 +71,7 @@ in
 
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${lib.getExe cfg.package}";
+        ExecStart = "${lib.getExe cfg.package} daemon";
         User = "root";
         Group = "root";
         RuntimeDirectory = "pynixd";

@@ -1,14 +1,15 @@
 """Entry point: python -m pynixd
 
-Configuration is via environment variables and/or a JSON config file.
-See PynixdSettings for env var mapping (PYNIXD_<FIELD_NAME>).
-All settings fall through from env vars → config file → defaults.
+Subcommands:
+  daemon    Start the pynixd daemon server
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
+import os
 import signal
 
 import structlog
@@ -19,7 +20,10 @@ from .instance import Server
 log = structlog.get_logger(__name__)
 
 
-async def async_main() -> None:
+async def async_daemon_main(config_path: str | None = None) -> None:
+    if config_path is not None:
+        os.environ["PYNIXD_CONFIG"] = config_path
+
     settings = PynixdSettings()
     local_store, stores = settings.to_stores()
 
@@ -44,7 +48,7 @@ async def async_main() -> None:
     await server.close()
 
 
-def main() -> None:
+def daemon_main(args: argparse.Namespace) -> None:
     settings = PynixdSettings()
     log_level_str = settings.log_level.upper()
 
@@ -69,7 +73,23 @@ def main() -> None:
         cache_logger_on_first_use=True,
     )
 
-    asyncio.run(async_main())
+    asyncio.run(async_daemon_main(config_path=args.config))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="pynixd — Nix daemon protocol proxy")
+    sub = parser.add_subparsers(dest="subcommand", required=True)
+
+    daemon_parser = sub.add_parser("daemon", help="Start the pynixd daemon server")
+    daemon_parser.add_argument(
+        "--config",
+        help="Path to JSON config file (overrides PYNIXD_CONFIG env var)",
+        default=None,
+    )
+    daemon_parser.set_defaults(func=daemon_main)
+
+    args = parser.parse_args()
+    args.func(args)
 
 
 if __name__ == "__main__":
