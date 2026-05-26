@@ -374,8 +374,9 @@ class BuildDecomposer:
             br = result_map.get(dp)
             if br is None:
                 # Derivation was already valid/cached — synthesise success
-                parsed = parsed_cache.get(StorePath(dp.drv_path))
-                if parsed is None:
+                drv_store_path = StorePath(dp.drv_path)
+                parsed = parsed_cache.get(drv_store_path) if drv_store_path.is_derivation() else None
+                if parsed is None and drv_store_path.is_derivation():
                     with contextlib.suppress(FileNotFoundError):
                         parsed = await dp.to_derivation(
                             self.local_store.store_path,
@@ -395,8 +396,9 @@ class BuildDecomposer:
                     )
             elif br.status == BuildResultStatus.ALREADY_VALID and not br.built_outputs:
                 # Backend returned ALREADY_VALID with empty built_outputs
-                parsed = parsed_cache.get(StorePath(dp.drv_path))
-                if parsed is None:
+                drv_store_path = StorePath(dp.drv_path)
+                parsed = parsed_cache.get(drv_store_path) if drv_store_path.is_derivation() else None
+                if parsed is None and drv_store_path.is_derivation():
                     with contextlib.suppress(FileNotFoundError):
                         parsed = await dp.to_derivation(
                             self.local_store.store_path,
