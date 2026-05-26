@@ -89,6 +89,8 @@ class LocalSocketStoreSpec(BaseModel):
     use_db: bool = True
     monitor: bool = True
     priority: float = 1.0
+    gc_enabled: bool = True
+    gc_max_age: int | None = None
 
     def to_store(self) -> Store:
         from .store import LocalSocketStore
@@ -106,6 +108,8 @@ class LocalSocketStoreSpec(BaseModel):
             use_db=self.use_db,
             monitor=self.monitor,
             priority=self.priority,
+            gc_enabled=self.gc_enabled,
+            gc_max_age=self.gc_max_age,
         )
 
 
@@ -120,6 +124,8 @@ class LocalSubprocessStoreSpec(BaseModel):
     extra_args: list[str] | None = None
     use_db: bool = True
     priority: float = 1.0
+    gc_enabled: bool = True
+    gc_max_age: int | None = None
 
     def to_store(self) -> Store:
         from .store import LocalSocketStore
@@ -135,6 +141,8 @@ class LocalSubprocessStoreSpec(BaseModel):
             extra_args=self.extra_args,
             use_db=self.use_db,
             priority=self.priority,
+            gc_enabled=self.gc_enabled,
+            gc_max_age=self.gc_max_age,
         )
 
 
@@ -151,6 +159,8 @@ class SSHSubprocessStoreSpec(BaseModel):
     nix_bin: str = "nix"
     client_keys: list[Path] = Field(default_factory=list)
     priority: float = 1.0
+    gc_enabled: bool = True
+    gc_max_age: int | None = None
 
     def to_store(self) -> Store:
         from .store import SSHSubprocessStore
@@ -170,6 +180,8 @@ class SSHSubprocessStoreSpec(BaseModel):
             nix_bin=self.nix_bin,
             client_keys=list(self.client_keys) if self.client_keys else None,
             priority=self.priority,
+            gc_enabled=self.gc_enabled,
+            gc_max_age=self.gc_max_age,
         )
 
 
@@ -185,6 +197,8 @@ class SSHSocketStoreSpec(BaseModel):
     monitor: bool = True
     client_keys: list[Path] = Field(default_factory=list)
     priority: float = 1.0
+    gc_enabled: bool = True
+    gc_max_age: int | None = None
 
     def to_store(self) -> Store:
         from .store import SSHSocketStore
@@ -203,6 +217,8 @@ class SSHSocketStoreSpec(BaseModel):
             monitor=self.monitor,
             client_keys=list(self.client_keys) if self.client_keys else None,
             priority=self.priority,
+            gc_enabled=self.gc_enabled,
+            gc_max_age=self.gc_max_age,
         )
 
 
@@ -272,6 +288,8 @@ class PynixdSettings(BaseSettings):
 
     admin_users: set[str] = Field(default_factory=set)
 
+    gc_enabled: bool = True
+    gc_local_enabled: bool = True
     gc_interval: float = 3600.0
     gc_local_max_age: int = 604800
     gc_builder_max_age: int = 3600

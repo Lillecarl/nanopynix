@@ -60,6 +60,7 @@ class Server:
                 store_path=Path("/"),
                 monitor=False,
                 priority=settings.local_store_priority,
+                gc_enabled=settings.gc_local_enabled,
             )
         if stores is None:
             stores = {}

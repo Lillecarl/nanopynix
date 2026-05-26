@@ -44,12 +44,16 @@ class GarbageCollector:
         self.db: LocalStoreDB = ctx.db
         self.stores: Mapping[StoreId, Store] = ctx.stores
         self.local_store: Store = ctx.local_store
+        self.gc_enabled = ctx.settings.gc_enabled
         self.interval = ctx.settings.gc_interval
         self.local_max_age = ctx.settings.gc_local_max_age
         self.builder_max_age = ctx.settings.gc_builder_max_age
 
     async def run(self) -> None:
-        """Run GC passes at the configured interval."""
+        """Run GC passes at the configured interval, if globally enabled."""
+        if not self.gc_enabled:
+            log.info("gc_disabled_globally")
+            return
         log.info("gc_loop_started", interval=self.interval)
         while True:
             await asyncio.sleep(self.interval)
@@ -61,24 +65,44 @@ class GarbageCollector:
                 log.exception("gc_pass_failed")
 
     async def run_gc_pass(self) -> None:
-        """Find stale paths and delete them from all stores."""
-        # Query with the shorter lifetime to get the superset of stale paths
-        builder_stale = await self.db.query_stale_paths(self.builder_max_age)
-        if not builder_stale:
-            return
+        """Find stale paths and delete them from all stores.
 
-        # Local store uses longer lifetime — filter to older paths
-        local_stale = await self.db.query_stale_paths(self.local_max_age)
+        Respects per-store ``gc_enabled`` and ``gc_max_age``.
+        A store with ``gc_enabled=False`` is skipped entirely.
+        A store with ``gc_max_age`` set uses that value instead of the
+        global builder/local default.
+        """
+        stale_cache: dict[int, StorePathSet] = {}
 
-        if not self.stores and not local_stale:
+        async def get_stale(age: int) -> StorePathSet:
+            if age not in stale_cache:
+                result = await self.db.query_stale_paths(age)
+                stale_cache[age] = result or set()
+            return stale_cache[age]
+
+        store_gc_targets: list[tuple[Store, StorePathSet]] = []
+
+        for store in self.stores.values():
+            if not store.gc_enabled:
+                continue
+            effective_age = store.gc_max_age or self.builder_max_age
+            paths = await get_stale(effective_age)
+            if paths:
+                store_gc_targets.append((store, paths))
+
+        if self.local_store.gc_enabled:
+            effective_age = self.local_store.gc_max_age or self.local_max_age
+            local_stale = await get_stale(effective_age)
+            if local_stale:
+                store_gc_targets.append((self.local_store, local_stale))
+
+        if not store_gc_targets:
             return
 
         log.info(
             "gc_pass_started",
-            builder_stale_count=len(builder_stale),
-            builder_max_age=self.builder_max_age,
-            local_stale_count=len(local_stale) if local_stale else 0,
-            local_max_age=self.local_max_age,
+            stores=len(store_gc_targets),
+            ages_queried=list(stale_cache.keys()),
         )
 
         total_deleted = 0
@@ -87,20 +111,10 @@ class GarbageCollector:
 
         try:
             async with asyncio.TaskGroup() as tg:
-                # GC builders with builder lifetime
-                for store in self.stores.values():
-                    t = tg.create_task(self.gc_store(store, builder_stale))
+                for store, paths in store_gc_targets:
+                    t = tg.create_task(self.gc_store(store, paths))
                     store_tasks.append((store, t))
-
-                # GC local store with local lifetime
-                if local_stale:
-                    t = tg.create_task(self.gc_store(self.local_store, local_stale))
-                    store_tasks.append((self.local_store, t))
         except* Exception as eg:
-            # TaskGroup cancels other tasks on first failure.
-            # We use except* (Python 3.11+) to handle individual exceptions
-            # in the ExceptionGroup if we wanted, but here we just want to
-            # make sure we don't crash the GC loop.
             log.warning("gc_pass_interrupted_by_error", errors=eg.exceptions)
 
         for store, t in store_tasks:
@@ -111,7 +125,6 @@ class GarbageCollector:
                         total_deleted += len(result.paths_deleted)
                         total_freed += result.bytes_freed
             except (BackendError, OSError, ConnectionError) as e:
-                # Task.result() re-raises the task's exception.
                 log.warning("gc_store_result_failed", store_id=store.store_id, error=str(e))
 
         log.info(

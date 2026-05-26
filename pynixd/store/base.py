@@ -75,6 +75,8 @@ class Store(ABC):
         probe: bool = True,
         no_schedule: bool = False,
         priority: float = 1.0,
+        gc_enabled: bool = True,
+        gc_max_age: int | None = None,
     ) -> None:
         self.store_id = store_id
         self.store_path = store_path
@@ -83,6 +85,8 @@ class Store(ABC):
         self.idle_ttl = idle_ttl
         self.conn_counter = 0
         self.priority: float = priority
+        self.gc_enabled: bool = gc_enabled
+        self.gc_max_age: int | None = gc_max_age
 
         self.gate = ResourceGate()
         self.pool = ConnectionPool(
