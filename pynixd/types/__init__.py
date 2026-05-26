@@ -64,6 +64,9 @@ from .protocol import (
     OptTrusted as OptTrusted,
 )
 from .protocol import (
+    PynixdGCAction as PynixdGCAction,
+)
+from .protocol import (
     ResultType as ResultType,
 )
 from .protocol import (

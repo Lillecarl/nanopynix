@@ -253,6 +253,7 @@ class Server:
 
         if self.ctx.db:
             gc = GarbageCollector(self.ctx)
+            self.ctx.gc = gc
             self.background_tasks.append(asyncio.create_task(gc.run()))
 
         s = self.settings

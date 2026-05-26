@@ -55,35 +55,38 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    services.pynixd.settings = lib.mapAttrsRecursive (n: v: lib.mkDefault v) {
-      unix_path = "/run/pynixd/pynixd.sock";
-      ssh_port = null;
-      http_port = null;
-      local_store_priority = 1.0;
-    };
-    systemd.services.pynixd = {
-      description = "pynixd - Python Nix daemon protocol proxy";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "nix-daemon.service" ];
-      wants = [ "nix-daemon.service" ];
-      restartTriggers = [ configFile ];
-
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = "${lib.getExe cfg.package} daemon";
-        User = "root";
-        Group = "root";
-        RuntimeDirectory = "pynixd";
-        RuntimeDirectoryMode = "755";
-        Environment = "PYNIXD_CONFIG=${configFile}";
-        Restart = "on-failure";
-        RestartSec = "5s";
-        PrivateTmp = true;
-        NoNewPrivileges = true;
+  config = lib.mkMerge [
+    (lib.mkIf cfg.enable {
+      services.pynixd.settings = lib.mapAttrsRecursive (n: v: lib.mkDefault v) {
+        unix_path = "/run/pynixd/pynixd.sock";
+        ssh_port = null;
+        http_port = null;
+        local_store_priority = 1.0;
       };
-    };
+      systemd.services.pynixd = {
+        description = "pynixd - Python Nix daemon protocol proxy";
+        wantedBy = [ "multi-user.target" ];
+        after = [ "nix-daemon.service" ];
+        wants = [ "nix-daemon.service" ];
+        restartTriggers = [ configFile ];
 
-    environment.systemPackages = [ cfg.package ];
-  };
+        serviceConfig = {
+          Type = "simple";
+          ExecStart = "${lib.getExe cfg.package} daemon";
+          User = "root";
+          Group = "root";
+          RuntimeDirectory = "pynixd";
+          RuntimeDirectoryMode = "755";
+          Environment = "PYNIXD_CONFIG=${configFile}";
+          Restart = "on-failure";
+          RestartSec = "5s";
+          PrivateTmp = true;
+          NoNewPrivileges = true;
+        };
+      };
+    })
+    {
+      environment.systemPackages = [ cfg.package ];
+    }
+  ];
 }

@@ -18,6 +18,7 @@ from . import find_roots as find_roots
 from . import is_valid_path as is_valid_path
 from . import nar_from_path as nar_from_path
 from . import optimise_store as optimise_store
+from . import pynixd_collect_garbage as pynixd_collect_garbage
 from . import query_all_valid_paths as query_all_valid_paths
 from . import query_closure as query_closure
 from . import query_closure_with_info as query_closure_with_info

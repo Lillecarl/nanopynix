@@ -21,6 +21,13 @@ class GCAction(IntEnum):
     DELETE_SPECIFIC = 3
 
 
+class PynixdGCAction(IntEnum):
+    """Actions for pynixd's custom collect-garbage operation."""
+
+    DRY_RUN = 0
+    EXECUTE = 1
+
+
 class OptTrusted(IntEnum):
     """Trust status for a path or user."""
 
