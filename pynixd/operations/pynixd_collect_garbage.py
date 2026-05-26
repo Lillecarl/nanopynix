@@ -19,6 +19,7 @@ from ..operations.collect_garbage import (
     GCAction,
 )
 from ..stderr import OperationLogs, StderrNext
+from ..store_path import StorePath
 from ..types import PynixdGCAction
 from ..types import Role as Role
 from ..types.context import ReadContext
@@ -36,14 +37,21 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class PynixdCollectGarbageResponse(OpResponse):
+    store_paths: set[StorePath] = field(default_factory=set)
+    bytes: int = 0
+
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         obj = cls.__new__(cls)
         obj.logs = await OperationLogs.deserialize(ctx)
+        obj.store_paths = await ctx.reader.read_string_set(StorePath)
+        obj.bytes = await ctx.reader.read_uint64()
         return obj
 
     async def serialize(self, ctx: WriteContext) -> None:
         self.logs.serialize(ctx)
+        ctx.writer.write_string_set(self.store_paths)
+        ctx.writer.write_uint64(self.bytes)
 
 
 @dataclass(kw_only=True)
@@ -82,7 +90,11 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
             return None
 
         response = PynixdCollectGarbageResponse()
-        await self.run_gc(ctx.proxy.ctx, self.action, logs=response.logs)
+        response.store_paths, response.bytes = await self.run_gc(
+            ctx.proxy.ctx,
+            self.action,
+            logs=response.logs,
+        )
         return response
 
     @classmethod
@@ -92,7 +104,7 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
         action: PynixdGCAction,
         *,
         logs: OperationLogs,
-    ) -> None:
+    ) -> tuple[set[StorePath], int]:
         """Execute or dry-run a GC pass across all stores.
 
         Two-phase GC per store:
@@ -101,24 +113,19 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
 
         Failures are appended to ``logs`` as ``StderrNext`` messages so they
         are forwarded to the client or captured by the ticker.
+
+        Returns ``(store_paths, bytes)`` — the deleted (or dry-run eligible)
+        paths and total freed bytes. Both are zero/empty for early exits.
         """
-        match action:
-            case PynixdGCAction.DRY_RUN:
-                log.info("gc_dry_run", message="Would trigger GC pass (dry-run)")
-                return
-
-            case PynixdGCAction.EXECUTE:
-                pass
-
         settings = pynixd_ctx.settings
         if not settings.gc_enabled:
             log.info("gc_disabled_globally")
-            return
+            return set(), 0
 
         db = pynixd_ctx.db
         if db is None:
             log.info("gc_no_database")
-            return
+            return set(), 0
 
         stale_cache: dict[int, StorePathSet] = {}
 
@@ -145,20 +152,22 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
                 store_gc_targets.append((pynixd_ctx.local_store, local_stale))
 
         if not store_gc_targets:
-            return
+            return set(), 0
+
+        dry_run = action == PynixdGCAction.DRY_RUN
 
         logs.add(
-            StderrNext(f"pynixd: GC pass started on {len(store_gc_targets)} stores"),
+            StderrNext(f"pynixd: GC pass started on {len(store_gc_targets)} stores{' (dry-run)' if dry_run else ''}"),
         )
 
-        total_deleted = 0
-        total_freed = 0
+        all_paths: set[StorePath] = set()
+        total_bytes = 0
         store_tasks: list[tuple[Store, asyncio.Task[CollectGarbageResponse | None]]] = []
 
         try:
             async with asyncio.TaskGroup() as tg:
                 for store, paths in store_gc_targets:
-                    t = tg.create_task(cls._gc_store(store, paths, logs=logs))
+                    t = tg.create_task(cls._gc_store(store, paths, logs=logs, dry_run=dry_run))
                     store_tasks.append((store, t))
         except* Exception as eg:
             log.warning("gc_pass_interrupted_by_error", errors=eg.exceptions)
@@ -168,17 +177,19 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
                 if not t.cancelled():
                     result = t.result()
                     if isinstance(result, CollectGarbageResponse):
-                        total_deleted += len(result.paths_deleted)
-                        total_freed += result.bytes_freed
+                        all_paths |= result.paths_deleted
+                        total_bytes += result.bytes_freed
             except (BackendError, OSError, ConnectionError) as e:
                 logs.add(StderrNext(f"pynixd: gc_store failed for {store.store_id}: {e}"))
                 log.warning("gc_store_result_failed", store_id=store.store_id, error=str(e))
 
         logs.add(
             StderrNext(
-                f"pynixd: GC pass complete: {total_deleted} paths, {total_freed} bytes freed",
+                f"pynixd: GC pass {'(dry-run) ' if dry_run else ''}complete: "
+                f"{len(all_paths)} paths, {total_bytes} bytes freed",
             ),
         )
+        return all_paths, total_bytes
 
     @classmethod
     async def _gc_store(
@@ -187,6 +198,7 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
         paths: StorePathSet,
         *,
         logs: OperationLogs,
+        dry_run: bool = False,
     ) -> CollectGarbageResponse | None:
         """Run CollectGarbage on a single store.
 
@@ -223,6 +235,13 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
         to_delete = paths & dead_paths
         if not to_delete:
             return None
+
+        if dry_run:
+            return CollectGarbageResponse(
+                paths_deleted=to_delete,
+                bytes_freed=0,
+                _obsolete=0,
+            )
 
         resp = await store.execute(
             CollectGarbageRequest(

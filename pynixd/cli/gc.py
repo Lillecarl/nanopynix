@@ -46,8 +46,6 @@ async def _gc_main(args: argparse.Namespace) -> None:
     socket_path = settings.unix_path or DEFAULT_SOCKET
     action = PynixdGCAction.EXECUTE if args.execute else PynixdGCAction.DRY_RUN
 
-    log.warning("gc_debug", step="creating_store", socket_path=str(socket_path), action=action.name)
-
     store = LocalSocketStore(
         store_id="cli",
         store_path=Path("/"),
@@ -56,21 +54,23 @@ async def _gc_main(args: argparse.Namespace) -> None:
         monitor=False,
     )
 
-    log.warning("gc_debug", step="starting_store")
     await store.start(sync_paths=False)
-    log.warning("gc_debug", step="store_started", features=store.features)
 
     try:
-        log.warning("gc_debug", step="executing_op")
         resp = await store.execute(PynixdCollectGarbageRequest(action=action))
-        log.warning("gc_debug", step="op_completed", resp_type=type(resp).__name__)
-    except Exception as e:
-        log.warning("gc_debug", step="op_failed", error=str(e), exc_info=True)
+    except Exception:
+        log.exception("gc_failed")
         raise
     finally:
         await store.close()
 
-    if args.execute:
-        log.warning("gc_complete", message="GC pass triggered on daemon")
+    for msg in resp.logs.messages:
+        text = getattr(msg, "text", None) or getattr(msg, "msg", None)
+        if text:
+            print(text)  # noqa: T201
+
+    label = "dry-run" if action == PynixdGCAction.DRY_RUN else "gc"
+    if resp.store_paths:
+        print(f"{label}: {len(resp.store_paths)} paths, {resp.bytes} bytes freed")  # noqa: T201
     else:
-        log.warning("gc_dry_run", message="Dry-run: daemon would trigger GC")
+        print(f"{label}: no paths eligible")  # noqa: T201
