@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -76,32 +77,43 @@ class StoreRankingSettings(BaseModel):
     """Minimum score required for a store to be considered. If lower, builds stay queued."""
 
 
-class LocalSocketStoreSpec(BaseModel):
-    type: Literal["local-socket"] = "local-socket"
-    store_path: Path = Path("/")
-    socket_path: Path | None = None
+class StoreSpecBase(BaseModel, ABC):
+    """Common settings shared by all store specs."""
+
     systems: set[str] | None = None
     system_features: set[str] = Field(default_factory=set)
     nix_bin: str = "nix"
-    extra_env: dict[str, str] | None = None
-    extra_args: list[str] | None = None
-    use_db: bool = True
-    monitor: bool = True
     scheduleable: bool = True
     priority: float = 1.0
     gc_enabled: bool = True
     gc_max_age: int | None = None
 
+    def _feature_matrix(self) -> dict[str, set[str]] | None:
+        return _feature_matrix_from_config(self.systems, self.system_features)
+
+    @abstractmethod
+    def to_store(self, store_id: str) -> Store: ...
+
+
+class LocalSocketStoreSpec(StoreSpecBase):
+    type: Literal["local-socket"] = "local-socket"
+    store_path: Path = Path("/")
+    socket_path: Path | None = None
+    extra_env: dict[str, str] | None = None
+    extra_args: list[str] | None = None
+    use_db: bool = True
+    monitor: bool = True
+
     def to_store(self, store_id: str) -> Store:
         from .store import LocalSocketStore
 
-        feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
+        fm = self._feature_matrix()
         return LocalSocketStore(
             store_id=StoreId(store_id),
             store_path=self.store_path,
             socket_path=self.socket_path,
-            feature_matrix=feature_matrix,
-            probe=feature_matrix is None,
+            feature_matrix=fm,
+            probe=fm is None,
             nix_bin=self.nix_bin,
             extra_env=self.extra_env,
             extra_args=self.extra_args,
@@ -114,29 +126,22 @@ class LocalSocketStoreSpec(BaseModel):
         )
 
 
-class LocalSubprocessStoreSpec(BaseModel):
+class LocalSubprocessStoreSpec(StoreSpecBase):
     type: Literal["local-subprocess"] = "local-subprocess"
     store_path: Path
-    systems: set[str] | None = None
-    system_features: set[str] = Field(default_factory=set)
-    nix_bin: str = "nix"
     extra_env: dict[str, str] | None = None
     extra_args: list[str] | None = None
     use_db: bool = True
-    scheduleable: bool = True
-    priority: float = 1.0
-    gc_enabled: bool = True
-    gc_max_age: int | None = None
 
     def to_store(self, store_id: str) -> Store:
         from .store import LocalSocketStore
 
-        feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
+        fm = self._feature_matrix()
         return LocalSocketStore(
             store_id=StoreId(store_id),
             store_path=self.store_path,
-            feature_matrix=feature_matrix,
-            probe=feature_matrix is None,
+            feature_matrix=fm,
+            probe=fm is None,
             nix_bin=self.nix_bin,
             extra_env=self.extra_env,
             extra_args=self.extra_args,
@@ -148,34 +153,27 @@ class LocalSubprocessStoreSpec(BaseModel):
         )
 
 
-class SSHSubprocessStoreSpec(BaseModel):
+class SSHSubprocessStoreSpec(StoreSpecBase):
     type: Literal["ssh-subprocess"] = "ssh-subprocess"
     host: str
     port: int = 22
     username: str | None = None
     store_path: Path = Path("/")
-    systems: set[str] | None = None
-    system_features: set[str] = Field(default_factory=set)
     monitor: bool = True
-    nix_bin: str = "nix"
     client_keys: list[Path] = Field(default_factory=list)
-    scheduleable: bool = True
-    priority: float = 1.0
-    gc_enabled: bool = True
-    gc_max_age: int | None = None
 
     def to_store(self, store_id: str) -> Store:
         from .store import SSHSubprocessStore
 
-        feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
+        fm = self._feature_matrix()
         return SSHSubprocessStore(
             host=self.host,
             store_id=StoreId(store_id),
             port=self.port,
             username=self.username,
             store_path=self.store_path,
-            feature_matrix=feature_matrix,
-            probe=feature_matrix is None,
+            feature_matrix=fm,
+            probe=fm is None,
             monitor=self.monitor,
             nix_bin=self.nix_bin,
             client_keys=list(self.client_keys) if self.client_keys else None,
@@ -186,33 +184,27 @@ class SSHSubprocessStoreSpec(BaseModel):
         )
 
 
-class SSHSocketStoreSpec(BaseModel):
+class SSHSocketStoreSpec(StoreSpecBase):
     type: Literal["ssh-socket"] = "ssh-socket"
     host: str
     port: int = 22
     username: str | None = None
     socket_path: Path = Path("/nix/var/nix/daemon-socket/socket")
-    systems: set[str] | None = None
-    system_features: set[str] = Field(default_factory=set)
     monitor: bool = True
     client_keys: list[Path] = Field(default_factory=list)
-    scheduleable: bool = True
-    priority: float = 1.0
-    gc_enabled: bool = True
-    gc_max_age: int | None = None
 
     def to_store(self, store_id: str) -> Store:
         from .store import SSHSocketStore
 
-        feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
+        fm = self._feature_matrix()
         return SSHSocketStore(
             host=self.host,
             store_id=StoreId(store_id),
             port=self.port,
             username=self.username,
             socket_path=self.socket_path,
-            feature_matrix=feature_matrix,
-            probe=feature_matrix is None,
+            feature_matrix=fm,
+            probe=fm is None,
             monitor=self.monitor,
             client_keys=list(self.client_keys) if self.client_keys else None,
             scheduleable=self.scheduleable,
