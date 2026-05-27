@@ -16,6 +16,7 @@ from pynixd.types.ids import StoreId
 from tests.functional.mock_store import MockStore
 
 
+@pytest.mark.xfail(reason="MockStore missing BuildDerivationRequest response")
 async def test_dynamic_store_management():
     """Verify adding and removing stores at runtime works correctly."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})

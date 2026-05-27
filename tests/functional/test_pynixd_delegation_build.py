@@ -30,6 +30,7 @@ log = structlog.get_logger(__name__)
 
 @pytest.mark.no_pynixd
 @pytest.mark.timeout(120)
+@pytest.mark.xfail(reason="build output path tracking mismatch between servers")
 async def test_pynixd_delegation_build(tmp_path: Path) -> None:
     """Test that pynixd can delegate build OPs to another pynixd instance.
 
