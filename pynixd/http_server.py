@@ -3,6 +3,7 @@
 Provides:
 - Nix binary cache protocol (narinfo, NAR streaming, uploads)
 - Prometheus metrics endpoint (/metrics)
+- Kubernetes health check endpoint (/healthz)
 
 Supports granular enabling of features (cache vs metrics) and
 optional basic auth/TLS.
@@ -87,6 +88,8 @@ class PynixdHttpServer:
             client_max_size=1024**4,  # 1 TiB
         )
 
+        self.app.router.add_get("/healthz", self.handle_healthz)
+
         if self.enable_metrics:
             self.app.router.add_get("/metrics", self.handle_metrics)
 
@@ -111,7 +114,9 @@ class PynixdHttpServer:
         request: web.Request,
         handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
     ) -> web.StreamResponse:
-        # Check if we should skip auth for metrics
+        # Health checks and metrics bypass auth
+        if request.path == "/healthz":
+            return await handler(request)
         if self.enable_metrics and self.metrics_no_auth and request.path == "/metrics":
             return await handler(request)
 
@@ -150,6 +155,10 @@ class PynixdHttpServer:
         return await handler(request)
 
     # ── Handlers ──────────────────────────────────────────────────────
+
+    async def handle_healthz(self, request: web.Request) -> web.Response:
+        """Kubernetes health check endpoint."""
+        return web.Response(status=HTTPStatus.OK, text="ok\n")
 
     async def handle_metrics(self, request: web.Request) -> web.Response:
         """Expose Prometheus metrics."""
