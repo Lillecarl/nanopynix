@@ -23,7 +23,6 @@ from ..store_path import StorePath
 from ..types import PynixdGCAction
 from ..types import Role as Role
 from ..types.context import ReadContext
-from ..types.ids import StoreId
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
@@ -141,11 +140,9 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
         for store in pynixd_ctx.stores.values():
             if not store.gc_enabled:
                 continue
-            if store.store_id == StoreId("local"):
-                effective_age = store.gc_max_age or settings.gc_local_max_age
-            else:
-                effective_age = store.gc_max_age or settings.gc_builder_max_age
-            paths = await get_stale(effective_age)
+            if store.gc_max_age is None:
+                continue
+            paths = await get_stale(store.gc_max_age)
             if paths:
                 store_gc_targets.append((store, paths))
 

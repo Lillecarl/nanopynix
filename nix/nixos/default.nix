@@ -59,7 +59,6 @@ in
         unix_path = "/run/pynixd/pynixd.sock";
         ssh_port = null;
         http_port = null;
-        local_store_priority = 1.0;
       };
       environment.etc."pynixd/pynixd.json".source = configFile;
 

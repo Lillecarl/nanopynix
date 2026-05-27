@@ -289,10 +289,7 @@ class PynixdSettings(BaseSettings):
     admin_users: set[str] = Field(default_factory=set)
 
     gc_enabled: bool = True
-    gc_local_enabled: bool = True
     gc_interval: float = 3600.0
-    gc_local_max_age: int = 604800
-    gc_builder_max_age: int = 3600
 
     # Scheduling & Telemetry
     schedule_mode: ScheduleMode = ScheduleMode.auto
@@ -305,11 +302,6 @@ class PynixdSettings(BaseSettings):
     min_available_memory_mb: int = 512  # Hard gate: block if < 512MB available
     max_cpu_util: float = 90.0  # Fallback: max 90% utilization
     gate_timeout: float = 5.0  # seconds to wait for pressure to subside
-
-    # Local Store
-    local_store_priority: float = 1.0
-    """Priority multiplier for the local store (default 1.0). Works the same as
-    per-store ``priority`` — multiplies the local store's telemetry score during ranking."""
 
     # Logging
     log_level: str = "WARNING"
@@ -340,7 +332,6 @@ class PynixdSettings(BaseSettings):
                 store_id=StoreId("local"),
                 store_path=Path("/"),
                 monitor=False,
-                priority=self.local_store_priority,
             )
 
         return stores

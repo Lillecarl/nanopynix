@@ -62,8 +62,6 @@ class Server:
                     store_id=StoreId("local"),
                     store_path=Path("/"),
                     monitor=False,
-                    priority=settings.local_store_priority,
-                    gc_enabled=settings.gc_local_enabled,
                 ),
             }
         elif StoreId("local") not in stores:
@@ -72,8 +70,6 @@ class Server:
                 store_id=StoreId("local"),
                 store_path=Path("/"),
                 monitor=False,
-                priority=settings.local_store_priority,
-                gc_enabled=settings.gc_local_enabled,
             )
 
         path_tracker = PathTracker(db=None)
