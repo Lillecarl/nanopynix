@@ -92,6 +92,9 @@ class StoreSpecBase(BaseModel):
     no_schedule: bool = False
     probe: bool | None = None
     settings: PynixdSettings | None = None
+    reconnect: bool = True
+    reconnect_min_delay: float = 1.0
+    reconnect_max_delay: float = 300.0
 
     def _effective_feature_matrix(self) -> dict[str, set[str]] | None:
         if self.feature_matrix is not None:

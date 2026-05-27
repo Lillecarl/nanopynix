@@ -216,6 +216,7 @@ class _SSHStoreMixin(Store):
             with contextlib.suppress(Exception):
                 self.conn.close()
             self.conn = None
+        self._schedule_reconnect()
 
     async def close_ssh(self) -> None:
         self.stop_psi_polling()

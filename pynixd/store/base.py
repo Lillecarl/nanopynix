@@ -5,6 +5,7 @@ Base Store ABC and pooling logic for pynixd.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import platform
 import time
 from abc import ABC, abstractmethod
@@ -27,7 +28,7 @@ from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Awaitable, Callable, Iterable, Mapping
     from collections.abc import Set as AbstractSet
     from contextlib import AbstractAsyncContextManager
 
@@ -48,6 +49,21 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 _CB_THRESHOLD: int = 3  # failures before cooldown
 _CB_MAX_COOLDOWN: float = 300.0  # 5 min max
+
+try:
+    import asyncssh
+except ImportError:
+    _SSH_ERRORS: tuple[type[BaseException], ...] = ()
+else:
+    _SSH_ERRORS = (asyncssh.misc.Error,)
+
+_TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
+    ConnectionError,
+    EOFError,
+    OSError,
+    asyncio.TimeoutError,
+    *_SSH_ERRORS,
+)
 
 
 class ProbeState(IntEnum):
@@ -113,6 +129,13 @@ class Store(ABC):
         self._signing_keys: dict[str, SecretKey] = {}
         self.draining: bool = False
         self._started: bool = False
+        self.reconnect_enabled = spec.reconnect
+        self.reconnect_min_delay = spec.reconnect_min_delay
+        self.reconnect_max_delay = spec.reconnect_max_delay
+        self._reconnect_task: asyncio.Task[None] | None = None
+        self._reconnect_trigger = asyncio.Event()
+        self._reconnect_delay = self.reconnect_min_delay
+        self._on_reconnect: Callable[[], Awaitable[None]] | None = None
 
     @property
     def features(self) -> AbstractSet[str]:
@@ -160,6 +183,7 @@ class Store(ABC):
             self.monitor.start()
 
         self._started = True
+        self._start_reconnect_loop()
 
     async def sync_paths(self) -> None:
         """Synchronize known paths from the store into the tracker.
@@ -352,7 +376,7 @@ class Store(ABC):
         self.cooldown_until = 0.0
 
     def record_failure(self) -> None:
-        """Record a failure. After threshold, enter cooldown."""
+        """Record a failure. After threshold, enter cooldown and schedule reconnect."""
         self.consecutive_failures += 1
         if self.consecutive_failures >= _CB_THRESHOLD:
             cooldown = min(
@@ -366,6 +390,80 @@ class Store(ABC):
                 consecutive_failures=self.consecutive_failures,
                 cooldown=cooldown,
             )
+        self._schedule_reconnect()
+
+    # ── Reconnect loop ──────────────────────────────────────────────
+
+    def _schedule_reconnect(self) -> None:
+        """Wake the reconnect loop. Safe to call from any context."""
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            self._reconnect_trigger.set()
+
+    def _start_reconnect_loop(self) -> None:
+        """Start the background reconnect loop if enabled."""
+        if not self.reconnect_enabled:
+            return
+        if self._reconnect_task is None or self._reconnect_task.done():
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _stop_reconnect_loop(self) -> None:
+        """Cancel the reconnect loop."""
+        if self._reconnect_task is not None:
+            self._reconnect_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._reconnect_task
+            self._reconnect_task = None
+
+    async def _do_reconnect(self) -> None:
+        """Probe and sync — actual reconnection."""
+        await self.pool.close()
+        self.probe_state = ProbeState.NOT_PROBED
+        self._probe_event.clear()
+        await self.probe()
+        await self.sync_paths()
+
+    async def _reconnect_loop(self) -> None:
+        """Background loop: wait for trigger, backoff, reconnect."""
+        while True:
+            await self._reconnect_trigger.wait()
+            self._reconnect_trigger.clear()
+
+            while True:
+                delay = self._reconnect_delay
+                await asyncio.sleep(delay)
+
+                try:
+                    await self._do_reconnect()
+                except _TRANSPORT_ERRORS:
+                    self._reconnect_delay = min(
+                        self._reconnect_delay * 2,
+                        self.reconnect_max_delay,
+                    )
+                    log.warning(
+                        "store_reconnect_failed",
+                        store_id=self.store_id,
+                        next_retry=self._reconnect_delay,
+                    )
+                    continue
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception(
+                        "store_reconnect_unexpected_error",
+                        store_id=self.store_id,
+                    )
+                    self._reconnect_delay = min(
+                        self._reconnect_delay * 2,
+                        self.reconnect_max_delay,
+                    )
+                    continue
+                else:
+                    self._reconnect_delay = self.reconnect_min_delay
+                    self.record_success()
+                    log.info("store_reconnected", store_id=self.store_id)
+                    if self._on_reconnect:
+                        await self._on_reconnect()
+                    break
 
     # ── Known paths tracking ────────────────────────────────────────
 
@@ -399,13 +497,17 @@ class Store(ABC):
 
         pool = self.build_conn if request.is_build else self.transfer_conn
 
-        async with pool() as conn:
-            return await conn.call(
-                request,
-                client=client,
-                suppress_last=suppress_last,
-                raise_on_error=raise_on_error,
-            )
+        try:
+            async with pool() as conn:
+                return await conn.call(
+                    request,
+                    client=client,
+                    suppress_last=suppress_last,
+                    raise_on_error=raise_on_error,
+                )
+        except _TRANSPORT_ERRORS:
+            self.record_failure()
+            raise
 
     async def execute(
         self,
@@ -547,7 +649,8 @@ class Store(ABC):
         return self.pool.acquire("transfer")
 
     async def close(self) -> None:
-        """Close all pooled connections and stop sweep task."""
+        """Close all pooled connections, stop background tasks."""
+        await self._stop_reconnect_loop()
         await self.pool.close()
 
     @property

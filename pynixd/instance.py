@@ -129,6 +129,15 @@ class Server:
                 store.tracker.add_known_paths(paths, update_regtime=False)
                 log.info("loaded_cached_paths", store_id=store.store_id, count=len(paths))
 
+        # Wire reconnect callback before start so the loop is ready
+        captured_dynamic = dynamic
+
+        async def _on_store_reconnect() -> None:
+            if self.scheduler:
+                self.scheduler.on_store_added(store, dynamic=captured_dynamic)
+
+        store._on_reconnect = _on_store_reconnect
+
         try:
             await store.start()
         except Exception:
