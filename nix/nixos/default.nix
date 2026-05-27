@@ -63,6 +63,8 @@ in
         http_port = null;
         local_store_priority = 1.0;
       };
+      environment.etc."pynixd/pynixd.json".source = configFile;
+
       systemd.services.pynixd = {
         description = "pynixd - Python Nix daemon protocol proxy";
         wantedBy = [ "multi-user.target" ];
