@@ -1,18 +1,28 @@
 {
   pkgs ?
     let
+      inputs =
+        (
+          let
+            lock = builtins.fromJSON (builtins.readFile ./flake.lock);
+            flake-compatish = import (fetchTree lock.nodes.flake-compatish.locked);
+          in
+          flake-compatish {
+            source = ./.;
+            overrides = {
+              self = ./.;
+            };
+          }
+        ).inputs;
+
       nixPath = builtins.tryEval (import <nixpkgs> { });
-      nixOnline = import (fetchTree {
-        type = "github";
-        owner = "nixos";
-        repo = "nixpkgs";
-        ref = "nixpkgs-unstable";
-      }) { };
+      nixInputs = import inputs.nixpkgs { };
     in
-    if nixPath.success then nixPath.value else nixOnline,
-  lib ? pkgs.lib,
+    if nixPath.success then nixPath.value else nixInputs,
 }:
 let
+  inherit (pkgs) lib;
+
   python = pkgs.python3;
 
   commonAttrs = {
@@ -59,7 +69,7 @@ let
       python.pkgs.pytest
       python.pkgs.pytest-asyncio
       python.pkgs.pytest-timeout
-   ];
+    ];
 
     meta = {
       description = "Python Nix daemon protocol proxy over SSH";
@@ -152,7 +162,7 @@ package
     };
     pytest = pkgs.callPackage ./tests/derivations/pytest {
       pynixd-lib = library;
-    src = lib.cleanSource ./.;
+      src = lib.cleanSource ./.;
 
     };
   };
