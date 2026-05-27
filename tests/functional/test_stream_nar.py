@@ -14,7 +14,7 @@ from pynixd.store_path import StorePath
 from tests.conftest import (
     CLIENT_BIN,
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
     run_subproc,
 )
@@ -45,18 +45,14 @@ async def test_stream_nar() -> None:
 
     # Source store is the system store (/)
     src_store = LocalSocketStore(
-        store_id="system",
-        store_path=Path("/"),
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="system", store_path=Path("/"), no_probe=True),
     )
 
     # Destination store is a temporary store
     dst_path = STORE_PREFIX / "test-stream-nar"
     rmtree_robust(dst_path)
     dst_store = LocalSocketStore(
-        store_id="test-stream-nar",
-        store_path=dst_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="test-stream-nar", store_path=dst_path, no_probe=True),
     )
 
     try:

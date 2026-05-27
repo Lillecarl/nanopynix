@@ -10,6 +10,7 @@ import pytest
 import structlog
 
 from pynixd import Server
+from pynixd.config import SSHSubprocessStoreSpec
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
@@ -17,7 +18,7 @@ from tests.conftest import (
     CLIENT_BIN,
     NIX_BIN,
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
     run_subproc,
 )
@@ -54,9 +55,11 @@ async def test_pynixd_delegation_build(tmp_path: Path) -> None:
     rmtree_robust(store_b_path)
     store_b_path.mkdir(parents=True, exist_ok=True)
     store_b = LocalSocketStore(
-        store_id="b-local",
-        store_path=store_b_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(
+            store_id="b-local",
+            store_path=store_b_path,
+            no_probe=True,
+        ),
     )
 
     # 1. Start Server B (The Actual Builder)
@@ -71,13 +74,15 @@ async def test_pynixd_delegation_build(tmp_path: Path) -> None:
         # 2. Start Server A (The Proxy)
         # It has server_b as its remote store.
         store_a_b = SSHSubprocessStore(
-            store_id="builder-b",
-            host="127.0.0.1",
-            port=port_b,
-            username=server_b.username,
-            client_keys=[key],
-            nix_bin=str(NIX_BIN),
-            monitor=False,
+            SSHSubprocessStoreSpec(
+                store_id=StoreId("builder-b"),
+                host="127.0.0.1",
+                port=port_b,
+                username=server_b.username,
+                client_keys=[key],
+                nix_bin=str(NIX_BIN),
+                monitor=False,
+            ),
         )
 
         # Server A's local store
@@ -85,9 +90,11 @@ async def test_pynixd_delegation_build(tmp_path: Path) -> None:
         rmtree_robust(store_a_path)
         store_a_path.mkdir(parents=True, exist_ok=True)
         store_a = LocalSocketStore(
-            store_id="a-local",
-            store_path=store_a_path,
-            **get_test_store_kwargs(no_probe=True),
+            make_test_spec(
+                store_id="a-local",
+                store_path=store_a_path,
+                no_probe=True,
+            ),
         )
 
         unix_path_a = tmp_path / "server-a.sock"

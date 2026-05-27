@@ -14,10 +14,13 @@ import asyncssh
 import structlog
 
 from .. import wire
-from ..config import PynixdSettings
+from ..config import (
+    PynixdSettings,
+    SSHSocketStoreSpec,
+    SSHSubprocessStoreSpec,
+)
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, GenericResourcePoller, ResourceMonitor
-from ..types.ids import StoreId
 from ..wire import SSHNixReader, SSHNixWriter
 from .base import Store
 
@@ -26,6 +29,7 @@ if TYPE_CHECKING:
         CpuUtil,
         MemInfo,
     )
+    from ..types.ids import StoreId
 
 log = structlog.get_logger(__name__)
 
@@ -53,7 +57,7 @@ class _SSHStoreMixin(Store):
     def init_ssh_state(
         self,
         *,
-        monitor: bool = True,
+        monitor_enabled: bool = True,
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
         settings: PynixdSettings | None = None,
     ) -> None:
@@ -63,10 +67,9 @@ class _SSHStoreMixin(Store):
         self.backoff = self.INITIAL_BACKOFF
         self.max_backoff = self.MAX_BACKOFF
         self.last_failure = 0.0
-        self.monitor_enabled = monitor
+        self.monitor_enabled = monitor_enabled
         self.client_keys = client_keys
         self.settings = settings or PynixdSettings()
-        # self.gate is inherited from Store.__init__
         self.monitor: ResourceMonitor | None = None
 
     async def start(self, sync_paths: bool = True) -> None:
@@ -232,42 +235,17 @@ class SSHSubprocessStore(_SSHStoreMixin):
     Otherwise runs ``nix-daemon --stdio`` (default store, nixbuild.net compat).
     """
 
-    def __init__(
-        self,
-        host: str,
-        store_id: str | StoreId | None = None,
-        port: int = 22,
-        username: str | None = None,
-        store_path: Path = Path("/"),
-        feature_matrix: dict[str, set[str]] | None = None,
-        probe: bool = True,
-        no_schedule: bool = False,
-        scheduleable: bool = True,
-        monitor: bool = True,
-        client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
-        nix_bin: str = "nix",
-        priority: float = 1.0,
-        gc_enabled: bool = True,
-        gc_max_age: int | None = None,
-    ) -> None:
-        super().__init__(
-            store_id=StoreId(store_id)
-            if isinstance(store_id, str)
-            else (store_id or StoreId(f"ssh:{username or ''}@{host}:{port}")),
-            store_path=store_path,
-            feature_matrix=feature_matrix,
-            probe=probe,
-            no_schedule=no_schedule,
-            scheduleable=scheduleable,
-            priority=priority,
-            gc_enabled=gc_enabled,
-            gc_max_age=gc_max_age,
+    def __init__(self, spec: SSHSubprocessStoreSpec) -> None:
+        super().__init__(spec)
+        self.host = spec.host
+        self.port = spec.port
+        self.username = spec.username
+        self.nix_bin = spec.nix_bin
+        self.init_ssh_state(
+            monitor_enabled=spec.monitor,
+            client_keys=list(spec.client_keys) if spec.client_keys else None,
+            settings=spec.settings,
         )
-        self.host = host
-        self.port = port
-        self.username = username
-        self.nix_bin = nix_bin
-        self.init_ssh_state(monitor=monitor, client_keys=client_keys)
         self.ssh_processes: list[asyncssh.SSHClientProcess] = []
 
     async def create_conn(self) -> Connection:
@@ -320,38 +298,17 @@ _DAEMON_SOCKET_PATH = Path("/nix/var/nix/daemon-socket/socket")
 class SSHSocketStore(_SSHStoreMixin):
     """Persistent SSH connection, tunnels to remote Unix socket."""
 
-    def __init__(
-        self,
-        host: str,
-        store_id: StoreId | None = None,
-        port: int = 22,
-        username: str | None = None,
-        socket_path: Path = _DAEMON_SOCKET_PATH,
-        feature_matrix: dict[str, set[str]] | None = None,
-        probe: bool = True,
-        no_schedule: bool = False,
-        scheduleable: bool = True,
-        monitor: bool = True,
-        client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
-        priority: float = 1.0,
-        gc_enabled: bool = True,
-        gc_max_age: int | None = None,
-    ) -> None:
-        super().__init__(
-            store_id=store_id or StoreId(f"ssh-socket:{username or ''}@{host}:{port}"),
-            feature_matrix=feature_matrix,
-            probe=probe,
-            no_schedule=no_schedule,
-            scheduleable=scheduleable,
-            priority=priority,
-            gc_enabled=gc_enabled,
-            gc_max_age=gc_max_age,
+    def __init__(self, spec: SSHSocketStoreSpec) -> None:
+        super().__init__(spec)
+        self.host = spec.host
+        self.port = spec.port
+        self.username = spec.username
+        self.socket_path = spec.socket_path
+        self.init_ssh_state(
+            monitor_enabled=spec.monitor,
+            client_keys=list(spec.client_keys) if spec.client_keys else None,
+            settings=spec.settings,
         )
-        self.host = host
-        self.port = port
-        self.username = username
-        self.socket_path = socket_path
-        self.init_ssh_state(monitor=monitor, client_keys=client_keys)
 
     async def create_conn(self) -> Connection:
         ssh_conn = await self.ensure_ssh()

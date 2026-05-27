@@ -18,7 +18,7 @@ from tests.conftest import (
     CLIENT_BIN,
     NIX_BIN,
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
     run_subproc,
     server_uri,
@@ -163,14 +163,10 @@ async def test_throughput_pynixd(profiler: pyinstrument.Profiler) -> None:
     client_path.mkdir(parents=True, exist_ok=True)
 
     local_store = LocalSocketStore(
-        store_id="local",
-        store_path=local_path,
-        **get_test_store_kwargs(),
+        make_test_spec(store_id="local", store_path=local_path),
     )
     builder_store = LocalSocketStore(
-        store_id="builder",
-        store_path=builder_path,
-        **get_test_store_kwargs(),
+        make_test_spec(store_id="builder", store_path=builder_path),
     )
 
     async with Server(

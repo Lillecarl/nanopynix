@@ -12,12 +12,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from pynixd import Server
+from pynixd.config import SSHSubprocessStoreSpec
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.types.ids import StoreId
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
 )
 
@@ -38,9 +39,12 @@ async def test_handshake_feature_announcement(tmp_path: Path) -> None:
     rmtree_robust(store_b_path)
     store_b_path.mkdir(parents=True, exist_ok=True)
     store_b = LocalSocketStore(
-        store_id="b-local",
-        store_path=store_b_path,
-        **get_test_store_kwargs(no_probe=True, feature_matrix=fm_b),
+        make_test_spec(
+            store_id="b-local",
+            store_path=store_b_path,
+            no_probe=True,
+            feature_matrix=fm_b,
+        ),
     )
     await store_b.ensure_daemon()
 
@@ -55,14 +59,16 @@ async def test_handshake_feature_announcement(tmp_path: Path) -> None:
         # 2. Client connecting to Server B
         # It should receive the feature matrix in the handshake and skip probing.
         client_store = SSHSubprocessStore(
-            store_id="client-to-b",
-            host="127.0.0.1",
-            port=port_b,
-            username=server_b.username,
-            client_keys=[key],
-            nix_bin=str(NIX_BIN),
-            monitor=False,
-            probe=True,  # We want it to probe normally...
+            SSHSubprocessStoreSpec(
+                store_id=StoreId("client-to-b"),
+                host="127.0.0.1",
+                port=port_b,
+                username=server_b.username,
+                client_keys=[key],
+                nix_bin=str(NIX_BIN),
+                monitor=False,
+                probe=True,
+            ),
         )
 
         # But it should be probed IMMEDIATELY upon connection via handshake

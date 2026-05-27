@@ -30,7 +30,7 @@ from pynixd.operations.nar_from_path import NarFromPathRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
-from tests.conftest import get_test_store_kwargs
+from tests.conftest import make_test_spec
 
 log = structlog.get_logger(__name__)
 
@@ -40,9 +40,7 @@ def _get_system_store_paths() -> list[str]:
 
     async def _inner() -> list[str]:
         store = LocalSocketStore(
-            store_id="system",
-            store_path=Path("/"),
-            **get_test_store_kwargs(no_probe=True),
+            make_test_spec(store_id="system", store_path=Path("/"), no_probe=True),
         )
         try:
             resp = await store.execute(QueryAllValidPathsRequest())
@@ -78,9 +76,7 @@ async def test_nar_roundtrip_via_streaming(store_path_str: str) -> None:
     spath = StorePath(store_path_str)
 
     store = LocalSocketStore(
-        store_id="system",
-        store_path=Path("/"),
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="system", store_path=Path("/"), no_probe=True),
     )
     try:
         info_resp = await store.execute(QueryPathInfoRequest(path=spath))
@@ -132,9 +128,7 @@ async def test_nar_forwarder_convenience(store_path_str: str) -> None:
     spath = StorePath(store_path_str)
 
     store = LocalSocketStore(
-        store_id="system",
-        store_path=Path("/"),
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="system", store_path=Path("/"), no_probe=True),
     )
     try:
         info_resp = await store.execute(QueryPathInfoRequest(path=spath))

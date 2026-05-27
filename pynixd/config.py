@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -77,22 +76,30 @@ class StoreRankingSettings(BaseModel):
     """Minimum score required for a store to be considered. If lower, builds stay queued."""
 
 
-class StoreSpecBase(BaseModel, ABC):
+class StoreSpecBase(BaseModel):
     """Common settings shared by all store specs."""
 
+    store_id: StoreId | None = None
     systems: set[str] | None = None
     system_features: set[str] = Field(default_factory=set)
+    feature_matrix: dict[str, set[str]] | None = None
     nix_bin: str = "nix"
+    idle_ttl: float = 10.0
     scheduleable: bool = True
     priority: float = 1.0
     gc_enabled: bool = True
     gc_max_age: int | None = None
+    no_schedule: bool = False
+    probe: bool | None = None
+    settings: PynixdSettings | None = None
 
-    def _feature_matrix(self) -> dict[str, set[str]] | None:
+    def _effective_feature_matrix(self) -> dict[str, set[str]] | None:
+        if self.feature_matrix is not None:
+            return self.feature_matrix
         return _feature_matrix_from_config(self.systems, self.system_features)
 
-    @abstractmethod
-    def to_store(self, store_id: str) -> Store: ...
+    def to_store(self, store_id: str) -> Store:
+        raise NotImplementedError(f"{type(self).__name__} must implement to_store()")
 
 
 class LocalSocketStoreSpec(StoreSpecBase):
@@ -107,49 +114,25 @@ class LocalSocketStoreSpec(StoreSpecBase):
     def to_store(self, store_id: str) -> Store:
         from .store import LocalSocketStore
 
-        fm = self._feature_matrix()
         return LocalSocketStore(
-            store_id=StoreId(store_id),
-            store_path=self.store_path,
-            socket_path=self.socket_path,
-            feature_matrix=fm,
-            probe=fm is None,
-            nix_bin=self.nix_bin,
-            extra_env=self.extra_env,
-            extra_args=self.extra_args,
-            use_db=self.use_db,
-            monitor=self.monitor,
-            scheduleable=self.scheduleable,
-            priority=self.priority,
-            gc_enabled=self.gc_enabled,
-            gc_max_age=self.gc_max_age,
+            self.model_copy(update={"store_id": StoreId(store_id)}),
         )
 
 
 class LocalSubprocessStoreSpec(StoreSpecBase):
     type: Literal["local-subprocess"] = "local-subprocess"
-    store_path: Path
+    store_path: Path  # Required — overrides parent default of /
     extra_env: dict[str, str] | None = None
     extra_args: list[str] | None = None
     use_db: bool = True
+    monitor: bool = True
+    socket_path: Path | None = None
 
     def to_store(self, store_id: str) -> Store:
         from .store import LocalSocketStore
 
-        fm = self._feature_matrix()
         return LocalSocketStore(
-            store_id=StoreId(store_id),
-            store_path=self.store_path,
-            feature_matrix=fm,
-            probe=fm is None,
-            nix_bin=self.nix_bin,
-            extra_env=self.extra_env,
-            extra_args=self.extra_args,
-            use_db=self.use_db,
-            scheduleable=self.scheduleable,
-            priority=self.priority,
-            gc_enabled=self.gc_enabled,
-            gc_max_age=self.gc_max_age,
+            self.model_copy(update={"store_id": StoreId(store_id)}),
         )
 
 
@@ -160,27 +143,13 @@ class SSHSubprocessStoreSpec(StoreSpecBase):
     username: str | None = None
     store_path: Path = Path("/")
     monitor: bool = True
-    client_keys: list[Path] = Field(default_factory=list)
+    client_keys: list[Any] = Field(default_factory=list)
 
     def to_store(self, store_id: str) -> Store:
         from .store import SSHSubprocessStore
 
-        fm = self._feature_matrix()
         return SSHSubprocessStore(
-            host=self.host,
-            store_id=StoreId(store_id),
-            port=self.port,
-            username=self.username,
-            store_path=self.store_path,
-            feature_matrix=fm,
-            probe=fm is None,
-            monitor=self.monitor,
-            nix_bin=self.nix_bin,
-            client_keys=list(self.client_keys) if self.client_keys else None,
-            scheduleable=self.scheduleable,
-            priority=self.priority,
-            gc_enabled=self.gc_enabled,
-            gc_max_age=self.gc_max_age,
+            self.model_copy(update={"store_id": StoreId(store_id)}),
         )
 
 
@@ -191,26 +160,13 @@ class SSHSocketStoreSpec(StoreSpecBase):
     username: str | None = None
     socket_path: Path = Path("/nix/var/nix/daemon-socket/socket")
     monitor: bool = True
-    client_keys: list[Path] = Field(default_factory=list)
+    client_keys: list[Any] = Field(default_factory=list)
 
     def to_store(self, store_id: str) -> Store:
         from .store import SSHSocketStore
 
-        fm = self._feature_matrix()
         return SSHSocketStore(
-            host=self.host,
-            store_id=StoreId(store_id),
-            port=self.port,
-            username=self.username,
-            socket_path=self.socket_path,
-            feature_matrix=fm,
-            probe=fm is None,
-            monitor=self.monitor,
-            client_keys=list(self.client_keys) if self.client_keys else None,
-            scheduleable=self.scheduleable,
-            priority=self.priority,
-            gc_enabled=self.gc_enabled,
-            gc_max_age=self.gc_max_age,
+            self.model_copy(update={"store_id": StoreId(store_id)}),
         )
 
 
@@ -316,14 +272,16 @@ class PynixdSettings(BaseSettings):
 
         stores: dict[StoreId, Store] = {}
         for key, spec in self.stores.items():
+            spec.settings = self
             store = spec.to_store(store_id=key)
             stores[store.store_id] = store
 
         if StoreId("local") not in stores:
-            stores[StoreId("local")] = LocalSocketStore(
+            spec = LocalSocketStoreSpec(
                 store_id=StoreId("local"),
-                store_path=Path("/"),
                 monitor=False,
+                settings=self,
             )
+            stores[StoreId("local")] = LocalSocketStore(spec)
 
         return stores

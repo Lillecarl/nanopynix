@@ -20,6 +20,7 @@ import structlog
 from environs import env
 
 from pynixd import Server
+from pynixd.config import LocalSocketStoreSpec
 from pynixd.instance import NixImplementation
 from pynixd.store import LocalSocketStore
 from pynixd.testing import clear_test_stash
@@ -175,18 +176,22 @@ DEFAULT_SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 DEFAULT_NIX_CONFIG = NixConfig.for_test_store()
 
 
-def get_test_store_kwargs(
+def make_test_spec(
+    store_id: str = "local",
+    store_path: Path | None = None,
     nix_config: NixConfig = DEFAULT_NIX_CONFIG,
     no_probe: bool = False,
     **kwargs,
-) -> dict[str, Any]:
-    """Return common kwargs for LocalSocketStore in tests.
+) -> LocalSocketStoreSpec:
+    """Create a LocalSocketStoreSpec with test defaults.
 
     Args:
+        store_id: Store identifier (used as StoreId).
+        store_path: Store root path. Defaults to STORE_PREFIX / store_id.
         nix_config: NixConfig to derive NIX_CONFIG env and daemon --option args from.
         no_probe: If True, skip build-based system/feature probing (saves ~4s per store).
             Supplies a default feature_matrix covering common test systems.
-        **kwargs: Additional overrides passed through to LocalSocketStore.
+        **kwargs: Additional overrides passed through to LocalSocketStoreSpec.
     """
     extra_args = nix_config.to_daemon_args()
     if "extra_args" in kwargs:
@@ -198,16 +203,23 @@ def get_test_store_kwargs(
     if "NIX_CONFIG" not in extra_env:
         extra_env["NIX_CONFIG"] = nix_config.to_nix_config_env()
 
-    res = {
-        "nix_bin": str(NIX_BIN),
-        "extra_args": extra_args,
-        "extra_env": extra_env,
-    }
     if no_probe:
-        res["probe"] = False
-        res.setdefault("feature_matrix", _NO_PROBE_FEATURE_MATRIX)
-    res.update(kwargs)
-    return res
+        kwargs.setdefault("probe", False)
+        kwargs.setdefault("feature_matrix", _NO_PROBE_FEATURE_MATRIX)
+
+    if store_path is None:
+        store_path = STORE_PREFIX / store_id
+
+    nix_bin = str(kwargs.pop("nix_bin", NIX_BIN))
+
+    return LocalSocketStoreSpec(
+        store_id=StoreId(store_id),
+        store_path=store_path,
+        nix_bin=nix_bin,
+        extra_args=extra_args,
+        extra_env=extra_env,
+        **kwargs,
+    )
 
 
 STORE_PREFIX = Path("/tmp/pynixd-stores")
@@ -728,14 +740,20 @@ async def pynixd_server(
     builder_bin = LIX_BIN if request.config.getoption("builder_bin") == "lix" else NIX_BIN
 
     local_store = LocalSocketStore(
-        store_id=StoreId("local"),
-        store_path=local_path,
-        **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG, nix_bin=str(local_bin)),
+        make_test_spec(
+            store_id="local",
+            store_path=local_path,
+            nix_config=SESSION_NIX_CONFIG,
+            nix_bin=str(local_bin),
+        ),
     )
     builder_store = LocalSocketStore(
-        store_id=StoreId("builder"),
-        store_path=builder_path,
-        **get_test_store_kwargs(nix_config=SESSION_NIX_CONFIG, nix_bin=str(builder_bin)),
+        make_test_spec(
+            store_id="builder",
+            store_path=builder_path,
+            nix_config=SESSION_NIX_CONFIG,
+            nix_bin=str(builder_bin),
+        ),
     )
 
     upload_dir = tmp_path_factory.mktemp("http-uploads")

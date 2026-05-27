@@ -9,6 +9,7 @@ import pytest
 import structlog
 
 from pynixd import Server
+from pynixd.config import LocalSocketStoreSpec, SSHSubprocessStoreSpec
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_infos import (
     QueryPathInfosRequest,
@@ -20,7 +21,7 @@ from pynixd.types.ids import StoreId
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
     run_subproc,
 )
@@ -53,9 +54,11 @@ async def test_extension_delegation(tmp_path: Path) -> None:
     rmtree_robust(store_b_path)
     store_b_path.mkdir(parents=True, exist_ok=True)
     store_b = LocalSocketStore(
-        store_id="b-local",
-        store_path=store_b_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(
+            store_id="b-local",
+            store_path=store_b_path,
+            no_probe=True,
+        ),
     )
     await store_b.ensure_daemon()
 
@@ -83,21 +86,25 @@ async def test_extension_delegation(tmp_path: Path) -> None:
         # 2. Start Server A (Proxy)
         # It has server_b as a store.
         store_a_b = SSHSubprocessStore(
-            store_id="builder-b",
-            host="127.0.0.1",
-            port=port_b,
-            username=server_b.username,
-            client_keys=[key],
-            nix_bin=str(NIX_BIN),
-            monitor=False,
+            SSHSubprocessStoreSpec(
+                store_id=StoreId("builder-b"),
+                host="127.0.0.1",
+                port=port_b,
+                username=server_b.username,
+                client_keys=[key],
+                nix_bin=str(NIX_BIN),
+                monitor=False,
+            ),
         )
 
         # Server A's local store doesn't have a DB and doesn't support extensions
         store_a = LocalSocketStore(
-            store_id="a-local",
-            store_path=Path("/"),
-            use_db=False,
-            **get_test_store_kwargs(no_probe=True),
+            make_test_spec(
+                store_id="a-local",
+                store_path=Path("/"),
+                no_probe=True,
+                use_db=False,
+            ),
         )
 
         unix_path_a = tmp_path / "server-a.sock"
@@ -125,7 +132,12 @@ async def test_extension_delegation(tmp_path: Path) -> None:
             # 3. Test delegation: Connect to Server A via Unix socket
             # This will trigger DaemonProxy.execute which should delegate to Server B
             # because Server A's local store (store_a) doesn't have the info.
-            client_store = LocalSocketStore(store_id="client", socket_path=unix_path_a)
+            client_store = LocalSocketStore(
+                LocalSocketStoreSpec(
+                    store_id=StoreId("client"),
+                    socket_path=unix_path_a,
+                ),
+            )
             resp_a = await client_store.execute(req)
 
             assert path in resp_a.infos

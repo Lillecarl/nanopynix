@@ -8,7 +8,7 @@ import pytest
 from pynixd import Server
 from pynixd.store import LocalSocketStore
 from pynixd.types.ids import StoreId
-from tests.conftest import CLIENT_BIN, get_test_store_kwargs, run_subproc
+from tests.conftest import CLIENT_BIN, make_test_spec, run_subproc
 
 """
 End-to-End Nix Integration Tests via Unix Socket
@@ -27,9 +27,7 @@ async def pynixd_server(tmp_path: Path):
     socket_path = tmp_path / "pynixd.sock"
 
     local_store = LocalSocketStore(
-        store_id="local",
-        store_path=store_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="local", store_path=store_path, no_probe=True),
     )
 
     async with Server(

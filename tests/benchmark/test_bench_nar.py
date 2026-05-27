@@ -13,10 +13,12 @@ import pytest
 import structlog
 
 from pynixd import wire
+from pynixd.config import LocalSocketStoreSpec
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore, Store
 from pynixd.store_path import StorePath
+from pynixd.types.ids import StoreId
 from tests.conftest import CLIENT_BIN, rmtree_robust, run_subproc
 
 if TYPE_CHECKING:
@@ -41,7 +43,7 @@ _CONCURRENCY_LEVELS = [1, 4, 8]
 async def _make_store(store_type: str) -> Store:
     """Create a store that reads from the system store."""
     if store_type == "local-socket":
-        return LocalSocketStore(store_id="local-socket")
+        return LocalSocketStore(LocalSocketStoreSpec(store_id=StoreId("local-socket")))
     raise ValueError(f"Unknown store type: {store_type}")
 
 
@@ -59,9 +61,7 @@ async def dst_store() -> AsyncIterator[LocalSocketStore]:
     BENCH_DST.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
 
     s = LocalSocketStore(
-        store_id="bench-dst",
-        store_path=BENCH_DST,
-        nix_bin=str(CLIENT_BIN),
+        LocalSocketStoreSpec(store_id=StoreId("bench-dst"), store_path=BENCH_DST, nix_bin=str(CLIENT_BIN)),
     )
     yield s
     await s.close()

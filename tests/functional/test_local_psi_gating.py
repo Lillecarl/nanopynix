@@ -14,7 +14,7 @@ from pynixd.config import PynixdSettings
 from pynixd.exceptions import ResourceExhaustedError
 from pynixd.monitor import ResourceMonitor
 from pynixd.store.local import LocalSocketStore
-from tests.conftest import get_test_store_kwargs
+from tests.conftest import make_test_spec
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,10 +35,7 @@ async def test_local_socket_store_gating(tmp_path: Path) -> None:
 
     settings = PynixdSettings(gate_timeout=0.2)  # short timeout for testing
     store = LocalSocketStore(
-        store_id="test-gate",
-        store_path=tmp_path,
-        settings=settings,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="test-gate", store_path=tmp_path, no_probe=True, settings=settings),
     )
 
     # 1. Replace the real monitor with a mock one we can control
@@ -83,10 +80,7 @@ async def test_gate_wait_timeout_success(tmp_path: Path) -> None:
 
     settings = PynixdSettings(gate_timeout=2.0)
     store = LocalSocketStore(
-        store_id="test-gate-timeout",
-        store_path=tmp_path,
-        settings=settings,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="test-gate-timeout", store_path=tmp_path, no_probe=True, settings=settings),
     )
 
     if store.monitor:

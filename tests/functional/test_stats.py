@@ -40,7 +40,7 @@ from pynixd.psi import CpuUtil
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import BuildId, StoreId
-from tests.conftest import STORE_PREFIX, get_test_store_kwargs, rmtree_robust
+from tests.conftest import STORE_PREFIX, make_test_spec, rmtree_robust
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -153,14 +153,10 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
     pynixd_remote_path.mkdir(parents=True, exist_ok=True)
 
     pynixd_local = LocalSocketStore(
-        store_id="local",
-        store_path=pynixd_local_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     pynixd_remote = StatsTestStore(
-        store_id="remote",
-        store_path=pynixd_remote_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="remote", store_path=pynixd_remote_path, no_probe=True),
     )
     pynixd_remote.build_delays["fast-pkg"] = 0.05
 
@@ -230,14 +226,10 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
     pynixd_remote_path.mkdir(parents=True, exist_ok=True)
 
     pynixd_local = LocalSocketStore(
-        store_id="local",
-        store_path=pynixd_local_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     pynixd_remote = StatsTestStore(
-        store_id="remote",
-        store_path=pynixd_remote_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="remote", store_path=pynixd_remote_path, no_probe=True),
     )
 
     async with Server(
@@ -323,9 +315,7 @@ async def test_levenshtein_sql(tmp_path: Path) -> None:
     conn.close()
 
     pynixd_local = LocalSocketStore(
-        store_id="local",
-        store_path=pynixd_local_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     # Ensure DB is created
     db = await LocalStoreDB.open(pynixd_local_path)
@@ -389,23 +379,17 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     rmtree_robust(pynixd_free_path)
 
     pynixd_local = LocalSocketStore(
-        store_id="local",
-        store_path=pynixd_local_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     pynixd_busy = CpuUtilTestStore(
-        store_id="busy",
-        store_path=pynixd_busy_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="busy", store_path=pynixd_busy_path, no_probe=True),
     )
     # Utilization 101% ensures score < 0 even with no penalties
     pynixd_busy._cpu_util = CpuUtil(utilization=101.0, cores=2.0, throttled_pct=10.0)
     pynixd_busy.build_delays["test-pkg"] = 0.05
 
     pynixd_free = CpuUtilTestStore(
-        store_id="free",
-        store_path=pynixd_free_path,
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="free", store_path=pynixd_free_path, no_probe=True),
     )
     pynixd_free._cpu_util = CpuUtil(utilization=50.0, cores=2.0, throttled_pct=0.0)
     pynixd_free.build_delays["test-pkg"] = 0.05

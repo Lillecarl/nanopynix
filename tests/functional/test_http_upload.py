@@ -18,7 +18,7 @@ from tests.conftest import (
     CLIENT_BIN,
     SESSION_HTTP_PASS,
     SESSION_HTTP_USER,
-    get_test_store_kwargs,
+    make_test_spec,
     run_subproc,
     server_uri,
 )
@@ -76,9 +76,7 @@ async def test_http_upload(
 
     # Get its NAR and narinfo from root store
     root_store = LocalSocketStore(
-        store_id="root",
-        store_path=Path("/"),
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="root", store_path=Path("/"), no_probe=True),
     )
     info_resp = await root_store.execute(QueryPathInfoRequest(path=path))
     assert info_resp.valid

@@ -14,7 +14,7 @@ from tests.conftest import (
     CLIENT_BIN,
     SESSION_STORE_PREFIX,
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
     run_subproc,
     server_uri,
@@ -39,10 +39,6 @@ CA_NIX_CONFIG = NixConfig.for_ca_derivations(
 )
 
 
-def _ca_test_store_kwargs(**overrides) -> dict:
-    return get_test_store_kwargs(nix_config=CA_NIX_CONFIG, **overrides)
-
-
 @pytest.fixture
 async def ca_env(pynixd_server: Server):
     """Set up a pynixd server with CA-derivations enabled."""
@@ -59,9 +55,7 @@ async def test_ca_simple_build_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        store_id="ca-root",
-        store_path=store_path,
-        **_ca_test_store_kwargs(),
+        make_test_spec(store_id="ca-root", store_path=store_path, nix_config=CA_NIX_CONFIG),
     )
 
     try:
@@ -98,9 +92,7 @@ async def test_ca_multi_output_build_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        store_id="ca-root-multi",
-        store_path=store_path,
-        **_ca_test_store_kwargs(),
+        make_test_spec(store_id="ca-root-multi", store_path=store_path, nix_config=CA_NIX_CONFIG),
     )
 
     try:
@@ -139,9 +131,7 @@ async def test_ca_depends_on_ca_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        store_id="ca-root-depends",
-        store_path=store_path,
-        **_ca_test_store_kwargs(),
+        make_test_spec(store_id="ca-root-depends", store_path=store_path, nix_config=CA_NIX_CONFIG),
     )
 
     try:
@@ -178,9 +168,7 @@ async def test_non_ca_depends_on_ca_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        store_id="ca-root-non-ca-depends",
-        store_path=store_path,
-        **_ca_test_store_kwargs(),
+        make_test_spec(store_id="ca-root-non-ca-depends", store_path=store_path, nix_config=CA_NIX_CONFIG),
     )
 
     try:
@@ -451,9 +439,7 @@ async def test_ca_query_derivation_output_map_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        store_id="ca-root-qdom",
-        store_path=store_path,
-        **_ca_test_store_kwargs(),
+        make_test_spec(store_id="ca-root-qdom", store_path=store_path, nix_config=CA_NIX_CONFIG),
     )
 
     await store.ensure_daemon()
@@ -694,9 +680,7 @@ async def test_text_hashed_ca_build_root_store(
     rmtree_robust(store_path)
 
     store = LocalSocketStore(
-        store_id="ca-root-text",
-        store_path=store_path,
-        **_ca_test_store_kwargs(),
+        make_test_spec(store_id="ca-root-text", store_path=store_path, nix_config=CA_NIX_CONFIG),
     )
 
     try:

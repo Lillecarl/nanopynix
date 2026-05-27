@@ -39,7 +39,7 @@ from pynixd.store_path import StorePath
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
     run_subproc,
 )
@@ -336,11 +336,8 @@ async def main() -> None:
     root_path = STORE_PREFIX / "deferred-replay-root"
     rmtree_robust(root_path)
 
-    root_kwargs = get_test_store_kwargs(nix_config=CA_NIX_CONFIG)
     root_store = LocalSocketStore(
-        store_id="deferred-replay-root",
-        store_path=root_path,
-        **root_kwargs,
+        make_test_spec(store_id="deferred-replay-root", store_path=root_path, nix_config=CA_NIX_CONFIG),
     )
     await root_store.ensure_daemon()
 
@@ -517,9 +514,7 @@ async def main() -> None:
     rmtree_robust(test_path)
 
     test_store = LocalSocketStore(
-        store_id="deferred-replay-resolve",
-        store_path=test_path,
-        **root_kwargs,
+        make_test_spec(store_id="deferred-replay-resolve", store_path=test_path, nix_config=CA_NIX_CONFIG),
     )
     await test_store.ensure_daemon()
 

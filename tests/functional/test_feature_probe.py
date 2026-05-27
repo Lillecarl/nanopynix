@@ -11,10 +11,12 @@ from pathlib import Path
 import pytest
 import structlog
 
+from pynixd.config import SSHSubprocessStoreSpec
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
+from pynixd.types.ids import StoreId
 from tests.conftest import (
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
 )
 from tests.nix_config import NixConfig
@@ -34,11 +36,12 @@ FEATURE_NIX_CONFIG = NixConfig.for_ca_derivations(
 async def test_feature_probe_in_memory() -> None:
     store_path = STORE_PREFIX / "feature-probe"
     rmtree_robust(store_path)
-    kwargs = get_test_store_kwargs(nix_config=FEATURE_NIX_CONFIG)
     store: LocalSocketStore | SSHSubprocessStore = LocalSocketStore(
-        store_id="feature-probe",
-        store_path=store_path,
-        **kwargs,
+        make_test_spec(
+            store_id="feature-probe",
+            store_path=store_path,
+            nix_config=FEATURE_NIX_CONFIG,
+        ),
     )
     await store.ensure_daemon()
 
@@ -59,10 +62,12 @@ async def test_feature_probe_in_memory() -> None:
 @pytest.mark.skip(reason="requires nixbuild.net; pass -m nixbuild to run")
 async def test_feature_probe_nixbuild_net() -> None:
     store = SSHSubprocessStore(
-        host="eu.nixbuild.net",
-        store_id="nixbuild-net",
-        username="lillecarl",
-        client_keys=[Path("~/.ssh/id_ed25519")],
+        SSHSubprocessStoreSpec(
+            host="eu.nixbuild.net",
+            store_id=StoreId("nixbuild-net"),
+            username="lillecarl",
+            client_keys=[Path("~/.ssh/id_ed25519")],
+        ),
     )
 
     await store.probe()

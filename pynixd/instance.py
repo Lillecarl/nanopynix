@@ -13,7 +13,7 @@ import aiosqlite
 import structlog
 
 from . import wire
-from .config import PynixdSettings
+from .config import LocalSocketStoreSpec, PynixdSettings
 from .context import PynixdContext
 from .http_server import PynixdHttpServer
 from .local_store_db import LocalStoreDB
@@ -59,17 +59,13 @@ class Server:
         if stores is None:
             stores = {
                 StoreId("local"): LocalSocketStore(
-                    store_id=StoreId("local"),
-                    store_path=Path("/"),
-                    monitor=False,
+                    LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False),
                 ),
             }
         elif StoreId("local") not in stores:
             stores = dict(stores)
             stores[StoreId("local")] = LocalSocketStore(
-                store_id=StoreId("local"),
-                store_path=Path("/"),
-                monitor=False,
+                LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False),
             )
 
         path_tracker = PathTracker(db=None)

@@ -15,7 +15,7 @@ import structlog
 from pynixd.drv_parser import parse_drv
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.store import LocalSocketStore
-from tests.conftest import get_test_store_kwargs
+from tests.conftest import make_test_spec
 
 log = structlog.get_logger(__name__)
 
@@ -25,9 +25,7 @@ def _get_system_drv_paths() -> list[str]:
 
     async def _inner() -> list[str]:
         store = LocalSocketStore(
-            store_id="system",
-            store_path=Path("/"),
-            **get_test_store_kwargs(no_probe=True),
+            make_test_spec(store_id="system", store_path=Path("/"), no_probe=True),
         )
         try:
             resp = await store.execute(QueryAllValidPathsRequest())

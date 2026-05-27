@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING
 import pytest
 import structlog
 
+from pynixd.config import LocalSocketStoreSpec
 from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore, Store
 from pynixd.store_path import StorePath
+from pynixd.types.ids import StoreId
 from tests.conftest import CLIENT_BIN, rmtree_robust, run_subproc
 
 if TYPE_CHECKING:
@@ -28,7 +30,7 @@ _STORE_TYPES = ["local-socket"]
 async def _make_store(store_type: str) -> Store:
     """Create a store that reads from the system store."""
     if store_type == "local-socket":
-        return LocalSocketStore(store_id="local-socket")
+        return LocalSocketStore(LocalSocketStoreSpec(store_id=StoreId("local-socket")))
     raise ValueError(f"Unknown store type: {store_type}")
 
 
@@ -121,7 +123,7 @@ async def test_bench_local_socket_overhead():
     """
 
     # 1. pynixd overhead
-    s = LocalSocketStore(store_id="managed", store_path=Path("/"))
+    s = LocalSocketStore(LocalSocketStoreSpec(store_id=StoreId("managed"), store_path=Path("/")))
     start = time.perf_counter()
     await s.execute(QueryAllValidPathsRequest())
     pynixd_elapsed = time.perf_counter() - start

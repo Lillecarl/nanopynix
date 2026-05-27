@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Set as AbstractSet
     from contextlib import AbstractAsyncContextManager
 
+    from ..config import StoreSpecBase
     from ..connection import ClientConn, Connection
     from ..local_store_db import LocalStoreDB
     from ..operations.base import (
@@ -43,9 +44,6 @@ if TYPE_CHECKING:
     from ..types.ids import StoreId
 
 log = structlog.get_logger(__name__)
-
-
-_DEFAULT_IDLE_TTL: float = 10.0
 _CB_THRESHOLD: int = 3  # failures before cooldown
 _CB_MAX_COOLDOWN: float = 300.0  # 5 min max
 
@@ -66,43 +64,40 @@ class Store(ABC):
     Idle connections are automatically closed after idle_ttl seconds.
     """
 
-    def __init__(
-        self,
-        store_id: StoreId,
-        store_path: Path = Path("/"),
-        idle_ttl: float = _DEFAULT_IDLE_TTL,
-        feature_matrix: dict[str, set[str]] | None = None,
-        probe: bool = True,
-        no_schedule: bool = False,
-        scheduleable: bool = True,
-        priority: float = 1.0,
-        gc_enabled: bool = True,
-        gc_max_age: int | None = None,
-    ) -> None:
-        self.store_id = store_id
-        self.scheduleable = scheduleable
-        self.store_path = store_path
+    def __init__(self, spec: StoreSpecBase) -> None:
+        self.spec = spec
+        if spec.store_id is None:
+            raise RuntimeError("store_id must be set on the spec before Store construction")
+        self.store_id: StoreId = spec.store_id
+        self.store_path = getattr(spec, "store_path", Path("/"))
+        self.scheduleable = spec.scheduleable
+        self.priority = spec.priority
+        self.gc_enabled = spec.gc_enabled
+        self.gc_max_age = spec.gc_max_age
+        self.no_schedule = spec.no_schedule
+        self.idle_ttl = spec.idle_ttl
         self.version: int = wire.PROTOCOL_VERSION
         self.nix_version: str = ""
-        self.idle_ttl = idle_ttl
         self.conn_counter = 0
-        self.priority: float = priority
-        self.gc_enabled: bool = gc_enabled
-        self.gc_max_age: int | None = gc_max_age
+
+        fm = spec._effective_feature_matrix()
+        self._feature_matrix: dict[str, set[str]] | None = fm
+        if spec.probe is not None:
+            self._probe = spec.probe
+        else:
+            self._probe = fm is None
 
         self.gate = ResourceGate()
         self.pool = ConnectionPool(
-            store_id=store_id,
+            store_id=self.store_id,
             factory=self._create_conn_with_counter,
             gate=self.gate,
-            idle_ttl=idle_ttl,
+            idle_ttl=self.idle_ttl,
             on_connection_created=self._on_connection_created,
         )
 
         self.monitor: ResourceMonitor | None = None
-        self._feature_matrix: dict[str, set[str]] | None = feature_matrix
-        self._probe = probe
-        self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=store_id)
+        self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=self.store_id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
             maxsize=10000,
             ttl=300,
@@ -115,7 +110,6 @@ class Store(ABC):
         self._probe_event: asyncio.Event = asyncio.Event()
         self._signing_keys: dict[str, SecretKey] = {}
         self.draining: bool = False
-        self.no_schedule: bool = no_schedule
         self._started: bool = False
 
     @property

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 import structlog
 
 from pynixd import metrics, wire
+from pynixd.config import StoreSpecBase
 from pynixd.operations.base import OpResponse
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.query_all_valid_paths import (
@@ -125,14 +126,13 @@ class MockStore(Store):
         feature_matrix: dict[str, set[str]] | None = None,
         cpu_utilization: float = 0.0,
     ) -> None:
-        # We pass probe=False to disable the background task that normally
-        # tries to run 'nix show-derivation' on real stores.
-        super().__init__(
+        spec = StoreSpecBase(
             store_id=StoreId(store_id),
-            store_path=Path(f"/mock/{store_id}"),
             feature_matrix=feature_matrix,
             probe=False,
         )
+        super().__init__(spec)
+        self.store_path = Path(f"/mock/{store_id}")
         self.nix_version = "pynixd-mock-2.18.1"
         # responses: Maps Request type -> fixed Response object
         self.responses: dict[type[OpRequest], Any] = {}

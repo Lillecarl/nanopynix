@@ -32,7 +32,7 @@ from pynixd.store_path import DrvOutput, StorePath
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
     run_subproc,
 )
@@ -51,11 +51,8 @@ DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
 async def main() -> None:
     root_path = STORE_PREFIX / "dyn-drv-root"
     rmtree_robust(root_path)
-    root_kwargs = get_test_store_kwargs(nix_config=DYN_NIX_CONFIG)
     root_store = LocalSocketStore(
-        store_id="dyn-drv-root",
-        store_path=root_path,
-        **root_kwargs,
+        make_test_spec(store_id="dyn-drv-root", store_path=root_path, nix_config=DYN_NIX_CONFIG),
     )
     await root_store.ensure_daemon()
 

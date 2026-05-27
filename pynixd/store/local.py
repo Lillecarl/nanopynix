@@ -16,10 +16,9 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from ..config import PynixdSettings
+from ..config import LocalSocketStoreSpec, LocalSubprocessStoreSpec, PynixdSettings
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, create_monitor
-from ..types.ids import StoreId
 from ..wire import UnixNixReader, UnixNixWriter
 from .base import Store
 
@@ -43,54 +42,26 @@ class LocalSocketStore(Store):
     system daemon socket without spawning anything.
     """
 
-    def __init__(
-        self,
-        store_id: str | StoreId,
-        store_path: Path | None = None,
-        socket_path: Path | None = None,
-        feature_matrix: dict[str, set[str]] | None = None,
-        probe: bool = True,
-        nix_bin: str = "nix",
-        extra_env: dict[str, str] | None = None,
-        extra_args: list[str] | None = None,
-        use_db: bool = True,
-        monitor: bool = True,
-        settings: PynixdSettings | None = None,
-        priority: float = 1.0,
-        scheduleable: bool = True,
-        gc_enabled: bool = True,
-        gc_max_age: int | None = None,
-    ) -> None:
-        if store_path is None:
-            store_path = Path("/")
-        managed = store_path != Path("/")
-        if socket_path:
-            self.socket_path = socket_path
+    def __init__(self, spec: LocalSocketStoreSpec | LocalSubprocessStoreSpec) -> None:
+        super().__init__(spec)
+        managed = self.store_path != Path("/")
+        if spec.socket_path:
+            self.socket_path = spec.socket_path
         elif managed:
-            self.socket_path = store_path / "var" / "nix" / "daemon-socket" / "socket"
+            self.socket_path = self.store_path / "var" / "nix" / "daemon-socket" / "socket"
         else:
             self.socket_path = DAEMON_SOCKET_PATH
 
-        super().__init__(
-            store_id=StoreId(store_id),
-            store_path=store_path,
-            feature_matrix=feature_matrix,
-            probe=probe,
-            scheduleable=scheduleable,
-            priority=priority,
-            gc_enabled=gc_enabled,
-            gc_max_age=gc_max_age,
-        )
         self.managed = managed
-        self.nix_bin = nix_bin
-        self.use_db = use_db
-        self.monitor_enabled = monitor
+        self.nix_bin = spec.nix_bin
+        self.use_db = spec.use_db
+        self.monitor_enabled = spec.monitor
         self.daemon_proc: asyncio.subprocess.Process | None = None
         self.daemon_ready: asyncio.Event | None = None
         self._daemon_log_task: asyncio.Task | None = None
-        self.extra_env = extra_env or {}
-        self.extra_args = extra_args or []
-        self.settings = settings or PynixdSettings()
+        self.extra_env = spec.extra_env or {}
+        self.extra_args = spec.extra_args or []
+        self.settings = spec.settings or PynixdSettings()
 
         # Register atexit handler to ensure daemon is killed even if close() is never called
         if self.managed:

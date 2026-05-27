@@ -20,7 +20,7 @@ from tests.conftest import (
     SESSION_HTTP_PASS,
     SESSION_HTTP_USER,
     STORE_PREFIX,
-    get_test_store_kwargs,
+    make_test_spec,
     rmtree_robust,
     run_subproc,
     server_uri,
@@ -65,9 +65,7 @@ async def test_narinfo() -> None:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
     local_store = LocalSocketStore(
-        store_id="local",
-        store_path=Path("/"),
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="local", store_path=Path("/"), no_probe=True),
     )
 
     async with Server(stores={StoreId("local"): local_store}, http_port=0) as server:
@@ -93,9 +91,7 @@ async def test_nar_streaming() -> None:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
     local_store = LocalSocketStore(
-        store_id="local",
-        store_path=Path("/"),
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="local", store_path=Path("/"), no_probe=True),
     )
 
     async with Server(stores={StoreId("local"): local_store}, http_port=0) as server:
@@ -136,9 +132,7 @@ async def test_cache_as_substituter() -> None:
     - QueryAllValidPaths: Queries all valid paths for cache synchronization
     """
     local_store = LocalSocketStore(
-        store_id="local",
-        store_path=Path("/"),
-        **get_test_store_kwargs(no_probe=True),
+        make_test_spec(store_id="local", store_path=Path("/"), no_probe=True),
     )
 
     async with Server(stores={StoreId("local"): local_store}, http_port=0) as server:

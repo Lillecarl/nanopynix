@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from ..config import LocalSocketStoreSpec
 from ..operations.pynixd_collect_garbage import PynixdCollectGarbageRequest
 from ..store import LocalSocketStore
 from ..types import PynixdGCAction
+from ..types.ids import StoreId
 from .base import load_settings, setup_logging
 
 if TYPE_CHECKING:
@@ -47,11 +49,12 @@ async def _gc_main(args: argparse.Namespace) -> None:
     action = PynixdGCAction.EXECUTE if args.execute else PynixdGCAction.DRY_RUN
 
     store = LocalSocketStore(
-        store_id="cli",
-        store_path=Path("/"),
-        socket_path=socket_path,
-        probe=False,
-        monitor=False,
+        LocalSocketStoreSpec(
+            store_id=StoreId("cli"),
+            socket_path=socket_path,
+            probe=False,
+            monitor=False,
+        ),
     )
 
     await store.start(sync_paths=False)
