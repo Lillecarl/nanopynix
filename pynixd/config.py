@@ -78,7 +78,6 @@ class StoreRankingSettings(BaseModel):
 
 class LocalSocketStoreSpec(BaseModel):
     type: Literal["local-socket"] = "local-socket"
-    store_id: str | None = None
     store_path: Path = Path("/")
     socket_path: Path | None = None
     systems: set[str] | None = None
@@ -92,12 +91,12 @@ class LocalSocketStoreSpec(BaseModel):
     gc_enabled: bool = True
     gc_max_age: int | None = None
 
-    def to_store(self) -> Store:
+    def to_store(self, store_id: str) -> Store:
         from .store import LocalSocketStore
 
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return LocalSocketStore(
-            store_id=StoreId(self.store_id) if self.store_id else StoreId("local-socket"),
+            store_id=StoreId(store_id),
             store_path=self.store_path,
             socket_path=self.socket_path,
             feature_matrix=feature_matrix,
@@ -115,7 +114,6 @@ class LocalSocketStoreSpec(BaseModel):
 
 class LocalSubprocessStoreSpec(BaseModel):
     type: Literal["local-subprocess"] = "local-subprocess"
-    store_id: str | None = None
     store_path: Path
     systems: set[str] | None = None
     system_features: set[str] = Field(default_factory=set)
@@ -127,12 +125,12 @@ class LocalSubprocessStoreSpec(BaseModel):
     gc_enabled: bool = True
     gc_max_age: int | None = None
 
-    def to_store(self) -> Store:
+    def to_store(self, store_id: str) -> Store:
         from .store import LocalSocketStore
 
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return LocalSocketStore(
-            store_id=StoreId(self.store_id) if self.store_id else StoreId("local-socket"),
+            store_id=StoreId(store_id),
             store_path=self.store_path,
             feature_matrix=feature_matrix,
             probe=feature_matrix is None,
@@ -149,7 +147,6 @@ class LocalSubprocessStoreSpec(BaseModel):
 class SSHSubprocessStoreSpec(BaseModel):
     type: Literal["ssh-subprocess"] = "ssh-subprocess"
     host: str
-    store_id: str | None = None
     port: int = 22
     username: str | None = None
     store_path: Path = Path("/")
@@ -162,15 +159,13 @@ class SSHSubprocessStoreSpec(BaseModel):
     gc_enabled: bool = True
     gc_max_age: int | None = None
 
-    def to_store(self) -> Store:
+    def to_store(self, store_id: str) -> Store:
         from .store import SSHSubprocessStore
 
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return SSHSubprocessStore(
             host=self.host,
-            store_id=StoreId(self.store_id)
-            if self.store_id
-            else StoreId(f"ssh:{self.username or ''}@{self.host}:{self.port}"),
+            store_id=StoreId(store_id),
             port=self.port,
             username=self.username,
             store_path=self.store_path,
@@ -188,7 +183,6 @@ class SSHSubprocessStoreSpec(BaseModel):
 class SSHSocketStoreSpec(BaseModel):
     type: Literal["ssh-socket"] = "ssh-socket"
     host: str
-    store_id: str | None = None
     port: int = 22
     username: str | None = None
     socket_path: Path = Path("/nix/var/nix/daemon-socket/socket")
@@ -200,15 +194,13 @@ class SSHSocketStoreSpec(BaseModel):
     gc_enabled: bool = True
     gc_max_age: int | None = None
 
-    def to_store(self) -> Store:
+    def to_store(self, store_id: str) -> Store:
         from .store import SSHSocketStore
 
         feature_matrix = _feature_matrix_from_config(self.systems, self.system_features)
         return SSHSocketStore(
             host=self.host,
-            store_id=StoreId(self.store_id)
-            if self.store_id
-            else StoreId(f"ssh-socket:{self.username or ''}@{self.host}:{self.port}"),
+            store_id=StoreId(store_id),
             port=self.port,
             username=self.username,
             socket_path=self.socket_path,
@@ -263,7 +255,7 @@ class PynixdSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PYNIXD_")
 
     config: Path | None = None
-    stores: list[StoreSpec] = Field(default_factory=list)
+    stores: dict[str, StoreSpec] = Field(default_factory=dict)
 
     ssh_host: str = "127.0.0.1"
     ssh_port: int | None = 2234
@@ -331,8 +323,8 @@ class PynixdSettings(BaseSettings):
         from .store import LocalSocketStore
 
         stores: dict[StoreId, Store] = {}
-        for spec in self.stores:
-            store = spec.to_store()
+        for key, spec in self.stores.items():
+            store = spec.to_store(store_id=key)
             stores[store.store_id] = store
 
         local_store = (
