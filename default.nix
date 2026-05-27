@@ -20,7 +20,7 @@ let
     version = "0.1.0";
     pyproject = true;
 
-    src = ./.;
+    src = lib.cleanSource ./.;
 
     build-system = [
       python.pkgs.hatchling
