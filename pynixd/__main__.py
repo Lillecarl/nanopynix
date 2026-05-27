@@ -22,9 +22,9 @@ log = structlog.get_logger(__name__)
 
 async def async_daemon_main() -> None:
     settings = load_settings()
-    local_store, stores = settings.to_stores()
+    stores = settings.to_stores()
 
-    server = Server(local_store=local_store, stores=stores, settings=settings)
+    server = Server(stores=stores, settings=settings)
     shutdown_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()

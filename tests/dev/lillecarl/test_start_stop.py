@@ -2,6 +2,7 @@ from pathlib import Path
 
 from pynixd import Server
 from pynixd.config import LocalSocketStoreSpec, PynixdSettings
+from pynixd.types.ids import StoreId
 
 
 async def test_start_stop(tmp_path):
@@ -12,7 +13,8 @@ async def test_start_stop(tmp_path):
         use_db=True,
     )
 
-    local_store, _remote_stores = settings.to_stores()
+    all_stores = settings.to_stores()
+    local_store = all_stores[StoreId("local")]
 
-    async with Server(local_store=local_store, settings=settings):
+    async with Server(stores={StoreId("local"): local_store}, settings=settings):
         pass

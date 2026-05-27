@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 from pynixd import Server
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
+from pynixd.types.ids import StoreId
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
@@ -45,7 +46,7 @@ async def test_handshake_feature_announcement(tmp_path: Path) -> None:
 
     # 1. Start Server B (Proxying store_b)
     async with Server(
-        local_store=store_b,
+        stores={StoreId("local"): store_b},
         ssh_port=0,
     ) as server_b:
         port_b = server_b.port

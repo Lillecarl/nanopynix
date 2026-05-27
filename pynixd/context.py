@@ -7,6 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .types.ids import StoreId
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -15,21 +17,27 @@ if TYPE_CHECKING:
     from .path_tracker import PathTracker
     from .scheduler import Scheduler
     from .store.base import Store
-    from .types.ids import StoreId
 
 
 @dataclass
 class PynixdContext:
-    """Encapsulates shared services and state for dependency injection."""
+    """Encapsulates shared services and state for dependency injection.
+
+    All stores (including local) live in ``_stores``. The ``local_store``
+    property looks up ``StoreId("local")`` in the dict.
+    """
 
     settings: PynixdSettings
-    local_store: Store
     _stores: dict[StoreId, Store]
     path_tracker: PathTracker
     db: LocalStoreDB | None = None
     scheduler: Scheduler | None = None
 
     @property
+    def local_store(self) -> Store:
+        return self._stores[StoreId("local")]
+
+    @property
     def stores(self) -> Mapping[StoreId, Store]:
-        """Read-only view of connected remote stores."""
+        """Read-only view of all connected stores (including local)."""
         return self._stores

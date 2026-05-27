@@ -50,29 +50,36 @@ class Server:
 
     def __init__(
         self,
-        local_store: Store | None = None,
         stores: dict[StoreId, Store] | None = None,
         settings: PynixdSettings | None = None,
         **kwargs: Any,
     ) -> None:
-        if local_store is None:
-            settings = settings or PynixdSettings(**kwargs)
-            local_store = LocalSocketStore(
+        settings = settings or PynixdSettings(**kwargs)
+
+        if stores is None:
+            stores = {
+                StoreId("local"): LocalSocketStore(
+                    store_id=StoreId("local"),
+                    store_path=Path("/"),
+                    monitor=False,
+                    priority=settings.local_store_priority,
+                    gc_enabled=settings.gc_local_enabled,
+                ),
+            }
+        elif StoreId("local") not in stores:
+            stores = dict(stores)
+            stores[StoreId("local")] = LocalSocketStore(
                 store_id=StoreId("local"),
                 store_path=Path("/"),
                 monitor=False,
                 priority=settings.local_store_priority,
                 gc_enabled=settings.gc_local_enabled,
             )
-        if stores is None:
-            stores = {}
-        settings = settings or PynixdSettings(**kwargs)
 
         path_tracker = PathTracker(db=None)
 
         self.ctx = PynixdContext(
             settings=settings,
-            local_store=local_store,
             _stores=stores,
             path_tracker=path_tracker,
         )
@@ -143,6 +150,8 @@ class Server:
 
         NOTE: Used by external projects — do not remove.
         """
+        if store_id == StoreId("local"):
+            raise RuntimeError("Cannot remove local store")
         if self.scheduler:
             # First, drain the store in the scheduler to cancel/requeue jobs
             await self.scheduler.drain_store(store_id, drain_timeout=drain_timeout)
@@ -254,15 +263,11 @@ class Server:
         if self.ctx.db:
             self.ctx.db.start()
 
-        # Gather stores to add and then clear the context mapping to ensure
-        # add_store (which populates it) starts from a clean state for these IDs.
-        stores_to_add = list(self.ctx.stores.values())
-        self.ctx._stores.clear()
-
-        if stores_to_add:
-            async with asyncio.TaskGroup() as tg:
-                for s in stores_to_add:
-                    tg.create_task(self.add_store(s))
+        # Start non-local stores concurrently — they're already in _stores.
+        async with asyncio.TaskGroup() as tg:
+            for store_id, store in list(self.ctx._stores.items()):
+                if store_id != StoreId("local"):
+                    tg.create_task(self.add_store(store))
 
         if self.ctx.scheduler:
             self.background_tasks.append(
@@ -367,8 +372,7 @@ class Server:
                 await task
         self.background_tasks.clear()
 
-        await self.local_store.close()
-        for store in self.stores.values():
+        for store in self.ctx._stores.values():
             await store.close()
         self.ctx._stores.clear()
         self._done_event.set()

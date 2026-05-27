@@ -7,6 +7,7 @@ import pytest
 
 from pynixd import Server
 from pynixd.store import LocalSocketStore
+from pynixd.types.ids import StoreId
 from tests.conftest import CLIENT_BIN, get_test_store_kwargs, run_subproc
 
 """
@@ -32,7 +33,7 @@ async def pynixd_server(tmp_path: Path):
     )
 
     async with Server(
-        local_store=local_store,
+        stores={StoreId("local"): local_store},
         unix_path=socket_path,
         ssh_port=None,  # Disable SSH
         http_port=None,

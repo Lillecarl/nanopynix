@@ -22,6 +22,7 @@ from .protocol import get_extension_features
 from .stderr import StderrError
 from .types import RequestContext as RequestContext
 from .types.context import WriteContext
+from .types.ids import StoreId
 from .types.protocol import OptTrusted, Verbosity
 
 if TYPE_CHECKING:
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
     from .context import PynixdContext
     from .scheduler import Scheduler
     from .store import Store
-    from .types.ids import StoreId
     from .wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
@@ -67,7 +67,7 @@ class DaemonProxy:
 
     @property
     def local_store(self) -> Store:
-        return self.ctx.local_store
+        return self.ctx._stores[StoreId("local")]
 
     @property
     def scheduler(self) -> Scheduler | None:
@@ -141,8 +141,8 @@ class DaemonProxy:
 
             our_features = get_extension_features()
 
-            # Aggregated feature_matrix from all backends + local store
-            for store in [*list(self.stores.values()), self.local_store]:
+            # Aggregated feature_matrix from all stores (local is already in stores)
+            for store in self.stores.values():
                 fm = store._feature_matrix
                 if fm:
                     for system, features in fm.items():
@@ -219,6 +219,8 @@ class DaemonProxy:
 
         # Extension not supported by local store or returned not found — try other stores
         for store in self.stores.values():
+            if store.store_id == StoreId("local"):
+                continue  # already tried above
             try:
                 # We don't forward client logs to remote stores for simple queries
                 # unless they are builds.

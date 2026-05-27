@@ -10,6 +10,7 @@ from passlib.apache import HtpasswdFile
 
 from pynixd import Server
 from pynixd.store import LocalSocketStore
+from pynixd.types.ids import StoreId
 from tests.conftest import get_test_store_kwargs
 
 
@@ -33,7 +34,7 @@ async def test_htpasswd_auth(tmp_path: Path) -> None:
     )
 
     async with Server(
-        local_store=local_store,
+        stores={StoreId("local"): local_store},
         http_port=0,
         http_htpasswd=htpasswd_path,
     ) as server:
@@ -83,7 +84,7 @@ async def test_htpasswd_fallback_to_single_user(tmp_path: Path) -> None:
 
     # No htpasswd, just single user/pass
     async with Server(
-        local_store=local_store,
+        stores={StoreId("local"): local_store},
         http_port=0,
         http_user="admin",
         http_pass="password",
@@ -101,7 +102,7 @@ async def test_htpasswd_fallback_to_single_user(tmp_path: Path) -> None:
     ht.save()
 
     async with Server(
-        local_store=local_store,
+        stores={StoreId("local"): local_store},
         http_port=0,
         http_user="admin",
         http_pass="password",

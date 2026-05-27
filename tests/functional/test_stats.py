@@ -165,8 +165,7 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
     pynixd_remote.build_delays["fast-pkg"] = 0.05
 
     async with Server(
-        local_store=pynixd_local,
-        stores={StoreId("remote"): pynixd_remote},
+        stores={StoreId("local"): pynixd_local, StoreId("remote"): pynixd_remote},
         ssh_port=None,
         unix_path=pynixd_local_path / "socket",
     ) as server:
@@ -242,8 +241,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
     )
 
     async with Server(
-        local_store=pynixd_local,
-        stores={StoreId("remote"): pynixd_remote},
+        stores={StoreId("local"): pynixd_local, StoreId("remote"): pynixd_remote},
         ssh_port=None,
         unix_path=pynixd_local_path / "socket",
     ) as server:
@@ -413,8 +411,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     pynixd_free.build_delays["test-pkg"] = 0.05
 
     async with Server(
-        local_store=pynixd_local,
-        stores={StoreId("busy"): pynixd_busy, StoreId("free"): pynixd_free},
+        stores={StoreId("local"): pynixd_local, StoreId("busy"): pynixd_busy, StoreId("free"): pynixd_free},
         ssh_port=None,
         unix_path=pynixd_local_path / "socket",
     ) as server:

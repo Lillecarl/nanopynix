@@ -14,6 +14,7 @@ from pynixd import Server
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
+from pynixd.types.ids import StoreId
 from tests.conftest import (
     CLIENT_BIN,
     SESSION_HTTP_PASS,
@@ -69,7 +70,7 @@ async def test_narinfo() -> None:
         **get_test_store_kwargs(no_probe=True),
     )
 
-    async with Server(local_store=local_store, http_port=0) as server:
+    async with Server(stores={StoreId("local"): local_store}, http_port=0) as server:
         path = await _pick_random_path(local_store)
         hash_part = path.hash_part()
         base_url = f"http://127.0.0.1:{server.http_bound_port}"
@@ -97,7 +98,7 @@ async def test_nar_streaming() -> None:
         **get_test_store_kwargs(no_probe=True),
     )
 
-    async with Server(local_store=local_store, http_port=0) as server:
+    async with Server(stores={StoreId("local"): local_store}, http_port=0) as server:
         path = await _pick_random_path(local_store)
         hash_part = path.hash_part()
         base_url = f"http://127.0.0.1:{server.http_bound_port}"
@@ -140,7 +141,7 @@ async def test_cache_as_substituter() -> None:
         **get_test_store_kwargs(no_probe=True),
     )
 
-    async with Server(local_store=local_store, http_port=0) as server:
+    async with Server(stores={StoreId("local"): local_store}, http_port=0) as server:
         target_path = await _pick_random_path(local_store)
         base_url = f"http://127.0.0.1:{server.http_bound_port}"
 

@@ -66,8 +66,7 @@ async def test_scheduler_load_balancing():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={StoreId("remote1"): remote1},
+        _stores={StoreId("local"): local_store, StoreId("remote1"): remote1},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -134,8 +133,7 @@ async def test_scheduler_skips_saturated_store():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={StoreId("remote1"): remote1},
+        _stores={StoreId("local"): local_store, StoreId("remote1"): remote1},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -210,8 +208,7 @@ async def test_scheduler_proactive_transfer():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={StoreId("busy"): remote_busy, StoreId("idle"): remote_idle},
+        _stores={StoreId("local"): local_store, StoreId("busy"): remote_busy, StoreId("idle"): remote_idle},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -274,8 +271,7 @@ async def test_scheduler_decomposition_and_ordering():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={StoreId("remote1"): remote1},
+        _stores={StoreId("local"): local_store, StoreId("remote1"): remote1},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -417,8 +413,7 @@ async def test_scheduler_cpu_utilization():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={StoreId("hot"): remote_hot, StoreId("cold"): remote_cold},
+        _stores={StoreId("local"): local_store, StoreId("hot"): remote_hot, StoreId("cold"): remote_cold},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -483,8 +478,7 @@ async def test_scheduler_feature_matching():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={StoreId("plain"): remote_plain, StoreId("full"): remote_full},
+        _stores={StoreId("local"): local_store, StoreId("plain"): remote_plain, StoreId("full"): remote_full},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -527,8 +521,7 @@ async def test_scheduler_fails_build_for_unknown_platform():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={},
+        _stores={StoreId("local"): local_store},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -561,8 +554,7 @@ async def test_scheduler_queues_build_for_dynamic_platform():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={},
+        _stores={StoreId("local"): local_store},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -595,8 +587,7 @@ async def test_scheduler_queues_build_for_dynamic_platform_with_features():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={},
+        _stores={StoreId("local"): local_store},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -626,8 +617,7 @@ async def test_scheduler_fails_build_for_missing_dynamic_feature():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={},
+        _stores={StoreId("local"): local_store},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -660,8 +650,7 @@ async def test_add_store_dynamic_registers_feature_matrix():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={},
+        _stores={StoreId("local"): local_store},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
@@ -686,8 +675,7 @@ async def test_dynamic_feature_matrix_survives_store_removal():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={},
+        _stores={StoreId("local"): local_store},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)

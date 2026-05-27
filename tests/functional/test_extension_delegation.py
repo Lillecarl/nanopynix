@@ -74,7 +74,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
 
     # 1. Start Server B (Builder)
     async with Server(
-        local_store=store_b,
+        stores={StoreId("local"): store_b},
         ssh_port=0,
     ) as server_b:
         port_b = server_b.port
@@ -103,8 +103,7 @@ async def test_extension_delegation(tmp_path: Path) -> None:
         unix_path_a = tmp_path / "server-a.sock"
 
         async with Server(
-            local_store=store_a,
-            stores={StoreId("builder-b"): store_a_b},
+            stores={StoreId("local"): store_a, StoreId("builder-b"): store_a_b},
             ssh_port=0,
             unix_path=unix_path_a,
         ) as server_a:

@@ -174,8 +174,7 @@ async def test_throughput_pynixd(profiler: pyinstrument.Profiler) -> None:
     )
 
     async with Server(
-        local_store=local_store,
-        stores={StoreId("builder"): builder_store},
+        stores={StoreId("local"): local_store, StoreId("builder"): builder_store},
         ssh_port=0,
     ) as server:
         log.info("server_up_resetting_profiler")

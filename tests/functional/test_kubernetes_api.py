@@ -21,7 +21,7 @@ async def test_dynamic_store_management():
     """Verify adding and removing stores at runtime works correctly."""
     local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
 
-    server = Server(local_store=local_store, http_port=0, http_enable_metrics=True)
+    server = Server(stores={StoreId("local"): local_store}, http_port=0, http_enable_metrics=True)
     await server.start()
 
     try:
@@ -106,7 +106,7 @@ async def test_prometheus_metrics_endpoint():
 
     # Start server with metrics enabled on random port
     server = Server(
-        local_store=local_store,
+        stores={StoreId("local"): local_store},
         http_port=0,
         http_enable_metrics=True,
         http_metrics_no_auth=True,

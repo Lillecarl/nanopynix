@@ -44,8 +44,7 @@ async def test_build_log_pubsub_two_clients():
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
-        local_store=local_store,
-        _stores={StoreId("remote"): remote},
+        _stores={StoreId("local"): local_store, StoreId("remote"): remote},
         path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)

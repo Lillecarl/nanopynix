@@ -741,8 +741,7 @@ async def pynixd_server(
     upload_dir = tmp_path_factory.mktemp("http-uploads")
 
     async with Server(
-        local_store=local_store,
-        stores={StoreId("builder"): builder_store},
+        stores={StoreId("local"): local_store, StoreId("builder"): builder_store},
         ssh_port=SESSION_SSH_PORT,
         http_port=SESSION_HTTP_PORT,
         unix_path=socket_path,

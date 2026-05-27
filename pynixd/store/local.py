@@ -57,6 +57,7 @@ class LocalSocketStore(Store):
         monitor: bool = True,
         settings: PynixdSettings | None = None,
         priority: float = 1.0,
+        scheduleable: bool = True,
         gc_enabled: bool = True,
         gc_max_age: int | None = None,
     ) -> None:
@@ -75,6 +76,7 @@ class LocalSocketStore(Store):
             store_path=store_path,
             feature_matrix=feature_matrix,
             probe=probe,
+            scheduleable=scheduleable,
             priority=priority,
             gc_enabled=gc_enabled,
             gc_max_age=gc_max_age,

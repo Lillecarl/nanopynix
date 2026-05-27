@@ -92,8 +92,7 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
     test_path = StorePath(stdout.strip())
 
     async with Server(
-        local_store=pynixd_local,
-        stores={StoreId("remote"): pynixd_remote},
+        stores={StoreId("local"): pynixd_local, StoreId("remote"): pynixd_remote},
         ssh_port=None,
     ):
         # Manually add a path to the remote store
@@ -122,8 +121,7 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
     )
 
     async with Server(
-        local_store=pynixd_local_2,
-        stores={StoreId("remote"): pynixd_remote_2},
+        stores={StoreId("local"): pynixd_local_2, StoreId("remote"): pynixd_remote_2},
         ssh_port=None,
     ):
         # Check if the path was loaded from DB and verified
@@ -159,8 +157,7 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
     path_stale = StorePath("/nix/store/00000000000000000000000000000002-stale")
 
     async with Server(
-        local_store=pynixd_local,
-        stores={StoreId("remote"): pynixd_remote},
+        stores={StoreId("local"): pynixd_local, StoreId("remote"): pynixd_remote},
         ssh_port=None,
     ):
         pynixd_remote.tracker.add_known_path(path_valid)
@@ -200,8 +197,7 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
     )
 
     async with Server(
-        local_store=pynixd_local_2,
-        stores={StoreId("remote"): pynixd_remote_2},
+        stores={StoreId("local"): pynixd_local_2, StoreId("remote"): pynixd_remote_2},
         ssh_port=None,
     ):
         # path_stale should be gone from memory
@@ -243,8 +239,7 @@ async def test_is_valid_path_isolation(tmp_path: Path) -> None:
     )
 
     async with Server(
-        local_store=pynixd_local,
-        stores={StoreId("remote"): pynixd_remote},
+        stores={StoreId("local"): pynixd_local, StoreId("remote"): pynixd_remote},
         ssh_port=None,
     ):
         # 1. Add a path to LOCAL store only

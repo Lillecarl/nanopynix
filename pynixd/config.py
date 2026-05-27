@@ -87,6 +87,7 @@ class LocalSocketStoreSpec(BaseModel):
     extra_args: list[str] | None = None
     use_db: bool = True
     monitor: bool = True
+    scheduleable: bool = True
     priority: float = 1.0
     gc_enabled: bool = True
     gc_max_age: int | None = None
@@ -106,6 +107,7 @@ class LocalSocketStoreSpec(BaseModel):
             extra_args=self.extra_args,
             use_db=self.use_db,
             monitor=self.monitor,
+            scheduleable=self.scheduleable,
             priority=self.priority,
             gc_enabled=self.gc_enabled,
             gc_max_age=self.gc_max_age,
@@ -121,6 +123,7 @@ class LocalSubprocessStoreSpec(BaseModel):
     extra_env: dict[str, str] | None = None
     extra_args: list[str] | None = None
     use_db: bool = True
+    scheduleable: bool = True
     priority: float = 1.0
     gc_enabled: bool = True
     gc_max_age: int | None = None
@@ -138,6 +141,7 @@ class LocalSubprocessStoreSpec(BaseModel):
             extra_env=self.extra_env,
             extra_args=self.extra_args,
             use_db=self.use_db,
+            scheduleable=self.scheduleable,
             priority=self.priority,
             gc_enabled=self.gc_enabled,
             gc_max_age=self.gc_max_age,
@@ -155,6 +159,7 @@ class SSHSubprocessStoreSpec(BaseModel):
     monitor: bool = True
     nix_bin: str = "nix"
     client_keys: list[Path] = Field(default_factory=list)
+    scheduleable: bool = True
     priority: float = 1.0
     gc_enabled: bool = True
     gc_max_age: int | None = None
@@ -174,6 +179,7 @@ class SSHSubprocessStoreSpec(BaseModel):
             monitor=self.monitor,
             nix_bin=self.nix_bin,
             client_keys=list(self.client_keys) if self.client_keys else None,
+            scheduleable=self.scheduleable,
             priority=self.priority,
             gc_enabled=self.gc_enabled,
             gc_max_age=self.gc_max_age,
@@ -190,6 +196,7 @@ class SSHSocketStoreSpec(BaseModel):
     system_features: set[str] = Field(default_factory=set)
     monitor: bool = True
     client_keys: list[Path] = Field(default_factory=list)
+    scheduleable: bool = True
     priority: float = 1.0
     gc_enabled: bool = True
     gc_max_age: int | None = None
@@ -208,6 +215,7 @@ class SSHSocketStoreSpec(BaseModel):
             probe=feature_matrix is None,
             monitor=self.monitor,
             client_keys=list(self.client_keys) if self.client_keys else None,
+            scheduleable=self.scheduleable,
             priority=self.priority,
             gc_enabled=self.gc_enabled,
             gc_max_age=self.gc_max_age,
@@ -318,8 +326,8 @@ class PynixdSettings(BaseSettings):
 
         return (init_settings, env_settings, _ConfigFileSource(settings_cls))
 
-    def to_stores(self) -> tuple[Store, dict[StoreId, Store]]:
-        """Convert all store specs to live Store instances, separating out 'local'."""
+    def to_stores(self) -> dict[StoreId, Store]:
+        """Convert all store specs to live Store instances."""
         from .store import LocalSocketStore
 
         stores: dict[StoreId, Store] = {}
@@ -327,15 +335,12 @@ class PynixdSettings(BaseSettings):
             store = spec.to_store(store_id=key)
             stores[store.store_id] = store
 
-        local_store = (
-            stores.pop(StoreId("local"))
-            if StoreId("local") in stores
-            else LocalSocketStore(
+        if StoreId("local") not in stores:
+            stores[StoreId("local")] = LocalSocketStore(
                 store_id=StoreId("local"),
                 store_path=Path("/"),
                 monitor=False,
                 priority=self.local_store_priority,
             )
-        )
 
-        return local_store, stores
+        return stores

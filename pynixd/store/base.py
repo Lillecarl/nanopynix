@@ -74,11 +74,13 @@ class Store(ABC):
         feature_matrix: dict[str, set[str]] | None = None,
         probe: bool = True,
         no_schedule: bool = False,
+        scheduleable: bool = True,
         priority: float = 1.0,
         gc_enabled: bool = True,
         gc_max_age: int | None = None,
     ) -> None:
         self.store_id = store_id
+        self.scheduleable = scheduleable
         self.store_path = store_path
         self.version: int = wire.PROTOCOL_VERSION
         self.nix_version: str = ""
