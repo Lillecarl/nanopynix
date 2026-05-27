@@ -129,7 +129,17 @@ class Server:
                 store.tracker.add_known_paths(paths, update_regtime=False)
                 log.info("loaded_cached_paths", store_id=store.store_id, count=len(paths))
 
-        await store.start()
+        try:
+            await store.start()
+        except Exception:
+            log.warning(
+                "store_start_failed",
+                store_id=store.store_id,
+                exc_info=True,
+            )
+            # Store is already in ctx._stores from construction.
+            # Don't register with scheduler — it's unavailable.
+            return
 
         # Server is the primary owner and mutator of the stores collection
         self.ctx._stores[store.store_id] = store
