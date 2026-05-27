@@ -5,11 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..exceptions import BackendError, OpNotImplementedError
 from ..stderr import OperationLogs
 from ..store_path import StorePath
 from .base import OpRequest, OpResponse
-from .query_valid_paths import QueryValidPathsRequest
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -63,81 +61,21 @@ class QueryAllValidPathsRequest(OpRequest[QueryAllValidPathsResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryAllValidPathsResponse:
-        try:
-            if (db := store.db) is not None:
+        if (db := store.db) is not None:
+            try:
                 async with db.execute(QUERY_ALL_VALID_PATHS) as cursor:
                     rows = await cursor.fetchall()
-                resp = QueryAllValidPathsResponse(paths={StorePath(r[0]) for r in rows})
-                # Use set_known_paths to ensure the in-memory cache is fully synced with DB
-                store.tracker.set_known_paths(resp.paths, update_regtime=False)
-                self.logger.info(
-                    "sync_paths_complete",
+                return QueryAllValidPathsResponse(
+                    paths={StorePath(r[0]) for r in rows},
+                )
+            except Exception:
+                self.logger.warning(
+                    "sync_paths_sqlite_error",
                     store_id=store.store_id,
-                    count=len(resp.paths),
                 )
-                return resp
 
-            # Remote store or no native DB: try the wire first.
-            try:
-                resp = await store.call(
-                    self,
-                    client=client,
-                    suppress_last=suppress_last,
-                )
-                # Success: Overwrite path tracker data (source of truth)
-                store.tracker.set_known_paths(resp.paths, update_regtime=False)
-                self.logger.info(
-                    "sync_paths_complete",
-                    store_id=store.store_id,
-                    count=len(resp.paths),
-                )
-            except (BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e:
-                # Try to get known paths from DB first, fallback to in-memory tracker
-                known_paths: StorePathSet | None = None
-                if store.tracker.parent is not None and store.tracker.parent.db is not None:
-                    known_paths = await store.tracker.parent.db.get_known_paths(store.store_id)
-                known_paths = known_paths or set(store.tracker.known_paths)
-
-                if known_paths:
-                    self.logger.info(
-                        "verifying_cached_paths",
-                        store_id=store.store_id,
-                        error=str(e),
-                        count=len(known_paths),
-                    )
-
-                    try:
-                        verified = await store.execute(
-                            QueryValidPathsRequest(
-                                paths=known_paths,
-                                substitute=0,
-                            ),
-                            client=client,
-                            suppress_last=suppress_last,
-                        )
-                        # Remove stale paths — only keep the verified ones
-                        stale = known_paths - verified.paths
-                        if stale:
-                            store.tracker.remove_known_paths(stale)
-                        store.tracker.add_known_paths(verified.paths)
-                        self.logger.info(
-                            "sync_paths_verified",
-                            store_id=store.store_id,
-                            total=len(known_paths),
-                            verified=len(verified.paths),
-                            removed=len(stale),
-                        )
-                        return QueryAllValidPathsResponse(paths=verified.paths)
-                    except (BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e2:
-                        self.logger.warning(
-                            "path_verification_failed",
-                            store_id=store.store_id,
-                            error=str(e2),
-                        )
-                        return QueryAllValidPathsResponse(paths=known_paths)
-                raise
-            else:
-                return resp
-        except Exception:
-            self.logger.exception("sync_paths_failed", store_id=store.store_id)
-            return QueryAllValidPathsResponse(paths=set())
+        return await store.call(
+            self,
+            client=client,
+            suppress_last=suppress_last,
+        )

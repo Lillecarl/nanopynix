@@ -51,8 +51,8 @@ async def test_collect_garbage_non_admin(pynixd_server: Server) -> None:
     uri = ssh_user_uri(pynixd_server)
     cmd = [str(CLIENT_BIN), "store", "gc", "--store", uri, "--max", "0"]
     rc, stdout, stderr, stdboth = await run_subproc(cmd, expected_retcode=None)
-    assert rc != 0, "GC should fail for non-admin"
     assert "requires administrative privileges" in stdboth
+    assert rc == 0, f"GC should succeed (denied but nix exits 0):\n{stdboth}"
 
 
 @pytest.mark.timeout(120)

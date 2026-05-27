@@ -16,10 +16,12 @@ import structlog
 from cachetools import TTLCache
 
 from .. import wire
+from ..exceptions import BackendError, OpNotImplementedError
 from ..monitor import ResourceGate, ResourceMonitor
 from ..operations.probe_features import ProbeFeaturesRequest
 from ..operations.probe_systems import ProbeSystemsRequest
 from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
+from ..operations.query_valid_paths import QueryValidPathsRequest
 from ..path_tracker import PathTrackerInstance
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
@@ -151,19 +153,65 @@ class Store(ABC):
 
         # 2. Synchronize paths to populate the tracker
         if sync_paths:
-            try:
-                resp = await self.execute(QueryAllValidPathsRequest())
-                self.tracker.add_known_paths(resp.paths)
-                log.debug("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
-            except Exception:
-                # Not critical during startup; operations will re-sync if needed
-                log.exception("store_paths_sync_failed", store_id=self.store_id)
+            await self.sync_paths()
 
         # 3. Activate monitoring if configured
         if self.monitor:
             self.monitor.start()
 
         self._started = True
+
+    async def sync_paths(self) -> None:
+        """Synchronize known paths from the store into the tracker.
+
+        Tries QueryAllValidPaths on the wire first. When the operation
+        is not implemented by the remote store (e.g. nixbuild.net),
+        falls back to cached paths from the tracker's DB, verifying
+        them via QueryValidPaths.
+        """
+        try:
+            resp = await self.execute(QueryAllValidPathsRequest())
+            self.tracker.add_known_paths(resp.paths)
+            log.debug("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
+        except (BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e:
+            known_paths: StorePathSet | None = None
+            if self.tracker.parent is not None and self.tracker.parent.db is not None:
+                known_paths = await self.tracker.parent.db.get_known_paths(self.store_id)
+            known_paths = known_paths or set(self.tracker.known_paths)
+
+            if not known_paths:
+                log.info("store_paths_sync_skipped", store_id=self.store_id)
+                return
+
+            log.info(
+                "verifying_cached_paths",
+                store_id=self.store_id,
+                error=str(e),
+                count=len(known_paths),
+            )
+            try:
+                verified = await self.execute(
+                    QueryValidPathsRequest(paths=known_paths, substitute=0),
+                )
+                stale = known_paths - verified.paths
+                if stale:
+                    self.tracker.remove_known_paths(stale)
+                self.tracker.add_known_paths(verified.paths)
+                log.info(
+                    "store_paths_verified",
+                    store_id=self.store_id,
+                    total=len(known_paths),
+                    verified=len(verified.paths),
+                    removed=len(stale),
+                )
+            except (BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e2:
+                log.warning("path_verification_failed", store_id=self.store_id, error=str(e2))
+                self.tracker.add_known_paths(known_paths)
+                log.info(
+                    "store_paths_sync_cached",
+                    store_id=self.store_id,
+                    count=len(known_paths),
+                )
 
     def _on_connection_created(self, conn: Connection) -> None:
         """Update store metadata from a newly created connection."""
