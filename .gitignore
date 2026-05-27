@@ -3,6 +3,7 @@ result
 
 #AI
 .kilo/plans
+.opencode/package-lock.json
 
 #stuff
 .tmp
