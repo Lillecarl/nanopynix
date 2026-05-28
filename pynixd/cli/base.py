@@ -51,11 +51,14 @@ def build_processors(settings: PynixdSettings) -> list:
     filter_fn = _scan_plugins_for_filter(settings.plugins)
     if filter_fn is not None:
 
-        def _filter_processor(logger: object, method_name: str, event_dict: dict) -> dict | None:
+        def _filter_processor(logger: object, method_name: str, event_dict: dict) -> dict:
             try:
-                return filter_fn(logger, method_name, event_dict)
+                result = filter_fn(logger, method_name, event_dict)
             except Exception:
                 return event_dict
+            if not result:
+                raise structlog.DropEvent
+            return result
 
         processors.append(_filter_processor)
 
