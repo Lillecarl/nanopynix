@@ -83,12 +83,7 @@ def _build_processors(is_foreign: bool, filter_fn: Callable | None) -> list:
     procs: list = []
     if is_foreign:
         # Shared formatter chain: strip metadata, render.
-        procs.append(structlog.stdlib.ProcessorFormatter.remove_processors_meta)
-
-        if filter_fn is not None:
-            procs.append(_DropFilteringRenderer())
-        else:
-            procs.append(structlog.processors.JSONRenderer())
+        procs.append(_DropFilteringRenderer())
     else:
         # Structlog-native chain.
         procs.extend(
@@ -129,13 +124,11 @@ def _build_foreign_pre_chain(filter_fn: Callable | None) -> list:
 
 
 class _DropFilteringRenderer:
-    """A ``ProcessorFormatter`` processor that renders to JSON, skipping
-    entries marked with the filter sentinel.
+    """A ``ProcessorFormatter`` processor that renders to JSON.
 
-    The sentinel is set by the plugin filter running in
-    ``foreign_pre_chain`` (which cannot raise ``DropEvent``).
-    Structlog entries bypass ``foreign_pre_chain`` and never have the
-    sentinel -- they are already filtered by the structlog chain.
+    Strips ``_record`` and ``_from_structlog`` metadata added by the
+    formatter, and discards entries marked with the filter sentinel.
+    The sentinel is set by the plugin filter in ``foreign_pre_chain``.
     """
 
     def __init__(self) -> None:
@@ -144,6 +137,8 @@ class _DropFilteringRenderer:
     def __call__(self, logger: object, method_name: str, event_dict: dict) -> str:
         if event_dict.get(_DROP_SENTINEL):
             return ""
+        event_dict.pop("_record", None)
+        event_dict.pop("_from_structlog", None)
         rendered = self._json(logger, method_name, event_dict)
         if isinstance(rendered, bytes):
             return rendered.decode("utf-8")
