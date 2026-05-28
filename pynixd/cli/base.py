@@ -47,7 +47,9 @@ def _build_filter_processor(filter_fn: Callable) -> Callable:
             return event_dict
         if not result:
             raise structlog.DropEvent
-        return result
+        if isinstance(result, dict):
+            return result
+        return event_dict
 
     return _proc
 
@@ -64,10 +66,14 @@ def _build_foreign_filter_processor(filter_fn: Callable) -> Callable:
         try:
             result = filter_fn(logger, method_name, event_dict)
         except structlog.DropEvent:
-            return {_DROP_SENTINEL: True}
+            return {**event_dict, _DROP_SENTINEL: True}
         except Exception:
             return event_dict
-        return result or {_DROP_SENTINEL: True}
+        if not result:
+            return {**event_dict, _DROP_SENTINEL: True}
+        if isinstance(result, dict):
+            return result
+        return {**event_dict, _DROP_SENTINEL: True}
 
     return _proc
 
