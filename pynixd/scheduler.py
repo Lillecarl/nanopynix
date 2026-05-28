@@ -30,6 +30,7 @@ from .derivation_resolver import DerivationResolver
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .operations.base import BuildMode, UnkeyedValidPathInfo
 from .operations.query_closure_with_info import QueryClosureWithInfoRequest
+from .operations.query_valid_paths import QueryValidPathsRequest
 from .stderr import StderrNext
 from .store.transfer import stream_paths_store_to_store
 from .store_path import StorePath
@@ -302,17 +303,26 @@ class Scheduler:
 
         Returns (schedulable, waiting_deps, waiting_paths, override_in_flight).
         override_in_flight accounts for builds assigned this cycle but not yet
-        reflected in `store.in_flight`.
+        reflected in ``store.in_flight``.
+
+        Criteria for "schedulable":
+        - Not already building
+        - All ``depends_on`` builds are done (or no deps)
+        - All ``required_paths`` are in the local store tracker
         """
         schedulable: list[QueuedBuild] = []
         waiting_paths: list[QueuedBuild] = []
         waiting_deps: list[QueuedBuild] = []
 
+        # Count builds that are already building per store (may exceed
+        # store.in_flight because the counter hasn't been updated yet).
         assigned_count: dict[StoreId, int] = {s.store_id: 0 for s in self.stores.values()}
         for build in pending:
             if build.is_building and build.assigned_store_id:
                 assigned_count[build.assigned_store_id] += 1
 
+        # Use the max of the store's reported in_flight and our assigned_count
+        # to avoid undercounting during rapid scheduling passes.
         override_in_flight: dict[StoreId, int] = {
             s.store_id: max(s.in_flight, assigned_count[s.store_id]) for s in self.stores.values()
         }
@@ -321,6 +331,9 @@ class Scheduler:
             if build.is_building:
                 continue
 
+            # DAG check: all dependency builds must be done.  This is a
+            # point-in-time check — a dep that completes between passes
+            # will be caught on the next iteration.
             if build.depends_on:
                 unfinished_deps = {
                     dep_id
@@ -331,6 +344,9 @@ class Scheduler:
                     waiting_deps.append(build)
                     continue
 
+            # Paths check: all required paths must be in the local store.
+            # The tracker is an in-memory cache of local ValidPaths entries,
+            # populated during probing and updated on path transfers.
             if self.local_store.tracker.has_all_paths(set(build.required_paths.keys())):
                 schedulable.append(build)
             else:
@@ -478,6 +494,27 @@ class Scheduler:
                 metrics.STORE_CPU_UTILIZATION.labels(store_id=s.store_id).set(
                     s.cpu_util.utilization,
                 )
+
+    async def validate_known_paths(self, paths: StorePathSet) -> None:
+        """Query unknown paths against the local store and update the tracker.
+
+        Only paths not already in local_store.tracker.known_paths are
+        queried via QueryValidPathsRequest.  This avoids redundant
+        daemon queries when paths are already tracked in memory.
+        """
+        unknown = paths - self.local_store.tracker.known_paths
+        if not unknown:
+            return
+        try:
+            resp = await self.local_store.execute(
+                QueryValidPathsRequest(paths=unknown, substitute=0),
+            )
+            self.local_store.tracker.add_known_paths(
+                resp.paths,
+                update_regtime=False,
+            )
+        except (BackendError, OSError, ConnectionError):
+            log.exception("validate_known_paths_failed", count=len(unknown))
 
     async def execute_build(self, build: QueuedBuild, store: Store) -> None:
         """Execute build on a store, handling inputs and outputs.

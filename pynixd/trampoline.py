@@ -19,7 +19,6 @@ from .drv_parser import read_drv_file, to_basic_derivation
 from .exceptions import BackendError
 from .operations.base import BuildResult, BuildResultStatus, UnkeyedValidPathInfo
 from .operations.build_derivation import BuildDerivationRequest
-from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import DrvOutput, StorePath
 
 if TYPE_CHECKING:
@@ -151,6 +150,21 @@ class Trampoline:
 
     # ── Internal helpers ─────────────────────────────────────────────
 
+    @staticmethod
+    def _has_drv_output(drv_outputs: dict[DrvOutput, Realisation]) -> bool:
+        """Check if any realisation output path is a .drv file.
+
+        A .drv output means the build produced inner derivations that
+        must be trampolined (built as separate derivation builds).
+        """
+        for realisation in drv_outputs.values():
+            out_path = realisation.get("outPath", "")
+            if out_path:
+                out_sp = StorePath(out_path).with_store_prefix()
+                if out_sp.is_derivation():
+                    return True
+        return False
+
     def _should_trampoline(
         self,
         build: QueuedBuild,
@@ -171,21 +185,15 @@ class Trampoline:
         if not drv_outputs:
             return False
 
-        has_drv_output = False
-        for realisation in drv_outputs.values():
-            out_path = realisation.get("outPath", "")
-            if out_path:
-                out_sp = StorePath(out_path).with_store_prefix()
-                if out_sp.is_derivation():
-                    has_drv_output = True
-                    break
-
-        if not has_drv_output:
+        if not self._has_drv_output(drv_outputs):
             return False
 
         if has_nested_dp:
             return True
 
+        # Scan the queue for builds that list this build's drv_path in
+        # their dynamic_input_drvs.  O(n) but only runs on successful
+        # dynamic builds with .drv outputs — rare in practice.
         build_drv_path = StorePath(build.request.drv_path)
         for other_build in self.queue.by_id.values():
             if other_build.is_done:
@@ -248,25 +256,14 @@ class Trampoline:
                 self.local_store.store_path,
             )
 
-            unknown_srcs = inner_basic.input_srcs - self.local_store.tracker.known_paths
-            if unknown_srcs:
-                try:
-                    valid_resp = await self.local_store.execute(
-                        QueryValidPathsRequest(
-                            paths=unknown_srcs,
-                            substitute=0,
-                        ),
-                    )
-                    self.local_store.tracker.add_known_paths(
-                        valid_resp.paths,
-                        update_regtime=False,
-                    )
-                except (BackendError, OSError, ConnectionError):
-                    log.exception(
-                        "trampoline_unknown_srcs_check_failed",
-                        build_id=build.build_id,
-                        inner_drv_path=out_sp,
-                    )
+            try:
+                await self.scheduler.validate_known_paths(inner_basic.input_srcs)
+            except (BackendError, OSError, ConnectionError):
+                log.exception(
+                    "trampoline_unknown_srcs_check_failed",
+                    build_id=build.build_id,
+                    inner_drv_path=out_sp,
+                )
 
             inner_req = BuildDerivationRequest(
                 drv_path=out_sp,
@@ -307,6 +304,11 @@ class Trampoline:
         """After trampoline enqueues an inner build, add DAG edges from
         dependent builds to the inner build, and add the inner build's
         output paths to their required_paths.
+
+        Scans all non-done builds in the queue for ones whose
+        ``dynamic_input_drvs`` reference the outer build.  This is O(n)
+        but only fires when a dynamic derivation with .drv outputs
+        completes, which is rare.
         """
         outer_drv_path = StorePath(outer_build.request.drv_path)
         inner_outputs = inner_derivation.output_paths()

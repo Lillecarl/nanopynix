@@ -147,13 +147,23 @@ class BuildDecomposer:
         to_build: set[StorePath],
         drv_to_derived: dict[str, DerivedPath],
     ) -> tuple[dict[StorePath, Derivation], set[StorePath]]:
-        """BFS walk derivation closure: read .drv files, expand dynamic_input_drvs.
+        """BFS walk the derivation closure to build a parsed-cache.
+
+        Starts from ``to_build`` and follows input_drvs and
+        dynamic_input_drvs until all reachable derivations are parsed.
+
+        For dynamic_input_drvs: if the outer derivation's outputs are
+        not yet built (missing in the local store), the dyn_drv itself is
+        added to the build set and recursively walked.
 
         Returns (parsed_cache, all_input_drvs).
         """
         parsed_cache: dict[StorePath, Derivation] = {}
         all_input_drvs: set[StorePath] = set()
 
+        # BFS: process derivations, collecting input_drvs from each.
+        # When a dynamic_input_drv has unbuilt outputs, add it to the
+        # build set for recursive expansion.
         queue = list(to_build)
         visited: set[StorePath] = set()
         while queue:
@@ -279,15 +289,9 @@ class BuildDecomposer:
             resolved.append((dp, drv_request))
             all_input_srcs.update(basic.input_srcs)
 
-        unknown = all_input_srcs - self.local_store.tracker.known_paths
-        if unknown:
-            valid_resp = await self.local_store.execute(
-                QueryValidPathsRequest(paths=unknown, substitute=0),
-            )
-            self.local_store.tracker.add_known_paths(
-                valid_resp.paths,
-                update_regtime=False,
-            )
+        # Validate that all input_srcs are known to the local store.
+        # The scheduler method handles the internal dedup check.
+        await self.scheduler.validate_known_paths(all_input_srcs)
 
         return resolved, all_input_srcs
 

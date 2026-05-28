@@ -323,10 +323,21 @@ class DerivationResolver:
     ) -> dict[tuple[StorePath, str, str], StorePath]:
         """Build the dynamic_output_paths map for DrvWithVersion resolution.
 
-        Resolves level-1 (outer drv output = .drv path) and level-2+
-        (inner .drv output = actual output) for each dynamic_input_drvs
-        entry.  Falls back to reading .drv files for outputs not found
-        in dep_realisations.
+        Resolves two levels for each dynamic_input_drvs entry:
+
+        1. **Level 1** — outer drv output (= .drv path): looked up from
+           ``dep_realisations`` (populated from completed dep builds' CA
+           realisations).
+
+        2. **Level 2+** — inner .drv output (= actual output): looked up
+           from ``dep_realisations`` (if the inner .drv was also a dep build
+           that completed).  Falls back to reading the .drv file from disk
+           to get static output paths if the realisations aren't available.
+
+        The key type is ``(dyn_drv_path, outer_output, inner_output_name)``
+        which matches the DrvWithVersion wire format.
+
+        Returns an empty dict if no paths can be resolved (warnings logged).
         """
         dynamic_output_paths: dict[tuple[StorePath, str, str], StorePath] = {}
 
