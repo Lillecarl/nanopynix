@@ -37,9 +37,9 @@ def _load_filter_from_plugins(plugins: list) -> Callable | None:
 def _build_filter_processor(filter_fn: Callable) -> Callable:
     """Wrap a plugin filter callable as a structlog processor.
 
-    Returns a ``DropEvent``-raising processor, which structlog's
-    ``_proxy_to_logger`` and ``ProcessorFormatter`` both understand
-    as a signal to discard the event.
+    Raises ``DropEvent`` when the filter drops the event, which
+    structlog's native ``_proxy_to_logger`` understands as a signal
+    to discard.
     """
 
     def _filter_processor(logger: object, method_name: str, event_dict: dict) -> dict:
@@ -104,8 +104,6 @@ def setup_logging(settings: PynixdSettings) -> None:
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso"),
     ]
-    if filter_proc is not None:
-        foreign_pre_chain.append(filter_proc)
 
     formatter = structlog.stdlib.ProcessorFormatter(
         processor=structlog.processors.JSONRenderer(),
