@@ -14,6 +14,7 @@ Phases:
 from __future__ import annotations
 
 import contextlib
+import time
 from typing import TYPE_CHECKING
 
 import structlog
@@ -110,6 +111,7 @@ class BuildDecomposer:
         3. Await sched_req.future — wait for completion
         4. _collect_results   — Assemble KeyedBuildResult list
         """
+        t0 = time.monotonic()
         _req_id, sched_req = await self.queue.create_request(
             derived_paths,
             build_mode,
@@ -117,6 +119,7 @@ class BuildDecomposer:
         )
 
         parsed_cache, drv_to_derived, output_cache = await self._discover_closure(derived_paths)
+        t1 = time.monotonic()
 
         drv_to_build_id = await self._enqueue_and_wire(
             parsed_cache,
@@ -126,19 +129,31 @@ class BuildDecomposer:
             sched_req,
             output_cache=output_cache,
         )
+        t2 = time.monotonic()
 
         if not drv_to_build_id:
             sched_req.resolve_if_done()
 
         result_map = await sched_req.future
+        t3 = time.monotonic()
 
         keyed_results = await self._collect_results(
             derived_paths,
             result_map,
             parsed_cache,
         )
+        t4 = time.monotonic()
 
         await self.queue.prune_request(sched_req.id)
+
+        log.info(
+            "decompose_timing",
+            discover=f"{t1 - t0:.3f}s",
+            enqueue_wire=f"{t2 - t1:.3f}s",
+            await_builds=f"{t3 - t2:.3f}s",
+            collect=f"{t4 - t3:.3f}s",
+            total=f"{t4 - t0:.3f}s",
+        )
 
         return BuildPathsWithResultsResponse(results=keyed_results)
 
@@ -164,8 +179,11 @@ class BuildDecomposer:
         # BFS: process derivations, collecting input_drvs from each.
         # When a dynamic_input_drv has unbuilt outputs, add it to the
         # build set for recursive expansion.
+        t0 = time.monotonic()
         queue = list(to_build)
         visited: set[StorePath] = set()
+        drv_read_count = 0
+        dyn_checked = 0
         while queue:
             sp = queue.pop(0)
             if sp in visited:
@@ -177,6 +195,7 @@ class BuildDecomposer:
                     self.local_store.store_path,
                     reader_fn=self.read_drv_fn,
                 )
+                drv_read_count += 1
             except FileNotFoundError:
                 log.warning("drv_read_failed", drv_path=dp.drv_path)
                 continue
@@ -185,6 +204,7 @@ class BuildDecomposer:
             all_input_drvs.update(parsed.input_drvs.keys())
 
             for dyn_drv_path in parsed.dynamic_input_drvs:
+                dyn_checked += 1
                 if dyn_drv_path not in to_build:
                     try:
                         dyn_parsed = await self.read_drv_fn(
@@ -203,6 +223,14 @@ class BuildDecomposer:
                         parsed_cache[dyn_drv_path] = dyn_parsed
                         all_input_drvs.update(dyn_parsed.input_drvs.keys())
 
+        t1 = time.monotonic()
+        log.info(
+            "bfs_closure_parsed",
+            drvs_parsed=drv_read_count,
+            dyn_checked=dyn_checked,
+            all_input_drvs=len(all_input_drvs),
+            duration=f"{t1 - t0:.3f}s",
+        )
         return parsed_cache, all_input_drvs
 
     async def _discover_closure(
@@ -215,6 +243,7 @@ class BuildDecomposer:
         Handles flattening nested paths, substitution, BFS discovery, and
         output-map queries.
         """
+        t0 = time.monotonic()
         flat_derived_paths: set[DerivedPath] = set()
         for dp in derived_paths:
             if isinstance(dp, DerivedPath) and dp.is_nested:
@@ -225,6 +254,7 @@ class BuildDecomposer:
         missing_resp = await self.local_store.execute(
             QueryMissingRequest(derived_paths=flat_derived_paths),
         )
+        t_query_missing = time.monotonic()
 
         if missing_resp.will_substitute:
             log.info("substituting_paths", count=len(missing_resp.will_substitute))
@@ -236,6 +266,7 @@ class BuildDecomposer:
                     ),
                 )
                 self.local_store.tracker.add_known_paths(valid.paths)
+        t_substitute = time.monotonic()
 
         drv_to_derived: dict[str, DerivedPath] = {}
         for dp in derived_paths:
@@ -250,6 +281,7 @@ class BuildDecomposer:
             to_build,
             drv_to_derived,
         )
+        t_bfs = time.monotonic()
 
         output_cache: OutputMap | None = None
         if all_input_drvs:
@@ -257,6 +289,16 @@ class BuildDecomposer:
                 QueryDerivationOutputMapBatchRequest(drv_paths=all_input_drvs),
             )
             output_cache = resp.outputs or {}
+        t_output_map = time.monotonic()
+
+        log.info(
+            "discover_closure_timing",
+            query_missing=f"{t_query_missing - t0:.3f}s",
+            substitute=f"{t_substitute - t_query_missing:.3f}s",
+            bfs_closure=f"{t_bfs - t_substitute:.3f}s",
+            output_map=f"{t_output_map - t_bfs:.3f}s",
+            total=f"{t_output_map - t0:.3f}s",
+        )
 
         return parsed_cache, drv_to_derived, output_cache
 
@@ -291,7 +333,14 @@ class BuildDecomposer:
 
         # Validate that all input_srcs are known to the local store.
         # The scheduler method handles the internal dedup check.
+        t0 = time.monotonic()
         await self.scheduler.validate_known_paths(all_input_srcs)
+        t1 = time.monotonic()
+        log.info(
+            "validate_known_paths_timing",
+            input_src_count=len(all_input_srcs),
+            duration=f"{t1 - t0:.3f}s",
+        )
 
         return resolved, all_input_srcs
 

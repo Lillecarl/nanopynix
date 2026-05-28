@@ -49,8 +49,10 @@ KEEP_LOGGERS = frozenset(
         "pynixd.proxy",
         "pynixd.unix_server",
         "pynixd.store.base",
+        "pynixd.store.pool",
         "pynixd.operations.probe_systems",
         "pynixd.operations.probe_features",
+        "pynixd.operations.build_paths",
     },
 )
 
@@ -69,7 +71,7 @@ def filter(logger, method_name, event_dict):  # noqa: A001 — plugin convention
         return event_dict
 
     logger_name = getattr(logger, "name", "")
-    if logger_name in KEEP_LOGGERS and method_name != "debug":
+    if logger_name in KEEP_LOGGERS:
         return event_dict
 
     return None
