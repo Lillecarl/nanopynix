@@ -77,6 +77,34 @@ class DerivationResolver:
         self.queue = scheduler.queue
         self.read_drv_fn = read_drv_fn or read_drv_file
 
+    def collect_missing_dep_out_paths(
+        self,
+        build: QueuedBuild,
+        store: Store,
+    ) -> StorePathSet:
+        """Collect output paths from dependency CA realisations that are
+        missing on the target builder store.
+
+        These paths must exist in the store's ValidPaths before
+        RegisterDrvOutputRequest can succeed, because the Nix daemon's
+        INSERT uses a subquery ``(select id from ValidPaths where path = ?)``
+        for the Realisations.outputPath foreign key.
+        """
+        missing: StorePathSet = set()
+        if store is self.local_store:
+            return missing
+        for dep_id in build.depends_on:
+            dep_build = self.queue.by_id.get(dep_id)
+            if dep_build is None or not dep_build.ca_realisations:
+                continue
+            for realisation in dep_build.ca_realisations:
+                out_path_raw = realisation.get("outPath", "")
+                if out_path_raw:
+                    out_path = StorePath(out_path_raw).with_store_prefix()
+                    if out_path not in store.tracker.known_paths:
+                        missing.add(out_path)
+        return missing
+
     async def register_dep_realisations(
         self,
         build: QueuedBuild,

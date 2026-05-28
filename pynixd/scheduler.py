@@ -542,8 +542,12 @@ class Scheduler:
         All operations that must happen before the build request is sent
         to the backend daemon.
         """
-        # 0. Register CA realisations from completed dependency builds
+        # 0. Ensure dependency CA output paths are on the builder, then
+        #    register realisations (the INSERT requires the path in ValidPaths)
         if build.depends_on:
+            missing = self.derivation_resolver.collect_missing_dep_out_paths(build, store)
+            if missing:
+                await stream_paths_store_to_store(self.local_store, store, missing)
             await self.derivation_resolver.register_dep_realisations(build, store)
             await self.derivation_resolver.resolve(build, store)
 
