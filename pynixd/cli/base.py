@@ -14,13 +14,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-def _load_filter_from_plugins(plugins: list) -> Callable | None:
-    """Import each plugin path and return the first callable named ``filter``.
+_DROP_SENTINEL = "_pynixd_drop"
 
-    The callable receives ``(logger, method_name, event_dict)`` and should
-    return the event_dict (pass through) or a falsy value (drop).
-    Plugins that fail to import are skipped with a warning.
-    """
+
+def _load_filter_from_plugins(plugins: list) -> Callable | None:
+    """Import each plugin path and return the first callable named ``filter``."""
     log = structlog.get_logger(__name__)
     for path in plugins:
         module = import_plugin(path)
@@ -35,14 +33,12 @@ def _load_filter_from_plugins(plugins: list) -> Callable | None:
 
 
 def _build_filter_processor(filter_fn: Callable) -> Callable:
-    """Wrap a plugin filter callable as a structlog processor.
+    """Wrap a plugin filter for the structlog chain.
 
-    Raises ``DropEvent`` when the filter drops the event, which
-    structlog's native ``_proxy_to_logger`` understands as a signal
-    to discard.
+    Raises ``DropEvent`` when the filter drops the event.
     """
 
-    def _filter_processor(logger: object, method_name: str, event_dict: dict) -> dict:
+    def _proc(logger: object, method_name: str, event_dict: dict) -> dict:
         try:
             result = filter_fn(logger, method_name, event_dict)
         except structlog.DropEvent:
@@ -53,61 +49,124 @@ def _build_filter_processor(filter_fn: Callable) -> Callable:
             raise structlog.DropEvent
         return result
 
-    return _filter_processor
+    return _proc
+
+
+def _build_foreign_filter_processor(filter_fn: Callable) -> Callable:
+    """Wrap a plugin filter for ``ProcessorFormatter.foreign_pre_chain``.
+
+    ``ProcessorFormatter`` does not catch ``DropEvent``, so this variant
+    returns a sentinel dict ``{"_pynixd_drop": True}``.  The renderer
+    in ``processors`` detects the sentinel and discards the entry.
+    """
+
+    def _proc(logger: object, method_name: str, event_dict: dict) -> dict:
+        try:
+            result = filter_fn(logger, method_name, event_dict)
+        except structlog.DropEvent:
+            return {_DROP_SENTINEL: True}
+        except Exception:
+            return event_dict
+        return result or {_DROP_SENTINEL: True}
+
+    return _proc
+
+
+def _build_processors(is_foreign: bool, filter_fn: Callable | None) -> list:
+    """Build the structlog processor chain.
+
+    Args:
+        is_foreign: True for ``ProcessorFormatter.processors`` (formatter
+            downstream), False for the structlog.configure processor list.
+        filter_fn: Plugin filter callable or None.
+    """
+    procs: list = []
+    if is_foreign:
+        # Shared formatter chain: strip metadata, render.
+        procs.append(structlog.stdlib.ProcessorFormatter.remove_processors_meta)
+
+        if filter_fn is not None:
+            procs.append(_DropFilteringRenderer())
+        else:
+            procs.append(structlog.processors.JSONRenderer())
+    else:
+        # Structlog-native chain.
+        procs.extend(
+            [
+                structlog.stdlib.filter_by_level,
+                structlog.stdlib.add_logger_name,
+                structlog.stdlib.add_log_level,
+                structlog.contextvars.merge_contextvars,
+            ],
+        )
+        if filter_fn is not None:
+            procs.append(_build_filter_processor(filter_fn))
+        procs.extend(
+            [
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.StackInfoRenderer(),
+                structlog.processors.format_exc_info,
+                structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+            ],
+        )
+    return procs
+
+
+def _build_foreign_pre_chain(filter_fn: Callable | None) -> list:
+    """Build ``foreign_pre_chain`` for ``ProcessorFormatter``.
+
+    These processors run only on non-structlog log records and prepare
+    the event dict for the shared rendering chain.
+    """
+    chain: list = [
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.processors.TimeStamper(fmt="iso"),
+    ]
+    if filter_fn is not None:
+        chain.append(_build_foreign_filter_processor(filter_fn))
+    return chain
+
+
+class _DropFilteringRenderer:
+    """A ``ProcessorFormatter`` processor that renders to JSON, skipping
+    entries marked with the filter sentinel.
+
+    The sentinel is set by the plugin filter running in
+    ``foreign_pre_chain`` (which cannot raise ``DropEvent``).
+    Structlog entries bypass ``foreign_pre_chain`` and never have the
+    sentinel -- they are already filtered by the structlog chain.
+    """
+
+    def __init__(self) -> None:
+        self._json = structlog.processors.JSONRenderer()
+
+    def __call__(self, logger: object, method_name: str, event_dict: dict) -> str:
+        if event_dict.get(_DROP_SENTINEL):
+            return ""
+        rendered = self._json(logger, method_name, event_dict)
+        if isinstance(rendered, bytes):
+            return rendered.decode("utf-8")
+        return rendered
 
 
 def setup_logging(settings: PynixdSettings) -> None:
-    """Configure structlog and stdlib logging with plugin-defined filtering.
-
-    Uses ``ProcessorFormatter`` to route standard-library log records
-    (from asyncssh, libraries, and our own non-structlog code) through
-    the same plugin filter that structlog uses.  Both paths produce
-    identical JSON output.
-    """
+    """Configure structlog and stdlib logging with plugin-defined filtering."""
     log_level_str = settings.log_level.upper()
     filter_fn = _load_filter_from_plugins(settings.plugins)
-    filter_proc = _build_filter_processor(filter_fn) if filter_fn else None
 
-    # ── Structlog processor chain ─────────────────────────────────
-    # ``wrap_for_formatter`` defers rendering to the ``ProcessorFormatter``
-    # so that stdlib and structlog messages share the same renderer.
-    structlog_processors: list = [
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.contextvars.merge_contextvars,
-    ]
-    if filter_proc is not None:
-        structlog_processors.append(filter_proc)
-    structlog_processors.extend(
-        [
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-        ],
-    )
-
+    # ── Structlog configure ────────────────────────────────────────
     structlog.configure(
-        processors=structlog_processors,
+        processors=_build_processors(is_foreign=False, filter_fn=filter_fn),
         logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
 
-    # ── Stdlib bridge via ProcessorFormatter ──────────────────────
-    # foreign_pre_chain converts logging.LogRecord → event_dict.
-    # Our plugin filter is inserted so the same filtering applies to
-    # both structlog and stdlib messages.
-    foreign_pre_chain: list = [
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.add_logger_name,
-        structlog.processors.TimeStamper(fmt="iso"),
-    ]
-
+    # ── Stdlib bridge via ProcessorFormatter ───────────────────────
     formatter = structlog.stdlib.ProcessorFormatter(
-        processor=structlog.processors.JSONRenderer(),
-        foreign_pre_chain=foreign_pre_chain,
+        foreign_pre_chain=_build_foreign_pre_chain(filter_fn),
+        processors=_build_processors(is_foreign=True, filter_fn=filter_fn),
     )
 
     logging.basicConfig(
