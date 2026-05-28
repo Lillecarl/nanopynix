@@ -254,7 +254,10 @@ class PynixdSettings(BaseSettings):
     max_cpu_util: float = 90.0  # Fallback: max 90% utilization
     gate_timeout: float = 5.0  # seconds to wait for pressure to subside
 
-    # Logging
+    # Plugins
+    plugins: list[Path] = Field(default_factory=list)
+
+    # Logging (the log-level threshold; filtering is handled by plugins)
     log_level: str = "WARNING"
 
     @classmethod

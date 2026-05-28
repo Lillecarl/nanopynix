@@ -39,6 +39,26 @@ log = structlog.get_logger(__name__)
 NIX_VERSION: str = "pynixd-0.1.0"
 
 
+def _format_op_error(op_name: str, ex: Exception) -> str:
+    """Format an operation error, unwrapping ExceptionGroup sub-exceptions.
+
+    When a TaskGroup fails, Python wraps multiple task exceptions in an
+    ExceptionGroup.  This helper extracts the first meaningful inner
+    error and includes it in the message sent to the client.
+    """
+    inner = _extract_inner_error(ex)
+    return f"Internal error handling {op_name}: {inner}"
+
+
+def _extract_inner_error(ex: BaseException) -> str:
+    """Unwrap ExceptionGroup to find the innermost string message."""
+    exs: list[BaseException] | None = getattr(ex, "exceptions", None)  # type: ignore[assignment]
+    if exs is not None:
+        for sub in exs:
+            return _extract_inner_error(sub)
+    return str(ex)
+
+
 class DaemonProxy:
     """Per-client session: handshake, op dispatch, response encoding.
 
@@ -199,7 +219,8 @@ class DaemonProxy:
             except Exception as ex:
                 log.exception("handle_op_error", name=op_name)
                 await self.client.flush()
-                await self.send_error(f"Internal error handling {op_name}\n{ex}")
+                msg = _format_op_error(op_name, ex)
+                await self.send_error(msg)
 
     # ── Dispatch ─────────────────────────────────────────────────────
 
