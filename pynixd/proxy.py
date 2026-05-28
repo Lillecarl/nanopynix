@@ -7,6 +7,7 @@ and dispatches them to request type handle() classmethods.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 import asyncssh
@@ -84,6 +85,7 @@ class DaemonProxy:
         self.role: Role = role
         self.username: str = username
         self.schedule_mode: ScheduleMode = schedule_mode
+        self._op_timing: dict[int, tuple[int, float]] = {}
 
     @property
     def local_store(self) -> Store:
@@ -129,6 +131,21 @@ class DaemonProxy:
             log.debug("client_disconnected")
         except Exception:
             log.exception("session_error")
+        finally:
+            if self._op_timing:
+                total_time = sum(t for _, t in self._op_timing.values())
+                total_ops = sum(n for n, _ in self._op_timing.values())
+                breakdown = {}
+                for op_num, (count, acc_time) in sorted(self._op_timing.items()):
+                    req_cls = OP_REGISTRY.get(op_num)
+                    name = req_cls.name if req_cls else f"op_{op_num}"
+                    breakdown[name] = f"x{count} {acc_time:.3f}s"
+                log.info(
+                    "client_op_timing",
+                    total_ops=total_ops,
+                    total_time=f"{total_time:.3f}s",
+                    breakdown=breakdown,
+                )
 
     # ── Handshake ────────────────────────────────────────────────────
 
@@ -207,6 +224,7 @@ class DaemonProxy:
             structlog.contextvars.bind_contextvars(operation=op_name)
             log.debug("received")
 
+            t0 = time.monotonic()
             try:
                 response = await self.dispatch(op_num)
 
@@ -221,6 +239,10 @@ class DaemonProxy:
                 await self.client.flush()
                 msg = _format_op_error(op_name, ex)
                 await self.send_error(msg)
+            finally:
+                elapsed = time.monotonic() - t0
+                count, acc = self._op_timing.get(op_num, (0, 0.0))
+                self._op_timing[op_num] = (count + 1, acc + elapsed)
 
     # ── Dispatch ─────────────────────────────────────────────────────
 
