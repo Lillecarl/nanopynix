@@ -221,8 +221,6 @@ class DaemonProxy:
                 continue
 
             op_name = req_cls.name
-            structlog.contextvars.bind_contextvars(operation=op_name)
-            log.debug("received")
 
             t0 = time.monotonic()
             try:

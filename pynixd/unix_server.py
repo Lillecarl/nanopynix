@@ -68,7 +68,7 @@ async def start_unix_server(
     if await sock.exists():
         await sock.unlink()
 
-    server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
+    server = await asyncio.start_unix_server(handle_client, path=str(socket_path), limit=2**18)
     await sock.chmod(0o666)
     log.info("unix_server_listening", socket_path=socket_path)
     return server
