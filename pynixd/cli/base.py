@@ -14,14 +14,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-def _scan_plugins_for_filter(plugins: list) -> Callable | None:
+def _load_filter_from_plugins(plugins: list) -> Callable | None:
     """Import each plugin path and return the first callable named ``filter``.
 
-    A plugin module may export a ``filter`` function (or a class instance
-    with ``__call__``).  The callable receives
-    ``(logger, method_name, event_dict)`` and should return the event_dict
-    (pass through) or a falsy value (drop).
-
+    The callable receives ``(logger, method_name, event_dict)`` and should
+    return the event_dict (pass through) or a falsy value (drop).
     Plugins that fail to import are skipped with a warning.
     """
     log = structlog.get_logger(__name__)
@@ -37,56 +34,91 @@ def _scan_plugins_for_filter(plugins: list) -> Callable | None:
     return None
 
 
-def build_processors(settings: PynixdSettings) -> list:
-    """Build the structlog processor chain, injecting a user-defined filter
-    processor if any plugin exports a ``filter`` callable.
+def _build_filter_processor(filter_fn: Callable) -> Callable:
+    """Wrap a plugin filter callable as a structlog processor.
+
+    Returns a ``DropEvent``-raising processor, which structlog's
+    ``_proxy_to_logger`` and ``ProcessorFormatter`` both understand
+    as a signal to discard the event.
     """
-    processors: list = [
+
+    def _filter_processor(logger: object, method_name: str, event_dict: dict) -> dict:
+        try:
+            result = filter_fn(logger, method_name, event_dict)
+        except structlog.DropEvent:
+            raise
+        except Exception:
+            return event_dict
+        if not result:
+            raise structlog.DropEvent
+        return result
+
+    return _filter_processor
+
+
+def setup_logging(settings: PynixdSettings) -> None:
+    """Configure structlog and stdlib logging with plugin-defined filtering.
+
+    Uses ``ProcessorFormatter`` to route standard-library log records
+    (from asyncssh, libraries, and our own non-structlog code) through
+    the same plugin filter that structlog uses.  Both paths produce
+    identical JSON output.
+    """
+    log_level_str = settings.log_level.upper()
+    filter_fn = _load_filter_from_plugins(settings.plugins)
+    filter_proc = _build_filter_processor(filter_fn) if filter_fn else None
+
+    # ── Structlog processor chain ─────────────────────────────────
+    # ``wrap_for_formatter`` defers rendering to the ``ProcessorFormatter``
+    # so that stdlib and structlog messages share the same renderer.
+    structlog_processors: list = [
         structlog.stdlib.filter_by_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
         structlog.contextvars.merge_contextvars,
     ]
-
-    filter_fn = _scan_plugins_for_filter(settings.plugins)
-    if filter_fn is not None:
-
-        def _filter_processor(logger: object, method_name: str, event_dict: dict) -> dict:
-            try:
-                result = filter_fn(logger, method_name, event_dict)
-            except Exception:
-                return event_dict
-            if not result:
-                raise structlog.DropEvent
-            return result
-
-        processors.append(_filter_processor)
-
-    processors.extend(
+    if filter_proc is not None:
+        structlog_processors.append(filter_proc)
+    structlog_processors.extend(
         [
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer(),
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-    )
-    return processors
-
-
-def setup_logging(settings: PynixdSettings) -> None:
-    log_level_str = settings.log_level.upper()
-
-    logging.basicConfig(
-        level=log_level_str,
-        format="%(message)s",
     )
 
     structlog.configure(
-        processors=build_processors(settings),
+        processors=structlog_processors,
         logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
+
+    # ── Stdlib bridge via ProcessorFormatter ──────────────────────
+    # foreign_pre_chain converts logging.LogRecord → event_dict.
+    # Our plugin filter is inserted so the same filtering applies to
+    # both structlog and stdlib messages.
+    foreign_pre_chain: list = [
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.processors.TimeStamper(fmt="iso"),
+    ]
+    if filter_proc is not None:
+        foreign_pre_chain.append(filter_proc)
+
+    formatter = structlog.stdlib.ProcessorFormatter(
+        processor=structlog.processors.JSONRenderer(),
+        foreign_pre_chain=foreign_pre_chain,
+    )
+
+    logging.basicConfig(
+        level=log_level_str,
+        handlers=[logging.StreamHandler()],
+        force=True,
+    )
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(formatter)
 
 
 def load_settings() -> PynixdSettings:
