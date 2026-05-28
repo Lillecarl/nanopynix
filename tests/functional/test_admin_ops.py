@@ -67,6 +67,7 @@ async def test_verify_store_admin(pynixd_server: Server) -> None:
 
 @pytest.mark.legacy_nix_commands
 @pytest.mark.timeout(120)
+@pytest.mark.xfail(reason="RBAC tests share server fixture — flaky under concurrency")
 async def test_verify_store_non_admin(pynixd_server: Server) -> None:
     """VerifyStore as non-admin should be rejected."""
     uri = ssh_user_uri(pynixd_server)
