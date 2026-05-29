@@ -196,7 +196,7 @@ class Store(ABC):
         try:
             resp = await self.execute(QueryAllValidPathsRequest())
             self.tracker.add_known_paths(resp.paths)
-            log.debug("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
+            log.info("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
         except (BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e:
             known_paths: StorePathSet | None = None
             if self.tracker.parent is not None and self.tracker.parent.db is not None:
