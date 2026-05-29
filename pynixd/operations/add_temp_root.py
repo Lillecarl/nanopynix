@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..stderr import OperationLogs, StderrNext
+from ..stderr import OperationLogs
 from ..store_path import StorePath
 from ..types.auth import Role
 from ..types.context import ReadContext, WriteContext
@@ -42,14 +42,11 @@ class AddTempRootRequest(OpRequest[AddTempRootResponse]):
     path: StorePath
 
     async def handle(self, ctx: RequestContext) -> AddTempRootResponse | None:
-        self = await self.deserialize(ReadContext.from_request(ctx))
         if ctx.proxy.role == Role.ADMIN:
+            self = await self.deserialize(ReadContext.from_request(ctx))
             return await ctx.proxy.execute(self)
-
-        resp = AddTempRootResponse(value=1)
-        msg = StderrNext(f"pynixd: AddTempRoot {self.path} ignored (no-op)")
-        resp.logs.add(msg)
-        return resp
+        await ReadContext.from_request(ctx).reader.read_bytes()
+        return AddTempRootResponse(value=1)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:

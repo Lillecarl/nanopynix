@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..stderr import OperationLogs, StderrNext
+from ..stderr import OperationLogs
 from ..store_path import StorePath
 from ..types.auth import Role
 from ..types.context import ReadContext, WriteContext
@@ -50,14 +50,11 @@ class AddIndirectRootRequest(OpRequest[AddIndirectRootResponse]):
         return obj
 
     async def handle(self, ctx: RequestContext) -> AddIndirectRootResponse | None:
-        self = await self.deserialize(ReadContext.from_request(ctx))
         if ctx.proxy.role == Role.ADMIN:
+            self = await self.deserialize(ReadContext.from_request(ctx))
             return await ctx.proxy.execute(self)
-
-        resp = AddIndirectRootResponse(value=1)
-        msg = StderrNext(f"pynixd: AddIndirectRoot {self.path} ignored (no-op)")
-        resp.logs.add(msg)
-        return resp
+        await ReadContext.from_request(ctx).reader.read_bytes()
+        return AddIndirectRootResponse(value=1)
 
     async def serialize(self, ctx: WriteContext) -> None:
         self.logger = self.logger.bind(identifier=ctx.writer.identifier)

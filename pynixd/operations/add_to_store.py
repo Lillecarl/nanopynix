@@ -6,8 +6,6 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-import structlog
-
 from ..stderr import OperationLogs
 from ..store_path import StorePath
 from ..types.context import ReadContext, WriteContext
@@ -113,7 +111,6 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
 
     async def handle(self, ctx: RequestContext) -> AddToStoreResponse:
         """Override handle because this is a streaming operation."""
-        structlog.contextvars.bind_contextvars(operation=type(self).__name__)
         async with ctx.proxy.local_store.transfer_conn() as conn:
             await self.forward(ctx.proxy.r, conn.w)
             await conn.w.drain()
