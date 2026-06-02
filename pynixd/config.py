@@ -139,6 +139,56 @@ class LocalSubprocessStoreSpec(StoreSpecBase):
         )
 
 
+class ReverseStoreSpec(StoreSpecBase):
+    """Configuration for a reverse store (builder connects to controller).
+
+    Reverse stores are created dynamically when a builder registers with
+    the controller via the reverse server. This spec exists to provide a
+    type in the StoreSpec union and document the expected fields.
+    """
+
+    type: Literal["reverse"] = "reverse"
+
+    def to_store(self, store_id: str) -> Store:
+        raise NotImplementedError("Reverse stores are created dynamically, not from config")
+
+
+class ReverseAcceptorSettings(BaseModel):
+    """Settings for the reverse acceptor (controller side).
+
+    The reverse acceptor listens for builder-initiated SSH connections.
+    Builders (reverse initiators) register themselves as build stores,
+    enabling NAT traversal.
+    """
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 2235
+    host_key_path: Path | None = None
+
+
+class ReverseInitiatorSettings(BaseModel):
+    """Settings for the reverse initiator (builder side).
+
+    The reverse initiator connects to a controller's reverse acceptor and
+    registers the local pynixd instance as a build store.  After registration,
+    the controller opens pooled ``nix-daemon --stdio`` sessions to execute
+    builds and queries.
+    """
+
+    enabled: bool = False
+    acceptor_host: str = "127.0.0.1"
+    acceptor_port: int = 2235
+    store_id: str | None = None
+    systems: list[str] | None = None
+    system_features: list[str] = Field(default_factory=list)
+    nix_bin: str = "nix"
+    server_host_key_paths: list[Path] = Field(default_factory=list)
+    reconnect_min_delay: float = 1.0
+    reconnect_max_delay: float = 60.0
+    shutdown_on_connect_failure_seconds: float | None = None
+
+
 class SSHSubprocessStoreSpec(StoreSpecBase):
     type: Literal["ssh-subprocess"] = "ssh-subprocess"
     host: str
@@ -174,7 +224,7 @@ class SSHSocketStoreSpec(StoreSpecBase):
 
 
 StoreSpec = Annotated[
-    LocalSocketStoreSpec | LocalSubprocessStoreSpec | SSHSubprocessStoreSpec | SSHSocketStoreSpec,
+    LocalSocketStoreSpec | LocalSubprocessStoreSpec | SSHSubprocessStoreSpec | SSHSocketStoreSpec | ReverseStoreSpec,
     Field(discriminator="type"),
 ]
 
@@ -236,6 +286,9 @@ class PynixdSettings(BaseSettings):
     https_port: int | None = None
     https_cert: Path | None = None
     https_key: Path | None = None
+
+    reverse_acceptor: ReverseAcceptorSettings = Field(default_factory=ReverseAcceptorSettings)
+    reverse_initiator: ReverseInitiatorSettings = Field(default_factory=ReverseInitiatorSettings)
 
     admin_users: set[str] = Field(default_factory=set)
 

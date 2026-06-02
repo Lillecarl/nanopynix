@@ -19,6 +19,8 @@ from .http_server import PynixdHttpServer
 from .local_store_db import LocalStoreDB
 from .operations.pynixd_collect_garbage import PynixdCollectGarbageRequest
 from .path_tracker import PathTracker
+from .reverse_client import ReverseInitiator
+from .reverse_server import start_reverse_acceptor
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
 from .stderr import OperationLogs
@@ -81,6 +83,7 @@ class Server:
         self.background_tasks: list[asyncio.Task[Any]] = []
         self.ssh_server: asyncssh.SSHAcceptor | None = None
         self.unix_server: asyncio.Server | None = None
+        self.reverse_acceptor: asyncssh.SSHAcceptor | None = None
         self.http_server: web.AppRunner | None = None
         self.http_bound_port: int | None = None
         self.https_server: web.AppRunner | None = None
@@ -299,6 +302,15 @@ class Server:
                 schedule_mode=s.schedule_mode,
             )
 
+        self.reverse_acceptor = await start_reverse_acceptor(
+            server=self,
+            settings=s.reverse_acceptor,
+        )
+
+        if s.reverse_initiator.enabled:
+            initiator = ReverseInitiator(self.ctx, s.reverse_initiator)
+            self.background_tasks.append(asyncio.create_task(initiator.run()))
+
         if s.unix_path:
             self.unix_server = await start_unix_server(
                 ctx=self.ctx,
@@ -335,7 +347,7 @@ class Server:
                 self.https_server = runner
                 self.https_bound_port = port
 
-        if not (self.ssh_server or self.unix_server or self.http_server or self.https_server):
+        if not (self.reverse_acceptor or self.ssh_server or self.unix_server or self.http_server or self.https_server):
             log.warning("no_servers_started")
 
     async def wait_finished(self) -> None:
@@ -361,6 +373,10 @@ class Server:
             await self.https_server.cleanup()
             self.https_server = None
 
+        if self.reverse_acceptor:
+            self.reverse_acceptor.close()
+            await self.reverse_acceptor.wait_closed()
+            self.reverse_acceptor = None
         if self.ssh_server:
             self.ssh_server.close()
             await self.ssh_server.wait_closed()
