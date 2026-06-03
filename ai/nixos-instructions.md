@@ -1,7 +1,7 @@
 # How AI can rebuild my system to iterate on pynixd as a system daemon
 ## Check logs
 ```bash
-journalctl -u pynixd -S "$(systemctl show pynixd -p ActiveEnterTimestamp --value)" # pipe or tail but prefer cleaning the logs with the filter file
+journalctl -u pynixd --since -"$seconds"s
 ```
 Checks the logs of the program since it last started
 ## Rebuild without pynixd
@@ -11,6 +11,18 @@ time timeout 300 sudo ai-nixos-rebuild # <important>don't pipe away output!! </i
 ## Rebuild with pynixd
 ```bash
 time timeout 300 sudo ai-nixos-rebuild-pynixd # <important>don't pipe away output!!!</important>
+```
+## Build with eval store Nix, build store pynixd
+```bash
+time timeout 300 nix build --eval-store unix:///nix/var/nix/daemon-socket/socket --store unix:///run/pynixd/pynixd.sock --no-link --file ~/Code/croshome oc.system.build.toplevel
+```
+## Build with eval store pynixd, build store pynixd
+```bash
+time timeout 300 nnix build --store unix:///run/pynixd/pynixd.sock --no-link --file ~/Code/croshome oc.system.build.toplevel
+```
+## Build with eval store nix, build store nix
+```bash
+time timeout 300 nnix build --no-link --file ~/Code/croshome oc.system.build.toplevel
 ```
 ## Collect garbage
 ```bash
