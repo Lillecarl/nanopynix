@@ -12,6 +12,7 @@ import asyncio
 import signal
 
 import structlog
+import uvloop
 
 from .cli.base import load_settings, setup_logging
 from .cli.gc import register as register_gc
@@ -48,6 +49,8 @@ async def async_daemon_main() -> None:
 def daemon_main(_args: argparse.Namespace) -> None:
     settings = load_settings()
     setup_logging(settings)
+
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
     asyncio.run(async_daemon_main())
 

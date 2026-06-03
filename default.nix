@@ -63,7 +63,7 @@ let
       python.pkgs.pydantic-settings
       python.pkgs.prometheus-client
       python.pkgs.anyio
-      python.pkgs.tenacity
+      python.pkgs.uvloop
     ];
 
     nativeCheckInputs = [
