@@ -71,8 +71,6 @@ KEEP_LOGGERS_DEBUG = frozenset(
         "pynixd.decomposer",
         "pynixd.derivation_resolver",
         "pynixd.build_queue",
-        "pynixd.operations.QueryValidPathsRequest",
-        "pynixd.operations.QueryDerivationOutputMapBatchRequest",
     },
 )
 

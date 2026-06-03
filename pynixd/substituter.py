@@ -10,14 +10,19 @@ HTTP requests, enabling near-parallel substituter queries during
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 import structlog
 
 from .store_path import StorePath
 from .types import SubstitutablePathInfo
+
+if TYPE_CHECKING:
+    from collections.abc import Coroutine
 
 log = structlog.get_logger(__name__)
 
@@ -83,7 +88,7 @@ class HttpBinaryCacheSubstituter(Substituter):
 
     async def __aenter__(self) -> HttpBinaryCacheSubstituter:
         if self._session is None:
-            connector = aiohttp.TCPConnector(limit=0, force_close=True)
+            connector = aiohttp.TCPConnector(limit=50, force_close=False)
             self._session = aiohttp.ClientSession(connector=connector)
             self._own_session = True
         return self
@@ -156,6 +161,88 @@ class HttpBinaryCacheSubstituter(Substituter):
                 pass
 
 
+class SubstituterGroup:
+    """Race N substituters per path — first 200 wins.
+
+    Owns the shared :class:`~aiohttp.ClientSession` and injects it
+    into every substituter.  Use as an async context manager::
+
+        async with SubstituterGroup(subs) as sg:
+            sg.tg = ...  # bind a TaskGroup
+            await sg.has_path(...)
+            sg.spawn(...)
+
+    Bind a :class:`~asyncio.TaskGroup` via :attr:`tg` before
+    calling :meth:`spawn` or :meth:`has_path`.
+    """
+
+    def __init__(
+        self,
+        subs: list[HttpBinaryCacheSubstituter],
+    ) -> None:
+        self._subs = subs
+        self.tg: asyncio.TaskGroup | None = None
+        self._session: aiohttp.ClientSession | None = None
+
+    async def __aenter__(self) -> SubstituterGroup:
+        connector = aiohttp.TCPConnector(limit=50, force_close=False)
+        self._session = aiohttp.ClientSession(connector=connector)
+        for sub in self._subs:
+            sub._session = self._session
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        if self._session is not None:
+            await self._session.close()
+            self._session = None
+
+    def spawn(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+        """Schedule *coro* in the bound TaskGroup."""
+        if self.tg is None:
+            raise RuntimeError("SubstituterGroup.tg is not bound to a TaskGroup")
+        return self.tg.create_task(coro)
+
+    async def has_path(self, path: StorePath) -> SubstitutablePathInfo | None:
+        """Race substituters — first narinfo wins, ``None`` if none have it.
+
+        Spawns one GET task per substituter racing to fetch the narinfo
+        for *path*.  Blocks until the first success or every substituter
+        has responded negatively.
+        """
+        if self.tg is None:
+            raise RuntimeError("SubstituterGroup.tg is not bound to a TaskGroup")
+        if not self._subs:
+            return None
+
+        lock = asyncio.Lock()
+        info_result: SubstitutablePathInfo | None = None
+        remaining = len(self._subs)
+        latch: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+        async def _try(sub: HttpBinaryCacheSubstituter) -> None:
+            nonlocal info_result, remaining
+            try:
+                infos = await sub.query_substitutable_path_infos({path})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                infos = {}
+            async with lock:
+                if infos and info_result is None:
+                    info_result = infos[path]
+                    if not latch.done():
+                        latch.set_result(None)
+                remaining -= 1
+                if remaining == 0 and not latch.done():
+                    latch.set_result(None)
+
+        for sub in self._subs:
+            self.tg.create_task(_try(sub))
+
+        await latch
+        return info_result
+
+
 def _parse_narinfo(text: str) -> SubstitutablePathInfo | None:
     fields: dict[str, str] = {}
     for match in _NARINFO_RE.finditer(text):
@@ -198,8 +285,6 @@ def get_substituter_urls() -> list[str]:
     Reads from the ``NIX_CONFIG`` environment variable (which may
     contain ``substituters = ...``).  Falls back to a default cache.
     """
-    import os
-
     config = os.environ.get("NIX_CONFIG", "")
     if config:
         for line in config.split("\n"):

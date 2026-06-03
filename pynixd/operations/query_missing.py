@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -29,11 +28,14 @@ from ..substituter import (
     HttpBinaryCacheSubstituter as HttpBinaryCacheSubstituter,
 )
 from ..substituter import (
+    SubstituterGroup as SubstituterGroup,
+)
+from ..substituter import (
     get_substituter_urls as get_substituter_urls,
 )
 from .base import OpRequest, OpResponse
+from .is_valid_path import IsValidPathRequest
 from .query_derivation_output_map_batch import QueryDerivationOutputMapBatchRequest
-from .query_valid_paths import QueryValidPathsRequest
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -41,7 +43,20 @@ if TYPE_CHECKING:
     from ..types.aliases import StorePathSet
     from ..types.context import ReadContext, WriteContext
 
-_BATCH_SIZE = 256
+
+@dataclass
+class _QueryCtx:
+    """Mutable execution context shared across swarm tasks."""
+
+    sg: SubstituterGroup
+    drv_to_wanted: dict[StorePath, set[str]]
+    will_build: set[StorePath]
+    will_substitute: set[StorePath]
+    unknown: set[StorePath]
+    store: Store
+    seen: set[str]
+    download_size: int = 0
+    nar_size: int = 0
 
 
 @dataclass
@@ -108,13 +123,6 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = True,
     ) -> QueryMissingResponse:
-        """Execute QueryMissing in-process with a self-feeding queue.
-
-        One batch SQLite validity check per iteration.  Missing paths are
-        checked against HTTP substituters and their .drv files in a
-        single TaskGroup.  Valid drvs have their output paths checked and
-        trigger will_build/will_substitute decisions.
-        """
         if not self.derived_paths:
             return _empty_response()
 
@@ -122,139 +130,131 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         will_substitute: StorePathSet = set()
         unknown: StorePathSet = set()
         seen: set[str] = set()
-        pending: set[StorePath] = set()
         drv_to_wanted: dict[StorePath, set[str]] = {}
 
+        initial_paths: set[StorePath] = set()
         for dp in self.derived_paths:
             derived = dp.derived
             if isinstance(derived, DerivedPathOpaque):
-                pending.add(derived.path)
+                initial_paths.add(derived.path)
             elif isinstance(derived, DerivedPathBuilt):
                 if isinstance(derived.drv_path, SingleDerivedPathBuilt):
                     continue
                 drv = StorePath(derived.base_store_path())
-                pending.add(drv)
+                initial_paths.add(drv)
                 if isinstance(derived.outputs, OutputsNames):
-                    drv_to_wanted[drv] = set(derived.outputs.names)
+                    drv_to_wanted.setdefault(drv, set()).update(derived.outputs.names)
 
-        if not pending:
+        if not initial_paths:
             return _empty_response()
 
         subs = [HttpBinaryCacheSubstituter(url) for url in get_substituter_urls()]
 
-        async with contextlib.AsyncExitStack() as stack:
-            for sub in subs:
-                await stack.enter_async_context(sub)
+        async with SubstituterGroup(subs) as sg:
+            ctx = _QueryCtx(
+                sg=sg,
+                drv_to_wanted=drv_to_wanted,
+                will_build=will_build,
+                will_substitute=will_substitute,
+                unknown=unknown,
+                store=store,
+                seen=seen,
+            )
 
-            while pending:
-                unseen = {p for p in pending if str(p) not in seen}
-                pending.clear()
-                if not unseen:
-                    break
-                for p in unseen:
-                    seen.add(str(p))
-
-                valid = (
-                    await QueryValidPathsRequest(
-                        paths=unseen,
-                        substitute=0,
-                    ).execute(store, client, suppress_last)
-                ).paths
-
-                missing = unseen - valid
-
-                drv_valid = {p for p in valid if p.is_derivation()}
-                if drv_valid:
-                    out_maps = (
-                        await QueryDerivationOutputMapBatchRequest(
-                            drv_paths=drv_valid,
-                        ).execute(store, client, suppress_last)
-                    ).outputs
-
-                    all_output_paths: set[StorePath] = set()
-                    for drv, outputs in out_maps.items():
-                        wanted = drv_to_wanted.get(drv, set())
-                        for name, opath in outputs.items():
-                            if opath is None:
-                                continue
-                            if wanted and name not in wanted:
-                                continue
-                            all_output_paths.add(opath)
-
-                    valid_outputs: StorePathSet = set()
-                    if all_output_paths:
-                        valid_outputs = (
-                            await QueryValidPathsRequest(
-                                paths=all_output_paths,
-                                substitute=0,
-                            ).execute(store, client, suppress_last)
-                        ).paths
-
-                    for drv, outputs in out_maps.items():
-                        wanted = drv_to_wanted.get(drv, set())
-                        invalid_outputs: set[StorePath] = set()
-                        for name, opath in outputs.items():
-                            if opath is None:
-                                continue
-                            if wanted and name not in wanted:
-                                continue
-                            if opath not in valid_outputs:
-                                invalid_outputs.add(opath)
-
-                        if not invalid_outputs:
-                            continue
-
-                        for sub in subs:
-                            if not invalid_outputs:
-                                break
-                            found = await sub.query_substitutable_paths(invalid_outputs)
-                            will_substitute |= found
-                            invalid_outputs -= found
-
-                        if invalid_outputs:
-                            will_build.add(drv)
-                            try:
-                                parsed = await read_drv_file(store.store_path, drv)
-                            except FileNotFoundError:
-                                unknown.add(drv)
-                                continue
-                            for input_drv in parsed.input_drvs:
-                                if str(input_drv) not in seen:
-                                    pending.add(input_drv)
-
-                if not missing:
-                    continue
-
-                drv_missing = {p for p in missing if p.is_derivation()}
-
-                async with asyncio.TaskGroup() as tg:
-                    for sub in subs:
-                        tg.create_task(
-                            _query_substituter(sub, missing, will_substitute),
-                        )
-                    for drv in drv_missing:
-                        tg.create_task(
-                            _read_and_enqueue(
-                                drv,
-                                store,
-                                will_build,
-                                will_substitute,
-                                unknown,
-                                pending,
-                                seen,
-                            ),
-                        )
-
-                missing -= will_substitute
-                unknown |= {p for p in missing if not p.is_derivation()}
+            async with asyncio.TaskGroup() as tg:
+                sg.tg = tg
+                for path in initial_paths:
+                    sg.spawn(_resolve_path(path, store, client, suppress_last, ctx))
 
         return QueryMissingResponse(
             will_build=will_build,
             will_substitute=will_substitute,
             unknown=unknown,
-            download_size=0,
-            nar_size=0,
+            download_size=ctx.download_size,
+            nar_size=ctx.nar_size,
         )
+
+
+async def _resolve_path(
+    path: StorePath,
+    store: Store,
+    client: ClientConn | None,
+    suppress_last: bool,
+    ctx: _QueryCtx,
+) -> None:
+    if str(path) in ctx.seen:
+        return
+    ctx.seen.add(str(path))
+
+    is_local = (await IsValidPathRequest(path=path).execute(store, client, suppress_last)).valid
+
+    if not is_local:
+        info = await ctx.sg.has_path(path)
+        if info is not None:
+            ctx.will_substitute.add(path)
+            ctx.download_size += info.download_size
+            ctx.nar_size += info.nar_size
+            if path.is_derivation():
+                outputs = await _fetch_output_map(path, store, client, suppress_last)
+                wanted = ctx.drv_to_wanted.get(path, set())
+                for name, opath in outputs.items():
+                    if opath is None:
+                        continue
+                    if wanted and name not in wanted:
+                        continue
+                    if opath in ctx.will_substitute:
+                        continue
+                    ctx.sg.spawn(_resolve_path(opath, store, client, suppress_last, ctx))
+        else:
+            ctx.unknown.add(path)
+        return
+
+    if not path.is_derivation():
+        return
+
+    outputs = await _fetch_output_map(path, store, client, suppress_last)
+    wanted = ctx.drv_to_wanted.get(path, set())
+
+    still_missing = False
+    for name, opath in outputs.items():
+        if opath is None:
+            continue
+        if wanted and name not in wanted:
+            continue
+        op_valid = (await IsValidPathRequest(path=opath).execute(store, client, suppress_last)).valid
+        if op_valid:
+            continue
+        info = await ctx.sg.has_path(opath)
+        if info is not None:
+            ctx.will_substitute.add(opath)
+            ctx.download_size += info.download_size
+            ctx.nar_size += info.nar_size
+        else:
+            still_missing = True
+
+    if not still_missing:
+        return
+
+    ctx.will_build.add(path)
+    try:
+        parsed = await read_drv_file(ctx.store.store_path, path)
+    except FileNotFoundError:
+        ctx.unknown.add(path)
+        return
+    for input_drv in parsed.input_drvs:
+        ctx.sg.spawn(_resolve_path(input_drv, store, client, suppress_last, ctx))
+
+
+async def _fetch_output_map(
+    drv: StorePath,
+    store: Store,
+    client: ClientConn | None,
+    suppress_last: bool,
+) -> dict[str, StorePath | None]:
+    resp = await QueryDerivationOutputMapBatchRequest(
+        drv_paths={drv},
+    ).execute(store, client, suppress_last)
+    return resp.outputs.get(drv, {})
 
 
 def _empty_response() -> QueryMissingResponse:
@@ -265,34 +265,3 @@ def _empty_response() -> QueryMissingResponse:
         download_size=0,
         nar_size=0,
     )
-
-
-async def _query_substituter(
-    sub: HttpBinaryCacheSubstituter,
-    paths: set[StorePath],
-    will_substitute: StorePathSet,
-) -> None:
-    found = await sub.query_substitutable_paths(paths)
-    will_substitute |= found
-
-
-async def _read_and_enqueue(
-    drv: StorePath,
-    store: Store,
-    will_build: StorePathSet,
-    will_substitute: StorePathSet,
-    unknown: StorePathSet,
-    pending: set[StorePath],
-    seen: set[str],
-) -> None:
-    if drv in will_substitute:
-        return
-    try:
-        parsed = await read_drv_file(store.store_path, drv)
-    except FileNotFoundError:
-        unknown.add(drv)
-        return
-    will_build.add(drv)
-    for input_drv in parsed.input_drvs:
-        if str(input_drv) not in seen:
-            pending.add(input_drv)
