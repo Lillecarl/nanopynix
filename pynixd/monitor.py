@@ -1,13 +1,15 @@
 """
 System resource monitoring and concurrency gating for pynixd stores.
-Consolidated monitoring logic for local and remote (SSH) stores.
+
+All monitoring uses passive polling — no PSI triggers or eventfd.
+Local stores poll /proc/pressure and cgroup files directly.
+Remote (SSH) stores poll through SFTP-backed reads.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -254,147 +256,8 @@ class GenericResourcePoller(ResourceMonitor):
             await asyncio.sleep(self.interval)
 
 
-class LocalPSIMonitor(ResourceMonitor):
-    """Specialized Linux cgroupv2 PSI monitor using instant triggers."""
-
-    def __init__(self, gate: ResourceGate, settings: PynixdSettings) -> None:
-        super().__init__(gate, settings)
-        self.cpu_fd: int | None = None
-        self.mem_fd: int | None = None
-        self.io_fd: int | None = None
-
-    async def run(self) -> None:
-        """Uses loop.add_reader to listen for kernel PSI events."""
-        loop = asyncio.get_running_loop()
-
-        # Unprivileged users are limited to a minimum window size of 2 seconds.
-        window_size = 2000000
-        cpu_threshold = f"some {int(self.settings.psi_cpu_threshold * 1000)} {window_size}"
-        mem_threshold = f"some {int(self.settings.psi_mem_threshold * 1000)} {window_size}"
-        io_threshold = f"some {int(self.settings.psi_io_threshold * 1000)} {window_size}"
-
-        try:
-            self.cpu_fd = os.open(
-                "/sys/fs/cgroup/cpu.pressure",
-                os.O_RDWR | os.O_NONBLOCK,
-            )
-            os.write(self.cpu_fd, cpu_threshold.encode())
-
-            self.mem_fd = os.open(
-                "/sys/fs/cgroup/memory.pressure",
-                os.O_RDWR | os.O_NONBLOCK,
-            )
-            os.write(self.mem_fd, mem_threshold.encode())
-
-            self.io_fd = os.open(
-                "/sys/fs/cgroup/io.pressure",
-                os.O_RDWR | os.O_NONBLOCK,
-            )
-            os.write(self.io_fd, io_threshold.encode())
-        except (PermissionError, FileNotFoundError, OSError) as e:
-            log.warning(
-                "psi_triggers_unavailable",
-                error=str(e),
-                hint="Set kernel.psi=1 and ensure write access to cgroup.pressure files",
-            )
-            return
-
-        def on_cpu_event():
-            log.warning("cpu_pressure_event_fired")
-            self.gate.cpu_clear.clear()
-            loop.call_later(2.0, self.check_pressure_manually)
-
-        def on_mem_event():
-            log.warning("mem_pressure_event_fired")
-            self.gate.mem_clear.clear()
-            loop.call_later(2.0, self.check_pressure_manually)
-
-        def on_io_event():
-            log.warning("io_pressure_event_fired")
-            self.gate.io_clear.clear()
-            loop.call_later(2.0, self.check_pressure_manually)
-
-        try:
-            loop.add_reader(self.cpu_fd, on_cpu_event)
-            loop.add_reader(self.mem_fd, on_mem_event)
-            loop.add_reader(self.io_fd, on_io_event)
-
-            log.info(
-                "psi_notifier_started",
-                cpu=cpu_threshold,
-                mem=mem_threshold,
-                io=io_threshold,
-            )
-
-            while self.running:
-                await asyncio.sleep(10)
-                self.check_pressure_manually()
-
-        except (OSError, FileNotFoundError, PermissionError, RuntimeError) as e:
-            log.info("psi_notifier_unavailable", reason=str(e))
-
-            # Local fallback functions
-            async def local_read(path: str) -> str:
-                with Path(path).open() as f:  # noqa: ASYNC230 — /proc reads are instant
-                    return f.read()
-
-            async def local_exists(path: str) -> bool:
-                return Path(path).exists()  # noqa: ASYNC240 — instant local FS check
-
-            # Fallback to generic poller
-            poller = GenericResourcePoller(
-                self.gate,
-                self.settings,
-                local_read,
-                local_exists,
-            )
-            await poller.run()
-        finally:
-            if self.cpu_fd:
-                loop.remove_reader(self.cpu_fd)
-                os.close(self.cpu_fd)
-            if self.mem_fd:
-                loop.remove_reader(self.mem_fd)
-                os.close(self.mem_fd)
-            if self.io_fd:
-                loop.remove_reader(self.io_fd)
-                os.close(self.io_fd)
-
-    def check_pressure_manually(self) -> None:
-        """Update health state via manual read."""
-        try:
-            parts = []
-            for p in ["cpu", "memory", "io"]:
-                with Path(f"/proc/pressure/{p}").open() as f:
-                    parts.append(f.read())
-
-            snap = parse_psi_output("\n".join(parts))
-            self.health.psi = snap
-
-            # We also need meminfo for absolute threshold check
-            with Path("/proc/meminfo").open() as f:
-                self.health.meminfo = parse_meminfo(f.read())
-
-            self.health.timestamp = time.monotonic()
-
-            if snap.cpu.some_avg10 < self.settings.psi_cpu_threshold:
-                self.gate.cpu_clear.set()
-
-            if (
-                snap.memory.some_avg10 < self.settings.psi_mem_threshold
-                and self.health.meminfo.mem_available >= self.settings.min_available_memory_mb * 1024
-            ):
-                self.gate.mem_clear.set()
-
-            if snap.io.some_avg10 < self.settings.psi_io_threshold:
-                self.gate.io_clear.set()
-
-        except (OSError, ValueError, IndexError, AttributeError):
-            log.exception("psi_manual_check_failed")
-
-
 def create_monitor(gate: ResourceGate, settings: PynixdSettings) -> ResourceMonitor:
-    """Factory to create the best available local monitor."""
+    """Factory to create a local passive-reading monitor."""
 
     async def local_read(path: str) -> str:
         with Path(path).open() as f:  # noqa: ASYNC230 — /proc reads are instant
@@ -403,6 +266,4 @@ def create_monitor(gate: ResourceGate, settings: PynixdSettings) -> ResourceMoni
     async def local_exists(path: str) -> bool:
         return Path(path).exists()  # noqa: ASYNC240 — instant local FS check
 
-    if Path("/sys/fs/cgroup/cpu.pressure").exists():
-        return LocalPSIMonitor(gate, settings)
     return GenericResourcePoller(gate, settings, local_read, local_exists)
