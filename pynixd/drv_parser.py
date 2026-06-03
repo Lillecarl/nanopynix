@@ -640,13 +640,24 @@ async def to_basic_derivation(
     # and add them to input_srcs (this is what nix does before sending
     # BuildDerivation over the wire)
     for drv_path, output_names in parsed.input_drvs.items():
-        # Try cache first (from DB)
         if output_cache and drv_path in output_cache:
             cached = output_cache[drv_path]
             for name in output_names:
                 p = cached.get(name)
                 if p:
                     input_srcs.add(p)
+            continue
+
+        try:
+            input_parsed = await read_drv_file(store_path, drv_path)
+        except FileNotFoundError:
+            input_srcs.add(StorePath(drv_path))
+            continue
+        all_outputs = input_parsed.output_paths()
+        for name in output_names:
+            p = all_outputs.get(name)
+            if p:
+                input_srcs.add(p)
             continue
 
         # Fall back to reading the .drv file

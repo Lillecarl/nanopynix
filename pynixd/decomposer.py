@@ -437,6 +437,13 @@ class BuildDecomposer:
         output_cache: OutputMap | None = None,
     ) -> dict[str, BuildId]:
         """Convert parsed derivations to BasicDerivation, enqueue, set DAG edges."""
+        if output_cache is not None:
+            for drv_path, cached_outputs in output_cache.items():
+                if any(p is None for p in cached_outputs.values()):
+                    parsed = parsed_cache.get(drv_path)
+                    if parsed is not None:
+                        output_cache[drv_path] = parsed.output_paths()  # type: ignore[dict-item]
+
         resolved, _ = await self._convert_to_build_requests(
             parsed_cache,
             drv_to_derived,
