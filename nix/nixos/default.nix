@@ -79,7 +79,7 @@ in
           Environment = "PYNIXD_CONFIG=${configFile}";
           Restart = "on-failure";
           RestartSec = "5s";
-          PrivateTmp = true;
+          # PrivateTmp = true;
           NoNewPrivileges = true;
         };
       };

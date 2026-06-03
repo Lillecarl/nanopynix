@@ -2,24 +2,17 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Self
 
-import pyinstrument
-
 from ..derived_path import DerivedPath
-from ..stderr import OperationLogs, StderrNext
+from ..stderr import OperationLogs
 from ..store_path import StorePath
 from ..types.context import ReadContext, WriteContext
 from .base import BuildMode, BuildResultStatus, KeyedBuildResult, OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..types import RequestContext
-
-
-_TMP = Path("/run/pynixd")
 
 # ── BuildPaths ───────────────────────────────────────────────────────
 
@@ -199,22 +192,11 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
             "build_paths_with_results_decomposed",
             num_derivations=len(self.derived_paths),
         )
-        profiler = pyinstrument.Profiler(async_mode="enabled")
-        profiler.start()
         result = await ctx.proxy.scheduler.build_derived_paths(
             self.derived_paths,
             self.build_mode,
             client=ctx.proxy.client,
         )
-        profiler.stop()
-
-        ts = int(time.time() * 1000)
-        out = _TMP / f"pynixd-profile-{ts}.txt"
-        out.write_text(profiler.output_text(unicode=True, color=False, show_all=True))
-        if ctx.proxy.client:
-            await ctx.proxy.client.send(
-                StderrNext(text=f"pynixd: profile written to {out}\n"),
-            )
 
         for kr in result.results:
             if kr.result.status not in (0, 1, 2):
