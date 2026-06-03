@@ -358,6 +358,7 @@ class BuildDecomposer:
         drv_to_build_id: dict[str, BuildId] = {}
 
         for dp, drv_request in resolved:
+            t_iter = time.monotonic()
             drv_path_str = str(drv_request.drv_path)
 
             parsed = parsed_cache.get(drv_request.drv_path)
@@ -375,12 +376,23 @@ class BuildDecomposer:
                     extrainfo=f"drv_path of {drv_path_str}",
                 ),
             )
+            t_paths = time.monotonic()
+
             build_id, _future = await self.scheduler.build_derivation(
                 drv_request,
                 required_paths,
                 platform=drv_request.derivation.platform,
                 scheduler_request_id=sched_req.id,
                 derived_paths_for_request={dp},
+            )
+            t_deriv = time.monotonic()
+
+            log.debug(
+                "enqueue_wire_single_build",
+                drv=drv_path_str,
+                paths_ms=f"{(t_paths - t_iter) * 1000:.1f}",
+                build_deriv=f"{t_deriv - t_paths:.3f}s",
+                path_count=len(required_paths),
             )
             if client is not None:
                 await self.queue.subscribe(build_id, client)
@@ -437,18 +449,35 @@ class BuildDecomposer:
         output_cache: OutputMap | None = None,
     ) -> dict[str, BuildId]:
         """Convert parsed derivations to BasicDerivation, enqueue, set DAG edges."""
+        t0 = time.monotonic()
+
         if output_cache is not None:
+            t_cache = time.monotonic()
+            fixed = 0
             for drv_path, cached_outputs in output_cache.items():
                 if any(p is None for p in cached_outputs.values()):
                     parsed = parsed_cache.get(drv_path)
                     if parsed is not None:
                         output_cache[drv_path] = parsed.output_paths()  # type: ignore[dict-item]
+                        fixed += 1
+            log.debug(
+                "enqueue_wire_cache_fix",
+                total=len(output_cache),
+                fixed=fixed,
+                duration=f"{time.monotonic() - t_cache:.3f}s",
+            )
 
         resolved, _ = await self._convert_to_build_requests(
             parsed_cache,
             drv_to_derived,
             build_mode,
             output_cache,
+        )
+        t_convert = time.monotonic()
+        log.debug(
+            "enqueue_wire_convert_timing",
+            build_count=len(resolved),
+            duration=f"{t_convert - t0:.3f}s",
         )
 
         drv_to_build_id = await self._enqueue_builds(
@@ -457,8 +486,20 @@ class BuildDecomposer:
             client,
             sched_req,
         )
+        t_enqueue = time.monotonic()
+        log.debug(
+            "enqueue_wire_enqueue_timing",
+            build_count=len(resolved),
+            duration=f"{t_enqueue - t_convert:.3f}s",
+        )
 
         await self._wire_dag_edges(resolved, parsed_cache, drv_to_build_id)
+        t_wire = time.monotonic()
+        log.debug(
+            "enqueue_wire_dag_timing",
+            edge_count=len(resolved),
+            duration=f"{t_wire - t_enqueue:.3f}s",
+        )
 
         return drv_to_build_id
 

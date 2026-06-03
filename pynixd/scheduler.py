@@ -173,6 +173,7 @@ class Scheduler:
         derived_paths_for_request: set[DerivedPath] | None = None,
     ) -> tuple[BuildId, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue and trigger the scheduler."""
+        t0 = time.monotonic()
         hint = None
         if self.local_store.db:
             pname = request.derivation.env.get("pname", None)
@@ -183,6 +184,7 @@ class Scheduler:
                     platform,
                     serialized,
                 )
+        t_hint = time.monotonic()
 
         if isinstance(required_paths, set):
             required_paths = {p: UnkeyedValidPathInfo() for p in required_paths}
@@ -195,7 +197,16 @@ class Scheduler:
             scheduler_request_id=scheduler_request_id,
             derived_paths_for_request=derived_paths_for_request,
         )
+        t_enqueue = time.monotonic()
         self.trigger()
+
+        log.debug(
+            "build_derivation_timing",
+            drv=str(request.drv_path),
+            hint=f"{t_hint - t0:.3f}s",
+            enqueue=f"{t_enqueue - t_hint:.3f}s",
+            total=f"{t_enqueue - t0:.3f}s",
+        )
         return res
 
     async def build_derived_paths(

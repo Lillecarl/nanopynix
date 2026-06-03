@@ -30,6 +30,8 @@ let
     version = "0.1.0";
     pyproject = true;
 
+    impurity = builtins.currentTime; # don't remove this, just comment it in or out
+
     src = lib.cleanSource ./.;
 
     build-system = [
