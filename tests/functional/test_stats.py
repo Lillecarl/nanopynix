@@ -241,9 +241,8 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
         # Pre-seed the DB with "tiny" stats
         await pynixd_local.db.record_build_stats(
             pname="tiny-pkg",
-            version="1.0",
             platform="x86_64-linux",
-            serialized_drv="tiny",
+            derivation_json='{"builder":"bash","outputs":["out"]}',
             cpu_user_us=None,
             cpu_system_us=None,
             duration_ms=100,  # 100ms
@@ -297,19 +296,17 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
         assert tiny_build.is_building
 
 
-async def test_levenshtein_sql(tmp_path: Path) -> None:
-    """Verify that the levenshtein function works in SQLite.
+async def test_build_stats_hint_by_pname(tmp_path: Path) -> None:
+    """Verify that build stats hints match by pname + platform.
 
     Store operations triggered:
-    - None: This test only checks SQLite function without triggering Store operations
+    - None: This test only checks SQLite hints without Store operations
     """
-    pynixd_local_path = STORE_PREFIX / "levenshtein-test"
+    pynixd_local_path = STORE_PREFIX / "stats-hint-test"
     rmtree_robust(pynixd_local_path)
     (pynixd_local_path / "nix/var/nix/db").mkdir(parents=True)
 
-    # Create an empty sqlite file so open() doesn't fail
     db_file = pynixd_local_path / "nix/var/nix/db/db.sqlite"
-
     conn = sqlite3.connect(db_file)
     conn.execute("CREATE TABLE ValidPaths (id INTEGER PRIMARY KEY, path TEXT UNIQUE)")
     conn.close()
@@ -317,34 +314,43 @@ async def test_levenshtein_sql(tmp_path: Path) -> None:
     pynixd_local = LocalSocketStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
-    # Ensure DB is created
     db = await LocalStoreDB.open(pynixd_local_path)
     pynixd_local.db = db
 
     assert db.active
-    async with db.execute("SELECT levenshtein(?, ?)", ("kitten", "sitting")) as cursor:
-        row = await cursor.fetchone()
-        assert row is not None
-        assert row[0] == 3
 
-    # Test our hint lookup with Levenshtein
+    # Record stats for two versions of the same package on same platform
     await db.record_build_stats(
-        pname="test",
-        version="1.0",
+        pname="testpkg",
         platform="x86_64-linux",
-        serialized_drv="very-long-string-with-small-change-A",
+        derivation_json='{"builder":"bash","outputs":["out"]}',
         cpu_user_us=None,
         cpu_system_us=None,
-        duration_ms=100,
+        duration_ms=500,
     )
 
-    hint = await db.get_build_stats_hint(
-        "test",
-        "x86_64-linux",
-        "very-long-string-with-small-change-B",
+    await db.record_build_stats(
+        pname="testpkg",
+        platform="x86_64-linux",
+        derivation_json='{"builder":"bash","outputs":["out","bin"]}',
+        cpu_user_us=None,
+        cpu_system_us=None,
+        duration_ms=300,  # latest replaces via INSERT OR REPLACE
     )
-    assert hint == 100
-    log.info("levenshtein_sql_verified")
+
+    # Same pname + platform should return the latest (300)
+    hint = await db.get_build_stats_hint("testpkg", "x86_64-linux")
+    assert hint == 300
+
+    # Different platform: falls back to cross-platform average (300)
+    hint = await db.get_build_stats_hint("testpkg", "aarch64-linux")
+    assert hint == 300
+
+    # Different pname: no entry at all
+    hint = await db.get_build_stats_hint("otherpkg", "x86_64-linux")
+    assert hint is None
+
+    log.info("build_stats_hint_by_pname_verified")
     await db.close()
 
 

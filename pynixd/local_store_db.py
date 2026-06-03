@@ -91,8 +91,8 @@ DELETE FROM PynixdKnownPaths WHERE storeId = ?
 
 INSERT_BUILD_STATS = """
 INSERT OR REPLACE INTO DerivationStats
-(pname, version, platform, serialized_drv, cpu_user_us, cpu_system_us, duration_ms, last_built_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
+(pname, platform, derivation_json, cpu_user_us, cpu_system_us, duration_ms, last_built_at)
+VALUES (?, ?, ?, ?, ?, ?, unixepoch())
 """
 
 QUERY_BUILD_STATS_HINT = """
@@ -108,24 +108,6 @@ WHERE pname = ?
 """
 
 _DEFAULT_REGTIME_FLUSH_INTERVAL = 5.0
-
-
-def levenshtein_distance(s1: str, s2: str) -> int:
-    """Simple Levenshtein distance implementation for SQLite matching."""
-    if len(s1) < len(s2):
-        return levenshtein_distance(s2, s1)
-    if not s2:
-        return len(s1)
-    previous_row = range(len(s2) + 1)
-    for i, c1 in enumerate(s1):
-        current_row = [i + 1]
-        for j, c2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (c1 != c2)
-            current_row.append(min(insertions, deletions, substitutions))
-        previous_row = current_row
-    return previous_row[-1]
 
 
 class LocalStoreDB:
@@ -181,7 +163,6 @@ class LocalStoreDB:
                 mode = "ro" if self.read_only else "rw"
                 uri = f"file:{self.db_path}?mode={mode}"
                 conn = await aiosqlite.connect(uri, uri=True)
-                await conn.create_function("levenshtein", 2, levenshtein_distance)
                 async with self._pool_lock:
                     self._all_conns.append(conn)
 
@@ -250,17 +231,17 @@ class LocalStoreDB:
                         "PRIMARY KEY (storeId, path)"
                         ")",
                     )
+                    await db.execute("DROP TABLE IF EXISTS DerivationStats")
                     await db.execute(
-                        "CREATE TABLE IF NOT EXISTS DerivationStats ("
+                        "CREATE TABLE DerivationStats ("
                         "pname TEXT, "
-                        "version TEXT, "
                         "platform TEXT, "
-                        "serialized_drv TEXT, "
+                        "derivation_json TEXT, "
                         "cpu_user_us INTEGER, "
                         "cpu_system_us INTEGER, "
                         "duration_ms INTEGER, "
                         "last_built_at INTEGER, "
-                        "PRIMARY KEY (pname, version, platform, serialized_drv)"
+                        "PRIMARY KEY (pname, platform)"
                         ")",
                     )
                     await db.execute(
@@ -366,9 +347,8 @@ class LocalStoreDB:
     async def record_build_stats(
         self,
         pname: str,
-        version: str,
         platform: str,
-        serialized_drv: str,
+        derivation_json: str,
         cpu_user_us: int | None,
         cpu_system_us: int | None,
         duration_ms: int,
@@ -382,9 +362,8 @@ class LocalStoreDB:
                     INSERT_BUILD_STATS,
                     (
                         pname,
-                        version,
                         platform,
-                        serialized_drv,
+                        derivation_json,
                         cpu_user_us,
                         cpu_system_us,
                         duration_ms,
@@ -398,9 +377,12 @@ class LocalStoreDB:
         self,
         pname: str,
         platform: str,
-        serialized_drv: str,
     ) -> int | None:
-        """Get an expected duration hint for a derivation (in ms)."""
+        """Get an expected duration hint for a derivation (in ms).
+
+        Matches on pname + platform, returning the most recent duration.
+        Falls back to cross-platform average if no same-platform entry exists.
+        """
         if not self.active:
             return None
         try:

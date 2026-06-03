@@ -178,11 +178,9 @@ class Scheduler:
         if self.local_store.db:
             pname = request.derivation.env.get("pname", None)
             if pname:
-                serialized = request.derivation.serialize_for_stats()
                 hint = await self.local_store.db.get_build_stats_hint(
                     pname,
                     platform,
-                    serialized,
                 )
         t_hint = time.monotonic()
 
@@ -703,10 +701,18 @@ class Scheduler:
                     duration = int((time.monotonic() - started_at) * 1000)
                     await self.local_store.db.record_build_stats(
                         pname=pname,
-                        version=build.request.derivation.env.get("version", ""),
                         platform=build.request.derivation.platform,
-                        serialized_drv=build.request.derivation.serialize_for_stats(),
+                        derivation_json=build.request.derivation.to_stats_json(),
                         cpu_user_us=resp.result.cpu_user,
                         cpu_system_us=resp.result.cpu_system,
                         duration_ms=duration,
+                    )
+                    expected = build.expected_duration
+                    log.info(
+                        "build_stats_recorded",
+                        pname=pname,
+                        platform=build.request.derivation.platform,
+                        expected_ms=expected,
+                        actual_ms=duration,
+                        error_pct=f"{(duration - expected) / expected * 100:.1f}" if expected else None,
                     )

@@ -16,6 +16,7 @@ KEEP_EVENTS = frozenset(
         "build_sending_inputs",
         "build_executing",
         "build_executed",
+        "build_stats_recorded",
         "pulling_paths",
         "pulled_paths_into_local_store",
         "scheduler_started",

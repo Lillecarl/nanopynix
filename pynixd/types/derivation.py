@@ -123,15 +123,15 @@ class BasicDerivation:
     def output_paths(self) -> dict[str, StorePath]:
         return {name: StorePath(o.path) for name, o in self.outputs.items()}
 
-    def serialize_for_stats(self) -> str:
-        noisy = {"out", "bin", "dev", "lib", "include", "man", "doc"}
-        env_stable = {k: v for k, v in self.env.items() if k not in noisy and not k.startswith("NIX_")}
-        parts = [
-            f"B:{self.builder}",
-            f"A:{' '.join(self.args)}",
-            f"E:{json.dumps(env_stable, sort_keys=True)}",
-        ]
-        return "|".join(parts)
+    def to_stats_json(self) -> str:
+        return json.dumps(
+            {
+                "builder": self.builder,
+                "outputs": list(self.outputs.keys()),
+                "system": self.env.get("system", self.platform),
+            },
+            sort_keys=True,
+        )
 
     @property
     def has_dynamic_outputs(self) -> bool:
