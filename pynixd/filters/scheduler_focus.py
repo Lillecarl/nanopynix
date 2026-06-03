@@ -36,6 +36,13 @@ KEEP_EVENTS = frozenset(
         "unix_client_connected",
         "client_protocol_negotiated",
         "client_handshake_complete",
+        "local_store_db_connected",
+        "local_store_db_disabled",
+        "no_servers_started",
+        "reverse_server_listening",
+        "reverse_builder_registration",
+        "reverse_store_added",
+        "reverse_builder_disconnected",
     },
 )
 
@@ -49,6 +56,9 @@ KEEP_LOGGERS = frozenset(
         "pynixd.proxy",
         "pynixd.unix_server",
         "pynixd.store.base",
+        "pynixd.instance",
+        "pynixd.reverse_server",
+        "pynixd.reverse_client",
         "pynixd.operations.probe_systems",
         "pynixd.operations.probe_features",
         "pynixd.operations.build_paths",
@@ -61,6 +71,8 @@ KEEP_LOGGERS_DEBUG = frozenset(
         "pynixd.decomposer",
         "pynixd.derivation_resolver",
         "pynixd.build_queue",
+        "pynixd.operations.QueryValidPathsRequest",
+        "pynixd.operations.QueryDerivationOutputMapBatchRequest",
     },
 )
 

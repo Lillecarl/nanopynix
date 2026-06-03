@@ -87,8 +87,10 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
                 rows = await cursor.fetchall()
             resp = QueryValidPathsResponse(paths={StorePath(r[0]) for r in rows})
             store.tracker.add_known_paths(resp.paths)
+            self.logger.debug("query_valid_paths_db_hit", total=len(self.paths), found=len(resp.paths))
             return resp
 
+        self.logger.debug("query_valid_paths_db_miss")
         resp = await store.call(self, client=client, suppress_last=suppress_last)
         store.tracker.add_known_paths(resp.paths)
         return resp

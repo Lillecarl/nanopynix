@@ -123,8 +123,10 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
                 result.setdefault(StorePath(drv_path), {})[output_name] = (
                     StorePath(output_path) if output_path else None
                 )
+            self.logger.debug("derivation_output_map_batch_db_hit", total=len(self.drv_paths), found=len(result))
             return DerivationOutputMapBatchResponse(outputs=result)
 
+        self.logger.debug("derivation_output_map_batch_db_miss")
         # Try delegation via wire (if talking to another pynixd)
         try:
             return await super().execute(store, client, suppress_last)

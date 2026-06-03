@@ -264,10 +264,15 @@ class Server:
             self.ctx.db = await LocalStoreDB.open(local_store.store_path or Path("/"))
             local_store.db = self.ctx.db
             self.ctx.path_tracker.db = self.ctx.db
+            log.info(
+                "local_store_db_connected",
+                db_path=str(self.ctx.db.db_path) if self.ctx.db else "none",
+            )
         else:
             self.ctx.db = None
             local_store.db = None
             self.ctx.path_tracker.db = None
+            log.warning("local_store_db_disabled")
 
         local_store.tracker = self.ctx.path_tracker.create_instance(
             local_store.store_id,
