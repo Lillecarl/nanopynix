@@ -96,12 +96,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
 """
 
 QUERY_BUILD_STATS_HINT = """
-WITH matching_pname AS (
-    SELECT * FROM DerivationStats
-    WHERE pname = ? AND platform = ?
-)
-SELECT duration_ms FROM matching_pname
-ORDER BY levenshtein(serialized_drv, ?) ASC
+SELECT duration_ms FROM DerivationStats
+WHERE pname = ? AND platform = ?
+ORDER BY last_built_at DESC
 LIMIT 1
 """
 
@@ -407,10 +404,10 @@ class LocalStoreDB:
         if not self.active:
             return None
         try:
-            # 1. Try exact match or closest Levenshtein on same platform
+            # 1. Most recent same-platform duration
             async with self.execute(
                 QUERY_BUILD_STATS_HINT,
-                (pname, platform, serialized_drv),
+                (pname, platform),
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
