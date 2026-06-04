@@ -26,7 +26,6 @@ test = [
     "pytest",
     "pytest-asyncio",
     "pytest-timeout",
-    "rich",
 ]
 
 [project.scripts]

@@ -215,7 +215,7 @@ class DaemonProxy:
             except Exception as ex:
                 log.exception("handle_op_error", name=op_name)
                 await self.client.flush()
-                await self.send_error(f"Internal error handling {op_name}: {ex}")
+                await self.send_error(repr(ex))
             finally:
                 elapsed = time.monotonic() - t0
                 count, acc = self._op_timing.get(op_num, (0, 0.0))
