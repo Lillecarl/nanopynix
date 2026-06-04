@@ -17,11 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .drv_parser import read_drv_file
 from .store_path import StorePath
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from .drv_parser import Derivation
@@ -178,10 +176,6 @@ def dp_output_names(dp: DerivedPathUnion) -> set[str]:
     return set()
 
 
-async def dp_to_derivation(dp: DerivedPathUnion, store_path: Path) -> Derivation:
-    return await read_drv_file(store_path, dp_drv_path(dp))
-
-
 def dp_is_nested(dp: DerivedPathUnion) -> bool:
     if isinstance(dp, DerivedPathBuilt):
         return isinstance(dp.drv_path, SingleDerivedPathBuilt)
@@ -223,14 +217,10 @@ class DerivedPath(StorePath):
     def output_names(self) -> set[str]:
         return dp_output_names(self._derived)
 
-    async def to_derivation(
-        self,
-        store_path: Path,
-        reader_fn: Callable[[Path, StorePath], Awaitable[Derivation]] | None = None,
-    ) -> Derivation:
-        if reader_fn is not None:
-            return await reader_fn(store_path, StorePath(self.drv_path))
-        return await dp_to_derivation(self._derived, store_path)
+    async def to_derivation(self, store_path: Path) -> Derivation:
+        from .drv_parser import read_drv_file
+
+        return await read_drv_file(store_path, StorePath(self.drv_path))
 
     @property
     def is_nested(self) -> bool:

@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from .build_queue import SchedulerBuildRequest
     from .connection import ClientConn
     from .drv_parser import Derivation
-    from .scheduler import DerivationReader, Scheduler
+    from .scheduler import Scheduler
     from .types import Realisation
     from .types.aliases import OutputMap
     from .types.ids import BuildId
@@ -85,17 +85,13 @@ class BuildDecomposer:
     response.
     """
 
-    read_drv_fn: DerivationReader
-
     def __init__(
         self,
         scheduler: Scheduler,
-        read_drv_fn: DerivationReader | None = None,
     ) -> None:
         self.scheduler = scheduler
         self.local_store = scheduler.local_store
         self.queue = scheduler.queue
-        self.read_drv_fn = read_drv_fn or read_drv_file
 
     async def decompose(
         self,
@@ -191,10 +187,7 @@ class BuildDecomposer:
             visited.add(sp)
             dp = drv_to_derived.get(str(sp), DerivedPath(sp))
             try:
-                parsed = await dp.to_derivation(
-                    self.local_store.store_path,
-                    reader_fn=self.read_drv_fn,
-                )
+                parsed = await dp.to_derivation(self.local_store.store_path)
                 drv_read_count += 1
             except FileNotFoundError:
                 log.warning("drv_read_failed", drv_path=dp.drv_path)
@@ -207,7 +200,7 @@ class BuildDecomposer:
                 dyn_checked += 1
                 if dyn_drv_path not in to_build:
                     try:
-                        dyn_parsed = await self.read_drv_fn(
+                        dyn_parsed = await read_drv_file(
                             self.local_store.store_path,
                             dyn_drv_path,
                         )
@@ -515,10 +508,7 @@ class BuildDecomposer:
         parsed = parsed_cache.get(drv_store_path)
         if parsed is None:
             with contextlib.suppress(FileNotFoundError):
-                parsed = await dp.to_derivation(
-                    self.local_store.store_path,
-                    reader_fn=self.read_drv_fn,
-                )
+                parsed = await dp.to_derivation(self.local_store.store_path)
         return parsed
 
     async def _collect_results(

@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from .drv_parser import Derivation
     from .operations.base import BasicDerivation
     from .operations.build_derivation import BuildDerivationResponse
-    from .scheduler import DerivationReader, Scheduler
+    from .scheduler import Scheduler
     from .store import Store
     from .types.aliases import StorePathSet
 
@@ -70,12 +70,10 @@ class DerivationResolver:
     def __init__(
         self,
         scheduler: Scheduler,
-        read_drv_fn: DerivationReader | None = None,
     ) -> None:
         self.scheduler = scheduler
         self.local_store = scheduler.local_store
         self.queue = scheduler.queue
-        self.read_drv_fn = read_drv_fn or read_drv_file
 
     def collect_missing_dep_out_paths(
         self,
@@ -266,7 +264,7 @@ class DerivationResolver:
     ) -> Derivation | None:
         """Read and parse a .drv file from the local store."""
         try:
-            return await self.read_drv_fn(self.local_store.store_path, drv_path)
+            return await read_drv_file(self.local_store.store_path, drv_path)
         except FileNotFoundError:
             log.warning(
                 "resolve_drv_not_found",
@@ -362,7 +360,7 @@ class DerivationResolver:
 
                         if not actual_path:
                             try:
-                                inner_parsed = await self.read_drv_fn(
+                                inner_parsed = await read_drv_file(
                                     self.local_store.store_path,
                                     level1_path,
                                 )

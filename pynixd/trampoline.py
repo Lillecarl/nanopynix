@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from .derived_path import DerivedPath
     from .operations.base import BasicDerivation
     from .operations.build_derivation import BuildDerivationResponse
-    from .scheduler import DerivationReader, Scheduler
+    from .scheduler import Scheduler
     from .types.aliases import StorePathSet
     from .types.ca import Realisation
     from .types.ids import BuildId, RequestId
@@ -45,12 +45,10 @@ class Trampoline:
     def __init__(
         self,
         scheduler: Scheduler,
-        read_drv_fn: DerivationReader | None = None,
     ) -> None:
         self.scheduler = scheduler
         self.local_store = scheduler.local_store
         self.queue = scheduler.queue
-        self.read_drv_fn = read_drv_fn or read_drv_file
 
     async def on_build_complete(
         self,
@@ -232,7 +230,7 @@ class Trampoline:
             )
 
             try:
-                inner_parsed = await self.read_drv_fn(
+                inner_parsed = await read_drv_file(
                     self.local_store.store_path,
                     out_sp,
                 )

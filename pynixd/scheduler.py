@@ -15,9 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import anyio
@@ -38,10 +36,11 @@ from .store_path import StorePath
 from .trampoline import Trampoline
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .connection import ClientConn, Connection
     from .context import PynixdContext
     from .derived_path import DerivedPath
-    from .drv_parser import Derivation
     from .operations.build_derivation import (
         BuildDerivationRequest,
         BuildDerivationResponse,
@@ -53,8 +52,6 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
-DerivationReader = Callable[[Path, "StorePath"], Awaitable["Derivation"]]
-
 
 class Scheduler:
     """Schedules builds across stores based on locality and DAG deps."""
@@ -62,7 +59,6 @@ class Scheduler:
     def __init__(
         self,
         ctx: PynixdContext,
-        read_drv_fn: DerivationReader | None = None,
     ) -> None:
         self.ctx = ctx
         self.queue = BuildQueue()
@@ -71,9 +67,9 @@ class Scheduler:
 
         self.ranker = TelemetryStoreRanker(ctx.settings)
         self.allocator = BuildAllocator(self.ctx.stores, self.local_store, self.ranker)
-        self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
-        self.derivation_resolver = DerivationResolver(self, read_drv_fn=read_drv_fn)
-        self.trampoline = Trampoline(self, read_drv_fn=read_drv_fn)
+        self.decomposer = BuildDecomposer(self)
+        self.derivation_resolver = DerivationResolver(self)
+        self.trampoline = Trampoline(self)
         self.trigger_event = anyio.Event()
         self.running = False
 

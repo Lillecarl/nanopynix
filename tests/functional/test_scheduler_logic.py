@@ -255,7 +255,7 @@ async def test_scheduler_proactive_transfer():
 
 
 @pytest.mark.xfail(reason="tiny-build fast-track to local store preempts remote1 assignment — pre-existing flake")
-async def test_scheduler_decomposition_and_ordering():
+async def test_scheduler_decomposition_and_ordering(monkeypatch):
     """Verify that BuildDecomposer correctly resolves a DAG and the Scheduler respects it.
 
     Scenario:
@@ -328,7 +328,7 @@ async def test_scheduler_decomposition_and_ordering():
             return root_drv
         raise FileNotFoundError(drv_path)
 
-    scheduler.decomposer.read_drv_fn = mock_read_drv
+    monkeypatch.setattr("pynixd.drv_parser.read_drv_file", mock_read_drv)
 
     # 3. Setup build responders
     build_resp = BuildDerivationResponse(
