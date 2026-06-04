@@ -198,7 +198,7 @@ async def _resolve_path(
                 outputs = await _fetch_output_map(path, store, client, suppress_last)
                 wanted = ctx.drv_to_wanted.get(path, set())
                 for name, opath in outputs.items():
-                    if opath is None:
+                    if opath is None or opath == StorePath(""):
                         continue
                     if wanted and name not in wanted:
                         continue
@@ -219,7 +219,7 @@ async def _resolve_path(
     for name, opath in outputs.items():
         if wanted and name not in wanted:
             continue
-        if opath is None:
+        if opath is None or opath == StorePath(""):
             still_missing = True
             continue
         op_valid = (await IsValidPathRequest(path=opath).execute(store, client, suppress_last)).valid

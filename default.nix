@@ -50,7 +50,7 @@ let
         doInstallCheck = false;
       })
       python.pkgs.structlog
-      python.pkgs.rich
+      # python.pkgs.rich
       python.pkgs.aiohttp
       python.pkgs.pyinstrument
       python.pkgs.aiosqlite
