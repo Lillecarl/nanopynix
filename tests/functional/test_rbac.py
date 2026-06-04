@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.xfail(reason="nix 2.34.7 returns exit code 0 even on access-denied errors")
 @pytest.mark.timeout(60)
 async def test_rbac_ssh_admin_vs_user(pynixd_server: Server) -> None:
     """Verify that SSH admin can GC, but SSH user cannot.

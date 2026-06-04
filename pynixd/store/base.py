@@ -411,7 +411,7 @@ class Store(ABC):
         """Cancel the reconnect loop."""
         if self._reconnect_task is not None:
             self._reconnect_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(anyio.get_cancelled_exc_class()):
                 await self._reconnect_task
             self._reconnect_task = None
 
