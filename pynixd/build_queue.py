@@ -216,6 +216,14 @@ class QueuedBuild:
         msg.to_writer(self._log_writer)
         return self._log_writer.get_bytes()[before:]
 
+    async def _send_raw_safe(self, sub: ClientConn, raw: bytes) -> None:
+        """Send raw bytes to a subscriber, removing it on failure."""
+        try:
+            await sub.send_raw(raw)
+        except (OSError, BrokenPipeError, ConnectionResetError):
+            async with self._sub_lock:
+                self.subscribers.remove(sub)
+
     async def post_log_bytes(self, raw: bytes) -> None:
         """Fan out raw log bytes to all subscribers via TaskGroup.
 
@@ -228,7 +236,7 @@ class QueuedBuild:
                 return
             async with anyio.create_task_group() as tg:
                 for sub in self.subscribers:
-                    tg.start_soon(sub.send_raw, raw)
+                    tg.start_soon(self._send_raw_safe, sub, raw)
 
     async def post_log_and_fanout(self, msg: StderrMsg) -> None:
         """Store a log entry and fan out to all subscribers."""
