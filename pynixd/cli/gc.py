@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import anyio
 import structlog
 
 from ..config import LocalSocketStoreSpec
@@ -37,7 +37,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def gc_main(args: argparse.Namespace) -> None:
-    asyncio.run(_gc_main(args))
+    anyio.run(_gc_main, args)
 
 
 async def _gc_main(args: argparse.Namespace) -> None:

@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import structlog
 
 from . import metrics, wire
@@ -140,7 +141,7 @@ class QueuedBuild:
 
         # Guards add_subscriber replay vs post_log_bytes fanout so that a
         # joining client never misses bytes that arrive during catch-up.
-        self._sub_lock = asyncio.Lock()
+        self._sub_lock = anyio.Lock()
 
     @property
     def is_building(self) -> bool:
@@ -225,18 +226,9 @@ class QueuedBuild:
         async with self._sub_lock:
             if not self.subscribers:
                 return
-            tasks: list[asyncio.Task[None]] = []
-            try:
-                async with asyncio.TaskGroup() as tg:
-                    tasks.extend(tg.create_task(sub.send_raw(raw)) for sub in self.subscribers)
-            except* Exception:
-                dead = [
-                    i
-                    for i, t in enumerate(tasks)
-                    if t.done() and t.exception() is not None and not isinstance(t.exception(), asyncio.CancelledError)
-                ]
-                for i in reversed(dead):
-                    self.subscribers.pop(i)
+            async with anyio.create_task_group() as tg:
+                for sub in self.subscribers:
+                    tg.start_soon(sub.send_raw, raw)
 
     async def post_log_and_fanout(self, msg: StderrMsg) -> None:
         """Store a log entry and fan out to all subscribers."""
@@ -270,7 +262,7 @@ class BuildQueue:
         self._requests: dict[RequestId, SchedulerBuildRequest] = {}
         self.next_id = 1
         self.next_request_id = 1
-        self.lock: asyncio.Lock = asyncio.Lock()
+        self.lock: anyio.Lock = anyio.Lock()
 
     @property
     def queue(self) -> Sequence[QueuedBuild]:

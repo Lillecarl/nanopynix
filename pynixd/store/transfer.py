@@ -14,8 +14,9 @@ from ..store_path import StorePath
 from ..types.context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import Iterable
+
+    import anyio
 
     from ..types.aliases import StorePathSet
     from ..types.path_info import ValidPathInfo
@@ -29,7 +30,7 @@ async def stream_paths_store_to_store(
     src: Store,
     dst: Store,
     paths: Iterable[StorePath],
-    cancel_event: asyncio.Event | None = None,
+    cancel_event: anyio.Event | None = None,
 ) -> None:
     """Copy paths from src store to dst via streaming, querying closure first.
 

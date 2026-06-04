@@ -11,7 +11,6 @@ optional basic auth/TLS.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import bz2
@@ -29,6 +28,7 @@ import lz4.frame
 import structlog
 import zstandard as zstd
 from aiohttp import web
+from anyio.to_thread import run_sync
 from passlib.apache import HtpasswdFile
 
 from . import metrics
@@ -359,7 +359,6 @@ class PynixdHttpServer:
             log.debug("provide_nar_start", path=nar_temp_path)
             # We need to wrap the raw NAR in Nix framing (framed NAR data)
             framed = writer.framed()
-            loop = asyncio.get_running_loop()
 
             def decompress_gen(path: Path):
                 if path.name.endswith(".xz"):
@@ -403,7 +402,7 @@ class PynixdHttpServer:
             sent_bytes = 0
             while True:
                 # Get next chunk from generator in a thread to keep event loop free
-                chunk = await loop.run_in_executor(None, get_next_chunk, gen)
+                chunk = await run_sync(get_next_chunk, gen)
                 if chunk is None:
                     break
 

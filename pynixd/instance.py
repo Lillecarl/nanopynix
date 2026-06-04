@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import aiosqlite
+import anyio
 import structlog
 
 from . import wire
@@ -89,7 +90,7 @@ class Server:
         self.https_server: web.AppRunner | None = None
         self.https_bound_port: int | None = None
         self._started = False
-        self._done_event = asyncio.Event()
+        self._done_event = anyio.Event()
 
     @property
     def local_store(self) -> Store:
@@ -200,14 +201,14 @@ class Server:
         """Periodic GC loop. Runs at gc_interval."""
         log.info("gc_loop_started", interval=self.ctx.settings.gc_interval)
         while True:
-            await asyncio.sleep(self.ctx.settings.gc_interval)
+            await anyio.sleep(self.ctx.settings.gc_interval)
             try:
                 await PynixdCollectGarbageRequest.run_gc(
                     self.ctx,
                     PynixdGCAction.EXECUTE,
                     logs=OperationLogs(),
                 )
-            except asyncio.CancelledError:
+            except anyio.get_cancelled_exc_class():
                 return
             except Exception:
                 log.exception("gc_pass_failed")
@@ -283,10 +284,10 @@ class Server:
             self.ctx.db.start()
 
         # Start non-local stores concurrently — they're already in _stores.
-        async with asyncio.TaskGroup() as tg:
+        async with anyio.create_task_group() as tg:
             for store_id, store in list(self.ctx._stores.items()):
                 if store_id != StoreId("local"):
-                    tg.create_task(self.add_store(store))
+                    tg.start_soon(self.add_store, store)
 
         if self.ctx.scheduler:
             self.background_tasks.append(
@@ -400,7 +401,7 @@ class Server:
 
         for task in self.background_tasks:
             task.cancel()
-            with contextlib.suppress(Exception, asyncio.CancelledError):
+            with contextlib.suppress(BaseException):
                 await task
         self.background_tasks.clear()
 

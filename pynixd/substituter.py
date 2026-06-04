@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+import anyio
 import structlog
 
 from .store_path import StorePath
@@ -84,7 +85,7 @@ class HttpBinaryCacheSubstituter(Substituter):
         self.base_url = base_url
         self._session = session
         self._own_session = False
-        self._semaphore = asyncio.Semaphore(concurrency)
+        self._semaphore = anyio.Semaphore(concurrency)
 
     async def __aenter__(self) -> HttpBinaryCacheSubstituter:
         if self._session is None:
@@ -105,9 +106,9 @@ class HttpBinaryCacheSubstituter(Substituter):
         if not paths or self._session is None:
             return set()
         found: set[StorePath] = set()
-        async with asyncio.TaskGroup() as tg:
+        async with anyio.create_task_group() as tg:
             for p in paths:
-                tg.create_task(self._check_one(p, found))
+                tg.start_soon(self._check_one, p, found)
         return found
 
     async def query_substitutable_path_infos(
@@ -117,9 +118,9 @@ class HttpBinaryCacheSubstituter(Substituter):
         if not paths or self._session is None:
             return {}
         result: dict[StorePath, SubstitutablePathInfo] = {}
-        async with asyncio.TaskGroup() as tg:
+        async with anyio.create_task_group() as tg:
             for p in paths:
-                tg.create_task(self._get_one(p, result))
+                tg.start_soon(self._get_one, p, result)
         return result
 
     async def _check_one(self, path: StorePath, found: set[StorePath]) -> None:
@@ -214,7 +215,7 @@ class SubstituterGroup:
         if not self._subs:
             return None
 
-        lock = asyncio.Lock()
+        lock = anyio.Lock()
         info_result: SubstitutablePathInfo | None = None
         remaining = len(self._subs)
         latch: asyncio.Future[None] = asyncio.get_running_loop().create_future()
@@ -223,7 +224,7 @@ class SubstituterGroup:
             nonlocal info_result, remaining
             try:
                 infos = await sub.query_substitutable_path_infos({path})
-            except asyncio.CancelledError:
+            except anyio.get_cancelled_exc_class():
                 raise
             except Exception:
                 infos = {}

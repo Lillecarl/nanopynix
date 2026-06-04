@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiosqlite
+import anyio
 import structlog
 
 from .store_path import StorePath
@@ -139,8 +140,8 @@ class LocalStoreDB:
 
         self._all_conns: list[aiosqlite.Connection] = []
         self._idle_conns: list[aiosqlite.Connection] = []
-        self._pool_lock = asyncio.Lock()
-        self._sem = asyncio.Semaphore(max_conns)
+        self._pool_lock = anyio.Lock()
+        self._sem = anyio.Semaphore(max_conns)
 
     @property
     def active(self) -> bool:
@@ -455,12 +456,12 @@ class LocalStoreDB:
     async def flush_loop(self) -> None:
         try:
             while True:
-                await asyncio.sleep(self.regtime_flush_interval)
+                await anyio.sleep(self.regtime_flush_interval)
                 try:
                     await self.flush_regtime()
                 except aiosqlite.Error:
                     log.exception("db_flush_loop_iteration_failed")
-        except asyncio.CancelledError:
+        except anyio.get_cancelled_exc_class():
             with suppress(Exception):
                 await self.flush_regtime()
         except Exception:
@@ -472,7 +473,7 @@ class LocalStoreDB:
         """Stop flush task, flush pending writes, close database."""
         if self.flush_task is not None:
             self.flush_task.cancel()
-            with suppress(Exception, asyncio.CancelledError):
+            with suppress(BaseException):
                 await self.flush_task
             self.flush_task = None
         await self.flush_regtime()

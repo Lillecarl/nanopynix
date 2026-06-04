@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import anyio
 import structlog
 
 from . import metrics
@@ -73,7 +74,7 @@ class Scheduler:
         self.decomposer = BuildDecomposer(self, read_drv_fn=read_drv_fn)
         self.derivation_resolver = DerivationResolver(self, read_drv_fn=read_drv_fn)
         self.trampoline = Trampoline(self, read_drv_fn=read_drv_fn)
-        self.trigger_event = asyncio.Event()
+        self.trigger_event = anyio.Event()
         self.running = False
 
     @property
@@ -146,7 +147,7 @@ class Scheduler:
         while time.monotonic() - start < drain_timeout:
             if store.in_flight == 0:
                 break
-            await asyncio.sleep(1.0)
+            await anyio.sleep(1.0)
         else:
             log.warning("drain_timeout_reached", store_id=store_id)
 
@@ -223,14 +224,14 @@ class Scheduler:
         while self.running:
             try:
                 await self.trigger_event.wait()
-                self.trigger_event.clear()
+                self.trigger_event = anyio.Event()
                 await self.schedule()
-                await asyncio.sleep(0.01)
-            except asyncio.CancelledError:
+                await anyio.sleep(0.01)
+            except anyio.get_cancelled_exc_class():
                 break
             except Exception:
                 log.exception("scheduler_pass_failed")
-                await asyncio.sleep(1.0)
+                await anyio.sleep(1.0)
 
     async def stop(self) -> None:
         """Stop the scheduler and cancel all pending builds."""

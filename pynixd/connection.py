@@ -15,10 +15,10 @@ Lifecycle:
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 from typing import TYPE_CHECKING, cast
 
+import anyio
 import structlog
 
 from . import stderr, wire
@@ -57,7 +57,7 @@ class ClientConn:
 
     def __init__(self, w: NixWriter) -> None:
         self.w = w
-        self._write_lock = asyncio.Lock()
+        self._write_lock = anyio.Lock()
 
     async def send(self, msg: stderr.StderrMsg) -> None:
         """Send a stderr message to the client. Safe to call from multiple tasks."""

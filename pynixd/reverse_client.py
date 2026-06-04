@@ -8,11 +8,11 @@ server, and serves incoming ``nix-daemon --stdio`` sessions via
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 from typing import TYPE_CHECKING
 
+import anyio
 import asyncssh
 import structlog
 
@@ -84,7 +84,7 @@ class ReverseInitiator:
             try:
                 await self._connect_and_serve()
                 delay = self._settings.reconnect_min_delay
-            except asyncio.CancelledError:
+            except anyio.get_cancelled_exc_class():
                 return
             except Exception:
                 log.exception("reverse_initiator_connection_failed")
@@ -96,7 +96,7 @@ class ReverseInitiator:
                         threshold=shutdown_s,
                     )
                     return
-                await asyncio.sleep(delay)
+                await anyio.sleep(delay)
                 delay = min(delay * 2, max_delay)
 
     async def _connect_and_serve(self) -> None:

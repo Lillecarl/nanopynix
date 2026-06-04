@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import anyio
 import structlog
 
 from .exceptions import ResourceExhaustedError
@@ -53,7 +54,8 @@ class ResourceGate:
     async def wait_mem_clear(self, timeout: float = 5.0) -> None:  # noqa: ASYNC109
         """Wait for Memory pressure to drop below threshold."""
         try:
-            await asyncio.wait_for(self.mem_clear.wait(), timeout=timeout)
+            with anyio.fail_after(timeout):
+                await self.mem_clear.wait()
         except TimeoutError:
             raise ResourceExhaustedError(
                 "Memory pressure remains too high after timeout",
@@ -110,7 +112,7 @@ class DummyResourceMonitor(ResourceMonitor):
         self.gate.mem_clear.set()
         self.gate.io_clear.set()
         while self.running:  # noqa: ASYNC110 — 60s PSI polling interval
-            await asyncio.sleep(60)
+            await anyio.sleep(60)
 
 
 class GenericResourcePoller(ResourceMonitor):
@@ -248,12 +250,12 @@ class GenericResourcePoller(ResourceMonitor):
                 else:
                     self.gate.io_clear.set()
 
-            except asyncio.CancelledError:
+            except anyio.get_cancelled_exc_class():
                 break
             except Exception:
                 log.exception("resource_poller_tick_failed")
 
-            await asyncio.sleep(self.interval)
+            await anyio.sleep(self.interval)
 
 
 def create_monitor(gate: ResourceGate, settings: PynixdSettings) -> ResourceMonitor:

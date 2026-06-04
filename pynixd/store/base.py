@@ -13,6 +13,7 @@ from enum import IntEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
+import anyio
 import structlog
 from cachetools import TTLCache
 
@@ -61,7 +62,7 @@ _TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
     ConnectionError,
     EOFError,
     OSError,
-    asyncio.TimeoutError,
+    TimeoutError,
     *_SSH_ERRORS,
 )
 
@@ -125,7 +126,7 @@ class Store(ABC):
         self.db: LocalStoreDB | None = None
         self._features: set[str] = set()
         self.probe_state: ProbeState = ProbeState.NOT_PROBED
-        self._probe_event: asyncio.Event = asyncio.Event()
+        self._probe_event: anyio.Event = anyio.Event()
         self._signing_keys: dict[str, SecretKey] = {}
         self.draining: bool = False
         self._started: bool = False
@@ -133,7 +134,7 @@ class Store(ABC):
         self.reconnect_min_delay = spec.reconnect_min_delay
         self.reconnect_max_delay = spec.reconnect_max_delay
         self._reconnect_task: asyncio.Task[None] | None = None
-        self._reconnect_trigger = asyncio.Event()
+        self._reconnect_trigger = anyio.Event()
         self._reconnect_delay = self.reconnect_min_delay
         self._on_reconnect: Callable[[], Awaitable[None]] | None = None
 
@@ -418,7 +419,7 @@ class Store(ABC):
         """Probe and sync — actual reconnection."""
         await self.pool.close()
         self.probe_state = ProbeState.NOT_PROBED
-        self._probe_event.clear()
+        self._probe_event = anyio.Event()
         await self.probe()
         await self.sync_paths()
 
@@ -426,11 +427,11 @@ class Store(ABC):
         """Background loop: wait for trigger, backoff, reconnect."""
         while True:
             await self._reconnect_trigger.wait()
-            self._reconnect_trigger.clear()
+            self._reconnect_trigger = anyio.Event()
 
             while True:
                 delay = self._reconnect_delay
-                await asyncio.sleep(delay)
+                await anyio.sleep(delay)
 
                 try:
                     await self._do_reconnect()
@@ -445,7 +446,7 @@ class Store(ABC):
                         next_retry=self._reconnect_delay,
                     )
                     continue
-                except asyncio.CancelledError:
+                except anyio.get_cancelled_exc_class():
                     raise
                 except Exception:
                     log.exception(

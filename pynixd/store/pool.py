@@ -10,6 +10,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppres
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
+import anyio
 import structlog
 
 if TYPE_CHECKING:
@@ -65,7 +66,7 @@ class ConnectionPool:
     async def sweep_idle(self) -> None:
         """Periodically close idle connections that have expired."""
         while self.idle_conns:
-            await asyncio.sleep(self.idle_ttl / 2)
+            await anyio.sleep(self.idle_ttl / 2)
             now = time.monotonic()
 
             expired: list[tuple[Connection, float]] = []
@@ -240,7 +241,7 @@ class ConnectionPool:
         """Close all pooled connections and stop sweep task."""
         if self.sweep_task is not None:
             self.sweep_task.cancel()
-            with suppress(Exception, asyncio.CancelledError):
+            with suppress(BaseException):
                 await self.sweep_task
             self.sweep_task = None
 

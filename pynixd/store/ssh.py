@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import asyncssh
 import structlog
 
@@ -62,7 +63,7 @@ class _SSHStoreMixin(Store):
         settings: PynixdSettings | None = None,
     ) -> None:
         self.conn = None
-        self.ssh_lock = asyncio.Lock()
+        self.ssh_lock = anyio.Lock()
         self._bg_tasks = set()
         self.backoff = self.INITIAL_BACKOFF
         self.max_backoff = self.MAX_BACKOFF
@@ -170,7 +171,7 @@ class _SSHStoreMixin(Store):
             wait = self.last_failure + self.backoff - now
             if self.last_failure > 0 and wait > 0:
                 log.info("ssh_backoff", store_id=self.store_id, backoff_seconds=wait)
-                await asyncio.sleep(wait)
+                await anyio.sleep(wait)
 
             try:
                 log.info(

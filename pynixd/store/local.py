@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import anyio
 import structlog
 
 from ..config import LocalSocketStoreSpec, LocalSubprocessStoreSpec, PynixdSettings
@@ -57,7 +58,7 @@ class LocalSocketStore(Store):
         self.use_db = spec.use_db
         self.monitor_enabled = spec.monitor
         self.daemon_proc: asyncio.subprocess.Process | None = None
-        self.daemon_ready: asyncio.Event | None = None
+        self.daemon_ready: anyio.Event | None = None
         self._daemon_log_task: asyncio.Task | None = None
         self.extra_env = spec.extra_env or {}
         self.extra_args = spec.extra_args or []
@@ -107,7 +108,7 @@ class LocalSocketStore(Store):
                 socket_path=str(self.socket_path),
             )
 
-        self.daemon_ready = asyncio.Event()
+        self.daemon_ready = anyio.Event()
 
         if self.socket_path.exists():
             log.info("removing_stale_socket", socket_path=str(self.socket_path))
@@ -169,7 +170,7 @@ class LocalSocketStore(Store):
                     f"Managed daemon exited early with code {self.daemon_proc.returncode} "
                     f"(pid={self.daemon_proc.pid}): {stderr_output!r}",
                 )
-            await asyncio.sleep(0.1)
+            await anyio.sleep(0.1)
         else:
             raise RuntimeError(
                 f"Managed daemon did not create socket at {self.socket_path} within 10s (pid={self.daemon_proc.pid})",
@@ -189,10 +190,10 @@ class LocalSocketStore(Store):
                 log.info("daemon_socket_ready", socket_path=str(self.socket_path))
                 if self._daemon_log_task and not self._daemon_log_task.done():
                     self._daemon_log_task.cancel()
-                await asyncio.sleep(0.1)
+                await anyio.sleep(0.1)
                 self.daemon_ready.set()
                 return
-            await asyncio.sleep(0.05)
+            await anyio.sleep(0.05)
 
         stderr_output = ""
         if self.daemon_proc.stderr:
@@ -202,7 +203,7 @@ class LocalSocketStore(Store):
             f"at {self.socket_path} within 5s (pid={self.daemon_proc.pid}): {stderr_output!r}",
         )
 
-    async def _stream_daemon_output(self, stop: asyncio.Event) -> None:
+    async def _stream_daemon_output(self, stop: anyio.Event) -> None:
         """Forward daemon stdout/stderr to structlog until stop is set."""
         if not self.daemon_proc or not self.daemon_proc.stdout or not self.daemon_proc.stderr:
             return
@@ -218,9 +219,9 @@ class LocalSocketStore(Store):
                 if stop.is_set():
                     return
 
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(_forward(self.daemon_proc.stdout, "stdout"))
-            tg.create_task(_forward(self.daemon_proc.stderr, "stderr"))
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_forward, self.daemon_proc.stdout, "stdout")
+            tg.start_soon(_forward, self.daemon_proc.stderr, "stderr")
 
     async def _probe_socket(self) -> bool:
         """Perform a full daemon handshake to verify a live Nix daemon.
@@ -274,7 +275,7 @@ class LocalSocketStore(Store):
             await self.monitor.stop()
         if self._daemon_log_task and not self._daemon_log_task.done():
             self._daemon_log_task.cancel()
-            with contextlib.suppress(Exception, asyncio.CancelledError):
+            with contextlib.suppress(BaseException):
                 await self._daemon_log_task
         await self._kill_daemon()
 
@@ -300,7 +301,8 @@ class LocalSocketStore(Store):
             os.killpg(pid, signal.SIGTERM)
 
         try:
-            await asyncio.wait_for(self.daemon_proc.wait(), timeout=5.0)
+            with anyio.fail_after(5.0):
+                await self.daemon_proc.wait()
         except TimeoutError:
             log.warning("daemon_sigterm_timeout_escalating_to_sigkill", pid=pid)
             with contextlib.suppress(ProcessLookupError):
@@ -308,7 +310,8 @@ class LocalSocketStore(Store):
 
             # Final wait so the process is reaped
             with contextlib.suppress(TimeoutError, ProcessLookupError):
-                await asyncio.wait_for(self.daemon_proc.wait(), timeout=2.0)
+                with anyio.fail_after(2.0):
+                    await self.daemon_proc.wait()
 
         self.daemon_proc = None
         self.daemon_ready = None

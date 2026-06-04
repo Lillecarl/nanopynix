@@ -8,9 +8,9 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import signal
 
+import anyio
 import structlog
 import uvloop
 
@@ -26,23 +26,23 @@ async def async_daemon_main() -> None:
     stores = settings.to_stores()
 
     server = Server(stores=stores, settings=settings)
-    shutdown_event = asyncio.Event()
+    shutdown_event = anyio.Event()
 
-    loop = asyncio.get_running_loop()
+    async def _handle_signals() -> None:
+        with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
+            async for _sig in signals:
+                if shutdown_event.is_set():
+                    log.info("forced_shutdown")
+                    raise SystemExit(1)
+                log.info("shutdown_signal_received")
+                shutdown_event.set()
 
-    def _signal_handler() -> None:
-        if shutdown_event.is_set():
-            log.info("forced_shutdown")
-            raise SystemExit(1)
-        log.info("shutdown_signal_received")
-        shutdown_event.set()
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_handle_signals)
+        await server.start()
+        await shutdown_event.wait()
+        tg.cancel_scope.cancel()
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _signal_handler)
-
-    await server.start()
-
-    await shutdown_event.wait()
     await server.close()
 
 
@@ -50,9 +50,7 @@ def daemon_main(_args: argparse.Namespace) -> None:
     settings = load_settings()
     setup_logging(settings)
 
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-
-    asyncio.run(async_daemon_main())
+    anyio.run(async_daemon_main, backend="asyncio", backend_options={"loop_factory": uvloop.new_event_loop})
 
 
 def main() -> None:
