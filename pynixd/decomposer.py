@@ -5,7 +5,7 @@ Store.execute. This module implements the decomposition logic for
 BuildPaths/BuildPathsWithResults requests.
 
 Phases:
-1. Discover closure — BFS walk .drv files, expand dynamic_input_drvs
+1. Discover closure — BFS walk .drv files via QueryMissing, expand dynamic_input_drvs
 2. Enqueue and wire  — Convert to BasicDerivation, enqueue, set DAG edges
 3. Await completion — Wait for all builds in the request
 4. Collect results  — Synthesise KeyedBuildResult list

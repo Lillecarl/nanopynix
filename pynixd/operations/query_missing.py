@@ -217,9 +217,10 @@ async def _resolve_path(
 
     still_missing = False
     for name, opath in outputs.items():
-        if opath is None:
-            continue
         if wanted and name not in wanted:
+            continue
+        if opath is None:
+            still_missing = True
             continue
         op_valid = (await IsValidPathRequest(path=opath).execute(store, client, suppress_last)).valid
         if op_valid:

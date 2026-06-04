@@ -8,12 +8,9 @@ for each client. Used for testing (avoids SSH) and local daemon mode.
 from __future__ import annotations
 
 import asyncio
-import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import anyio
-import pyinstrument
 import structlog
 
 from .config import ScheduleMode
@@ -22,6 +19,8 @@ from .proxy import DaemonProxy
 from .wire import UnixNixReader, UnixNixWriter
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .context import PynixdContext
 
 log = structlog.get_logger(__name__)
@@ -49,8 +48,6 @@ async def start_unix_server(
     ) -> None:
         peer = writer.get_extra_info("peername") or "unknown"
         log.info("unix_client_connected", peer=peer)
-        profiler = pyinstrument.Profiler(async_mode="enabled")
-        profiler.start()
         try:
             proxy = DaemonProxy(
                 UnixNixReader(reader, identifier="client"),
@@ -64,11 +61,6 @@ async def start_unix_server(
         except Exception:
             log.exception("unix_proxy_session_failed")
         finally:
-            profiler.stop()
-            ts = int(time.time() * 1000)
-            out = Path("/tmp") / f"pynixd-profile-{ts}.txt"
-            out.write_text(profiler.output_text(unicode=True, color=False, show_all=True))
-            log.info("profile_dumped", path=str(out))
             writer.close()
 
     # Clean up stale socket

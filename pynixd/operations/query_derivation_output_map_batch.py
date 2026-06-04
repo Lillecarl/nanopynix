@@ -123,6 +123,16 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
                 result.setdefault(StorePath(drv_path), {})[output_name] = (
                     StorePath(output_path) if output_path else None
                 )
+
+            for drv_path in self.drv_paths:
+                if StorePath(drv_path) in result:
+                    continue
+                try:
+                    parsed = await read_drv_file(store.store_path, drv_path)
+                    result[StorePath(drv_path)] = dict(parsed.output_paths().items())
+                except FileNotFoundError:
+                    pass
+
             return DerivationOutputMapBatchResponse(outputs=result)
 
         # Try delegation via wire (if talking to another pynixd)
