@@ -9,7 +9,6 @@ HTTP requests, enabling near-parallel substituter queries during
 
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 from abc import ABC, abstractmethod
@@ -23,6 +22,7 @@ from .store_path import StorePath
 from .types import SubstitutablePathInfo
 
 if TYPE_CHECKING:
+    import asyncio
     from collections.abc import Coroutine
 
 log = structlog.get_logger(__name__)
@@ -218,7 +218,7 @@ class SubstituterGroup:
         lock = anyio.Lock()
         info_result: SubstitutablePathInfo | None = None
         remaining = len(self._subs)
-        latch: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        latch = anyio.Event()
 
         async def _try(sub: HttpBinaryCacheSubstituter) -> None:
             nonlocal info_result, remaining
@@ -231,16 +231,15 @@ class SubstituterGroup:
             async with lock:
                 if infos and info_result is None:
                     info_result = infos[path]
-                    if not latch.done():
-                        latch.set_result(None)
+                    latch.set()
                 remaining -= 1
-                if remaining == 0 and not latch.done():
-                    latch.set_result(None)
+                if remaining == 0:
+                    latch.set()
 
         for sub in self._subs:
             self.tg.create_task(_try(sub))
 
-        await latch
+        await latch.wait()
         return info_result
 
 
