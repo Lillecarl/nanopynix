@@ -8,18 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import (
     DerivedPath as DerivedPath,
-)
-from ..derived_path import (
-    DerivedPathBuilt as DerivedPathBuilt,
-)
-from ..derived_path import (
-    DerivedPathOpaque as DerivedPathOpaque,
-)
-from ..derived_path import (
     OutputsNames as OutputsNames,
-)
-from ..derived_path import (
-    SingleDerivedPathBuilt as SingleDerivedPathBuilt,
 )
 from ..drv_parser import read_drv_file
 from ..stderr import OperationLogs
@@ -134,16 +123,16 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
 
         initial_paths: set[StorePath] = set()
         for dp in self.derived_paths:
-            derived = dp.derived
-            if isinstance(derived, DerivedPathOpaque):
-                initial_paths.add(derived.path)
-            elif isinstance(derived, DerivedPathBuilt):
-                if isinstance(derived.drv_path, SingleDerivedPathBuilt):
-                    continue
-                drv = StorePath(derived.base_store_path())
+            dp = dp.derived
+            if dp.is_opaque:
+                initial_paths.add(StorePath(dp.drv_path))
+            elif dp.is_nested:
+                continue
+            else:
+                drv = StorePath(dp.drv_path)
                 initial_paths.add(drv)
-                if isinstance(derived.outputs, OutputsNames):
-                    drv_to_wanted.setdefault(drv, set()).update(derived.outputs.names)
+                if isinstance(dp.outputs, OutputsNames):
+                    drv_to_wanted.setdefault(drv, set()).update(dp.outputs.names)
 
         if not initial_paths:
             return _empty_response()

@@ -692,7 +692,7 @@ def parse_drv(content: str) -> Derivation:
 async def read_drv_file(
     store_path: Path,
     drv_store_path: StorePath | str,
-) -> Derivation:
+) -> Derivation | None:
     """Read and parse a .drv file from a store's filesystem.
 
     Args:
@@ -705,5 +705,8 @@ async def read_drv_file(
     # drv_store_path is like "/nix/store/xxx.drv"
     # On disk it's at "{store_path}/nix/store/xxx.drv"
     fs_path = store_path / str(drv_store_path).lstrip("/")
-    content = await anyio.Path(fs_path).read_text()
+    path = anyio.Path(fs_path)
+    if not await path.exists():
+        return None
+    content = await path.read_text()
     return parse_drv(content)

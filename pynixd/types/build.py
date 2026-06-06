@@ -169,6 +169,9 @@ class BuildResult:
                 ctx.writer.write_string(k)
                 ctx.writer.write_string(json.dumps(v))
 
+    def to_keyed(self, derived_path: DerivedPath):
+        return KeyedBuildResult(derived_path, self)
+
 
 @dataclass
 class KeyedBuildResult:
@@ -178,17 +181,16 @@ class KeyedBuildResult:
     the derivation path or store path that was built/substituted.
     """
 
-    path: DerivedPath = field(default_factory=lambda: StorePath(""))  # type: ignore[assignment]  # always set by from_reader
-    result: BuildResult = field(default_factory=BuildResult)
+    path: DerivedPath
+    result: BuildResult
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
         from ..derived_path import DerivedPath
 
-        obj = cls.__new__(cls)
-        obj.path = await ctx.reader.read_string(DerivedPath)
-        obj.result = await BuildResult.deserialize(ctx)
-        return obj
+        path = await ctx.reader.read_string(DerivedPath)
+        result = await BuildResult.deserialize(ctx)
+        return cls.__init__(path, result)
 
     async def serialize(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(self.path)

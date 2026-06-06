@@ -129,8 +129,6 @@ let
         pyinstance
         pkgs.pyright
         pkgs.ruff
-        pkgs.ty
-        # pkgs.zuban
       ];
       text = ''
         src=${toString ./pynixd}
@@ -140,8 +138,6 @@ let
         ruff check --fix "$src" ./tests || true
         echo "=== pyright ==="
         pyright --pythonpath ${pyinstance}/bin/python "$src" ./tests || true
-        echo "=== ty ==="
-        ty check --python ${pyinstance}/bin/python "$src" ./tests || true
         # echo "=== zuban ==="
         # zuban check --follow-untyped-imports --python-executable ${pyinstance}/bin/python "$src" || true
       '';
