@@ -1,11 +1,40 @@
-from __future__ import annotations
+from typing import Annotated
 
-from typing import NotRequired, TypedDict
+from pydantic import BaseModel, BeforeValidator, Field
+
+from pynixd.store_path import DrvOutput, StorePath
 
 
-class Realisation(TypedDict):
+def _coerce_storepath(v: object) -> StorePath:
+    if isinstance(v, StorePath):
+        return v
+    if isinstance(v, str):
+        return StorePath(v)
+    raise ValueError(f"Cannot coerce {type(v).__name__} to StorePath")
+
+
+def _coerce_drvoutput(v: object) -> DrvOutput:
+    if isinstance(v, DrvOutput):
+        return v
+    if isinstance(v, str):
+        return DrvOutput(v)
+    raise ValueError(f"Cannot coerce {type(v).__name__} to DrvOutput")
+
+
+_StorePathField = Annotated[StorePath, BeforeValidator(_coerce_storepath)]
+_DrvOutputField = Annotated[DrvOutput, BeforeValidator(_coerce_drvoutput)]
+
+
+class Realisation(BaseModel):
     """Nix content-addressed derivation realisation."""
 
-    id: str
-    outPath: str
-    signatures: NotRequired[list[str]]
+    model_config = {
+        "extra": "ignore",
+        "arbitrary_types_allowed": True,
+        "populate_by_name": True,
+    }
+
+    id: _DrvOutputField
+    out_path: _StorePathField = Field(alias="outPath")
+    signatures: list[str] = []
+    dependent_realisations: dict[_DrvOutputField, _StorePathField] = Field(default={}, alias="dependentRealisations")

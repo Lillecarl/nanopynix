@@ -65,12 +65,12 @@ async def async_main():
         proc = await asyncio.create_subprocess_exec(
             "nix",
             "eval",
+            "--raw",
             "--store",
             td,
-            "--impure",
-            "--expr",
-            'let pkgs = import <nixpkgs> {};in (pkgs.hello.overrideAttrs (pa: { pname = "not-hello-${toString builtins.currentTime}"; } )).drvPath',
-            "--raw",
+            "--file",
+            "tests/nix",
+            "ca.depends_on_ca.drvPath",
             stdout=PIPE,
         )
         stdout, _ = await proc.communicate()

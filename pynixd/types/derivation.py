@@ -165,10 +165,18 @@ class BasicDerivation:
         ctx.writer.write_uint64(len(self.outputs))
         for name, out in self.outputs.items():
             ctx.writer.write_string(name)
-            ctx.writer.write_string(out.path)
+            # Normalize output paths to absolute store paths.
+            # The drv_parser may return bare hash-names for CA derivations,
+            # but the daemon protocol requires absolute paths.
+            out_path = str(StorePath(out.path).with_store_prefix()) if out.path else ""
+            ctx.writer.write_string(out_path)
             ctx.writer.write_string(out.method)
             ctx.writer.write_string(out.hash_digest)
-        ctx.writer.write_string_set(self.input_srcs)
+        # Normalize input_srcs to absolute store paths
+        normalized_srcs: StorePathSet = set()
+        for src in self.input_srcs:
+            normalized_srcs.add(src.with_store_prefix())
+        ctx.writer.write_string_set(normalized_srcs)
         ctx.writer.write_string(self.platform)
         ctx.writer.write_string(self.builder)
         ctx.writer.write_string_list(self.args)

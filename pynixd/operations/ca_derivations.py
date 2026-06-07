@@ -15,13 +15,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..stderr import OperationLogs
-from ..store_path import DrvOutput, StorePath
+from ..store_path import DrvOutput
+from ..types.ca import Realisation
 from .base import OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
-    from ..types.ca import Realisation
     from ..types.context import ReadContext, WriteContext
 
 
@@ -59,14 +59,14 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
         obj = cls.__new__(cls)
         obj.logger = cls.logger.bind(identifier=ctx.reader.identifier)
         realisation_json = await ctx.reader.read_string()
-        obj.realisation = json.loads(realisation_json)
+        obj.realisation = Realisation.model_validate(json.loads(realisation_json))
         obj.logger.debug("deserialize", realisation=obj.realisation)
         return obj
 
     async def serialize(self, ctx: WriteContext) -> None:
         self.logger = self.logger.bind(identifier=ctx.writer.identifier)
         ctx.writer.write_uint64(self.op)
-        ctx.writer.write_string(json.dumps(self.realisation))
+        ctx.writer.write_string(self.realisation.model_dump_json(by_alias=True))
 
     async def execute(
         self,
@@ -76,9 +76,9 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     ) -> RegisterDrvOutputResponse:
         resp = await store.call(self, client=client, suppress_last=suppress_last)
 
-        out_path = self.realisation.get("outPath")
+        out_path = self.realisation.out_path
         if out_path:
-            store.tracker.add_known_path(StorePath(out_path).with_store_prefix())
+            store.tracker.add_known_path(out_path.with_store_prefix())
 
         return resp
 
@@ -93,7 +93,7 @@ class QueryRealisationResponse(OpResponse):
     Output: Set of Realisations (JSON dicts)
     """
 
-    realisations: list[dict]
+    realisations: list[Realisation]
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext) -> Self:
@@ -104,7 +104,7 @@ class QueryRealisationResponse(OpResponse):
         obj.realisations = []
         for _ in range(n):
             realisation_json = await ctx.reader.read_string()
-            obj.realisations.append(json.loads(realisation_json))
+            obj.realisations.append(Realisation.model_validate(json.loads(realisation_json)))
         return obj
 
     async def serialize(self, ctx: WriteContext) -> None:
@@ -112,7 +112,7 @@ class QueryRealisationResponse(OpResponse):
         self.logs.serialize(ctx)
         ctx.writer.write_uint64(len(self.realisations))
         for r in self.realisations:
-            ctx.writer.write_string(json.dumps(r))
+            ctx.writer.write_string(r.model_dump_json(by_alias=True))
 
 
 @dataclass(kw_only=True)
@@ -148,8 +148,8 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
         resp = await store.call(self, client=client, suppress_last=suppress_last)
 
         for r in resp.realisations:
-            out_path = r.get("outPath")
+            out_path = r.out_path
             if out_path:
-                store.tracker.add_known_path(StorePath(out_path).with_store_prefix())
+                store.tracker.add_known_path(out_path.with_store_prefix())
 
         return resp

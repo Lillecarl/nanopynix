@@ -662,10 +662,10 @@ class Scheduler:
         ca_output_paths: StorePathSet = set()
         if resp.result.built_outputs:
             for realisation in resp.result.built_outputs.values():
-                out_path = realisation.get("outPath")
+                out_path = realisation.out_path
                 if out_path:
                     ca_output_paths.add(
-                        StorePath(out_path).with_store_prefix(),
+                        out_path.with_store_prefix(),
                     )
             build.ca_realisations = list(resp.result.built_outputs.values())
 

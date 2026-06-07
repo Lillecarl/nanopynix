@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import DerivedPath
 from ..stderr import OperationLogs
-from ..store_path import StorePath
 from ..types.context import ReadContext, WriteContext
 from .base import BuildMode, BuildResultStatus, KeyedBuildResult, OpRequest, OpResponse
 
@@ -80,7 +79,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
                     if kr.result.status == 0:
                         for output in kr.result.built_outputs.values():
                             ctx.proxy.local_store.tracker.add_known_path(
-                                StorePath(output["outPath"]).with_store_prefix(),
+                                output.out_path.with_store_prefix(),
                             )
 
             self.logger.debug("responded_op")
@@ -180,7 +179,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
                     ):
                         for output in kr.result.built_outputs.values():
                             ctx.proxy.local_store.tracker.add_known_path(
-                                StorePath(output["outPath"]).with_store_prefix(),
+                                output.out_path.with_store_prefix(),
                             )
 
             self.logger.debug("responded_op")

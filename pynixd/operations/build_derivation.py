@@ -77,7 +77,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             if result.result.status == 0:
                 for output in result.result.built_outputs.values():
                     ctx.proxy.local_store.tracker.add_known_path(
-                        StorePath(output["outPath"]).with_store_prefix(),
+                        output.out_path.with_store_prefix(),
                     )
 
             self.logger.debug("responded_op")

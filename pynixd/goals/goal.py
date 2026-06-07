@@ -116,6 +116,10 @@ class Goal:
 
         output = derived_outputs[self.derived_path]
 
+        if not output.path:
+            await self.execute_ca_derivation(derivation)
+            return
+
         if (await self.ctx.store.execute(IsValidPathRequest(path=StorePath(output.path)))).valid:
             self.result = GoalResult(
                 path=self.derived_path,
@@ -125,7 +129,7 @@ class Goal:
             return
 
         log.info("checking_substituters", path=output.path)
-        if await self.ctx.substitution_manager.check(StorePath(output.path)):
+        if await self.ctx.substitution_manager.query_path(StorePath(output.path)):
             goal = self.add_child(DerivedPath(output.path))
             await self.execute_children()
             if goal.result:
@@ -147,7 +151,7 @@ class Goal:
                 continue
             if isinstance(result, GoalResult):
                 input_srcs.update(result.produced_paths)
-            input_srcs.update(StorePath(output["outPath"]) for output in result.result.built_outputs.values())
+            input_srcs.update(output.out_path for output in result.result.built_outputs.values())
 
         log.info("building", derivation=self.derived_path.drv_path, input_srcs=input_srcs)
         response = await self.ctx.store.execute(
@@ -180,6 +184,130 @@ class Goal:
         for realisation in self.result.result.built_outputs.values():
             await self.ctx.store.execute(RegisterDrvOutputRequest(realisation=realisation))
 
+    async def execute_ca_derivation(self, derivation: Derivation) -> None:
+        """Build (or substitute) a content-addressed derivation.
+
+        Called when ``output.path`` is empty — the output path isn't known
+        until after the build completes and the daemon returns a
+        :class:`Realisation` with the actual ``outPath``.
+
+        **Key differences from regular execute_derivation:**
+
+        * No upfront ``IsValidPath`` check — we don't know the path.
+        * No substitution shortcut by path — we could query by
+          ``DrvOutput`` (content hash), but the current
+          :class:`SubstitutionManager` only supports path-based checks.
+        * After the build we **must register** each ``Realisation`` via
+          :class:`RegisterDrvOutputRequest` so downstream derivations
+          that depend on this CA output can resolve it by content hash.
+        * ``produced_paths`` comes from the realisations' ``outPath``
+          fields, not from the derivation's static ``outputs``.
+
+        **Child-first resolution:**  CA input-dependencies from
+        ``input_drvs`` are created as child goals and executed first.
+        Those children build (or substitute) their outputs, setting
+        ``produced_paths`` with the actual store paths.  The parent
+        collects those paths into ``input_srcs`` before sending
+        ``BuildDerivationRequest``, so the sandbox has everything it
+        needs.
+        """
+        log.info(
+            "execute_ca_derivation",
+            derived_path=self.derived_path.derived,
+            is_dynamic=derivation.is_dynamic,
+        )
+
+        # ── 1. Resolve all input children ──
+        # Same as non-CA: create child goals for every input dependency.
+        # CA input_drvs children will hit execute_ca_derivation themselves
+        # and resolve their output paths via building.
+        for path, outputs in derivation.input_drvs.items():
+            for output in outputs:
+                self.add_child(DerivedPath(f"{path}!{output}"))
+        for path in derivation.input_srcs:
+            self.add_child(DerivedPath(path))
+
+        # Also resolve dynamic input_drvs (derivations whose outputs
+        # depend on other outputs from the same derivation).  Each entry
+        # has the same structure as input_drvs but the output names are
+        # nested  ``{drv_path: {output_name: [nested_names]}}``
+        for path, outputs in derivation.dynamic_input_drvs.items():
+            for output in outputs:
+                self.add_child(DerivedPath(f"{path}!{output}"))
+
+        await self.execute_children()
+
+        # ── 2. Collect resolved input paths ──
+        # Gather every store path that children made available.
+        # For CA children this includes the freshly-built output paths
+        # from their realisations.
+        input_srcs: set[StorePath] = set()
+        for result in self.collect_results():
+            if not isinstance(result, KeyedBuildResult):
+                continue
+            if isinstance(result, GoalResult):
+                input_srcs.update(result.produced_paths)
+            input_srcs.update(output.out_path for output in result.result.built_outputs.values())
+
+        # ── 3. Build via daemon ──
+        # The daemon handles CA-specific logic: it creates the sandbox,
+        # runs the builder, hashes the output, computes the final store
+        # path, and returns a Realisation with the actual outPath.
+        log.info(
+            "building_ca",
+            derivation=self.derived_path.drv_path,
+            input_count=len(input_srcs),
+        )
+        response = await self.ctx.store.execute(
+            BuildDerivationRequest(
+                drv_path=self.derived_path.base_store_path(),
+                derivation=BasicDerivation(
+                    outputs={
+                        o.name: DerivationOutput(
+                            path=o.path,
+                            method=o.hash_algo,
+                            hash_digest=o.hash_value,
+                        )
+                        for o in derivation.outputs
+                    },
+                    input_srcs=input_srcs,
+                    args=derivation.args,
+                    builder=derivation.builder,
+                    env=derivation.env,
+                    is_dynamic=derivation.is_dynamic,
+                    platform=derivation.platform,
+                ),
+                build_mode=BuildMode.NORMAL,
+            )
+        )
+
+        # ── 4. Register realisations ──
+        # Critical for downstream derivations: they look up this output
+        # by its DrvOutput (:DrvOutput) key, which contains the content
+        # hash.  Without registration, dependents can't find the path.
+        for realisation in response.result.built_outputs.values():
+            log.debug(
+                "registering_ca_output",
+                drv_output=realisation.id,
+                out_path=realisation.out_path,
+            )
+            await self.ctx.store.execute(RegisterDrvOutputRequest(realisation=realisation))
+
+        # ── 5. Extract produced paths from realisations ──
+        # These are the actual store paths the build created.
+        # They will be propagated upward so the grandparent's input_srcs
+        # includes them.
+        produced_paths: set[StorePath] = set()
+        for realisation in response.result.built_outputs.values():
+            if out_path := realisation.out_path:
+                produced_paths.add(out_path.with_store_prefix())
+
+        self.result = GoalResult(
+            path=self.derived_path,
+            result=response.result,
+            produced_paths=produced_paths,
+        )
+
     async def execute_opaque(self):
         assert self.derived_path.is_opaque
         log.info(
@@ -195,7 +323,7 @@ class Goal:
             )
             return
 
-        if info := await self.ctx.substitution_manager.check(self.derived_path.base_store_path()):
+        if info := await self.ctx.substitution_manager.query_path(self.derived_path.base_store_path()):
             for path in info.references:
                 if self.derived_path.base_store_path() == path:
                     continue  # don't create a child for itself
@@ -204,7 +332,7 @@ class Goal:
             await self.execute_children()
 
             log.info("substituting", path=self.derived_path.base_store_path())
-            await self.ctx.substitution_manager.substitute({self.derived_path.base_store_path()}, self.ctx.store)
+            await self.ctx.substitution_manager.substitute_paths({self.derived_path.base_store_path()}, self.ctx.store)
             self.result = GoalResult(
                 path=self.derived_path,
                 result=BuildResult(status=BuildResultStatus.SUBSTITUTED),

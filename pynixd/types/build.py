@@ -9,13 +9,14 @@ from typing import TYPE_CHECKING, Self
 
 import structlog
 
+from pynixd.types.ca import Realisation
+
 from .. import wire
 from ..store_path import DrvOutput, StorePath
 
 if TYPE_CHECKING:
     from ..derived_path import DerivedPath
     from .aliases import ContentAddress, NARHash
-    from .ca import Realisation
     from .context import ReadContext, WriteContext
 
 
@@ -145,7 +146,7 @@ class BuildResult:
             for _ in range(n):
                 drv_output = DrvOutput(await ctx.reader.read_string())
                 realisation_json = await ctx.reader.read_string()
-                obj.built_outputs[drv_output] = json.loads(realisation_json)
+                obj.built_outputs[drv_output] = Realisation.model_validate(json.loads(realisation_json))
 
         return obj
 

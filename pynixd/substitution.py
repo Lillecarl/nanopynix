@@ -18,14 +18,15 @@ from __future__ import annotations
 import contextlib
 import re
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING
 
 import aiohttp
 import anyio
 import structlog
 
 from .nar_info import NarInfo
-from .store_path import StorePath
+from .store_path import DrvOutput, StorePath
+from .types.ca import Realisation
 
 if TYPE_CHECKING:
     from .store import Store
@@ -75,6 +76,18 @@ class Substituter(ABC):
         Returns:
             ``{path: True}`` for successfully imported paths,
             ``{path: False}`` for failures.
+        """
+
+    @abstractmethod
+    async def query_realisations(
+        self,
+        drv_outputs: set[DrvOutput],
+    ) -> dict[DrvOutput, Realisation]:
+        """Query content-addressed realisations by ``DrvOutput`` key.
+
+        For each ``DrvOutput`` (e.g. ``sha256:abc...!out``) that this
+        cache knows about, return the corresponding :class:`Realisation`
+        with the actual ``outPath``.
         """
 
 
@@ -173,6 +186,42 @@ class HttpBinaryCacheSubstituter(Substituter):
                 pass
 
     # ── Download interface ──────────────────────────────────────────
+
+    async def query_realisations(
+        self,
+        drv_outputs: set[DrvOutput],
+    ) -> dict[DrvOutput, Realisation]:
+        """Query CA realisations by DrvOutput from the binary cache.
+
+        Realisations are stored at ``{base}/realisation/{drv_output}.json``.
+        """
+        if not drv_outputs or self._session is None:
+            return {}
+        result: dict[DrvOutput, Realisation] = {}
+        async with anyio.create_task_group() as tg:
+            for d in drv_outputs:
+                tg.start_soon(self._get_realisation, d, result)
+        return result
+
+    async def _get_realisation(
+        self,
+        drv_output: DrvOutput,
+        result: dict[DrvOutput, Realisation],
+    ) -> None:
+        url = f"{self.base_url}realisation/{drv_output}.json"
+        async with self._semaphore:
+            try:
+                assert self._session is not None
+                async with self._session.get(
+                    url,
+                    timeout=self._query_timeout,
+                    raise_for_status=False,
+                ) as resp:
+                    if resp.status != 200:
+                        return
+                    result[drv_output] = Realisation.model_validate(await resp.json())
+            except (TimeoutError, aiohttp.ClientError, OSError):
+                pass
 
     async def substitute(
         self,
@@ -356,6 +405,35 @@ class StoreSubstituter(Substituter):
                 )
         return results
 
+    # ── CA realisation queries ───────────────────────────────────
+
+    async def query_realisations(
+        self,
+        drv_outputs: set[DrvOutput],
+    ) -> dict[DrvOutput, Realisation]:
+        """Query CA realisations via the daemon's ``QueryRealisation`` operation."""
+        if not drv_outputs:
+            return {}
+        result: dict[DrvOutput, Realisation] = {}
+        async with anyio.create_task_group() as tg:
+            for d in drv_outputs:
+                tg.start_soon(self._query_one_realisation, d, result)
+        return result
+
+    async def _query_one_realisation(
+        self,
+        drv_output: DrvOutput,
+        result: dict[DrvOutput, Realisation],
+    ) -> None:
+        from .operations.ca_derivations import QueryRealisationRequest
+
+        try:
+            resp = await self._store.execute(QueryRealisationRequest(drv_output=drv_output))
+            if resp.realisations:
+                result[drv_output] = resp.realisations[0]
+        except Exception:
+            pass
+
     async def _substitute_one(
         self,
         path: StorePath,
@@ -416,11 +494,6 @@ class StoreSubstituter(Substituter):
             results[path] = False
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# SubstitutionManager
-# ═════════════════════════════════════════════════════════════════════════════
-
-
 class SubstitutionManager:
     """Orchestrates substituters with parallel query racing and DAG ordering.
 
@@ -428,13 +501,14 @@ class SubstitutionManager:
     ``async with`` unless you want deterministic cleanup::
 
         sm = SubstitutionManager([HttpBinaryCacheSubstituter("https://cache.nixos.org")])
-        info = await sm.check(path)
+        info = await sm.query_path(path)
+        ok = await sm.substitute_path(path, store)
         await sm.close()  # optional explicit cleanup
 
     Or with async context manager for auto-cleanup::
 
         async with SubstitutionManager(...) as sm:
-            info = await sm.check(path)
+            info = await sm.query_path(path)
     """
 
     def __init__(
@@ -461,36 +535,28 @@ class SubstitutionManager:
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
-    # ── check (single / set) ────────────────────────────────────────
+    # ── query_path / query_paths ──────────────────────────────────
 
-    @overload
-    async def check(self, paths: StorePath) -> SubstitutablePathInfo | None: ...
-    @overload
-    async def check(self, paths: set[StorePath]) -> dict[StorePath, SubstitutablePathInfo]: ...
+    async def query_path(self, path: StorePath) -> SubstitutablePathInfo | None:
+        """Check if a single store path is available from any substituter.
 
-    async def check(
+        Returns :class:`SubstitutablePathInfo` or ``None`` if not found.
+        """
+        result = await self.query_paths({path})
+        return result.get(path)
+
+    async def query_paths(
         self,
-        paths: StorePath | set[StorePath],
-    ) -> SubstitutablePathInfo | dict[StorePath, SubstitutablePathInfo] | None:
+        paths: set[StorePath],
+    ) -> dict[StorePath, SubstitutablePathInfo]:
         """Race all substituters — first ``SubstitutablePathInfo`` per path wins.
-
-        Race all substituters — first ``SubstitutablePathInfo`` per path wins.
 
         Returns the lean :class:`SubstitutablePathInfo` used by the daemon
         protocol (deriver, references, download size, NAR size) instead of
         the full ``NarInfo`` (URL, compression, signatures, ...).
-
-        Accepts a single ``StorePath`` (returns one result or ``None``)
-        or a ``set[StorePath]`` (returns a dict).
         """
-        single = isinstance(paths, StorePath)
-        path: StorePath | None = None
-        if single:
-            path = paths
-            paths = {paths}
-
         if not paths or not self._subs:
-            return None if single else {}
+            return {}
 
         from .types.path_info import SubstitutablePathInfo
 
@@ -518,37 +584,30 @@ class SubstitutionManager:
             for sub in self._subs:
                 tg.start_soon(_race, sub)
 
-        return result.get(path) if single else result  # type: ignore[union-attr]
+        return result
 
-    # ── substitute (single / set) ───────────────────────────────────
+    # ── substitute_path / substitute_paths ─────────────────────────
 
-    @overload
-    async def substitute(self, paths: StorePath, store: Store) -> bool: ...
-    @overload
-    async def substitute(self, paths: set[StorePath], store: Store) -> dict[StorePath, bool]: ...
+    async def substitute_path(self, path: StorePath, store: Store) -> bool:
+        """Download and import a single store path."""
+        result = await self.substitute_paths({path}, store)
+        return result.get(path, False)
 
-    async def substitute(
+    async def substitute_paths(
         self,
-        paths: StorePath | set[StorePath],
+        paths: set[StorePath],
         store: Store,
-    ) -> bool | dict[StorePath, bool]:
+    ) -> dict[StorePath, bool]:
         """Download and import paths via available substituters.
 
         Distributes paths across all registered substituters and runs
         them in parallel.  Each substituter handles its own download
         and ``AddToStoreNar`` import.
 
-        Accepts a single ``StorePath`` (returns ``True``/``False``)
-        or a ``set[StorePath]`` (returns a dict).
+        Returns ``{path: True/False}`` for the requested paths.
         """
-        single = isinstance(paths, StorePath)
-        path: StorePath | None = None
-        if single:
-            path = paths
-            paths = {paths}
-
         if not paths:
-            return False if single else {}
+            return {}
 
         results: dict[StorePath, bool] = {}
 
@@ -569,7 +628,38 @@ class SubstitutionManager:
         for p in paths:
             results.setdefault(p, False)
 
-        return results.get(path, False) if single else results  # type: ignore[union-attr]
+        return results
+
+    # ── query_realisations ──────────────────────────────────────────
+
+    async def query_realisations(
+        self,
+        drv_outputs: set[DrvOutput],
+    ) -> dict[DrvOutput, Realisation]:
+        """Query CA realisations from all substituters — first hit per DrvOutput wins."""
+        if not drv_outputs or not self._subs:
+            return {}
+
+        result: dict[DrvOutput, Realisation] = {}
+        lock = anyio.Lock()
+        remaining = set(drv_outputs)
+
+        async def _race(sub: Substituter) -> None:
+            nonlocal remaining
+            if not remaining:
+                return
+            infos = await sub.query_realisations(remaining.copy())
+            async with lock:
+                for d, r in infos.items():
+                    if d in remaining and d not in result:
+                        result[d] = r
+                        remaining.discard(d)
+
+        async with anyio.create_task_group() as tg:
+            for sub in self._subs:
+                tg.start_soon(_race, sub)
+
+        return result
 
 
 # ═════════════════════════════════════════════════════════════════════════════
