@@ -220,19 +220,13 @@ class DerivationBuildGoal(Goal):
 
         if resolved_output_paths:
             from ..derivation_resolution import (
-                _unparse_basic_derivation as unparse_basic_derivation,
                 resolve_derivation,
                 resolve_dynamic_derivation,
             )
-            from ..utils import nix32_encode
-            from .resolution import _nix_drv_name as _res_drv_name
 
             has_dynamic = bool(derivation.dynamic_input_drvs)
 
             if has_dynamic:
-                # Build dynamic_output_paths: {(drv, *chain): actual_path}
-                # Variable-length tuple keys encode the chain depth.
-                # E.g., (producer, "out") → path for producer!out
                 from ..derivation_resolution import DynamicPathMap
 
                 dynamic_output_paths: DynamicPathMap = {}
@@ -242,10 +236,7 @@ class DerivationBuildGoal(Goal):
                             if sub.result and sub.result.resolved_outputs:
                                 for oname, outer_path in sub.result.resolved_outputs.items():
                                     outer_drv_path = StorePath(sub.key.path)
-                                    # All paths from a DynamicBuildGoal's resolved_outputs
-                                    # are for the purpose of placeholder resolution.
                                     dynamic_output_paths[(outer_drv_path, oname)] = outer_path
-                                    # Walk produced_paths to find intermediate .drv files
                                     for sp in sub.result.produced_paths:
                                         if sp.is_derivation():
                                             inner_drv = await read_drv_file(
@@ -258,12 +249,6 @@ class DerivationBuildGoal(Goal):
                                                         inner_path = StorePath(inner_o.path)
                                                         dynamic_output_paths[(outer_drv_path, oname, inner_o.name)] = inner_path
 
-                log.debug(
-                    "resolve_dynamic_prep",
-                    dynamic_count=len(dynamic_output_paths),
-                    keys=["!".join(str(kk) for kk in k) for k in dynamic_output_paths],
-                )
-                # Also populate level-1 paths: the .drv produced by the outer build
                 for child in self.children:
                     if isinstance(child, ResolutionGoal):
                         for sub in child.children:
@@ -283,31 +268,41 @@ class DerivationBuildGoal(Goal):
                     drv_path,
                     resolved_output_paths,
                 )
-
-            # The daemon's ``BuildDerivation`` reads the .drv from the
-            # store filesystem via ``readDerivation``, NOT from our
-            # ``BasicDerivation``.  We must write a modified .drv with
-            # filled-in output paths so the daemon picks them up.
-            aterm = unparse_basic_derivation(basic, mask_outputs=False)
-            content_hash = hashlib.sha256(aterm.encode()).digest()
-            content_hash_b32 = nix32_encode(content_hash)
-            clean_name = _res_drv_name(drv_path)
-            new_drv_path_str = f"/nix/store/{content_hash_b32}-{clean_name}.drv"
-            # Write to the store's filesystem directly
-            fs_path = self.ctx.store.store_path / new_drv_path_str.lstrip("/")
-            fs_path.parent.mkdir(parents=True, exist_ok=True)
-            fs_path.write_text(aterm, encoding="utf-8")
-            drv_path = StorePath(new_drv_path_str)
-
-            log.debug(
-                "wrote_resolved_drv",
-                path=str(drv_path),
-                dynamic=has_dynamic,
-            )
         else:
             from ..drv_parser import to_basic_derivation as parse_to_basic
 
             basic = await parse_to_basic(derivation, self.ctx.store.store_path)
+
+        # Compute the path the resolved .drv WOULD have at, so that
+        # ``queryPartialDerivationOutputMap`` falls back to the
+        # in-memory ``drv->outputs`` (which has our resolved paths)
+        # instead of reading the unresolved .drv from the store.
+        # We don't write the file — ``isValidPath`` returns false for
+        # the computed path because it was never registered.
+        if resolved_output_paths:
+            from ..derivation_resolution import (
+                _unparse_basic_derivation as _unparse,
+            )
+            from ..utils import compress_hash, nix32_encode
+            from .resolution import _nix_drv_name as _res_drv_name
+
+            # The .drv store path is computed via Nix's ``TextInfo``
+            # algorithm — NOT ``sha256(aterm)`` directly.  See
+            # ``Derivation.compute_storepath()`` for the canonical
+            # implementation; we inline the key steps here since
+            # ``basic`` is a ``BasicDerivation`` (not ``Derivation``).
+            aterm = _unparse(basic, mask_outputs=False)
+            content_hash = hashlib.sha256(aterm.encode()).hexdigest()
+            clean_name = _res_drv_name(drv_path)
+            name = f"{clean_name}.drv"
+            type_str = "text"
+            hash_ref = f"sha256:{content_hash}"
+            s = f"{type_str}:{hash_ref}:{str(self.ctx.store.store_path)}:{name}"
+            digest = hashlib.sha256(s.encode()).digest()
+            compressed = compress_hash(digest, 20)
+            drv_path = StorePath(
+                f"/nix/store/{nix32_encode(compressed)}-{name}"
+            )
 
         # Merge the caller's input_srcs with the ones resolved by
         # ``resolve_derivation`` (which adds resolved input paths).
