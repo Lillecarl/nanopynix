@@ -11,7 +11,7 @@ Write functions are sync (writer.write() buffers; callers await drain()).
 from __future__ import annotations
 
 import struct
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Protocol
 
 import asyncssh
 from environs import env
@@ -89,14 +89,14 @@ class NixReader:
             await self.readexactly(pad)
         return data
 
-    async def read_string[T: str = str](self, tp: type[T] = str) -> T:
+    async def read_string[T = str](self, tp: Callable[[str], T] = str) -> T:
         return tp((await self.read_bytes()).decode("utf-8"))
 
-    async def read_string_list[T: str = str](self, tp: type[T] = str) -> list[T]:
+    async def read_string_list[T = str](self, tp: Callable[[str], T] = str) -> list[T]:
         count: int = await self.read_uint64()
         return [await self.read_string(tp) for _ in range(count)]
 
-    async def read_string_set[T: str = str](self, tp: type[T] = str) -> set[T]:
+    async def read_string_set[T = str](self, tp: Callable[[str], T] = str) -> set[T]:
         count: int = await self.read_uint64()
         return {await self.read_string(tp) for _ in range(count)}
 
@@ -154,6 +154,12 @@ class UnixNixReader(NixReader):
         return bool(self.reader._buffer)  # type: ignore[attr-defined]
 
 
+class StrCoercible(Protocol):
+    """Anything that can be converted to ``str`` via ``str()``."""
+
+    def __str__(self) -> str: ...
+
+
 class NixWriter:
     """Wraps AsyncWriter with wire protocol methods."""
 
@@ -203,16 +209,16 @@ class NixWriter:
         if pad:
             self.write(b"\0" * pad)
 
-    def write_string(self, s: str) -> None:
-        self.write_bytes(s.encode("utf-8"))
+    def write_string(self, s: StrCoercible) -> None:
+        self.write_bytes(str(s).encode("utf-8"))
 
-    def write_string_list(self, items: Iterable[str]) -> None:
+    def write_string_list(self, items: Iterable[StrCoercible]) -> None:
         items_list = list(items)
         self.write_uint64(len(items_list))
         for item in items_list:
             self.write_string(item)
 
-    def write_string_set(self, items: Iterable[str]) -> None:
+    def write_string_set(self, items: Iterable[StrCoercible]) -> None:
         self.write_string_list(items)
 
     def framed(self) -> FramedWriter:

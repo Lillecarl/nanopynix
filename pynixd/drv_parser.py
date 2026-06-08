@@ -25,7 +25,7 @@ ATerm .drv format (Dynamic DrvWithVersion):
 Output fields: (name, path, hash_algo, hash_value)
 
 Compatibility with DerivationOutput (operations/base.py):
-  OutputInfo:  name, path, hash_algo, hash_value  (parser - raw ATerm fields)
+  DrvOutput: hash_algo, hash_value, output_name, path  (parser - raw ATerm fields)
   DerivationOutput: name, path, method, hash_digest  (wire protocol)
   Mapping: name->name, path->path, hash_algo->method, hash_value->hash_digest
 """
@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict
 
 import anyio
 
-from .store_path import StorePath
+from .store_path import DrvOutput, StorePath
 from .types import BasicDerivation, DerivationOutput, OutputKind
 
 if TYPE_CHECKING:
@@ -84,20 +84,10 @@ def _aterm_escape(s: str) -> str:
 
 
 @dataclass
-class OutputInfo:
-    """A single derivation output from ATerm parsing."""
-
-    name: str
-    path: str
-    hash_algo: str
-    hash_value: str
-
-
-@dataclass
 class Derivation:
     """A parsed .drv file."""
 
-    outputs: list[OutputInfo] = field(default_factory=list)
+    outputs: list[DrvOutput] = field(default_factory=list)
 
     input_drvs: dict[StorePath, list[str]] = field(default_factory=dict)
 
@@ -373,10 +363,10 @@ class _Parser:
         self._expect("]")
         return result
 
-    def parse_outputs(self) -> list[OutputInfo]:
-        """Parse [("name","path","hashAlgo","hash"), ...] into OutputInfo list."""
+    def parse_outputs(self) -> list[DrvOutput]:
+        """Parse [("name","path","hashAlgo","hash"), ...] into DrvOutput list."""
         self._expect("[")
-        result: list[OutputInfo] = []
+        result: list[DrvOutput] = []
         self._skip_ws()
         while self._peek() != "]":
             if result:
@@ -392,11 +382,11 @@ class _Parser:
             hash_value = self.parse_string()
             self._expect(")")
             result.append(
-                OutputInfo(
-                    name=name,
-                    path=path,
+                DrvOutput(
                     hash_algo=hash_algo,
                     hash_value=hash_value,
+                    output_name=name,
+                    path=path,
                 ),
             )
             self._skip_ws()

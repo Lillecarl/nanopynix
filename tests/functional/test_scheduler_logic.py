@@ -5,7 +5,7 @@ import pytest
 from pynixd.config import PynixdSettings
 from pynixd.context import PynixdContext
 from pynixd.derived_path import DerivedPath
-from pynixd.drv_parser import Derivation, OutputInfo
+from pynixd.drv_parser import Derivation
 from pynixd.operations.base import (
     BasicDerivation,
     BuildMode,
@@ -30,7 +30,7 @@ from pynixd.operations.query_valid_paths import (
 )
 from pynixd.path_tracker import PathTracker
 from pynixd.scheduler import Scheduler
-from pynixd.store_path import StorePath
+from pynixd.store_path import DrvOutput, StorePath
 from pynixd.types.ids import StoreId
 from tests.functional.mock_store import MockStore
 
@@ -295,8 +295,8 @@ async def test_scheduler_decomposition_and_ordering(monkeypatch):
 
     leaf_drv = Derivation(
         outputs=[
-            OutputInfo(
-                name="out",
+            DrvOutput(
+                output_name="out",
                 path="/nix/store/leaf-out",
                 hash_algo="",
                 hash_value="",
@@ -308,8 +308,8 @@ async def test_scheduler_decomposition_and_ordering(monkeypatch):
     )
     root_drv = Derivation(
         outputs=[
-            OutputInfo(
-                name="out",
+            DrvOutput(
+                output_name="out",
                 path="/nix/store/root-out",
                 hash_algo="",
                 hash_value="",

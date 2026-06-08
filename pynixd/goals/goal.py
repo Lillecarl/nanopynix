@@ -20,7 +20,7 @@ from pynixd.types.build import BuildResult, BuildResultStatus
 
 from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file
-from ..store_path import StorePath
+from ..store_path import DrvOutput, StorePath
 
 log = structlog.get_logger()
 
@@ -249,7 +249,40 @@ class Goal:
                 input_srcs.update(result.produced_paths)
             input_srcs.update(output.out_path for output in result.result.built_outputs.values())
 
-        # ── 3. Build via daemon ──
+        # ── 3. Try substitution by DrvOutput ──
+        # For CA derivations with known content hashes (fixed-output, text-hashed)
+        # we can query substituters for the output path before building.
+        # Floating CA (hash_algo starts with "r:") has no known hash.
+        drv_outputs: set[DrvOutput] = set()
+        for out in derivation.outputs:
+            if out.hash_algo and not out.hash_algo.startswith("r:") and out.hash_value:
+                drv_outputs.add(DrvOutput(hash_algo=out.hash_algo, hash_value=out.hash_value, output_name=out.name))
+
+        if drv_outputs:
+            realisations = await self.ctx.substitution_manager.query_realisations(drv_outputs)
+            if realisations:
+                for realisation in realisations.values():
+                    await self.ctx.store.execute(RegisterDrvOutputRequest(realisation=realisation))
+
+                produced_paths: set[StorePath] = set()
+                for realisation in realisations.values():
+                    if out_path := realisation.out_path:
+                        produced_paths.add(out_path.with_store_prefix())
+
+                if produced_paths:
+                    log.info(
+                        "substituted_ca",
+                        derivation=self.derived_path.drv_path,
+                        produced_paths=produced_paths,
+                    )
+                    self.result = GoalResult(
+                        path=self.derived_path,
+                        result=BuildResult(status=BuildResultStatus.SUBSTITUTED),
+                        produced_paths=produced_paths,
+                    )
+                    return
+
+        # ── 4. Build via daemon ──
         # The daemon handles CA-specific logic: it creates the sandbox,
         # runs the builder, hashes the output, computes the final store
         # path, and returns a Realisation with the actual outPath.
@@ -281,7 +314,7 @@ class Goal:
             )
         )
 
-        # ── 4. Register realisations ──
+        # ── 5. Register realisations ──
         # Critical for downstream derivations: they look up this output
         # by its DrvOutput (:DrvOutput) key, which contains the content
         # hash.  Without registration, dependents can't find the path.
@@ -293,7 +326,7 @@ class Goal:
             )
             await self.ctx.store.execute(RegisterDrvOutputRequest(realisation=realisation))
 
-        # ── 5. Extract produced paths from realisations ──
+        # ── 6. Extract produced paths from realisations ──
         # These are the actual store paths the build created.
         # They will be propagated upward so the grandparent's input_srcs
         # includes them.

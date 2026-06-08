@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import pytest
 
-from pynixd.drv_parser import Derivation, OutputInfo, parse_drv, to_basic_derivation
-from pynixd.store_path import StorePath
+from pynixd.drv_parser import Derivation, parse_drv, to_basic_derivation
+from pynixd.store_path import DrvOutput, StorePath
 from pynixd.types.derivation import OutputKind
 
 if TYPE_CHECKING:
@@ -309,7 +309,7 @@ class TestDerivationProperties:
     def test_output_paths(self):
         parsed = Derivation(
             outputs=[
-                OutputInfo(name="out", path="/nix/store/abc-foo", hash_algo="", hash_value=""),
+                DrvOutput(output_name="out", path="/nix/store/abc-foo", hash_algo="", hash_value=""),
             ],
         )
         assert parsed.output_paths() == {"out": StorePath("/nix/store/abc-foo")}
@@ -317,9 +317,9 @@ class TestDerivationProperties:
     def test_output_kinds_mixed(self):
         parsed = Derivation(
             outputs=[
-                OutputInfo(name="ia", path="/nix/store/a", hash_algo="", hash_value=""),
-                OutputInfo(name="ca", path="", hash_algo="sha256", hash_value="xyz"),
-                OutputInfo(name="flt", path="", hash_algo="sha256", hash_value=""),
+                DrvOutput(output_name="ia", path="/nix/store/a", hash_algo="", hash_value=""),
+                DrvOutput(output_name="ca", path="", hash_algo="sha256", hash_value="xyz"),
+                DrvOutput(output_name="flt", path="", hash_algo="sha256", hash_value=""),
             ],
         )
         assert parsed.output_kinds() == [
@@ -384,13 +384,14 @@ class TestToBasicDerivation:
             assert StorePath(drv_path) in result.input_srcs
 
 
-class TestOutputInfo:
+class TestDrvOutputFields:
     def test_fields(self):
-        oi = OutputInfo(name="out", path="/nix/store/a", hash_algo="sha256", hash_value="xyz")
-        assert oi.name == "out"
-        assert oi.path == "/nix/store/a"
-        assert oi.hash_algo == "sha256"
-        assert oi.hash_value == "xyz"
+        o = DrvOutput(hash_algo="sha256", hash_value="xyz", output_name="out", path="/nix/store/a")
+        assert o.hash_algo == "sha256"
+        assert o.hash_value == "xyz"
+        assert o.output_name == "out"
+        assert o.path == "/nix/store/a"
+        assert o.name == "out"
 
 
 class TestToJson:
@@ -445,7 +446,7 @@ class TestSerialize:
 
     def test_escaping(self):
         parsed = Derivation(
-            outputs=[OutputInfo(name="out", path="", hash_algo="", hash_value="")],
+            outputs=[DrvOutput(output_name="out", path="", hash_algo="", hash_value="")],
             input_drvs={},
             input_srcs=set(),
             platform="x86_64-linux",

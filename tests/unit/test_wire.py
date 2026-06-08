@@ -89,6 +89,7 @@ from pynixd.operations.verify_store import VerifyStoreRequest, VerifyStoreRespon
 from pynixd.stderr import StderrNext, StderrStartActivity
 from pynixd.store_path import DrvOutput, StorePath
 from pynixd.types import KeyedBuildResult
+from pynixd.types.ca import Realisation
 from pynixd.types.path_info import SubstitutablePathInfo
 
 if TYPE_CHECKING:
@@ -1114,7 +1115,7 @@ class TestQueryRealisationSerialization:
     async def test_response(self):
 
         resp = QueryRealisationResponse(
-            realisations=[{"id": "test"}],
+            realisations=[Realisation(id="sha256:abc!test", outPath="/nix/store/test")],
         )
         result = await _serialize_deserialize_response(QueryRealisationResponse, resp)
         assert result.realisations == resp.realisations
@@ -1124,7 +1125,7 @@ class TestRegisterDrvOutputSerialization:
     async def test_request(self):
 
         req = RegisterDrvOutputRequest(
-            realisation={"id": "test", "outPath": "/nix/store/test"},
+            realisation=Realisation(id="sha256:abc!test", outPath="/nix/store/test"),
         )
         result = await _serialize_deserialize_request(RegisterDrvOutputRequest, req)
         assert result.realisation == req.realisation
