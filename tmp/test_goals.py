@@ -30,9 +30,36 @@ from anyio import TemporaryDirectory
 _LEVEL = logging.WARNING if "--trace" not in sys.argv else logging.NOTSET
 
 
+# Event names to suppress (noisy pynixd internals).
+_SILENCED_EVENTS = frozenset({
+    # Store/daemon connection management (not goal-related)
+    "spawning_managed_daemon",
+    "daemon_stderr",
+    "daemon_protocol_negotiated",
+    "daemon_nix_version",
+    "daemon_socket_ready",
+    "resource_poller_started",
+    "terminating_daemon_process_group",
+    "pool_reusing_conn",
+    "store_paths_synced",
+    "pool_created_connection",
+    "daemon_features",
+    "connecting_daemon_socket",
+})
+
+
+def _drop_silenced(logger, method_name, event_dict):
+    """Drop log events whose event name is in the silenced set."""
+    event = event_dict.get("event", "")
+    if event in _SILENCED_EVENTS:
+        raise structlog.DropEvent
+    return event_dict
+
+
 def _setup_logging(level: int = _LEVEL) -> None:
     structlog.configure(
         processors=[
+            _drop_silenced,
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
             structlog.processors.StackInfoRenderer(),
@@ -173,6 +200,7 @@ async def test_simple_build() -> None:
 
         log.info("test_simple_build", msg="PASSED")
         await store.close()
+        await ctx.substitution_manager.close()
 
 
 async def test_resolution() -> None:
@@ -201,6 +229,7 @@ async def test_resolution() -> None:
 
         log.info("test_resolution", msg="PASSED")
         await store.close()
+        await ctx.substitution_manager.close()
 
 
 async def test_deferred_resolution() -> None:
@@ -225,6 +254,7 @@ async def test_deferred_resolution() -> None:
 
         log.info("test_deferred_resolution", msg="PASSED")
         await store.close()
+        await ctx.substitution_manager.close()
 
 
 async def test_opaque_path() -> None:
@@ -256,6 +286,7 @@ async def test_opaque_path() -> None:
 
         log.info("test_opaque_path", msg="PASSED")
         await store.close()
+        await ctx.substitution_manager.close()
 
 
 # ── main ───────────────────────────────────────────────────────────
