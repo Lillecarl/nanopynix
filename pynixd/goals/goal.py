@@ -4,13 +4,19 @@ A Goal represents a single build target within the pynixd build
 orchestration system.  Goals are tracked and scheduled by the
 GoalManager.
 
-Goal handles DAG orchestration only (parents, children, dedup, result
-tracking).  Execution logic is delegated to a :class:`GoalHandler`
-subclass selected at construction time.
+Two core goal kinds:
+
+* **BuildGoal** — ensure a DerivedPath exists (check, substitute, build).
+* **ResolutionGoal** — compute the output path of a single derivation
+  output via the unparsing math (ATerm → hash → path).
+
+Each goal is identified by a ``GoalKey`` in the ``GoalManager`` for
+deduplication across concurrent requests.
 """
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from asyncio import Event, TaskGroup
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -23,19 +29,67 @@ from ..store_path import StorePath  # noqa: TC001 — used in dataclass fields
 if TYPE_CHECKING:
     from ..store.base import Store
     from ..substitution import SubstitutionManager
-    from .handler import GoalHandler
     from .manager import GoalManager
 
 
-class EndGoal:
-    """Controls whether a Goal tree executes or just queries."""
+# ── Goal key for dedup ────────────────────────────────────────────
 
+
+@dataclass(frozen=True)
+class GoalKey:
+    """Unique identifier for a Goal in the GoalManager.
+
+    Three tag families:
+    * ``"build"`` — a BuildGoal ensuring a DerivedPath exists.
+    * ``"resolve"`` — a ResolutionGoal computing one output of a
+      derivation via hashDerivationModulo.
+    * ``"substitute"`` — a SubstitutionGoal fetching a store path
+      from a binary cache.
+    """
+
+    tag: str      # "build" | "resolve" | "substitute"
+    path: str     # normalized store path string
+    output: str   # output name ("" for opaque/substitute paths)
+
+    @classmethod
+    def build(cls, dp: DerivedPath) -> GoalKey:
+        """Key for a BuildGoal that ensures *dp* exists."""
+        return cls(tag="build", path=str(dp.base_store_path()), output=_dp_output(dp))
+
+    @classmethod
+    def resolve(cls, drv_path: StorePath, output_name: str) -> GoalKey:
+        """Key for a ResolutionGoal that computes one output path."""
+        return cls(tag="resolve", path=str(drv_path), output=output_name)
+
+    @classmethod
+    def substitute(cls, path: StorePath) -> GoalKey:
+        """Key for a SubstitutionGoal that fetches a store path."""
+        return cls(tag="substitute", path=str(path), output="")
+
+
+def _dp_output(dp: DerivedPath) -> str:
+    """Extract the canonical output name from a DerivedPath."""
+    if dp.is_opaque:
+        return ""
+    names = dp.output_names
+    if len(names) == 1:
+        return next(iter(names))
+    return "*"
+
+
+# ── End goal mode ────────────────────────────────────────────────
+
+
+class EndGoal:
     BUILD = "build"
     QUERY = "query"
 
 
+# ── Shared context ────────────────────────────────────────────────
+
+
 class GoalContext:
-    """Shared context passed through the build DAG."""
+    """Shared context passed through the goal DAG."""
 
     def __init__(
         self,
@@ -50,92 +104,128 @@ class GoalContext:
         self.end_goal = end_goal
 
 
+# ── Goal result ────────────────────────────────────────────────────
+
+
 @dataclass
 class GoalResult(KeyedBuildResult):
-    """Extended build result with DAG propagation metadata.
+    """Extended build result with DAG propagation and resolution metadata.
 
     Adds ``produced_paths`` — the set of store paths that this goal
     made available (substituted, already valid, or built).  This lets
     parents collect dependency paths without faking ``built_outputs``
     entries that are semantically about content-addressed builds.
+
+    Adds ``resolved_outputs`` — output name → resolved store path,
+    set by resolution goals and consumed by parent build goals for
+    placeholder rewriting.
+
+    Adds ``modulo_hash`` — hex SHA256 of the hashDerivationModulo
+    for this derivation.  Needed by parent resolution goals to
+    compute their own hashDerivationModulo.
     """
 
     produced_paths: set[StorePath] = field(default_factory=set)
+    resolved_outputs: dict[str, StorePath] = field(default_factory=dict)
+    modulo_hash: str = ""
 
 
-class Goal:
+# ── Abstract Goal base ─────────────────────────────────────────────
+
+
+class Goal(ABC):
     """A single build target tracked by the GoalManager.
 
-    Each Goal wraps a ``DerivedPath`` and maintains its own dependency
-    edges via ``parents`` and ``children`` sets, forming the DAG that
-    the GoalManager schedules.
+    Each goal is uniquely identified by :attr:`key` in the manager's
+    dedup index.  Subclasses implement :meth:`execute` with their
+    specific logic and set :attr:`result` when done.
+
+    DAG helpers (``add_child``, ``execute_children``, ``collect_results``)
+    are shared by all subclasses.
     """
 
-    def __init__(
-        self,
-        derived_path: DerivedPath,
-        ctx: GoalContext,
-        handler: GoalHandler | None = None,
-    ) -> None:
-        self.derived_path = derived_path
+    def __init__(self, ctx: GoalContext) -> None:
         self.ctx = ctx
         self.parents: set[Goal] = set()
         self.children: set[Goal] = set()
         self.is_executing: bool = False
         self.finished_executing = Event()
         self.result: GoalResult | None = None
-        self._handler = handler or _resolve_handler(derived_path)
+
+    # ── subclasses must define ────────────────────────────────────
+
+    @property
+    @abstractmethod
+    def key(self) -> GoalKey:
+        """Key for dedup in the GoalManager."""
+
+    @abstractmethod
+    async def execute(self) -> None:
+        """Execute this goal and set ``self.result``."""
+
+    # ── DAG helpers ───────────────────────────────────────────────
 
     def add_parent(self, goal: Goal) -> None:
         self.parents.add(goal)
 
-    def add_child(self, derived_path: DerivedPath) -> Goal:
-        if goal := self.ctx.goal_manager.goals.get(derived_path):
-            goal.add_parent(self)
-            self.children.add(goal)
-            return goal
+    def add_child(self, child: Goal) -> None:
+        """Register *child* as a dependency — it will execute before us."""
+        child.add_parent(self)
+        self.children.add(child)
 
-        goal = Goal(derived_path=derived_path, ctx=self.ctx)
-        goal.add_parent(self)
-        self.children.add(goal)
-        self.ctx.goal_manager.goals[derived_path] = goal
-        return goal
+    async def execute_children(self) -> None:
+        """Execute all children in parallel."""
+        async with TaskGroup() as tg:
+            for child in self.children:
+                tg.create_task(child.execute())
 
-    def collect_results(self) -> list[KeyedBuildResult | None]:
-        results: list[KeyedBuildResult | None] = []
-        results.append(self.result)
+    def collect_results(self) -> list[GoalResult | None]:
+        """Depth-first collection of all results in the subtree."""
+        results: list[GoalResult | None] = [self.result]
         for child in self.children:
             results.extend(child.collect_results())
         return results
 
-    async def execute_children(self) -> None:
-        async with TaskGroup() as tg:
-            for child_goal in self.children:
-                tg.create_task(child_goal.execute())
+    # ── Execution lifecycle ───────────────────────────────────────
 
-    async def execute(self) -> None:
+    async def run(self) -> None:
+        """Run this goal (with dedup: if already executing, wait)."""
         if self.is_executing:
             await self.finished_executing.wait()
             return
         self.is_executing = True
+        try:
+            await self.execute()
+        finally:
+            self.finished_executing.set()
 
-        await self._handler.execute(self)
 
-        self.finished_executing.set()
+# ── Factory helpers ────────────────────────────────────────────────
 
 
-def _resolve_handler(dp: DerivedPath) -> GoalHandler:
-    """Pick the right handler based on the derived path type."""
+def make_build_goal(dp: DerivedPath, ctx: GoalContext) -> Goal:
+    """Create the right BuildGoal subclass for a DerivedPath."""
     if dp.is_opaque:
-        from .opaque import OpaqueHandler
+        from .opaque import OpaqueBuildGoal
 
-        return OpaqueHandler()
+        return OpaqueBuildGoal(derived_path=dp, ctx=ctx)
 
     if dp.is_nested:
-        from .dynamic import DynamicDerivationHandler
+        from .dynamic import DynamicBuildGoal
 
-        return DynamicDerivationHandler()
+        return DynamicBuildGoal(derived_path=dp, ctx=ctx)
 
-    from .derivation import DerivationHandler
+    from .derivation import DerivationBuildGoal
 
-    return DerivationHandler()
+    return DerivationBuildGoal(derived_path=dp, ctx=ctx)
+
+
+def make_resolution_goal(
+    drv_path: StorePath,
+    output_name: str,
+    ctx: GoalContext,
+) -> Goal:
+    """Create a ResolutionGoal for one output of a derivation."""
+    from .resolution import ResolutionGoal
+
+    return ResolutionGoal(drv_path=drv_path, output_name=output_name, ctx=ctx)

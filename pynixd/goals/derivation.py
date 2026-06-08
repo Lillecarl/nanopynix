@@ -1,305 +1,219 @@
-"""Handler for regular (non-CA) derivations where output paths are known.
+"""BuildGoal for regular (non-opaque) derivation outputs.
 
-Reads the derivation from the store, checks if the output already
-exists, tries substitution, resolves input children, then builds.
+A ``DerivationBuildGoal`` takes a ``DerivedPath`` like ``a.drv!out``
+and ensures the output path exists.  It does this by:
+
+1. Creating a ``ResolutionGoal`` child that resolves the output path
+   (via hashDerivationModulo for deferred, or reading the .drv for
+   known outputs, or querying realisations for CA-floating).
+2. Checking validity of the resolved path.
+3. Trying substitution if not valid.
+4. Building via ``BuildDerivationRequest`` if all else fails.
+
+For CA-floating outputs that couldn't be resolved, the build step
+produces the realisations, which are then registered.
 """
 
 from __future__ import annotations
 
-import hashlib
-from typing import TYPE_CHECKING
-
 import structlog
 
-from pynixd.derivation_resolution import (
-    _make_store_path,
-    _nix_drv_name,
-    _output_path_name,
-    _rewrite_strings,
-    _unparse_derivation_for_hash,
-    downstream_placeholder,
-    downstream_placeholder_unknown_derivation,
+from ..derived_path import DerivedPath  # noqa: TC001 — used in function bodies
+from ..drv_parser import (
+    Derivation,
+    read_drv_file,
 )
-from pynixd.operations.build_derivation import BuildDerivationRequest
-from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
-from pynixd.operations.is_valid_path import IsValidPathRequest
-from pynixd.types import BasicDerivation, BuildMode, DerivationOutput, KeyedBuildResult
-from pynixd.types.build import BuildResult, BuildResultStatus
-
-from ..derived_path import DerivedPath, OutputsNames
-from ..drv_parser import read_drv_file
+from ..operations.build_derivation import BuildDerivationRequest
+from ..operations.ca_derivations import RegisterDrvOutputRequest
+from ..operations.is_valid_path import IsValidPathRequest
 from ..store_path import StorePath
-from .ca_derivation import CADerivationHandler
-from .goal import EndGoal, GoalResult
-from .handler import GoalHandler
-
-if TYPE_CHECKING:
-    from .goal import Goal
+from ..types import BasicDerivation, BuildMode, DerivationOutput
+from ..types.build import BuildResult, BuildResultStatus
+from .goal import EndGoal, Goal, GoalContext, GoalKey, GoalResult, make_resolution_goal
 
 log = structlog.get_logger(__name__)
 
 
-class DerivationHandler(GoalHandler):
-    """Build a regular derivation whose output paths are known upfront."""
+class DerivationBuildGoal(Goal):
+    """Ensure a single derivation output exists — resolve, substitute, or build.
 
-    async def execute(self, goal: Goal) -> None:
-        assert not goal.derived_path.is_opaque
+    One goal per ``(drv_path, output_name)`` pair.  The ``execute``
+    method:
 
-        derivation = await read_drv_file(
-            goal.ctx.store.store_path,
-            goal.derived_path.base_store_path(),
+    1. Creates a ``ResolutionGoal`` child for this output.
+    2. After resolution, checks if the resolved path is valid.
+    3. If valid → done (``ALREADY_VALID``).
+    4. If not valid → tries substitution.
+    5. If substitution fails → builds via ``BuildDerivationRequest``.
+    """
+
+    def __init__(self, derived_path: DerivedPath, ctx: GoalContext) -> None:
+        super().__init__(ctx)
+        self._derived_path = derived_path
+
+    @property
+    def key(self) -> GoalKey:
+        return GoalKey.build(self._derived_path)
+
+    async def execute(self) -> None:
+        dp = self._derived_path
+        drv_path = dp.base_store_path()
+        output_name = _single_output(dp)
+
+        log.info(
+            "execute_build",
+            derived_path=dp.derived,
+            output=output_name,
         )
-        if derivation is None:
-            log.warning(
-                "derivation_not_found",
-                drv_path=goal.derived_path.drv_path,
+
+        # ── 1. Create ResolutionGoal child ────────────────────────
+        resolve_goal = make_resolution_goal(drv_path, output_name, self.ctx)
+        registered = self.ctx.goal_manager.register(resolve_goal)
+        self.add_child(registered)
+
+        # ── 2. Execute children (resolves input deps + this output) ─
+        await self.execute_children()
+
+        if registered.result is None or not registered.result.resolved_outputs:
+            # Resolution failed (e.g. CA-floating with no known realisation).
+            # We must build directly — read the .drv and send BuildDerivation.
+            log.info(
+                "build_resolution_failed_building",
+                derived_path=dp.derived,
             )
-            goal.result = GoalResult(
-                path=goal.derived_path,
+            await self._build_fallback(dp)
+            return
+
+        resolved_output = registered.result.resolved_outputs.get(output_name)
+        if resolved_output is None:
+            log.warning(
+                "build_resolution_missing_output",
+                derived_path=dp.derived,
+                output=output_name,
+            )
+            await self._build_fallback(dp)
+            return
+
+        # ── 3. Check validity ─────────────────────────────────────
+        drv_path = dp.base_store_path()
+        if (await self.ctx.store.execute(IsValidPathRequest(path=resolved_output))).valid:
+            log.info("build_already_valid", path=resolved_output)
+            self.result = GoalResult(
+                path=dp,
+                result=BuildResult(status=BuildResultStatus.ALREADY_VALID),
+                produced_paths={resolved_output},
+            )
+            return
+
+        # ── 4. Try substitution ───────────────────────────────────
+        sub_info = await self.ctx.substitution_manager.query_path(resolved_output)
+        if sub_info:
+            if self.ctx.end_goal is EndGoal.QUERY:
+                self.result = GoalResult(
+                    path=dp,
+                    result=BuildResult(status=BuildResultStatus.SUBSTITUTED),
+                )
+                return
+            log.info("build_substituting", path=resolved_output)
+            await self.ctx.substitution_manager.substitute_paths(
+                {resolved_output},
+                self.ctx.store,
+            )
+            self.result = GoalResult(
+                path=dp,
+                result=BuildResult(status=BuildResultStatus.SUBSTITUTED),
+                produced_paths={resolved_output},
+            )
+            return
+
+        # ── 5. Build ──────────────────────────────────────────────
+        if self.ctx.end_goal is EndGoal.QUERY:
+            self.result = GoalResult(
+                path=dp,
+                result=BuildResult(status=BuildResultStatus.UNKNOWN),
+            )
+            return
+
+        log.info("build_executing", derived_path=dp.derived)
+        await self._do_build(dp)
+
+    # ── Build fallback (when resolution didn't produce a path) ─────
+
+    async def _build_fallback(self, dp: DerivedPath) -> None:
+        """Build a derivation whose output path wasn't resolved.
+
+        This happens for CA-floating outputs where no prior realisation
+        exists.  We read the .drv and send the build to the daemon,
+        which produces the realisations.
+        """
+        drv_path = dp.base_store_path()
+        derivation = await read_drv_file(self.ctx.store.store_path, drv_path)
+        if derivation is None:
+            self.result = GoalResult(
+                path=dp,
                 result=BuildResult(
-                    status=BuildResultStatus.UNKNOWN
-                    if goal.ctx.end_goal is EndGoal.QUERY
-                    else BuildResultStatus.MISC_FAILURE
+                    status=BuildResultStatus.MISC_FAILURE,
+                    error_msg=f"Derivation not found: {drv_path}",
                 ),
             )
             return
 
-        # Build a lookup: DerivedPath → DerivationOutput
-        derived_outputs: dict[DerivedPath, DerivationOutput] = {}
-        for out in derivation.outputs:
-            dp = DerivedPath(f"{goal.derived_path.base_store_path()}!{out.name}")
-            derived_outputs[dp] = DerivationOutput(
-                path=out.path,
-                method=out.hash_algo,
-                hash_digest=out.hash_value,
-            )
-
-        output = derived_outputs.get(goal.derived_path)
-
-        # Delegate to CA handler only for genuinely content-addressed outputs
-        if output is not None and output.is_ca:
-            await CADerivationHandler(derivation).execute(goal)
-            return
-
-        # ── Resolve input derivation children ──
-        for path, outputs in derivation.input_drvs.items():
-            for out_name in outputs:
-                goal.add_child(DerivedPath(f"{path}!{out_name}"))
-
-        for path, outputs in derivation.dynamic_input_drvs.items():
-            for out_name in outputs:
-                goal.add_child(DerivedPath(f"{path}!{out_name}"))
-
-        await goal.execute_children()
-
-        # ── Collect resolved input paths from children ──
+        # Collect input sources from children
         input_srcs: set[StorePath] = set(derivation.input_srcs)
-        for result in goal.collect_results():
-            if isinstance(result, GoalResult):
-                input_srcs.update(result.produced_paths)
-
-        # input_srcs are plain store paths (may include .drv files).
-        # They only need to exist — they're not build targets.
-        for src in derivation.input_srcs:
-            if src not in input_srcs:
-                valid = (await goal.ctx.store.execute(IsValidPathRequest(path=src))).valid
-                if valid:
-                    input_srcs.add(src)
-
-        # ── Build placeholder → actual_path rewrite map from children ──
-        resolved_output_paths: dict[str, StorePath] = {}
-        for result in goal.collect_results():
-            if not isinstance(result, KeyedBuildResult):
-                continue
-            for drv_out, realisation in result.result.built_outputs.items():
-                if drv_out.output_name and drv_out.output_name not in resolved_output_paths:
-                    resolved_output_paths[drv_out.output_name] = realisation.out_path
-
-        drv_path = goal.derived_path.base_store_path()
-
-        # ── Handle dynamic_input_drvs: build inner .drv files ──
-        if derivation.dynamic_input_drvs:
-            for output_map in derivation.dynamic_input_drvs.values():
-                for outer_out_name, inner_out_names in output_map.items():
-                    drv_file_path = resolved_output_paths.get(outer_out_name)
-                    if drv_file_path and drv_file_path.is_derivation():
-                        for inner_out_name in inner_out_names:
-                            inner_dp = DerivedPath(f"{drv_file_path}!{inner_out_name}")
-                            goal.add_child(inner_dp)
-
-            await goal.execute_children()
-
-            for result in goal.collect_results():
-                if not isinstance(result, KeyedBuildResult):
-                    continue
-                for drv_out, realisation in result.result.built_outputs.items():
-                    if drv_out.output_name and drv_out.output_name not in resolved_output_paths:
-                        resolved_output_paths[drv_out.output_name] = realisation.out_path
-
-        rewrites: dict[str, str] = {}
-        new_input_srcs: set[StorePath] = set(derivation.input_srcs) | input_srcs
-
-        for input_drv_path, output_names in derivation.input_drvs.items():
-            for output_name in output_names:
-                placeholder = downstream_placeholder(input_drv_path, output_name)
-                actual_path = resolved_output_paths.get(output_name)
-                if actual_path is not None:
-                    rewrites[placeholder] = str(actual_path)
-                    new_input_srcs.add(StorePath(str(actual_path)))
-
-        for dpath, output_map in derivation.dynamic_input_drvs.items():
-            for outer_out_name, inner_out_names in output_map.items():
-                drv_file_path = resolved_output_paths.get(outer_out_name)
-                if drv_file_path and drv_file_path.is_derivation():
-                    # The env placeholder uses
-                    # DownstreamPlaceholder::unknownDerivation:
-                    # outer hash = raw hash of the PARENT placeholder
-                    # (computed from the original drv path, not resolved)
-                    hash_part = str(dpath).rsplit("/", 1)[-1].split("-", 1)[0]
-                    parent_drv_name = _nix_drv_name(dpath)
-                    outer_clear = (
-                        f"nix-upstream-output:{hash_part}:{_output_path_name(parent_drv_name, outer_out_name)}"
-                    )
-                    outer_hash = hashlib.sha256(outer_clear.encode()).digest()
-                    for inner_out_name in inner_out_names:
-                        placeholder = downstream_placeholder_unknown_derivation(outer_hash, inner_out_name)
-                        actual_path = resolved_output_paths.get(inner_out_name)
-                        if actual_path is not None:
-                            rewrites[placeholder] = str(actual_path)
-                            new_input_srcs.add(StorePath(str(actual_path)))
-
-        # ── Resolved env/args ──
-        resolved_builder = _rewrite_strings(derivation.builder, rewrites)
-        resolved_args = [_rewrite_strings(a, rewrites) for a in derivation.args]
-        resolved_env = {k: _rewrite_strings(v, rewrites) for k, v in derivation.env.items()}
-
-        # ── Deferred derivation: resolve placeholders, compute output path ──
-        # 1. Clear input_drvs (daemon replaces them with modulo hashes anyway)
-        # 2. Rewrite placeholders in env/args with children's real paths
-        # 3. Derivation.serialize() → ATerm matching daemon's hash input
-        # 4. Hash ATerm → compute output paths via _make_store_path
-        if output is None or not output.path:
-            if goal.ctx.end_goal is EndGoal.QUERY:
-                goal.result = GoalResult(
-                    path=goal.derived_path,
-                    result=BuildResult(status=BuildResultStatus.UNKNOWN),
-                )
-                return
-
-            # ── Build the resolved env/args for the actual build ──
-            resolved_builder = _rewrite_strings(derivation.builder, rewrites) if rewrites else derivation.builder
-            resolved_args = [_rewrite_strings(a, rewrites) for a in derivation.args] if rewrites else derivation.args
-            resolved_env = (
-                {k: _rewrite_strings(v, rewrites) for k, v in derivation.env.items()} if rewrites else derivation.env
-            )
-
-            # ── Compute modulo hash for each input drv ──
-            # Nix's hashDerivationModulo replaces each input_drv entry with
-            # the hex hash of the input derivation's own modulo hash.
-            # We read each child's .drv and compute its ATerm hash (with
-            # empty input_drvs, since Nix recurses the same process).
-            input_drv_hashes: dict[str, list[str]] = {}
-            for child in goal.children:
-                if not child.result or child.result.result.status not in (0, 1, 2):
-                    continue
-                child_drv = await read_drv_file(
-                    goal.ctx.store.store_path,
-                    child.derived_path.base_store_path(),
-                )
-                if child_drv is None:
-                    continue
-                child_aterm = _unparse_derivation_for_hash(child_drv, {})
-                child_hash = hashlib.sha256(child_aterm.encode()).hexdigest()
-                if isinstance(child.derived_path.outputs, OutputsNames):
-                    for name in child.derived_path.outputs.names:
-                        input_drv_hashes.setdefault(child_hash, []).append(name)
-
-            log.info(
-                "building_deferred",
-                drv_path=str(drv_path),
-                input_count=len(input_drv_hashes),
-            )
-            # ── Serialize with hash-replaced input_drvs and hash ──
-            aterm = _unparse_derivation_for_hash(derivation, input_drv_hashes)
-            h = hashlib.sha256(aterm.encode()).digest()
-            log.info(
-                "deferred_aterm",
-                aterm_preview=aterm[:400],
-                hash_hex=h.hex(),
-                input_hashes=input_drv_hashes,
-            )
-
-            resolved_outputs: dict[str, DerivationOutput] = {}
-            for o in derivation.outputs:
-                store_name = _output_path_name(_nix_drv_name(drv_path), o.name)
-                out_path = _make_store_path(f"output:{o.name}", h, store_name)
-                resolved_outputs[o.name] = DerivationOutput(
-                    path=out_path,
-                    method=o.hash_algo,
-                    hash_digest=o.hash_value,
-                )
-                resolved_env[o.name] = out_path
-
-            response = await goal.ctx.store.execute(
-                BuildDerivationRequest(
-                    drv_path=drv_path,
-                    derivation=BasicDerivation(
-                        outputs=resolved_outputs,
-                        input_srcs=new_input_srcs,
-                        platform=derivation.platform,
-                        builder=resolved_builder,
-                        args=resolved_args,
-                        env=resolved_env,
-                        is_dynamic=derivation.is_dynamic,
-                    ),
-                    build_mode=BuildMode.NORMAL,
-                )
-            )
-            goal.result = GoalResult(
-                path=goal.derived_path,
-                result=response.result,
-                produced_paths={StorePath(o.path) for o in resolved_outputs.values() if o.path}
-                | {r.out_path for r in response.result.built_outputs.values() if r.out_path},
-            )
-            for realisation in goal.result.result.built_outputs.values():
-                await goal.ctx.store.execute(RegisterDrvOutputRequest(realisation=realisation))
-            return
-
-        # ── Known output path: check validity / substitute / build ──
-        if (await goal.ctx.store.execute(IsValidPathRequest(path=StorePath(output.path)))).valid:
-            goal.result = GoalResult(
-                path=goal.derived_path,
-                result=BuildResult(status=BuildResultStatus.ALREADY_VALID),
-                produced_paths={StorePath(output.path)},
-            )
-            return
-
-        # ── Try substitution ──
-        log.info("checking_substituters", path=output.path)
-        if await goal.ctx.substitution_manager.query_path(StorePath(output.path)):
-            child = goal.add_child(DerivedPath(output.path))
-            await goal.execute_children()
+        for child in self.children:
             if child.result:
-                goal.result = child.result
-                goal.result.path = goal.derived_path
-            return
+                input_srcs.update(child.result.produced_paths)
 
-        # ── Build ──
-        if goal.ctx.end_goal is EndGoal.QUERY:
-            goal.result = GoalResult(
-                path=goal.derived_path,
-                result=BuildResult(status=BuildResultStatus.MISC_FAILURE),
+        await self._do_build_with_derivation(dp, derivation, input_srcs)
+
+    # ── Core build logic ───────────────────────────────────────────
+
+    async def _do_build(self, dp: DerivedPath) -> None:
+        """Build this derivation with pre-resolved outputs."""
+        drv_path = dp.base_store_path()
+        derivation = await read_drv_file(self.ctx.store.store_path, drv_path)
+        if derivation is None:
+            self.result = GoalResult(
+                path=dp,
+                result=BuildResult(
+                    status=BuildResultStatus.MISC_FAILURE,
+                    error_msg=f"Derivation not found: {drv_path}",
+                ),
             )
             return
 
-        log.info(
-            "building_known",
-            derivation=goal.derived_path.drv_path,
-            output_path=output.path,
-        )
-        response = await goal.ctx.store.execute(
+        # Collect all resolved paths from children
+        input_srcs: set[StorePath] = set(derivation.input_srcs)
+        for child in self.children:
+            if child.result:
+                input_srcs.update(child.result.produced_paths)
+
+        await self._do_build_with_derivation(dp, derivation, input_srcs)
+
+    async def _do_build_with_derivation(
+        self,
+        dp: DerivedPath,
+        derivation: Derivation,
+        input_srcs: set[StorePath],
+    ) -> None:
+        """Send the build request to the daemon."""
+        from ..drv_parser import to_basic_derivation as parse_to_basic
+
+        # Build the derivation env with resolved paths
+        resolved_env = dict(derivation.env)
+        for child in self.children:
+            if child.result and child.result.resolved_outputs:
+                for oname, sp in child.result.resolved_outputs.items():
+                    resolved_env[oname] = str(sp)
+
+        basic = await parse_to_basic(derivation, self.ctx.store.store_path)
+        # Override env with resolved paths
+        basic.env = resolved_env
+
+        drv_path = dp.base_store_path()
+        response = await self.ctx.store.execute(
             BuildDerivationRequest(
-                drv_path=goal.derived_path.base_store_path(),
+                drv_path=drv_path,
                 derivation=BasicDerivation(
                     outputs={
                         o.name: DerivationOutput(
@@ -309,19 +223,71 @@ class DerivationHandler(GoalHandler):
                         )
                         for o in derivation.outputs
                     },
-                    input_srcs=new_input_srcs,
+                    input_srcs=input_srcs,
                     platform=derivation.platform,
-                    builder=resolved_builder,
-                    args=resolved_args,
+                    builder=derivation.builder,
+                    args=derivation.args,
                     env=resolved_env,
                     is_dynamic=derivation.is_dynamic,
                 ),
                 build_mode=BuildMode.NORMAL,
             )
         )
-        goal.result = GoalResult(
-            path=goal.derived_path,
+
+        # Register any CA realisations from the build
+        for realisation in response.result.built_outputs.values():
+            try:
+                await self.ctx.store.execute(
+                    RegisterDrvOutputRequest(realisation=realisation),
+                )
+            except Exception:
+                log.warning(
+                    "register_drv_output_failed",
+                    drv_output=realisation.id,
+                    exc_info=True,
+                )
+
+        # Collect produced paths
+        produced: set[StorePath] = set()
+        for realisation in response.result.built_outputs.values():
+            if realisation.out_path:
+                produced.add(realisation.out_path.with_store_prefix())
+        for o in derivation.outputs:
+            if o.path:
+                produced.add(StorePath(o.path))
+
+        output_name = _single_output(dp)
+        resolved = {}
+        # Try to get our specific output from realisations
+        for drv_out, realisation in response.result.built_outputs.items():
+            if drv_out.output_name == output_name and realisation.out_path:
+                resolved[output_name] = realisation.out_path.with_store_prefix()
+        # Fallback: derivation output paths
+        if not resolved:
+            for o in derivation.outputs:
+                if o.name == output_name and o.path:
+                    resolved[output_name] = StorePath(o.path)
+
+        self.result = GoalResult(
+            path=dp,
             result=response.result,
-            produced_paths={StorePath(output.path)}
-            | {r.out_path for r in response.result.built_outputs.values() if r.out_path},
+            resolved_outputs=resolved,
+            produced_paths=produced,
         )
+
+
+def _single_output(dp: DerivedPath) -> str:
+    """Extract the single output name from a DerivedPath, defaulting to 'out'."""
+    from ..derived_path import OutputsAll, OutputsNames
+
+    if dp.is_opaque:
+        return ""
+    if isinstance(dp.outputs, OutputsAll):
+        return "out"
+    if isinstance(dp.outputs, OutputsNames):
+        names = list(dp.outputs.names)
+        return names[0] if names else "out"
+    return "out"
+
+
+
