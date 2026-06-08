@@ -176,8 +176,41 @@ let
     '';
   };
 
+  # ── Deferred + Dynamic (boundary test) ────────────────────
+  #
+  # A deferred derivation that depends on both a CA floating
+  # derivation AND a dynamic chain.  This exercises _resolve_deferred
+  # with mixed input_drvs + dynamic_input_drvs.
+  #
+  # KNOWN LIMITATION: Neither Nix 2.34.7 nor pynixd's goal system
+  # can resolve this without the trampoline.  The .drv extension
+  # constraint in BuildDerivation (a Nix data structure primitive)
+  # prevents the DynamicBuildGoal from wrapping text-hashed CA
+  # outputs whose names don't end in .drv.
+  #
+  # Nix build output:
+  #   error: ... is not a valid derivation path
+
+  caFloat2 = mkCADrv {
+    name = "ca-float-2";
+    buildCommand = ''printf '%s' float2 > $out'';
+  };
+
+  deferredDyn = mkDrv {
+    name = "deferred-dyn";
+    buildCommand = ''
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+      done < "${caFloat2}" > $out
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+      done < "${refB}" >> $out
+    '';
+  };
+
 in
 {
   inherit hello producingDrv wrapper target producer deepWrapper
-          baseA baseB caFloat producerA producerB refA refB refC crazy;
+          baseA baseB caFloat producerA producerB refA refB refC crazy
+          caFloat2 deferredDyn;
 }
