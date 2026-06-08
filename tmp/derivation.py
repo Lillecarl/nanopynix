@@ -70,13 +70,13 @@ async def async_main():
             td,
             "--file",
             "tests/nix",
-            "ca.depends_on_ca.drvPath",
+            "dyn.producingDrv.drvPath",
             stdout=PIPE,
         )
         stdout, _ = await proc.communicate()
         drv_str = stdout.decode().splitlines()[0]
         log.info("drv_str", drv_str=drv_str)
-        goal = Goal(derived_path=DerivedPath(f"{drv_str}!out"), ctx=ctx)
+        goal = Goal(derived_path=DerivedPath(f"{drv_str}!out!out"), ctx=ctx)
         await goal.execute()
         log.info("result", result=goal.result)
         await ctx.substitution_manager.close()
