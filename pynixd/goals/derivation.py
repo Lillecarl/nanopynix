@@ -105,25 +105,25 @@ class DerivationBuildGoal(Goal):
             )
             return
 
-        # ── 4. Try substitution ───────────────────────────────────
-        sub_info = await self.ctx.substitution_manager.query_path(resolved_output)
-        if sub_info:
-            if self.ctx.end_goal is EndGoal.QUERY:
-                self.result = GoalResult(
-                    path=dp,
-                    result=BuildResult(status=BuildResultStatus.SUBSTITUTED),
-                )
-                return
-            log.info("build_substituting", path=resolved_output)
-            await self.ctx.substitution_manager.substitute_paths(
-                {resolved_output},
-                self.ctx.store,
-            )
-            self.result = GoalResult(
-                path=dp,
-                result=BuildResult(status=BuildResultStatus.SUBSTITUTED),
-                produced_paths={resolved_output},
-            )
+        # ── 4. Delegate to OpaqueBuildGoal for substitution ───────
+        # OpaqueBuildGoal handles reference resolution and substitution
+        # correctly (creates children for references, then substitutes).
+        from ..derived_path import DerivedPath as DP
+        from .opaque import OpaqueBuildGoal
+        opaque = OpaqueBuildGoal(
+            derived_path=DP._from_components(
+                drv_path=resolved_output,
+                chain=(),
+                outputs=None,
+            ),
+            ctx=self.ctx,
+        )
+        registered = self.ctx.goal_manager.register(opaque)
+        self.add_child(registered)
+        await self.execute_children()
+        if registered.result and registered.result.produced_paths:
+            self.result = registered.result
+            self.result.path = dp
             return
 
         # ── 5. Build ──────────────────────────────────────────────
