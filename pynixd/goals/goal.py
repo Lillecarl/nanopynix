@@ -16,11 +16,12 @@ deduplication across concurrent requests.
 
 from __future__ import annotations
 
-import structlog
 from abc import ABC, abstractmethod
 from asyncio import Event, TaskGroup
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+import structlog
 
 from pynixd.types import KeyedBuildResult
 
@@ -50,9 +51,9 @@ class GoalKey:
       from a binary cache.
     """
 
-    tag: str      # "build" | "resolve" | "substitute"
-    path: str     # normalized store path string
-    output: str   # output name ("" for opaque/substitute paths)
+    tag: str  # "build" | "resolve" | "substitute"
+    path: str  # normalized store path string
+    output: str  # output name ("" for opaque/substitute paths)
 
     @classmethod
     def build(cls, dp: DerivedPath) -> GoalKey:

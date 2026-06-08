@@ -36,7 +36,7 @@ from .derivation_resolution import (
 from .derivation_resolution import (
     resolve_dynamic_derivation as drv_resolve_dynamic_derivation,
 )
-from .drv_parser import read_drv_file
+from .drv_parser import ChildMapNode, read_drv_file
 from .exceptions import BackendError
 from .operations.add_to_store import AddToStoreRequest
 from .operations.base import UnkeyedValidPathInfo
@@ -317,7 +317,7 @@ class DerivationResolver:
         self,
         build: QueuedBuild,
         dep_realisations: dict[StorePath, dict[str, StorePath]],
-        dynamic_input_drvs: dict[StorePath, dict[str, list[str]]],
+        dynamic_input_drvs: dict[StorePath, ChildMapNode],
     ) -> dict[tuple[StorePath, str, str], StorePath]:
         """Build the dynamic_output_paths map for DrvWithVersion resolution.
 
@@ -339,10 +339,10 @@ class DerivationResolver:
         """
         dynamic_output_paths: dict[tuple[StorePath, str, str], StorePath] = {}
 
-        for dyn_drv_path, output_deps in dynamic_input_drvs.items():
+        for dyn_drv_path, node in dynamic_input_drvs.items():
             outer_outputs = dep_realisations.get(dyn_drv_path, {})
 
-            for outer_output, inner_outputs in output_deps.items():
+            for outer_output in node.outputs:
                 level1_path = outer_outputs.get(outer_output)
                 if level1_path is None:
                     log.warning(
@@ -353,7 +353,8 @@ class DerivationResolver:
                     )
                     continue
 
-                for inner_output_name in inner_outputs:
+                inner_node = node.children.get(outer_output, ChildMapNode())
+                for inner_output_name in inner_node.outputs:
                     if level1_path.is_derivation():
                         inner_outputs_map = dep_realisations.get(level1_path, {})
                         actual_path = inner_outputs_map.get(inner_output_name)

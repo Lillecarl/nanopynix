@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
     from .connection import ClientConn
     from .derived_path import DerivedPath
+    from .drv_parser import ChildMapNode
     from .operations.build_derivation import BuildDerivationRequest
     from .stderr import StderrMsg
     from .store_path import StorePath
@@ -130,7 +131,7 @@ class QueuedBuild:
         # {drv_path: {output_name: [nested_output_name, ...], ...}}
         # Used by the trampoline to add depends_on edges and required_paths
         # to this build when a dynamic dep's inner build is enqueued.
-        self.dynamic_input_drvs: dict[StorePath, dict[str, list[str]]] = {}
+        self.dynamic_input_drvs: dict[StorePath, ChildMapNode] = {}
 
         # Append-only byte buffer of all stderr messages (serialized via
         # NixWriter interface). New subscribers get this replayed on join.

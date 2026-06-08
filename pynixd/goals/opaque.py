@@ -97,4 +97,3 @@ class OpaqueBuildGoal(Goal):
                     else BuildResultStatus.NO_SUBSTITUTERS,
                 ),
             )
-

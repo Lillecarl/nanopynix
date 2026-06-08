@@ -80,7 +80,7 @@ async def main():
 
     # Step 3: compute_storepath on raw parent (should give its own path)
     raw_storepath = parent.compute_storepath()
-    print(f"=== Step 3: compute_storepath on raw parent ===")
+    print("=== Step 3: compute_storepath on raw parent ===")
     print(f"  Computed: {raw_storepath}")
     print(f"  Actual:   {PARENT_DRV}")
     print(f"  Match: {str(raw_storepath) == PARENT_DRV}")
@@ -88,14 +88,14 @@ async def main():
 
     # Step 4: compute hashDerivationModulo on child
     child_hashes = child.hash_derivation_modulo(mask_outputs=True)
-    print(f"=== Step 4: hashDerivationModulo on child ===")
+    print("=== Step 4: hashDerivationModulo on child ===")
     print(f"  Child hashes: {child_hashes}")
     print()
 
     # Step 5: QueryRealisation using the drv hash
     drv_hash = child_hashes["out"]
     drv_output = DrvOutput(hash_algo="sha256", hash_value=drv_hash, output_name="out")
-    print(f"=== Step 5: QueryRealisation ===")
+    print("=== Step 5: QueryRealisation ===")
     print(f"  DrvOutput: {str(drv_output)!r}")
     resp = await store.call(QueryRealisationRequest(drv_output=drv_output))
     print(f"  Response: {resp}")
@@ -112,7 +112,7 @@ async def main():
 
     # Step 6: resolve — rewrite placeholders, move input_drvs to input_srcs
     ph = downstream_placeholder(StorePath(CHILD_DRV), "out")
-    print(f"=== Step 6: Resolve parent ===")
+    print("=== Step 6: Resolve parent ===")
     print(f"  Placeholder: {ph!r}")
 
     parent.input_drvs = {}
@@ -124,7 +124,7 @@ async def main():
 
     # Step 7: fill in output paths via hashDerivationModulo
     resolved_hashes = parent.hash_derivation_modulo(mask_outputs=True)
-    print(f"=== Step 7: Fill in output paths ===")
+    print("=== Step 7: Fill in output paths ===")
     print(f"  Resolved hashDerivationModulo: {resolved_hashes}")
 
     drv_name = parent.env.get("name", "unknown")
@@ -144,7 +144,7 @@ async def main():
 
     # Step 8: compute_storepath on fully-resolved parent
     resolved_storepath = parent.compute_storepath()
-    print(f"=== Step 8: compute_storepath on resolved parent ===")
+    print("=== Step 8: compute_storepath on resolved parent ===")
     print(f"  Computed: {resolved_storepath}")
     print(f"  Expected: {EXPECTED_RESOLVED}")
     print(f"  MATCH: {str(resolved_storepath) == EXPECTED_RESOLVED}")
@@ -158,20 +158,20 @@ async def main():
             print(f"  Expected ATerm ({len(expected_content)} bytes):")
             print(f"    {expected_content}")
             if serialized == expected_content:
-                print(f"  ✓ ATerms match byte-for-byte!")
+                print("  ✓ ATerms match byte-for-byte!")
             else:
                 for i, (a, b) in enumerate(zip(serialized, expected_content)):
                     if a != b:
                         print(f"  First diff at byte {i}: {a!r} vs {b!r}")
-                        print(f"  Context ours: ...{serialized[max(0,i-30):i+30]}...")
-                        print(f"  Context exp:  ...{expected_content[max(0,i-30):i+30]}...")
+                        print(f"  Context ours: ...{serialized[max(0, i - 30) : i + 30]}...")
+                        print(f"  Context exp:  ...{expected_content[max(0, i - 30) : i + 30]}...")
                         break
         except FileNotFoundError:
-            print(f"  (expected resolved .drv not found)")
+            print("  (expected resolved .drv not found)")
 
     # Verify output path
     out_check = make_output_path(drv_name, "out", resolved_hashes["out"])
-    print(f"\n=== Output path verification ===")
+    print("\n=== Output path verification ===")
     print(f"  Computed: {out_check}")
     print(f"  Expected: {EXPECTED_OUTPUT}")
     print(f"  Match: {out_check == EXPECTED_OUTPUT}")

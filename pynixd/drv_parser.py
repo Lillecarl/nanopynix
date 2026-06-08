@@ -676,13 +676,12 @@ class _Parser:
             # Leaf: flat list of output names
             outputs = self.parse_string_list()
             return ChildMapNode(outputs=outputs)
-        elif self._peek() == "(":
+        if self._peek() == "(":
             # Nested: recursive DerivedPathMapNode
             return self._parse_child_map_node()
-        else:
-            raise ValueError(
-                f"Expected '[' or '(' at pos {self._pos}, got {self._peek()!r}",
-            )
+        raise ValueError(
+            f"Expected '[' or '(' at pos {self._pos}, got {self._peek()!r}",
+        )
 
     def _parse_child_map_node(self) -> ChildMapNode:
         """Parse a ``DerivedPathMapNode`` recursively.

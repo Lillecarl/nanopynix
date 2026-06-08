@@ -29,7 +29,7 @@ from ..operations.build_derivation import BuildDerivationRequest
 from ..operations.ca_derivations import RegisterDrvOutputRequest
 from ..operations.is_valid_path import IsValidPathRequest
 from ..store_path import StorePath
-from ..types import BasicDerivation, BuildMode, DerivationOutput
+from ..types import BasicDerivation, BuildMode
 from ..types.build import BuildResult, BuildResultStatus
 from .goal import EndGoal, Goal, GoalContext, GoalKey, GoalResult, make_resolution_goal
 from .resolution import ResolutionGoal
@@ -119,6 +119,7 @@ class DerivationBuildGoal(Goal):
         # correctly (creates children for references, then substitutes).
         from ..derived_path import DerivedPath as DP
         from .opaque import OpaqueBuildGoal
+
         opaque = OpaqueBuildGoal(
             derived_path=DP._from_components(
                 drv_path=resolved_output,
@@ -247,7 +248,9 @@ class DerivationBuildGoal(Goal):
                                                 for inner_o in inner_drv.outputs:
                                                     if inner_o.path:
                                                         inner_path = StorePath(inner_o.path)
-                                                        dynamic_output_paths[(outer_drv_path, oname, inner_o.name)] = inner_path
+                                                        dynamic_output_paths[(outer_drv_path, oname, inner_o.name)] = (
+                                                            inner_path
+                                                        )
 
                 for child in self.children:
                     if isinstance(child, ResolutionGoal):
@@ -297,12 +300,10 @@ class DerivationBuildGoal(Goal):
             name = f"{clean_name}.drv"
             type_str = "text"
             hash_ref = f"sha256:{content_hash}"
-            s = f"{type_str}:{hash_ref}:{str(self.ctx.store.store_path)}:{name}"
+            s = f"{type_str}:{hash_ref}:{self.ctx.store.store_path!s}:{name}"
             digest = hashlib.sha256(s.encode()).digest()
             compressed = compress_hash(digest, 20)
-            drv_path = StorePath(
-                f"/nix/store/{nix32_encode(compressed)}-{name}"
-            )
+            drv_path = StorePath(f"/nix/store/{nix32_encode(compressed)}-{name}")
 
         # Merge the caller's input_srcs with the ones resolved by
         # ``resolve_derivation`` (which adds resolved input paths).
@@ -458,6 +459,3 @@ def _collect_resolved_paths(children: set[Goal]) -> dict[str, StorePath]:
         _collect(child)
 
     return result
-
-
-

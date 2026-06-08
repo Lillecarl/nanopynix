@@ -298,6 +298,7 @@ class TestDrvWithVersion:
         assert StorePath("/nix/store/simple.drv") in parsed.input_drvs
         assert parsed.input_drvs[StorePath("/nix/store/simple.drv")] == ["out"]
         from pynixd.drv_parser import ChildMapNode
+
         assert parsed.dynamic_input_drvs[StorePath("/nix/store/dep.drv")] == ChildMapNode()
 
 

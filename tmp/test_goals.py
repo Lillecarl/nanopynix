@@ -31,23 +31,25 @@ _TEST_NIX = (_HERE / "../tests/nix/default.nix").resolve()
 
 _LEVEL = logging.WARNING if "--trace" not in sys.argv else logging.NOTSET
 
-_SILENCED_EVENTS = frozenset({
-    # Store/daemon connection management (not goal-related)
-    "spawning_managed_daemon",
-    "daemon_stderr",
-    "daemon_protocol_negotiated",
-    "daemon_nix_version",
-    "daemon_socket_ready",
-    "resource_poller_started",
-    "terminating_daemon_process_group",
-    "pool_reusing_conn",
-    "store_paths_synced",
-    "pool_created_connection",
-    "daemon_features",
-    "connecting_daemon_socket",
-    "store_discarding_dirty_connection",
-    "build_derivation_timing",
-})
+_SILENCED_EVENTS = frozenset(
+    {
+        # Store/daemon connection management (not goal-related)
+        "spawning_managed_daemon",
+        "daemon_stderr",
+        "daemon_protocol_negotiated",
+        "daemon_nix_version",
+        "daemon_socket_ready",
+        "resource_poller_started",
+        "terminating_daemon_process_group",
+        "pool_reusing_conn",
+        "store_paths_synced",
+        "pool_created_connection",
+        "daemon_features",
+        "connecting_daemon_socket",
+        "store_discarding_dirty_connection",
+        "build_derivation_timing",
+    }
+)
 
 
 def _drop_silenced(logger, method_name, event_dict):
@@ -169,12 +171,11 @@ async def test_simple_build() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
         assert result.produced_paths, "no produced paths"
 
         from pynixd.operations.is_valid_path import IsValidPathRequest
+
         for sp in result.produced_paths:
             valid = (await store.execute(IsValidPathRequest(path=sp))).valid
             assert valid, f"produced path {sp} is not valid"
@@ -196,12 +197,11 @@ async def test_ca_simple() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
         assert result.produced_paths, "no produced paths"
 
         from pynixd.operations.is_valid_path import IsValidPathRequest
+
         for sp in result.produced_paths:
             valid = (await store.execute(IsValidPathRequest(path=sp))).valid
             assert valid, f"CA output {sp} is not valid"
@@ -247,9 +247,7 @@ async def test_ca_depends_on_ca() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
         assert result.produced_paths, "no produced paths"
 
         log.info("test_ca_depends_on_ca", msg="PASSED")
@@ -276,9 +274,7 @@ async def test_deferred_non_ca_depends_on_ca() -> None:
         # derivation that depends on it.
         ca_drv = await nix_eval(td, "ca.simple.drvPath")
         ca_result = await build_drv(store, ctx, ca_drv, "out")
-        assert ca_result is not None and ca_result.result.status in (0, 1, 2, 13), (
-            f"CA dep build failed"
-        )
+        assert ca_result is not None and ca_result.result.status in (0, 1, 2, 13), "CA dep build failed"
         log.info("test_deferred", ca_built=ca_result.produced_paths)
 
         # The GoalManager was cleared by build_paths. Now evaluate and
@@ -327,12 +323,11 @@ async def test_ca_fixed() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
         assert result.produced_paths, "no produced paths"
 
         from pynixd.operations.is_valid_path import IsValidPathRequest
+
         for sp in result.produced_paths:
             valid = (await store.execute(IsValidPathRequest(path=sp))).valid
             assert valid, f"CA fixed output {sp} is not valid"
@@ -354,9 +349,7 @@ async def test_ca_text_hashed() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
 
         log.info("test_ca_text_hashed", msg="PASSED")
         await store.close()
@@ -375,9 +368,7 @@ async def test_dyn_hello() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
 
         log.info("test_dyn_hello", msg="PASSED")
         await store.close()
@@ -399,9 +390,7 @@ async def test_dyn_producing_drv() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
         assert result.produced_paths, "no produced paths"
 
         # The output should be a .drv file (text-hashed CA copies the .drv)
@@ -432,9 +421,7 @@ async def test_dyn_wrapper() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
 
         log.info("test_dyn_wrapper", msg="PASSED")
         await store.close()
@@ -464,9 +451,7 @@ async def test_deep_dynamic() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
 
         log.info("test_deep_dynamic", msg="PASSED")
         await store.close()
@@ -491,12 +476,10 @@ async def test_crazy_mixed_deps() -> None:
 
         result = await build_drv(store, ctx, drv_str, "out")
         assert result is not None, "goal returned None"
-        assert result.result.status in (0, 1, 2, 13), (
-            f"build failed: {result.result.status} {result.result.error_msg}"
-        )
+        assert result.result.status in (0, 1, 2, 13), f"build failed: {result.result.status} {result.result.error_msg}"
 
         # Verify output contains content from all dependency types
-        for sp in (result.produced_paths or set()):
+        for sp in result.produced_paths or set():
             fs_path = store.store_path / str(sp).lstrip("/")
             if fs_path.exists() and fs_path.is_file():
                 content = fs_path.read_text()
@@ -545,7 +528,7 @@ async def async_main() -> None:
             log.exception(f"{test_fn.__name__} FAILED", error=str(e))
             failed += 1
 
-    print(f"\n{'='*40}")
+    print(f"\n{'=' * 40}")
     print(f"Results: {passed} passed, {failed} failed")
     if failed:
         sys.exit(1)

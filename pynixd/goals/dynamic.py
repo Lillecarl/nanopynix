@@ -21,12 +21,12 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from ..store_path import StorePath
 from ..types.build import BuildResult, BuildResultStatus
 from .goal import EndGoal, Goal, GoalContext, GoalKey, GoalResult, make_build_goal
 
 if TYPE_CHECKING:
     from ..derived_path import DerivedPath
+    from ..store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -164,6 +164,7 @@ class DynamicBuildGoal(Goal):
             return None
 
         from ..drv_parser import read_drv_file as _read_drv
+
         try:
             parsed = await _read_drv(self.ctx.store.store_path, candidate)
         except Exception:
@@ -173,5 +174,3 @@ class DynamicBuildGoal(Goal):
             return None
 
         return candidate
-
-
