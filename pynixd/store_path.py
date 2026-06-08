@@ -5,8 +5,11 @@ DrvOutput: a class for Nix derivation output identifiers.
 
 from __future__ import annotations
 
+import json as _json
 from pathlib import Path
 from typing import Any
+
+_original_default = _json.JSONEncoder.default
 
 _STORE_PREFIX = "/nix/store/"
 
@@ -107,9 +110,6 @@ class StorePath:
     def __len__(self) -> int:
         return len(self._path)
 
-    def __contains__(self, item: str) -> bool:
-        return item in self._path
-
     def __lt__(self, other: object) -> bool:
         if isinstance(other, StorePath):
             return self._path < other._path
@@ -119,6 +119,10 @@ class StorePath:
         if isinstance(other, StorePath):
             return self._path <= other._path
         return NotImplemented
+
+    def __json__(self) -> str:
+        """JSON serialization — returns the full store path."""
+        return str(self)
 
 
 class DrvOutput:

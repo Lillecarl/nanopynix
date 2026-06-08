@@ -428,12 +428,12 @@ class LocalStoreDB:
             t0 = time.monotonic()
             async with self.acquire_conn() as db:
                 if paths:
-                    paths_json = json.dumps(list(paths))
+                    paths_json = json.dumps([str(p) for p in paths])
                     await db.execute(UPDATE_REGTIME, (paths_json,))
                 for sid, pths in known_paths.items():
-                    await db.execute(INSERT_KNOWN_PATHS, (sid, json.dumps(list(pths))))
+                    await db.execute(INSERT_KNOWN_PATHS, (sid, json.dumps([str(p) for p in pths])))
                 for sid, pths in removed_known_paths.items():
-                    await db.execute(REMOVE_KNOWN_PATHS, (sid, json.dumps(list(pths))))
+                    await db.execute(REMOVE_KNOWN_PATHS, (sid, json.dumps([str(p) for p in pths])))
                 await db.commit()
             elapsed = time.monotonic() - t0
             log.debug(
