@@ -107,7 +107,77 @@ let
     '';
   };
 
+  # ── Crazy: mixed dependency types ──────────────────────────
+  #
+  # A single derivation that depends on:
+  # - Regular (input_addressed) derivations
+  # - CA floating derivations
+  # - Dynamic derivations at different chain depths
+  # - Multiple dynamic_input_drvs entries simultaneously
+  #
+  # This stress-tests the resolution pipeline's ability to handle
+  # heterogeneous dependency graphs in one .drv file.
+
+  baseA = mkDrv {
+    name = "base-a";
+    buildCommand = ''printf '%s' aaa > $out'';
+  };
+
+  baseB = mkDrv {
+    name = "base-b";
+    buildCommand = ''printf '%s' bbb > $out'';
+  };
+
+  caFloat = mkCADrv {
+    name = "ca-float";
+    buildCommand = ''printf '%s' float > $out'';
+  };
+
+  producerA = mkCADrv {
+    name = "a.drv";
+    hashMode = "text";
+    buildCommand = ''
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+      done < "${builtins.unsafeDiscardOutputDependency baseA.drvPath}" > $out
+    '';
+  };
+
+  producerB = mkCADrv {
+    name = "b.drv";
+    hashMode = "text";
+    buildCommand = ''
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+      done < "${builtins.unsafeDiscardOutputDependency baseB.drvPath}" > $out
+    '';
+  };
+
+  # Dynamic references at different depths
+  refA = builtins.outputOf producerA.outPath "out";
+  refB = builtins.outputOf refA "out";            # 2 levels deep
+  refC = builtins.outputOf producerB.outPath "out";  # 1 level deep
+
+  crazy = mkDrv {
+    name = "crazy";
+    buildCommand = ''
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+      done < "${refB}" >> $out
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+      done < "${refC}" >> $out
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+      done < "${caFloat.outPath}" >> $out
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+      done < "${baseA.outPath}" >> $out
+    '';
+  };
+
 in
 {
-  inherit hello producingDrv wrapper target producer deepWrapper;
+  inherit hello producingDrv wrapper target producer deepWrapper
+          baseA baseB caFloat producerA producerB refA refB refC crazy;
 }

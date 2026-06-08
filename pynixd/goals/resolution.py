@@ -148,14 +148,16 @@ class ResolutionGoal(Goal):
 
         # ── Known-path outputs — no resolution needed ─────────────
         #
-        # For derivations with dynamic_input_drvs, we must still create
-        # children even for known-path outputs, because the placeholder
-        # rewriting in ``_do_build_with_derivation`` needs the resolved
-        # paths from dynamic deps.
+        # ResolutionGoal never sets ``produced_paths`` to its own resolved
+        # output — those paths are the derivation's *outputs*, not inputs.
+        # If they leaked into a parent's ``input_srcs`` via
+        # ``_do_build()``\'s children iteration, the daemon would reject
+        # them as non-existent inputs.
+        #
+        # FUTURE: expressing richer goal metadata (e.g. which derivation
+        # produced each path) would let the parent filter instead of
+        # relying on this convention.
         if dop.kind in (OutputKind.INPUT_ADDRESSED, OutputKind.CA_FIXED):
-            has_dynamic = bool(derivation.dynamic_input_drvs)
-            if has_dynamic:
-                await self._resolve_dynamic_children(derivation)
             resolved = StorePath(output_obj.path)
             self.result = GoalResult(
                 path=_fake_dp(self._drv_path, self._output_name),
@@ -193,24 +195,6 @@ class ResolutionGoal(Goal):
             path=_fake_dp(self._drv_path, self._output_name),
             result=BuildResult(status=BuildResultStatus.MISC_FAILURE),
         )
-
-    # ── Dynamic children (placeholder resolution support) ───────────
-
-    async def _resolve_dynamic_children(self, derivation: Derivation) -> None:
-        """Create BuildGoal children for dynamic_input_drvs.
-
-        Even for known-path outputs, children must be created so that
-        ``_do_build_with_derivation`` can collect resolved paths for
-        placeholder rewriting.
-        """
-        for input_drv_path, node in derivation.dynamic_input_drvs.items():
-            for dp in _child_map_to_paths(input_drv_path, node):
-                child = make_build_goal(dp, self.ctx)
-                registered = self.ctx.goal_manager.register(child)
-                self.add_child(registered)
-
-        if self.children:
-            await self.execute_children()
 
     # ── Deferred resolution (hashDerivationModulo + unparsing) ─────
 

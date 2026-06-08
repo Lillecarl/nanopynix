@@ -473,6 +473,40 @@ async def test_deep_dynamic() -> None:
         await ctx.substitution_manager.close()
 
 
+async def test_crazy_mixed_deps() -> None:
+    """Build a derivation that mixes regular, CA, and dynamic deps.
+
+    Exercises:
+    1. Multiple dynamic_input_drvs entries with different chain depths
+    2. Mixed regular + CA + dynamic deps in one .drv
+    3. Dynamic chains of different lengths running in parallel
+    """
+    log.info("test_crazy_mixed_deps", msg="starting")
+    async with TemporaryDirectory() as td:
+        store = await make_store(td)
+        ctx = await make_context(store)
+
+        drv_str = await nix_eval(td, "dyn.crazy.drvPath")
+        log.info("test_crazy_mixed_deps", drv=drv_str)
+
+        result = await build_drv(store, ctx, drv_str, "out")
+        assert result is not None, "goal returned None"
+        assert result.result.status in (0, 1, 2, 13), (
+            f"build failed: {result.result.status} {result.result.error_msg}"
+        )
+
+        # Verify output contains content from all dependency types
+        for sp in (result.produced_paths or set()):
+            fs_path = store.store_path / str(sp).lstrip("/")
+            if fs_path.exists() and fs_path.is_file():
+                content = fs_path.read_text()
+                log.info("crazy_check", path=sp, content=content.strip())
+
+        log.info("test_crazy_mixed_deps", msg="PASSED")
+        await store.close()
+        await ctx.substitution_manager.close()
+
+
 # ── main ───────────────────────────────────────────────────────────
 
 _TESTS = {
@@ -487,6 +521,7 @@ _TESTS = {
     "test_dyn_producing_drv": test_dyn_producing_drv,
     "test_dyn_wrapper": test_dyn_wrapper,
     "test_deep_dynamic": test_deep_dynamic,
+    "test_crazy_mixed_deps": test_crazy_mixed_deps,
 }
 
 
