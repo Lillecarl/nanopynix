@@ -79,11 +79,26 @@ class DynamicBuildGoal(Goal):
             )
             return
 
-        # ── 2. Find the inner .drv from the outer result ──
-        inner_drv = self._find_inner_drv(registered, dp.chain[-1])
+        # ── 2. Resolve the inner .drv from the outer result ──
+        # The chain tells us the next .drv is at resolved_outputs[chain[-1]].
+        # No filename heuristic needed — the DerivedPath chain structure
+        # already encodes the nesting.  The store path at this chain level
+        # IS a valid derivation ATerm regardless of its extension.
+        if not registered.result or not registered.result.resolved_outputs:
+            log.warning("dynamic_outer_no_resolved", outer=outer_dp)
+            self.result = GoalResult(
+                path=dp,
+                result=BuildResult(
+                    status=BuildResultStatus.UNKNOWN
+                    if self.ctx.end_goal is EndGoal.QUERY
+                    else BuildResultStatus.MISC_FAILURE,
+                ),
+            )
+            return
+        inner_drv = registered.result.resolved_outputs.get(dp.chain[-1])
         if inner_drv is None:
             log.warning(
-                "dynamic_inner_drv_not_found",
+                "dynamic_chain_output_not_found",
                 outer=outer_dp,
                 output_name=dp.chain[-1],
             )
@@ -99,7 +114,16 @@ class DynamicBuildGoal(Goal):
 
         log.debug("dynamic_inner_drv_resolved", inner_drv=inner_drv)
 
-        # ── 3. Wrap and build the remainder ──
+        # ── 3. Check if inner_drv is actually a derivation ──
+        # The daemon wire protocol requires derivation paths to end
+        # in ``.drv``.  If the chain collapsed (all levels resolved
+        # and we got the final output), skip wrapping.
+        if not inner_drv.is_derivation():
+            self.result = registered.result
+            self.result.path = dp
+            return
+
+        # ── 4. Wrap and build the remainder ──
         # ``dp.wrap(inner_drv)`` replaces the root with inner_drv
         # and clears the chain, producing e.g. inner_drv!lib
         next_dp = dp.wrap(inner_drv)
@@ -113,49 +137,7 @@ class DynamicBuildGoal(Goal):
             self.result = registered_remainder.result
             self.result.path = dp
             # Propagate the inner .drv path so parent DynamicBuildGoals
-            # can find it via ``_find_inner_drv``
+            # can resolve the chain at the next level up
             self.result.produced_paths.add(inner_drv)
-
-    # ── Inner .drv discovery ───────────────────────────────────────
-
-    @staticmethod
-    def _find_inner_drv(
-        outer_goal: Goal,
-        output_name: str,
-    ) -> StorePath | None:
-        """Extract the inner ``.drv`` path from a completed outer goal.
-
-        Tries, in order:
-        1. ``produced_paths`` — if exactly one path, it's our .drv.
-        2. ``resolved_outputs`` — match by output name.
-        3. ``built_outputs`` — match by output name.
-        """
-        if not outer_goal.result:
-            return None
-
-        # Strategy 1: single produced path — likely the .drv
-        if len(outer_goal.result.produced_paths) == 1:
-            candidate = next(iter(outer_goal.result.produced_paths))
-            if candidate.is_derivation():
-                return candidate
-
-        # Strategy 2: produced_paths that are derivations
-        for sp in outer_goal.result.produced_paths:
-            if sp.is_derivation():
-                return sp
-
-        # Strategy 3: resolved_outputs
-        resolved = outer_goal.result.resolved_outputs.get(output_name)
-        if resolved is not None and resolved.is_derivation():
-            return resolved
-
-        # Strategy 4: child results
-        for child in outer_goal.children:
-            if child.result and child.result.produced_paths:
-                for sp in child.result.produced_paths:
-                    if sp.is_derivation():
-                        return sp
-
-        return None
 
 
