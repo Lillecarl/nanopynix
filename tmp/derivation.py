@@ -1,138 +1,119 @@
 #! /usr/bin/env python3
+"""
+Tiny reproducer: verify Derivation round-trips (read→serialize), then
+compute store path of the .drv file itself and compare with the real path.
+
+Run from repo root with:  ./tmp/derivation.py
+"""
 
 from __future__ import annotations
 
 import asyncio
-import logging
 from pathlib import Path
-from subprocess import PIPE
 
-import structlog
-from anyio import TemporaryDirectory
+STORE_DIR = Path("/nix/store")
 
-from pynixd.config import LocalSocketStoreSpec
-from pynixd.derived_path import DerivedPath
-from pynixd.goals.goal import EndGoal, Goal, GoalContext
-from pynixd.goals.manager import GoalManager
-from pynixd.store import LocalSocketStore
-from pynixd.substitution import HttpBinaryCacheSubstituter, SubstitutionManager
-from pynixd.system_features import KNOWN_FEATURES
-from pynixd.types import StoreId
-from pynixd.types.build import BuildResultStatus
-
-structlog.configure(
-    processors=[
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.StackInfoRenderer(),
-        structlog.dev.set_exc_info,
-        structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
-        structlog.dev.ConsoleRenderer(),
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(logging.NOTSET),
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
-    cache_logger_on_first_use=False,
-)
-
-log = structlog.get_logger()
+# Hardcoded from one `nix build` run
+CA_DRV = STORE_DIR / "agazn184kb1ki5wz31810ga6yip2pxyi-ca-simple.drv"
+PARENT_DRV_UNRESOLVED = STORE_DIR / "8snb293k8gdh59jwc511p2bfw72mjiwa-non-ca-depends-on-ca.drv"
+PARENT_DRV_RESOLVED = STORE_DIR / "dcm47sig17dnkmdp3rx3lf02pfa1sl6n-non-ca-depends-on-ca.drv"
 
 
-async def async_main():
-    async with TemporaryDirectory() as td:
-        store = LocalSocketStore(
-            LocalSocketStoreSpec(
-                store_id=StoreId("local"),
-                feature_matrix={"x86_64-linux": set(KNOWN_FEATURES)},
-                probe=False,
-                gc_enabled=False,
-                store_path=Path(td),
-                use_db=True,
-            )
-        )
-        await store.start()
+async def main():
+    from pynixd.drv_parser import read_drv_file
 
-        proc = await asyncio.create_subprocess_exec(
-            "nix",
-            "eval",
-            "--raw",
-            "--store",
-            td,
-            "--file",
-            "tests/nix",
-            "dyn.producingDrv.drvPath",
-            stdout=PIPE,
-        )
-        stdout, _ = await proc.communicate()
-        drv_str = stdout.decode().splitlines()[0]
-        log.info("drv_str", drv_str=drv_str)
+    # read_drv_file expects store_path as root: Path("/") + "/nix/store/xxx.drv" → /nix/store/xxx.drv
+    ROOT = Path("/")
 
-        # ── Query phase ──
-        query_ctx = GoalContext(
-            goal_manager=GoalManager(),
-            store=store,
-            substitution_manager=SubstitutionManager(
-                substituters=[HttpBinaryCacheSubstituter("https://cache.nixos.org")]
-            ),
-            end_goal=EndGoal.QUERY,
-        )
-        query_goal = Goal(derived_path=DerivedPath(f"{drv_str}!out!out"), ctx=query_ctx)
-        await query_goal.execute()
-        log.info(
-            "query_result",
-            result=query_goal.result,
-            status=query_goal.result.result.status if query_goal.result else None,
-        )
+    # ── 1. Round-trip on CA child ──
+    raw = CA_DRV.read_text().rstrip("\n")
+    drv = await read_drv_file(ROOT, str(CA_DRV))
+    assert drv is not None, "Failed to parse ca-simple.drv"
+    serialized = drv.serialize().rstrip("\n")
 
-        # Classify all goals into will_build / will_substitute / unknown
-        will_build: set[str] = set()
-        will_substitute: set[str] = set()
-        unknown: set[str] = set()
-        seen: set[int] = set()  # dedup by id of base_store_path
-        for r in query_goal.collect_results():
-            if r is None:
-                continue
-            key = id(r.path.base_store_path())
-            if key in seen:
-                continue
-            seen.add(key)
-            path = str(r.path.base_store_path())
-            status = r.result.status
-            if status is BuildResultStatus.ALREADY_VALID:
-                continue
-            if status is BuildResultStatus.SUBSTITUTED:
-                will_substitute.add(path)
-            elif status is BuildResultStatus.UNKNOWN:
-                unknown.add(path)
-            else:
-                will_build.add(path)
+    print("=== CA child round-trip ===")
+    print(f"Raw length:        {len(raw)}")
+    print(f"Serialized length: {len(serialized)}")
+    if raw == serialized:
+        print("✓ EXACT MATCH (raw == serialize)")
+    else:
+        for i, (a, b) in enumerate(zip(raw, serialized)):
+            if a != b:
+                print(f"✗ First diff at offset {i}:")
+                print(f"  raw[{i - 20}:{i + 20}] = {raw[max(0, i - 20) : i + 20]!r}")
+                print(f"  ser[{i - 20}:{i + 20}] = {serialized[max(0, i - 20) : i + 20]!r}")
+                break
+        if len(raw) != len(serialized):
+            print(f"  Length differs: {len(raw)} vs {len(serialized)}")
 
-        log.info(
-            "query_summary",
-            will_build=sorted(will_build),
-            will_substitute=sorted(will_substitute),
-            unknown=sorted(unknown),
-        )
-        await query_ctx.substitution_manager.close()
+    # ── 2. Compute store path and compare ──
+    computed_path = drv.compute_storepath()
+    actual_path = CA_DRV
+    print("\n=== CA child store path ===")
+    print(f"Computed: {computed_path}")
+    print(f"Actual:   {actual_path}")
+    print(f"  name from env: {drv.env.get('name', 'NOT SET')!r}")
+    print(f"✓ MATCH: {computed_path == actual_path}")
 
-        # ── Build phase ──
-        build_ctx = GoalContext(
-            goal_manager=GoalManager(),
-            store=store,
-            substitution_manager=SubstitutionManager(
-                substituters=[HttpBinaryCacheSubstituter("https://cache.nixos.org")]
-            ),
-            end_goal=EndGoal.BUILD,
-        )
-        build_goal = Goal(derived_path=DerivedPath(f"{drv_str}!out!out"), ctx=build_ctx)
-        await build_goal.execute()
-        log.info("build_result", result=build_goal.result)
-        await build_ctx.substitution_manager.close()
+    # ── 3. Round-trip on unresolved parent ──
+    raw_p = PARENT_DRV_UNRESOLVED.read_text().rstrip("\n")
+    drv_p = await read_drv_file(ROOT, str(PARENT_DRV_UNRESOLVED))
+    assert drv_p is not None, "Failed to parse parent .drv"
+    serialized_p = drv_p.serialize().rstrip("\n")
 
+    print("\n=== Parent (unresolved) round-trip ===")
+    print(f"Raw length:        {len(raw_p)}")
+    print(f"Serialized length: {len(serialized_p)}")
+    if raw_p == serialized_p:
+        print("✓ EXACT MATCH (raw == serialize)")
+    else:
+        for i, (a, b) in enumerate(zip(raw_p, serialized_p)):
+            if a != b:
+                print(f"✗ First diff at offset {i}:")
+                print(f"  raw[{i - 20}:{i + 20}] = {raw_p[max(0, i - 20) : i + 20]!r}")
+                print(f"  ser[{i - 20}:{i + 20}] = {serialized_p[max(0, i - 20) : i + 20]!r}")
+                break
+        if len(raw_p) != len(serialized_p):
+            print(f"  Length differs: {len(raw_p)} vs {len(serialized_p)}")
 
-def main():
-    asyncio.run(async_main())
+    # Compute store path for unresolved parent
+    computed_path_p = drv_p.compute_storepath()
+    actual_path_p = PARENT_DRV_UNRESOLVED
+    print("\n=== Parent (unresolved) store path ===")
+    print(f"Computed: {computed_path_p}")
+    print(f"Actual:   {actual_path_p}")
+    print(f"  name from env: {drv_p.env.get('name', 'NOT SET')!r}")
+    print(f"✓ MATCH: {computed_path_p == actual_path_p}")
+
+    # ── 4. Round-trip on resolved parent ──
+    raw_r = PARENT_DRV_RESOLVED.read_text().rstrip("\n")
+    drv_r = await read_drv_file(ROOT, str(PARENT_DRV_RESOLVED))
+    assert drv_r is not None, "Failed to parse resolved .drv"
+    serialized_r = drv_r.serialize().rstrip("\n")
+
+    print("\n=== Parent (resolved) round-trip ===")
+    print(f"Raw length:        {len(raw_r)}")
+    print(f"Serialized length: {len(serialized_r)}")
+    if raw_r == serialized_r:
+        print("✓ EXACT MATCH (raw == serialize)")
+    else:
+        for i, (a, b) in enumerate(zip(raw_r, serialized_r)):
+            if a != b:
+                print(f"✗ First diff at offset {i}:")
+                print(f"  raw[{i - 20}:{i + 20}] = {raw_r[max(0, i - 20) : i + 20]!r}")
+                print(f"  ser[{i - 20}:{i + 20}] = {serialized_r[max(0, i - 20) : i + 20]!r}")
+                break
+        if len(raw_r) != len(serialized_r):
+            print(f"  Length differs: {len(raw_r)} vs {len(serialized_r)}")
+
+    computed_path_r = drv_r.compute_storepath()
+    actual_path_r = PARENT_DRV_RESOLVED
+    print("\n=== Parent (resolved) store path ===")
+    print(f"Computed: {computed_path_r}")
+    print(f"Actual:   {actual_path_r}")
+    print(f"  name from env: {drv_r.env.get('name', 'NOT SET')!r}")
+    print(f"✓ MATCH: {computed_path_r == actual_path_r}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

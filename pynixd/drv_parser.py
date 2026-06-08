@@ -32,18 +32,20 @@ Compatibility with DerivationOutput (operations/base.py):
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, TypedDict
 
 import anyio
 
 from .store_path import DrvOutput, StorePath
 from .types import BasicDerivation, DerivationOutput, OutputKind
+from .utils import compress_hash, nix32_encode
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from .types.aliases import OutputMap, StorePathSet
 
@@ -279,6 +281,43 @@ class Derivation:
 
         parts.append(")")
         return "".join(parts)
+
+    def compute_storepath(self, store_dir: Path | str = Path("/nix/store")) -> Path:
+        """Compute the store path of this .drv file itself.
+
+        Nix uses ``Store::makeFixedOutputPathFromCA`` with ``TextInfo``,
+        which calls ``makeStorePath(type, hash, name)`` where::
+
+            type = "text" + ":" + ref1 + ":" + ref2 + ...
+            hash = "sha256:" + hex(content_hash)
+            name = "<drv_name>.drv"
+
+            s = type + ":" + hash + ":" + storeDir + ":" + name
+            digest = sha256(s)
+            storePath = compress(digest, 20).toBase32 + "-" + name
+        """
+        store_dir = Path(store_dir)
+        raw = self.serialize().encode()
+        content_hash = hashlib.sha256(raw).hexdigest()
+
+        drv_name = self.env.get("name", "unknown")
+        name = f"{drv_name}.drv"
+
+        # Build type string: "text" + ":" + ref1 + ":" + ref2 + ...
+        type_str = "text"
+        for p in sorted(self.input_drvs, key=str):
+            type_str += ":" + str(p)
+        for p in sorted(self.input_srcs, key=str):
+            type_str += ":" + str(p)
+
+        # Hash string with sha256: prefix (matching Hash::to_string(Base16, true))
+        hash_str = f"sha256:{content_hash}"
+
+        s = f"{type_str}:{hash_str}:{store_dir}:{name}"
+        digest = hashlib.sha256(s.encode()).digest()
+        compressed = compress_hash(digest, 20)
+        result = f"{store_dir}/{nix32_encode(compressed)}-{name}"
+        return Path(result)
 
 
 _STRING_CHUNK = re.compile(r'([^"\\]*)(["\\])')

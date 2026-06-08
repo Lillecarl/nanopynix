@@ -157,6 +157,62 @@ def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -
     return "".join(parts)
 
 
+def _unparse_derivation_for_hash(
+    drv: Derivation,
+    input_drv_hashes: dict[str, list[str]] | None = None,
+) -> str:
+    """Serialize a Derivation to ATerm for hashDerivationModulo.
+
+    Like Derivation.serialize() but replaces input_drvs keys with the
+    given hex hash strings (matching what Nix's hashDerivationModulo
+    produces after substituting input drv references with their modulo
+    hashes).
+
+    Args:
+        drv: The derivation to serialize.
+        input_drv_hashes: {hex_hash: [output_names]} replacement for
+            input_drvs.  When None, the original input_drvs are used
+            with their store-path keys (same as serialize()).
+    """
+    from pynixd.drv_parser import _aterm_escape
+
+    parts: list[str] = ["Derive("]
+
+    out_parts = [
+        f'("{_aterm_escape(o.name)}","{_aterm_escape(o.path)}",'
+        f'"{_aterm_escape(o.hash_algo)}","{_aterm_escape(o.hash_value)}")'
+        for o in sorted(drv.outputs, key=lambda x: x.name)
+    ]
+    parts.append(f"[{','.join(out_parts)}],")
+
+    if input_drv_hashes is not None:
+        drv_parts = [
+            f'("{_aterm_escape(key)}",[{",".join(f'"{_aterm_escape(o)}"' for o in outs)}])'
+            for key, outs in sorted(input_drv_hashes.items(), key=lambda x: x[0])
+        ]
+    else:
+        drv_parts = [
+            f'("{_aterm_escape(str(drv_path))}",[{",".join(f'"{_aterm_escape(o)}"' for o in outputs)}])'
+            for drv_path, outputs in sorted(drv.input_drvs.items(), key=lambda x: str(x[0]))
+        ]
+    parts.append(f"[{','.join(drv_parts)}],")
+
+    srcs = ",".join(f'"{_aterm_escape(str(p))}"' for p in sorted(str(p) for p in drv.input_srcs))
+    parts.append(f"[{srcs}],")
+
+    parts.append(f'"{_aterm_escape(drv.platform)}",')
+    parts.append(f'"{_aterm_escape(drv.builder)}",')
+
+    args = ",".join(f'"{_aterm_escape(a)}"' for a in drv.args)
+    parts.append(f"[{args}],")
+
+    env_parts = [f'("{_aterm_escape(k)}","{_aterm_escape(v)}")' for k, v in sorted(drv.env.items())]
+    parts.append(f"[{','.join(env_parts)}]")
+
+    parts.append(")")
+    return "".join(parts)
+
+
 def _hash_derivation_modulo(
     drv: BasicDerivation,
     mask_outputs: bool = True,

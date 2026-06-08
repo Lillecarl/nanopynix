@@ -30,6 +30,20 @@ def nix32_encode(data: bytes) -> str:
     return "".join(result)
 
 
+def compress_hash(data: bytes, new_size: int) -> bytes:
+    """XOR-fold a hash digest into *new_size* bytes.
+
+    Matches Nix's ``hash::compressHash`` (used by ``Store::makeStorePath``).
+    """
+    if len(data) == new_size:
+        return data
+    assert len(data) > new_size
+    result = bytearray(data[:new_size])
+    for i in range(new_size, len(data)):
+        result[i % new_size] ^= data[i]
+    return bytes(result)
+
+
 def random_nix32_hash() -> str:
     """Generate a random 32-char nix base32 hash for probe derivations."""
     return nix32_encode(hashlib.sha256(os.urandom(32)).digest())[:32]
