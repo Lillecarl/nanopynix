@@ -86,7 +86,7 @@ class BuiltOutput:
 
     def to_string(self) -> str:
         if self.ca or self.hash or self.nar_hash:
-            data: dict[str, str | int] = {"outPath": self.out_path}
+            data: dict[str, str | int] = {"outPath": str(self.out_path)}
             if self.ca:
                 data["ca"] = self.ca
             if self.hash:
@@ -100,7 +100,7 @@ class BuiltOutput:
             if self.reference:
                 data["reference"] = self.reference
             return json.dumps(data)
-        return self.out_path
+        return str(self.out_path)
 
 
 @dataclass
@@ -169,7 +169,7 @@ class BuildResult:
             ctx.writer.write_uint64(len(self.built_outputs))
             for k, v in self.built_outputs.items():
                 ctx.writer.write_string(k)
-                ctx.writer.write_string(json.dumps(v))
+                ctx.writer.write_string(v.model_dump_json(by_alias=True))
 
     def to_keyed(self, derived_path: DerivedPath):
         return KeyedBuildResult(derived_path, self)

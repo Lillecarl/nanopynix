@@ -42,6 +42,7 @@ from .store_path import DrvOutput, StorePath
 from .types import BasicDerivation, DerivationOutput, OutputKind
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from .types.aliases import OutputMap, StorePathSet
@@ -349,7 +350,7 @@ class _Parser:
                 parts.append("\\")
                 parts.append(esc)
 
-    def parse_string_list[T: str = str](self, tp: type[T] = str) -> list[T]:
+    def parse_string_list[T](self, tp: Callable[[str], T] = str) -> list[T]:
         """Parse [str, str, ...]."""
         self._expect("[")
         result: list[T] = []

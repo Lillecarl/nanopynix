@@ -1,33 +1,52 @@
 """
-StorePath: a str subclass for Nix store paths with helpers.
-DrvOutput: a str subclass for Nix derivation output identifiers.
+StorePath: a self-owned class for Nix store paths (no longer a str subclass).
+DrvOutput: a class for Nix derivation output identifiers.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
+
+_STORE_PREFIX = "/nix/store/"
 
 
-class StorePath(str):
-    """A str subclass representing a Nix store path.
+class StorePath:
+    """A Nix store path.
+
+    Stores the bare path (hash-name) internally — the ``/nix/store/`` prefix
+    is stripped on construction and re-added by ``__str__``.
 
     Provides helpers for basename, derivation checking, etc.
     Can store optional 'extrainfo' for debugging (e.g. why this path is required).
     """
 
-    __slots__ = ("extrainfo",)
+    __slots__ = ("_path", "extrainfo")
 
-    def __new__(cls, value: str | StorePath, extrainfo: Any = None) -> Self:
-        instance = str.__new__(cls, value)
-        # Use getattr if value is already a StorePath to preserve existing info if not overridden
-        instance.extrainfo = extrainfo or getattr(value, "extrainfo", None)
-        return instance
+    def __init__(self, path: str | StorePath, extrainfo: Any = None) -> None:
+        if isinstance(path, StorePath):
+            self._path = path._path
+            self.extrainfo = extrainfo or path.extrainfo
+        else:
+            self._path = self._strip_prefix(path)
+            self.extrainfo = extrainfo
+
+    @staticmethod
+    def _strip_prefix(path: str) -> str:
+        if path.startswith(_STORE_PREFIX):
+            return path[len(_STORE_PREFIX) :]
+        return path
+
+    # ── Core accessors ─────────────────────────────────────────────
+
+    def base(self) -> str:
+        """The bare path (hash-name) without the ``/nix/store/`` prefix."""
+        return self._path
 
     @property
     def name(self) -> str:
         """The full basename (hash-name) of the store path."""
-        return Path(self).name
+        return Path(self._path).name
 
     def hash_part(self) -> str:
         """The 32-character hash part of the store path."""
@@ -40,26 +59,66 @@ class StorePath(str):
 
     def is_derivation(self) -> bool:
         """Return True if this is a .drv path."""
-        return self.endswith(".drv")
+        return self._path.endswith(".drv")
 
     def to_path(self) -> Path:
-        """Convert to a pathlib.Path."""
-        return Path(self)
+        """Convert to a pathlib.Path (full ``/nix/store/...`` path)."""
+        return Path(str(self))
 
     def with_store_prefix(self) -> StorePath:
-        """Return a StorePath with the /nix/store/ prefix guaranteed.
+        """Return self — ``__str__`` already guarantees the ``/nix/store/`` prefix."""
+        return self
 
-        If the path already starts with /nix/store/, returns self unchanged.
-        If it's a bare basename (e.g. hash-name), prepends /nix/store/.
-        """
-        if self.startswith("/nix/store/"):
-            return self
-        return StorePath(f"/nix/store/{self}", extrainfo=self.extrainfo)
+    # ── str-adjacent helpers ───────────────────────────────────────
+
+    def endswith(self, suffix: str) -> bool:
+        """Check whether the bare path ends with *suffix*."""
+        return self._path.endswith(suffix)
+
+    def startswith(self, prefix: str) -> bool:
+        """Check whether the bare path starts with *prefix*."""
+        return self._path.startswith(prefix)
+
+    # ── Dunder methods ─────────────────────────────────────────────
+
+    def __str__(self) -> str:
+        """Full store path: ``/nix/store/{bare}`` (or ``""`` when empty)."""
+        if not self._path:
+            return ""
+        return _STORE_PREFIX + self._path
 
     def __repr__(self) -> str:
+        inner = repr(self._path)
         if self.extrainfo:
-            return f"StorePath({str.__repr__(self)}, info={self.extrainfo!r})"
-        return f"StorePath({str.__repr__(self)})"
+            return f"StorePath({inner}, info={self.extrainfo!r})"
+        return f"StorePath({inner})"
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, StorePath):
+            return self._path == other._path
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._path)
+
+    def __bool__(self) -> bool:
+        return bool(self._path)
+
+    def __len__(self) -> int:
+        return len(self._path)
+
+    def __contains__(self, item: str) -> bool:
+        return item in self._path
+
+    def __lt__(self, other: object) -> bool:
+        if isinstance(other, StorePath):
+            return self._path < other._path
+        return NotImplemented
+
+    def __le__(self, other: object) -> bool:
+        if isinstance(other, StorePath):
+            return self._path <= other._path
+        return NotImplemented
 
 
 class DrvOutput:

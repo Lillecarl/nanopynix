@@ -34,7 +34,7 @@ async def _pick_random_path(store: LocalSocketStore) -> str:
     resp = await store.execute(QueryAllValidPathsRequest())
     all_paths = resp.paths
     assert all_paths, "Store has no paths?!"
-    return next(iter(all_paths))
+    return str(next(iter(all_paths)))
 
 
 @pytest.mark.timeout(60)

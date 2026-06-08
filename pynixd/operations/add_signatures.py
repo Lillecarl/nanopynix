@@ -39,7 +39,7 @@ class AddSignaturesRequest(OpRequest[AddSignaturesResponse]):
     name: ClassVar[str] = "AddSignatures"
     op: ClassVar[int] = 37
     response_type: ClassVar[type[OpResponse]] = AddSignaturesResponse
-    path: str
+    path: StorePath
     sigs: set[str]
 
     @classmethod

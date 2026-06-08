@@ -401,6 +401,9 @@ class Server:
         if self.ctx.scheduler:
             await self.ctx.scheduler.close()
 
+        if self.ctx.substitution_manager:
+            await self.ctx.substitution_manager.close()
+
         for task in self.background_tasks:
             task.cancel()
             with contextlib.suppress(BaseException):

@@ -95,7 +95,9 @@ class DerivedPath:
         Optional metadata (e.g. why this path is required).
     """
 
-    def __init__(self, s: str) -> None:
+    def __init__(self, s: str | StorePath) -> None:
+        if isinstance(s, StorePath):
+            s = str(s)
         drv_path, chain, outputs = _parse_components(s, "!")
         self._drv_path = drv_path
         self._chain = chain

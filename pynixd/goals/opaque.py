@@ -55,7 +55,7 @@ class OpaqueHandler(GoalHandler):
             for ref in info.references:
                 if path == ref:
                     continue  # don't create a child for itself
-                goal.add_child(DerivedPath(ref))
+                goal.add_child(DerivedPath(str(ref)))
 
             await goal.execute_children()
 

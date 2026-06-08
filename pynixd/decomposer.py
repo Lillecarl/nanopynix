@@ -188,7 +188,7 @@ class BuildDecomposer:
             if sp in visited:
                 continue
             visited.add(sp)
-            dp = drv_to_derived.get(str(sp), DerivedPath(sp))
+            dp = drv_to_derived.get(str(sp), DerivedPath(str(sp)))
             try:
                 parsed = await dp.to_derivation(self.local_store.store_path)
                 drv_read_count += 1
@@ -321,7 +321,7 @@ class BuildDecomposer:
         all_input_srcs: set[StorePath] = set()
 
         for drv_path, parsed in parsed_cache.items():
-            dp = drv_to_derived.get(str(drv_path), DerivedPath(drv_path))
+            dp = drv_to_derived.get(str(drv_path), DerivedPath(str(drv_path)))
             basic = await to_basic_derivation(
                 parsed,
                 self.local_store.store_path,

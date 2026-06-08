@@ -66,7 +66,7 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
     async def serialize(self, ctx: WriteContext) -> None:
         self.logger = self.logger.bind(identifier=ctx.writer.identifier)
         ctx.writer.write_uint64(self.op)
-        ctx.writer.write_string(json.dumps(self.realisation.model_dump(by_alias=True), default=str))
+        ctx.writer.write_string(self.realisation.model_dump_json(by_alias=True))
 
     async def execute(
         self,
@@ -112,7 +112,7 @@ class QueryRealisationResponse(OpResponse):
         self.logs.serialize(ctx)
         ctx.writer.write_uint64(len(self.realisations))
         for r in self.realisations:
-            ctx.writer.write_string(json.dumps(r.model_dump(by_alias=True), default=str))
+            ctx.writer.write_string(r.model_dump_json(by_alias=True))
 
 
 @dataclass(kw_only=True)

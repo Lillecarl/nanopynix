@@ -168,7 +168,7 @@ class ValidPathInfo(UnkeyedValidPathInfo):
             lines.append(f"References: {refs}")
 
         if self.deriver:
-            lines.append(f"Deriver: {self.deriver.split('/')[-1]}")
+            lines.append(f"Deriver: {str(self.deriver).split('/')[-1]}")
 
         lines.extend(f"Sig: {sig}" for sig in sorted(self.sigs))
 

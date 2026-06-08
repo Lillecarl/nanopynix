@@ -459,7 +459,7 @@ class PynixdHttpServer:
 
         # 2. Fall back to standard QueryPathFromHashPart (for 32-char store path hashes)
         resp = await self.store.execute(
-            QueryPathFromHashPartRequest(path=StorePath(hash_part)),
+            QueryPathFromHashPartRequest(path=hash_part),
         )
         if resp.value:
             return StorePath(resp.value)

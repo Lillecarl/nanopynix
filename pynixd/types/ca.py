@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer
 
 from pynixd.store_path import DrvOutput, StorePath
 
@@ -21,8 +21,16 @@ def _coerce_drvoutput(v: object) -> DrvOutput:
     raise ValueError(f"Cannot coerce {type(v).__name__} to DrvOutput")
 
 
-_StorePathField = Annotated[StorePath, BeforeValidator(_coerce_storepath)]
-_DrvOutputField = Annotated[DrvOutput, BeforeValidator(_coerce_drvoutput)]
+_StorePathField = Annotated[
+    StorePath,
+    BeforeValidator(_coerce_storepath),
+    PlainSerializer(lambda x: x.base(), return_type=str, when_used="json"),
+]
+_DrvOutputField = Annotated[
+    DrvOutput,
+    BeforeValidator(_coerce_drvoutput),
+    PlainSerializer(lambda x: str(x), return_type=str, when_used="json"),
+]
 
 
 class Realisation(BaseModel):

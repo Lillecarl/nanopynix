@@ -172,11 +172,7 @@ class BasicDerivation:
             ctx.writer.write_string(out_path)
             ctx.writer.write_string(out.method)
             ctx.writer.write_string(out.hash_digest)
-        # Normalize input_srcs to absolute store paths
-        normalized_srcs: StorePathSet = set()
-        for src in self.input_srcs:
-            normalized_srcs.add(src.with_store_prefix())
-        ctx.writer.write_string_set(normalized_srcs)
+        ctx.writer.write_string_set({src.with_store_prefix() for src in self.input_srcs})
         ctx.writer.write_string(self.platform)
         ctx.writer.write_string(self.builder)
         ctx.writer.write_string_list(self.args)

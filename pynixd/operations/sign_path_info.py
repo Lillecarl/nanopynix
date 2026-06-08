@@ -121,7 +121,7 @@ class SignPathInfoRequest(OpRequest[SignPathInfoResponse]):
                 await conn.commit()
 
         await store.execute(
-            AddSignaturesRequest(path=str(self.info.path), sigs={sig}),
+            AddSignaturesRequest(path=self.info.path, sigs={sig}),
             client=client,
             suppress_last=suppress_last,
         )

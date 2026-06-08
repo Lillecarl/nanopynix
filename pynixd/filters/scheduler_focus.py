@@ -75,13 +75,19 @@ KEEP_LOGGERS_DEBUG = frozenset(
     },
 )
 
+DROP_LOGGERS = frozenset({"pynixd.operations.AddMultipleToStoreRequest"})
+
 ALWAYS_KEEP_LEVELS = frozenset({"error", "critical"})
 
 
 def filter(logger, method_name, event_dict):  # noqa: A001 — plugin convention
     level = event_dict.get("level", "").lower()
+    logger_name = getattr(logger, "name", "")
     if level in ALWAYS_KEEP_LEVELS or method_name in ALWAYS_KEEP_LEVELS:
         return event_dict
+
+    if logger_name in DROP_LOGGERS:
+        return None
 
     if level not in ("debug", "info", "trace"):
         return event_dict
@@ -89,7 +95,6 @@ def filter(logger, method_name, event_dict):  # noqa: A001 — plugin convention
     if event_dict.get("event") in KEEP_EVENTS:
         return event_dict
 
-    logger_name = getattr(logger, "name", "")
     if logger_name in KEEP_LOGGERS_DEBUG:
         return event_dict
     if logger_name in KEEP_LOGGERS and method_name != "debug":

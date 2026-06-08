@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 import structlog
 
 from pynixd.operations.build_derivation import BuildDerivationRequest
-from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
-from pynixd.types import BasicDerivation, BuildMode, DerivationOutput, KeyedBuildResult
+from pynixd.operations.ca_derivations import QueryRealisationRequest, RegisterDrvOutputRequest
+from pynixd.types import BasicDerivation, BuildMode, DerivationOutput
 from pynixd.types.build import BuildResult, BuildResultStatus
 
 from ..derived_path import DerivedPath
@@ -24,6 +24,7 @@ from .handler import GoalHandler
 
 if TYPE_CHECKING:
     from ..drv_parser import Derivation
+    from ..types.ca import Realisation
     from .goal import Goal
 
 log = structlog.get_logger(__name__)
@@ -56,7 +57,7 @@ class CADerivationHandler(GoalHandler):
             for output in outputs:
                 goal.add_child(DerivedPath(f"{path}!{output}"))
         for path in derivation.input_srcs:
-            goal.add_child(DerivedPath(path))
+            goal.add_child(DerivedPath(str(path)))
 
         for path, outputs in derivation.dynamic_input_drvs.items():
             for output in outputs:
@@ -67,11 +68,8 @@ class CADerivationHandler(GoalHandler):
         # ── 2. Collect resolved input paths ──
         input_srcs: set[StorePath] = set()
         for result in goal.collect_results():
-            if not isinstance(result, KeyedBuildResult):
-                continue
             if isinstance(result, GoalResult):
                 input_srcs.update(result.produced_paths)
-            input_srcs.update(output.out_path for output in result.result.built_outputs.values())
 
         # ── 3. Try substitution by DrvOutput ──
         drv_outputs: set[DrvOutput] = set()
@@ -80,6 +78,33 @@ class CADerivationHandler(GoalHandler):
                 drv_outputs.add(DrvOutput(hash_algo=out.hash_algo, hash_value=out.hash_value, output_name=out.name))
 
         if drv_outputs:
+            # Check the local store first (the CA child may have just built this)
+            local_realisations: dict[DrvOutput, Realisation] = {}
+            for do in drv_outputs:
+                try:
+                    resp = await goal.ctx.store.execute(QueryRealisationRequest(drv_output=do))
+                    for r in resp.realisations:
+                        local_realisations[do] = r
+                except Exception:
+                    pass
+
+            if local_realisations:
+                for realisation in local_realisations.values():
+                    await goal.ctx.store.execute(RegisterDrvOutputRequest(realisation=realisation))
+                produced_paths: set[StorePath] = set()
+                for realisation in local_realisations.values():
+                    if out_path := realisation.out_path:
+                        produced_paths.add(out_path.with_store_prefix())
+                if produced_paths:
+                    log.info("ca_local_resolved", produced_paths=produced_paths)
+                    goal.result = GoalResult(
+                        path=goal.derived_path,
+                        result=BuildResult(status=BuildResultStatus.ALREADY_VALID),
+                        produced_paths=produced_paths,
+                    )
+                    return
+
+            # Fall back to checking substituters
             realisations = await goal.ctx.substitution_manager.query_realisations(drv_outputs)
             if realisations:
                 for realisation in realisations.values():
@@ -115,6 +140,7 @@ class CADerivationHandler(GoalHandler):
             "building_ca",
             derivation=goal.derived_path.drv_path,
             input_count=len(input_srcs),
+            input_srcs=input_srcs,
         )
         response = await goal.ctx.store.execute(
             BuildDerivationRequest(
