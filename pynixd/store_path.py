@@ -166,7 +166,9 @@ class DrvOutput:
                 )
             if value:
                 id_hash, self._output_name = value.split("!", 1)
-                self._hash_algo, self._hash_value = id_hash.split(":", 1)
+                # algo can have colons (e.g. "r:sha256"), so split from right
+                *algo_parts, self._hash_value = id_hash.split(":")
+                self._hash_algo = ":".join(algo_parts)
             else:
                 self._hash_algo = ""
                 self._hash_value = ""

@@ -50,6 +50,15 @@ if TYPE_CHECKING:
     from .types.aliases import OutputMap, StorePathSet
 
 
+# Recursive type for input drv nodes in unparse.
+# (output_names, child_map, is_dynamic) where:
+# - output_names: output names referenced from this input
+# - child_map: {output_name: (nested_names, child_map, is_dynamic)} for dynamic deps
+# - is_dynamic: True if this entry was in DrvWithVersion dynamic format,
+#   even when child_map is empty (``([], [])`` vs simple ``[]``)
+type _DrvInputNode = tuple[list[str], dict[str, "_DrvInputNode"], bool]
+
+
 class NixDerivationOutputShow(TypedDict, total=False):
     """Output entry in `nix derivation show` JSON."""
 
@@ -193,94 +202,28 @@ class Derivation:
         return {drv_path_str: inner}
 
     def serialize(self) -> str:
-        """Serialize to ATerm format (the on-disk .drv representation).
+        """Serialize to ATerm format (delegates to :meth:`unparse`).
 
         Returns a string in either ``Derive(...)`` or
         ``DrvWithVersion("xp-dyn-drv", ...)`` format.
         """
-        if self.is_dynamic:
-            return self._serialize_dynamic()
-        return self._serialize_traditional()
+        return self.unparse(maskOutputs=False, actualInputs=None)
 
-    def _serialize_traditional(self) -> str:
-        parts: list[str] = ["Derive("]
+    @staticmethod
+    def _make_store_path(
+        type_str: str,
+        hash_str: str,
+        name: str,
+        store_dir: str = "/nix/store",
+    ) -> str:
+        """Build a store path in the canonical Nix fashion.
 
-        # Serialize outputs
-        out_parts = [
-            f'("{_aterm_escape(o.name)}","{_aterm_escape(o.path)}",'
-            f'"{_aterm_escape(o.hash_algo)}","{_aterm_escape(o.hash_value)}")'
-            for o in sorted(self.outputs, key=lambda x: x.name)
-        ]
-        parts.append(f"[{','.join(out_parts)}],")
-
-        # Serialize input derivations
-        drv_parts = [
-            f'("{_aterm_escape(str(drv_path))}",[{",".join(f'"{_aterm_escape(o)}"' for o in outputs)}])'
-            for drv_path, outputs in sorted(self.input_drvs.items(), key=lambda x: str(x[0]))
-        ]
-        parts.append(f"[{','.join(drv_parts)}],")
-
-        # Serialize input sources
-        srcs = ",".join(f'"{_aterm_escape(str(p))}"' for p in sorted(str(p) for p in self.input_srcs))
-        parts.append(f"[{srcs}],")
-
-        parts.append(f'"{_aterm_escape(self.platform)}",')
-        parts.append(f'"{_aterm_escape(self.builder)}",')
-
-        args = ",".join(f'"{_aterm_escape(a)}"' for a in self.args)
-        parts.append(f"[{args}],")
-
-        env_parts = [f'("{_aterm_escape(k)}","{_aterm_escape(v)}")' for k, v in sorted(self.env.items())]
-        parts.append(f"[{','.join(env_parts)}]")
-
-        parts.append(")")
-        return "".join(parts)
-
-    def _serialize_dynamic(self) -> str:
-        parts: list[str] = ['DrvWithVersion("xp-dyn-drv",']
-
-        # outputs (same as traditional)
-        out_parts = [
-            f'("{_aterm_escape(o.name)}","{_aterm_escape(o.path)}",'
-            f'"{_aterm_escape(o.hash_algo)}","{_aterm_escape(o.hash_value)}")'
-            for o in sorted(self.outputs, key=lambda x: x.name)
-        ]
-        parts.append(f"[{','.join(out_parts)}],")
-
-        # input_drvs — mixed simple and dynamic entries
-        def _serialize_drv_entry(drv_path: StorePath) -> str:
-            outputs = self.input_drvs.get(drv_path, [])
-            dynamic = self.dynamic_input_drvs.get(drv_path)
-            out_list = ",".join(f'"{_aterm_escape(o)}"' for o in outputs)
-
-            if dynamic is not None:
-                nested_parts = [
-                    f'("{_aterm_escape(nested_name)}",[{",".join(f'"{_aterm_escape(d)}"' for d in nested_deps)}])'
-                    for nested_name, nested_deps in sorted(dynamic.items())
-                ]
-                dynamic_out_names = ",".join(f'"{_aterm_escape(k)}"' for k in sorted(dynamic.keys()))
-                return f'("{_aterm_escape(str(drv_path))}",([{dynamic_out_names}],[{",".join(nested_parts)}]))'
-            return f'("{_aterm_escape(str(drv_path))}",[{out_list}])'
-
-        all_drv_paths = sorted(set(self.input_drvs) | set(self.dynamic_input_drvs), key=str)
-        drv_parts = [_serialize_drv_entry(drv_path) for drv_path in all_drv_paths]
-        parts.append(f"[{','.join(drv_parts)}],")
-
-        # input_srcs
-        srcs = ",".join(f'"{_aterm_escape(str(p))}"' for p in sorted(str(p) for p in self.input_srcs))
-        parts.append(f"[{srcs}],")
-
-        parts.append(f'"{_aterm_escape(self.platform)}",')
-        parts.append(f'"{_aterm_escape(self.builder)}",')
-
-        args = ",".join(f'"{_aterm_escape(a)}"' for a in self.args)
-        parts.append(f"[{args}],")
-
-        env_parts = [f'("{_aterm_escape(k)}","{_aterm_escape(v)}")' for k, v in sorted(self.env.items())]
-        parts.append(f"[{','.join(env_parts)}]")
-
-        parts.append(")")
-        return "".join(parts)
+        Computes ``sha256(type + ":" + hash + ":" + storeDir + ":" + name)``,
+        compresses to 20 bytes, and formats as ``<hash>-<name>``.
+        """
+        digest = hashlib.sha256(f"{type_str}:{hash_str}:{store_dir}:{name}".encode()).digest()
+        compressed = compress_hash(digest, 20)
+        return f"{store_dir}/{nix32_encode(compressed)}-{name}"
 
     def compute_storepath(self, store_dir: Path | str = Path("/nix/store")) -> Path:
         """Compute the store path of this .drv file itself.
@@ -297,7 +240,7 @@ class Derivation:
             storePath = compress(digest, 20).toBase32 + "-" + name
         """
         store_dir = Path(store_dir)
-        raw = self.serialize().encode()
+        raw = self.unparse(maskOutputs=False).encode()
         content_hash = hashlib.sha256(raw).hexdigest()
 
         drv_name = self.env.get("name", "unknown")
@@ -310,14 +253,242 @@ class Derivation:
         for p in sorted(self.input_srcs, key=str):
             type_str += ":" + str(p)
 
-        # Hash string with sha256: prefix (matching Hash::to_string(Base16, true))
         hash_str = f"sha256:{content_hash}"
+        return Path(self._make_store_path(type_str, hash_str, name, str(store_dir)))
 
-        s = f"{type_str}:{hash_str}:{store_dir}:{name}"
-        digest = hashlib.sha256(s.encode()).digest()
-        compressed = compress_hash(digest, 20)
-        result = f"{store_dir}/{nix32_encode(compressed)}-{name}"
-        return Path(result)
+    @staticmethod
+    def _print_unquoted_string(s: str) -> str:
+        """Wrap in quotes without escaping (like C++ printUnquotedString)."""
+        return f'"{s}"'
+
+    @staticmethod
+    def _print_unquoted_strings(items: list[str]) -> str:
+        """ATerm list of unquoted strings (like C++ printUnquotedStrings)."""
+        return "[" + ",".join(f'"{item}"' for item in items) + "]"
+
+    def _has_dynamic_drv_dep(self) -> bool:
+        """Check if this derivation depends on outputs of dynamic derivations.
+
+        Corresponds to the C++ hasDynamicDrvDep helper.
+        """
+        return bool(self.dynamic_input_drvs)
+
+    @staticmethod
+    def _format_output_hash_algo(o: DrvOutput) -> str:
+        """Return the ATerm hash_algo string for a DrvOutput.
+
+        ``DrvOutput.hash_algo`` preserves the method prefix (e.g.
+        ``"r:sha256"``) so we pass it through as-is.
+
+        Returns the ATerm field value (e.g. ``"r:sha256"``, ``"sha256"``,
+        or ``""``).
+        """
+        return o.hash_algo
+
+    def _unparse_derived_path_node(self, node: _DrvInputNode) -> str:
+        """Serialize a derived path map node (like C++ unparseDerivedPathMapNode).
+
+        Produces the part after the path/name within an input drv entry.
+        Simple: ``,[\"out\"]``
+        Dynamic: ``,([\"out\"],[(\"a\",[...]),(\"b\",[...])])``
+
+        The leading comma separates from the preceding path string.
+        """
+        output_names, child_map, is_dynamic = node
+        if not child_map and not is_dynamic:
+            return "," + self._print_unquoted_strings(output_names)
+        # Dynamic entry wraps output names and child map
+        inner = self._print_unquoted_strings(output_names)
+        child_parts = []
+        for out_name, child_node in sorted(child_map.items()):
+            child_parts.append(
+                "(" + self._print_unquoted_string(out_name) + self._unparse_derived_path_node(child_node) + ")"
+            )
+        inner += ",[" + ",".join(child_parts) + "]"
+        return ",(" + inner + ")"
+
+    def unparse(self, maskOutputs: bool = False, actualInputs: dict[str, _DrvInputNode] | None = None) -> str:  # noqa: N803
+        """Serialize to ATerm format, matching C++ ``Derivation::unparse``.
+
+        Uses ``Derive(...)`` format when possible (backwards compatible),
+        and ``DrvWithVersion(\"xp-dyn-drv\", ...)`` format when the
+        derivation has dynamic input drv dependencies.
+
+        Args:
+            maskOutputs: If True, output paths are masked (empty string)
+                in both the output list and environment variables. This
+                is used for ``hashDerivationModulo``.
+            actualInputs: If provided, replaces the input drvs entirely.
+                Keys are already-string identifiers (e.g., hash modulo
+                values). Values are ``(output_names, child_map)`` tuples
+                matching the ``_DrvInputNode`` type.
+
+        Returns:
+            ATerm string representation of the derivation.
+        """
+        parts: list[str] = []
+
+        # Choose format: if actualInputs is provided, check if any node has
+        # dynamic deps (matching C++ logic where actualInputs can also trigger
+        # the dynamic format); otherwise fall back to self.dynamic_input_drvs.
+        if actualInputs is not None:
+            has_dynamic = any(child_map or is_dyn for _, child_map, is_dyn in actualInputs.values())
+        else:
+            has_dynamic = self._has_dynamic_drv_dep()
+        if has_dynamic:
+            parts.append("DrvWithVersion(")
+            parts.append(self._print_unquoted_string("xp-dyn-drv"))
+            parts.append(",")
+        else:
+            parts.append("Derive(")
+
+        # --- Outputs ---
+        parts.append("[")
+        first = True
+        for o in sorted(self.outputs, key=lambda x: x.name):
+            if first:
+                first = False
+            else:
+                parts.append(",")
+            parts.append("(")
+            parts.append(self._print_unquoted_string(o.name))
+            parts.append(",")
+            parts.append(self._print_unquoted_string("" if maskOutputs else o.path))
+            parts.append(",")
+            parts.append(self._print_unquoted_string(self._format_output_hash_algo(o)))
+            parts.append(",")
+            parts.append(self._print_unquoted_string(o.hash_value))
+            parts.append(")")
+        parts.append("],")
+
+        # --- Input derivations ---
+        parts.append("[")
+        first = True
+        if actualInputs is not None:
+            for key, node in sorted(actualInputs.items()):
+                if first:
+                    first = False
+                else:
+                    parts.append(",")
+                parts.append("(")
+                parts.append(self._print_unquoted_string(key))
+                parts.append(self._unparse_derived_path_node(node))
+                parts.append(")")
+        else:
+            # Merge simple and dynamic input drvs
+            all_paths = set(self.input_drvs) | set(self.dynamic_input_drvs)
+            for drv_path in sorted(all_paths, key=str):
+                if first:
+                    first = False
+                else:
+                    parts.append(",")
+                parts.append("(")
+                parts.append(self._print_unquoted_string(str(drv_path)))
+                # Build node from both simple and dynamic entries
+                outputs = self.input_drvs.get(drv_path, [])
+                dynamic = self.dynamic_input_drvs.get(drv_path, {})
+                child_map: dict[str, tuple[list[str], dict]] = {}
+                for out_name, nested_deps in dynamic.items():
+                    # Current model: one level of nesting
+                    child_map[out_name] = (nested_deps, {})
+                is_dyn = drv_path in self.dynamic_input_drvs
+                node: _DrvInputNode = (outputs, child_map, is_dyn)
+                parts.append(self._unparse_derived_path_node(node))
+                parts.append(")")
+        parts.append("],")
+
+        # --- Input sources ---
+        srcs = sorted(str(p) for p in self.input_srcs)
+        parts.append(self._print_unquoted_strings(srcs))
+        parts.append(",")
+
+        # --- Platform (unquoted - simple identifier) ---
+        parts.append(self._print_unquoted_string(self.platform))
+        parts.append(",")
+
+        # --- Builder (needs full ATerm escaping) ---
+        parts.append(f'"{_aterm_escape(self.builder)}"')
+        parts.append(",")
+
+        # --- Arguments (needs full ATerm escaping) ---
+        parts.append("[")
+        first = True
+        for a in self.args:
+            if first:
+                first = False
+            else:
+                parts.append(",")
+            parts.append(f'"{_aterm_escape(a)}"')
+        parts.append("],")
+
+        # --- Environment ---
+        parts.append("[")
+        first = True
+        output_names = {o.name for o in self.outputs}
+        for k, v in sorted(self.env.items()):
+            if first:
+                first = False
+            else:
+                parts.append(",")
+            parts.append("(")
+            parts.append(f'"{_aterm_escape(k)}"')
+            parts.append(",")
+            if maskOutputs and k in output_names:
+                parts.append('""')
+            else:
+                parts.append(f'"{_aterm_escape(v)}"')
+            parts.append(")")
+        parts.append("])")
+
+        return "".join(parts)
+
+    def hash_derivation_modulo(
+        self,
+        mask_outputs: bool = True,
+        input_drv_hashes: dict[str, list[str]] | None = None,
+    ) -> dict[str, str]:
+        """Compute ``hashDerivationModulo``, matching C++ behaviour.
+
+        For **fixed-output** derivations (every output has a non-empty
+        hash_value and hash_algo), each output gets its own hash computed
+        as SHA256 of ``"fixed:out:<method>:<hash>:<path>"``.
+
+        For **all other** derivations (floating, deferred,
+        input-addressed), the derivation is serialised via
+        :meth:`unparse` with ``maskOutputs`` and the supplied
+        ``input_drv_hashes``, and a single SHA256 hash is assigned to
+        every output.
+
+        Args:
+            mask_outputs: Forwarded to :meth:`unparse`.  When ``True``,
+                output paths are masked in the ATerm, which is required
+                for ``hashDerivationModulo``.
+            input_drv_hashes: ``{hex_hash: [output_name, ...]}`` — the
+                hashes of each referenced output from input derivations.
+                When the derivation has no input drvs this can be
+                ``None`` (or empty).
+
+        Returns:
+            ``{output_name: hex_hash}`` — one SHA256 hex hash per
+            derivation output.
+        """
+        # Fixed-output derivations: each output gets its own hash
+        if all(o.hash_algo and o.hash_value for o in self.outputs):
+            result: dict[str, str] = {}
+            for o in self.outputs:
+                method_algo = self._format_output_hash_algo(o)
+                content = f"fixed:out:{method_algo}:{o.hash_value}:{o.path}"
+                result[o.name] = hashlib.sha256(content.encode()).hexdigest()
+            return result
+
+        # Floating / deferred / input-addressed: unparse + single hash
+        actual: dict[str, _DrvInputNode] | None = None
+        if input_drv_hashes is not None:
+            actual = {h: (outs, {}, False) for h, outs in input_drv_hashes.items()}
+
+        aterm = self.unparse(maskOutputs=mask_outputs, actualInputs=actual)
+        h = hashlib.sha256(aterm.encode()).hexdigest()
+        return {o.name: h for o in self.outputs}
 
 
 _STRING_CHUNK = re.compile(r'([^"\\]*)(["\\])')
