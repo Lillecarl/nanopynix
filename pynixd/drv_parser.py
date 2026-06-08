@@ -59,6 +59,53 @@ if TYPE_CHECKING:
 type _DrvInputNode = tuple[list[str], dict[str, "_DrvInputNode"], bool]
 
 
+def _child_map_to_drv_node(node: ChildMapNode, prefix_outputs: list[str] | None = None) -> _DrvInputNode:
+    """Convert a ChildMapNode to _DrvInputNode for serialization.
+
+    Combines ``prefix_outputs`` (flat outputs from ``input_drvs``) with
+    the node's own outputs and recursively converts children.
+    """
+    all_outputs = (prefix_outputs or []) + node.outputs
+    children = {name: _child_map_to_drv_node(child) for name, child in node.children.items()}
+    return (all_outputs, children, True)
+
+
+@dataclass
+class ChildMapNode:
+    """A node in the recursive DerivedPathMapNode tree.
+
+    Maps to the ATerm format: ``([flat_outs],[(output_name, child_node), ...])``
+
+    Each node has:
+    - outputs: flat output names at this level (leaf outputs).
+    - children: nested {output_name: ChildMapNode} map for deeper levels.
+    """
+
+    outputs: list[str] = field(default_factory=list)
+    children: dict[str, ChildMapNode] = field(default_factory=dict)
+
+    def is_leaf(self) -> bool:
+        """True if this node has no further nesting."""
+        return not self.children
+
+    def direct_outputs(self) -> list[str]:
+        """Return the output names referenced at this level.
+
+        This includes both flat outputs and child keys, since both
+        represent output references at this level of nesting.
+        """
+        result: list[str] = list(self.outputs)
+        result.extend(self.children)
+        return result
+
+    def to_dict(self) -> dict:
+        """Serialize to JSON-compatible dict."""
+        result: dict = {"outputs": self.outputs}
+        if self.children:
+            result["dynamicOutputs"] = {name: child.to_dict() for name, child in self.children.items()}
+        return result
+
+
 class NixDerivationOutputShow(TypedDict, total=False):
     """Output entry in `nix derivation show` JSON."""
 
@@ -70,7 +117,7 @@ class NixDerivationOutputShow(TypedDict, total=False):
 class NixInputDrvShow(TypedDict):
     """Input derivation entry in `nix derivation show` JSON."""
 
-    dynamicOutputs: dict[str, dict[str, list[str]]]
+    dynamicOutputs: dict
     outputs: list[str]
 
 
@@ -113,12 +160,10 @@ class Derivation:
     is_dynamic: bool = False
     """True if DrvWithVersion("xp-dyn-drv",...) format (dynamic derivations)."""
 
-    dynamic_input_drvs: dict[StorePath, dict[str, list[str]]] = field(
+    dynamic_input_drvs: dict[StorePath, ChildMapNode] = field(
         default_factory=dict,
     )
-    # dynamic_input_drvs: {drv_path: {output_name: [nested_output_name, ...], ...}}
-    # Only present for DrvWithVersion format where outputs depend on
-    # other dynamic outputs
+    """{drv_path: ChildMapNode} for DrvWithVersion dynamic inputs."""
 
     @property
     def required_system_features(self) -> set[str]:
@@ -175,10 +220,7 @@ class Derivation:
         all_drv_paths = set(self.input_drvs) | set(self.dynamic_input_drvs)
         for dp in sorted(all_drv_paths):
             entry_outputs = self.input_drvs.get(dp, [])
-            dynamic = self.dynamic_input_drvs.get(dp, {})
-            dynamic_out: dict[str, dict[str, list[str]]] = {}
-            for out_name, nested in dynamic.items():
-                dynamic_out[out_name] = {"outputs": nested}
+            dynamic_out = self.dynamic_input_drvs[dp].to_dict() if dp in self.dynamic_input_drvs else {}
             input_drvs[str(dp)] = {
                 "dynamicOutputs": dynamic_out,
                 "outputs": entry_outputs,
@@ -386,13 +428,13 @@ class Derivation:
                 parts.append(self._print_unquoted_string(str(drv_path)))
                 # Build node from both simple and dynamic entries
                 outputs = self.input_drvs.get(drv_path, [])
-                dynamic = self.dynamic_input_drvs.get(drv_path, {})
-                child_map: dict[str, tuple[list[str], dict]] = {}
-                for out_name, nested_deps in dynamic.items():
-                    # Current model: one level of nesting
-                    child_map[out_name] = (nested_deps, {})
-                is_dyn = drv_path in self.dynamic_input_drvs
-                node: _DrvInputNode = (outputs, child_map, is_dyn)
+                if drv_path in self.dynamic_input_drvs:
+                    node = _child_map_to_drv_node(
+                        self.dynamic_input_drvs[drv_path],
+                        prefix_outputs=outputs,
+                    )
+                else:
+                    node = (outputs, {}, False)
                 parts.append(self._unparse_derived_path_node(node))
                 parts.append(")")
         parts.append("],")
@@ -623,20 +665,72 @@ class _Parser:
         self._expect("]")
         return result
 
+    def _parse_child_value(self) -> ChildMapNode:
+        """Parse a child value in a DerivedPathMapNode.
+
+        A child value can be either:
+        - Leaf: ``[out1,out2]`` — flat output names
+        - Nested: ``([flat_outs],[(name,child),...])`` — recursive node
+        """
+        if self._peek() == "[":
+            # Leaf: flat list of output names
+            outputs = self.parse_string_list()
+            return ChildMapNode(outputs=outputs)
+        elif self._peek() == "(":
+            # Nested: recursive DerivedPathMapNode
+            return self._parse_child_map_node()
+        else:
+            raise ValueError(
+                f"Expected '[' or '(' at pos {self._pos}, got {self._peek()!r}",
+            )
+
+    def _parse_child_map_node(self) -> ChildMapNode:
+        """Parse a ``DerivedPathMapNode`` recursively.
+
+        Wire format: ``([flat_outs],[(output_name, child_value), ...])``
+        where child_value is either a flat list ``[out]`` or a nested
+        ``DerivedPathMapNode`` ``([outs],[children])``.
+        """
+        self._advance()  # '('
+        self._skip_ws()
+        outputs = self.parse_string_list()
+        self._expect(",")
+        self._expect("[")  # Start of children list
+        children: dict[str, ChildMapNode] = {}
+        self._skip_ws()
+        while self._peek() != "]":
+            if children:
+                self._expect(",")
+            self._skip_ws()
+            self._expect("(")
+            child_name = self.parse_string()
+            self._expect(",")
+            # Parse child value (leaf or nested)
+            child_node = self._parse_child_value()
+            children[child_name] = child_node
+            self._expect(")")
+            self._skip_ws()
+        self._expect("]")  # End of children list
+        self._expect(")")  # End of this node
+        return ChildMapNode(outputs=outputs, children=children)
+
     def parse_input_drvs_dynamic(
         self,
-    ) -> tuple[dict[StorePath, list[str]], dict[StorePath, dict[str, list[str]]]]:
-        """Parse dynamic input drvs format.
+    ) -> tuple[dict[StorePath, list[str]], dict[StorePath, ChildMapNode]]:
+        """Parse dynamic input drvs format (DrvWithVersion).
+
+        Each input drv is either:
+        - Simple: ``(drvPath,[out1,out2])`` — non-dynamic dependency
+        - Dynamic: ``(drvPath,([flat_outs],[(name,child),...]))`` — recursive
 
         Returns:
             (simple_map, dynamic_map) where:
             - simple_map: {drv_path: [output_name, ...]} for non-dynamic inputs
-            - dynamic_map: {drv_path: {output_name: [nested_output_name, ...], ...}}
-              for inputs that depend on dynamic outputs
+            - dynamic_map: {drv_path: ChildMapNode} for dynamic inputs
         """
         self._expect("[")
         simple: dict[StorePath, list[str]] = {}
-        dynamic: dict[StorePath, dict[str, list[str]]] = {}
+        dynamic: dict[StorePath, ChildMapNode] = {}
         self._skip_ws()
         while self._peek() != "]":
             if simple or dynamic:
@@ -652,29 +746,9 @@ class _Parser:
                 outputs = self.parse_string_list()
                 simple[drv_path] = outputs
             elif self._peek() == "(":
-                # Dynamic: nested structure
-                self._advance()  # '('
-                # First part: output names
-                self.parse_string_list()
-                self._expect(",")
-                self._expect("[")  # Start of nested structure
-                nested: dict[str, list[str]] = {}
-                self._skip_ws()
-                while self._peek() != "]":
-                    if nested:
-                        self._expect(",")
-                    self._skip_ws()
-                    self._expect("(")
-                    nested_output_name = self.parse_string()
-                    self._expect(",")
-                    # Recursive nested for deeper dynamic deps
-                    nested_deps = self.parse_string_list()
-                    nested[nested_output_name] = nested_deps
-                    self._expect(")")
-                    self._skip_ws()
-                self._expect("]")  # End of nested structure
-                self._expect(")")  # End of dynamic entry
-                dynamic[drv_path] = nested
+                # Dynamic: recursive ChildMapNode
+                node = self._parse_child_map_node()
+                dynamic[drv_path] = node
             else:
                 raise ValueError(
                     f"Expected '[' or '(' at pos {self._pos}, got {self._peek()!r}",

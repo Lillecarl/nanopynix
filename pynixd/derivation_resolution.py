@@ -25,7 +25,9 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING
 
-from .drv_parser import _aterm_escape
+import structlog
+
+from .drv_parser import ChildMapNode, _aterm_escape
 from .operations.base import BasicDerivation, DerivationOutput
 from .store_path import StorePath
 from .utils import nix32_encode
@@ -33,6 +35,8 @@ from .utils import nix32_encode
 if TYPE_CHECKING:
     from .drv_parser import Derivation
     from .types.aliases import StorePathSet
+
+log = structlog.get_logger(__name__)
 
 STORE_DIR = "/nix/store"
 
@@ -312,10 +316,128 @@ def resolve_derivation(
     return _resolve_deferred_outputs(resolved, drv_name)
 
 
+def _collect_leaf_outputs(node: ChildMapNode) -> list[str]:
+    """Collect all leaf output names from a ChildMapNode tree."""
+    if node.outputs:
+        return list(node.outputs)
+    for child in node.children.values():
+        leaf = _collect_leaf_outputs(child)
+        if leaf:
+            return leaf
+    return []
+
+
+# Type alias: (drv_path, output_name) -> resolved store path
+type DynamicPathMap = dict[tuple[StorePath | str, ...], StorePath]
+
+
+def _resolve_dynamic_node(
+    drv_path: StorePath,
+    node: ChildMapNode,
+    path_map: DynamicPathMap,
+    parent_hash: bytes | None,
+    rewrites: dict[str, str],
+    new_input_srcs: set[StorePath],
+) -> None:
+    """Recursively resolve placeholders for a ChildMapNode tree.
+
+    Walks the tree depth-first, computing placeholders at each level.
+    At the root (parent_hash is None), the placeholder is
+    ``downstream_placeholder`` (level-1). Deeper levels use
+    ``downstream_placeholder_unknown_derivation``.
+
+    All non-root placeholders resolve to the same leaf output path
+    (looked up as ``(drv_path, leaf_output_name)``), because the
+    DynamicBuildGoal chain collapses intermediate levels into the
+    final output.
+    """
+    hash_part = str(drv_path).rsplit("/", 1)[-1].split("-", 1)[0]
+    dyn_drv_name = _nix_drv_name(drv_path)
+
+    for child_name, child_node in node.children.items():
+        # Compute this level's hash and placeholder
+        if parent_hash is None:
+            # Level 1: unknownCaOutput placeholder
+            clear = f"nix-upstream-output:{hash_part}:{_output_path_name(dyn_drv_name, child_name)}"
+            this_hash = hashlib.sha256(clear.encode()).digest()
+            placeholder_prefix = "/" + nix32_encode(this_hash)
+        else:
+            # Level 2+: unknownDerivation placeholder
+            this_hash = downstream_placeholder_unknown_derivation_raw(
+                parent_hash,
+                child_name,
+            )
+            placeholder_prefix = downstream_placeholder_unknown_derivation(
+                parent_hash,
+                child_name,
+            )
+
+        # Resolve leaf outputs reachable via this child
+        # All leaf outputs at any depth resolve to the final output path
+        for leaf_out in _collect_leaf_outputs(child_node):
+            if parent_hash is None:
+                # Level 1 chain: placeholder = downstream_placeholder
+                placeholder = downstream_placeholder(drv_path, leaf_out)
+            else:
+                # Level 2+ chain: placeholder = unknownDerivation(parent_hash, leaf_out)
+                placeholder = placeholder_prefix
+            actual_path = path_map.get((drv_path, leaf_out))
+            if actual_path is not None:
+                log.debug(
+                    "resolve_dyn_rewrite",
+                    drv_path=str(drv_path),
+                    leaf_out=leaf_out,
+                    placeholder=placeholder,
+                    actual_path=str(actual_path),
+                )
+                rewrites[placeholder] = str(actual_path)
+                new_input_srcs.add(StorePath(str(actual_path)))
+            else:
+                log.debug(
+                    "resolve_dyn_no_path",
+                    drv_path=str(drv_path),
+                    leaf_out=leaf_out,
+                    path_key=f"({drv_path}, {leaf_out})",
+                )
+
+        # Recurse into child for deeper levels
+        _resolve_dynamic_node(
+            drv_path,
+            child_node,
+            path_map,
+            this_hash,
+            rewrites,
+            new_input_srcs,
+        )
+
+    # Handle flat outputs at this level (leaf or root with no children)
+    if node.outputs and not node.children:
+        for leaf_out in node.outputs:
+            if parent_hash is None:
+                placeholder = downstream_placeholder(drv_path, leaf_out)
+            else:
+                placeholder = downstream_placeholder_unknown_derivation(
+                    parent_hash,
+                    leaf_out,
+                )
+            actual_path = path_map.get((drv_path, leaf_out))
+            log.debug(
+                "resolve_dyn_flat",
+                drv_path=str(drv_path),
+                leaf_out=leaf_out,
+                placeholder=placeholder,
+                path_found=actual_path is not None,
+                parent_hash=parent_hash is not None,
+            )
+            if actual_path is not None:
+                rewrites[placeholder] = str(actual_path)
+                new_input_srcs.add(StorePath(str(actual_path)))
+
+
 def resolve_dynamic_derivation(
     drv: Derivation,
     drv_path: StorePath,
-    dynamic_output_paths: dict[tuple[StorePath, str, str], StorePath],
+    dynamic_output_paths: DynamicPathMap,
 ) -> BasicDerivation:
     """Resolve a dynamic (DrvWithVersion) wrapper derivation.
 
@@ -325,11 +447,11 @@ def resolve_dynamic_derivation(
     unknownDerivation chain.
 
     Args:
-        drv: The parsed derivation (with dynamic_input_drvs)
+        drv: The parsed derivation (with dynamic_input_drvs as ChildMapNode)
         drv_path: The .drv store path (for computing output names)
-        dynamic_output_paths: {(outer_drv, outer_output, inner_output): actual_path}
-            Maps each nested dynamic output reference to its resolved store path.
-            E.g., {(producingDrv, "out", "out"): StorePath("/nix/store/...-hello")}
+        dynamic_output_paths: {(drv_path, *chain): actual_path}
+            Maps each chain element to its resolved store path.
+            E.g., {(producer,): drv_path, (producer, "out"): target_path}
 
     Returns:
         A resolved BasicDerivation with placeholders rewritten and
@@ -344,46 +466,28 @@ def resolve_dynamic_derivation(
     for input_drv_path, output_names in drv.input_drvs.items():
         for output_name in output_names:
             placeholder = downstream_placeholder(input_drv_path, output_name)
-            actual_path = dynamic_output_paths.get((input_drv_path, "", output_name))
+            actual_path = dynamic_output_paths.get((input_drv_path, output_name))
             if actual_path is None:
                 raise ValueError(f"No resolved path for {input_drv_path}!{output_name}")
             rewrites[placeholder] = str(actual_path)
             new_input_srcs.add(StorePath(str(actual_path)))
 
-    # Handle dynamic_input_drvs: {drv_path: {outer_output: [inner_outputs]}}
-    for dyn_drv_path, output_deps in drv.dynamic_input_drvs.items():
-        hash_part = str(dyn_drv_path).rsplit("/", 1)[-1].split("-", 1)[0]
-        dyn_drv_name = _nix_drv_name(dyn_drv_path)
+    # Handle dynamic_input_drvs: recursive ChildMapNode
+    for dyn_drv_path, node in drv.dynamic_input_drvs.items():
+        _resolve_dynamic_node(
+            dyn_drv_path,
+            node,
+            dynamic_output_paths,
+            parent_hash=None,
+            rewrites=rewrites,
+            new_input_srcs=new_input_srcs,
+        )
 
-        for outer_output, inner_outputs in output_deps.items():
-            # Compute level-1 placeholder hash (unknownCaOutput)
-            outer_clear = f"nix-upstream-output:{hash_part}:{_output_path_name(dyn_drv_name, outer_output)}"
-            outer_hash = hashlib.sha256(outer_clear.encode()).digest()
-            outer_placeholder = "/" + nix32_encode(outer_hash)
-
-            # The level-1 output is the .drv itself — add to input_srcs if known
-            level1_path = dynamic_output_paths.get(
-                (dyn_drv_path, outer_output, outer_output),
-            )
-            if level1_path is not None:
-                rewrites[outer_placeholder] = str(level1_path)
-                new_input_srcs.add(StorePath(str(level1_path)))
-
-            # Compute level-2+ placeholders (unknownDerivation)
-            for inner_output in inner_outputs:
-                inner_placeholder = downstream_placeholder_unknown_derivation(
-                    outer_hash,
-                    inner_output,
-                )
-                actual_path = dynamic_output_paths.get(
-                    (dyn_drv_path, outer_output, inner_output),
-                )
-                if actual_path is None:
-                    raise ValueError(
-                        f"No resolved path for {dyn_drv_path}^{outer_output}^{inner_output}",
-                    )
-                rewrites[inner_placeholder] = str(actual_path)
-                new_input_srcs.add(StorePath(str(actual_path)))
+    log.debug(
+        "resolve_dyn_final",
+        rewrites_count=len(rewrites),
+        rewrites={k[:50]: v for k, v in rewrites.items()},
+    )
 
     resolved = BasicDerivation(
         outputs={

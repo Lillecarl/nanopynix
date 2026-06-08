@@ -23,7 +23,7 @@ import hashlib
 import structlog
 
 from ..derived_path import DerivedPath
-from ..drv_parser import Derivation, DrvOutput, _aterm_escape, read_drv_file
+from ..drv_parser import ChildMapNode, Derivation, DrvOutput, _aterm_escape, read_drv_file
 from ..store_path import StorePath
 from ..types import DerivationOutput, OutputKind
 from ..types.build import BuildResult, BuildResultStatus
@@ -33,6 +33,35 @@ from .goal import EndGoal, Goal, GoalContext, GoalKey, GoalResult, make_build_go
 log = structlog.get_logger(__name__)
 
 
+# ── ChildMapNode helpers ───────────────────────────────────────────
+
+
+def _child_map_to_paths(drv_path: StorePath, node: ChildMapNode) -> list[DerivedPath]:
+    """Walk a ChildMapNode tree and yield a DerivedPath for each leaf.
+
+    Accumulates the chain of output names along the path so that
+    DynamicBuildGoal receives the full chain (e.g.
+    ``producer!out!out!out!out!out``).
+    """
+    from ..derived_path import OutputsNames
+
+    results: list[DerivedPath] = []
+
+    def _walk(n: ChildMapNode, prefix_chain: tuple[str, ...]) -> None:
+        for child_name, child_node in n.children.items():
+            _walk(child_node, (*prefix_chain, child_name))
+        if n.outputs:
+            results.extend(
+                DerivedPath._from_components(
+                    drv_path=drv_path,
+                    chain=prefix_chain,
+                    outputs=OutputsNames(frozenset({leaf_out})),
+                )
+                for leaf_out in n.outputs
+            )
+
+    _walk(node, ())
+    return results
 
 
 # ── ResolutionGoal ─────────────────────────────────────────────────
@@ -119,16 +148,14 @@ class ResolutionGoal(Goal):
 
         # ── Known-path outputs — no resolution needed ─────────────
         #
-        # ResolutionGoal never sets ``produced_paths`` to its own resolved
-        # output — those paths are the derivation's *outputs*, not inputs.
-        # If they leaked into a parent's ``input_srcs`` via
-        # ``_do_build()``\'s children iteration, the daemon would reject
-        # them as non-existent inputs.
-        #
-        # FUTURE: expressing richer goal metadata (e.g. which derivation
-        # produced each path) would let the parent filter instead of
-        # relying on this convention.
+        # For derivations with dynamic_input_drvs, we must still create
+        # children even for known-path outputs, because the placeholder
+        # rewriting in ``_do_build_with_derivation`` needs the resolved
+        # paths from dynamic deps.
         if dop.kind in (OutputKind.INPUT_ADDRESSED, OutputKind.CA_FIXED):
+            has_dynamic = bool(derivation.dynamic_input_drvs)
+            if has_dynamic:
+                await self._resolve_dynamic_children(derivation)
             resolved = StorePath(output_obj.path)
             self.result = GoalResult(
                 path=_fake_dp(self._drv_path, self._output_name),
@@ -167,6 +194,24 @@ class ResolutionGoal(Goal):
             result=BuildResult(status=BuildResultStatus.MISC_FAILURE),
         )
 
+    # ── Dynamic children (placeholder resolution support) ───────────
+
+    async def _resolve_dynamic_children(self, derivation: Derivation) -> None:
+        """Create BuildGoal children for dynamic_input_drvs.
+
+        Even for known-path outputs, children must be created so that
+        ``_do_build_with_derivation`` can collect resolved paths for
+        placeholder rewriting.
+        """
+        for input_drv_path, node in derivation.dynamic_input_drvs.items():
+            for dp in _child_map_to_paths(input_drv_path, node):
+                child = make_build_goal(dp, self.ctx)
+                registered = self.ctx.goal_manager.register(child)
+                self.add_child(registered)
+
+        if self.children:
+            await self.execute_children()
+
     # ── Deferred resolution (hashDerivationModulo + unparsing) ─────
 
     async def _resolve_deferred(self, derivation: Derivation) -> None:
@@ -183,25 +228,11 @@ class ResolutionGoal(Goal):
                 registered = self.ctx.goal_manager.register(child)
                 self.add_child(registered)
 
-        for input_drv_path, output_deps in derivation.dynamic_input_drvs.items():
-            for outer_out, inner_outs in output_deps.items():
-                for inner_out in inner_outs:
-                    # Create a nested DerivedPath (e.g.
-                    # ``producingDrv!out!out``) so that ``make_build_goal``
-                    # creates a ``DynamicBuildGoal`` which builds the
-                    # full chain: outer → produce .drv → inner → output.
-                    from ..derived_path import OutputsNames as _ON
-
-                    child = make_build_goal(
-                        DerivedPath._from_components(
-                            drv_path=input_drv_path,
-                            chain=(outer_out,),
-                            outputs=_ON(frozenset({inner_out})),
-                        ),
-                        self.ctx,
-                    )
-                    registered = self.ctx.goal_manager.register(child)
-                    self.add_child(registered)
+        for input_drv_path, node in derivation.dynamic_input_drvs.items():
+            for dp in _child_map_to_paths(input_drv_path, node):
+                child = make_build_goal(dp, self.ctx)
+                registered = self.ctx.goal_manager.register(child)
+                self.add_child(registered)
 
         # 2. Execute children (builds all input derivation outputs)
         await self.execute_children()
@@ -263,31 +294,27 @@ class ResolutionGoal(Goal):
                 input_drv_hashes.setdefault("", []).extend(output_names)
 
         # 4b. Compute dynamic_input_drv_hashes for hashDerivationModulo.
-        #     Each dynamic input drv's entry maps outer_output → [inner_outs]
-        #     using the same modulo hash as collected above.
-        dynamic_input_drv_hashes: dict[str, dict[str, list[str]]] = {}
-        for input_drv_path, output_deps in derivation.dynamic_input_drvs.items():
+        #     Each dynamic input drv's entry maps modulo_hash → ChildMapNode.
+        dynamic_input_drv_hashes: dict[str, ChildMapNode] = {}
+        for input_drv_path, node in derivation.dynamic_input_drvs.items():
             input_key = str(input_drv_path)
             mh = child_modulo_hashes.get(input_key)
             if mh:
-                dyn_entry: dict[str, list[str]] = {}
-                for outer_out, inner_outs in output_deps.items():
-                    dyn_entry[outer_out] = list(inner_outs)
                 existing = dynamic_input_drv_hashes.get(mh)
                 if existing:
-                    existing.update(dyn_entry)
+                    # Merge: combine outputs from both nodes
+                    existing.outputs.extend(node.outputs)
+                    existing.children.update(node.children)
                 else:
-                    dynamic_input_drv_hashes[mh] = dyn_entry
+                    dynamic_input_drv_hashes[mh] = node
             else:
                 log.debug(
                     "resolve_dyn_no_modulo_hash",
                     drv_path=input_key,
                 )
-                # Use empty hash as fallback (same as the flat case)
-                dyn_entry = {}
-                for outer_out, inner_outs in output_deps.items():
-                    dyn_entry[outer_out] = list(inner_outs)
-                dynamic_input_drv_hashes.setdefault("", {}).update(dyn_entry)
+                existing = dynamic_input_drv_hashes.setdefault("", ChildMapNode())
+                existing.outputs.extend(node.outputs)
+                existing.children.update(node.children)
 
         # 5. Serialize with hashes → hash → derive output paths
         aterm = _unparse_for_hash(
@@ -352,12 +379,11 @@ class ResolutionGoal(Goal):
                 registered = self.ctx.goal_manager.register(child)
                 self.add_child(registered)
 
-        for input_drv_path, output_deps in derivation.dynamic_input_drvs.items():
-            for outer_out, inner_outs in output_deps.items():
-                for _inner_out in inner_outs:
-                    child = make_resolution_goal(input_drv_path, outer_out, self.ctx)
-                    registered = self.ctx.goal_manager.register(child)
-                    self.add_child(registered)
+        for input_drv_path, node in derivation.dynamic_input_drvs.items():
+            for outer_out in node.direct_outputs():
+                child = make_resolution_goal(input_drv_path, outer_out, self.ctx)
+                registered = self.ctx.goal_manager.register(child)
+                self.add_child(registered)
 
         await self.execute_children()
 
@@ -459,7 +485,6 @@ class ResolutionGoal(Goal):
         )
 
 
-
 def _fake_dp(drv_path: StorePath, output_name: str) -> DerivedPath:
     """Build a DerivedPath for the goal's path field."""
     from ..derived_path import OutputsNames
@@ -482,9 +507,10 @@ def _find_output(
     return None
 
 
-def _dp_from(drv_path: StorePath, output_name: str) -> "DerivedPath":
+def _dp_from(drv_path: StorePath, output_name: str) -> DerivedPath:
     """Construct a DerivedPath for (drv_path, output_name)."""
-    from ..derived_path import DerivedPath as DP, OutputsNames
+    from ..derived_path import DerivedPath as DP
+    from ..derived_path import OutputsNames
 
     return DP._from_components(
         drv_path=drv_path,
@@ -515,10 +541,32 @@ def _q(s: str) -> str:
     return f'"{_aterm_escape(s)}"'
 
 
+def _format_child_map_node(node: ChildMapNode) -> str:
+    """Serialize a ChildMapNode to ATerm for hashDerivationModulo.
+
+    Produces the children list part of a ``DerivedPathMapNode``:
+      ``[(outer_out,([flat_outs],[children,...])),...]``
+
+    Each child is serialized recursively, supporting arbitrary depth.
+    """
+    children_parts: list[str] = []
+    for child_name, child_node in sorted(node.children.items()):
+        inner = _q(child_name) + ",(" + _q_list(child_node.outputs) + ","
+        inner += _format_child_map_node(child_node)
+        inner += ")"
+        children_parts.append(f"({inner})")
+    return "[" + ",".join(children_parts) + "]"
+
+
+def _q_list(items: list[str]) -> str:
+    """Format a list of ATerm-quoted strings: ``["a","b"]``."""
+    return "[" + ",".join(_q(o) for o in items) + "]"
+
+
 def _unparse_for_hash(
     derivation: Derivation,
     input_drv_hashes: dict[str, list[str]],
-    dynamic_input_drv_hashes: dict[str, dict[str, list[str]]] | None = None,
+    dynamic_input_drv_hashes: dict[str, ChildMapNode] | None = None,
 ) -> str:
     """Serialize a Derivation to ATerm for hashDerivationModulo.
 
@@ -529,7 +577,7 @@ def _unparse_for_hash(
     For derivations with ``dynamic_input_drvs``, the nested dependency
     tree is serialized using ``DrvWithVersion`` format with
     ``DerivedPathMapNode`` children.  ``dynamic_input_drv_hashes``
-    maps modulo hash to ``{outer_output: [inner_outputs]}``.
+    maps modulo hash to ``ChildMapNode`` for recursive serialization.
 
     Mirrors the C++ ``Derivation::unparse()`` with actualInputs set.
     """
@@ -552,54 +600,43 @@ def _unparse_for_hash(
             first = False
         else:
             parts.append(",")
-        parts.append(
-            "("
-            + _q(o.name) + ","
-            + _q("") + ","
-            + _q(o.hash_algo) + ","
-            + _q(o.hash_value)
-            + ")"
-        )
+        parts.append("(" + _q(o.name) + "," + _q("") + "," + _q(o.hash_algo) + "," + _q(o.hash_value) + ")")
     parts.append("],")
 
     # --- Input derivations (replaced with modulo hashes) ---
     # Combine flat and dynamic inputs into a single map keyed by modulo hash.
-    # Each entry has (flat_output_names, {outer_out: [inner_outputs]}).
-    combined: dict[str, tuple[list[str], dict[str, list[str]]]] = {}
+    # Each entry has (flat_output_names, ChildMapNode).
+    combined: dict[str, tuple[list[str], ChildMapNode | None]] = {}
     for h, outs in input_drv_hashes.items():
-        combined[h] = (list(outs), {})
+        combined[h] = (list(outs), None)
     if dynamic_input_drv_hashes:
-        for h, deps in dynamic_input_drv_hashes.items():
+        for h, node in dynamic_input_drv_hashes.items():
             existing = combined.get(h)
             if existing is not None:
-                existing[1].update(deps)
+                flat_outs, existing_node = existing
+                if existing_node is not None:
+                    existing_node.outputs.extend(node.outputs)
+                    existing_node.children.update(node.children)
+                else:
+                    combined[h] = (flat_outs, node)
             else:
-                combined[h] = ([], dict(deps))
+                combined[h] = ([], node)
 
     parts.append("[")
     first = True
-    for h, (flat_outs, dynamic_deps) in sorted(combined.items(), key=lambda x: x[0]):
+    for h, (flat_outs, dyn_node) in sorted(combined.items(), key=lambda x: x[0]):
         if first:
             first = False
         else:
             parts.append(",")
         quoted_outs = ",".join(_q(o) for o in flat_outs)
-        if dynamic_deps:
-            # Nested: (hash,([flat_outs],[(outer_out,([inner_outs]))]))
+        if dyn_node is not None and (dyn_node.outputs or dyn_node.children):
             parts.append(f"({_q(h)},(")
             parts.append(f"[{quoted_outs}]")
-            parts.append(",[")
-            dyn_first = True
-            for outer_out, inner_outs in sorted(dynamic_deps.items()):
-                if dyn_first:
-                    dyn_first = False
-                else:
-                    parts.append(",")
-                quoted_inner = ",".join(_q(o) for o in inner_outs)
-                parts.append(f"({_q(outer_out)},([{quoted_inner}]))")
-            parts.append("]))")
+            parts.append(",")
+            parts.append(_format_child_map_node(dyn_node))
+            parts.append("))")
         else:
-            # Flat: (hash,[out1,out2])
             parts.append(f"({_q(h)},[{quoted_outs}])")
     parts.append("],")
 

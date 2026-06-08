@@ -112,6 +112,9 @@ class DynamicBuildGoal(Goal):
         if registered_remainder.result:
             self.result = registered_remainder.result
             self.result.path = dp
+            # Propagate the inner .drv path so parent DynamicBuildGoals
+            # can find it via ``_find_inner_drv``
+            self.result.produced_paths.add(inner_drv)
 
     # ── Inner .drv discovery ───────────────────────────────────────
 

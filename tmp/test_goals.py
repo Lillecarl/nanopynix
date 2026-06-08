@@ -441,6 +441,38 @@ async def test_dyn_wrapper() -> None:
         await ctx.substitution_manager.close()
 
 
+async def test_deep_dynamic() -> None:
+    """Build a derivation with 5 layers of nested outputOf.
+
+    builtins.outputOf wraps its first argument in a
+    SingleDerivedPath::Built, which can be chained arbitrarily deep.
+    The outermost wrapper's .drv has a dynamic_input_drvs entry with
+    5 levels of childMap nesting.
+
+    This exercises:
+    1. The Nix evaluator producing 5-deep DownstreamPlaceholder chain
+    2. pynixd's resolve_deferred with deep dynamic_input_drvs
+    3. The daemon resolving 5 levels of placeholder indirection
+    """
+    log.info("test_deep_dynamic", msg="starting")
+    async with TemporaryDirectory() as td:
+        store = await make_store(td)
+        ctx = await make_context(store)
+
+        drv_str = await nix_eval(td, "dyn.deepWrapper.drvPath")
+        log.info("test_deep_dynamic", drv=drv_str)
+
+        result = await build_drv(store, ctx, drv_str, "out")
+        assert result is not None, "goal returned None"
+        assert result.result.status in (0, 1, 2, 13), (
+            f"build failed: {result.result.status} {result.result.error_msg}"
+        )
+
+        log.info("test_deep_dynamic", msg="PASSED")
+        await store.close()
+        await ctx.substitution_manager.close()
+
+
 # ── main ───────────────────────────────────────────────────────────
 
 _TESTS = {
@@ -454,6 +486,7 @@ _TESTS = {
     "test_dyn_hello": test_dyn_hello,
     "test_dyn_producing_drv": test_dyn_producing_drv,
     "test_dyn_wrapper": test_dyn_wrapper,
+    "test_deep_dynamic": test_deep_dynamic,
 }
 
 

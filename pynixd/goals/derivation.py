@@ -230,35 +230,48 @@ class DerivationBuildGoal(Goal):
             has_dynamic = bool(derivation.dynamic_input_drvs)
 
             if has_dynamic:
-                # Build dynamic_output_paths: {(outer_drv, outer_out, inner_out): actual_path}
-                # The dynamic input BuildGoals are children of the ResolutionGoal,
-                # not direct children of this DerivationBuildGoal.
-                dynamic_output_paths: dict[tuple[StorePath, str, str], StorePath] = {}
+                # Build dynamic_output_paths: {(drv, *chain): actual_path}
+                # Variable-length tuple keys encode the chain depth.
+                # E.g., (producer, "out") → path for producer!out
+                from ..derivation_resolution import DynamicPathMap
+
+                dynamic_output_paths: DynamicPathMap = {}
                 for child in self.children:
                     if isinstance(child, ResolutionGoal):
                         for sub in child.children:
                             if sub.result and sub.result.resolved_outputs:
                                 for oname, outer_path in sub.result.resolved_outputs.items():
-                                    # The outer output is the .drv file itself
                                     outer_drv_path = StorePath(sub.key.path)
-                                    dynamic_output_paths[(outer_drv_path, oname, oname)] = outer_path
-                                    # Resolve inner outputs if outer is a .drv
-                                    if outer_path.is_derivation():
-                                        inner_drv = await read_drv_file(
-                                            self.ctx.store.store_path,
-                                            outer_path,
-                                        )
-                                        if inner_drv:
-                                            for inner_o in inner_drv.outputs:
-                                                if inner_o.path:
-                                                    inner_path = StorePath(inner_o.path)
-                                                    dynamic_output_paths[(outer_drv_path, oname, inner_o.name)] = inner_path
+                                    # All paths from a DynamicBuildGoal's resolved_outputs
+                                    # are for the purpose of placeholder resolution.
+                                    dynamic_output_paths[(outer_drv_path, oname)] = outer_path
+                                    # Walk produced_paths to find intermediate .drv files
+                                    for sp in sub.result.produced_paths:
+                                        if sp.is_derivation():
+                                            inner_drv = await read_drv_file(
+                                                self.ctx.store.store_path,
+                                                sp,
+                                            )
+                                            if inner_drv:
+                                                for inner_o in inner_drv.outputs:
+                                                    if inner_o.path:
+                                                        inner_path = StorePath(inner_o.path)
+                                                        dynamic_output_paths[(outer_drv_path, oname, inner_o.name)] = inner_path
 
                 log.debug(
                     "resolve_dynamic_prep",
                     dynamic_count=len(dynamic_output_paths),
-                    keys=[f"{k[0].base()}:{k[1]}^{k[2]}" for k in dynamic_output_paths],
+                    keys=["!".join(str(kk) for kk in k) for k in dynamic_output_paths],
                 )
+                # Also populate level-1 paths: the .drv produced by the outer build
+                for child in self.children:
+                    if isinstance(child, ResolutionGoal):
+                        for sub in child.children:
+                            if sub.result and sub.result.produced_paths:
+                                outer_drv_path = StorePath(sub.key.path)
+                                for sp in sub.result.produced_paths:
+                                    if sp.is_derivation():
+                                        dynamic_output_paths[(outer_drv_path,)] = sp
                 basic = resolve_dynamic_derivation(
                     derivation,
                     drv_path,
@@ -285,6 +298,7 @@ class DerivationBuildGoal(Goal):
             fs_path.parent.mkdir(parents=True, exist_ok=True)
             fs_path.write_text(aterm, encoding="utf-8")
             drv_path = StorePath(new_drv_path_str)
+
             log.debug(
                 "wrote_resolved_drv",
                 path=str(drv_path),
