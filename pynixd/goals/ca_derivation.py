@@ -14,6 +14,7 @@ import structlog
 
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import QueryRealisationRequest, RegisterDrvOutputRequest
+from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.types import BasicDerivation, BuildMode, DerivationOutput
 from pynixd.types.build import BuildResult, BuildResultStatus
 
@@ -56,8 +57,6 @@ class CADerivationHandler(GoalHandler):
         for path, outputs in derivation.input_drvs.items():
             for output in outputs:
                 goal.add_child(DerivedPath(f"{path}!{output}"))
-        for path in derivation.input_srcs:
-            goal.add_child(DerivedPath(str(path)))
 
         for path, outputs in derivation.dynamic_input_drvs.items():
             for output in outputs:
@@ -65,11 +64,18 @@ class CADerivationHandler(GoalHandler):
 
         await goal.execute_children()
 
-        # ── 2. Collect resolved input paths ──
-        input_srcs: set[StorePath] = set()
+        # ── 2. Collect resolved input paths from children ──
+        input_srcs: set[StorePath] = set(derivation.input_srcs)
         for result in goal.collect_results():
             if isinstance(result, GoalResult):
                 input_srcs.update(result.produced_paths)
+
+        # Also add any input_srcs that are valid (they're just files, not build targets)
+        for src in derivation.input_srcs:
+            if src not in input_srcs:
+                valid = (await goal.ctx.store.execute(IsValidPathRequest(path=src))).valid
+                if valid:
+                    input_srcs.add(src)
 
         # ── 3. Try substitution by DrvOutput ──
         drv_outputs: set[DrvOutput] = set()

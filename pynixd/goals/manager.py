@@ -51,6 +51,9 @@ class GoalManager:
         """
         from .goal import Goal
 
+        # Fresh goal cache per request — don't leak results from
+        # prior QueryMissing/BuildPaths calls.
+        self.goals.clear()
         ctx = self._make_ctx(store, substitution_manager)
         goals = [Goal(derived_path=dp, ctx=ctx) for dp in derived_paths]
         async with TaskGroup() as tg:
@@ -91,7 +94,9 @@ class GoalManager:
             end_goal=EndGoal.QUERY,
         )
 
-        # Register top-level goals in the shared dict for dedup
+        # Fresh goal cache per request — don't leak results from
+        # prior build requests into the query.
+        self.goals.clear()
         roots: list[Goal] = []
         for dp in derived_paths:
             if dp not in self.goals:
