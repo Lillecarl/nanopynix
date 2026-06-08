@@ -21,12 +21,12 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from ..store_path import StorePath
 from ..types.build import BuildResult, BuildResultStatus
 from .goal import EndGoal, Goal, GoalContext, GoalKey, GoalResult, make_build_goal
 
 if TYPE_CHECKING:
     from ..derived_path import DerivedPath
-    from ..store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
@@ -114,14 +114,18 @@ class DynamicBuildGoal(Goal):
 
         log.debug("dynamic_inner_drv_resolved", inner_drv=inner_drv)
 
-        # ── 3. Check if inner_drv is actually a derivation ──
-        # The daemon wire protocol requires derivation paths to end
-        # in ``.drv``.  If the chain collapsed (all levels resolved
-        # and we got the final output), skip wrapping.
-        if not inner_drv.is_derivation():
+        # ── 3. Check if inner_drv is a valid derivation ──
+        # The daemon wire protocol requires .drv extensions for
+        # BuildDerivation.  If inner_drv looks like a .drv, read it
+        # to verify.  If it doesn't, this is the final output (chain
+        # collapsed) — skip wrapping.
+        inner_drv_path = await self._resolve_drv_target(inner_drv)
+        if inner_drv_path is None:
+            # Not a valid derivation — this IS the final output
             self.result = registered.result
             self.result.path = dp
             return
+        inner_drv = inner_drv_path
 
         # ── 4. Wrap and build the remainder ──
         # ``dp.wrap(inner_drv)`` replaces the root with inner_drv
@@ -139,5 +143,35 @@ class DynamicBuildGoal(Goal):
             # Propagate the inner .drv path so parent DynamicBuildGoals
             # can resolve the chain at the next level up
             self.result.produced_paths.add(inner_drv)
+
+    # ── Inner .drv resolution ───────────────────────────────────────
+
+    async def _resolve_drv_target(self, candidate: StorePath) -> StorePath | None:
+        """Verify ``candidate`` is a valid derivation.
+
+        The daemon's BuildDerivation requires .drv extensions.  If the
+        path doesn't end in .drv but its content IS a valid derivation
+        ATerm, we can't use it directly — the daemon rejects non-.drv
+        paths.  In that case, return None (chain collapse — this must
+        be the final output).
+
+        If the path ends in .drv, try to read and parse the content.
+        If parsing succeeds, the content IS a valid derivation we can
+        wrap.  If parsing fails, this is the final output (e.g. a file
+        whose name happens to end in .drv but isn't actually one).
+        """
+        if not candidate.is_derivation():
+            return None
+
+        from ..drv_parser import read_drv_file as _read_drv
+        try:
+            parsed = await _read_drv(self.ctx.store.store_path, candidate)
+        except Exception:
+            return None
+
+        if parsed is None:
+            return None
+
+        return candidate
 
 
