@@ -16,6 +16,7 @@ deduplication across concurrent requests.
 
 from __future__ import annotations
 
+import structlog
 from abc import ABC, abstractmethod
 from asyncio import Event, TaskGroup
 from dataclasses import dataclass, field
@@ -25,6 +26,8 @@ from pynixd.types import KeyedBuildResult
 
 from ..derived_path import DerivedPath  # noqa: TC001 — used in function bodies
 from ..store_path import StorePath  # noqa: TC001 — used in dataclass fields
+
+log = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from ..store.base import Store
@@ -68,13 +71,21 @@ class GoalKey:
 
 
 def _dp_output(dp: DerivedPath) -> str:
-    """Extract the canonical output name from a DerivedPath."""
+    """Extract the canonical output identifier from a DerivedPath.
+
+    For nested paths (e.g. ``a.drv!out!lib``), the chain is encoded
+    as ``out!lib`` so that the GoalKey is distinct from the flat
+    ``a.drv!lib`` goal key.
+    """
     if dp.is_opaque:
         return ""
+    suffix = "!".join(dp.chain)
     names = dp.output_names
     if len(names) == 1:
-        return next(iter(names))
-    return "*"
+        out = next(iter(names))
+    else:
+        out = "*"
+    return f"{suffix}!{out}" if suffix else out
 
 
 # ── End goal mode ────────────────────────────────────────────────
@@ -174,10 +185,10 @@ class Goal(ABC):
         self.children.add(child)
 
     async def execute_children(self) -> None:
-        """Execute all children in parallel."""
+        """Execute all children in parallel (dedup via ``run()``)."""
         async with TaskGroup() as tg:
             for child in self.children:
-                tg.create_task(child.execute())
+                tg.create_task(child.run())
 
     def collect_results(self) -> list[GoalResult | None]:
         """Depth-first collection of all results in the subtree."""

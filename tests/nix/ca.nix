@@ -68,6 +68,21 @@ let
     buildCommand = "echo text-content-${ts} > $out";
   };
 
+  # Fixed-output CA: outputHash is known at evaluation time.
+  # The content hash is declared upfront; the daemon verifies it
+  # after the build and registers the realisation.
+  fixed_ca = derivation {
+    name = "ca-fixed";
+    inherit system;
+    builder = "/bin/sh";
+    args = [ "-c" "printf '%s' ca-fixed > $out" ];
+    outputHashAlgo = "sha256";
+    outputHashMode = "text";
+    outputHash = builtins.hashString "sha256" "ca-fixed";
+    __contentAddressed = true;
+    _timestamp = ts;
+  };
+
 in
 {
   inherit
@@ -76,5 +91,6 @@ in
     depends_on_ca
     non_ca_depends_on_ca
     text_hashed
+    fixed_ca
     ;
 }

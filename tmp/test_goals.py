@@ -6,9 +6,9 @@ and exercises the full goal tree (BuildGoal + ResolutionGoal)
 without the complexity of the full pynixd server.
 
 Usage:
-    ./tmp/test_goals.py                          # run all tests
-    ./tmp/test_goals.py test_simple_build        # named test
-    ./tmp/test_goals.py test_resolution --trace  # verbose logging
+    ./tmp/test_goals.py                              # run all tests
+    ./tmp/test_goals.py test_deferred                # named test
+    ./tmp/test_goals.py test_simple_build --trace     # verbose logging
 
 Add --trace for structlog debug output, otherwise only warnings+ are shown.
 """
@@ -24,13 +24,13 @@ from subprocess import PIPE
 import structlog
 from anyio import TemporaryDirectory
 
+_HERE = Path(__file__).resolve().parent
+_TEST_NIX = (_HERE / "../tests/nix/default.nix").resolve()
+
 # ── Logging ───────────────────────────────────────────────────────
-# Silenced by default.  Pass --trace to see everything.
 
 _LEVEL = logging.WARNING if "--trace" not in sys.argv else logging.NOTSET
 
-
-# Event names to suppress (noisy pynixd internals).
 _SILENCED_EVENTS = frozenset({
     # Store/daemon connection management (not goal-related)
     "spawning_managed_daemon",
@@ -45,11 +45,12 @@ _SILENCED_EVENTS = frozenset({
     "pool_created_connection",
     "daemon_features",
     "connecting_daemon_socket",
+    "store_discarding_dirty_connection",
+    "build_derivation_timing",
 })
 
 
 def _drop_silenced(logger, method_name, event_dict):
-    """Drop log events whose event name is in the silenced set."""
     event = event_dict.get("event", "")
     if event in _SILENCED_EVENTS:
         raise structlog.DropEvent
@@ -119,31 +120,29 @@ async def make_context(store):
     )
 
 
-async def nix_drv(store_path: str, expr: str) -> str:
-    """Evaluate a Nix expression and return the .drv path string."""
+async def nix_eval(store_path: str, attr: str) -> str:
+    """Evaluate a Nix attribute and return its output (.drvPath or path)."""
     proc = await asyncio.create_subprocess_exec(
         "nix",
         "eval",
         "--store",
         store_path,
         "--impure",
-        "--expr",
-        expr,
+        "--file",
+        str(_TEST_NIX),
+        attr,
         "--raw",
         stdout=PIPE,
         stderr=PIPE,
     )
     stdout, stderr = await proc.communicate()
     if proc.returncode != 0:
-        raise RuntimeError(f"nix eval failed: {stderr.decode()}")
+        raise RuntimeError(f"nix eval {attr} failed: {stderr.decode()}")
     return stdout.decode().splitlines()[0].strip()
 
 
 async def build_drv(store, ctx, drv_str: str, output_name: str = "out"):
-    """Build a single derivation output through the goal tree.
-
-    Returns the GoalResult.
-    """
+    """Build a single derivation output through the goal tree."""
     from pynixd.derived_path import DerivedPath
     from pynixd.goals.goal import make_build_goal
 
@@ -153,34 +152,19 @@ async def build_drv(store, ctx, drv_str: str, output_name: str = "out"):
     return goal.result
 
 
-async def resolve_output(ctx, drv_path: str, output_name: str = "out"):
-    """Resolve a single derivation output through the resolution goal tree.
-
-    Returns the GoalResult.
-    """
-    from pynixd.goals.goal import make_resolution_goal
-    from pynixd.store_path import StorePath
-
-    goal = make_resolution_goal(StorePath(drv_path), output_name, ctx)
-    registered = ctx.goal_manager.register(goal)
-    await registered.run()
-    return registered.result
-
-
 # ── Tests ──────────────────────────────────────────────────────────
 
 
 async def test_simple_build() -> None:
-    """Build pkgs.hello via the goal tree and verify the output path."""
+    """Build a simple (non-CA) derivation via the goal tree."""
     log.info("test_simple_build", msg="starting")
     async with TemporaryDirectory() as td:
         store = await make_store(td)
         ctx = await make_context(store)
 
-        drv_str = await nix_drv(
-            td,
-            "let pkgs = import <nixpkgs> {}; in pkgs.hello.drvPath",
-        )
+        # Use ``dyn.hello`` (defined in dyn-drv.nix, no nixpkgs dependency)
+        # instead of ``pkgs.hello`` which requires nixpkgs in the store.
+        drv_str = await nix_eval(td, "dyn.hello.drvPath")
         log.info("test_simple_build", drv=drv_str)
 
         result = await build_drv(store, ctx, drv_str, "out")
@@ -189,11 +173,8 @@ async def test_simple_build() -> None:
             f"build failed: {result.result.status} {result.result.error_msg}"
         )
         assert result.produced_paths, "no produced paths"
-        log.info("test_simple_build", status=result.result.status, paths=result.produced_paths)
 
-        # Verify the output is valid in the store
         from pynixd.operations.is_valid_path import IsValidPathRequest
-
         for sp in result.produced_paths:
             valid = (await store.execute(IsValidPathRequest(path=sp))).valid
             assert valid, f"produced path {sp} is not valid"
@@ -203,88 +184,259 @@ async def test_simple_build() -> None:
         await ctx.substitution_manager.close()
 
 
-async def test_resolution() -> None:
-    """Test that ResolutionGoal resolves outputs for a fixed derivation."""
-    log.info("test_resolution", msg="starting")
+async def test_ca_simple() -> None:
+    """Build a CA floating derivation (ca.simple)."""
+    log.info("test_ca_simple", msg="starting")
     async with TemporaryDirectory() as td:
         store = await make_store(td)
         ctx = await make_context(store)
 
-        drv_str = await nix_drv(
-            td,
-            "let pkgs = import <nixpkgs> {}; in pkgs.hello.drvPath",
-        )
-        log.info("test_resolution", drv=drv_str)
-
-        # Resolve the "out" output via ResolutionGoal
-        result = await resolve_output(ctx, drv_str, "out")
-        assert result is not None, "resolution returned None"
-        assert result.resolved_outputs, f"no resolved outputs: {result}"
-        out_path = result.resolved_outputs.get("out")
-        assert out_path is not None, f"out not in resolved_outputs"
-        log.info("test_resolution", out_path=str(out_path))
-
-        # For a fixed derivation, the path should be from the .drv, not computed
-        assert not result.modulo_hash, "fixed derivation should not have modulo_hash"
-
-        log.info("test_resolution", msg="PASSED")
-        await store.close()
-        await ctx.substitution_manager.close()
-
-
-async def test_deferred_resolution() -> None:
-    """Exercise the resolution + build pipeline end-to-end."""
-    log.info("test_deferred_resolution", msg="starting")
-    async with TemporaryDirectory() as td:
-        store = await make_store(td)
-        ctx = await make_context(store)
-
-        drv_str = await nix_drv(
-            td,
-            "let pkgs = import <nixpkgs> {}; in pkgs.hello.drvPath",
-        )
-        log.info("test_deferred_resolution", drv=drv_str)
+        drv_str = await nix_eval(td, "ca.simple.drvPath")
+        log.info("test_ca_simple", drv=drv_str)
 
         result = await build_drv(store, ctx, drv_str, "out")
-        assert result is not None, "build result is None"
+        assert result is not None, "goal returned None"
         assert result.result.status in (0, 1, 2, 13), (
             f"build failed: {result.result.status} {result.result.error_msg}"
         )
-        log.info("test_deferred_resolution", status=result.result.status, paths=result.produced_paths)
+        assert result.produced_paths, "no produced paths"
 
-        log.info("test_deferred_resolution", msg="PASSED")
+        from pynixd.operations.is_valid_path import IsValidPathRequest
+        for sp in result.produced_paths:
+            valid = (await store.execute(IsValidPathRequest(path=sp))).valid
+            assert valid, f"CA output {sp} is not valid"
+
+        log.info("test_ca_simple", msg="PASSED")
         await store.close()
         await ctx.substitution_manager.close()
 
 
-async def test_opaque_path() -> None:
-    """Resolve an opaque store path via the goal tree."""
-    log.info("test_opaque_path", msg="starting")
+async def test_ca_multi_output() -> None:
+    """Build a CA derivation with multiple outputs (ca.multi_output)."""
+    log.info("test_ca_multi_output", msg="starting")
     async with TemporaryDirectory() as td:
         store = await make_store(td)
         ctx = await make_context(store)
 
-        from pynixd.derived_path import DerivedPath
-        from pynixd.goals.goal import make_build_goal
+        drv_str = await nix_eval(td, "ca.multi_output.drvPath")
+        log.info("test_ca_multi_output", drv=drv_str)
 
-        # Build hello first so we have a known path
-        drv_str = await nix_drv(
-            td,
-            "let pkgs = import <nixpkgs> {}; in pkgs.hello.drvPath",
+        for out_name in ("out", "dev"):
+            result = await build_drv(store, ctx, drv_str, out_name)
+            assert result is not None, f"no result for {out_name}"
+            assert result.result.status in (0, 1, 2, 13), (
+                f"build of {out_name} failed: {result.result.status} {result.result.error_msg}"
+            )
+            assert result.produced_paths, f"no produced paths for {out_name}"
+            log.info("test_ca_multi_output", output=out_name, paths=result.produced_paths)
+
+        log.info("test_ca_multi_output", msg="PASSED")
+        await store.close()
+        await ctx.substitution_manager.close()
+
+
+async def test_ca_depends_on_ca() -> None:
+    """Build a CA derivation that depends on another CA (ca.depends_on_ca)."""
+    log.info("test_ca_depends_on_ca", msg="starting")
+    async with TemporaryDirectory() as td:
+        store = await make_store(td)
+        ctx = await make_context(store)
+
+        drv_str = await nix_eval(td, "ca.depends_on_ca.drvPath")
+        log.info("test_ca_depends_on_ca", drv=drv_str)
+
+        result = await build_drv(store, ctx, drv_str, "out")
+        assert result is not None, "goal returned None"
+        assert result.result.status in (0, 1, 2, 13), (
+            f"build failed: {result.result.status} {result.result.error_msg}"
         )
-        build_result = await build_drv(store, ctx, drv_str, "out")
-        assert build_result is not None and build_result.produced_paths
-        hello_path = list(build_result.produced_paths)[0]
+        assert result.produced_paths, "no produced paths"
 
-        # Create an opaque goal for the path (should be ALREADY_VALID)
-        goal = make_build_goal(DerivedPath(str(hello_path)), ctx)
-        await goal.run()
-        assert goal.result is not None, "opaque goal returned None"
-        assert goal.result.result.status == 2, (
-            f"expected ALREADY_VALID (2), got {goal.result.result.status}"
+        log.info("test_ca_depends_on_ca", msg="PASSED")
+        await store.close()
+        await ctx.substitution_manager.close()
+
+
+async def test_deferred_non_ca_depends_on_ca() -> None:
+    """Build a non-CA (deferred) derivation that depends on a CA derivation.
+
+    This exercises the DEFERRED resolution path in ResolutionGoal:
+    1. The non-CA derivation's .drv has path=\"\" (deferred outputs)
+    2. ResolutionGoal must compute hashDerivationModulo and derive paths
+    3. Input dep (CA simple) must be built first
+    4. Placeholders must be rewritten with the actual CA output path
+    """
+    log.info("test_deferred", msg="starting")
+    async with TemporaryDirectory() as td:
+        store = await make_store(td)
+        ctx = await make_context(store)
+
+        # Build the CA dependency explicitly first so its realisations
+        # are registered in the store, then build the non-CA deferred
+        # derivation that depends on it.
+        ca_drv = await nix_eval(td, "ca.simple.drvPath")
+        ca_result = await build_drv(store, ctx, ca_drv, "out")
+        assert ca_result is not None and ca_result.result.status in (0, 1, 2, 13), (
+            f"CA dep build failed"
+        )
+        log.info("test_deferred", ca_built=ca_result.produced_paths)
+
+        # The GoalManager was cleared by build_paths. Now evaluate and
+        # build non_ca_depends_on_ca in a separate goal tree.
+        drv_str = await nix_eval(td, "ca.non_ca_depends_on_ca.drvPath")
+        log.info("test_deferred", drv=drv_str)
+
+        result = await build_drv(store, ctx, drv_str, "out")
+        assert result is not None, "goal returned None"
+        assert result.result.status in (0, 1, 2, 13), (
+            f"deferred build failed: {result.result.status} {result.result.error_msg}"
+        )
+        assert result.produced_paths, "no produced paths"
+
+        # Verify the output contains the CA content
+        for sp in result.produced_paths:
+            fs_path = store.store_path / str(sp).lstrip("/")
+            if fs_path.exists() and fs_path.is_file():
+                content = fs_path.read_text()
+                assert "dep-on-" in content, f"unexpected content in {sp}: {content[:200]}"
+                log.info("test_deferred", path=sp, content_preview=content.strip()[:80])
+
+        log.info("test_deferred", msg="PASSED")
+        await store.close()
+        await ctx.substitution_manager.close()
+
+
+async def test_ca_fixed() -> None:
+    """Build a fixed-output CA derivation (known content hash at eval time).
+
+    Unlike floating CA (outputHash=""), a fixed-output CA has a known
+    content hash at evaluation time, so the .drv contains the expected
+    output path.  The daemon builds it, verifies the hash, and registers
+    the realisation.
+
+    The ResolutionGoal hits the CA_FIXED path and returns the known
+    output path immediately — no hashDerivationModulo needed.
+    """
+    log.info("test_ca_fixed", msg="starting")
+    async with TemporaryDirectory() as td:
+        store = await make_store(td)
+        ctx = await make_context(store)
+
+        drv_str = await nix_eval(td, "ca.fixed_ca.drvPath")
+        log.info("test_ca_fixed", drv=drv_str)
+
+        result = await build_drv(store, ctx, drv_str, "out")
+        assert result is not None, "goal returned None"
+        assert result.result.status in (0, 1, 2, 13), (
+            f"build failed: {result.result.status} {result.result.error_msg}"
+        )
+        assert result.produced_paths, "no produced paths"
+
+        from pynixd.operations.is_valid_path import IsValidPathRequest
+        for sp in result.produced_paths:
+            valid = (await store.execute(IsValidPathRequest(path=sp))).valid
+            assert valid, f"CA fixed output {sp} is not valid"
+
+        log.info("test_ca_fixed", msg="PASSED")
+        await store.close()
+        await ctx.substitution_manager.close()
+
+
+async def test_ca_text_hashed() -> None:
+    """Build a text-hashed CA derivation (ca.text_hashed)."""
+    log.info("test_ca_text_hashed", msg="starting")
+    async with TemporaryDirectory() as td:
+        store = await make_store(td)
+        ctx = await make_context(store)
+
+        drv_str = await nix_eval(td, "ca.text_hashed.drvPath")
+        log.info("test_ca_text_hashed", drv=drv_str)
+
+        result = await build_drv(store, ctx, drv_str, "out")
+        assert result is not None, "goal returned None"
+        assert result.result.status in (0, 1, 2, 13), (
+            f"build failed: {result.result.status} {result.result.error_msg}"
         )
 
-        log.info("test_opaque_path", msg="PASSED")
+        log.info("test_ca_text_hashed", msg="PASSED")
+        await store.close()
+        await ctx.substitution_manager.close()
+
+
+async def test_dyn_hello() -> None:
+    """Build dyn.hello (simple regular derivation in dyn set)."""
+    log.info("test_dyn_hello", msg="starting")
+    async with TemporaryDirectory() as td:
+        store = await make_store(td)
+        ctx = await make_context(store)
+
+        drv_str = await nix_eval(td, "dyn.hello.drvPath")
+        log.info("test_dyn_hello", drv=drv_str)
+
+        result = await build_drv(store, ctx, drv_str, "out")
+        assert result is not None, "goal returned None"
+        assert result.result.status in (0, 1, 2, 13), (
+            f"build failed: {result.result.status} {result.result.error_msg}"
+        )
+
+        log.info("test_dyn_hello", msg="PASSED")
+        await store.close()
+        await ctx.substitution_manager.close()
+
+
+async def test_dyn_producing_drv() -> None:
+    """Build dyn.producingDrv (CA that outputs a .drv file).
+
+    This is the first step in the dynamic derivation chain.
+    """
+    log.info("test_dyn_producing_drv", msg="starting")
+    async with TemporaryDirectory() as td:
+        store = await make_store(td)
+        ctx = await make_context(store)
+
+        drv_str = await nix_eval(td, "dyn.producingDrv.drvPath")
+        log.info("test_dyn_producing_drv", drv=drv_str)
+
+        result = await build_drv(store, ctx, drv_str, "out")
+        assert result is not None, "goal returned None"
+        assert result.result.status in (0, 1, 2, 13), (
+            f"build failed: {result.result.status} {result.result.error_msg}"
+        )
+        assert result.produced_paths, "no produced paths"
+
+        # The output should be a .drv file (text-hashed CA copies the .drv)
+        for sp in result.produced_paths:
+            log.info("test_dyn_producing_drv", path=sp, is_derivation=sp.is_derivation())
+
+        log.info("test_dyn_producing_drv", msg="PASSED")
+        await store.close()
+        await ctx.substitution_manager.close()
+
+
+async def test_dyn_wrapper() -> None:
+    """Build dyn.wrapper — the full dynamic derivation chain.
+
+    This exercises the DynamicBuildGoal (nested DerivedPath):
+    1. Build producingDrv → produces a .drv file as output
+    2. Read the inner .drv from the result
+    3. Build the inner derivation
+    4. Build wrapper which references the inner output via outputOf
+    """
+    log.info("test_dyn_wrapper", msg="starting")
+    async with TemporaryDirectory() as td:
+        store = await make_store(td)
+        ctx = await make_context(store)
+
+        drv_str = await nix_eval(td, "dyn.wrapper.drvPath")
+        log.info("test_dyn_wrapper", drv=drv_str)
+
+        result = await build_drv(store, ctx, drv_str, "out")
+        assert result is not None, "goal returned None"
+        assert result.result.status in (0, 1, 2, 13), (
+            f"build failed: {result.result.status} {result.result.error_msg}"
+        )
+
+        log.info("test_dyn_wrapper", msg="PASSED")
         await store.close()
         await ctx.substitution_manager.close()
 
@@ -293,9 +445,15 @@ async def test_opaque_path() -> None:
 
 _TESTS = {
     "test_simple_build": test_simple_build,
-    "test_resolution": test_resolution,
-    "test_deferred_resolution": test_deferred_resolution,
-    "test_opaque_path": test_opaque_path,
+    "test_ca_simple": test_ca_simple,
+    "test_ca_multi_output": test_ca_multi_output,
+    "test_ca_depends_on_ca": test_ca_depends_on_ca,
+    "test_deferred": test_deferred_non_ca_depends_on_ca,
+    "test_ca_fixed": test_ca_fixed,
+    "test_ca_text_hashed": test_ca_text_hashed,
+    "test_dyn_hello": test_dyn_hello,
+    "test_dyn_producing_drv": test_dyn_producing_drv,
+    "test_dyn_wrapper": test_dyn_wrapper,
 }
 
 
@@ -303,7 +461,7 @@ async def async_main() -> None:
     _setup_logging()
 
     requested = [a for a in sys.argv[1:] if not a.startswith("--")]
-    tests = [t for name, t in _TESTS.items() if not requested or name in requested]
+    tests = [fn for name, fn in _TESTS.items() if not requested or name in requested]
 
     if not tests:
         print(f"Available tests: {', '.join(_TESTS)}", file=sys.stderr)

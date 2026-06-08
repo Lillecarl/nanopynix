@@ -46,7 +46,14 @@ class OpaqueBuildGoal(Goal):
             return
 
         # 2. Try substitution
-        if info := await self.ctx.substitution_manager.query_path(path):
+        info = await self.ctx.substitution_manager.query_path(path)
+        log.debug(
+            "DEBUG_opaque_query_path",
+            path=str(path),
+            got_info=bool(info),
+            refs=list(str(r) for r in info.references) if info else None,
+        )
+        if info:
             if self.ctx.end_goal is EndGoal.QUERY:
                 self.result = GoalResult(
                     path=dp,
