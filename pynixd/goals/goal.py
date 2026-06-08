@@ -27,6 +27,13 @@ if TYPE_CHECKING:
     from .manager import GoalManager
 
 
+class EndGoal:
+    """Controls whether a Goal tree executes or just queries."""
+
+    BUILD = "build"
+    QUERY = "query"
+
+
 class GoalContext:
     """Shared context passed through the build DAG."""
 
@@ -35,10 +42,12 @@ class GoalContext:
         goal_manager: GoalManager,
         store: Store,
         substitution_manager: SubstitutionManager,
+        end_goal: str = EndGoal.BUILD,
     ) -> None:
         self.goal_manager = goal_manager
         self.store = store
         self.substitution_manager = substitution_manager
+        self.end_goal = end_goal
 
 
 @dataclass

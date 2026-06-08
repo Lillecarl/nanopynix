@@ -15,7 +15,7 @@ from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.types.build import BuildResult, BuildResultStatus
 
 from ..derived_path import DerivedPath
-from .goal import GoalResult
+from .goal import EndGoal, GoalResult
 from .handler import GoalHandler
 
 if TYPE_CHECKING:
@@ -45,6 +45,13 @@ class OpaqueHandler(GoalHandler):
             return
 
         if info := await goal.ctx.substitution_manager.query_path(path):
+            if goal.ctx.end_goal is EndGoal.QUERY:
+                goal.result = GoalResult(
+                    path=goal.derived_path,
+                    result=BuildResult(status=BuildResultStatus.SUBSTITUTED),
+                )
+                return
+
             for ref in info.references:
                 if path == ref:
                     continue  # don't create a child for itself
@@ -62,5 +69,9 @@ class OpaqueHandler(GoalHandler):
         else:
             goal.result = GoalResult(
                 path=goal.derived_path,
-                result=BuildResult(status=BuildResultStatus.NO_SUBSTITUTERS),
+                result=BuildResult(
+                    status=BuildResultStatus.UNKNOWN
+                    if goal.ctx.end_goal is EndGoal.QUERY
+                    else BuildResultStatus.NO_SUBSTITUTERS
+                ),
             )

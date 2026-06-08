@@ -19,7 +19,7 @@ from pynixd.types.build import BuildResult, BuildResultStatus
 
 from ..derived_path import DerivedPath
 from ..store_path import DrvOutput, StorePath
-from .goal import GoalResult
+from .goal import EndGoal, GoalResult
 from .handler import GoalHandler
 
 if TYPE_CHECKING:
@@ -104,6 +104,13 @@ class CADerivationHandler(GoalHandler):
                     return
 
         # ── 4. Build via daemon ──
+        if goal.ctx.end_goal is EndGoal.QUERY:
+            goal.result = GoalResult(
+                path=goal.derived_path,
+                result=BuildResult(status=BuildResultStatus.MISC_FAILURE),
+            )
+            return
+
         log.info(
             "building_ca",
             derivation=goal.derived_path.drv_path,

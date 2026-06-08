@@ -6,21 +6,19 @@ import asyncio
 import logging
 from pathlib import Path
 from subprocess import PIPE
-from typing import TYPE_CHECKING
 
-from anyio import TemporaryDirectory
 import structlog
+from anyio import TemporaryDirectory
 
 from pynixd.config import LocalSocketStoreSpec
 from pynixd.derived_path import DerivedPath
-from pynixd.drv_parser import Derivation, read_drv_file
-from pynixd.goals.goal import Goal, GoalContext
+from pynixd.goals.goal import EndGoal, Goal, GoalContext
 from pynixd.goals.manager import GoalManager
 from pynixd.store import LocalSocketStore
-from pynixd.store_path import StorePath
+from pynixd.substitution import HttpBinaryCacheSubstituter, SubstitutionManager
 from pynixd.system_features import KNOWN_FEATURES
 from pynixd.types import StoreId
-from pynixd.substitution import HttpBinaryCacheSubstituter, Substituter, SubstitutionManager
+from pynixd.types.build import BuildResultStatus
 
 structlog.configure(
     processors=[
@@ -54,14 +52,6 @@ async def async_main():
         )
         await store.start()
 
-        ctx = GoalContext(
-            goal_manager=GoalManager(),
-            store=store,
-            substitution_manager=SubstitutionManager(
-                substituters=[HttpBinaryCacheSubstituter("https://cache.nixos.org")]
-            ),
-        )
-
         proc = await asyncio.create_subprocess_exec(
             "nix",
             "eval",
@@ -76,10 +66,64 @@ async def async_main():
         stdout, _ = await proc.communicate()
         drv_str = stdout.decode().splitlines()[0]
         log.info("drv_str", drv_str=drv_str)
-        goal = Goal(derived_path=DerivedPath(f"{drv_str}!out!out"), ctx=ctx)
-        await goal.execute()
-        log.info("result", result=goal.result)
-        await ctx.substitution_manager.close()
+
+        # ── Query phase ──
+        query_ctx = GoalContext(
+            goal_manager=GoalManager(),
+            store=store,
+            substitution_manager=SubstitutionManager(
+                substituters=[HttpBinaryCacheSubstituter("https://cache.nixos.org")]
+            ),
+            end_goal=EndGoal.QUERY,
+        )
+        query_goal = Goal(derived_path=DerivedPath(f"{drv_str}!out!out"), ctx=query_ctx)
+        await query_goal.execute()
+        log.info("query_result", result=query_goal.result, status=query_goal.result.result.status if query_goal.result else None)
+
+        # Classify all goals into will_build / will_substitute / unknown
+        will_build: set[str] = set()
+        will_substitute: set[str] = set()
+        unknown: set[str] = set()
+        seen: set[int] = set()  # dedup by id of base_store_path
+        for r in query_goal.collect_results():
+            if r is None:
+                continue
+            key = id(r.path.base_store_path())
+            if key in seen:
+                continue
+            seen.add(key)
+            path = str(r.path.base_store_path())
+            status = r.result.status
+            if status is BuildResultStatus.ALREADY_VALID:
+                continue
+            if status is BuildResultStatus.SUBSTITUTED:
+                will_substitute.add(path)
+            elif status is BuildResultStatus.UNKNOWN:
+                unknown.add(path)
+            else:
+                will_build.add(path)
+
+        log.info(
+            "query_summary",
+            will_build=sorted(will_build),
+            will_substitute=sorted(will_substitute),
+            unknown=sorted(unknown),
+        )
+        await query_ctx.substitution_manager.close()
+
+        # ── Build phase ──
+        build_ctx = GoalContext(
+            goal_manager=GoalManager(),
+            store=store,
+            substitution_manager=SubstitutionManager(
+                substituters=[HttpBinaryCacheSubstituter("https://cache.nixos.org")]
+            ),
+            end_goal=EndGoal.BUILD,
+        )
+        build_goal = Goal(derived_path=DerivedPath(f"{drv_str}!out!out"), ctx=build_ctx)
+        await build_goal.execute()
+        log.info("build_result", result=build_goal.result)
+        await build_ctx.substitution_manager.close()
 
 
 def main():

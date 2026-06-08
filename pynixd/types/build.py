@@ -41,6 +41,7 @@ class BuildResultStatus(IntEnum):
     NO_SUBSTITUTERS = 14
 
     HASH_MISMATCH = 101
+    UNKNOWN = 102
 
 
 class BuildMode(IntEnum):
@@ -191,7 +192,7 @@ class KeyedBuildResult:
 
         path = await ctx.reader.read_string(DerivedPath)
         result = await BuildResult.deserialize(ctx)
-        return cls.__init__(path, result)
+        return cls(path=path, result=result)
 
     async def serialize(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(self.path)

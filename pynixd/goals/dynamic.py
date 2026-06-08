@@ -18,7 +18,7 @@ import structlog
 
 from pynixd.types.build import BuildResult, BuildResultStatus
 
-from .goal import Goal, GoalResult
+from .goal import EndGoal, Goal, GoalResult
 from .handler import GoalHandler
 
 if TYPE_CHECKING:
@@ -60,7 +60,11 @@ class DynamicDerivationHandler(GoalHandler):
             )
             goal.result = GoalResult(
                 path=dp,
-                result=BuildResult(status=BuildResultStatus.MISC_FAILURE),
+                result=BuildResult(
+                    status=BuildResultStatus.UNKNOWN
+                    if goal.ctx.end_goal is EndGoal.QUERY
+                    else BuildResultStatus.MISC_FAILURE
+                ),
             )
             return
 

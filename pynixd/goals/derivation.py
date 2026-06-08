@@ -20,7 +20,7 @@ from ..derived_path import DerivedPath
 from ..drv_parser import read_drv_file
 from ..store_path import StorePath
 from .ca_derivation import CADerivationHandler
-from .goal import GoalResult
+from .goal import EndGoal, GoalResult
 from .handler import GoalHandler
 
 if TYPE_CHECKING:
@@ -46,7 +46,11 @@ class DerivationHandler(GoalHandler):
             )
             goal.result = GoalResult(
                 path=goal.derived_path,
-                result=BuildResult(status=BuildResultStatus.MISC_FAILURE),
+                result=BuildResult(
+                    status=BuildResultStatus.UNKNOWN
+                    if goal.ctx.end_goal is EndGoal.QUERY
+                    else BuildResultStatus.MISC_FAILURE
+                ),
             )
             return
 
@@ -105,6 +109,13 @@ class DerivationHandler(GoalHandler):
             input_srcs.update(output.out_path for output in result.result.built_outputs.values())
 
         # ── Build ──
+        if goal.ctx.end_goal is EndGoal.QUERY:
+            goal.result = GoalResult(
+                path=goal.derived_path,
+                result=BuildResult(status=BuildResultStatus.MISC_FAILURE),
+            )
+            return
+
         log.info("building", derivation=goal.derived_path.drv_path, input_srcs=input_srcs)
         response = await goal.ctx.store.execute(
             BuildDerivationRequest(
