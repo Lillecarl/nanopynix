@@ -88,14 +88,14 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
             return QueryPathInfoResponse(info=cached)
 
         if (db := store.db) is not None:
-            async with db.execute(QUERY_PATH_INFO, (self.path,)) as cursor:
+            async with db.execute(QUERY_PATH_INFO, (str(self.path),)) as cursor:
                 row = await cursor.fetchone()
             if row is None:
                 return QueryPathInfoResponse()
 
             _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
 
-            async with db.execute(QUERY_REFERENCES, (self.path,)) as cursor:
+            async with db.execute(QUERY_REFERENCES, (str(self.path),)) as cursor:
                 ref_rows = await cursor.fetchall()
             refs = {r[0] for r in ref_rows}
 

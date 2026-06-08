@@ -6,17 +6,18 @@ exists, tries substitution, resolves input children, then builds.
 
 from __future__ import annotations
 
-import hashlib
 from typing import TYPE_CHECKING
 
 import structlog
 
 from pynixd.derivation_resolution import (
-    _make_output_path,
     _nix_drv_name,
+    _resolve_deferred_outputs,
     _rewrite_strings,
+    _unparse_basic_derivation,
     downstream_placeholder,
 )
+from pynixd.operations.add_to_store import AddToStoreRequest
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
 from pynixd.operations.is_valid_path import IsValidPathRequest
@@ -72,24 +73,13 @@ class DerivationHandler(GoalHandler):
             )
 
         output = derived_outputs.get(goal.derived_path)
-        log.debug(
-            "derivation_output_resolve",
-            drv_path=goal.derived_path.base_store_path(),
-            derived_output_keys=[str(k) for k in derived_outputs],
-            goal_dp=str(goal.derived_path),
-            output_is_none=output is None,
-            output_path=output.path if output else None,
-            output_is_ca=output.is_ca if output else None,
-            num_outputs=len(derivation.outputs),
-            output_paths_raw=[(o.name, o.path) for o in derivation.outputs],
-        )
 
         # Delegate to CA handler only for genuinely content-addressed outputs
         if output is not None and output.is_ca:
             await CADerivationHandler(derivation).execute(goal)
             return
 
-        # ── Resolve all input dependencies (always needed for CA child paths) ──
+        # ── Resolve all input dependencies ──
         for path, outputs in derivation.input_drvs.items():
             for out_name in outputs:
                 goal.add_child(DerivedPath(f"{path}!{out_name}"))
@@ -98,7 +88,7 @@ class DerivationHandler(GoalHandler):
 
         await goal.execute_children()
 
-        # ── Collect resolved input paths ──
+        # ── Collect resolved input paths from children ──
         input_srcs: set[StorePath] = set()
         for result in goal.collect_results():
             if not isinstance(result, KeyedBuildResult):
@@ -107,9 +97,7 @@ class DerivationHandler(GoalHandler):
                 input_srcs.update(result.produced_paths)
             input_srcs.update(output.out_path for output in result.result.built_outputs.values())
 
-        # Deferred derivation: output path unknown (depends on unresolved CA deps).
-        # Resolve the derivation by substituting placeholders with actual paths
-        # from the (now-complete) children, then compute output paths.
+        # ── Deferred derivation (depends on CA outputs): resolve and build ──
         if output is None or not output.path:
             if goal.ctx.end_goal is EndGoal.QUERY:
                 goal.result = GoalResult(
@@ -128,6 +116,7 @@ class DerivationHandler(GoalHandler):
                         resolved_output_paths[drv_out.output_name] = realisation.out_path
 
             drv_path = goal.derived_path.base_store_path()
+            drv_name = _nix_drv_name(drv_path)
 
             rewrites: dict[str, str] = {}
             new_input_srcs: set[StorePath] = set(derivation.input_srcs) | input_srcs
@@ -136,58 +125,15 @@ class DerivationHandler(GoalHandler):
                 for output_name in output_names:
                     placeholder = downstream_placeholder(input_drv_path, output_name)
                     actual_path = resolved_output_paths.get(output_name)
-                    if actual_path is None:
-                        log.warning(
-                            "deferred_resolve_missing_output",
-                            input_drv_path=input_drv_path,
-                            output_name=output_name,
-                            resolved_keys=list(resolved_output_paths),
-                        )
-                        continue
-                    rewrites[placeholder] = str(actual_path)
-                    new_input_srcs.add(StorePath(str(actual_path)))
+                    if actual_path is not None:
+                        rewrites[placeholder] = str(actual_path)
+                        new_input_srcs.add(StorePath(str(actual_path)))
 
-            # Read the raw .drv file, do string replacement of placeholders,
-            # then compute the output path by hashing the result.
-            drv_name = _nix_drv_name(drv_path)
-
-            # Read raw .drv content: {store_path}/nix/store/{bare}
-            drv_raw_path = goal.ctx.store.store_path / str(drv_path)
-            raw_aterm = drv_raw_path.read_text()
-
-            # Replace placeholders directly in the ATerm string
-            resolved_aterm = raw_aterm
-            for placeholder, actual in rewrites.items():
-                resolved_aterm = resolved_aterm.replace(placeholder, actual)
-
-            # Compute output path from the resolved ATerm
-            h = hashlib.sha256(resolved_aterm.encode()).digest()
-            out_path = _make_output_path("out", h, drv_name)
-
-            log.info(
-                "building_deferred_resolved",
-                derivation=goal.derived_path.drv_path,
-                input_count=len(new_input_srcs),
-                rewrites=rewrites,
-                out_path=out_path,
-                drv_name=drv_name,
-            )
-
-            # Log original BasicDerivation fields before rewriting
-            log.info(
-                "building_deferred_original",
-                outputs_raw=[(o.name, o.path, o.hash_algo, o.hash_value) for o in derivation.outputs],
-                input_srcs_raw=[str(s) for s in derivation.input_srcs],
-                builder_raw=derivation.builder,
-                args_raw=derivation.args,
-                env_raw=derivation.env,
-                input_drvs={str(k): v for k, v in derivation.input_drvs.items()},
-            )
-
+            # Build resolved BasicDerivation, computing output paths
             resolved = BasicDerivation(
                 outputs={
                     o.name: DerivationOutput(
-                        path=o.path or out_path,
+                        path=o.path,
                         method=o.hash_algo,
                         hash_digest=o.hash_value,
                     )
@@ -200,22 +146,33 @@ class DerivationHandler(GoalHandler):
                 env={k: _rewrite_strings(v, rewrites) for k, v in derivation.env.items()},
                 is_dynamic=derivation.is_dynamic,
             )
+            resolved = _resolve_deferred_outputs(resolved, drv_name)
 
-            log.info(
-                "building_deferred_before_send",
-                drv_path=str(drv_path),
-                outputs={n: o.path for n, o in resolved.outputs.items()},
-                input_srcs=[str(s) for s in resolved.input_srcs],
-                builder=resolved.builder,
-                args=resolved.args,
-                env=resolved.env,
-                is_dynamic=resolved.is_dynamic,
-                platform=resolved.platform,
+            # Upload the resolved derivation to the store so the daemon
+            # reads THIS (not the unresolved original) for output path.
+            resolved_aterm = _unparse_basic_derivation(resolved, mask_outputs=False)
+            name_for_add = drv_name + ".drv"
+
+            async def provide_resolved_drv(writer):
+                fw = writer.framed()
+                data = resolved_aterm.encode("utf-8")
+                fw.write(data)
+                await fw.finalize()
+
+            add_resp = await goal.ctx.store.execute(
+                AddToStoreRequest(
+                    path_name=name_for_add,
+                    cam="text:sha256",
+                    references=resolved.input_srcs,
+                    repair=0,
+                    async_provider=provide_resolved_drv,
+                )
             )
+            resolved_drv_path = add_resp.info.path if add_resp.info else drv_path
 
             response = await goal.ctx.store.execute(
                 BuildDerivationRequest(
-                    drv_path=drv_path,
+                    drv_path=resolved_drv_path,
                     derivation=resolved,
                     build_mode=BuildMode.NORMAL,
                 )
@@ -256,3 +213,37 @@ class DerivationHandler(GoalHandler):
                 result=BuildResult(status=BuildResultStatus.MISC_FAILURE),
             )
             return
+
+        log.info(
+            "building_known",
+            derivation=goal.derived_path.drv_path,
+            output_path=output.path,
+        )
+        response = await goal.ctx.store.execute(
+            BuildDerivationRequest(
+                drv_path=goal.derived_path.base_store_path(),
+                derivation=BasicDerivation(
+                    outputs={
+                        o.name: DerivationOutput(
+                            path=o.path,
+                            method=o.hash_algo,
+                            hash_digest=o.hash_value,
+                        )
+                        for o in derivation.outputs
+                    },
+                    input_srcs=input_srcs,
+                    platform=derivation.platform,
+                    builder=derivation.builder,
+                    args=derivation.args,
+                    env=derivation.env,
+                    is_dynamic=derivation.is_dynamic,
+                ),
+                build_mode=BuildMode.NORMAL,
+            )
+        )
+        goal.result = GoalResult(
+            path=goal.derived_path,
+            result=response.result,
+            produced_paths={StorePath(output.path)}
+            | {r.out_path for r in response.result.built_outputs.values() if r.out_path},
+        )
