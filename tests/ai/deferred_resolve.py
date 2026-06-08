@@ -412,6 +412,7 @@ async def main() -> None:
     print(f"Deferred .drv path: {deferred_drv_path}")
 
     deferred_parsed = await read_drv_file(root_store.store_path, deferred_drv_path)
+    assert deferred_parsed is not None
     await read_drv_file(root_store.store_path, ca_drv_path)
 
     print(f"\nDeferred .drv outputs: {deferred_parsed.output_paths()}")

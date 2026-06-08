@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import (
     DerivedPath as DerivedPath,
+)
+from ..derived_path import (
     OutputsNames as OutputsNames,
 )
 from ..drv_parser import read_drv_file
@@ -22,6 +24,7 @@ from ..substituter import (
 from ..substituter import (
     get_substituter_urls as get_substituter_urls,
 )
+from ..types.context import ReadContext
 from .base import OpRequest, OpResponse
 from .is_valid_path import IsValidPathRequest
 from .query_derivation_output_map_batch import QueryDerivationOutputMapBatchRequest
@@ -29,8 +32,9 @@ from .query_derivation_output_map_batch import QueryDerivationOutputMapBatchRequ
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..store import Store
+    from ..types import RequestContext
     from ..types.aliases import StorePathSet
-    from ..types.context import ReadContext, WriteContext
+    from ..types.context import WriteContext
 
 
 @dataclass
@@ -105,6 +109,27 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
         self.logger = self.logger.bind(identifier=ctx.writer.identifier)
         ctx.writer.write_uint64(self.op)
         ctx.writer.write_string_set(self.derived_paths)
+
+    async def handle(self, ctx: RequestContext) -> OpResponse | None:
+        self.logger.debug("received_op")
+        self = await self.deserialize(ReadContext.from_request(ctx))
+
+        if ctx.proxy.substitution_manager is None:
+            # Fall back to the old BFS execute() path
+            return await self.execute(
+                ctx.proxy.local_store,
+                client=ctx.proxy.client,
+            )
+
+        self.logger.debug(
+            "query_missing_goals",
+            count=len(self.derived_paths),
+        )
+        return await ctx.proxy.goal_manager.query_paths(
+            self.derived_paths,
+            ctx.proxy.local_store,
+            ctx.proxy.substitution_manager,
+        )
 
     async def execute(
         self,
@@ -231,6 +256,11 @@ async def _resolve_path(
     except FileNotFoundError:
         ctx.unknown.add(path)
         return
+
+    if parsed is None:
+        ctx.unknown.add(path)
+        return
+
     for input_drv in parsed.input_drvs:
         ctx.sg.spawn(_resolve_path(input_drv, store, client, suppress_last, ctx))
 

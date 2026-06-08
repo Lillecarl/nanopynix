@@ -69,7 +69,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
 
         self = await self.deserialize(ReadContext.from_request(ctx))
 
-        if not ctx.proxy.use_scheduler_for_builds:
+        if not ctx.proxy.use_scheduler_for_builds or ctx.proxy.substitution_manager is None:
             self.logger.debug("handle_local_mode_fallback")
             result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
 
@@ -85,19 +85,21 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
             self.logger.debug("responded_op")
             return result
 
-        if ctx.proxy.scheduler is None:
-            raise RuntimeError("scheduler is None")
-        self.logger.debug("build_paths_count", count=len(self.derived_paths))
-        result = await ctx.proxy.scheduler.build_derived_paths(
+        self.logger.debug("build_paths_goals", count=len(self.derived_paths))
+        keyed_results = await ctx.proxy.goal_manager.build_paths(
             self.derived_paths,
-            self.build_mode,
-            client=ctx.proxy.client,
+            ctx.proxy.local_store,
+            ctx.proxy.substitution_manager,
         )
 
-        for kr in result.results:
-            if kr.result.status not in (0, 1, 2):
-                self.logger.debug("responded_op")
-                return BuildPathsResponse(value=1)
+        for kr in keyed_results:
+            if kr.result.status not in (0, 1, 2, 13):
+                self.logger.warning(
+                    "build_paths_goal_failed",
+                    path=kr.path,
+                    status=kr.result.status,
+                    error=kr.result.error_msg,
+                )
 
         self.logger.debug("responded_op")
         return BuildPathsResponse(value=1)
@@ -164,7 +166,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
 
         self = await self.deserialize(ReadContext.from_request(ctx))
 
-        if not ctx.proxy.use_scheduler_for_builds:
+        if not ctx.proxy.use_scheduler_for_builds or ctx.proxy.substitution_manager is None:
             self.logger.debug("handle_local_mode_fallback")
             result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
 
@@ -185,25 +187,24 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
             self.logger.debug("responded_op")
             return result
 
-        if ctx.proxy.scheduler is None:
-            raise RuntimeError("scheduler is None")
         self.logger.debug(
-            "build_paths_with_results_decomposed",
+            "build_paths_with_results_goals",
             num_derivations=len(self.derived_paths),
         )
-        result = await ctx.proxy.scheduler.build_derived_paths(
+        keyed_results = await ctx.proxy.goal_manager.build_paths(
             self.derived_paths,
-            self.build_mode,
-            client=ctx.proxy.client,
+            ctx.proxy.local_store,
+            ctx.proxy.substitution_manager,
         )
 
-        for kr in result.results:
-            if kr.result.status not in (0, 1, 2):
+        for kr in keyed_results:
+            if kr.result.status not in (0, 1, 2, 13):
                 self.logger.warning(
-                    "unexpected_build_paths_with_results_status",
+                    "build_paths_with_results_goal_failed",
+                    path=kr.path,
                     status=kr.result.status,
-                    error_msg=kr.result.error_msg,
+                    error=kr.result.error_msg,
                 )
 
         self.logger.debug("responded_op")
-        return result
+        return BuildPathsWithResultsResponse(results=keyed_results)

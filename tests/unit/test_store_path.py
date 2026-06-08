@@ -113,7 +113,7 @@ class TestDrvOutputConstruction:
 
     def test_from_drv_output(self):
         do1 = DrvOutput("sha256:abc!out")
-        do2 = DrvOutput(do1)
+        do2 = DrvOutput(do1)  # type: ignore[arg-type]
         assert str(do2) == "sha256:abc!out"
 
 

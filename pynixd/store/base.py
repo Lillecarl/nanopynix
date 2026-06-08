@@ -117,7 +117,7 @@ class Store(ABC):
 
         self.monitor: ResourceMonitor | None = None
         self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=self.store_id)
-        self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(
+        self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(  # type: ignore[type-var]
             maxsize=10000,
             ttl=300,
         )

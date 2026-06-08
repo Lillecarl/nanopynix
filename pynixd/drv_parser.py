@@ -641,8 +641,12 @@ async def to_basic_derivation(
         try:
             input_parsed = await read_drv_file(store_path, drv_path)
         except FileNotFoundError:
+            input_parsed = None
+
+        if input_parsed is None:
             input_srcs.add(StorePath(drv_path))
             continue
+
         all_outputs = input_parsed.output_paths()
         for name in output_names:
             p = all_outputs.get(name)
@@ -650,13 +654,16 @@ async def to_basic_derivation(
                 input_srcs.add(p)
             continue
 
-        # Fall back to reading the .drv file
         try:
             input_parsed = await read_drv_file(store_path, drv_path)
         except FileNotFoundError:
+            input_parsed = None
+
+        if input_parsed is None:
             # Can't resolve — add the drv itself as a dependency
             input_srcs.add(StorePath(drv_path))
             continue
+
         all_outputs = input_parsed.output_paths()
         for name in output_names:
             p = all_outputs.get(name)

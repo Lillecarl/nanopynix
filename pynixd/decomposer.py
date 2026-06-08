@@ -33,13 +33,13 @@ from .operations.query_missing import QueryMissingRequest
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .store_path import DrvOutput, StorePath
 from .types.build import BuildResult, BuildResultStatus
+from .types.ca import Realisation
 
 if TYPE_CHECKING:
     from .build_queue import SchedulerBuildRequest
     from .connection import ClientConn
     from .drv_parser import Derivation
     from .scheduler import Scheduler
-    from .types import Realisation
     from .types.aliases import OutputMap
     from .types.ids import BuildId
 
@@ -59,10 +59,13 @@ def synthesize_already_valid(
     for out_name, out_path in parsed.output_paths().items():
         if out_path != StorePath(""):
             drv_output = DrvOutput(f"sha256:{0:064x}!{out_name}")
-            built_outputs[drv_output] = {
-                "id": str(drv_output),
-                "outPath": out_path.name,
-            }
+
+            built_outputs[drv_output] = Realisation.model_construct(
+                id=str(drv_output),
+                outPath=str(out_path),
+                signatures=[],
+                dependentRealisations={},
+            )
     return BuildResult(
         status=status,
         error_msg="",
@@ -193,6 +196,10 @@ class BuildDecomposer:
                 log.warning("drv_read_failed", drv_path=dp.drv_path)
                 continue
 
+            if parsed is None:
+                log.warning("drv_parse_failed", drv_path=dp.drv_path)
+                continue
+
             parsed_cache[StorePath(dp.drv_path)] = parsed
             all_input_drvs.update(parsed.input_drvs.keys())
 
@@ -206,6 +213,10 @@ class BuildDecomposer:
                         )
                     except FileNotFoundError:
                         continue
+
+                    if dyn_parsed is None:
+                        continue
+
                     dyn_outputs = dyn_parsed.output_paths()
                     has_unbuilt = any(
                         p == StorePath("") or not self.local_store.tracker.has_path(p) for p in dyn_outputs.values()

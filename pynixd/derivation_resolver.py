@@ -96,9 +96,9 @@ class DerivationResolver:
             if dep_build is None or not dep_build.ca_realisations:
                 continue
             for realisation in dep_build.ca_realisations:
-                out_path_raw = realisation.get("outPath", "")
+                out_path_raw = realisation.out_path
                 if out_path_raw:
-                    out_path = StorePath(out_path_raw).with_store_prefix()
+                    out_path = StorePath(str(out_path_raw)).with_store_prefix()
                     if out_path not in store.tracker.known_paths:
                         missing.add(out_path)
         return missing
@@ -288,8 +288,8 @@ class DerivationResolver:
                 continue
             dep_drv_path = StorePath(dep_build.request.drv_path)
             for realisation in dep_build.ca_realisations:
-                out_path: str = realisation.get("outPath", "")
-                output_name: str = realisation.get("id", "").rsplit("!", 1)[-1] or "out"
+                out_path = realisation.out_path
+                output_name = str(realisation.id).rsplit("!", 1)[-1] or "out"
                 if out_path:
                     dep_realisations.setdefault(dep_drv_path, {})[output_name] = StorePath(out_path).with_store_prefix()
         return dep_realisations
@@ -364,6 +364,8 @@ class DerivationResolver:
                                     self.local_store.store_path,
                                     level1_path,
                                 )
+                                if inner_parsed is None:
+                                    continue
                                 inner_outs = inner_parsed.output_paths()
                                 actual_path = inner_outs.get(inner_output_name)
                             except (OSError, ValueError) as e:

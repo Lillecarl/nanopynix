@@ -78,7 +78,11 @@ async def async_main():
         )
         query_goal = Goal(derived_path=DerivedPath(f"{drv_str}!out!out"), ctx=query_ctx)
         await query_goal.execute()
-        log.info("query_result", result=query_goal.result, status=query_goal.result.result.status if query_goal.result else None)
+        log.info(
+            "query_result",
+            result=query_goal.result,
+            status=query_goal.result.result.status if query_goal.result else None,
+        )
 
         # Classify all goals into will_build / will_substitute / unknown
         will_build: set[str] = set()

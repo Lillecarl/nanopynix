@@ -76,6 +76,14 @@ class DaemonProxy:
         return self.ctx.scheduler
 
     @property
+    def goal_manager(self):
+        return self.ctx.goal_manager
+
+    @property
+    def substitution_manager(self):
+        return self.ctx.substitution_manager
+
+    @property
     def build_queue(self) -> BuildQueue | None:
         return self.scheduler.queue if self.scheduler else None
 

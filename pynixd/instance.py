@@ -26,6 +26,7 @@ from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
 from .stderr import OperationLogs
 from .store import LocalSocketStore, Store
+from .substitution import HttpBinaryCacheSubstituter, SubstitutionManager
 from .types import PynixdGCAction
 from .types.ids import StoreId
 from .unix_server import start_unix_server
@@ -76,6 +77,7 @@ class Server:
         self.ctx = PynixdContext(
             settings=settings,
             _stores=stores,
+            substitution_manager=SubstitutionManager([HttpBinaryCacheSubstituter("https://cache.nixos.org/")]),
             path_tracker=path_tracker,
         )
 

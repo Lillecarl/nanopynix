@@ -1114,8 +1114,11 @@ class TestQueryRealisationSerialization:
 
     async def test_response(self):
 
+        from pynixd.store_path import DrvOutput
+
+        drv_out = DrvOutput(hash_algo="sha256", hash_value="abc", output_name="test")
         resp = QueryRealisationResponse(
-            realisations=[Realisation(id="sha256:abc!test", outPath="/nix/store/test")],
+            realisations=[Realisation(id=drv_out, outPath=StorePath("/nix/store/test"))],
         )
         result = await _serialize_deserialize_response(QueryRealisationResponse, resp)
         assert result.realisations == resp.realisations
@@ -1124,8 +1127,11 @@ class TestQueryRealisationSerialization:
 class TestRegisterDrvOutputSerialization:
     async def test_request(self):
 
+        from pynixd.store_path import DrvOutput
+
+        drv_out = DrvOutput(hash_algo="sha256", hash_value="abc", output_name="test")
         req = RegisterDrvOutputRequest(
-            realisation=Realisation(id="sha256:abc!test", outPath="/nix/store/test"),
+            realisation=Realisation(id=drv_out, outPath=StorePath("/nix/store/test")),
         )
         result = await _serialize_deserialize_request(RegisterDrvOutputRequest, req)
         assert result.realisation == req.realisation

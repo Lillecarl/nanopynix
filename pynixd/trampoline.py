@@ -156,9 +156,9 @@ class Trampoline:
         must be trampolined (built as separate derivation builds).
         """
         for realisation in drv_outputs.values():
-            out_path = realisation.get("outPath", "")
+            out_path = realisation.out_path
             if out_path:
-                out_sp = StorePath(out_path).with_store_prefix()
+                out_sp = StorePath(str(out_path)).with_store_prefix()
                 if out_sp.is_derivation():
                     return True
         return False
@@ -213,8 +213,8 @@ class Trampoline:
         """Enqueue inner builds for .drv outputs produced by a dynamic build."""
         drv_outputs = build_resp.result.built_outputs
         for realisation in drv_outputs.values():
-            out_path = realisation.get("outPath", "")
-            output_name = realisation.get("id", "").rsplit("!", 1)[-1] or "out"
+            out_path = realisation.out_path
+            output_name = str(realisation.id).rsplit("!", 1)[-1] or "out"
             if not out_path:
                 continue
 
@@ -244,6 +244,14 @@ class Trampoline:
             except (OSError, ValueError):
                 log.exception(
                     "trampoline_drv_parse_failed",
+                    build_id=build.build_id,
+                    inner_drv_path=out_sp,
+                )
+                continue
+
+            if inner_parsed is None:
+                log.warning(
+                    "trampoline_drv_none",
                     build_id=build.build_id,
                     inner_drv_path=out_sp,
                 )

@@ -11,7 +11,10 @@ Write functions are sync (writer.write() buffers; callers await drain()).
 from __future__ import annotations
 
 import struct
-from typing import TYPE_CHECKING, Callable, Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import asyncssh
 from environs import env

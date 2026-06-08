@@ -129,6 +129,8 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
                     continue
                 try:
                     parsed = await read_drv_file(store.store_path, drv_path)
+                    if parsed is None:
+                        continue
                     result[StorePath(drv_path)] = dict(parsed.output_paths().items())
                 except FileNotFoundError:
                     pass
@@ -145,6 +147,8 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
         for drv_path in self.drv_paths:
             try:
                 parsed = await read_drv_file(store.store_path, drv_path)
+                if parsed is None:
+                    continue
                 out = parsed.output_paths()
                 outputs[drv_path] = dict(out.items())
             except FileNotFoundError:

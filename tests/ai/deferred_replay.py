@@ -168,6 +168,8 @@ async def main() -> None:
 
     ca_parsed = await read_drv_file(root_store.store_path, ca_drv_path)
     deferred_parsed = await read_drv_file(root_store.store_path, deferred_drv_path)
+    assert ca_parsed is not None
+    assert deferred_parsed is not None
 
     for o in deferred_parsed.outputs:
         print(f"  output: name={o.name} path={o.path!r} hash_algo={o.hash_algo!r}")
