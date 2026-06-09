@@ -435,8 +435,9 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     covered = item.config.stash.get(_covered_features_key, TestFeatures(0))
 
     if features and features in covered:
+        # Mark the item for skipping and let pytest's normal protocol
+        # handle setup/call/teardown lifecycle properly.
         item.add_marker(pytest.mark.skip(reason="subsumed by broader tests (features already covered)"))
-        return True
 
     return None
 
