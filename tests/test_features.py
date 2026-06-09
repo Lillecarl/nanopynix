@@ -600,27 +600,6 @@ class TestFeatures(Flag):
 
     # All daemon protocol operations that perform builds.
     BUILD_ALL = BUILD_DERIVATION | BUILD_PATHS | BUILD_PATHS_WITH_RESULTS | ENSURE_PATH
-    # All daemon protocol operations that query store metadata (no mutation).
-    QUERY_ALL = (
-        IS_VALID_PATH
-        | QUERY_PATH_INFO
-        | QUERY_PATH_INFOS
-        | QUERY_VALID_PATHS
-        | QUERY_ALL_VALID_PATHS
-        | QUERY_PATH_FROM_HASH_PART
-        | QUERY_REFERRERS
-        | QUERY_DERIVER
-        | QUERY_CLOSURE
-        | QUERY_CLOSURE_WITH_INFO
-        | QUERY_DERIVATION_OUTPUT_MAP
-        | QUERY_DERIVATION_OUTPUT_MAP_BATCH
-        | QUERY_REALISATION
-        | QUERY_SUBSTITUTABLE_PATH_INFO
-        | QUERY_SUBSTITUTABLE_PATH_INFOS
-        | QUERY_SUBSTITUTABLE_PATHS
-        | QUERY_VALID_DERIVERS
-        | QUERY_MISSING
-    )
     # All protocol operations that ingest/store content.
     INGEST_ALL = (
         ADD_TO_STORE | ADD_TEXT_TO_STORE | ADD_TO_STORE_NAR | ADD_MULTIPLE_TO_STORE | ADD_BUILD_LOG | ADD_SIGNATURES

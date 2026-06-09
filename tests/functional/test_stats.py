@@ -138,15 +138,11 @@ class StatsTestStore(LocalSocketStore):
         )
 
 
-@pytest.mark.covers(F.QUERY_ALL | F.STORE_LOCAL)
+@pytest.mark.covers(F.BUILD_DERIVATION | F.QUERY_ALL_VALID_PATHS | F.QUERY_CLOSURE_WITH_INFO | F.STORE_LOCAL)
 @pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="DB stats query returns no row")
 async def test_build_stats_recording(tmp_path: Path) -> None:
-    """Verify that build stats are recorded to the DB.
-
-    Store operations triggered:
-    - None: This test only checks statistics recording without triggering Store operations
-    """
+    """Verify that build stats are recorded to the DB."""
     pynixd_local_path = STORE_PREFIX / "stats-local"
     pynixd_remote_path = STORE_PREFIX / "stats-remote"
     rmtree_robust(pynixd_local_path)
@@ -213,13 +209,10 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
             assert 50 <= row[1] <= 1000
 
 
+@pytest.mark.covers(F.BUILD_DERIVATION | F.GOAL_BUILD_QUEUE | F.GOAL_SCHEDULER | F.STORE_LOCAL)
 @pytest.mark.timeout(30)
 async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
-    """Verify that the scheduler fast-tracks tiny builds to the local store.
-
-    Store operations triggered:
-    - None: This test only checks scheduler behavior without triggering Store operations
-    """
+    """Verify that the scheduler fast-tracks tiny builds to the local store."""
     pynixd_local_path = STORE_PREFIX / "fasttrack-local"
     pynixd_remote_path = STORE_PREFIX / "fasttrack-remote"
     rmtree_robust(pynixd_local_path)
@@ -298,12 +291,9 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
         assert tiny_build.is_building
 
 
+@pytest.mark.covers(F.PERSISTENCE)
 async def test_build_stats_hint_by_pname(tmp_path: Path) -> None:
-    """Verify that build stats hints match by pname + platform.
-
-    Store operations triggered:
-    - None: This test only checks SQLite hints without Store operations
-    """
+    """Verify that build stats hints match by pname + platform."""
     pynixd_local_path = STORE_PREFIX / "stats-hint-test"
     rmtree_robust(pynixd_local_path)
     (pynixd_local_path / "nix/var/nix/db").mkdir(parents=True)
@@ -372,14 +362,11 @@ class CpuUtilTestStore(StatsTestStore):
         self._cpu_util = value
 
 
+@pytest.mark.covers(F.BUILD_DERIVATION | F.GOAL_SCHEDULER | F.GOAL_BUILD_QUEUE | F.SERVER_PSI_GATING | F.STORE_LOCAL)
 @pytest.mark.xfail(reason="pre-existing: scheduler saturation logic needs review")
 @pytest.mark.timeout(30)
 async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
-    """Verify scheduler skips stores at >99% CPU utilization.
-
-    Store operations triggered:
-    - None: This test only checks scheduler CPU utilization behavior without triggering Store operations
-    """
+    """Verify scheduler skips stores at >99% CPU utilization."""
     pynixd_local_path = STORE_PREFIX / "cpu-util-local"
     pynixd_busy_path = STORE_PREFIX / "cpu-util-busy"
     pynixd_free_path = STORE_PREFIX / "cpu-util-free"

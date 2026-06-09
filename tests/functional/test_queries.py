@@ -72,19 +72,13 @@ async def query_env(pynixd_server: Server):
     return pynixd_server, uri, out_path
 
 
-@pytest.mark.covers(F.QUERY_ALL | F.STORE_LOCAL)
+@pytest.mark.covers(F.QUERY_REFERRERS | F.STORE_LOCAL)
 @pytest.mark.legacy_nix_commands
 async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify QueryReferrers via 'nix-store -q --referrers'.
 
     Store operations triggered:
-    - AddMultipleToStore: Adds multiple paths to store
-    - BuildPaths: Builds derivation paths
-    - BuildPathsWithResults: Builds derivation paths with results
-    - QueryMissing: Queries missing paths
-    - QueryPathInfo: Queries path info
     - QueryReferrers: Queries referrers
-    - QueryValidPaths: Queries valid paths
     """
     server, uri, out_path = query_env
     test_nix = TEST_NIX
@@ -143,6 +137,7 @@ async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> No
     assert dep_path in referrers
 
 
+@pytest.mark.covers(F.QUERY_PATH_FROM_HASH_PART | F.STORE_LOCAL)
 async def test_query_path_from_hash_part(
     profiler: pyinstrument.Profiler,
     query_env,
@@ -150,12 +145,7 @@ async def test_query_path_from_hash_part(
     """Verify QueryPathFromHashPart via 'nix store path-from-hash-part'.
 
     Store operations triggered:
-    - AddMultipleToStore: Adds multiple paths to store
-    - BuildPaths: Builds derivation paths
-    - BuildPathsWithResults: Builds derivation paths with results
-    - QueryMissing: Queries missing paths
     - QueryPathFromHashPart: Queries path from hash part
-    - QueryValidPaths: Queries valid paths
     """
     server, uri, out_path = query_env
 
@@ -177,17 +167,13 @@ async def test_query_path_from_hash_part(
     assert stdout.strip() == out_path
 
 
+@pytest.mark.covers(F.QUERY_VALID_DERIVERS | F.STORE_LOCAL)
 @pytest.mark.legacy_nix_commands
 async def test_query_valid_derivers(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify QueryValidDerivers via 'nix-store -q --deriver'.
 
     Store operations triggered:
-    - AddMultipleToStore: Adds multiple paths to store
-    - BuildPaths: Builds derivation paths
-    - BuildPathsWithResults: Builds derivation paths with results
-    - QueryMissing: Queries missing paths
-    - QueryPathInfo: Queries path info
-    - QueryValidPaths: Queries valid paths
+    - QueryValidDerivers: Queries valid derivers
     """
     server, uri, out_path = query_env
 
@@ -208,15 +194,12 @@ async def test_query_valid_derivers(profiler: pyinstrument.Profiler, query_env) 
     assert deriver.startswith("/nix/store/")
 
 
+@pytest.mark.covers(F.QUERY_MISSING | F.STORE_LOCAL)
 async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify QueryMissing via 'nix build --dry-run'.
 
     Store operations triggered:
-    - AddMultipleToStore: Adds multiple paths to store
-    - BuildPaths: Builds derivation paths
-    - BuildPathsWithResults: Builds derivation paths with results
     - QueryMissing: Queries missing paths
-    - QueryValidPaths: Queries valid paths
     """
     server, uri, out_path = query_env
 
@@ -238,6 +221,7 @@ async def test_query_missing(profiler: pyinstrument.Profiler, query_env) -> None
     assert rc == 0
 
 
+@pytest.mark.covers(F.FIND_ROOTS | F.STORE_LOCAL)
 @pytest.mark.legacy_nix_commands
 async def test_find_roots(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify FindRoots via 'nix-store --gc --print-roots'.
