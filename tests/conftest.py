@@ -435,7 +435,7 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     covered = item.config.stash.get(_covered_features_key, TestFeatures(0))
 
     if features and features in covered:
-        pytest.skip("subsumed by broader tests (features already covered)")
+        item.add_marker(pytest.mark.skip(reason="subsumed by broader tests (features already covered)"))
         return True
 
     return None
