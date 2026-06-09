@@ -18,6 +18,7 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
+from tests.test_features import TestFeatures as F
 
 log = structlog.get_logger(__name__)
 
@@ -30,6 +31,7 @@ async def get_hello_path() -> StorePath:
     return StorePath(stdout.strip())
 
 
+@pytest.mark.covers(F.NAR_FROM_PATH | F.NAR_STREAM | F.NAR_PARSE | F.STORE_LOCAL)
 @pytest.mark.timeout(60)
 async def test_stream_nar() -> None:
     """

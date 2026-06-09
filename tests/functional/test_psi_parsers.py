@@ -20,8 +20,10 @@ from pynixd.psi import (
     parse_psi_line,
     parse_psi_output,
 )
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.SERVER_PSI_GATING)
 class TestParseCpuStat:
     def test_full_cpu_stat(self):
         text = """usage_usec 23302029

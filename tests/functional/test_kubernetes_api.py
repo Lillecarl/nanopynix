@@ -14,8 +14,10 @@ from pynixd.operations.build_derivation import (
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
 from tests.functional.mock_store import MockStore
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.SERVER_KUBERNETES_API)
 @pytest.mark.xfail(reason="MockStore missing BuildDerivationRequest response")
 async def test_dynamic_store_management():
     """Verify adding and removing stores at runtime works correctly."""

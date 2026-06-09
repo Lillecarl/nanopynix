@@ -9,6 +9,7 @@ from pynixd import Server
 from pynixd.store import LocalSocketStore
 from pynixd.types.ids import StoreId
 from tests.conftest import CLIENT_BIN, make_test_spec, run_subproc
+from tests.test_features import TestFeatures as F
 
 """
 End-to-End Nix Integration Tests via Unix Socket
@@ -19,6 +20,7 @@ daemon protocol proxying logic without SSH complexity.
 """
 
 
+@pytest.mark.covers(F.STORE_UNIX | F.SERVER_SESSION_BRIDGE | F.STORE_DELEGATOR | F.BUILD_ALL)
 @pytest.fixture
 async def pynixd_server(tmp_path: Path):
     """Start a pynixd server listening on a Unix socket."""

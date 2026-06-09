@@ -11,8 +11,10 @@ from pathlib import Path
 import pytest
 
 from pynixd.store_path import DrvOutput, StorePath
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.STORE_PATH_ENCODE)
 class TestStorePathConstruction:
     def test_from_string(self):
         sp = StorePath("/nix/store/abc123-foo")

@@ -25,6 +25,7 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
+from tests.test_features import TestFeatures as F
 
 log = structlog.get_logger(__name__)
 
@@ -37,6 +38,7 @@ async def _pick_random_path(store: LocalSocketStore) -> str:
     return str(next(iter(all_paths)))
 
 
+@pytest.mark.covers(F.EXTENSION_DELEGATION | F.STORE_LOCAL)
 @pytest.mark.timeout(60)
 async def test_extension_delegation(tmp_path: Path) -> None:
     """Test that pynixd can delegate extension OPs to other pynixd instances.

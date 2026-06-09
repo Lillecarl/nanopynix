@@ -12,8 +12,10 @@ import pytest
 
 from pynixd.store_path import StorePath
 from pynixd.types.build import BuildMode, BuildResult, BuildResultStatus, BuiltOutput
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.BUILD_TYPES)
 class TestBuildResultStatus:
     def test_built(self):
         assert BuildResultStatus.BUILT == 0

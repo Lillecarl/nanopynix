@@ -5,8 +5,10 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import run_subproc
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.SERVER_PARAM_LOGS)
 @pytest.mark.parametrize("value", [1, 2, 3])
 async def test_param(value: int) -> None:
     """Parameterized test to verify separate log files.

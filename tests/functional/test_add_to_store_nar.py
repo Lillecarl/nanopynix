@@ -19,7 +19,10 @@ if TYPE_CHECKING:
 
     from pynixd import Server
 
+from tests.test_features import TestFeatures as F
 
+
+@pytest.mark.covers(F.ADD_TO_STORE_NAR | F.STORE_LOCAL)
 @pytest.mark.timeout(60)
 async def test_add_to_store_nar(pynixd_server: Server, tmp_path: Path):
     """Add a path to the store using nix store add-path to trigger AddToStoreNar.

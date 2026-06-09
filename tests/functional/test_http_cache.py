@@ -25,6 +25,7 @@ from tests.conftest import (
     run_subproc,
     server_uri,
 )
+from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
     from pynixd.store_path import StorePath
@@ -57,6 +58,7 @@ async def _pick_random_path(store: LocalSocketStore) -> StorePath:
     return all_paths[0]
 
 
+@pytest.mark.covers(F.SERVER_HTTP | F.STORE_HTTP_BINARY_CACHE | F.NAR_FROM_PATH | F.QUERY_PATH_INFO | F.STORE_LOCAL)
 @pytest.mark.timeout(60)
 async def test_narinfo() -> None:
     """Test fetching .narinfo from the HTTP cache.

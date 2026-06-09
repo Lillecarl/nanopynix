@@ -20,6 +20,7 @@ from tests.conftest import (
     rmtree_robust,
 )
 from tests.nix_config import NixConfig
+from tests.test_features import TestFeatures as F
 
 log = structlog.get_logger(__name__)
 
@@ -32,6 +33,7 @@ FEATURE_NIX_CONFIG = NixConfig.for_ca_derivations(
 )
 
 
+@pytest.mark.covers(F.PROBE_FEATURES | F.PROBE_SYSTEMS | F.BUILD_DERIVATION | F.STORE_LOCAL)
 @pytest.mark.timeout(60)
 async def test_feature_probe_in_memory() -> None:
     store_path = STORE_PREFIX / "feature-probe"

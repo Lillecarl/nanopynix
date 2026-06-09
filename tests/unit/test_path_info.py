@@ -6,10 +6,14 @@ combinations of fields. All tests are pure — no I/O.
 
 from __future__ import annotations
 
+import pytest
+
 from pynixd.store_path import StorePath
 from pynixd.types.path_info import ValidPathInfo
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.PATH_INFO)
 class TestNarinfoRoundtrip:
     def test_minimal(self):
         info = ValidPathInfo(

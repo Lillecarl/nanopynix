@@ -15,6 +15,7 @@ from tests.conftest import (
     run_subproc,
     server_uri,
 )
+from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
     import pyinstrument
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.covers(F.QUERY_ALL | F.STORE_LOCAL)
 @pytest.fixture
 async def query_env(pynixd_server: Server):
     """Set up a pynixd server with some initial paths."""

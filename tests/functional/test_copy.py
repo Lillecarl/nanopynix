@@ -15,7 +15,20 @@ from tests.conftest import (
 if TYPE_CHECKING:
     from pynixd import Server
 
+from tests.test_features import TestFeatures as F
 
+
+@pytest.mark.covers(
+    F.COPY_MULTIPLE
+    | F.QUERY_VALID_PATHS
+    | F.REGISTER_DRV_OUTPUT
+    | F.ADD_MULTIPLE_TO_STORE
+    | F.NAR_FROM_PATH
+    | F.QUERY_PATH_INFO
+    | F.QUERY_CLOSURE
+    | F.STORE_HTTP_BINARY_CACHE
+    | F.STORE_POOL
+)
 @pytest.mark.timeout(60)
 async def test_copy(pynixd_server: Server):
     """Copy paths between two stores via UDS.

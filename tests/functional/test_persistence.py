@@ -26,6 +26,7 @@ from tests.conftest import (
     run_subproc,
     server_uri,
 )
+from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -55,6 +56,7 @@ class NoQueryAllValidPathsStore(LocalSocketStore):
         )
 
 
+@pytest.mark.covers(F.PERSISTENCE | F.STORE_LOCAL)
 @pytest.mark.timeout(30)
 async def test_known_paths_persistence(tmp_path: Path) -> None:
     """Verify that known paths for a remote store survive server restart.

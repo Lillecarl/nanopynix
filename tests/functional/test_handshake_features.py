@@ -8,6 +8,8 @@ import asyncssh
 import pytest
 import structlog
 
+from tests.test_features import TestFeatures as F
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -25,6 +27,7 @@ from tests.conftest import (
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.covers(F.SERVER_HANDSHAKE | F.SERVER_FEATURE_PROBE)
 @pytest.mark.timeout(60)
 async def test_handshake_feature_announcement(tmp_path: Path) -> None:
     """Test that pynixd announces its feature matrix in the handshake and the client skips probing."""

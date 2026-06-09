@@ -14,6 +14,7 @@ import pytest
 import structlog
 
 from tests.conftest import CLIENT_BIN, run_subproc, server_uri
+from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -81,6 +82,7 @@ async def _fetch_nix_log(client_store_path: Path, out_path: str) -> str:
     return combined
 
 
+@pytest.mark.covers(F.SERVER_BUILD_LOG_PUBSUB | F.BUILD_ALL | F.STORE_LOCAL)
 @pytest.mark.timeout(120)
 async def test_build_log_pubsub_real_nix(
     profiler: pyinstrument.Profiler,

@@ -41,6 +41,7 @@ from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import BuildId, StoreId
 from tests.conftest import STORE_PREFIX, make_test_spec, rmtree_robust
+from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -137,6 +138,7 @@ class StatsTestStore(LocalSocketStore):
         )
 
 
+@pytest.mark.covers(F.QUERY_ALL | F.STORE_LOCAL)
 @pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="DB stats query returns no row")
 async def test_build_stats_recording(tmp_path: Path) -> None:

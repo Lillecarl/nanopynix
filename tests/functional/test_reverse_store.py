@@ -17,6 +17,7 @@ from pynixd.config import (
 from pynixd.store import LocalSocketStore
 from pynixd.types.ids import StoreId
 from tests.conftest import STORE_PREFIX, make_test_spec, rmtree_robust
+from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.covers(F.STORE_REVERSE | F.ADD_TO_STORE_NAR)
 @pytest.mark.timeout(60)
 async def test_reverse_store_registration(tmp_path: Path) -> None:
     """Builder connects to controller via reverse initiator, registers as a store.

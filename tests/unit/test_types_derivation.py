@@ -13,8 +13,10 @@ import pytest
 from pynixd.store_path import StorePath
 from pynixd.system_features import PYNIXD_HANDLED_FEATURES
 from pynixd.types.derivation import BasicDerivation, DerivationOutput, OutputKind
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.BUILD_TYPES)
 class TestOutputKind:
     def test_input_addressed(self):
         out = DerivationOutput(path="/nix/store/abc-foo", method="", hash_digest="")

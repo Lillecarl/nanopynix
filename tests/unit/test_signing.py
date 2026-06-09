@@ -14,6 +14,7 @@ import pytest
 from pynixd.operations.base import ValidPathInfo
 from pynixd.signing import SecretKey, fingerprint, get_default_signing_key, sign_path_info
 from pynixd.store_path import StorePath
+from tests.test_features import TestFeatures as F
 
 _SEED_32 = b"\x00" * 32
 _SEED_32_B64 = base64.b64encode(_SEED_32).decode()
@@ -22,6 +23,7 @@ _SEED_64 = _SEED_32 + _verify_key
 _SEED_64_B64 = base64.b64encode(_SEED_64).decode()
 
 
+@pytest.mark.covers(F.SIGNING)
 class TestSecretKeyParse:
     def test_parse_32_byte_seed(self):
         key = SecretKey._parse(f"test:{_SEED_32_B64}")

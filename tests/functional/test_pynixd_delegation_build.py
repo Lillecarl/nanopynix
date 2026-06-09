@@ -22,6 +22,7 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
+from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.covers(F.EXTENSION_BUILD | F.BUILD_ALL | F.STORE_LOCAL)
 @pytest.mark.no_pynixd
 @pytest.mark.timeout(120)
 @pytest.mark.xfail(reason="build output path tracking mismatch between servers")

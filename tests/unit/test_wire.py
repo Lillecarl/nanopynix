@@ -113,8 +113,10 @@ from pynixd.wire import (
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. Primitive wire protocol roundtrips
 # ═════════════════════════════════════════════════════════════════════════════
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.WIRE_ENCODE | F.WIRE_DECODE)
 class TestWirePrimitives:
     """Roundtrip tests for NixReader/NixWriter primitive methods."""
 

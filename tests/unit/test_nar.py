@@ -25,8 +25,10 @@ from pynixd.nar import (
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. Roundtrip tests
 # ═════════════════════════════════════════════════════════════════════════════
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.NAR_PARSE | F.NAR_SERIALIZE)
 class TestNarRoundtrip:
     """Serialize → deserialize → compare for every node type."""
 

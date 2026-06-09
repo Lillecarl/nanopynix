@@ -12,8 +12,10 @@ from pynixd import Server
 from pynixd.store import LocalSocketStore
 from pynixd.types.ids import StoreId
 from tests.conftest import make_test_spec
+from tests.test_features import TestFeatures as F
 
 
+@pytest.mark.covers(F.SERVER_HTTP_AUTH | F.STORE_HTTP_BINARY_CACHE | F.SUBSTITUTE_HTTP_AUTH | F.STORE_LOCAL)
 @pytest.mark.timeout(30)
 async def test_htpasswd_auth(tmp_path: Path) -> None:
     """Test HTTP cache authentication using an htpasswd file.

@@ -16,6 +16,7 @@ from tests.conftest import (
     server_uri,
     set_log_levels,
 )
+from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,6 +28,17 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
+@pytest.mark.covers(
+    F.REGULAR
+    | F.TEXT_OUTPUT
+    | F.BUILD_ALL
+    | F.GOAL_BUILD
+    | F.GOAL_DAG
+    | F.GOAL_BUILD_QUEUE
+    | F.GOAL_MANAGER
+    | F.GOAL_SCHEDULER
+    | F.STORE_LOCAL
+)
 @pytest.mark.timeout(60)
 async def test_builders(
     profiler: pyinstrument.Profiler,
