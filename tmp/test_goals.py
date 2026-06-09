@@ -490,6 +490,57 @@ async def test_crazy_mixed_deps() -> None:
         await ctx.substitution_manager.close()
 
 
+async def test_nar_from_path_roundtrip() -> None:
+    """Verify a .drv file is byte-identical over NarFromPath.
+
+    Eval a .drv into a temp store, read it from the local filesystem,
+    fetch the same bytes via NarFromPath over the wire, and compare.
+    """
+    log.info("test_nar", msg="starting")
+
+    from pynixd.nar import NarRegular, parse_nar
+    from pynixd.operations.nar_from_path import NarFromPathRequest
+    from pynixd.operations.query_path_info import QueryPathInfoRequest
+    from pynixd.store_path import StorePath
+
+    async with TemporaryDirectory() as td:
+        # 1. Eval into the temp store so the .drv is written there
+        drv_path_str = await nix_eval(td, "dyn.hello.drvPath")
+        log.info("test_nar", drv_path=drv_path_str)
+
+        # 2. Read the .drv from the temp store's filesystem
+        local_path = Path(td) / drv_path_str.lstrip("/")
+        local_bytes = local_path.read_bytes()
+        log.info("test_nar", local_size=len(local_bytes))
+
+        store = await make_store(td)
+
+        # 3. QueryPathInfo to get nar_size
+        drv_store_path = StorePath(drv_path_str)
+        info_resp = await store.execute(QueryPathInfoRequest(path=drv_store_path))
+        assert info_resp.valid and info_resp.info is not None, f"path not found: {drv_path_str}"
+        nar_size = info_resp.info.nar_size
+
+        # 4. Fetch via NarFromPath
+        resp = await store.execute(
+            NarFromPathRequest(path=drv_store_path, nar_size=nar_size),
+        )
+        assert resp is not None, "NarFromPath returned None"
+        nar_bytes = resp.nar_data
+        log.info("test_nar", nar_size=len(nar_bytes))
+
+        # 5. Parse the NAR and extract the file contents
+        nar_node = parse_nar(nar_bytes)
+        assert isinstance(nar_node, NarRegular), f"expected regular file, got {type(nar_node).__name__}"
+
+        # 6. Compare byte-for-byte
+        actual_bytes = nar_node.contents
+        assert actual_bytes == local_bytes, f"NAR contents differ! local={len(local_bytes)}b nar={len(actual_bytes)}b"
+
+        log.info("test_nar", msg="PASSED", match=True)
+        await store.close()
+
+
 # ── main ───────────────────────────────────────────────────────────
 
 _TESTS = {
@@ -505,6 +556,7 @@ _TESTS = {
     "test_dyn_wrapper": test_dyn_wrapper,
     "test_deep_dynamic": test_deep_dynamic,
     "test_crazy_mixed_deps": test_crazy_mixed_deps,
+    "test_nar_from_path_roundtrip": test_nar_from_path_roundtrip,
 }
 
 
