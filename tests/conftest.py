@@ -26,6 +26,7 @@ from pynixd.store import LocalSocketStore
 from pynixd.testing import clear_test_stash
 from pynixd.types.ids import StoreId
 from tests.nix_config import NixConfig
+from tests.test_features import TestFeatures
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator, Sequence
@@ -156,6 +157,12 @@ def pytest_addoption(parser):
     parser.addoption("--client-bin", choices=["nix", "lix"], default="nix")
     parser.addoption("--local-bin", choices=["nix", "lix"], default="nix")
     parser.addoption("--builder-bin", choices=["nix", "lix"], default="nix")
+    parser.addoption(
+        "--no-test-subsumption",
+        action="store_true",
+        default=False,
+        help="Disable test subsumption (run full suite even if features are already covered)",
+    )
 
 
 def pytest_configure(config):
@@ -270,6 +277,9 @@ _default_store_ids = {"local", "builder"}
 
 _log_dir_key = pytest.StashKey[Path]()
 
+# Stash key for test-subsumption: union of TestFeatures from passing tests.
+_covered_features_key = pytest.StashKey[TestFeatures]()
+
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Create session-wide log directory and print its path.
@@ -334,11 +344,19 @@ def pytest_terminal_summary(
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]):
-    """Automatically wrap async tests in asyncio.timeout.
+    """Wrap async tests in asyncio.timeout and sort by subsumption.
 
-    This provides better diagnostic information (asyncio tracebacks) than the
+    Provides better diagnostic information (asyncio tracebacks) than the
     nuclear 'pytest-timeout' option by triggering 5s earlier.
+
+    When subsumption is active, sorts tests so broader-coverage tests
+    (higher covers popcount) run first, enabling later narrow tests to be
+    skipped when their features are fully covered.
     """
+
+    # Sort by descending covers-popcount so broad tests run first.
+    if not config.getoption("no_test_subsumption"):
+        _sort_by_subsumption(items)
     # Prefer merged value from pytest-timeout if available
     try:
         default_timeout = config.getvalue("timeout")
@@ -366,9 +384,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.obj = _wrap_with_asyncio_timeout(item, default_timeout)
             item.obj._pynixd_timeout_wrapped = True  # type: ignore[reportAttributeAccessIssue]
 
-    # Lix: skip tests requiring CA/dynamic derivations when either the
-    # client, local store, or builder store uses Lix (Lix's daemon cannot
-    # parse floating CA outputs in BuildDerivation).
+    # ── Lix: skip CA/dynamic tests ────────────────────────────────
+    # Lix's daemon cannot parse floating CA outputs in BuildDerivation.
     client_bin = config.getoption("client_bin", "nix")
     local_bin = config.getoption("local_bin", "nix")
     builder_bin = config.getoption("builder_bin", "nix")
@@ -376,6 +393,47 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         for item in items:
             if item.get_closest_marker("ca_derivations"):
                 item.add_marker(pytest.mark.skip(reason="Not supported with Lix"))
+
+
+def _sort_by_subsumption(items: list[pytest.Item]) -> None:
+    """Sort tests so broader-coverage tests run first.
+
+    Tests with a ``covers`` marker are sorted by descending popcount
+    (number of feature flags set).  Tests without the marker are placed
+    at the end (no subsumption benefit).
+    """
+
+    def _popcount(item: pytest.Item) -> int:
+        marker = item.get_closest_marker("covers")
+        if marker is not None and marker.args:
+            features: TestFeatures = marker.args[0]
+            return len(features)
+        return 0
+
+    items.sort(key=_popcount, reverse=True)
+
+
+def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> object:
+    """Skip a test if all its features are already covered by passing tests.
+
+    Only active when ``--no-test-subsumption`` is NOT set.
+    Tests without a ``covers`` marker always run.
+    """
+    if item.config.getoption("no_test_subsumption"):
+        return None  # Normal execution
+
+    marker = item.get_closest_marker("covers")
+    if marker is None or not marker.args:
+        return None  # No covers marker — run normally
+
+    features: TestFeatures = marker.args[0]
+    covered = item.config.stash.get(_covered_features_key, TestFeatures(0))
+
+    if features and features in covered:
+        pytest.skip("subsumed by broader tests (features already covered)")
+        return True
+
+    return None
 
 
 def _wrap_with_asyncio_timeout(item: pytest.Function, default_timeout: float):
@@ -509,23 +567,32 @@ def pytest_runtest_makereport(item: pytest.Item, call):
     outcome = yield
     report = outcome.get_result()
 
-    if report.when == "call" and report.failed:
-        log_dir = item.config.stash.get(_log_dir_key, None)
-        if log_dir:
-            log_file = get_log_file_path(log_dir, item)
-            with log_file.open("a") as f:
-                if report.longrepr:
-                    f.write("\n--- Failure details ---\n")
-                    f.write(str(report.longrepr))
-                if report.capstdout:
-                    f.write("\n--- Captured stdout ---\n")
-                    f.write(report.capstdout)
-                if report.capstderr:
-                    f.write("\n--- Captured stderr ---\n")
-                    f.write(report.capstderr)
+    if report.when == "call":
+        # Record covered features for subsumption when test passes
+        if report.passed and not item.config.getoption("no_test_subsumption"):
+            marker = item.get_closest_marker("covers")
+            if marker is not None and marker.args:
+                features: TestFeatures = marker.args[0]
+                covered = item.config.stash.get(_covered_features_key, TestFeatures(0))
+                item.config.stash[_covered_features_key] = covered | features
 
-            # Replace longrepr with short message for console
-            report.longrepr = f"FAILED (see log file: {log_file})"
+        if report.failed:
+            log_dir = item.config.stash.get(_log_dir_key, None)
+            if log_dir:
+                log_file = get_log_file_path(log_dir, item)
+                with log_file.open("a") as f:
+                    if report.longrepr:
+                        f.write("\n--- Failure details ---\n")
+                        f.write(str(report.longrepr))
+                    if report.capstdout:
+                        f.write("\n--- Captured stdout ---\n")
+                        f.write(report.capstdout)
+                    if report.capstderr:
+                        f.write("\n--- Captured stderr ---\n")
+                        f.write(report.capstderr)
+
+                # Replace longrepr with short message for console
+                report.longrepr = f"FAILED (see log file: {log_file})"
 
 
 def rmtree_robust(path: str | Path) -> None:
