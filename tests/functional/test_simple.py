@@ -31,13 +31,15 @@ log = structlog.get_logger(__name__)
 @pytest.mark.covers(
     F.REGULAR
     | F.TEXT_OUTPUT
-    | F.BUILD_ALL
+    | F.BUILD_DERIVATION
+    | F.BUILD_PATHS
+    | F.BUILD_PATHS_WITH_RESULTS
     | F.GOAL_BUILD
     | F.GOAL_DAG
     | F.GOAL_BUILD_QUEUE
-    | F.GOAL_MANAGER
     | F.GOAL_SCHEDULER
-    | F.STORE_LOCAL
+    | F.STORE_SSH
+    | F.STORE_REVERSE
 )
 @pytest.mark.timeout(60)
 async def test_builders(
@@ -85,21 +87,25 @@ async def test_builders(
     assert out_path.startswith("/nix/store/"), f"Expected store path, got: {out_path}"
 
 
+@pytest.mark.covers(
+    F.REGULAR
+    | F.TEXT_OUTPUT
+    | F.BUILD_DERIVATION
+    | F.BUILD_PATHS
+    | F.BUILD_PATHS_WITH_RESULTS
+    | F.GOAL_BUILD
+    | F.GOAL_DAG
+    | F.GOAL_BUILD_QUEUE
+    | F.GOAL_SCHEDULER
+    | F.STORE_LOCAL
+)
 @pytest.mark.timeout(60)
 async def test_store(
     profiler: pyinstrument.Profiler,
     pynixd_server: Server,
     tmp_path: Path,
 ) -> None:
-    """Build nix/standard.simple via --store.
-
-    Store operations triggered:
-    - AddMultipleToStore: Adds multiple paths to store
-    - BuildPaths: Builds derivation paths
-    - BuildPathsWithResults: Builds derivation paths with results
-    - QueryMissing: Queries missing paths
-    - QueryValidPaths: Queries valid paths
-    """
+    """Build nix/standard.simple via --store."""
     test_nix = TEST_NIX
 
     with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):

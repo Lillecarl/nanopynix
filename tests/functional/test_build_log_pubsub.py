@@ -27,7 +27,9 @@ from tests.functional.mock_store import MockStore
 from tests.test_features import TestFeatures as F
 
 
-@pytest.mark.covers(F.SERVER_BUILD_LOG_PUBSUB | F.BUILD_ALL | F.STORE_LOCAL)
+@pytest.mark.covers(
+    F.SERVER_BUILD_LOG_PUBSUB | F.BUILD_DERIVATION | F.BUILD_PATHS | F.BUILD_PATHS_WITH_RESULTS | F.STORE_LOCAL
+)
 @pytest.mark.xfail(reason="flaky: build scheduling timing in CI")
 async def test_build_log_pubsub_two_clients():
     """Verify that two clients subscribing to the same build receive identical log output.

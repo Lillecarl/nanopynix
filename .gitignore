@@ -3,7 +3,7 @@ result
 
 #AI
 .kilo/plans
-.pi
+.pi/*
 .opencode/package-lock.json
 
 #stuff

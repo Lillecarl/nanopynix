@@ -33,7 +33,7 @@ from tests.test_features import TestFeatures as F
 log = structlog.get_logger(__name__)
 
 
-@pytest.mark.covers(F.GC_ALL | F.STORE_LOCAL)
+@pytest.mark.covers(F.COLLECT_GARBAGE | F.SERVER_RBAC | F.STORE_LOCAL)
 @pytest.mark.timeout(120)
 async def test_collect_garbage_admin(pynixd_server: Server) -> None:
     """GC as admin user should succeed.

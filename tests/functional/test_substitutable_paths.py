@@ -29,19 +29,11 @@ log = structlog.get_logger(__name__)
 
 
 @pytest.mark.covers(
-    F.QUERY_SUBSTITUTABLE_PATH_INFOS
-    | F.QUERY_SUBSTITUTABLE_PATHS
-    | F.QUERY_SUBSTITUTABLE_PATH_INFO
-    | F.SUBSTITUTE_HTTP
-    | F.SUBSTITUTION_MANAGER
-    | F.STORE_LOCAL
+    F.QUERY_SUBSTITUTABLE_PATH_INFOS | F.QUERY_SUBSTITUTABLE_PATHS | F.QUERY_SUBSTITUTABLE_PATH_INFO | F.STORE_LOCAL
 )
 @pytest.mark.timeout(60)
 async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
-    """Build a path and verify it via path-info through pynixd.
-
-    Exercises QueryPathInfo and QueryValidPaths protocol operations.
-    """
+    """Build a path and verify it via path-info through pynixd."""
     uri = server_uri(pynixd_server)
 
     # Build a path first

@@ -82,7 +82,9 @@ async def _fetch_nix_log(client_store_path: Path, out_path: str) -> str:
     return combined
 
 
-@pytest.mark.covers(F.SERVER_BUILD_LOG_PUBSUB | F.BUILD_ALL | F.STORE_LOCAL)
+@pytest.mark.covers(
+    F.SERVER_BUILD_LOG_PUBSUB | F.BUILD_DERIVATION | F.BUILD_PATHS | F.BUILD_PATHS_WITH_RESULTS | F.STORE_LOCAL
+)
 @pytest.mark.timeout(120)
 async def test_build_log_pubsub_real_nix(
     profiler: pyinstrument.Profiler,

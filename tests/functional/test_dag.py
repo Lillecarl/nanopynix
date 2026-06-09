@@ -27,7 +27,17 @@ from tests.test_features import TestFeatures as F
 log = structlog.get_logger(__name__)
 
 
-@pytest.mark.covers(F.DAG_BUILD | F.REGULAR | F.BUILD_ALL | F.GOAL_DAG | F.GOAL_BUILD | F.GOAL_BUILD_QUEUE)
+@pytest.mark.covers(
+    F.DAG_BUILD
+    | F.REGULAR
+    | F.BUILD_DERIVATION
+    | F.BUILD_PATHS
+    | F.BUILD_PATHS_WITH_RESULTS
+    | F.GOAL_DAG
+    | F.GOAL_BUILD
+    | F.GOAL_BUILD_QUEUE
+    | F.STORE_LOCAL
+)
 @pytest.mark.timeout(60)
 async def test_builders(pynixd_server: Server, tmp_path: Path) -> None:
     """Build nix/standard.dag via --builders.

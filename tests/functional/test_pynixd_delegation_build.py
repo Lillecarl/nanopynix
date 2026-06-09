@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
-@pytest.mark.covers(F.EXTENSION_BUILD | F.BUILD_ALL | F.STORE_LOCAL)
+@pytest.mark.covers(F.EXTENSION_BUILD | F.BUILD_DERIVATION | F.BUILD_PATHS | F.BUILD_PATHS_WITH_RESULTS | F.STORE_LOCAL)
 @pytest.mark.no_pynixd
 @pytest.mark.timeout(120)
 @pytest.mark.xfail(reason="build output path tracking mismatch between servers")
