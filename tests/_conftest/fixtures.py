@@ -1,0 +1,176 @@
+"""Autouse fixtures for store cleanup, profiling, and test isolation."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import random
+import time
+from contextlib import suppress
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+import structlog
+
+from pynixd.testing import clear_test_stash
+from tests._conftest.constants import (
+    HAS_PYINSTRUMENT,
+    SESSION_STORE_PREFIX,
+    STORE_PREFIX,
+    ConsoleRenderer,
+    Profiler,
+    _default_store_ids,
+    _log_dir_key,
+)
+from tests._conftest.helpers import rmtree_robust, rmtree_robust_glob
+from tests._conftest.logging import get_log_file_path
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from pynixd import Server
+
+log = structlog.get_logger(__name__)
+
+
+# ── Profiling helpers ─────────────────────────────────────────────
+
+
+def _prune_client_processor(frame, options):
+    """Custom pyinstrument processor to remove client-side subprocess frames."""
+    if frame is None:
+        return None
+    for child in list(frame.children):
+        if child.function and ("run_nix_build" in child.function or "run_subproc" in child.function):
+            child.remove_from_parent()
+        else:
+            _prune_client_processor(child, options)
+    return frame
+
+
+# ── Autouse fixtures ──────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def clear_instrumentation():
+    """Clear internal test stash before each test."""
+    clear_test_stash()
+    return
+
+
+@pytest.fixture(autouse=True)
+def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
+    """Redirect all structlog output for this test to its own log file."""
+    import structlog as _structlog
+
+    from tests._conftest.logging import _TestRelativeTimeHandler
+
+    log_file = get_log_file_path(test_log_dir, request.node)
+
+    _structlog.contextvars.bind_contextvars(test_start_time=time.monotonic())
+
+    test_start = time.time()
+    handler = _TestRelativeTimeHandler(test_start, log_file)
+    handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(message)s")
+    handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    old_level = root_logger.level
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.addHandler(handler)
+
+    yield log_file
+
+    root_logger.removeHandler(handler)
+    root_logger.setLevel(old_level)
+    handler.close()
+
+
+@pytest.fixture(autouse=True)
+def _fixed_test_ts():
+    """Pin PYNIXD_TEST_TS for each test so build+eval get consistent .drv paths."""
+    ts = str(int(time.time()))
+    original = os.environ.get("PYNIXD_TEST_TS")
+    os.environ["PYNIXD_TEST_TS"] = ts
+    yield
+    if original is None:
+        os.environ.pop("PYNIXD_TEST_TS", None)
+    else:
+        os.environ["PYNIXD_TEST_TS"] = original
+
+
+@pytest.fixture(autouse=True)
+async def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
+    """Profile every test and save to a .pyinstrument file."""
+    if not HAS_PYINSTRUMENT:
+        yield None
+        return
+
+    p = Profiler(async_mode="enabled")
+    p.start()
+
+    yield p
+
+    if p is not None:
+        if p.is_running:
+            p.stop()
+        session = p.last_session
+        if session:
+            log_file = get_log_file_path(test_log_dir, request.node)
+            profile_file = log_file.with_suffix(".pyinstrument")
+
+            renderer = ConsoleRenderer(unicode=True, color=False)
+            renderer.processors.insert(0, _prune_client_processor)
+
+            with profile_file.open("w") as f:
+                f.write(renderer.render(session))
+
+
+@pytest.fixture(autouse=True)
+def cleanup_stores():
+    """Remove any leftover test stores before and after each test."""
+    yield
+    rmtree_robust_glob(f"{STORE_PREFIX}/*")
+    rmtree_robust_glob("/tmp/pynixd-test-*")
+
+
+# ── Non-autouse fixtures ──────────────────────────────────────────
+
+
+@pytest.fixture
+def tmp_path(request: pytest.FixtureRequest) -> Generator[Path]:
+    """Override pytest's tmp_path to use rmtree_robust for teardown.
+
+    Uses a dedicated prefix to avoid pytest's shutil.rmtree which
+    fails on read-only Nix store files.
+    """
+    suffix = f"{request.node.name}-{random.getrandbits(32):08x}"
+    path = Path(f"/tmp/pynixd-test-{suffix}")
+    path.mkdir(parents=True, exist_ok=True)
+    yield path
+    with suppress(Exception):
+        rmtree_robust(path)
+
+
+@pytest.fixture(autouse=True)
+async def cleanup_extra_stores(pynixd_server: Server | tuple | None):
+    """Remove non-default stores added by tests between each test."""
+    yield
+    if pynixd_server is None:
+        return
+
+    actual_server = pynixd_server[0] if isinstance(pynixd_server, tuple) else pynixd_server
+    if not hasattr(actual_server, "stores"):
+        return
+
+    extra_ids = [sid for sid in actual_server.stores if sid not in _default_store_ids]
+
+    for sid in extra_ids:
+        store = actual_server.stores[sid]
+        store_path = store.store_path
+        await actual_server.remove_store(sid)
+        if store_path and str(store_path).startswith(str(SESSION_STORE_PREFIX)):
+            await asyncio.to_thread(rmtree_robust, store_path)
