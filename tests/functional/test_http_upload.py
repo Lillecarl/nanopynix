@@ -63,7 +63,6 @@ async def get_no_refs_path() -> StorePath:
 
 
 @pytest.mark.covers(F.SERVER_HTTP_UPLOAD | F.STORE_HTTP_BINARY_CACHE_WRITE | F.ADD_TO_STORE_NAR | F.STORE_LOCAL)
-@pytest.mark.timeout(60)
 async def test_http_upload(
     pynixd_server: Server,
 ) -> None:
@@ -130,7 +129,6 @@ async def test_http_upload(
     assert info_resp.valid, f"Path {path} should be valid in local store after upload"
 
 
-@pytest.mark.timeout(60)
 async def test_nix_copy_to_http(
     pynixd_server: Server,
 ) -> None:

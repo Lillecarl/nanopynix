@@ -103,7 +103,7 @@ def _fixed_test_ts():
 
 
 @pytest.fixture(autouse=True)
-async def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
+def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
     """Profile every test and save to a .pyinstrument file."""
     if not HAS_PYINSTRUMENT:
         yield None
@@ -140,6 +140,17 @@ def cleanup_stores():
 # ── Non-autouse fixtures ──────────────────────────────────────────
 
 
+@pytest.fixture(
+    scope="session",
+    params=[
+        pytest.param(("asyncio", {"use_uvloop": True}), id="asyncio+uvloop"),
+    ],
+)
+def anyio_backend(request: pytest.FixtureRequest):
+    """Override anyio's default backend fixture to use uvloop (session-scoped)."""
+    return request.param
+
+
 @pytest.fixture
 def tmp_path(request: pytest.FixtureRequest) -> Generator[Path]:
     """Override pytest's tmp_path to use rmtree_robust for teardown.
@@ -155,9 +166,14 @@ def tmp_path(request: pytest.FixtureRequest) -> Generator[Path]:
         rmtree_robust(path)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 async def cleanup_extra_stores(pynixd_server: Server | tuple | None):
-    """Remove non-default stores added by tests between each test."""
+    """Remove non-default stores added by tests between each test.
+
+    Not autouse — sync tests cannot consume async fixtures without
+    pytest-asyncio.  The sync ``cleanup_stores`` fixture handles
+    basic store directory cleanup for all tests.
+    """
     yield
     if pynixd_server is None:
         return

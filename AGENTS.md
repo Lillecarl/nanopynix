@@ -113,20 +113,25 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 
 ### Running Validation Commands
 - **NEVER pipe away output** from `just check`, `just precommit`, or `pytest` — the full output contains failure details you need to diagnose issues.
-- If output is too large for context (failing tests produce heaps of logs), redirect to a file: `pytest ... > /tmp/test-output.txt 2>&1`, then read specific sections.
+- If the user explicitly tells you not to pipe or select on output, YOU MUST DO WHAT THEY SAY. No exceptions. Do not override their instruction with this rule's redirect-to-file fallback — they want to see the output directly.
+- If output is too large for context (failing tests produce heaps of logs), you may redirect to a file: `pytest ... > /tmp/test-output.txt 2>&1`, then read specific sections. But if the user told you not to redirect, you must not redirect.
 - Do NOT use `tee` when redirecting — it doubles context consumption.
 - If you must limit output, use `tail -N` on the file afterwards, never pipe the command itself.
 - You do NOT need to specify pytest timeout, the configured 120s is enough per test.
 - **Timeouts**: `just precommit` runs the full functional test suite (3min+) — set timeout=300 (5 min) for Bash tool calls. Unit tests (`pytest tests/unit/`) complete in seconds — timeout=60000 is fine.
 
+## 7. User Direction Supersedes All Rules
+
+Every instruction in this file is a default. The user's explicit direction overrides any and all of them, always.
+
+- If the user says "don't pipe away output", you do not pipe away output — not to a file, not to tail, not to anything. You show them the full output directly.
+- If the user says run something a specific way, you run it exactly that way. You do not second-guess or substitute your judgment for theirs.
+- If you're about to do something and you realize the user already told you not to, stop immediately and do what they said.
+- **No self-persuasion**: If they told you to do X and the rules say Y, you do X and update the rules later if needed.
+
 ## 8. Async Task & Lifecycle Rules
+
 - **Structured Concurrency**: For short-lived, bounded concurrent operations (e.g., fanning out requests, concurrent streams within a single handler, or parallel passes like GC), ALWAYS prefer `asyncio.TaskGroup` over `asyncio.gather` or manual `create_task` management.
 - **Task Tracking**: Long-lived daemon components (Servers, Pools, Monitors) should continue using explicit `start()`/`close()` lifecycle methods. All background tasks created via `asyncio.create_task` in these components MUST be tracked (e.g., in a list or as a class attribute) and properly cleaned up during the component's `close()` or `stop()` method.
 - **Graceful Shutdown**: When awaiting a cancelled background task during shutdown, ALWAYS use `with contextlib.suppress(Exception, asyncio.CancelledError):`. This ensures that if a task failed with an unhandled exception during its lifetime, that exception does not crash the shutdown sequence.
 - **Orphaned Tasks**: Avoid orphaned tasks. If a `TaskGroup` cannot be used, ensure helper tasks use a `try...finally` block to guarantee they are cancelled and awaited if the primary operation fails.
-
-#### Good examples
-- just test
-- just precommit
-- pytest tests/functional/test_ca_ops.py &> /tmp/test_output.txt
-- pytest tests/functional/test_ca_ops.py::test_ca_simple_build_root_store &> /tmp/test_output.txt

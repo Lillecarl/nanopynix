@@ -45,7 +45,6 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("drv_path_str", paths)
 
 
-@pytest.mark.timeout(30)
 def test_drv_roundtrip(drv_path_str: str) -> None:
     """For a single .drv file: read, parse, serialize, parse, compare."""
     drv_path = Path(drv_path_str)

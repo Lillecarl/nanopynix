@@ -7,8 +7,6 @@ let
     default.package.dependencies
     ++ [
       ps.pytest
-      ps.pytest-asyncio
-      ps.pytest-timeout
     ]
   );
 in

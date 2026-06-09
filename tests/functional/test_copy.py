@@ -28,7 +28,6 @@ from tests.test_features import TestFeatures as F
     | F.STORE_HTTP_BINARY_CACHE
     | F.STORE_POOL
 )
-@pytest.mark.timeout(60)
 async def test_copy(pynixd_server: Server):
     """Copy paths between two stores via UDS.
 

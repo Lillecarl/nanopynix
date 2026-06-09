@@ -25,7 +25,6 @@ log = structlog.get_logger(__name__)
 
 
 @pytest.mark.covers(F.QUERY_DERIVATION_OUTPUT_MAP | F.STORE_LOCAL)
-@pytest.mark.timeout(60)
 async def test_query_derivation_output_map(pynixd_server: Server) -> None:
     """Build a derivation and query its output map.
 

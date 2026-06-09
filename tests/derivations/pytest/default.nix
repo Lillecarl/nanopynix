@@ -8,7 +8,6 @@ let
   pytestEnv = pkgs.python3.withPackages (ps: [
     pynixd-lib
     ps.pytest
-    ps.pytest-asyncio
     ps.pytest-timeout
     ps.pyinstrument
   ]);

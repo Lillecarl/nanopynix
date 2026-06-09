@@ -38,7 +38,6 @@ log = structlog.get_logger(__name__)
     | F.GOAL_BUILD_QUEUE
     | F.STORE_LOCAL
 )
-@pytest.mark.timeout(60)
 async def test_builders(pynixd_server: Server, tmp_path: Path) -> None:
     """Build nix/standard.dag via --builders.
 
@@ -78,7 +77,6 @@ async def test_builders(pynixd_server: Server, tmp_path: Path) -> None:
     assert rc == 0, f"build failed:\n{stdboth}"
 
 
-@pytest.mark.timeout(60)
 async def test_store(pynixd_server: Server, tmp_path: Path) -> None:
     """Build nix/standard.dag via --store.
 

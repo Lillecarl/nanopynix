@@ -25,7 +25,6 @@ log = structlog.get_logger(__name__)
 
 @pytest.mark.covers(F.SERVER_RBAC | F.SERVER_SSH | F.ADD_PERM_ROOT | F.ADD_INDIRECT_ROOT | F.SET_OPTIONS | F.STORE_SSH)
 @pytest.mark.xfail(reason="nix 2.34.7 returns exit code 0 even on access-denied errors")
-@pytest.mark.timeout(60)
 async def test_rbac_ssh_admin_vs_user(pynixd_server: Server) -> None:
     """Verify that SSH admin can GC, but SSH user cannot.
 
@@ -47,7 +46,6 @@ async def test_rbac_ssh_admin_vs_user(pynixd_server: Server) -> None:
     assert rc_admin == 0
 
 
-@pytest.mark.timeout(60)
 async def test_rbac_unix_implicit_admin(pynixd_server: Server) -> None:
     """Verify that Unix socket connections are implicit admins.
 

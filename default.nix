@@ -70,8 +70,6 @@ let
 
     nativeCheckInputs = [
       python.pkgs.pytest
-      python.pkgs.pytest-asyncio
-      python.pkgs.pytest-timeout
     ];
 
     meta = {
@@ -94,8 +92,6 @@ let
         (python.withPackages (ps: [
           library
           ps.pytest
-          ps.pytest-asyncio
-          ps.pytest-timeout
           ps.pyinstrument
         ]))
       ];
@@ -118,8 +114,6 @@ let
         ++ library.dependencies
         ++ [
           ps.pytest
-          ps.pytest-asyncio
-          ps.pytest-timeout
         ]
       );
     in

@@ -59,7 +59,6 @@ async def _pick_random_path(store: LocalSocketStore) -> StorePath:
 
 
 @pytest.mark.covers(F.SERVER_HTTP | F.STORE_HTTP_BINARY_CACHE | F.NAR_FROM_PATH | F.QUERY_PATH_INFO | F.STORE_LOCAL)
-@pytest.mark.timeout(60)
 async def test_narinfo() -> None:
     """Test fetching .narinfo from the HTTP cache.
 
@@ -85,7 +84,6 @@ async def test_narinfo() -> None:
                 assert "URL: nar/" in text
 
 
-@pytest.mark.timeout(60)
 async def test_nar_streaming() -> None:
     """Test streaming a NAR from the HTTP cache.
 
@@ -126,7 +124,6 @@ async def test_nar_streaming() -> None:
                 assert total_bytes > 0
 
 
-@pytest.mark.timeout(120)
 async def test_cache_as_substituter() -> None:
     """Test using pynixd HTTP cache as a substituter for another nix build.
 

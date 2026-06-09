@@ -34,7 +34,6 @@ log = structlog.get_logger(__name__)
 
 
 @pytest.mark.covers(F.COLLECT_GARBAGE | F.SERVER_RBAC | F.STORE_LOCAL)
-@pytest.mark.timeout(120)
 async def test_collect_garbage_admin(pynixd_server: Server) -> None:
     """GC as admin user should succeed.
 
@@ -48,7 +47,6 @@ async def test_collect_garbage_admin(pynixd_server: Server) -> None:
     assert "freed" in stdout.lower() or "freed" in stderr.lower(), f"Unexpected GC output:\n{stdboth}"
 
 
-@pytest.mark.timeout(120)
 @pytest.mark.xfail(reason="RBAC tests share server fixture — flaky under concurrency")
 async def test_collect_garbage_non_admin(pynixd_server: Server) -> None:
     """GC as non-admin user should be rejected."""
@@ -59,7 +57,6 @@ async def test_collect_garbage_non_admin(pynixd_server: Server) -> None:
     assert rc == 0, f"GC should succeed (denied but nix exits 0):\n{stdboth}"
 
 
-@pytest.mark.timeout(120)
 async def test_collect_garbage_unix_admin(pynixd_server: Server) -> None:
     """GC over Unix socket (implicit admin) should succeed."""
     uri = unix_session_uri(pynixd_server)

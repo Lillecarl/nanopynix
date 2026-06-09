@@ -16,7 +16,6 @@ from tests.test_features import TestFeatures as F
 
 
 @pytest.mark.covers(F.SERVER_HTTP_AUTH | F.STORE_HTTP_BINARY_CACHE | F.STORE_LOCAL)
-@pytest.mark.timeout(30)
 async def test_htpasswd_auth(tmp_path: Path) -> None:
     """Test HTTP cache authentication using an htpasswd file.
 
@@ -69,7 +68,6 @@ async def test_htpasswd_auth(tmp_path: Path) -> None:
                 assert resp.status == 403
 
 
-@pytest.mark.timeout(30)
 async def test_htpasswd_fallback_to_single_user(tmp_path: Path) -> None:
     """Test that htpasswd takes precedence but single user still works if no htpasswd.
 

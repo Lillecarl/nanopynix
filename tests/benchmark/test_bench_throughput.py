@@ -41,7 +41,6 @@ TEST_ENV = {
 
 
 @pytest.mark.benchmark
-@pytest.mark.timeout(120)
 async def test_throughput_local() -> None:
     """Baseline: Build directly with a custom local store path."""
     store_path = STORE_PREFIX / "throughput-local-baseline"
@@ -71,7 +70,6 @@ async def test_throughput_local() -> None:
 
 
 @pytest.mark.benchmark
-@pytest.mark.timeout(120)
 async def test_throughput_daemon() -> None:
     """Baseline: Build against a standard Nix daemon."""
     store_path = STORE_PREFIX / "throughput-daemon-baseline"
@@ -145,7 +143,6 @@ async def test_throughput_daemon() -> None:
 
 
 @pytest.mark.benchmark
-@pytest.mark.timeout(0)
 async def test_throughput_pynixd(profiler: pyinstrument.Profiler) -> None:
     """pynixd: Build through pynixd proxy."""
     # THIS TEST MUST COMPLETE WITHIN 120 SECONDS. If it takes longer, something is broken.

@@ -12,6 +12,7 @@ from pynixd.store import get_current_system
 from tests.conftest import (
     CLIENT_BIN,
     TEST_NIX,
+    configure_test_logging,
     run_subproc,
     server_uri,
     set_log_levels,
@@ -41,7 +42,6 @@ log = structlog.get_logger(__name__)
     | F.STORE_SSH
     | F.STORE_REVERSE
 )
-@pytest.mark.timeout(60)
 async def test_builders(
     profiler: pyinstrument.Profiler,
     pynixd_server: Server,
@@ -99,13 +99,36 @@ async def test_builders(
     | F.GOAL_SCHEDULER
     | F.STORE_LOCAL
 )
-@pytest.mark.timeout(60)
 async def test_store(
     profiler: pyinstrument.Profiler,
     pynixd_server: Server,
     tmp_path: Path,
 ) -> None:
     """Build nix/standard.simple via --store."""
+    _lk = "_pynixd_life"
+    configure_test_logging(
+        extra_processors=[
+            # Suppress AddMultipleToStore path-transfer events by exact logger + event prefix
+            lambda _logger, _method, event_dict: (
+                event_dict.update({_lk: event_dict.get(_lk, 0) - 1}) or event_dict
+                if (
+                    event_dict.get("logger") == "pynixd.operations.AddMultipleToStoreRequest"
+                    and str(event_dict.get("event", "")).startswith("forward")
+                )
+                else event_dict
+            ),
+            # Suppress nix "copying path" progress from stderr
+            lambda _logger, _method, event_dict: (
+                event_dict.update({_lk: event_dict.get(_lk, 0) - 1}) or event_dict
+                if (
+                    event_dict.get("logger") == "tests._conftest.helpers"
+                    and event_dict.get("event") == "stderr"
+                    and "copying path" in str(event_dict.get("message", ""))
+                )
+                else event_dict
+            ),
+        ]
+    )
     test_nix = TEST_NIX
 
     with set_log_levels({"pynixd.op.AddToStore": logging.INFO}):

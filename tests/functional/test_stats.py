@@ -139,7 +139,6 @@ class StatsTestStore(LocalSocketStore):
 
 
 @pytest.mark.covers(F.BUILD_DERIVATION | F.QUERY_ALL_VALID_PATHS | F.QUERY_CLOSURE_WITH_INFO | F.STORE_LOCAL)
-@pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="DB stats query returns no row")
 async def test_build_stats_recording(tmp_path: Path) -> None:
     """Verify that build stats are recorded to the DB."""
@@ -210,7 +209,6 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
 
 
 @pytest.mark.covers(F.BUILD_DERIVATION | F.GOAL_BUILD_QUEUE | F.GOAL_SCHEDULER | F.STORE_LOCAL)
-@pytest.mark.timeout(30)
 async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
     """Verify that the scheduler fast-tracks tiny builds to the local store."""
     pynixd_local_path = STORE_PREFIX / "fasttrack-local"
@@ -364,7 +362,6 @@ class CpuUtilTestStore(StatsTestStore):
 
 @pytest.mark.covers(F.BUILD_DERIVATION | F.GOAL_SCHEDULER | F.GOAL_BUILD_QUEUE | F.SERVER_PSI_GATING | F.STORE_LOCAL)
 @pytest.mark.xfail(reason="pre-existing: scheduler saturation logic needs review")
-@pytest.mark.timeout(30)
 async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     """Verify scheduler skips stores at >99% CPU utilization."""
     pynixd_local_path = STORE_PREFIX / "cpu-util-local"

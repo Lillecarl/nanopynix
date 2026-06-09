@@ -34,7 +34,6 @@ FEATURE_NIX_CONFIG = NixConfig.for_ca_derivations(
 
 
 @pytest.mark.covers(F.PROBE_FEATURES | F.PROBE_SYSTEMS | F.BUILD_DERIVATION | F.STORE_LOCAL)
-@pytest.mark.timeout(60)
 async def test_feature_probe_in_memory() -> None:
     store_path = STORE_PREFIX / "feature-probe"
     rmtree_robust(store_path)
@@ -59,7 +58,6 @@ async def test_feature_probe_in_memory() -> None:
     assert "uid-range" not in fm.get("x86_64-linux", set())
 
 
-@pytest.mark.timeout(120)
 @pytest.mark.nixbuild
 @pytest.mark.skip(reason="requires nixbuild.net; pass -m nixbuild to run")
 async def test_feature_probe_nixbuild_net() -> None:

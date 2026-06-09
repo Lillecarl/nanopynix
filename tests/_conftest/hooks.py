@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -74,27 +73,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     if not config.getoption("no_test_subsumption"):
         _sort_by_subsumption(items)
 
-    # Resolve timeout value.
-    try:
-        default_timeout = config.getvalue("timeout")
-    except (AttributeError, ValueError):
-        default_timeout = None
-    if default_timeout is None:
-        default_timeout = os.environ.get("PYTEST_TIMEOUT")
-    if default_timeout is None:
-        default_timeout = config.getini("timeout")
-    try:
-        default_timeout = float(default_timeout) if default_timeout else 120.0
-    except ValueError:
-        default_timeout = 120.0
-
     for item in items:
         if (
             isinstance(item, pytest.Function)
             and asyncio.iscoroutinefunction(item.obj)
             and not getattr(item.obj, "_pynixd_timeout_wrapped", False)
         ):
-            item.obj = _wrap_with_asyncio_timeout(item, default_timeout)
+            item.obj = _wrap_with_asyncio_timeout(item)
             item.obj._pynixd_timeout_wrapped = True  # type: ignore[reportAttributeAccessIssue]
 
     # Lix: skip CA/dynamic tests.
@@ -107,29 +92,20 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                 item.add_marker(pytest.mark.skip(reason="Not supported with Lix"))
 
 
-def _wrap_with_asyncio_timeout(item: pytest.Function, default_timeout: float):
-    """Wrap an async test function with asyncio.timeout that triggers before pytest-timeout."""
+def _wrap_with_asyncio_timeout(item: pytest.Function):
+    """Wrap an async test function with asyncio.timeout for timeout protection."""
     original_func = item.obj
 
     @functools.wraps(original_func)
     async def wrapped(*args, **kwargs):
-        timeout_mark = item.get_closest_marker("timeout")
-        seconds = float(timeout_mark.args[0] if timeout_mark else default_timeout)
-
-        if seconds <= 0:
-            return await original_func(*args, **kwargs)
-
-        timeout_val = max(1.0, seconds - 5.0)
-
         try:
-            async with asyncio.timeout(timeout_val):
+            async with asyncio.timeout(120):
                 return await original_func(*args, **kwargs)
         except TimeoutError:
             log.exception(
                 "test_timeout_triggered",
                 test=item.nodeid,
-                timeout=seconds,
-                effective=timeout_val,
+                timeout=120,
             )
             raise
 

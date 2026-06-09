@@ -57,6 +57,12 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     global CLIENT_BIN
     CLIENT_BIN = LIX_BIN if config.getoption("client_bin") == "lix" else NIX_BIN
+
+    # Unregister pytest-asyncio — we use anyio for async test execution.
+    asyncio_plugin = config.pluginmanager.get_plugin("asyncio")
+    if asyncio_plugin is not None:
+        config.pluginmanager.unregister(asyncio_plugin)
+
     config.addinivalue_line(
         "markers",
         "covers(features): TestFeatures flag mask covered by this test. Used by test subsumption sorting and skipping.",
@@ -149,6 +155,7 @@ def nix_env() -> dict[str, str]:
 
 @pytest.fixture(scope="session", autouse=True)
 async def pynixd_server(
+    anyio_backend,
     request: pytest.FixtureRequest,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> AsyncGenerator[Server]:

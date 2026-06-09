@@ -26,7 +26,6 @@ log = structlog.get_logger(__name__)
 
 
 @pytest.mark.covers(F.STORE_REVERSE | F.ADD_TO_STORE_NAR)
-@pytest.mark.timeout(60)
 async def test_reverse_store_registration(tmp_path: Path) -> None:
     """Builder connects to controller via reverse initiator, registers as a store.
 

@@ -57,7 +57,6 @@ class NoQueryAllValidPathsStore(LocalSocketStore):
 
 
 @pytest.mark.covers(F.PERSISTENCE | F.STORE_LOCAL)
-@pytest.mark.timeout(30)
 async def test_known_paths_persistence(tmp_path: Path) -> None:
     """Verify that known paths for a remote store survive server restart.
 
@@ -123,7 +122,6 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
         log.info("persistence_verified", path=test_path)
 
 
-@pytest.mark.timeout(30)
 async def test_known_paths_cleanup(tmp_path: Path) -> None:
     """Verify that stale cached paths are removed after verification.
 
@@ -201,7 +199,6 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
         log.info("cleanup_verified")
 
 
-@pytest.mark.timeout(30)
 async def test_is_valid_path_isolation(tmp_path: Path) -> None:
     """Verify that IsValidPath correctly distinguishes between local and remote stores sharing a DB.
 

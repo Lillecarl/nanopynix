@@ -45,7 +45,6 @@ log = structlog.get_logger(__name__)
     | F.STORE_LOCAL
     | F.SERVER_RBAC
 )
-@pytest.mark.timeout(120)
 async def test_optimise_store_admin(pynixd_server: Server) -> None:
     """OptimiseStore as admin should succeed.
 
@@ -58,7 +57,6 @@ async def test_optimise_store_admin(pynixd_server: Server) -> None:
 
 
 @pytest.mark.xfail(reason="nix 2.34.7 returns exit code 0 even on access-denied errors")
-@pytest.mark.timeout(120)
 async def test_optimise_store_non_admin(pynixd_server: Server) -> None:
     """OptimiseStore as non-admin should be rejected."""
     uri = ssh_user_uri(pynixd_server)
@@ -69,7 +67,6 @@ async def test_optimise_store_non_admin(pynixd_server: Server) -> None:
 
 
 @pytest.mark.legacy_nix_commands
-@pytest.mark.timeout(120)
 async def test_verify_store_admin(pynixd_server: Server) -> None:
     """VerifyStore as admin should succeed."""
     uri = unix_session_uri(pynixd_server)
@@ -79,7 +76,6 @@ async def test_verify_store_admin(pynixd_server: Server) -> None:
 
 
 @pytest.mark.legacy_nix_commands
-@pytest.mark.timeout(120)
 @pytest.mark.xfail(reason="RBAC tests share server fixture — flaky under concurrency")
 async def test_verify_store_non_admin(pynixd_server: Server) -> None:
     """VerifyStore as non-admin should be rejected."""
@@ -90,7 +86,6 @@ async def test_verify_store_non_admin(pynixd_server: Server) -> None:
     assert "requires administrative privileges" in stdboth
 
 
-@pytest.mark.timeout(120)
 async def test_add_build_log_non_admin(pynixd_server: Server) -> None:
     """AddBuildLog as non-admin should be rejected.
 
@@ -116,7 +111,6 @@ async def test_add_build_log_non_admin(pynixd_server: Server) -> None:
     assert rc == 0, f"Build (and possibly AddBuildLog) failed:\n{stdboth}"
 
 
-@pytest.mark.timeout(120)
 async def test_add_signatures_via_store(
     pynixd_server: Server,
     tmp_path: Path,

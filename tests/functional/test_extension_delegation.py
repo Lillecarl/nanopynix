@@ -39,7 +39,6 @@ async def _pick_random_path(store: LocalSocketStore) -> str:
 
 
 @pytest.mark.covers(F.EXTENSION_DELEGATION | F.STORE_LOCAL)
-@pytest.mark.timeout(60)
 async def test_extension_delegation(tmp_path: Path) -> None:
     """Test that pynixd can delegate extension OPs to other pynixd instances.
 

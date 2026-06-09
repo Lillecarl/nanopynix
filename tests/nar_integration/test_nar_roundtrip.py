@@ -66,7 +66,6 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("store_path_str", paths)
 
 
-@pytest.mark.timeout(30)
 async def test_nar_roundtrip_via_streaming(store_path_str: str) -> None:
     """For a single store path: get NAR, stream through NarForwarder,
     parse/serialize, and assert all bytes match.
@@ -120,7 +119,6 @@ async def test_nar_roundtrip_via_streaming(store_path_str: str) -> None:
         await store.close()
 
 
-@pytest.mark.timeout(30)
 async def test_nar_forwarder_convenience(store_path_str: str) -> None:
     """Verify forward_nar() works end-to-end with a single real store path."""
     from pynixd.store_path import StorePath

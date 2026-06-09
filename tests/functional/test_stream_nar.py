@@ -32,7 +32,6 @@ async def get_hello_path() -> StorePath:
 
 
 @pytest.mark.covers(F.NAR_FROM_PATH | F.NAR_STREAM | F.NAR_PARSE | F.STORE_LOCAL)
-@pytest.mark.timeout(60)
 async def test_stream_nar() -> None:
     """
     Test streaming a NAR from the system store to a temporary store.

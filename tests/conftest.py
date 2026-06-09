@@ -31,6 +31,7 @@ from tests._conftest.constants import (
 )
 from tests._conftest.fixtures import (
     _fixed_test_ts,
+    anyio_backend,
     cleanup_extra_stores,
     cleanup_stores,
     clear_instrumentation,
@@ -45,5 +46,15 @@ from tests._conftest.hooks import (
     pytest_sessionstart,
     pytest_terminal_summary,
 )
-from tests._conftest.logging import set_log_levels, test_log_dir, test_log_file
+from tests._conftest.logging import (
+    _reset_structlog,
+    configure_test_logging,
+    revive_messages_containing,
+    revive_messages_matching,
+    set_log_levels,
+    suppress_messages_containing,
+    suppress_messages_matching,
+    test_log_dir,
+    test_log_file,
+)
 from tests._conftest.subsumption import pytest_runtest_protocol

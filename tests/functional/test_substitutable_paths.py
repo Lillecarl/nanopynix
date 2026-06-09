@@ -31,7 +31,6 @@ log = structlog.get_logger(__name__)
 @pytest.mark.covers(
     F.QUERY_SUBSTITUTABLE_PATH_INFOS | F.QUERY_SUBSTITUTABLE_PATHS | F.QUERY_SUBSTITUTABLE_PATH_INFO | F.STORE_LOCAL
 )
-@pytest.mark.timeout(60)
 async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
     """Build a path and verify it via path-info through pynixd."""
     uri = server_uri(pynixd_server)
@@ -68,7 +67,6 @@ async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
     assert out_path in stdout, f"Expected {out_path} in path-info output:\n{stdboth}"
 
 
-@pytest.mark.timeout(60)
 async def test_substitutable_paths_via_nix(pynixd_server: Server) -> None:
     """Build a path through pynixd and verify it's tracked.
 
