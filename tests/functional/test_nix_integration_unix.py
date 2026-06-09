@@ -20,7 +20,6 @@ daemon protocol proxying logic without SSH complexity.
 """
 
 
-@pytest.mark.covers(F.STORE_UNIX | F.SERVER_SESSION_BRIDGE | F.STORE_DELEGATOR | F.BUILD_ALL)
 @pytest.fixture
 async def pynixd_server(tmp_path: Path):
     """Start a pynixd server listening on a Unix socket."""
@@ -41,6 +40,7 @@ async def pynixd_server(tmp_path: Path):
         yield server, socket_path, store_path
 
 
+@pytest.mark.covers(F.STORE_UNIX | F.SERVER_SESSION_BRIDGE | F.STORE_DELEGATOR | F.BUILD_ALL)
 @pytest.mark.no_pynixd
 async def test_nix_build_via_unix(pynixd_server):
     """Verify that 'nix build' works when using pynixd via Unix socket."""

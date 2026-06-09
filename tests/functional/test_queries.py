@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
-@pytest.mark.covers(F.QUERY_ALL | F.STORE_LOCAL)
 @pytest.fixture
 async def query_env(pynixd_server: Server):
     """Set up a pynixd server with some initial paths."""
@@ -73,6 +72,7 @@ async def query_env(pynixd_server: Server):
     return pynixd_server, uri, out_path
 
 
+@pytest.mark.covers(F.QUERY_ALL | F.STORE_LOCAL)
 @pytest.mark.legacy_nix_commands
 async def test_query_referrers(profiler: pyinstrument.Profiler, query_env) -> None:
     """Verify QueryReferrers via 'nix-store -q --referrers'.

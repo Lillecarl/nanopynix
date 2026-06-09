@@ -168,6 +168,11 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     global CLIENT_BIN
     CLIENT_BIN = LIX_BIN if config.getoption("client_bin") == "lix" else NIX_BIN
+    # Register the ``covers`` mark used by test subsumption.
+    config.addinivalue_line(
+        "markers",
+        "covers(features): TestFeatures flag mask covered by this test. Used by test subsumption sorting and skipping.",
+    )
 
 
 def server_uri(server: Server) -> str:

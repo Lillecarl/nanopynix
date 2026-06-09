@@ -40,17 +40,6 @@ CA_NIX_CONFIG = NixConfig.for_ca_derivations(
 )
 
 
-@pytest.mark.covers(
-    F.CA_ALL
-    | F.DEFERRED
-    | F.DYN_ALL
-    | F.BUILD_ALL
-    | F.QUERY_DERIVATION_OUTPUT_MAP
-    | F.REGISTER_DRV_OUTPUT
-    | F.NAR_FROM_PATH
-    | F.GOAL_ALL
-    | F.STORE_LOCAL
-)
 @pytest.fixture
 async def ca_env(pynixd_server: Server):
     """Set up a pynixd server with CA-derivations enabled."""
