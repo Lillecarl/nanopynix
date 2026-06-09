@@ -140,15 +140,10 @@ def cleanup_stores():
 # ── Non-autouse fixtures ──────────────────────────────────────────
 
 
-@pytest.fixture(
-    scope="session",
-    params=[
-        pytest.param(("asyncio", {"use_uvloop": True}), id="asyncio+uvloop"),
-    ],
-)
-def anyio_backend(request: pytest.FixtureRequest):
+@pytest.fixture(scope="session")
+def anyio_backend() -> tuple[str, dict[str, bool]]:
     """Override anyio's default backend fixture to use uvloop (session-scoped)."""
-    return request.param
+    return ("asyncio", {"use_uvloop": True})
 
 
 @pytest.fixture
