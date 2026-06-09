@@ -52,7 +52,7 @@ _SILENCED_EVENTS = frozenset(
 )
 
 
-def _drop_silenced(logger, method_name, event_dict):
+def _drop_silenced(_logger, _method_name, event_dict):
     event = event_dict.get("event", "")
     if event in _SILENCED_EVENTS:
         raise structlog.DropEvent
@@ -143,7 +143,7 @@ async def nix_eval(store_path: str, attr: str) -> str:
     return stdout.decode().splitlines()[0].strip()
 
 
-async def build_drv(store, ctx, drv_str: str, output_name: str = "out"):
+async def build_drv(_store, ctx, drv_str: str, output_name: str = "out"):
     """Build a single derivation output through the goal tree."""
     from pynixd.derived_path import DerivedPath
     from pynixd.goals.goal import make_build_goal
@@ -274,7 +274,8 @@ async def test_deferred_non_ca_depends_on_ca() -> None:
         # derivation that depends on it.
         ca_drv = await nix_eval(td, "ca.simple.drvPath")
         ca_result = await build_drv(store, ctx, ca_drv, "out")
-        assert ca_result is not None and ca_result.result.status in (0, 1, 2, 13), "CA dep build failed"
+        assert ca_result is not None
+        assert ca_result.result.status in (0, 1, 2, 13), "CA dep build failed"
         log.info("test_deferred", ca_built=ca_result.produced_paths)
 
         # The GoalManager was cleared by build_paths. Now evaluate and
@@ -518,7 +519,8 @@ async def test_nar_from_path_roundtrip() -> None:
         # 3. QueryPathInfo to get nar_size
         drv_store_path = StorePath(drv_path_str)
         info_resp = await store.execute(QueryPathInfoRequest(path=drv_store_path))
-        assert info_resp.valid and info_resp.info is not None, f"path not found: {drv_path_str}"
+        assert info_resp.valid, f"path not found (invalid): {drv_path_str}"
+        assert info_resp.info is not None, f"path not found (no info): {drv_path_str}"
         nar_size = info_resp.info.nar_size
 
         # 4. Fetch via NarFromPath
@@ -567,7 +569,7 @@ async def async_main() -> None:
     tests = [fn for name, fn in _TESTS.items() if not requested or name in requested]
 
     if not tests:
-        print(f"Available tests: {', '.join(_TESTS)}", file=sys.stderr)
+        log.warning("no_tests", available=list(_TESTS))
         sys.exit(1)
 
     passed = 0
@@ -580,8 +582,7 @@ async def async_main() -> None:
             log.exception(f"{test_fn.__name__} FAILED", error=str(e))
             failed += 1
 
-    print(f"\n{'=' * 40}")
-    print(f"Results: {passed} passed, {failed} failed")
+    log.info("results", passed=passed, failed=failed)
     if failed:
         sys.exit(1)
 

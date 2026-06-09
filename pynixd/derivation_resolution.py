@@ -375,12 +375,7 @@ def _resolve_dynamic_node(
         # Resolve leaf outputs reachable via this child
         # All leaf outputs at any depth resolve to the final output path
         for leaf_out in _collect_leaf_outputs(child_node):
-            if parent_hash is None:
-                # Level 1 chain: placeholder = downstream_placeholder
-                placeholder = downstream_placeholder(drv_path, leaf_out)
-            else:
-                # Level 2+ chain: placeholder = unknownDerivation(parent_hash, leaf_out)
-                placeholder = placeholder_prefix
+            placeholder = downstream_placeholder(drv_path, leaf_out) if parent_hash is None else placeholder_prefix
             actual_path = path_map.get((drv_path, leaf_out))
             if actual_path is not None:
                 log.debug(

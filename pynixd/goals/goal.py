@@ -82,10 +82,7 @@ def _dp_output(dp: DerivedPath) -> str:
         return ""
     suffix = "!".join(dp.chain)
     names = dp.output_names
-    if len(names) == 1:
-        out = next(iter(names))
-    else:
-        out = "*"
+    out = next(iter(names)) if len(names) == 1 else "*"
     return f"{suffix}!{out}" if suffix else out
 
 

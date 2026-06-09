@@ -117,11 +117,11 @@ class DerivationBuildGoal(Goal):
         # ── 4. Delegate to OpaqueBuildGoal for substitution ───────
         # OpaqueBuildGoal handles reference resolution and substitution
         # correctly (creates children for references, then substitutes).
-        from ..derived_path import DerivedPath as DP
+        from ..derived_path import DerivedPath
         from .opaque import OpaqueBuildGoal
 
         opaque = OpaqueBuildGoal(
-            derived_path=DP._from_components(
+            derived_path=DerivedPath._from_components(
                 drv_path=resolved_output,
                 chain=(),
                 outputs=None,
@@ -370,7 +370,7 @@ class DerivationBuildGoal(Goal):
         child_hash: str = ""
         built_outputs = response.result.built_outputs
         if built_outputs:
-            for drv_out, _ in built_outputs.items():
+            for drv_out in built_outputs:
                 if drv_out.output_name == output_name and drv_out.hash_value:
                     # Use the original hash_algo from the .drv (e.g.
                     # ``"r:sha256"``), not the stripped version from the
@@ -410,11 +410,10 @@ class DerivationBuildGoal(Goal):
 
             rk = GoalKey.resolve(drv_path, output_name)
             cached = self.ctx.goal_manager.goals.get(rk)
-            if isinstance(cached, ResolutionGoal) and cached.result is not None:
-                if not cached.result.resolved_outputs:
-                    cached.result.resolved_outputs = dict(resolved)
-                    cached.result.modulo_hash = child_hash
-                    cached.result.produced_paths |= produced
+            if isinstance(cached, ResolutionGoal) and cached.result is not None and not cached.result.resolved_outputs:
+                cached.result.resolved_outputs = dict(resolved)
+                cached.result.modulo_hash = child_hash
+                cached.result.produced_paths |= produced
 
 
 def _single_output(dp: DerivedPath) -> str:

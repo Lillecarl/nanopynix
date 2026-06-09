@@ -51,7 +51,7 @@ class OpaqueBuildGoal(Goal):
             "DEBUG_opaque_query_path",
             path=str(path),
             got_info=bool(info),
-            refs=list(str(r) for r in info.references) if info else None,
+            refs=[str(r) for r in info.references] if info else None,
         )
         if info:
             if self.ctx.end_goal is EndGoal.QUERY:

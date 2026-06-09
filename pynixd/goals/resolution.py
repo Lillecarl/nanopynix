@@ -493,10 +493,9 @@ def _find_output(
 
 def _dp_from(drv_path: StorePath, output_name: str) -> DerivedPath:
     """Construct a DerivedPath for (drv_path, output_name)."""
-    from ..derived_path import DerivedPath as DP
-    from ..derived_path import OutputsNames
+    from ..derived_path import DerivedPath, OutputsNames
 
-    return DP._from_components(
+    return DerivedPath._from_components(
         drv_path=drv_path,
         chain=(),
         outputs=OutputsNames(frozenset({output_name})),
