@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
+import json
 import os
 import shlex
 import signal
@@ -215,7 +216,26 @@ class LocalSocketStore(Store):
                 line = await stream.readline()
                 if not line:
                     break
-                log.info(f"daemon_{label}", msg=line.decode(errors="replace").rstrip())
+                decoded = line.decode(errors="replace").rstrip()
+                if decoded.startswith("@nix "):
+                    try:
+                        data = json.loads(decoded[5:])
+                    except json.JSONDecodeError:
+                        log.info(f"daemon_{label}", msg=decoded)
+                        continue
+                    log.info(
+                        f"daemon_{label}",
+                        event=f"nix_{data.pop('action', 'unknown')}",
+                        nix_id=data.pop("id", None),
+                        nix_level=data.pop("level", None),
+                        nix_parent=data.pop("parent", None),
+                        nix_text=data.pop("text", ""),
+                        nix_type=data.pop("type", None),
+                        nix_fields=data.pop("fields", None),
+                        **data,
+                    )
+                else:
+                    log.info(f"daemon_{label}", msg=decoded)
 
         async with anyio.create_task_group() as tg:
             tg.start_soon(_forward, self.daemon_proc.stdout, "stdout")
