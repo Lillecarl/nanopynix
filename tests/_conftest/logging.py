@@ -123,6 +123,40 @@ def _relative_time_stamper(logger: Any, method_name: str, event_dict: Any) -> An
     return event_dict
 
 
+# ── Nix internal-json parser ─────────────────────────────────────
+
+
+def _parse_nix_internal_json(logger: Any, method_name: str, event_dict: Any) -> Any:
+    """Parse @nix internal-json messages into structured nix_* fields.
+
+    When nix outputs --log-format internal-json, stderr lines are:
+        @nix {"action":"start","id":...,"level":...,"parent":...,"text":"...","type":...,"fields":[...]}
+
+    This processor strips the '@nix ' prefix, parses the JSON body, and
+    replaces the raw message with structured fields for precise filtering.
+    Unknown fields are passed through via event_dict.update().
+    """
+    for key in ("message", "msg"):  # message from run_subproc, msg from ensure_daemon
+        value = event_dict.get(key, "")
+        if not isinstance(value, str) or not value.startswith("@nix "):
+            continue
+        try:
+            data = json.loads(value[5:])  # strip "@nix " prefix
+        except json.JSONDecodeError:
+            continue
+        event_dict["event"] = f"nix_{data.pop('action', 'unknown')}"
+        event_dict["nix_id"] = data.pop("id", None)
+        event_dict["nix_level"] = data.pop("level", None)
+        event_dict["nix_parent"] = data.pop("parent", None)
+        event_dict["nix_text"] = data.pop("text", "")
+        event_dict["nix_type"] = data.pop("type", None)
+        event_dict["nix_fields"] = data.pop("fields", None)
+        event_dict.update(data)  # pass through any remaining fields
+        event_dict.pop(key, None)
+        break
+    return event_dict
+
+
 # ── Default processor chain ──────────────────────────────────────
 
 _BASE_PROCESSORS: list[Callable[[Any, str, Any], Any]] = [
@@ -130,6 +164,7 @@ _BASE_PROCESSORS: list[Callable[[Any, str, Any], Any]] = [
     structlog.stdlib.add_logger_name,
     structlog.stdlib.add_log_level,
     structlog.contextvars.merge_contextvars,
+    _parse_nix_internal_json,
     _abs_time_stamper,
     _relative_time_stamper,
     structlog.processors.StackInfoRenderer(),
@@ -140,16 +175,21 @@ _BASE_PROCESSORS: list[Callable[[Any, str, Any], Any]] = [
 ]
 
 
+_AUTO_PROCESSOR_INDEX = 4  # insertion point for extra_processors (after _parse_nix_internal_json)
+
+
 def configure_test_logging(*, extra_processors: list[Callable[[Any, str, Any], Any]] | None = None) -> None:
     """Reset structlog to test defaults, optionally injecting extra processors.
 
-    Extra processors are inserted after ``add_log_level`` (position 3) so they
+    Extra processors are inserted after ``add_log_level`` and
+    ``_parse_nix_internal_json`` (position ``_AUTO_PROCESSOR_INDEX``) so they
     have access to ``event``, ``logger``, and ``level`` fields, and execute
     before ``_capture_processor`` (so captured events include any mutations).
     """
     if extra_processors:
-        idx = 3
-        processors = _BASE_PROCESSORS[:idx] + extra_processors + _BASE_PROCESSORS[idx:]
+        processors = (
+            _BASE_PROCESSORS[:_AUTO_PROCESSOR_INDEX] + extra_processors + _BASE_PROCESSORS[_AUTO_PROCESSOR_INDEX:]
+        )
     else:
         processors = _BASE_PROCESSORS
 

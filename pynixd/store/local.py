@@ -126,6 +126,8 @@ class LocalSocketStore(Store):
             "--option",
             "build-dir",
             str(path / "nix" / "var" / "nix" / "builds"),
+            "--log-format",
+            "internal-json",
         ]
         cmd.extend(self.extra_args)
 
