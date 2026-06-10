@@ -92,8 +92,27 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
             ctx.proxy.substitution_manager,
         )
 
+        # Register successful output paths in the tracker (so subsequent
+        # IsValidPathRequest fast-paths can find them without hitting the daemon).
         for kr in keyed_results:
-            if kr.result.status not in (0, 1, 2, 13):
+            if kr.result.status in (
+                BuildResultStatus.BUILT,
+                BuildResultStatus.SUBSTITUTED,
+                BuildResultStatus.ALREADY_VALID,
+                BuildResultStatus.RESOLVES_TO_ALREADY_VALID,
+            ):
+                for output in kr.result.built_outputs.values():
+                    ctx.proxy.local_store.tracker.add_known_path(
+                        output.out_path.with_store_prefix(),
+                    )
+
+        for kr in keyed_results:
+            if kr.result.status not in (
+                BuildResultStatus.BUILT,
+                BuildResultStatus.SUBSTITUTED,
+                BuildResultStatus.ALREADY_VALID,
+                BuildResultStatus.RESOLVES_TO_ALREADY_VALID,
+            ):
                 self.logger.warning(
                     "build_paths_goal_failed",
                     path=kr.path,

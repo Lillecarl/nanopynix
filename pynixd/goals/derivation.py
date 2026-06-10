@@ -147,6 +147,22 @@ class DerivationBuildGoal(Goal):
         log.info("build_executing", derived_path=dp.derived)
         await self._do_build(dp)
 
+        # After build succeeds, update the OpaqueBuildGoal child's result
+        # so it doesn't report NO_SUBSTITUTERS for the same output path.
+        if self.result and self.result.result.status in (
+            BuildResultStatus.BUILT,
+            BuildResultStatus.ALREADY_VALID,
+        ):
+            from .opaque import OpaqueBuildGoal
+
+            for child in self.children:
+                if isinstance(child, OpaqueBuildGoal) and child.result:
+                    child.result = GoalResult(
+                        path=child.result.path,
+                        result=BuildResult(status=BuildResultStatus.ALREADY_VALID),
+                        produced_paths=self.result.produced_paths,
+                    )
+
     # ── Build fallback (when resolution didn't produce a path) ─────
 
     async def _build_fallback(self, dp: DerivedPath) -> None:

@@ -156,22 +156,33 @@ class GoalManager:
 def _flatten_as_keyed(goals: list[Goal]) -> list[KeyedBuildResult]:
     """Flatten all GoalResults into backward-compatible KeyedBuildResult list.
 
-    Deduplicates by identity of the path object to avoid returning
-    the same path from multiple goals in the tree.
+    Deduplicates by store path, keeping the result with the better status
+    when both opaque and derivation goals produce results for the same path.
     """
-    seen: set[int] = set()
-    results: list[KeyedBuildResult] = []
+    # Status ordering: higher = better
+    _status_rank = {
+        BuildResultStatus.BUILT: 3,
+        BuildResultStatus.SUBSTITUTED: 2,
+        BuildResultStatus.ALREADY_VALID: 1,
+    }
+
+    by_path: dict[StorePath, KeyedBuildResult] = {}
 
     def walk(g: Goal) -> None:
         if g.result is not None:
-            key = id(g.result.path)
-            if key not in seen:
-                seen.add(key)
-                results.append(g.result)
+            sp = g.result.path.base_store_path()
+            existing = by_path.get(sp)
+            if existing is None:
+                by_path[sp] = g.result
+            else:
+                new_rank = _status_rank.get(g.result.result.status, -1)
+                old_rank = _status_rank.get(existing.result.status, -1)
+                if new_rank > old_rank:
+                    by_path[sp] = g.result
         for child in g.children:
             walk(child)
 
     for g in goals:
         walk(g)
 
-    return results
+    return list(by_path.values())
