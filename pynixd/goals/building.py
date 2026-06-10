@@ -42,6 +42,7 @@ class DerivationBuildingGoal(Goal):
         self.output_name: str = ""  # set by DerivationGoal before run()
         self.derivation: Derivation | None = None  # set by DerivationGoal
         self.resolved_paths: dict[str, StorePath] = {}  # set by DerivationGoal
+        self.dynamic_paths: dict[tuple[StorePath | str, ...], StorePath] = {}  # set by DerivationGoal
         self.input_srcs: set[StorePath] = set()  # set by DerivationGoal
 
     async def execute(self) -> None:
@@ -75,14 +76,10 @@ class DerivationBuildingGoal(Goal):
 
         if resolved_output_paths:
             if derivation.dynamic_input_drvs:
-                from ..derivation_resolution import DynamicPathMap
-
-                dynamic_output_paths: DynamicPathMap = {}
-                # (simplified — children aren't available here, caller provides resolved_paths)
                 basic = resolve_dynamic_derivation(
                     derivation,
                     drv_path,
-                    dynamic_output_paths,
+                    self.dynamic_paths,
                 )
             else:
                 basic = resolve_derivation(

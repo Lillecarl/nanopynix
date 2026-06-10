@@ -26,8 +26,15 @@ from ..drv_parser import ChildMapNode, Derivation, DrvOutput
 from ..store_path import StorePath
 from ..types import DerivationOutput, OutputKind
 from ..types.build import BuildResult, BuildResultStatus
-from ._helpers import _child_map_to_paths, _derive_output_paths, _dp_from, _fake_dp, _find_output, _unparse_for_hash
-from .derivation import DerivationGoal
+from ._helpers import (
+    _child_map_to_paths,
+    _collect_modulo_hashes,
+    _derive_output_paths,
+    _dp_from,
+    _fake_dp,
+    _find_output,
+    _unparse_for_hash,
+)
 from .goal import EndGoal, Goal, GoalContext, GoalResult, make_build_goal, make_resolution_goal
 
 log = structlog.get_logger(__name__)
@@ -197,13 +204,6 @@ class ResolutionGoal(Goal):
             if child.result:
                 child_resolved.update(child.result.resolved_outputs)
                 child_produced.update(child.result.produced_paths)
-                # ``DynamicBuildGoal`` doesn't propagate modulo_hash from
-                # its outer child — traverse children to find it.
-                if isinstance(child, DerivationGoal) and child.result and child.result.modulo_hash:
-                    child_modulo_hashes[str(child.drv_path)] = child.result.modulo_hash
-                for sub in child.children:
-                    if isinstance(sub, DerivationGoal) and sub.result and sub.result.modulo_hash:
-                        child_modulo_hashes[str(sub.drv_path)] = sub.result.modulo_hash
             else:
                 log.debug(
                     "DEBUG_child_no_result",
@@ -220,6 +220,11 @@ class ResolutionGoal(Goal):
                     mod_hash=child.result.modulo_hash[:16] if child.result.modulo_hash else "",
                     resolved_keys=list(child.result.resolved_outputs),
                 )
+
+        # Recursively collect modulo hashes from all descendant goals.
+        # Trampoline chains (dynamic ``outputOf`` nesting) can bury
+        # ``DerivationGoal``\s arbitrarily deep.
+        child_modulo_hashes.update(_collect_modulo_hashes(self.children))
 
         # 4. Compute input_drv_hashes for hashDerivationModulo
         input_drv_hashes: dict[str, list[str]] = {}

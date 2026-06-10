@@ -286,3 +286,66 @@ def _collect_resolved_paths(children: set[GoalType]) -> dict[str, StorePath]:
         _collect(g)
 
     return result
+
+
+def _collect_modulo_hashes(children: set[GoalType]) -> dict[str, str]:
+    """Recursively collect modulo_hashes from all DerivationGoal descendants.
+
+    Traverses the entire goal tree to find DerivationGoals, which may be
+    nested arbitrarily deep inside trampoline chains (dynamic derivations
+    with many levels of ``outputOf`` indirection).
+    """
+    from ..goals.derivation import DerivationGoal
+
+    result: dict[str, str] = {}
+
+    def _walk(goal: GoalType) -> None:
+        if isinstance(goal, DerivationGoal) and goal.result and goal.result.modulo_hash:
+            result[str(goal.drv_path)] = goal.result.modulo_hash
+        for child in goal.children:
+            _walk(child)
+
+    for g in children:
+        _walk(g)
+
+    return result
+
+
+def _collect_dynamic_paths(
+    children: set[GoalType],
+) -> dict[tuple[StorePath | str, ...], StorePath]:
+    r"""Collect dynamic path results from all descendant goals.
+
+    Walks the entire goal tree to build a ``DynamicPathMap`` keyed by
+    ``(drv_path, output_name)`` from any goal that has resolved outputs.
+    This includes ``DerivationTrampolineGoal``\s deep in trampoline
+    chains, whose ``resolved_outputs`` contain the final output paths
+    for dynamic derivation inputs.
+    """
+    result: dict[tuple[StorePath | str, ...], StorePath] = {}
+
+    def _walk(goal: GoalType) -> None:
+        if goal.result and goal.result.resolved_outputs:
+            # Try to get a drv_path from the goal
+            drv_path: StorePath | None = None
+            if hasattr(goal, "derived_path"):
+                # DerivationTrampolineGoal
+                dp = goal.derived_path
+                if hasattr(dp, "_drv_path"):
+                    drv_path = dp._drv_path
+            elif hasattr(goal, "drv_path"):
+                # DerivationGoal / DerivationBuildingGoal
+                raw = goal.drv_path
+                if isinstance(raw, StorePath):
+                    drv_path = raw
+
+            if drv_path is not None:
+                for out_name, out_path in goal.result.resolved_outputs.items():
+                    result[(drv_path, out_name)] = out_path
+        for child in goal.children:
+            _walk(child)
+
+    for g in children:
+        _walk(g)
+
+    return result

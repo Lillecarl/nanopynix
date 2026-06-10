@@ -17,7 +17,7 @@ from ..operations.is_valid_path import IsValidPathRequest
 from ..types import DerivationOutput
 from ..types.build import BuildResult, BuildResultStatus
 from ..types.derivation import OutputKind
-from ._helpers import _fake_dp
+from ._helpers import _collect_dynamic_paths, _fake_dp
 from ._helpers import _find_output as _find_dop
 from .goal import EndGoal, Goal, GoalContext, GoalResult, make_resolution_goal
 
@@ -222,6 +222,7 @@ class DerivationGoal(Goal):
             else:
                 input_dep_resolved.update(_deep_collect({child}))
         bg.resolved_paths = input_dep_resolved
+        bg.dynamic_paths = _collect_dynamic_paths(self.children)
         bg.input_srcs = self._collect_input_srcs()
         registered = self.ctx.goal_manager.register(bg)
         # register() may return a canonical copy (dedup).  Sync properties.
@@ -229,6 +230,7 @@ class DerivationGoal(Goal):
             registered.output_name = bg.output_name
             registered.derivation = bg.derivation
             registered.resolved_paths = bg.resolved_paths
+            registered.dynamic_paths = bg.dynamic_paths
             registered.input_srcs = bg.input_srcs
         self.add_child(registered)
         await self.execute_children()
