@@ -283,8 +283,8 @@ def _summarize(events: list[dict[str, Any]], *, write: Callable[[str], object] =
 
     Args:
         events: Captured event dicts for this test.
-        write: Output function (default ``print``).  The fixture passes
-            ``terminalreporter.write_line`` to bypass pytest capture.
+        write: Output function (default ``print``).  The fixture writes to
+            the per-test log file.
     """
     if not events:
         return
@@ -340,5 +340,6 @@ def test_logging(request: pytest.FixtureRequest, test_log_dir: Path):
     logging.getLogger().setLevel(old_log_level)
     handler.close()
 
-    tr = request.config.pluginmanager.get_plugin("terminalreporter")
-    _summarize(events, write=tr.write_line if tr is not None else print)
+    # Append per-test log statistics to the log file.
+    with open(log_file, "a") as f:
+        _summarize(events, write=lambda s: f.write(s + "\n"))
