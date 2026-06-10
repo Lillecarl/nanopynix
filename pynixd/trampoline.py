@@ -186,22 +186,8 @@ class Trampoline:
         if not self._has_drv_output(drv_outputs):
             return False
 
-        if has_nested_dp:
-            return True
-
-        # Scan the queue for builds that list this build's drv_path in
-        # their dynamic_input_drvs.  O(n) but only runs on successful
-        # dynamic builds with .drv outputs — rare in practice.
-        build_drv_path = StorePath(build.request.drv_path)
-        for other_build in self.queue.by_id.values():
-            if other_build.is_done:
-                continue
-            if not other_build.dynamic_input_drvs:
-                continue
-            if build_drv_path in other_build.dynamic_input_drvs:
-                return True
-
-        return False
+        # DEPRECATED: dynamic_input_drvs tracking removed in P0.
+        return has_nested_dp
 
     async def _fire_trampoline(
         self,
@@ -316,27 +302,14 @@ class Trampoline:
         but only fires when a dynamic derivation with .drv outputs
         completes, which is rare.
         """
-        outer_drv_path = StorePath(outer_build.request.drv_path)
         inner_outputs = inner_derivation.output_paths()
         inner_output_paths: StorePathSet = {p for p in inner_outputs.values() if p != StorePath("")}
 
+        # DEPRECATED: dynamic_input_drvs / depends_on tracking removed in P0.
+        # This path was only used by BuildDecomposer which is also dead.
         for other_build in self.queue.by_id.values():
             if other_build.is_done:
                 continue
-            if not other_build.dynamic_input_drvs:
-                continue
-            if outer_drv_path not in other_build.dynamic_input_drvs:
-                continue
-
-            if inner_build_id not in other_build.depends_on:
-                other_build.depends_on.add(inner_build_id)
-                log.info(
-                    "dynamic_dep_linked",
-                    dependent_build_id=other_build.build_id,
-                    inner_build_id=inner_build_id,
-                    outer_build_id=outer_build.build_id,
-                )
-
             for p in inner_output_paths:
                 if p not in other_build.required_paths:
                     other_build.required_paths[p] = UnkeyedValidPathInfo()

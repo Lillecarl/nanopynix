@@ -409,40 +409,6 @@ class BuildDecomposer:
 
         return drv_to_build_id
 
-    async def _wire_dag_edges(
-        self,
-        resolved: list[tuple[DerivedPath, BuildDerivationRequest]],
-        parsed_cache: dict[StorePath, Derivation],
-        drv_to_build_id: dict[str, BuildId],
-    ) -> None:
-        """Set DAG edges between builds from input_drvs and dynamic_input_drvs."""
-        for _dp, drv_request in resolved:
-            drv_path_str = str(drv_request.drv_path)
-            parsed = parsed_cache.get(drv_request.drv_path)
-            if parsed is None:
-                continue
-
-            depends_on: set[BuildId] = set()
-            for input_drv in parsed.input_drvs:
-                dep_id = drv_to_build_id.get(str(input_drv))
-                if dep_id is not None and dep_id != drv_to_build_id.get(drv_path_str):
-                    depends_on.add(dep_id)
-
-            for dyn_drv in parsed.dynamic_input_drvs:
-                dep_id = drv_to_build_id.get(str(dyn_drv))
-                if dep_id is not None and dep_id != drv_to_build_id.get(drv_path_str):
-                    depends_on.add(dep_id)
-
-            build_id = drv_to_build_id.get(drv_path_str)
-            if build_id is not None and parsed.dynamic_input_drvs:
-                build = self.queue.by_id.get(build_id)
-                if build is not None:
-                    build.dynamic_input_drvs = parsed.dynamic_input_drvs
-
-            if depends_on:
-                build_id = drv_to_build_id[drv_path_str]
-                await self.queue.set_depends_on(build_id, depends_on)
-
     async def _enqueue_and_wire(
         self,
         parsed_cache: dict[StorePath, Derivation],
@@ -495,14 +461,6 @@ class BuildDecomposer:
             "enqueue_wire_enqueue_timing",
             build_count=len(resolved),
             duration=f"{t_enqueue - t_convert:.3f}s",
-        )
-
-        await self._wire_dag_edges(resolved, parsed_cache, drv_to_build_id)
-        t_wire = time.monotonic()
-        log.debug(
-            "enqueue_wire_dag_timing",
-            edge_count=len(resolved),
-            duration=f"{t_wire - t_enqueue:.3f}s",
         )
 
         return drv_to_build_id

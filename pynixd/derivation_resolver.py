@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-import asyncssh
 import structlog
 
 from .derivation_resolution import (
@@ -88,56 +87,9 @@ class DerivationResolver:
         INSERT uses a subquery ``(select id from ValidPaths where path = ?)``
         for the Realisations.outputPath foreign key.
         """
-        missing: StorePathSet = set()
-        if store is self.local_store:
-            return missing
-        for dep_id in build.depends_on:
-            dep_build = self.queue.by_id.get(dep_id)
-            if dep_build is None or not dep_build.ca_realisations:
-                continue
-            for realisation in dep_build.ca_realisations:
-                out_path_raw = realisation.out_path
-                if out_path_raw:
-                    out_path = StorePath(str(out_path_raw)).with_store_prefix()
-                    if out_path not in store.tracker.known_paths:
-                        missing.add(out_path)
-        return missing
-
-    async def register_dep_realisations(
-        self,
-        build: QueuedBuild,
-        store: Store,
-    ) -> None:
-        """Register CA realisations from completed dependency builds on the
-        target builder store so it can resolve deferred output paths.
-        """
-        for dep_id in build.depends_on:
-            dep_build = self.queue.by_id.get(dep_id)
-            if dep_build is None or not dep_build.ca_realisations:
-                continue
-
-            if store is self.local_store:
-                continue
-
-            for realisation in dep_build.ca_realisations:
-                try:
-                    reg_req = RegisterDrvOutputRequest(realisation=realisation)
-                    log.debug(
-                        "registering_dep_realisation_on_builder",
-                        build_id=build.build_id,
-                        dep_build_id=dep_id,
-                        store_id=store.store_id,
-                        realisation=realisation,
-                    )
-                    await store.call(reg_req, suppress_last=True)
-                except (BackendError, OSError, ConnectionError, EOFError, asyncssh.misc.Error) as exc:
-                    log.warning(
-                        "register_dep_realisation_failed",
-                        build_id=build.build_id,
-                        dep_build_id=dep_id,
-                        store_id=store.store_id,
-                        error=str(exc),
-                    )
+        # DEPRECATED: depends_on tracking removed in P0. BuildDecomposer
+        # (which populated it) is dead code. This method is a no-op.
+        return set()
 
     async def register_built_outputs(
         self,
@@ -277,22 +229,8 @@ class DerivationResolver:
         self,
         build: QueuedBuild,
     ) -> dict[StorePath, dict[str, StorePath]]:
-        """Collect CA realisations from completed dependency builds.
-
-        Returns {dep_drv_path: {output_name: resolved_store_path}}.
-        """
-        dep_realisations: dict[StorePath, dict[str, StorePath]] = {}
-        for dep_id in build.depends_on:
-            dep_build = self.queue.by_id.get(dep_id)
-            if dep_build is None or not dep_build.ca_realisations:
-                continue
-            dep_drv_path = StorePath(dep_build.request.drv_path)
-            for realisation in dep_build.ca_realisations:
-                out_path = realisation.out_path
-                output_name = str(realisation.id).rsplit("!", 1)[-1] or "out"
-                if out_path:
-                    dep_realisations.setdefault(dep_drv_path, {})[output_name] = StorePath(out_path).with_store_prefix()
-        return dep_realisations
+        """DEPRECATED: depends_on tracking removed in P0. Returns empty dict."""
+        return {}
 
     def _flatten_realisations(
         self,

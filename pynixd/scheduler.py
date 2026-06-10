@@ -255,7 +255,7 @@ class Scheduler:
 
         await self._populate_metadata(pending)
 
-        schedulable, waiting_deps, waiting_paths, override_in_flight = self._filter_schedulable(pending)
+        schedulable, waiting_paths, override_in_flight = self._filter_schedulable(pending)
 
         waiting_slot = await self._assign_to_stores(schedulable, override_in_flight)
 
@@ -265,7 +265,6 @@ class Scheduler:
             "scheduling_pass_done",
             pending=len(pending),
             waiting_paths=len(waiting_paths),
-            waiting_deps=len(waiting_deps),
             waiting_slot=len(waiting_slot),
             in_flight={s.store_id: s.in_flight for s in self.stores.values()},
             cpu_util={
@@ -306,21 +305,19 @@ class Scheduler:
     def _filter_schedulable(
         self,
         pending: list[QueuedBuild],
-    ) -> tuple[list[QueuedBuild], list[QueuedBuild], list[QueuedBuild], dict[StoreId, int]]:
-        """Triage pending builds into schedulable, waiting_deps, and waiting_paths.
+    ) -> tuple[list[QueuedBuild], list[QueuedBuild], dict[StoreId, int]]:
+        """Triage pending builds into schedulable and waiting_paths.
 
-        Returns (schedulable, waiting_deps, waiting_paths, override_in_flight).
+        Returns (schedulable, waiting_paths, override_in_flight).
         override_in_flight accounts for builds assigned this cycle but not yet
         reflected in ``store.in_flight``.
 
         Criteria for "schedulable":
         - Not already building
-        - All ``depends_on`` builds are done (or no deps)
         - All ``required_paths`` are in the local store tracker
         """
         schedulable: list[QueuedBuild] = []
         waiting_paths: list[QueuedBuild] = []
-        waiting_deps: list[QueuedBuild] = []
 
         # Count builds that are already building per store (may exceed
         # store.in_flight because the counter hasn't been updated yet).
@@ -347,7 +344,7 @@ class Scheduler:
             else:
                 waiting_paths.append(build)
 
-        return schedulable, waiting_deps, waiting_paths, override_in_flight
+        return schedulable, waiting_paths, override_in_flight
 
     async def _assign_to_stores(
         self,
@@ -574,17 +571,6 @@ class Scheduler:
         All operations that must happen before the build request is sent
         to the backend daemon.
         """
-        # 0. For direct-daemon path (not goal-managed): ensure dependency
-        #    CA output paths are on the builder, register realisations,
-        #    and resolve deferred outputs.  The goal manager handles all
-        #    of this internally when ``from_goal_path`` is set.
-        if not build.from_goal_path and build.depends_on:
-            missing = self.derivation_resolver.collect_missing_dep_out_paths(build, store)
-            if missing:
-                await stream_paths_store_to_store(self.local_store, store, missing)
-            await self.derivation_resolver.register_dep_realisations(build, store)
-            await self.derivation_resolver.resolve(build, store)
-
         # Strip pynixd-handled features from requiredSystemFeatures
         self.allocator.strip_handled_features(build)
 

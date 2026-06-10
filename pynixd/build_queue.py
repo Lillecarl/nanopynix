@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
     from .connection import ClientConn
     from .derived_path import DerivedPath
-    from .drv_parser import ChildMapNode
     from .operations.build_derivation import BuildDerivationRequest
     from .stderr import StderrMsg
     from .store_path import StorePath
@@ -104,15 +103,7 @@ class QueuedBuild:
         self.store_failures: dict[StoreId, int] = {}
         self.build_task: asyncio.Task[Any] | None = None
 
-        # Build DAG: build IDs this build depends on (must complete before this
-        # can be scheduled). Populated during decomposition for CA dependency
-        # ordering.
-        self.depends_on: set[BuildId] = set()
         self.from_goal_path: bool = False
-
-        # Track which builds depend on this one (reversed depends_on)
-        # Used for efficient DAG updates when a build completes.
-        self.dependents: set[BuildId] = set()
 
         # CA realisations from this build's outputs, populated after successful
         # build completion. Used to register realisations on builder stores
@@ -127,12 +118,6 @@ class QueuedBuild:
         # Multiple requests can share a single build (dedup).
         # Empty set for standalone build_derivation() calls.
         self.scheduler_request_ids: set[RequestId] = scheduler_request_ids or set()
-
-        # Dynamic input derivations from DrvWithVersion .drv files.
-        # {drv_path: {output_name: [nested_output_name, ...], ...}}
-        # Used by the trampoline to add depends_on edges and required_paths
-        # to this build when a dynamic dep's inner build is enqueued.
-        self.dynamic_input_drvs: dict[StorePath, ChildMapNode] = {}
 
         # Append-only byte buffer of all stderr messages (serialized via
         # NixWriter interface). New subscribers get this replayed on join.
@@ -413,16 +398,6 @@ class BuildQueue:
                 [b for b in self._queue if not b.is_done],
                 key=lambda b: b.build_id,
             )
-
-    async def set_depends_on(self, build_id: BuildId, depends_on: set[BuildId]) -> None:
-        """Set the build DAG dependencies for a build.
-
-        Called after decomposition to link inter-drv dependencies.
-        """
-        async with self.lock:
-            build = self._by_id.get(build_id)
-            if build is not None:
-                build.depends_on = depends_on
 
     async def complete(
         self,
