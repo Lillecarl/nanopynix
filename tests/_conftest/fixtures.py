@@ -24,7 +24,6 @@ from tests._conftest.constants import (
     _log_dir_key,
 )
 from tests._conftest.helpers import rmtree_robust, rmtree_robust_glob
-from tests._conftest.logging import get_log_file_path
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -73,7 +72,7 @@ def _fixed_test_ts():
 
 
 @pytest.fixture(autouse=True)
-def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
+def profiler(request: pytest.FixtureRequest, test_logging: Path):
     """Profile every test and save to a .pyinstrument file."""
     if not HAS_PYINSTRUMENT:
         yield None
@@ -89,8 +88,7 @@ def profiler(request: pytest.FixtureRequest, test_log_dir: Path):
             p.stop()
         session = p.last_session
         if session:
-            log_file = get_log_file_path(test_log_dir, request.node)
-            profile_file = log_file.with_suffix(".pyinstrument")
+            profile_file = test_logging / "pyinstrument.txt"
 
             renderer = ConsoleRenderer(unicode=True, color=False)
             renderer.processors.insert(0, _prune_client_processor)

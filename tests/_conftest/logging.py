@@ -1,22 +1,26 @@
-"""Structured logging configuration and per-test log file fixtures.
+"""Structured logging configuration and per-test log folder fixtures.
 
 Uses a single autouse fixture (``test_logging``) that:
 1. Captures every structlog event into a per-test list
-2. Writes formatted output to a per-test log file
-3. Prints statistics on teardown (total events, dropped, top sources)
+2. Writes JSON events to a per-test folder (filtered.log + unfiltered.log)
+3. Logs per-test statistics to logstats.txt on teardown
 """
 
 from __future__ import annotations
 
+import json
+import linecache
 import logging
 import re
+import sys
 import time
+import traceback
 from collections import Counter
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
     import pytest
@@ -59,20 +63,27 @@ def _capture_processor(logger: Any, method_name: str, event_dict: Any) -> Any:
     return event_dict
 
 
-# ── Keys to exclude from per-event example lines ─────────────────
+# ── Exception formatting for JSON output ─────────────────────────
 
-_SKIP_KEYS = frozenset(
-    {
-        "event",
-        "logger",
-        "level",
-        "log_level",
-        "timestamp",
-        _LIFE_KEY,
-        "exception",
-        "stack",
-    }
-)
+
+def _format_exception_for_json(logger: Any, method_name: str, event_dict: Any) -> Any:
+    """Convert exc_info to a structured dict for JSON serialization."""
+    exc_info = event_dict.pop("exc_info", None)
+    if exc_info and not isinstance(exc_info, str):
+        event_dict["exception"] = {
+            "type": type(exc_info[1]).__name__,
+            "message": str(exc_info[1]),
+            "traceback": [
+                {
+                    "file": frame.filename,
+                    "line": frame.lineno or 0,
+                    "function": frame.name,
+                    "code": linecache.getline(frame.filename, frame.lineno or 0).strip() or None,
+                }
+                for frame in traceback.extract_tb(exc_info[2])
+            ],
+        }
+    return event_dict
 
 
 # ── Time stampers ────────────────────────────────────────────────
@@ -107,7 +118,8 @@ _BASE_PROCESSORS: list[Callable[[Any, str, Any], Any]] = [
     structlog.processors.StackInfoRenderer(),
     _capture_processor,  # ← snapshot BEFORE the drop gate
     _life_check_processor,  # ← may DropEvent here
-    structlog.dev.ConsoleRenderer(colors=False),
+    _format_exception_for_json,  # ← convert exc_info to structured dict
+    structlog.processors.JSONRenderer(),
 ]
 
 
@@ -213,7 +225,7 @@ def set_log_levels(levels: dict[str, int]):
             logging.getLogger(name).setLevel(level)
 
 
-# ── Log file path helpers ────────────────────────────────────────
+# ── Log directory fixture ────────────────────────────────────────
 
 
 @pytest.fixture(scope="session")
@@ -222,124 +234,128 @@ def test_log_dir(request: pytest.FixtureRequest) -> Path:
     return request.session.config.stash[_log_dir_key]
 
 
-def get_log_file_path(log_dir: Path, item: Any) -> Path:
-    """Generate a consistent log file path: log_dir/test_file::test_func.log"""
-    file_stem = item.path.stem
-    safe_name = item.name.replace("/", "_")
-    return log_dir / f"{file_stem}::{safe_name}.log"
+# ── Human-readable stderr formatter ──────────────────────────────
 
 
-# ── File handler with relative timestamps ────────────────────────
+class _HumanReadableFormatter(logging.Formatter):
+    """Parse JSON record.msg and render as a human-readable line."""
 
-
-class _TestRelativeTimeHandler(logging.FileHandler):
-    """File handler that rewrites timestamps relative to test start."""
-
-    _TS_LEN = 7
-
-    def __init__(self, test_start: float, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._test_start = test_start
-
-    def emit(self, record: logging.LogRecord) -> None:
-        if record.created:
-            elapsed = record.created - self._test_start
-            seconds = int(elapsed)
-            milliseconds = int((elapsed - seconds) * 1000)
-            ts = f"{seconds:03d}.{milliseconds:03d}"
-            if record.msg and len(record.msg) >= self._TS_LEN:
-                record.msg = ts + record.msg[self._TS_LEN :]
-        super().emit(record)
+    def format(self, record: logging.LogRecord) -> str:
+        try:
+            data = json.loads(record.msg)
+        except (json.JSONDecodeError, TypeError):
+            return record.msg
+        ts = data.get("timestamp", "")
+        level = data.get("log_level", data.get("level", ""))
+        logger_name = data.get("logger", "")
+        event = data.get("event", "")
+        # Remaining keys as key=value pairs
+        skip = {"event", "logger", "level", "log_level", "timestamp", "exception"}
+        extras = "    ".join(f"{k}={v}" for k, v in data.items() if k not in skip)
+        return f"[{ts}] {level.upper()} {logger_name}    {event}    {extras}"
 
 
 # ── Setup / teardown helpers ─────────────────────────────────────
 
 
-_MAX_VALUES = 5
+def _setup_test_logging(log_dir: Path) -> tuple[logging.FileHandler, logging.StreamHandler, int]:
+    """Attach per-test log handlers and configure structlog.
 
+    Creates two handlers:
+    - FileHandler → filtered.log (JSON, real-time, DEBUG+)
+    - StreamHandler → stderr (human-readable, WARNING+)
 
-def _setup_test_logging(log_file: Path) -> tuple[logging.FileHandler, int]:
-    """Attach a per-test log file and reset the structlog processor chain.
-
-    Sets root logger to DEBUG so ``filter_by_level`` does not suppress
-    events before ``_capture_processor``.  Returns (handler, old_level)
-    so the caller can restore the level on teardown.
+    Returns (file_handler, stderr_handler, old_level) for teardown.
     """
-    handler = _TestRelativeTimeHandler(time.time(), log_file)
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # File handler → filtered.log (JSON, real-time)
+    file_handler = logging.FileHandler(log_dir / "filtered.log")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+
+    # Stream handler → stderr (human-readable, WARNING+)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(_HumanReadableFormatter())
 
     root = logging.getLogger()
     old_level = root.level
     root.setLevel(logging.DEBUG)
-    root.addHandler(handler)
+    root.addHandler(file_handler)
+    root.addHandler(stderr_handler)
 
     configure_test_logging()
-    return handler, old_level
+
+    return file_handler, stderr_handler, old_level
 
 
-def _summarize(events: list[dict[str, Any]], *, write: Callable[[str], object] = print) -> None:
-    """Print per-test log statistics.
+def _teardown_test_logging(
+    file_handler: logging.FileHandler,
+    stderr_handler: logging.StreamHandler,
+    old_level: int,
+    events: list[dict[str, Any]],
+    log_dir: Path,
+) -> None:
+    """Remove per-test handlers and write unfiltered log + stats."""
+    root = logging.getLogger()
+    root.removeHandler(file_handler)
+    root.removeHandler(stderr_handler)
+    root.setLevel(old_level)
+    file_handler.close()
+    stderr_handler.close()
 
-    Args:
-        events: Captured event dicts for this test.
-        write: Output function (default ``print``).  The fixture writes to
-            the per-test log file.
-    """
-    if not events:
-        return
+    # Write unfiltered.log — all captured events as JSON
+    with (log_dir / "unfiltered.log").open("w") as f:
+        f.writelines(json.dumps(e, default=str) + "\n" for e in events)
 
+    # Write logstats.txt
+    if events:
+        _write_stats(events, log_dir / "logstats.txt")
+
+
+def _write_stats(events: list[dict[str, Any]], path: Path) -> None:
+    """Write per-test log statistics to a file."""
     by_source: Counter[tuple[str, str]] = Counter()
-    by_operation: Counter[str] = Counter()
     for ed in events:
         by_source[(ed.get("logger", ""), ed.get("event", ""))] += 1
-        if "operation" in ed:
-            by_operation[ed["operation"]] += 1
 
     dropped = sum(1 for e in events if e.get(_LIFE_KEY, 0) < 0)
 
-    write(f"[logs] {len(events)} events, {dropped} dropped ({len(by_source)} unique)")
-
-    for (logger_, event), count in by_source.most_common(_MAX_VALUES):
-        example = next(
-            (e for e in events if e.get("logger") == logger_ and e.get("event") == event),
-            {},
-        )
-        detail = {k: v for k, v in example.items() if k not in _SKIP_KEYS}
-        detail = {k: (str(v)[:80] if isinstance(v, str) else v) for k, v in detail.items()}
-        short_logger = logger_.rsplit(".", 1)[-1] if "." in logger_ else logger_
-        write(f"  {short_logger}:{event} x{count}  {dict(detail)}")
-
-    if by_operation:
-        ops = dict(by_operation.most_common(_MAX_VALUES))
-        write(f"  [ops] {ops}")
+    with path.open("w") as f:
+        f.write(f"total: {len(events)}\n")
+        f.write(f"dropped: {dropped}\n")
+        f.write(f"unique (logger, event): {len(by_source)}\n")
+        f.write("\ntop (logger, event) pairs:\n")
+        f.writelines(f"  {logger_}:{event} x{count}\n" for (logger_, event), count in by_source.most_common(10))
 
 
-# ── Single autouse fixture (replaces test_log_file + _reset_structlog) ─
+# ── Single autouse fixture ───────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
-def test_logging(request: pytest.FixtureRequest, test_log_dir: Path):
-    """Per-test log capture, file output, and statistics.
+def test_logging(request: pytest.FixtureRequest, test_log_dir: Path) -> Generator[Path, Any, Any]:
+    """Per-test log capture, folder output, and statistics.
 
-    Swaps in a fresh event list, opens a per-test log file, resets the
-    structlog processor chain, and on teardown prints log statistics.
+    Creates a per-test folder under ``test_log_dir``, sets up JSON file
+    logging and WARNING+ stderr logging, and on teardown writes
+    unfiltered events and statistics to the folder.
+
+    Yields the per-test folder path for other fixtures to use.
     """
     events: list[dict[str, Any]] = []
     global _captured_events
     _captured_events = events
 
-    log_file = get_log_file_path(test_log_dir, request.node)
-    handler, old_log_level = _setup_test_logging(log_file)
+    # Build folder path: <run_id>/<test_file>/<test_name>/
+    test_file = request.node.path.stem
+    test_name = request.node.name.replace("/", "_").replace("[", "_").replace("]", "_")
+    log_dir = test_log_dir / test_file / test_name
 
+    file_handler, stderr_handler, old_level = _setup_test_logging(log_dir)
     structlog.contextvars.bind_contextvars(test_start_time=time.monotonic())
 
-    yield
+    yield log_dir  # yield the folder path for other fixtures to use
 
+    _teardown_test_logging(file_handler, stderr_handler, old_level, events, log_dir)
     _captured_events = []
-    logging.getLogger().setLevel(old_log_level)
-    handler.close()
-
-    # Append per-test log statistics to the log file.
-    with open(log_file, "a") as f:
-        _summarize(events, write=lambda s: f.write(s + "\n"))

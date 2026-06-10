@@ -13,7 +13,6 @@ import pytest
 import structlog
 
 from tests._conftest.constants import _covered_features_key, _log_dir_key
-from tests._conftest.logging import get_log_file_path
 from tests._conftest.subsumption import _sort_by_subsumption
 from tests.test_features import TestFeatures
 
@@ -132,15 +131,7 @@ def pytest_runtest_makereport(item: pytest.Item, call):
         if report.failed:
             log_dir = item.config.stash.get(_log_dir_key, None)
             if log_dir:
-                log_file = get_log_file_path(log_dir, item)
-                with log_file.open("a") as f:
-                    if report.longrepr:
-                        f.write("\n--- Failure details ---\n")
-                        f.write(str(report.longrepr))
-                    if report.capstdout:
-                        f.write("\n--- Captured stdout ---\n")
-                        f.write(report.capstdout)
-                    if report.capstderr:
-                        f.write("\n--- Captured stderr ---\n")
-                        f.write(report.capstderr)
-                report.longrepr = f"FAILED (see log file: {log_file})"
+                test_file = item.path.stem
+                test_name = item.name.replace("/", "_").replace("[", "_").replace("]", "_")
+                folder = log_dir / test_file / test_name
+                report.longrepr = f"logs: {folder}"
