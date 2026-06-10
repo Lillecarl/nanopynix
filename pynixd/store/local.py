@@ -156,7 +156,7 @@ class LocalSocketStore(Store):
 
         if self.daemon_proc.stdout:
             self._daemon_log_task = asyncio.create_task(
-                self._stream_daemon_output(self.daemon_ready),
+                self._stream_daemon_output(),
                 name="daemon-log-forwarder",
             )
 
@@ -190,8 +190,6 @@ class LocalSocketStore(Store):
                 )
             if await self._probe_socket():
                 log.info("daemon_socket_ready", socket_path=str(self.socket_path))
-                if self._daemon_log_task and not self._daemon_log_task.done():
-                    self._daemon_log_task.cancel()
                 await anyio.sleep(0.1)
                 self.daemon_ready.set()
                 return
@@ -205,8 +203,8 @@ class LocalSocketStore(Store):
             f"at {self.socket_path} within 5s (pid={self.daemon_proc.pid}): {stderr_output!r}",
         )
 
-    async def _stream_daemon_output(self, stop: anyio.Event) -> None:
-        """Forward daemon stdout/stderr to structlog until stop is set."""
+    async def _stream_daemon_output(self) -> None:
+        """Forward daemon stdout/stderr to structlog indefinitely."""
         if not self.daemon_proc or not self.daemon_proc.stdout or not self.daemon_proc.stderr:
             return
 
@@ -218,8 +216,6 @@ class LocalSocketStore(Store):
                 if not line:
                     break
                 log.info(f"daemon_{label}", msg=line.decode(errors="replace").rstrip())
-                if stop.is_set():
-                    return
 
         async with anyio.create_task_group() as tg:
             tg.start_soon(_forward, self.daemon_proc.stdout, "stdout")
