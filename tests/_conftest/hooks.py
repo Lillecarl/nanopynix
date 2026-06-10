@@ -135,3 +135,4 @@ def pytest_runtest_makereport(item: pytest.Item, call):
                 test_name = item.name.replace("/", "_").replace("[", "_").replace("]", "_")
                 folder = log_dir / test_file / test_name
                 report.longrepr = f"logs: {folder}"
+                report.sections = []
