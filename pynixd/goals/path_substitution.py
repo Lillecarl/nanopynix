@@ -12,27 +12,23 @@ from ..derived_path import DerivedPath
 from ..operations.is_valid_path import IsValidPathRequest
 from ..store_path import StorePath
 from ..types.build import BuildResult, BuildResultStatus
-from .goal import EndGoal, Goal, GoalContext, GoalKey, GoalResult, make_build_goal
+from .goal import EndGoal, Goal, GoalContext, GoalResult, make_build_goal
 
 log = structlog.get_logger(__name__)
 
 
-class OpaqueBuildGoal(Goal):
+class PathSubstitutionGoal(Goal):
     """Resolve an opaque store path — check validity or substitute."""
 
     def __init__(self, derived_path: DerivedPath, ctx: GoalContext) -> None:
         super().__init__(ctx)
         self._derived_path = derived_path
 
-    @property
-    def key(self) -> GoalKey:
-        return GoalKey.build(self._derived_path)
-
     async def execute(self) -> None:
         dp = self._derived_path
         assert dp.is_opaque
 
-        log.info("execute_opaque", derived_path=dp.derived)
+        log.info("execute_path_substitution", derived_path=dp.derived)
 
         path = dp.base_store_path()
 

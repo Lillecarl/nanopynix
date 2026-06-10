@@ -1,8 +1,7 @@
 """Shared build goal orchestration for the pynixd build pipeline.
 
-The GoalManager owns the global ``GoalKey`` → ``Goal`` cache (dedup)
-and provides convenience methods for executing goal trees from
-``BuildPaths`` / ``QueryMissing`` request handlers.
+The GoalManager owns per-type dedup maps and provides methods for
+executing goal trees from ``BuildPaths`` / ``QueryMissing`` request handlers.
 """
 
 from __future__ import annotations
@@ -17,37 +16,124 @@ from ..store_path import StorePath  # noqa: TC001 — used in function bodies
 from ..types.build import BuildResultStatus, KeyedBuildResult
 
 if TYPE_CHECKING:
+    from ..drv_parser import DrvOutput
+    from ..operations.query_missing import QueryMissingResponse
     from ..store.base import Store
     from ..substitution import SubstitutionManager
-    from .goal import Goal, GoalKey
+    from .goal import Goal, GoalContext
 
 log = structlog.get_logger(__name__)
 
 
 class GoalManager:
-    """Shared singleton that tracks and orchestrates build goals.
+    """Per-type dedup maps for build goals.
 
-    All goals are indexed by ``GoalKey`` in ``self.goals``, providing
-    automatic dedup across concurrent requests.
+    Each goal type has its own index, keyed by the appropriate target type:
+    - Trampoline goals: DerivedPath
+    - Path substitution goals: StorePath
+    - Drv output substitution goals: DrvOutput
+    - Derivation building goals: StorePath
     """
 
     def __init__(self) -> None:
-        self.goals: dict[GoalKey, Goal] = {}
+        self._trampoline_goals: dict[DerivedPath, Goal] = {}
+        self._path_substitution_goals: dict[StorePath, Goal] = {}
+        self._drv_output_sub_goals: dict[DrvOutput, Goal] = {}
+        self._derivation_building_goals: dict[StorePath, Goal] = {}
+
+    # ── Per-type get_or_create ─────────────────────────────────────
+
+    def get_or_create_trampoline(
+        self,
+        dp: DerivedPath,
+        ctx: GoalContext,
+    ) -> Goal:
+        existing = self._trampoline_goals.get(dp)
+        if existing:
+            return existing
+        from .trampoline import DerivationTrampolineGoal
+
+        g = DerivationTrampolineGoal(dp, ctx)
+        self._trampoline_goals[dp] = g
+        return g
+
+    def get_or_create_path_substitution(
+        self,
+        path: StorePath,
+        ctx: GoalContext,
+    ) -> Goal:
+        existing = self._path_substitution_goals.get(path)
+        if existing:
+            return existing
+        from ..derived_path import DerivedPath
+        from .path_substitution import PathSubstitutionGoal
+
+        g = PathSubstitutionGoal(
+            derived_path=DerivedPath._from_components(
+                drv_path=path,
+                chain=(),
+                outputs=None,
+            ),
+            ctx=ctx,
+        )
+        self._path_substitution_goals[path] = g
+        return g
+
+    def get_or_create_drv_output_sub(
+        self,
+        drv_output: DrvOutput,
+        ctx: GoalContext,
+    ) -> Goal:
+        existing = self._drv_output_sub_goals.get(drv_output)
+        if existing:
+            return existing
+        from .drv_output_substitution import DrvOutputSubstitutionGoal
+
+        g = DrvOutputSubstitutionGoal(drv_output, ctx)
+        self._drv_output_sub_goals[drv_output] = g
+        return g
+
+    def get_or_create_derivation_building(
+        self,
+        drv_path: StorePath,
+        ctx: GoalContext,
+    ) -> Goal:
+        existing = self._derivation_building_goals.get(drv_path)
+        if existing:
+            return existing
+        from .building import DerivationBuildingGoal
+
+        g = DerivationBuildingGoal(drv_path, ctx)
+        self._derivation_building_goals[drv_path] = g
+        return g
+
+    # ── Compatibility register ─────────────────────────────────────
 
     def register(self, goal: Goal) -> Goal:
-        """Register *goal* in the dedup cache, or return existing.
+        """Register *goal* in the appropriate per-type map, or return existing.
 
-        If a goal with the same key already exists, link *goal*'s
-        parents to the existing goal and return the existing one.
-        Otherwise insert *goal* and return it.
+        Dispatches to the right ``get_or_create_*`` based on goal type.
+        For goal types not managed by the index (e.g. ResolutionGoal,
+        DerivationGoal), returns *goal* directly.
         """
-        existing = self.goals.get(goal.key)
-        if existing is not None:
-            for p in goal.parents:
-                p.add_child(existing)
-            return existing
-        self.goals[goal.key] = goal
+        from .building import DerivationBuildingGoal
+        from .drv_output_substitution import DrvOutputSubstitutionGoal
+        from .path_substitution import PathSubstitutionGoal
+        from .trampoline import DerivationTrampolineGoal
+
+        if isinstance(goal, DerivationTrampolineGoal):
+            return self.get_or_create_trampoline(goal.derived_path, goal.ctx)
+        if isinstance(goal, PathSubstitutionGoal):
+            sp = goal._derived_path.base_store_path()
+            return self.get_or_create_path_substitution(sp, goal.ctx)
+        if isinstance(goal, DrvOutputSubstitutionGoal):
+            return self.get_or_create_drv_output_sub(goal.drv_output, goal.ctx)
+        if isinstance(goal, DerivationBuildingGoal):
+            return self.get_or_create_derivation_building(goal.drv_path, goal.ctx)
+        # Unindexed goal types (ResolutionGoal, DerivationGoal)
         return goal
+
+    # ── build_paths ────────────────────────────────────────────────
 
     async def build_paths(
         self,
@@ -57,28 +143,23 @@ class GoalManager:
     ) -> list[KeyedBuildResult]:
         """Execute a set of derived paths through the goal tree.
 
-        Creates a fresh :class:`GoalContext` for the request, builds a goal
-        for each top-level path, executes them all (goals recursively
-        resolve children), and returns every result in the tree as
-        :class:`KeyedBuildResult` objects.
+        Creates fresh per-type maps for the request, builds a trampoline
+        goal for each top-level path, executes them all, and returns
+        results via ``_collect_results``.
         """
-        from .goal import GoalContext, make_build_goal
+        from .goal import GoalContext
 
-        # Fresh goal cache per request — don't leak results from
-        # prior QueryMissing/BuildPaths calls.
-        self.goals.clear()
+        self._clear()
         ctx = GoalContext(
             goal_manager=self,
             store=store,
             substitution_manager=substitution_manager,
         )
-        goals = [make_build_goal(dp, ctx) for dp in derived_paths]
+        roots = [self.get_or_create_trampoline(dp, ctx) for dp in derived_paths]
         async with TaskGroup() as tg:
-            for g in goals:
-                tg.create_task(g.run())
-
-        # Flatten deduplicated results
-        return _flatten_as_keyed(goals)
+            for root in roots:
+                tg.create_task(root.run())
+        return _collect_results(roots)
 
     async def query_paths(
         self,
@@ -86,13 +167,8 @@ class GoalManager:
         store: Store,
         substitution_manager: SubstitutionManager,
     ) -> QueryMissingResponse:
-        """Determine which paths need building, substitution, or are unknown.
-
-        Runs the goal tree in ``QUERY`` mode so no expensive operations
-        (builds, actual substitutions) execute.  The result mirrors Nix's
-        ``QueryMissing`` response.
-        """
-        from .goal import EndGoal, GoalContext, make_build_goal
+        """Determine which paths need building, substitution, or are unknown."""
+        from .goal import EndGoal, GoalContext
 
         ctx = GoalContext(
             goal_manager=self,
@@ -100,20 +176,18 @@ class GoalManager:
             substitution_manager=substitution_manager,
             end_goal=EndGoal.QUERY,
         )
-
-        self.goals.clear()
-        roots = [make_build_goal(dp, ctx) for dp in derived_paths]
-
+        self._clear()
+        roots = [self.get_or_create_trampoline(dp, ctx) for dp in derived_paths]
         async with TaskGroup() as tg:
-            for g in roots:
-                tg.create_task(g.run())
+            for root in roots:
+                tg.create_task(root.run())
 
         will_build: set[StorePath] = set()
         will_substitute: set[StorePath] = set()
         unknown: set[StorePath] = set()
         seen: set[int] = set()
 
-        for kr in _flatten_as_keyed(roots):
+        for kr in _collect_results(roots):
             sp = kr.path.base_store_path()
             key = id(sp)
             if key in seen:
@@ -129,8 +203,6 @@ class GoalManager:
             else:
                 will_build.add(sp)
 
-        # Fallback: if nothing was detected, treat all root paths as
-        # needing build (query mode is best-effort).
         if not will_build and not will_substitute and not unknown:
             for dp in derived_paths:
                 will_build.add(dp.base_store_path())
@@ -145,44 +217,42 @@ class GoalManager:
             nar_size=0,
         )
 
-    if TYPE_CHECKING:
-        from ..operations.query_missing import QueryMissingResponse
-        from .goal import Goal, GoalContext, GoalKey, GoalResult
+    # ── Internal ───────────────────────────────────────────────────
+
+    def _clear(self) -> None:
+        """Clear all per-type maps."""
+        self._trampoline_goals.clear()
+        self._path_substitution_goals.clear()
+        self._drv_output_sub_goals.clear()
+        self._derivation_building_goals.clear()
 
 
-# ── Result flattening (GoalResult → KeyedBuildResult) ──────────────
+# ── Result collection ──────────────────────────────────────────────
 
 
-def _flatten_as_keyed(goals: list[Goal]) -> list[KeyedBuildResult]:
-    """Flatten all GoalResults into backward-compatible KeyedBuildResult list.
+def _collect_results(roots: list) -> list[KeyedBuildResult]:
+    """Collect results from root goals.
 
-    Deduplicates by store path, keeping the result with the better status
-    when both opaque and derivation goals produce results for the same path.
+    Successful roots → append their result.
+    Failed roots → walk children to find first failure.
     """
-    # Status ordering: higher = better
-    _status_rank = {
-        BuildResultStatus.BUILT: 3,
-        BuildResultStatus.SUBSTITUTED: 2,
-        BuildResultStatus.ALREADY_VALID: 1,
-    }
+    results: list[KeyedBuildResult] = []
+    for root in roots:
+        if root.result and root.result.result.status.is_success:
+            results.append(root.result)
+        else:
+            failed = _find_failure(root)
+            if failed:
+                results.append(failed)
+    return results
 
-    by_path: dict[StorePath, KeyedBuildResult] = {}
 
-    def walk(g: Goal) -> None:
-        if g.result is not None:
-            sp = g.result.path.base_store_path()
-            existing = by_path.get(sp)
-            if existing is None:
-                by_path[sp] = g.result
-            else:
-                new_rank = _status_rank.get(g.result.result.status, -1)
-                old_rank = _status_rank.get(existing.result.status, -1)
-                if new_rank > old_rank:
-                    by_path[sp] = g.result
-        for child in g.children:
-            walk(child)
-
-    for g in goals:
-        walk(g)
-
-    return list(by_path.values())
+def _find_failure(g) -> KeyedBuildResult | None:
+    """Walk tree to find first goal with a failure status."""
+    if g.result and g.result.result.status.is_failure:
+        return g.result
+    for child in getattr(g, "children", []):
+        found = _find_failure(child)
+        if found:
+            return found
+    return None

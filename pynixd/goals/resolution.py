@@ -22,49 +22,15 @@ import hashlib
 
 import structlog
 
-from ..derived_path import DerivedPath
-from ..drv_parser import ChildMapNode, Derivation, DrvOutput, _aterm_escape
+from ..drv_parser import ChildMapNode, Derivation, DrvOutput
 from ..store_path import StorePath
 from ..types import DerivationOutput, OutputKind
 from ..types.build import BuildResult, BuildResultStatus
-from ..utils import compress_hash, nix32_encode
-from .goal import EndGoal, Goal, GoalContext, GoalKey, GoalResult, make_build_goal, make_resolution_goal
+from ._helpers import _child_map_to_paths, _derive_output_paths, _dp_from, _fake_dp, _find_output, _unparse_for_hash
+from .derivation import DerivationGoal
+from .goal import EndGoal, Goal, GoalContext, GoalResult, make_build_goal, make_resolution_goal
 
 log = structlog.get_logger(__name__)
-
-
-# ── ChildMapNode helpers ───────────────────────────────────────────
-
-
-def _child_map_to_paths(drv_path: StorePath, node: ChildMapNode) -> list[DerivedPath]:
-    """Walk a ChildMapNode tree and yield a DerivedPath for each leaf.
-
-    Accumulates the chain of output names along the path so that
-    DynamicBuildGoal receives the full chain (e.g.
-    ``producer!out!out!out!out!out``).
-    """
-    from ..derived_path import OutputsNames
-
-    results: list[DerivedPath] = []
-
-    def _walk(n: ChildMapNode, prefix_chain: tuple[str, ...]) -> None:
-        for child_name, child_node in n.children.items():
-            _walk(child_node, (*prefix_chain, child_name))
-        if n.outputs:
-            results.extend(
-                DerivedPath._from_components(
-                    drv_path=drv_path,
-                    chain=prefix_chain,
-                    outputs=OutputsNames(frozenset({leaf_out})),
-                )
-                for leaf_out in n.outputs
-            )
-
-    _walk(node, ())
-    return results
-
-
-# ── ResolutionGoal ─────────────────────────────────────────────────
 
 
 class ResolutionGoal(Goal):
@@ -95,10 +61,6 @@ class ResolutionGoal(Goal):
         self._derivation: Derivation | None = None
 
     # ── identity ───────────────────────────────────────────────────
-
-    @property
-    def key(self) -> GoalKey:
-        return GoalKey.resolve(self._drv_path, self._output_name)
 
     # ── lazy derivation read (cached) ──────────────────────────────
 
@@ -237,22 +199,24 @@ class ResolutionGoal(Goal):
                 child_produced.update(child.result.produced_paths)
                 # ``DynamicBuildGoal`` doesn't propagate modulo_hash from
                 # its outer child — traverse children to find it.
-                if child.result.modulo_hash:
-                    child_modulo_hashes[str(child.key.path)] = child.result.modulo_hash
+                if isinstance(child, DerivationGoal) and child.result and child.result.modulo_hash:
+                    child_modulo_hashes[str(child.drv_path)] = child.result.modulo_hash
                 for sub in child.children:
-                    if sub.result and sub.result.modulo_hash:
-                        child_modulo_hashes[str(sub.key.path)] = sub.result.modulo_hash
+                    if isinstance(sub, DerivationGoal) and sub.result and sub.result.modulo_hash:
+                        child_modulo_hashes[str(sub.drv_path)] = sub.result.modulo_hash
             else:
                 log.debug(
                     "DEBUG_child_no_result",
-                    key=str(child.key),
+                    child_type=type(child).__name__,
+                    child_id=id(child),
                     is_executing=child.is_executing,
                     is_done=child.finished_executing.is_set(),
                 )
             if child.result:
                 log.debug(
                     "DEBUG_child_result_mod",
-                    key=str(child.key),
+                    child_type=type(child).__name__,
+                    child_id=id(child),
                     mod_hash=child.result.modulo_hash[:16] if child.result.modulo_hash else "",
                     resolved_keys=list(child.result.resolved_outputs),
                 )
@@ -466,222 +430,3 @@ class ResolutionGoal(Goal):
                 else BuildResultStatus.NO_SUBSTITUTERS,
             ),
         )
-
-
-def _fake_dp(drv_path: StorePath, output_name: str) -> DerivedPath:
-    """Build a DerivedPath for the goal's path field."""
-    from ..derived_path import OutputsNames
-
-    return DerivedPath._from_components(
-        drv_path=drv_path,
-        chain=(),
-        outputs=OutputsNames(frozenset({output_name})),
-    )
-
-
-def _find_output(
-    derivation: Derivation,
-    output_name: str,
-) -> DrvOutput | None:
-    """Find a DrvOutput by name in the derivation."""
-    for o in derivation.outputs:
-        if o.name == output_name:
-            return o
-    return None
-
-
-def _dp_from(drv_path: StorePath, output_name: str) -> DerivedPath:
-    """Construct a DerivedPath for (drv_path, output_name)."""
-    from ..derived_path import DerivedPath, OutputsNames
-
-    return DerivedPath._from_components(
-        drv_path=drv_path,
-        chain=(),
-        outputs=OutputsNames(frozenset({output_name})),
-    )
-
-
-def _nix_drv_name(drv_path: StorePath) -> str:
-    """Extract the derivation name (without .drv suffix) from a store path."""
-    name = str(drv_path).rsplit("/", 1)[-1]
-    first_dash = name.find("-")
-    if first_dash == -1:
-        return name
-    name = name[first_dash + 1 :]
-    return name.removesuffix(".drv")
-
-
-def _output_path_name(drv_name: str, output_name: str) -> str:
-    """Nix's ``outputPathName`` — the basename part of an output store path."""
-    if output_name == "out":
-        return drv_name
-    return f"{drv_name}-{output_name}"
-
-
-def _q(s: str) -> str:
-    """ATerm-quote a string: wrap in quotes with escaping."""
-    return f'"{_aterm_escape(s)}"'
-
-
-def _format_child_map_node(node: ChildMapNode) -> str:
-    """Serialize a ChildMapNode to ATerm for hashDerivationModulo.
-
-    Produces the children list part of a ``DerivedPathMapNode``:
-      ``[(outer_out,([flat_outs],[children,...])),...]``
-
-    Each child is serialized recursively, supporting arbitrary depth.
-    """
-    children_parts: list[str] = []
-    for child_name, child_node in sorted(node.children.items()):
-        inner = _q(child_name) + ",(" + _q_list(child_node.outputs) + ","
-        inner += _format_child_map_node(child_node)
-        inner += ")"
-        children_parts.append(f"({inner})")
-    return "[" + ",".join(children_parts) + "]"
-
-
-def _q_list(items: list[str]) -> str:
-    """Format a list of ATerm-quoted strings: ``["a","b"]``."""
-    return "[" + ",".join(_q(o) for o in items) + "]"
-
-
-def _unparse_for_hash(
-    derivation: Derivation,
-    input_drv_hashes: dict[str, list[str]],
-    dynamic_input_drv_hashes: dict[str, ChildMapNode] | None = None,
-) -> str:
-    """Serialize a Derivation to ATerm for hashDerivationModulo.
-
-    Replaces input_drvs keys with the given modulo hashes (matching
-    what Nix's hashDerivationModulo produces).  When no hashes are
-    provided, input_drvs serializes as empty (collapsed).
-
-    For derivations with ``dynamic_input_drvs``, the nested dependency
-    tree is serialized using ``DrvWithVersion`` format with
-    ``DerivedPathMapNode`` children.  ``dynamic_input_drv_hashes``
-    maps modulo hash to ``ChildMapNode`` for recursive serialization.
-
-    Mirrors the C++ ``Derivation::unparse()`` with actualInputs set.
-    """
-    parts: list[str] = []
-
-    # Choose format
-    is_dynamic = bool(derivation.dynamic_input_drvs)
-    if is_dynamic:
-        parts.append("DrvWithVersion(")
-        parts.append(_q("xp-dyn-drv"))
-        parts.append(",")
-    else:
-        parts.append("Derive(")
-
-    # --- Outputs (masked for hashing) ---
-    parts.append("[")
-    first = True
-    for o in sorted(derivation.outputs, key=lambda x: x.name):
-        if first:
-            first = False
-        else:
-            parts.append(",")
-        parts.append("(" + _q(o.name) + "," + _q("") + "," + _q(o.hash_algo) + "," + _q(o.hash_value) + ")")
-    parts.append("],")
-
-    # --- Input derivations (replaced with modulo hashes) ---
-    # Combine flat and dynamic inputs into a single map keyed by modulo hash.
-    # Each entry has (flat_output_names, ChildMapNode).
-    combined: dict[str, tuple[list[str], ChildMapNode | None]] = {}
-    for h, outs in input_drv_hashes.items():
-        combined[h] = (list(outs), None)
-    if dynamic_input_drv_hashes:
-        for h, node in dynamic_input_drv_hashes.items():
-            existing = combined.get(h)
-            if existing is not None:
-                flat_outs, existing_node = existing
-                if existing_node is not None:
-                    existing_node.outputs.extend(node.outputs)
-                    existing_node.children.update(node.children)
-                else:
-                    combined[h] = (flat_outs, node)
-            else:
-                combined[h] = ([], node)
-
-    parts.append("[")
-    first = True
-    for h, (flat_outs, dyn_node) in sorted(combined.items(), key=lambda x: x[0]):
-        if first:
-            first = False
-        else:
-            parts.append(",")
-        quoted_outs = ",".join(_q(o) for o in flat_outs)
-        if dyn_node is not None and (dyn_node.outputs or dyn_node.children):
-            parts.append(f"({_q(h)},(")
-            parts.append(f"[{quoted_outs}]")
-            parts.append(",")
-            parts.append(_format_child_map_node(dyn_node))
-            parts.append("))")
-        else:
-            parts.append(f"({_q(h)},[{quoted_outs}])")
-    parts.append("],")
-
-    # --- Input sources ---
-    srcs = ",".join(_q(str(p)) for p in sorted(str(p) for p in derivation.input_srcs))
-    parts.append(f"[{srcs}],")
-
-    # --- Platform ---
-    parts.append(_q(derivation.platform) + ",")
-
-    # --- Builder ---
-    parts.append(_q(derivation.builder) + ",")
-
-    # --- Arguments ---
-    args = ",".join(_q(a) for a in derivation.args)
-    parts.append(f"[{args}],")
-
-    # --- Environment (output paths masked for hashing) ---
-    output_names = {o.name for o in derivation.outputs}
-    parts.append("[")
-    first = True
-    for k, v in sorted(derivation.env.items()):
-        if first:
-            first = False
-        else:
-            parts.append(",")
-        val = "" if k in output_names else v
-        parts.append(f"({_q(k)},{_q(val)})")
-    parts.append("])")
-
-    return "".join(parts)
-
-
-def _derive_output_paths(
-    derivation: Derivation,
-    modulo_hash_hex: str,
-    drv_path: StorePath,
-) -> dict[str, StorePath]:
-    """Derive output store paths from a modulo hash."""
-    drv_name = _nix_drv_name(drv_path)
-    h = bytes.fromhex(modulo_hash_hex)
-    result: dict[str, StorePath] = {}
-
-    for o in derivation.outputs:
-        if o.path:
-            result[o.name] = StorePath(o.path)
-        else:
-            name = _output_path_name(drv_name, o.name)
-            out = _make_store_path(f"output:{o.name}", h, name)
-            result[o.name] = StorePath(out)
-
-    return result
-
-
-def _make_store_path(
-    type_str: str,
-    hash_modulo: bytes,
-    name: str,
-    store_dir: str = "/nix/store",
-) -> str:
-    """Nix's ``makeStorePath`` — derive a store path from a type, hash, and name."""
-    hash_hex = hash_modulo.hex()
-    s = f"{type_str}:sha256:{hash_hex}:{store_dir}:{name}"
-    digest = hashlib.sha256(s.encode()).digest()
-    compressed = compress_hash(digest, 20)
-    return f"{store_dir}/{nix32_encode(compressed)}-{name}"

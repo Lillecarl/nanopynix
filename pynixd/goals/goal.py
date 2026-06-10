@@ -10,7 +10,7 @@ Two core goal kinds:
 * **ResolutionGoal** — compute the output path of a single derivation
   output via the unparsing math (ATerm → hash → path).
 
-Each goal is identified by a ``GoalKey`` in the ``GoalManager`` for
+Each goal is tracked by the ``GoalManager`` for
 deduplication across concurrent requests.
 """
 
@@ -34,56 +34,6 @@ if TYPE_CHECKING:
     from ..store.base import Store
     from ..substitution import SubstitutionManager
     from .manager import GoalManager
-
-
-# ── Goal key for dedup ────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class GoalKey:
-    """Unique identifier for a Goal in the GoalManager.
-
-    Three tag families:
-    * ``"build"`` — a BuildGoal ensuring a DerivedPath exists.
-    * ``"resolve"`` — a ResolutionGoal computing one output of a
-      derivation via hashDerivationModulo.
-    * ``"substitute"`` — a SubstitutionGoal fetching a store path
-      from a binary cache.
-    """
-
-    tag: str  # "build" | "resolve" | "substitute"
-    path: str  # normalized store path string
-    output: str  # output name ("" for opaque/substitute paths)
-
-    @classmethod
-    def build(cls, dp: DerivedPath) -> GoalKey:
-        """Key for a BuildGoal that ensures *dp* exists."""
-        return cls(tag="build", path=str(dp.base_store_path()), output=_dp_output(dp))
-
-    @classmethod
-    def resolve(cls, drv_path: StorePath, output_name: str) -> GoalKey:
-        """Key for a ResolutionGoal that computes one output path."""
-        return cls(tag="resolve", path=str(drv_path), output=output_name)
-
-    @classmethod
-    def substitute(cls, path: StorePath) -> GoalKey:
-        """Key for a SubstitutionGoal that fetches a store path."""
-        return cls(tag="substitute", path=str(path), output="")
-
-
-def _dp_output(dp: DerivedPath) -> str:
-    """Extract the canonical output identifier from a DerivedPath.
-
-    For nested paths (e.g. ``a.drv!out!lib``), the chain is encoded
-    as ``out!lib`` so that the GoalKey is distinct from the flat
-    ``a.drv!lib`` goal key.
-    """
-    if dp.is_opaque:
-        return ""
-    suffix = "!".join(dp.chain)
-    names = dp.output_names
-    out = next(iter(names)) if len(names) == 1 else "*"
-    return f"{suffix}!{out}" if suffix else out
 
 
 # ── End goal mode ────────────────────────────────────────────────
@@ -143,14 +93,11 @@ class GoalResult(KeyedBuildResult):
 
 
 class Goal(ABC):
-    """A single build target tracked by the GoalManager.
+    """A single build target.
 
-    Each goal is uniquely identified by :attr:`key` in the manager's
-    dedup index.  Subclasses implement :meth:`execute` with their
-    specific logic and set :attr:`result` when done.
-
-    DAG helpers (``add_child``, ``execute_children``, ``collect_results``)
-    are shared by all subclasses.
+    Subclasses implement :meth:`execute` with their specific logic
+    and set :attr:`result` when done.  DAG helpers (``add_child``,
+    ``execute_children``, ``collect_results``) are shared by all subclasses.
     """
 
     def __init__(self, ctx: GoalContext) -> None:
@@ -162,11 +109,6 @@ class Goal(ABC):
         self.result: GoalResult | None = None
 
     # ── subclasses must define ────────────────────────────────────
-
-    @property
-    @abstractmethod
-    def key(self) -> GoalKey:
-        """Key for dedup in the GoalManager."""
 
     @abstractmethod
     async def execute(self) -> None:
@@ -215,18 +157,25 @@ class Goal(ABC):
 def make_build_goal(dp: DerivedPath, ctx: GoalContext) -> Goal:
     """Create the right BuildGoal subclass for a DerivedPath."""
     if dp.is_opaque:
-        from .opaque import OpaqueBuildGoal
+        from .path_substitution import PathSubstitutionGoal
 
-        return OpaqueBuildGoal(derived_path=dp, ctx=ctx)
+        return PathSubstitutionGoal(derived_path=dp, ctx=ctx)
 
     if dp.is_nested:
-        from .dynamic import DynamicBuildGoal
+        from .trampoline import DerivationTrampolineGoal
 
-        return DynamicBuildGoal(derived_path=dp, ctx=ctx)
+        return DerivationTrampolineGoal(derived_path=dp, ctx=ctx)
 
-    from .derivation import DerivationBuildGoal
+    # Flat derivation: create a DerivationGoal for the single output.
+    # Extracts drv_path and output_name from the DerivedPath.
+    from ._helpers import _single_output
+    from .derivation import DerivationGoal
 
-    return DerivationBuildGoal(derived_path=dp, ctx=ctx)
+    return DerivationGoal(
+        drv_path=dp.base_store_path(),
+        output_name=_single_output(dp),
+        ctx=ctx,
+    )
 
 
 def make_resolution_goal(

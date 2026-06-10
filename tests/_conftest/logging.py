@@ -68,7 +68,11 @@ def _capture_processor(logger: Any, method_name: str, event_dict: Any) -> Any:
 
 def _format_exception_for_json(logger: Any, method_name: str, event_dict: Any) -> Any:
     """Convert exc_info to a structured dict for JSON serialization."""
+    import sys
+
     exc_info = event_dict.pop("exc_info", None)
+    if exc_info is True:
+        exc_info = sys.exc_info()
     if exc_info and not isinstance(exc_info, str):
         event_dict["exception"] = {
             "type": type(exc_info[1]).__name__,

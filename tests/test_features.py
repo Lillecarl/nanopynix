@@ -314,7 +314,7 @@ class TestFeatures(Flag):
     # BUILD_DERIVATION.  Covers dependency resolution, output registration,
     # and result collection.
     GOAL_BUILD = auto()
-    # GOAL_OPAQUE: An OpaqueBuildGoal that handles substitution of already-known
+    # GOAL_OPAQUE: A PathSubstitutionGoal that handles substitution of already-known
     # paths.  Creates sub-goals for references, then substitutes the path.
     # Used for inputs already in the store or needing remote fetch.
     GOAL_OPAQUE = auto()

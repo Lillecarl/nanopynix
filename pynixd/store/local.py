@@ -226,8 +226,7 @@ class LocalSocketStore(Store):
                         log.info(f"daemon_{label}", msg=decoded)
                         continue
                     log.info(
-                        f"daemon_{label}",
-                        event=f"nix_{data.pop('action', 'unknown')}",
+                        f"daemon_{data.pop('action', label)}",
                         nix_id=data.pop("id", None),
                         nix_level=data.pop("level", None),
                         nix_parent=data.pop("parent", None),
