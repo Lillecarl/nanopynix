@@ -86,6 +86,22 @@ def _format_exception_for_json(logger: Any, method_name: str, event_dict: Any) -
     return event_dict
 
 
+# ── Foreign stdlib log enrichment ─────────────────────────────────
+
+
+def _stdlib_to_event_dict(logger: Any, method_name: str, event_dict: Any) -> Any:
+    """Enrich a foreign (non-structlog) LogRecord with logger/level keys.
+
+    Called by ProcessorFormatter.foreign_pre_chain for stdlib loggers
+    like asyncssh that don't use structlog.
+    """
+    record = event_dict["_record"]
+    event_dict["logger"] = record.name
+    event_dict["level"] = record.levelno
+    event_dict["log_level"] = record.levelname.lower()
+    return event_dict
+
+
 # ── Time stampers ────────────────────────────────────────────────
 
 _session_start_time = time.monotonic()
@@ -119,7 +135,7 @@ _BASE_PROCESSORS: list[Callable[[Any, str, Any], Any]] = [
     _capture_processor,  # ← snapshot BEFORE the drop gate
     _life_check_processor,  # ← may DropEvent here
     _format_exception_for_json,  # ← convert exc_info to structured dict
-    structlog.processors.JSONRenderer(),
+    structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
 ]
 
 
@@ -234,66 +250,77 @@ def test_log_dir(request: pytest.FixtureRequest) -> Path:
     return request.session.config.stash[_log_dir_key]
 
 
-# ── Human-readable stderr formatter ──────────────────────────────
+# ── Human-readable stderr renderer ───────────────────────────────
 
 
-class _HumanReadableFormatter(logging.Formatter):
-    """Parse JSON record.msg and render as a human-readable line."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        try:
-            data = json.loads(record.msg)
-        except (json.JSONDecodeError, TypeError):
-            return record.msg
-        ts = data.get("timestamp", "")
-        level = data.get("log_level", data.get("level", ""))
-        logger_name = data.get("logger", "")
-        event = data.get("event", "")
-        # Remaining keys as key=value pairs
-        skip = {"event", "logger", "level", "log_level", "timestamp", "exception"}
-        extras = "    ".join(f"{k}={v}" for k, v in data.items() if k not in skip)
-        return f"[{ts}] {level.upper()} {logger_name}    {event}    {extras}"
+def _human_readable_renderer(logger: Any, method_name: str, event_dict: Any) -> str:
+    """Render event_dict as a human-readable string for stderr output."""
+    ts = event_dict.get("timestamp", "")
+    level = str(event_dict.get("log_level", event_dict.get("level", "")))
+    logger_name = event_dict.get("logger", "")
+    event = event_dict.get("event", "")
+    skip = {"event", "logger", "level", "log_level", "timestamp", "exception"}
+    extras = "    ".join(f"{k}={v}" for k, v in event_dict.items() if k not in skip)
+    return f"[{ts}] {level.upper()} {logger_name}    {event}    {extras}"
 
 
 # ── Setup / teardown helpers ─────────────────────────────────────
 
 
-def _setup_test_logging(log_dir: Path) -> tuple[logging.FileHandler, logging.StreamHandler, int]:
+def _setup_test_logging(log_dir: Path) -> tuple[logging.FileHandler, logging.StreamHandler]:
     """Attach per-test log handlers and configure structlog.
 
     Creates two handlers:
     - FileHandler → filtered.log (JSON, real-time, DEBUG+)
     - StreamHandler → stderr (human-readable, WARNING+)
 
-    Returns (file_handler, stderr_handler, old_level) for teardown.
+    Returns (file_handler, stderr_handler) for teardown.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # File handler → filtered.log (JSON, real-time)
+    foreign_pre: list[Callable[[Any, str, Any], Any]] = [
+        _stdlib_to_event_dict,
+        _abs_time_stamper,
+        _relative_time_stamper,
+    ]
+
+    # File handler → JSON output via ProcessorFormatter
+    json_formatter = structlog.stdlib.ProcessorFormatter(
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.processors.JSONRenderer(),
+        ],
+        foreign_pre_chain=foreign_pre,
+    )
     file_handler = logging.FileHandler(log_dir / "filtered.log")
     file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    file_handler.setFormatter(json_formatter)
 
-    # Stream handler → stderr (human-readable, WARNING+)
+    # Stderr handler → human-readable, WARNING+
+    human_formatter = structlog.stdlib.ProcessorFormatter(
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            _human_readable_renderer,
+        ],
+        foreign_pre_chain=foreign_pre,
+    )
     stderr_handler = logging.StreamHandler(sys.stderr)
     stderr_handler.setLevel(logging.WARNING)
-    stderr_handler.setFormatter(_HumanReadableFormatter())
+    stderr_handler.setFormatter(human_formatter)
 
     root = logging.getLogger()
-    old_level = root.level
     root.setLevel(logging.DEBUG)
     root.addHandler(file_handler)
     root.addHandler(stderr_handler)
 
     configure_test_logging()
 
-    return file_handler, stderr_handler, old_level
+    return file_handler, stderr_handler
 
 
 def _teardown_test_logging(
     file_handler: logging.FileHandler,
     stderr_handler: logging.StreamHandler,
-    old_level: int,
     events: list[dict[str, Any]],
     log_dir: Path,
 ) -> None:
@@ -301,7 +328,7 @@ def _teardown_test_logging(
     root = logging.getLogger()
     root.removeHandler(file_handler)
     root.removeHandler(stderr_handler)
-    root.setLevel(old_level)
+    root.setLevel(logging.WARNING)
     file_handler.close()
     stderr_handler.close()
 
@@ -352,10 +379,10 @@ def test_logging(request: pytest.FixtureRequest, test_log_dir: Path) -> Generato
     test_name = request.node.name.replace("/", "_").replace("[", "_").replace("]", "_")
     log_dir = test_log_dir / test_file / test_name
 
-    file_handler, stderr_handler, old_level = _setup_test_logging(log_dir)
+    file_handler, stderr_handler = _setup_test_logging(log_dir)
     structlog.contextvars.bind_contextvars(test_start_time=time.monotonic())
 
     yield log_dir  # yield the folder path for other fixtures to use
 
-    _teardown_test_logging(file_handler, stderr_handler, old_level, events, log_dir)
+    _teardown_test_logging(file_handler, stderr_handler, events, log_dir)
     _captured_events = []
