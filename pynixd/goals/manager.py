@@ -203,7 +203,7 @@ class GoalManager:
             if status is BuildResultStatus.SUBSTITUTED:
                 will_substitute.add(sp)
             elif status is BuildResultStatus.UNKNOWN:
-                unknown.add(sp)
+                will_build.add(sp)
             else:
                 will_build.add(sp)
 

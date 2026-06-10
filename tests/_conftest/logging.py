@@ -110,6 +110,8 @@ def _stdlib_to_event_dict(logger: Any, method_name: str, event_dict: Any) -> Any
 # ── Time stampers ────────────────────────────────────────────────
 
 _session_start_time = time.monotonic()
+_test_start_time: float = _session_start_time
+_original_excepthook = sys.excepthook
 
 
 def _abs_time_stamper(logger: Any, method_name: str, event_dict: Any) -> Any:
@@ -301,6 +303,24 @@ def _setup_test_logging(log_dir: Path) -> tuple[logging.FileHandler, logging.Str
     """
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    global _test_start_time, _original_excepthook
+    _test_start_time = time.monotonic()
+
+    _original_excepthook = sys.excepthook
+
+    def _jsonl_excepthook(exc_type: type[BaseException], exc_value: BaseException, exc_tb: Any) -> None:
+        entry = {
+            "timestamp": f"{time.monotonic() - _test_start_time:09.3f}",
+            "type": exc_type.__name__,
+            "message": str(exc_value),
+            "traceback": "".join(traceback.format_exception(exc_type, exc_value, exc_tb)),
+        }
+        with (log_dir / "exceptions.jsonl").open("a") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+        _original_excepthook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _jsonl_excepthook
+
     foreign_pre: list[Callable[[Any, str, Any], Any]] = [
         _stdlib_to_event_dict,
         _abs_time_stamper,
@@ -349,6 +369,9 @@ def _teardown_test_logging(
 ) -> None:
     """Remove per-test handlers and write unfiltered log + stats."""
     root = logging.getLogger()
+    global _original_excepthook
+    sys.excepthook = _original_excepthook
+
     root.removeHandler(file_handler)
     root.removeHandler(stderr_handler)
     root.setLevel(logging.WARNING)
