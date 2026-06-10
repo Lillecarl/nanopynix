@@ -139,6 +139,7 @@ class DerivationBuildingGoal(Goal):
                     build_request,
                     required_paths=all_srcs,
                     platform=basic.platform,
+                    from_goal_path=True,
                 )
                 response = await future
             else:

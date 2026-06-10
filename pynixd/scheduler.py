@@ -168,6 +168,7 @@ class Scheduler:
         platform: str = "",
         scheduler_request_id: RequestId | None = None,
         derived_paths_for_request: set[DerivedPath] | None = None,
+        from_goal_path: bool = False,
     ) -> tuple[BuildId, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue and trigger the scheduler."""
         t0 = time.monotonic()
@@ -191,6 +192,7 @@ class Scheduler:
             expected_duration=hint,
             scheduler_request_id=scheduler_request_id,
             derived_paths_for_request=derived_paths_for_request,
+            from_goal_path=from_goal_path,
         )
         t_enqueue = time.monotonic()
         self.trigger()
@@ -336,19 +338,6 @@ class Scheduler:
         for build in pending:
             if build.is_building:
                 continue
-
-            # DAG check: all dependency builds must be done.  This is a
-            # point-in-time check — a dep that completes between passes
-            # will be caught on the next iteration.
-            if build.depends_on:
-                unfinished_deps = {
-                    dep_id
-                    for dep_id in build.depends_on
-                    if dep_id in self.queue.by_id and not self.queue.by_id[dep_id].is_done
-                }
-                if unfinished_deps:
-                    waiting_deps.append(build)
-                    continue
 
             # Paths check: all required paths must be in the local store.
             # The tracker is an in-memory cache of local ValidPaths entries,
@@ -585,9 +574,11 @@ class Scheduler:
         All operations that must happen before the build request is sent
         to the backend daemon.
         """
-        # 0. Ensure dependency CA output paths are on the builder, then
-        #    register realisations (the INSERT requires the path in ValidPaths)
-        if build.depends_on:
+        # 0. For direct-daemon path (not goal-managed): ensure dependency
+        #    CA output paths are on the builder, register realisations,
+        #    and resolve deferred outputs.  The goal manager handles all
+        #    of this internally when ``from_goal_path`` is set.
+        if not build.from_goal_path and build.depends_on:
             missing = self.derivation_resolver.collect_missing_dep_out_paths(build, store)
             if missing:
                 await stream_paths_store_to_store(self.local_store, store, missing)

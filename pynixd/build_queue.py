@@ -108,6 +108,7 @@ class QueuedBuild:
         # can be scheduled). Populated during decomposition for CA dependency
         # ordering.
         self.depends_on: set[BuildId] = set()
+        self.from_goal_path: bool = False
 
         # Track which builds depend on this one (reversed depends_on)
         # Used for efficient DAG updates when a build completes.
@@ -323,6 +324,7 @@ class BuildQueue:
         expected_duration: int | None = None,
         scheduler_request_id: RequestId | None = None,
         derived_paths_for_request: set[DerivedPath] | None = None,
+        from_goal_path: bool = False,
     ) -> tuple[BuildId, asyncio.Future[BuildDerivationResponse]]:
         """Add a build to the queue (deduplicates if already present).
 
@@ -343,6 +345,7 @@ class BuildQueue:
             existing = self._by_path.get(drv_path)
             if existing is not None and not existing.is_done:
                 log.debug("build_deduped", id=existing.build_id)
+                existing.from_goal_path = existing.from_goal_path or from_goal_path
                 if scheduler_request_id is not None:
                     existing.scheduler_request_ids.add(scheduler_request_id)
                     if derived_paths_for_request:
@@ -370,6 +373,7 @@ class BuildQueue:
                 expected_duration=expected_duration,
                 scheduler_request_ids=scheduler_request_ids,
             )
+            build.from_goal_path = from_goal_path
             self.next_id += 1
             self._queue.append(build)
             self._by_path[drv_path] = build
