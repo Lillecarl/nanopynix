@@ -90,6 +90,7 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
             self.derived_paths,
             ctx.proxy.local_store,
             ctx.proxy.substitution_manager,
+            scheduler=ctx.proxy.scheduler,
         )
 
         # Register successful output paths in the tracker (so subsequent
@@ -199,6 +200,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
             self.derived_paths,
             ctx.proxy.local_store,
             ctx.proxy.substitution_manager,
+            scheduler=ctx.proxy.scheduler,
         )
 
         for kr in keyed_results:

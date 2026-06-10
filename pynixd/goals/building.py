@@ -113,21 +113,38 @@ class DerivationBuildingGoal(Goal):
 
         # Merge input_srcs
         all_srcs: set[StorePath] = set(self.input_srcs) | set(basic.input_srcs)
-        response = await self.ctx.store.execute(
-            BuildDerivationRequest(
-                drv_path=drv_path,
-                derivation=BasicDerivation(
-                    outputs=basic.outputs,
-                    input_srcs=all_srcs,
-                    platform=basic.platform,
-                    builder=basic.builder,
-                    args=basic.args,
-                    env=basic.env,
-                    is_dynamic=basic.is_dynamic,
-                ),
-                build_mode=BuildMode.NORMAL,
-            )
+
+        build_request = BuildDerivationRequest(
+            drv_path=drv_path,
+            derivation=BasicDerivation(
+                outputs=basic.outputs,
+                input_srcs=all_srcs,
+                platform=basic.platform,
+                builder=basic.builder,
+                args=basic.args,
+                env=basic.env,
+                is_dynamic=basic.is_dynamic,
+            ),
+            build_mode=BuildMode.NORMAL,
         )
+
+        scheduler = self.ctx.scheduler
+        if scheduler is not None:
+            # Distributed build: scheduler allocates a remote store,
+            # streams inputs, executes, and pulls outputs back.
+            from ..scheduler import Scheduler as _Sched
+
+            if isinstance(scheduler, _Sched):
+                _, future = await scheduler.build_derivation(
+                    build_request,
+                    required_paths=all_srcs,
+                    platform=basic.platform,
+                )
+                response = await future
+            else:
+                response = await self.ctx.store.execute(build_request)
+        else:
+            response = await self.ctx.store.execute(build_request)
 
         # Register any CA realisations from the build
         for realisation in response.result.built_outputs.values():

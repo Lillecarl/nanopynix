@@ -140,6 +140,7 @@ class GoalManager:
         derived_paths: set[DerivedPath],
         store: Store,
         substitution_manager: SubstitutionManager,
+        scheduler: object | None = None,
     ) -> list[KeyedBuildResult]:
         """Execute a set of derived paths through the goal tree.
 
@@ -154,6 +155,7 @@ class GoalManager:
             goal_manager=self,
             store=store,
             substitution_manager=substitution_manager,
+            scheduler=scheduler,
         )
         roots = [self.get_or_create_trampoline(dp, ctx) for dp in derived_paths]
         async with TaskGroup() as tg:
@@ -166,6 +168,7 @@ class GoalManager:
         derived_paths: set[DerivedPath],
         store: Store,
         substitution_manager: SubstitutionManager,
+        scheduler: object | None = None,
     ) -> QueryMissingResponse:
         """Determine which paths need building, substitution, or are unknown."""
         from .goal import EndGoal, GoalContext
@@ -175,6 +178,7 @@ class GoalManager:
             store=store,
             substitution_manager=substitution_manager,
             end_goal=EndGoal.QUERY,
+            scheduler=scheduler,
         )
         self._clear()
         roots = [self.get_or_create_trampoline(dp, ctx) for dp in derived_paths]

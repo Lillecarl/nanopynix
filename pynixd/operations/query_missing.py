@@ -128,6 +128,7 @@ class QueryMissingRequest(OpRequest[QueryMissingResponse]):
             self.derived_paths,
             ctx.proxy.local_store,
             ctx.proxy.substitution_manager,
+            scheduler=ctx.proxy.scheduler,
         )
 
     async def execute(

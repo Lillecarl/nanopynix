@@ -56,11 +56,13 @@ class GoalContext:
         store: Store,
         substitution_manager: SubstitutionManager,
         end_goal: str = EndGoal.BUILD,
+        scheduler: object | None = None,
     ) -> None:
         self.goal_manager = goal_manager
         self.store = store
         self.substitution_manager = substitution_manager
         self.end_goal = end_goal
+        self.scheduler = scheduler
 
 
 # ── Goal result ────────────────────────────────────────────────────
