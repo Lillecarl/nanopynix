@@ -326,18 +326,15 @@ def _collect_dynamic_paths(
 
     def _walk(goal: GoalType) -> None:
         if goal.result and goal.result.resolved_outputs:
-            # Try to get a drv_path from the goal
+            from ..goals.building import DerivationBuildingGoal as _BGoal
+            from ..goals.derivation import DerivationGoal as _DGoal
+            from ..goals.trampoline import DerivationTrampolineGoal as _TGoal
+
             drv_path: StorePath | None = None
-            if hasattr(goal, "derived_path"):
-                # DerivationTrampolineGoal
-                dp = goal.derived_path
-                if hasattr(dp, "_drv_path"):
-                    drv_path = dp._drv_path
-            elif hasattr(goal, "drv_path"):
-                # DerivationGoal / DerivationBuildingGoal
-                raw = goal.drv_path
-                if isinstance(raw, StorePath):
-                    drv_path = raw
+            if isinstance(goal, _TGoal):
+                drv_path = goal.derived_path._drv_path
+            elif isinstance(goal, (_DGoal, _BGoal)):
+                drv_path = goal.drv_path
 
             if drv_path is not None:
                 for out_name, out_path in goal.result.resolved_outputs.items():

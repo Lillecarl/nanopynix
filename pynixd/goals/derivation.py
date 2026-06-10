@@ -204,13 +204,35 @@ class DerivationGoal(Goal):
             )
             return
 
+        from ._helpers import _child_map_to_paths, _dp_from
+        from ._helpers import _collect_resolved_paths as _deep_collect
         from .building import DerivationBuildingGoal
+        from .goal import make_build_goal
+        from .resolution import ResolutionGoal
+
+        # Build direct input dependencies first so their outputs are
+        # valid in the daemon store when we send BuildDerivationRequest.
+        for input_drv_path, output_names in derivation.input_drvs.items():
+            for oname in output_names:
+                child = make_build_goal(
+                    _dp_from(input_drv_path, oname),
+                    self.ctx,
+                )
+                registered = self.ctx.goal_manager.register(child)
+                self.add_child(registered)
+
+        for input_drv_path, node in derivation.dynamic_input_drvs.items():
+            for dp in _child_map_to_paths(input_drv_path, node):
+                child = make_build_goal(dp, self.ctx)
+                registered = self.ctx.goal_manager.register(child)
+                self.add_child(registered)
+
+        if self.children:
+            await self.execute_children()
 
         bg = DerivationBuildingGoal(self.drv_path, self.ctx)
         bg.output_name = self.output_name
         bg.derivation = derivation
-        from ._helpers import _collect_resolved_paths as _deep_collect
-        from .resolution import ResolutionGoal
 
         # Collect resolved paths from input deps only (skip the current
         # derivation's own ResolutionGoal — its resolved_outputs contain
