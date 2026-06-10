@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    import pytest
+
 import pytest
 import structlog
 from structlog import DropEvent
@@ -256,21 +258,34 @@ class _TestRelativeTimeHandler(logging.FileHandler):
 _MAX_VALUES = 5
 
 
-def _setup_test_logging(log_file: Path) -> logging.FileHandler:
-    """Attach a per-test log file and reset the structlog processor chain."""
+def _setup_test_logging(log_file: Path) -> tuple[logging.FileHandler, int]:
+    """Attach a per-test log file and reset the structlog processor chain.
+
+    Sets root logger to DEBUG so ``filter_by_level`` does not suppress
+    events before ``_capture_processor``.  Returns (handler, old_level)
+    so the caller can restore the level on teardown.
+    """
     handler = _TestRelativeTimeHandler(time.time(), log_file)
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter("%(message)s"))
 
     root = logging.getLogger()
+    old_level = root.level
+    root.setLevel(logging.DEBUG)
     root.addHandler(handler)
 
     configure_test_logging()
-    return handler
+    return handler, old_level
 
 
-def _summarize(events: list[dict[str, Any]]) -> None:
-    """Print per-test log statistics to stdout (visible only on failure)."""
+def _summarize(events: list[dict[str, Any]], *, write: Callable[[str], object] = print) -> None:
+    """Print per-test log statistics.
+
+    Args:
+        events: Captured event dicts for this test.
+        write: Output function (default ``print``).  The fixture passes
+            ``terminalreporter.write_line`` to bypass pytest capture.
+    """
     if not events:
         return
 
@@ -283,7 +298,7 @@ def _summarize(events: list[dict[str, Any]]) -> None:
 
     dropped = sum(1 for e in events if e.get(_LIFE_KEY, 0) < 0)
 
-    print(f"[logs] {len(events)} events, {dropped} dropped ({len(by_source)} unique)")
+    write(f"[logs] {len(events)} events, {dropped} dropped ({len(by_source)} unique)")
 
     for (logger_, event), count in by_source.most_common(_MAX_VALUES):
         example = next(
@@ -293,11 +308,11 @@ def _summarize(events: list[dict[str, Any]]) -> None:
         detail = {k: v for k, v in example.items() if k not in _SKIP_KEYS}
         detail = {k: (str(v)[:80] if isinstance(v, str) else v) for k, v in detail.items()}
         short_logger = logger_.rsplit(".", 1)[-1] if "." in logger_ else logger_
-        print(f"  {short_logger}:{event} x{count}  {dict(detail)}")
+        write(f"  {short_logger}:{event} x{count}  {dict(detail)}")
 
     if by_operation:
         ops = dict(by_operation.most_common(_MAX_VALUES))
-        print(f"  [ops] {ops}")
+        write(f"  [ops] {ops}")
 
 
 # ── Single autouse fixture (replaces test_log_file + _reset_structlog) ─
@@ -315,12 +330,15 @@ def test_logging(request: pytest.FixtureRequest, test_log_dir: Path):
     _captured_events = events
 
     log_file = get_log_file_path(test_log_dir, request.node)
-    handler = _setup_test_logging(log_file)
+    handler, old_log_level = _setup_test_logging(log_file)
 
     structlog.contextvars.bind_contextvars(test_start_time=time.monotonic())
 
     yield
 
-    _captured_events = []  # point to a fresh list for any post-teardown events
+    _captured_events = []
+    logging.getLogger().setLevel(old_log_level)
     handler.close()
-    _summarize(events)
+
+    tr = request.config.pluginmanager.get_plugin("terminalreporter")
+    _summarize(events, write=tr.write_line if tr is not None else print)

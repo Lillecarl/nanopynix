@@ -54,5 +54,6 @@ from tests._conftest.logging import (
     suppress_messages_containing,
     suppress_messages_matching,
     test_log_dir,
+    test_logging,
 )
 from tests._conftest.subsumption import pytest_runtest_protocol
