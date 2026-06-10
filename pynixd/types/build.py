@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from .context import ReadContext, WriteContext
 
 
+_SUCCESS_VALUES = frozenset({0, 1, 2, 13})
+
+
 class BuildResultStatus(IntEnum):
     """Build result status codes from nix daemon protocol."""
 
@@ -42,6 +45,14 @@ class BuildResultStatus(IntEnum):
 
     HASH_MISMATCH = 101
     UNKNOWN = 102
+
+    @property
+    def is_success(self) -> bool:
+        return self.value in _SUCCESS_VALUES
+
+    @property
+    def is_failure(self) -> bool:
+        return not self.is_success
 
 
 class BuildMode(IntEnum):

@@ -149,10 +149,7 @@ class DerivationBuildGoal(Goal):
 
         # After build succeeds, update the OpaqueBuildGoal child's result
         # so it doesn't report NO_SUBSTITUTERS for the same output path.
-        if self.result and self.result.result.status in (
-            BuildResultStatus.BUILT,
-            BuildResultStatus.ALREADY_VALID,
-        ):
+        if self.result and self.result.result.status.is_success:
             from .opaque import OpaqueBuildGoal
 
             for child in self.children:

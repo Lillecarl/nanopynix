@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from ..derived_path import DerivedPath
 from ..stderr import OperationLogs
 from ..types.context import ReadContext, WriteContext
-from .base import BuildMode, BuildResultStatus, KeyedBuildResult, OpRequest, OpResponse
+from .base import BuildMode, KeyedBuildResult, OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..types import RequestContext
@@ -95,24 +95,14 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         # Register successful output paths in the tracker (so subsequent
         # IsValidPathRequest fast-paths can find them without hitting the daemon).
         for kr in keyed_results:
-            if kr.result.status in (
-                BuildResultStatus.BUILT,
-                BuildResultStatus.SUBSTITUTED,
-                BuildResultStatus.ALREADY_VALID,
-                BuildResultStatus.RESOLVES_TO_ALREADY_VALID,
-            ):
+            if kr.result.status.is_success:
                 for output in kr.result.built_outputs.values():
                     ctx.proxy.local_store.tracker.add_known_path(
                         output.out_path.with_store_prefix(),
                     )
 
         for kr in keyed_results:
-            if kr.result.status not in (
-                BuildResultStatus.BUILT,
-                BuildResultStatus.SUBSTITUTED,
-                BuildResultStatus.ALREADY_VALID,
-                BuildResultStatus.RESOLVES_TO_ALREADY_VALID,
-            ):
+            if kr.result.status.is_failure:
                 self.logger.warning(
                     "build_paths_goal_failed",
                     path=kr.path,
@@ -192,12 +182,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
             # Track newly built paths
             if isinstance(result, BuildPathsWithResultsResponse):
                 for kr in result.results:
-                    if kr.result.status in (
-                        BuildResultStatus.BUILT,
-                        BuildResultStatus.SUBSTITUTED,
-                        BuildResultStatus.ALREADY_VALID,
-                        BuildResultStatus.RESOLVES_TO_ALREADY_VALID,
-                    ):
+                    if kr.result.status.is_success:
                         for output in kr.result.built_outputs.values():
                             ctx.proxy.local_store.tracker.add_known_path(
                                 output.out_path.with_store_prefix(),
@@ -217,7 +202,7 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
         )
 
         for kr in keyed_results:
-            if kr.result.status not in (0, 1, 2, 13):
+            if kr.result.status.is_failure:
                 self.logger.warning(
                     "build_paths_with_results_goal_failed",
                     path=kr.path,
