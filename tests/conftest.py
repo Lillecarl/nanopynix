@@ -47,7 +47,6 @@ from tests._conftest.hooks import (
     pytest_terminal_summary,
 )
 from tests._conftest.logging import (
-    _reset_structlog,
     configure_test_logging,
     revive_messages_containing,
     revive_messages_matching,
@@ -55,6 +54,5 @@ from tests._conftest.logging import (
     suppress_messages_containing,
     suppress_messages_matching,
     test_log_dir,
-    test_log_file,
 )
 from tests._conftest.subsumption import pytest_runtest_protocol

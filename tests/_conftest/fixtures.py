@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import random
 import time
@@ -58,35 +57,6 @@ def clear_instrumentation():
     """Clear internal test stash before each test."""
     clear_test_stash()
     return
-
-
-@pytest.fixture(autouse=True)
-def test_log_file(request: pytest.FixtureRequest, test_log_dir: Path):
-    """Redirect all structlog output for this test to its own log file."""
-    import structlog as _structlog
-
-    from tests._conftest.logging import _TestRelativeTimeHandler
-
-    log_file = get_log_file_path(test_log_dir, request.node)
-
-    _structlog.contextvars.bind_contextvars(test_start_time=time.monotonic())
-
-    test_start = time.time()
-    handler = _TestRelativeTimeHandler(test_start, log_file)
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(message)s")
-    handler.setFormatter(formatter)
-
-    root_logger = logging.getLogger()
-    old_level = root_logger.level
-    root_logger.setLevel(logging.DEBUG)
-    root_logger.addHandler(handler)
-
-    yield log_file
-
-    root_logger.removeHandler(handler)
-    root_logger.setLevel(old_level)
-    handler.close()
 
 
 @pytest.fixture(autouse=True)
