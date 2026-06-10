@@ -163,10 +163,8 @@ class DynamicBuildGoal(Goal):
         if not candidate.is_derivation():
             return None
 
-        from ..drv_parser import read_drv_file as _read_drv
-
         try:
-            parsed = await _read_drv(self.ctx.store.store_path, candidate)
+            parsed = await self.ctx.store.read_derivation(candidate)
         except Exception:
             return None
 

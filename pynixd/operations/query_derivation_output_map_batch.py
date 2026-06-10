@@ -12,7 +12,6 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..drv_parser import read_drv_file
 from ..exceptions import OpNotImplementedError
 from ..stderr import OperationLogs
 from ..store_path import StorePath
@@ -128,7 +127,7 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
                 if StorePath(drv_path) in result:
                     continue
                 try:
-                    parsed = await read_drv_file(store.store_path, drv_path)
+                    parsed = await store.read_derivation(drv_path)
                     if parsed is None:
                         continue
                     result[StorePath(drv_path)] = dict(parsed.output_paths().items())
@@ -146,7 +145,7 @@ class QueryDerivationOutputMapBatchRequest(OpRequest[DerivationOutputMapBatchRes
         outputs: OutputMap = {}
         for drv_path in self.drv_paths:
             try:
-                parsed = await read_drv_file(store.store_path, drv_path)
+                parsed = await store.read_derivation(drv_path)
                 if parsed is None:
                     continue
                 out = parsed.output_paths()

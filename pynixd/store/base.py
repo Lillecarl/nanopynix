@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
     from ..config import StoreSpecBase
     from ..connection import ClientConn, Connection
+    from ..drv_parser import Derivation
     from ..local_store_db import LocalStoreDB
     from ..operations.base import (
         OpRequest,
@@ -546,6 +547,18 @@ class Store(ABC):
     @abstractmethod
     async def create_conn(self) -> Connection:
         """Create transport, construct Connection, and connect it."""
+        ...
+
+    @abstractmethod
+    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        """Read and parse a .drv file from this store.
+
+        Args:
+            drv_store_path: The full store path (e.g., "/nix/store/xxx.drv").
+
+        Returns:
+            Parsed Derivation or None if the file doesn't exist.
+        """
         ...
 
     async def probe(self) -> None:

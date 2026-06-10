@@ -12,7 +12,6 @@ from ..derived_path import (
 from ..derived_path import (
     OutputsNames as OutputsNames,
 )
-from ..drv_parser import read_drv_file
 from ..stderr import OperationLogs
 from ..store_path import StorePath
 from ..substituter import (
@@ -252,7 +251,7 @@ async def _resolve_path(
 
     ctx.will_build.add(path)
     try:
-        parsed = await read_drv_file(ctx.store.store_path, path)
+        parsed = await ctx.store.read_derivation(path)
     except FileNotFoundError:
         ctx.unknown.add(path)
         return

@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from pynixd.connection import ClientConn, Connection
+    from pynixd.drv_parser import Derivation
     from pynixd.operations.base import OpRequest, Resp
     from pynixd.wire import NixReader, NixWriter
 
@@ -222,6 +223,12 @@ class MockStore(Store):
             f"MockStore {self.store_id} has no response for {req_type.__name__}. "
             f"Update your test setup to provide a mock response.",
         )
+
+    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        """Read a .drv file from the mock filesystem."""
+        from pynixd.drv_parser import read_drv_file
+
+        return await read_drv_file(self.store_path, drv_store_path)
 
     async def execute(
         self,

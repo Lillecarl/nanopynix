@@ -21,10 +21,12 @@ import structlog
 from ..config import LocalSocketStoreSpec, LocalSubprocessStoreSpec, PynixdSettings
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, create_monitor
+from ..store_path import StorePath
 from ..wire import UnixNixReader, UnixNixWriter
 from .base import Store
 
 if TYPE_CHECKING:
+    from ..drv_parser import Derivation
     from ..monitor import ResourceMonitor
 
 log = structlog.get_logger(__name__)
@@ -285,6 +287,32 @@ class LocalSocketStore(Store):
         )
         await conn.connect()
         return conn
+
+    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        """Fetch and parse a .drv file from the daemon via NAR."""
+        from ..drv_parser import parse_drv
+        from ..nar import NarRegular, parse_nar
+        from ..operations.is_valid_path import IsValidPathRequest
+        from ..operations.nar_from_path import NarFromPathRequest
+
+        sp = StorePath(str(drv_store_path))
+
+        valid = (await IsValidPathRequest(path=sp).execute(self)).valid
+        if not valid:
+            log.warning("drv_not_found", drv_path=str(drv_store_path), reason="not_valid")
+            return None
+
+        resp = await NarFromPathRequest(path=sp, nar_size=0).execute(self)
+        if not resp.nar_data:
+            log.warning("drv_not_found", drv_path=str(drv_store_path), reason="nar_empty")
+            return None
+
+        node = parse_nar(resp.nar_data)
+        if not isinstance(node, NarRegular):
+            log.warning("drv_not_found", drv_path=str(drv_store_path), reason="not_regular_file")
+            return None
+
+        return parse_drv(node.contents.decode())
 
     async def close(self) -> None:
         """Close stores, stop monitor and terminate managed daemon if any."""

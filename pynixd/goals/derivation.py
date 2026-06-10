@@ -17,15 +17,15 @@ produces the realisations, which are then registered.
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
 
 import structlog
 
 from ..derived_path import DerivedPath  # noqa: TC001 — used in function bodies
-from ..drv_parser import (
-    Derivation,
-    read_drv_file,
-)
 from ..operations.build_derivation import BuildDerivationRequest
+
+if TYPE_CHECKING:
+    from ..drv_parser import Derivation
 from ..operations.ca_derivations import RegisterDrvOutputRequest
 from ..operations.is_valid_path import IsValidPathRequest
 from ..store_path import StorePath
@@ -157,7 +157,7 @@ class DerivationBuildGoal(Goal):
         which produces the realisations.
         """
         drv_path = dp.base_store_path()
-        derivation = await read_drv_file(self.ctx.store.store_path, drv_path)
+        derivation = await self.ctx.store.read_derivation(drv_path)
         if derivation is None:
             self.result = GoalResult(
                 path=dp,
@@ -181,7 +181,7 @@ class DerivationBuildGoal(Goal):
     async def _do_build(self, dp: DerivedPath) -> None:
         """Build this derivation with pre-resolved outputs."""
         drv_path = dp.base_store_path()
-        derivation = await read_drv_file(self.ctx.store.store_path, drv_path)
+        derivation = await self.ctx.store.read_derivation(drv_path)
         if derivation is None:
             self.result = GoalResult(
                 path=dp,
@@ -240,8 +240,7 @@ class DerivationBuildGoal(Goal):
                                     dynamic_output_paths[(outer_drv_path, oname)] = outer_path
                                     for sp in sub.result.produced_paths:
                                         if sp.is_derivation():
-                                            inner_drv = await read_drv_file(
-                                                self.ctx.store.store_path,
+                                            inner_drv = await self.ctx.store.read_derivation(
                                                 sp,
                                             )
                                             if inner_drv:

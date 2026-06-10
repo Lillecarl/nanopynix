@@ -23,7 +23,7 @@ import hashlib
 import structlog
 
 from ..derived_path import DerivedPath
-from ..drv_parser import ChildMapNode, Derivation, DrvOutput, _aterm_escape, read_drv_file
+from ..drv_parser import ChildMapNode, Derivation, DrvOutput, _aterm_escape
 from ..store_path import StorePath
 from ..types import DerivationOutput, OutputKind
 from ..types.build import BuildResult, BuildResultStatus
@@ -104,8 +104,7 @@ class ResolutionGoal(Goal):
 
     async def _get_derivation(self) -> Derivation | None:
         if self._derivation is None:
-            self._derivation = await read_drv_file(
-                self.ctx.store.store_path,
+            self._derivation = await self.ctx.store.read_derivation(
                 self._drv_path,
             )
         return self._derivation
