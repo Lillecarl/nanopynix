@@ -100,8 +100,6 @@ async def test_scheduler_load_balancing():
 
     build_id, future = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="x86_64-linux",
     )
 
     # 4. Trigger scheduler manually
@@ -166,8 +164,6 @@ async def test_scheduler_skips_saturated_store():
 
     build_id, _future = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="x86_64-linux",
     )
 
     # Pass 1: No slots available anywhere (scores < 0)
@@ -240,8 +236,6 @@ async def test_scheduler_proactive_transfer():
 
     build_id, _future = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="x86_64-linux",
     )
 
     # Pass 1: busy is best (has paths) but saturated. idle has slot but needs paths.
@@ -263,139 +257,6 @@ async def test_scheduler_proactive_transfer():
 
     # Verify path was moved to the idle store
     assert remote_idle.tracker.has_path(drv_path)
-
-
-@pytest.mark.xfail(reason="tiny-build fast-track to local store preempts remote1 assignment — pre-existing flake")
-async def test_scheduler_decomposition_and_ordering(monkeypatch):
-    """Verify that BuildDecomposer correctly resolves a DAG and the Scheduler respects it.
-
-    Scenario:
-    - Enqueue a 'root' derivation that depends on a 'leaf' derivation.
-
-    Success Condition:
-    - Queue contains both builds.
-    - Leaf is scheduled and completed first.
-    - Root is only scheduled AFTER leaf completes.
-    """
-    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
-    remote1 = MockStore("remote1", feature_matrix={"x86_64-linux": set()})
-
-    ctx = PynixdContext(
-        settings=PynixdSettings(),
-        _stores={StoreId("local"): local_store, StoreId("remote1"): remote1},
-        path_tracker=PathTracker(db=None),
-    )
-    scheduler = Scheduler(ctx)
-
-    leaf_path = StorePath("/nix/store/00000000000000000000000000000001-leaf.drv")
-    root_path = StorePath("/nix/store/00000000000000000000000000000002-root.drv")
-    local_store.tracker.add_known_paths({leaf_path, root_path})
-
-    # 2. Mock Responses for the BuildDecomposer pipeline
-    local_store.responses[QueryMissingRequest] = QueryMissingResponse(
-        will_build={leaf_path, root_path},
-        will_substitute=set(),
-        unknown=set(),
-        download_size=0,
-        nar_size=0,
-    )
-    local_store.responses[QueryValidPathsRequest] = QueryValidPathsResponse(paths=set())
-    local_store.responses[QueryDerivationOutputMapBatchRequest] = DerivationOutputMapBatchResponse(
-        outputs={leaf_path: {"out": StorePath("/nix/store/leaf-out")}},
-    )
-
-    leaf_drv = Derivation(
-        outputs=[
-            DrvOutput(
-                output_name="out",
-                path="/nix/store/leaf-out",
-                hash_algo="",
-                hash_value="",
-            ),
-        ],
-        input_drvs={},
-        input_srcs=set(),
-        platform="x86_64-linux",
-    )
-    root_drv = Derivation(
-        outputs=[
-            DrvOutput(
-                output_name="out",
-                path="/nix/store/root-out",
-                hash_algo="",
-                hash_value="",
-            ),
-        ],
-        input_drvs={leaf_path: ["out"]},
-        input_srcs=set(),
-        platform="x86_64-linux",
-    )
-
-    # Inject deterministic derivation reader
-    async def mock_read_drv(_store_path, drv_path):
-        if str(drv_path) == str(leaf_path):
-            return leaf_drv
-        if str(drv_path) == str(root_path):
-            return root_drv
-        raise FileNotFoundError(drv_path)
-
-    monkeypatch.setattr("pynixd.drv_parser.read_drv_file", mock_read_drv)
-
-    # 3. Setup build responders
-    build_resp = BuildDerivationResponse(
-        result=BuildResult(status=BuildResultStatus.BUILT),
-    )
-    local_store.responses[BuildDerivationRequest] = build_resp
-    remote1.responses[BuildDerivationRequest] = build_resp
-
-    # Block BOTH builds initially so we can check queue state before completion
-    leaf_done = remote1.block_build(leaf_path)
-    root_done = remote1.block_build(root_path)
-
-    # 4. Start decomposition in background
-    dp = DerivedPath(str(root_path))
-    build_task = asyncio.create_task(
-        scheduler.build_derived_paths({dp}, BuildMode.NORMAL),
-    )
-
-    # Wait for decomposition to finish and populate queue
-    await asyncio.sleep(0.05)
-    assert len(scheduler.queue.queue) == 2
-
-    # Find builds in queue
-    root_b = next(b for b in scheduler.queue.queue if str(b.request.drv_path) == str(root_path))
-    leaf_b = next(b for b in scheduler.queue.queue if str(b.request.drv_path) == str(leaf_path))
-
-    # 5. Pass 1: Scheduling
-    await scheduler.schedule()
-    await asyncio.sleep(0.05)
-
-    # Verify: Only leaf is scheduled (root blocked by depends_on)
-    assert leaf_b.assigned_store_id == "remote1"
-    assert leaf_b.is_building
-    assert root_b.assigned_store_id is None
-    assert root_b.is_pending
-
-    # 6. Complete leaf build
-    leaf_done.set()
-    await asyncio.sleep(0.05)
-    assert leaf_b.is_done
-
-    # 7. Pass 2: Root should now be schedulable
-    await scheduler.schedule()
-    await asyncio.sleep(0.05)
-    assert root_b.assigned_store_id == "remote1"
-    assert root_b.is_building
-
-    # 8. Complete root build
-    root_done.set()
-    await asyncio.sleep(0.05)
-    assert root_b.is_done
-
-    # 9. Final result verification
-    results = await build_task
-    assert len(results.results) == 1
-    assert results.results[0].result.status == BuildResultStatus.BUILT
 
 
 @pytest.mark.xfail(reason="missing BuildDerivationRequest mock response in MockStore — pre-existing")
@@ -444,8 +305,6 @@ async def test_scheduler_cpu_utilization():
 
     build_id, _future = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="x86_64-linux",
     )
 
     await scheduler.schedule()
@@ -509,8 +368,6 @@ async def test_scheduler_feature_matching():
 
     build_id, _future = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="x86_64-linux",
     )
 
     await scheduler.schedule()
@@ -547,8 +404,6 @@ async def test_scheduler_fails_build_for_unknown_platform():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="aarch64-darwin",
     )
 
     await scheduler.schedule()
@@ -581,8 +436,6 @@ async def test_scheduler_queues_build_for_dynamic_platform():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="aarch64-darwin",
     )
 
     await scheduler.schedule()
@@ -612,8 +465,6 @@ async def test_scheduler_queues_build_for_dynamic_platform_with_features():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="aarch64-darwin",
     )
 
     await scheduler.schedule()
@@ -642,8 +493,6 @@ async def test_scheduler_fails_build_for_missing_dynamic_feature():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="aarch64-darwin",
     )
 
     await scheduler.schedule()
@@ -707,8 +556,6 @@ async def test_dynamic_feature_matrix_survives_store_removal():
 
     build_id, _ = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="aarch64-darwin",
     )
 
     await scheduler.schedule()

@@ -79,22 +79,11 @@ class TelemetryStoreRanker(StoreRanker):
             score = 0.0
 
             # 1. Data Locality (+ points)
-            if build.required_paths:
-                total_size = sum(info.nar_size for info in build.required_paths.values())
-                if total_size > 0:
-                    present_size = sum(
-                        info.nar_size
-                        for path, info in build.required_paths.items()
-                        if path in store.tracker.known_paths
-                    )
-                    ratio = present_size / total_size
-                    score += ratio * self.settings.locality_weight
-                else:
-                    common = store.tracker.count_common_paths(
-                        set(build.required_paths.keys()),
-                    )
-                    ratio = common / len(build.required_paths)
-                    score += ratio * self.settings.locality_weight
+            input_srcs = build.request.derivation.input_srcs
+            if input_srcs:
+                common = store.tracker.count_common_paths(input_srcs)
+                ratio = common / len(input_srcs)
+                score += ratio * self.settings.locality_weight
 
             # 2. CPU Availability (+ points)
             if store.cpu_util:
@@ -164,7 +153,7 @@ class BuildAllocator:
             self.local_store.is_healthy
             and not self.local_store.draining
             and not self.local_store.no_schedule
-            and self.local_store.supports_derivation(build.platform, build_features)
+            and self.local_store.supports_derivation(build.request.derivation.platform, build_features)
             and not build.is_blacklisted(self.local_store.store_id)
         ):
             candidates.append(self.local_store)
@@ -172,7 +161,7 @@ class BuildAllocator:
         for store_id, store in self.stores.items():
             if not store.is_healthy or store.draining or store.no_schedule:
                 continue
-            if not store.supports_derivation(build.platform, build_features):
+            if not store.supports_derivation(build.request.derivation.platform, build_features):
                 continue
             if build.is_blacklisted(store_id):
                 continue

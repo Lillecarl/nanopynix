@@ -14,7 +14,6 @@ from . import metrics, wire
 from .operations.build_derivation import BuildDerivationResponse
 from .types.build import BuildResult, BuildResultStatus
 from .types.ids import BuildId, RequestId, StoreId
-from .types.path_info import UnkeyedValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -23,10 +22,8 @@ if TYPE_CHECKING:
     from .derived_path import DerivedPath
     from .operations.build_derivation import BuildDerivationRequest
     from .stderr import StderrMsg
-    from .store_path import StorePath
     from .types.build import BuildMode
     from .types.ca import Realisation
-    from .types.path_info import UnkeyedValidPathInfo
 
 log = structlog.get_logger(__name__)
 
@@ -84,17 +81,13 @@ class QueuedBuild:
         self,
         build_id: BuildId,
         request: BuildDerivationRequest,
-        required_paths: dict[StorePath, UnkeyedValidPathInfo],
         future: asyncio.Future[BuildDerivationResponse],
-        platform: str = "",
         expected_duration: int | None = None,
         scheduler_request_ids: set[RequestId] | None = None,
     ) -> None:
         self.build_id = build_id
         self.request = request
-        self.required_paths = required_paths
         self.future = future
-        self.platform = platform
         self.expected_duration = expected_duration
         self.enqueued_at = time.monotonic()
         self.started_at: float | None = None
@@ -304,8 +297,6 @@ class BuildQueue:
     async def enqueue(
         self,
         request: BuildDerivationRequest,
-        required_paths: dict[StorePath, UnkeyedValidPathInfo],
-        platform: str = "",
         expected_duration: int | None = None,
         scheduler_request_id: RequestId | None = None,
         derived_paths_for_request: set[DerivedPath] | None = None,
@@ -352,9 +343,7 @@ class BuildQueue:
             build = QueuedBuild(
                 build_id=build_id,
                 request=request,
-                required_paths=required_paths,
                 future=future,
-                platform=platform,
                 expected_duration=expected_duration,
                 scheduler_request_ids=scheduler_request_ids,
             )
@@ -373,7 +362,6 @@ class BuildQueue:
                 "build_enqueued",
                 build_id=build.build_id,
                 description=build.description,
-                required_paths=len(required_paths),
                 request_ids=list(scheduler_request_ids),
             )
             metrics.QUEUE_SIZE.labels(status="pending").inc()

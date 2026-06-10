@@ -191,8 +191,6 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
 
         build_id, future = await scheduler.build_derivation(
             req,
-            set(),
-            platform="x86_64-linux",
         )
         await future
 
@@ -253,7 +251,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
             derivation=blocker_drv,
             build_mode=BuildMode.NORMAL,
         )
-        await scheduler.build_derivation(blocker_req, set(), platform="x86_64-linux")
+        await scheduler.build_derivation(blocker_req)
 
         # Wait for blocker to start on REMOTE
         while True:
@@ -272,8 +270,6 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
         )
         id_tiny, fut_tiny = await scheduler.build_derivation(
             tiny_req,
-            set(),
-            platform="x86_64-linux",
         )
 
         # 3. Verify it's building on LOCAL
@@ -407,9 +403,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
         build = QueuedBuild(
             build_id=BuildId(1),
             request=req,
-            required_paths={},
             future=loop.create_future(),
-            platform="x86_64-linux",
         )
 
         ranked = scheduler.allocator.rank_stores(build, {})

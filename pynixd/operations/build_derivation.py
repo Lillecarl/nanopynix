@@ -12,7 +12,6 @@ from .base import BasicDerivation, BuildMode, BuildResult, OpRequest, OpResponse
 
 if TYPE_CHECKING:
     from ..types import RequestContext
-    from ..types.aliases import StorePathSet
 
 
 @dataclass
@@ -86,21 +85,11 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
         # The client provides a complete build recipe in BuildDerivation.
         # input_srcs contains all required dependencies (sources and other .drvs).
         # We don't need to perform extra discovery or closure expansion.
-        drv_path_str = str(self.drv_path)
-        required_paths: StorePathSet = {
-            StorePath(inp, extrainfo=f"input_src of {drv_path_str}") for inp in self.derivation.input_srcs
-        }
-
-        # We DO NOT add request.drv_path to required_paths because the client
-        # provides the derivation contents over the wire and often doesn't
-        # upload the .drv file itself to the remote builder.
         if ctx.proxy.scheduler is None:
             raise RuntimeError("BuildDerivation requires a configured scheduler")
 
         build_id, future = await ctx.proxy.scheduler.build_derivation(
             self,
-            required_paths,
-            platform=self.derivation.platform,
         )
         if ctx.proxy.client is not None:
             await ctx.proxy.scheduler.queue.subscribe(build_id, ctx.proxy.client)
@@ -108,7 +97,7 @@ class BuildDerivationRequest(OpRequest[BuildDerivationResponse]):
             "build_derivation_enqueued",
             build_id=build_id,
             drv_path=self.drv_path,
-            required_count=len(required_paths),
+            required_count=len(self.derivation.input_srcs),
         )
         response = await future
         self.logger.debug("responded_op")

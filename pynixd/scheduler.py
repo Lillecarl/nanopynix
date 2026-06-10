@@ -24,28 +24,23 @@ import structlog
 from . import metrics
 from .allocator import TINY_BUILD_THRESHOLD_MS, BuildAllocator, TelemetryStoreRanker
 from .build_queue import BuildQueue, QueuedBuild
-from .decomposer import BuildDecomposer
-from .derivation_resolver import DerivationResolver
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
-from .operations.base import BuildMode, UnkeyedValidPathInfo
-from .operations.query_closure_with_info import QueryClosureWithInfoRequest
+from .operations.base import UnkeyedValidPathInfo
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .stderr import StderrNext
 from .store.transfer import stream_paths_store_to_store
 from .store_path import StorePath
-from .trampoline import Trampoline
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .connection import ClientConn, Connection
+    from .connection import Connection
     from .context import PynixdContext
     from .derived_path import DerivedPath
     from .operations.build_derivation import (
         BuildDerivationRequest,
         BuildDerivationResponse,
     )
-    from .operations.build_paths import BuildPathsWithResultsResponse
     from .store import Store
     from .types.aliases import StorePathSet
     from .types.ids import BuildId, RequestId, StoreId
@@ -67,9 +62,6 @@ class Scheduler:
 
         self.ranker = TelemetryStoreRanker(ctx.settings)
         self.allocator = BuildAllocator(self.ctx.stores, self.local_store, self.ranker)
-        self.decomposer = BuildDecomposer(self)
-        self.derivation_resolver = DerivationResolver(self)
-        self.trampoline = Trampoline(self)
         self.trigger_event = anyio.Event()
         self.running = False
 
@@ -164,8 +156,6 @@ class Scheduler:
     async def build_derivation(
         self,
         request: BuildDerivationRequest,
-        required_paths: StorePathSet | dict[StorePath, UnkeyedValidPathInfo],
-        platform: str = "",
         scheduler_request_id: RequestId | None = None,
         derived_paths_for_request: set[DerivedPath] | None = None,
         from_goal_path: bool = False,
@@ -178,17 +168,12 @@ class Scheduler:
             if pname:
                 hint = await self.local_store.db.get_build_stats_hint(
                     pname,
-                    platform,
+                    request.derivation.platform,
                 )
         t_hint = time.monotonic()
 
-        if isinstance(required_paths, set):
-            required_paths = {p: UnkeyedValidPathInfo() for p in required_paths}
-
         res = await self.queue.enqueue(
             request,
-            required_paths,
-            platform,
             expected_duration=hint,
             scheduler_request_id=scheduler_request_id,
             derived_paths_for_request=derived_paths_for_request,
@@ -205,15 +190,6 @@ class Scheduler:
             total=f"{t_enqueue - t0:.3f}s",
         )
         return res
-
-    async def build_derived_paths(
-        self,
-        derived_paths: set[DerivedPath],
-        build_mode: BuildMode,
-        client: ClientConn | None = None,
-    ) -> BuildPathsWithResultsResponse:
-        """Decompose DerivedPath set into individual builds and execute them."""
-        return await self.decomposer.decompose(derived_paths, build_mode, client)
 
     async def start(self) -> None:
         """Start the scheduler loop."""
@@ -253,8 +229,6 @@ class Scheduler:
             self._update_store_metrics()
             return
 
-        await self._populate_metadata(pending)
-
         schedulable, waiting_paths, override_in_flight = self._filter_schedulable(pending)
 
         waiting_slot = await self._assign_to_stores(schedulable, override_in_flight)
@@ -271,36 +245,6 @@ class Scheduler:
                 s.store_id: f"{s.cpu_util.utilization:.1f}%" if s.cpu_util else None for s in self.stores.values()
             },
         )
-
-    async def _populate_metadata(self, pending: list[QueuedBuild]) -> None:
-        """Ensure all pending builds have closure metadata for required paths."""
-        needs_metadata = [b for b in pending if any(info.nar_size == 0 for info in b.required_paths.values())]
-        for build in needs_metadata:
-            seeds = set(build.required_paths.keys())
-            try:
-                resp = await self.local_store.execute(
-                    QueryClosureWithInfoRequest(paths=seeds),
-                )
-                build.required_paths = {
-                    info.path: UnkeyedValidPathInfo(
-                        deriver=info.deriver,
-                        nar_hash=info.nar_hash,
-                        references=info.references,
-                        registration_time=info.registration_time,
-                        nar_size=info.nar_size,
-                        ultimate=info.ultimate,
-                        sigs=info.sigs,
-                        ca=info.ca,
-                    )
-                    for info in resp.infos
-                }
-                log.debug(
-                    "build_metadata_populated",
-                    build_id=build.build_id,
-                    paths=len(build.required_paths),
-                )
-            except Exception:
-                log.exception("metadata_query_failed", build_id=build.build_id)
 
     def _filter_schedulable(
         self,
@@ -339,7 +283,7 @@ class Scheduler:
             # Paths check: all required paths must be in the local store.
             # The tracker is an in-memory cache of local ValidPaths entries,
             # populated during probing and updated on path transfers.
-            if self.local_store.tracker.has_all_paths(set(build.required_paths.keys())):
+            if self.local_store.tracker.has_all_paths(build.request.derivation.input_srcs):
                 schedulable.append(build)
             else:
                 waiting_paths.append(build)
@@ -373,7 +317,7 @@ class Scheduler:
             if (
                 build.expected_duration is not None
                 and build.expected_duration <= TINY_BUILD_THRESHOLD_MS
-                and self.local_store.supports_derivation(build.platform, build_features)
+                and self.local_store.supports_derivation(build.request.derivation.platform, build_features)
                 and self.local_store.in_flight < 4
             ):
                 log.info(
@@ -420,7 +364,7 @@ class Scheduler:
                 all_compatible = [
                     s
                     for s in [self.local_store, *self.stores.values()]
-                    if s.supports_derivation(build.platform, build_features)
+                    if s.supports_derivation(build.request.derivation.platform, build_features)
                 ]
                 if all_compatible and all(build.is_blacklisted(s.store_id) for s in all_compatible):
                     await self._fail_all_compatible_blacklisted(build, build_features, all_compatible)
@@ -436,11 +380,11 @@ class Scheduler:
     ) -> bool:
         """Check if any live or dynamic store could ever support this build."""
         all_stores = list(self.stores.values())
-        if self.local_store.supports_derivation(build.platform, build_features):
+        if self.local_store.supports_derivation(build.request.derivation.platform, build_features):
             return True
-        return any(s.supports_derivation(build.platform, build_features) for s in all_stores) or self._dynamic_supports(
-            build.platform, build_features
-        )
+        return any(
+            s.supports_derivation(build.request.derivation.platform, build_features) for s in all_stores
+        ) or self._dynamic_supports(build.request.derivation.platform, build_features)
 
     async def _fail_no_compatible_store(
         self,
@@ -448,14 +392,12 @@ class Scheduler:
         build_features: set[str] | None,
     ) -> None:
         """Permanently fail a build with no compatible store."""
-        error_msg = f"No compatible store for {build.platform}" + (
+        error_msg = f"No compatible store for {build.request.derivation.platform}" + (
             f" (requires {', '.join(sorted(build_features))})" if build_features else ""
         )
         await self.queue.fail(build.build_id, error_msg)
         for line in error_msg.split("\n"):
             await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
-        if build.scheduler_request_ids:
-            await self.trampoline.on_build_complete_failed(build, error_msg)
 
     async def _fail_all_compatible_blacklisted(
         self,
@@ -466,15 +408,13 @@ class Scheduler:
         """Permanently fail a build blacklisted by all compatible stores."""
         failed_ids = [s.store_id for s in compatible]
         error_msg = (
-            f"All compatible stores failed for {build.platform}"
+            f"All compatible stores failed for {build.request.derivation.platform}"
             + (f" (requires {', '.join(sorted(build_features))})" if build_features else "")
             + f": {', '.join(failed_ids)}"
         )
         await self.queue.fail(build.build_id, error_msg)
         for line in error_msg.split("\n"):
             await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
-        if build.scheduler_request_ids:
-            await self.trampoline.on_build_complete_failed(build, error_msg)
 
     def _update_store_metrics(self) -> None:
         """Update per-store metrics."""
@@ -547,17 +487,10 @@ class Scheduler:
             log.exception("build_crashed", build_id=build.build_id)
             await build.post_log_and_fanout(StderrNext(text="pynixd: internal scheduler error, failing build\n"))
             await self.queue.fail(build.build_id, "Internal scheduler error")
-            if build.scheduler_request_ids:
-                await self.trampoline.on_build_complete_failed(
-                    build,
-                    "Internal scheduler error",
-                )
             self.trigger()
 
         if build_resp is not None:
             await self.queue.complete(build.build_id, build_resp)
-            if build.scheduler_request_ids:
-                await self.trampoline.on_build_complete(build, build_resp)
             self.trigger()
 
     async def _prepare_build(
@@ -575,7 +508,9 @@ class Scheduler:
         self.allocator.strip_handled_features(build)
 
         # 1. Ensure all inputs are present on the builder
-        missing_info = {p: info for p, info in build.required_paths.items() if p not in store.tracker.known_paths}
+        missing_info = {
+            p: UnkeyedValidPathInfo() for p in build.request.derivation.input_srcs if p not in store.tracker.known_paths
+        }
         if missing_info:
             missing_size = sum(info.nar_size for info in missing_info.values())
             log.debug(
@@ -662,9 +597,6 @@ class Scheduler:
             count=len(all_output_paths),
             store_id=store.store_id,
         )
-
-        # Register CA realisations after outputs are in local store
-        await self.derivation_resolver.register_built_outputs(build, resp)
 
         # Record build statistics
         if self.local_store.db:

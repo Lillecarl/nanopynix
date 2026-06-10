@@ -61,8 +61,6 @@ async def test_dynamic_store_management():
 
         build_id, future = await scheduler.build_derivation(
             request,
-            required_paths={drv_path},
-            platform="x86_64-linux",
         )
 
         await scheduler.schedule()

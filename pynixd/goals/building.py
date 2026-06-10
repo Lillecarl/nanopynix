@@ -137,8 +137,6 @@ class DerivationBuildingGoal(Goal):
             if isinstance(scheduler, _Sched):
                 _, future = await scheduler.build_derivation(
                     build_request,
-                    required_paths=all_srcs,
-                    platform=basic.platform,
                     from_goal_path=True,
                 )
                 response = await future

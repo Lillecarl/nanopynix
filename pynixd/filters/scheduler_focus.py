@@ -50,9 +50,7 @@ KEEP_EVENTS = frozenset(
 KEEP_LOGGERS = frozenset(
     {
         "pynixd.scheduler",
-        "pynixd.decomposer",
         "pynixd.trampoline",
-        "pynixd.derivation_resolver",
         "pynixd.build_queue",
         "pynixd.proxy",
         "pynixd.unix_server",
@@ -69,8 +67,6 @@ KEEP_LOGGERS = frozenset(
 KEEP_LOGGERS_DEBUG = frozenset(
     {
         "pynixd.scheduler",
-        "pynixd.decomposer",
-        "pynixd.derivation_resolver",
         "pynixd.build_queue",
     },
 )

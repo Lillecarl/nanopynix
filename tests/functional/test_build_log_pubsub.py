@@ -82,8 +82,6 @@ async def test_build_log_pubsub_two_clients():
 
     build_id, future = await scheduler.build_derivation(
         request,
-        required_paths={drv_path},
-        platform="x86_64-linux",
     )
 
     # Create two separate client connections with their own buffers.
@@ -158,7 +156,6 @@ async def test_build_log_pubsub_late_subscriber_gets_full_history():
     build = QueuedBuild(
         build_id=BuildId(1),
         request=request,
-        required_paths={},
         future=future,
     )
 
