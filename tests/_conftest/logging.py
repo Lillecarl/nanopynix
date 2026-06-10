@@ -123,6 +123,18 @@ def _relative_time_stamper(logger: Any, method_name: str, event_dict: Any) -> An
     return event_dict
 
 
+# ── Event dict key sorter for consistent JSON output ─────────────
+
+_KEY_PRIORITY = ("timestamp", "level", "event", "logger")
+
+
+def _sort_event_dict_keys(logger: Any, method_name: str, event_dict: Any) -> dict[str, Any]:
+    """Reorder event_dict keys: priority keys first, rest sorted alphabetically."""
+    prioritized = {k: event_dict.pop(k) for k in _KEY_PRIORITY if k in event_dict}
+    sorted_keys = sorted(event_dict)
+    return {**prioritized, **{k: event_dict[k] for k in sorted_keys}}
+
+
 # ── Default processor chain ──────────────────────────────────────
 
 _BASE_PROCESSORS: list[Callable[[Any, str, Any], Any]] = [
@@ -136,6 +148,7 @@ _BASE_PROCESSORS: list[Callable[[Any, str, Any], Any]] = [
     _capture_processor,  # ← snapshot BEFORE the drop gate
     _life_check_processor,  # ← may DropEvent here
     _format_exception_for_json,  # ← convert exc_info to structured dict
+    _sort_event_dict_keys,  # ← consistent key ordering before JSON
     structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
 ]
 
