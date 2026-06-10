@@ -96,6 +96,7 @@ def _stdlib_to_event_dict(logger: Any, method_name: str, event_dict: Any) -> Any
     like asyncssh that don't use structlog.
     """
     record = event_dict["_record"]
+    event_dict["message"] = event_dict.pop("event")  # rename for foreign records
     event_dict["logger"] = record.name
     event_dict["level"] = record.levelno
     event_dict["log_level"] = record.levelname.lower()
@@ -258,7 +259,7 @@ def _human_readable_renderer(logger: Any, method_name: str, event_dict: Any) -> 
     ts = event_dict.get("timestamp", "")
     level = str(event_dict.get("log_level", event_dict.get("level", "")))
     logger_name = event_dict.get("logger", "")
-    event = event_dict.get("event", "")
+    event = event_dict.get("event") or event_dict.get("message", "")
     skip = {"event", "logger", "level", "log_level", "timestamp", "exception"}
     extras = "    ".join(f"{k}={v}" for k, v in event_dict.items() if k not in skip)
     return f"[{ts}] {level.upper()} {logger_name}    {event}    {extras}"
