@@ -1,106 +1,101 @@
-"""Minimal binary serialization prototype using Pydantic.
+"""Declarative binary serialization for Nix daemon protocol types.
 
-Provides a type registry for primitive binary (de)serialization and a
-Pydantic base class that can round-trip to/from bytes via the registry.
+Pydantic models inherit from ``WireMessage`` to auto-generate
+serialize()/deserialize() from type annotations.
 
-This is a prototype — not used by production code paths.
+Class variables (ClassVar[int]) are skipped — they're protocol constants
+like op codes that are written/read by the operation layer, not the message body.
 """
 
 from __future__ import annotations
 
-import asyncio
-import struct
-from collections.abc import Callable
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, ClassVar, get_type_hints
 
 from pydantic import BaseModel
 
-ReaderFunc = Callable[[asyncio.StreamReader], Any]  # coroutine
-WriterFunc = Callable[[Any, asyncio.StreamWriter], None]
+if TYPE_CHECKING:
+    from .types.context import ReadContext, WriteContext
 
-_BINARY_REGISTRY: dict[type, tuple[ReaderFunc, WriterFunc]] = {}
+# ── Type registry ──
+
+_READERS: dict[type, Any] = {}
+_WRITERS: dict[type, Any] = {}
 
 
-def register_binary_type(py_type: type, reader: ReaderFunc, writer: WriterFunc) -> None:
-    """Register a reader/writer pair for a Python type."""
-    _BINARY_REGISTRY[py_type] = (reader, writer)
+def register_type(py_type: type, reader, writer) -> None:
+    _READERS[py_type] = reader
+    _WRITERS[py_type] = writer
 
 
 # ── Primitive handlers ──
 
-
-async def _read_uint64(r: asyncio.StreamReader) -> int:
-    return struct.unpack("<Q", await r.readexactly(8))[0]
-
-
-def _write_uint64(v: int, w: asyncio.StreamWriter) -> None:
-    w.write(struct.pack("<Q", v))
-
-
-async def _read_bytes(r: asyncio.StreamReader) -> bytes:
-    n = await _read_uint64(r)
-    return await r.readexactly(n)
-
-
-def _write_bytes(v: bytes, w: asyncio.StreamWriter) -> None:
-    w.write(struct.pack("<Q", len(v)))
-    w.write(v)
-
-
-async def _read_string(r: asyncio.StreamReader) -> str:
-    return (await _read_bytes(r)).decode("utf-8")
-
-
-def _write_string(v: str, w: asyncio.StreamWriter) -> None:
-    _write_bytes(v.encode("utf-8"), w)
+register_type(
+    int,
+    reader=lambda r: r.read_uint64(),
+    writer=lambda v, w: w.write_uint64(v),
+)
+register_type(
+    bool,
+    reader=lambda r: bool(r.read_uint64()),
+    writer=lambda v, w: w.write_uint64(1 if v else 0),
+)
+register_type(
+    str,
+    reader=lambda r: r.read_string(str),
+    writer=lambda v, w: w.write_string(v),
+)
+register_type(
+    bytes,
+    reader=lambda r: r.read_bytes(),
+    writer=lambda v, w: w.write_bytes(v),
+)
 
 
-register_binary_type(int, _read_uint64, _write_uint64)
-register_binary_type(bytes, _read_bytes, _write_bytes)
+# ── Field collection ──
 
 
-async def _read_bool(r: asyncio.StreamReader) -> bool:
-    return bool(await _read_uint64(r))
+def _wire_fields(cls: type[BaseModel]) -> list[tuple[str, type]]:
+    """Return (name, type) pairs in declaration order, skipping ClassVars."""
+    hints = get_type_hints(cls, include_extras=True)
+    result = []
+    for name in cls.model_fields:
+        ann = hints.get(name)
+        if ann is None:
+            continue
+        origin = getattr(ann, "__origin__", None)
+        if origin is ClassVar:
+            continue
+        result.append((name, ann))
+    return result
 
 
-def _write_bool(v: bool, w: asyncio.StreamWriter) -> None:
-    _write_uint64(1 if v else 0, w)
+# ── Base class ──
 
 
-register_binary_type(bool, _read_bool, _write_bool)
-register_binary_type(str, _read_string, _write_string)
+class WireMessage(BaseModel):
+    """Pydantic base class with auto-generated Nix daemon protocol serde.
 
-
-# ── Pydantic base class ──
-
-
-class BinaryProtocolMessage(BaseModel):
-    """Base class for Pydantic models that can (de)serialize to binary wire format.
-
-    Uses the global ``_BINARY_REGISTRY`` to look up reader/writer functions
-    for each field's type annotation. Fields must have types registered in
-    the registry (``int``, ``str``, ``bytes``, ``bool`` by default).
+    Usage:
+        class FooResponse(WireMessage):
+            valid: int   # uint64 on the wire
+            path: str    # length-prefixed UTF-8
     """
 
+    async def serialize(self, ctx: WriteContext) -> None:
+        """Write all non-ClassVar fields in declaration order."""
+        for name, ann in _wire_fields(type(self)):
+            writer = _WRITERS.get(ann)
+            if writer is None:
+                raise TypeError(f"No writer registered for {ann} in {type(self).__name__}.{name}")
+            writer(getattr(self, name), ctx.writer)
+
     @classmethod
-    async def from_stream(cls, r: asyncio.StreamReader) -> Self:
-        """Deserialize an instance from a binary stream.
-
-        Reads fields in the order they are declared on the model, using
-        the registered reader for each field's type annotation.
-        """
-        kwargs: dict[str, Any] = {}
-        for name, field in cls.model_fields.items():
-            reader, _ = _BINARY_REGISTRY[field.annotation]  # type: ignore[index]
-            kwargs[name] = await reader(r)
+    async def deserialize(cls, ctx: ReadContext):
+        """Read all non-ClassVar fields in declaration order."""
+        kwargs = {}
+        for name, ann in _wire_fields(cls):
+            reader = _READERS.get(ann)
+            if reader is None:
+                raise TypeError(f"No reader registered for {ann} in {cls.__name__}.{name}")
+            kwargs[name] = await reader(ctx.reader)
         return cls(**kwargs)
-
-    async def to_stream(self, w: asyncio.StreamWriter) -> None:
-        """Serialize this instance to a binary stream.
-
-        Writes fields in declaration order using the registered writer
-        for each field's type annotation.
-        """
-        for name, field in type(self).model_fields.items():
-            _, writer = _BINARY_REGISTRY[field.annotation]  # type: ignore[index]
-            writer(getattr(self, name), w)
