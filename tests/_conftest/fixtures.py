@@ -78,23 +78,41 @@ def profiler(request: pytest.FixtureRequest, test_logging: Path):
         yield None
         return
 
+    # ── Setup: ensure no stale profiler is running ──
+    # The pyinstrument StackSampler is a singleton. If a previous test's
+    # profiler wasn't stopped (e.g., due to crash), its subscriber is
+    # still registered and start() will fail. Detect and clean up.
+    from pyinstrument.stack_sampler import active_profiler_context_var, get_stack_sampler
+
+    sampler = get_stack_sampler()
+    if any(sampler.subscribers) or active_profiler_context_var.get() is not None:
+        sampler.subscribers.clear()
+        active_profiler_context_var.set(None)
+
     p = Profiler(async_mode="enabled")
     p.start()
 
-    yield p
+    try:
+        yield p
+    finally:
+        # ── Teardown: always stop, even if test failed ──
+        try:
+            if p.is_running:
+                p.stop()
+        except Exception:
+            pass  # best-effort cleanup
 
-    if p is not None:
-        if p.is_running:
-            p.stop()
-        session = p.last_session
-        if session:
-            profile_file = test_logging / "pyinstrument.txt"
-
-            renderer = ConsoleRenderer(unicode=True, color=False)
-            renderer.processors.insert(0, _prune_client_processor)
-
-            with profile_file.open("w") as f:
-                f.write(renderer.render(session))
+        # Write profile output
+        try:
+            session = p.last_session
+            if session:
+                profile_file = test_logging / "pyinstrument.txt"
+                renderer = ConsoleRenderer(unicode=True, color=False)
+                renderer.processors.insert(0, _prune_client_processor)
+                with profile_file.open("w") as f:
+                    f.write(renderer.render(session))
+        except Exception:
+            pass  # don't let output writing crash teardown
 
 
 @pytest.fixture(autouse=True)
