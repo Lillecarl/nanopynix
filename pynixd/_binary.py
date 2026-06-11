@@ -158,21 +158,29 @@ class WireMessage(BaseModel):
                 ctx.writer.write_uint64(1 if val.is_present else 0)
                 if val.is_present:
                     inner_writer = _WRITERS.get(ann)
-                    if inner_writer is None:
+                    if inner_writer is not None:
+                        result = inner_writer(val.value, ctx.writer)
+                        if asyncio.iscoroutine(result):
+                            await result
+                    elif isinstance(ann, type) and issubclass(ann, WireMessage):
+                        result = val.value.serialize(ctx)
+                        if asyncio.iscoroutine(result):
+                            await result
+                    else:
                         raise TypeError(f"No writer registered for {ann} in {type(self).__name__}.{name}")
-                    result = inner_writer(val.value, ctx.writer)
-                    # nested models have async serialize, primitives are sync
-                    if asyncio.iscoroutine(result):
-                        await result
                 continue
 
             writer = _WRITERS.get(ann)
-            if writer is None:
+            if writer is not None:
+                result = writer(getattr(self, name), ctx.writer)
+                if asyncio.iscoroutine(result):
+                    await result
+            elif isinstance(ann, type) and issubclass(ann, WireMessage):
+                result = getattr(self, name).serialize(ctx)
+                if asyncio.iscoroutine(result):
+                    await result
+            else:
                 raise TypeError(f"No writer registered for {ann} in {type(self).__name__}.{name}")
-            result = writer(getattr(self, name), ctx.writer)
-            # nested models have async serialize, primitives are sync
-            if asyncio.iscoroutine(result):
-                await result
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext):
@@ -181,17 +189,53 @@ class WireMessage(BaseModel):
         for name, ann, is_conditional in _wire_fields(cls):
             if is_conditional:
                 reader = _READERS.get(ann)
-                if reader is None:
-                    raise TypeError(f"No reader registered for {ann} in {cls.__name__}.{name}")
-                valid = await ctx.reader.read_uint64()
-                if valid:
-                    kwargs[name] = Conditional(await reader(ctx.reader))
+                if reader is not None:
+                    valid = await ctx.reader.read_uint64()
+                    if valid:
+                        kwargs[name] = Conditional(await reader(ctx.reader))
+                    else:
+                        kwargs[name] = Conditional(None)
+                elif isinstance(ann, type) and issubclass(ann, WireMessage):
+                    valid = await ctx.reader.read_uint64()
+                    if valid:
+                        inner = await ann.deserialize(ReadContext(reader=ctx.reader, version=ctx.version))
+                        kwargs[name] = Conditional(inner)
+                    else:
+                        kwargs[name] = Conditional(None)
                 else:
-                    kwargs[name] = Conditional(None)
+                    raise TypeError(f"No reader registered for {ann} in {cls.__name__}.{name}")
                 continue
 
             reader = _READERS.get(ann)
-            if reader is None:
+            if reader is not None:
+                kwargs[name] = await reader(ctx.reader)
+            elif isinstance(ann, type) and issubclass(ann, WireMessage):
+                kwargs[name] = await ann.deserialize(ReadContext(reader=ctx.reader, version=ctx.version))
+            else:
                 raise TypeError(f"No reader registered for {ann} in {cls.__name__}.{name}")
-            kwargs[name] = await reader(ctx.reader)
         return cls(**kwargs)
+
+
+class WireStorePath(WireMessage):
+    """A store path on the Nix daemon wire protocol.
+
+    Wire format: single length-prefixed UTF-8 string.
+
+    Usage::
+
+        class MyRequest(WireMessage):
+            path: WireStorePath  # auto-detected as WireMessage subtype
+    """
+
+    path: str
+
+    def __str__(self) -> str:
+        return self.path
+
+    def __hash__(self) -> int:
+        return hash(self.path)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, WireStorePath):
+            return NotImplemented
+        return self.path == other.path

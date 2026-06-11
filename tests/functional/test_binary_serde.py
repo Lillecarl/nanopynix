@@ -6,7 +6,7 @@ from io import BytesIO
 
 import pytest
 
-from pynixd._binary import Conditional, WireMessage, register_nested_model
+from pynixd._binary import Conditional, WireMessage, WireStorePath
 from pynixd.derived_path import DerivedPath
 from pynixd.operations.build_paths import BuildPathsRequest
 from pynixd.operations.is_valid_path import (
@@ -161,9 +161,6 @@ class PathInfo(WireMessage):
     ca: str
 
 
-register_nested_model(PathInfo)
-
-
 class QueryPathInfoResp(WireMessage):
     info: Conditional[PathInfo]
 
@@ -231,3 +228,34 @@ async def test_query_path_info_response_roundtrip():
     wm3 = await QueryPathInfoResp.deserialize(ReadContext(reader=r2, version=1))  # type: ignore[arg-type]
     assert not wm3.info.is_present
     assert wm3.info.value is None
+
+
+class ReqWithStorePath(WireMessage):
+    path: WireStorePath  # auto-detected, no register_nested_model needed
+
+
+async def test_wire_store_path_roundtrip():
+    # Pydantic → bytes → Pydantic
+    sp = WireStorePath(path="/nix/store/abc-test")
+    req = ReqWithStorePath(path=sp)
+
+    buf = BytesIO()
+    await req.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    data = buf.getvalue()
+
+    r = _R(data)
+    # No op skip needed — ReqWithStorePath has no ClassVar
+    wm = await ReqWithStorePath.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+
+    assert str(wm.path) == str(sp)
+    assert wm.path == sp
+    assert isinstance(wm.path, WireStorePath)
+    assert wm.path.path == "/nix/store/abc-test"
+
+    # Pydantic → bytes → Pydantic (full roundtrip)
+    buf2 = BytesIO()
+    await wm.serialize(WriteContext(writer=_W(buf2), version=1))  # type: ignore[arg-type]
+    wm2 = await ReqWithStorePath.deserialize(ReadContext(reader=_R(buf2.getvalue()), version=1))  # type: ignore[arg-type]
+
+    assert wm2.path == wm.path
+    assert str(wm2.path) == "/nix/store/abc-test"
