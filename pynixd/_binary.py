@@ -9,12 +9,12 @@ like op codes that are written/read by the operation layer, not the message body
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, get_type_hints
+import asyncio
+from typing import Any, ClassVar, get_type_hints
 
 from pydantic import BaseModel
 
-if TYPE_CHECKING:
-    from .types.context import ReadContext, WriteContext
+from .types.context import ReadContext, WriteContext
 
 # ── Type registry ──
 
@@ -58,15 +58,62 @@ register_type(
 )
 
 
+# ── Conditional type ──
+
+
+class Conditional[T]:
+    """A protocol field present only when ``valid=true`` on the wire.
+
+    Usage::
+
+        class MyResponse(WireMessage):
+            info: Conditional[PathInfo]
+
+    On the wire this reads/writes a ``uint64`` validity flag followed by
+    the inner type's fields when present.
+    """
+
+    def __init__(self, value: T | None = None):
+        self.value = value
+
+    @property
+    def is_present(self) -> bool:
+        return self.value is not None
+
+
+# ── Nested model registry ──
+
+
+def register_nested_model(model_cls: type[WireMessage]) -> None:
+    """Register a WireMessage subclass as a serializable nested type.
+
+    Wraps the model's ``serialize``/``deserialize`` into the type
+    registry so it can be used as an inner type of ``Conditional[T]``.
+    """
+
+    async def _read_nested(r):
+        return await model_cls.deserialize(ReadContext(reader=r, version=0))
+
+    def _write_nested(v, w):
+        return v.serialize(WriteContext(writer=w, version=0))
+
+    register_type(model_cls, _read_nested, _write_nested)
+
+
 # ── Field collection ──
 
 
-def _wire_fields(cls: type[BaseModel]) -> list[tuple[str, type]]:
-    """Return (name, type) pairs in declaration order, skipping ClassVars.
+def _wire_fields(cls: type[BaseModel]) -> list[tuple[str, type, bool]]:
+    """Return (name, type, is_conditional) triples in declaration order.
+
+    ClassVar fields are skipped.
 
     For generic types (e.g. ``set[str]``) the resolved annotation type is
     returned (e.g. ``set``) rather than the parameterized form, so the
     registry lookup can match on the bare type.
+
+    For ``Conditional[T]``, the inner type ``T`` is returned with
+    ``is_conditional=True``.
     """
     hints = get_type_hints(cls, include_extras=True)
     result = []
@@ -77,9 +124,15 @@ def _wire_fields(cls: type[BaseModel]) -> list[tuple[str, type]]:
         origin = getattr(ann, "__origin__", None)
         if origin is ClassVar:
             continue
-        # For generic types, use the origin (e.g. ``set[str]`` → ``set``)
-        resolved = origin if origin is not None else ann
-        result.append((name, resolved))
+        if origin is Conditional:
+            # Extract inner type for registry lookup; mark as conditional
+            result.append((name, ann.__args__[0], True))
+        elif origin is not None:
+            # Generic type like set[str] → use origin (set)
+            result.append((name, origin, False))
+        else:
+            # Plain type like int, str, bool
+            result.append((name, ann, False))
     return result
 
 
@@ -95,19 +148,48 @@ class WireMessage(BaseModel):
             path: str    # length-prefixed UTF-8
     """
 
+    model_config = {"arbitrary_types_allowed": True}
+
     async def serialize(self, ctx: WriteContext) -> None:
         """Write all non-ClassVar fields in declaration order."""
-        for name, ann in _wire_fields(type(self)):
+        for name, ann, is_conditional in _wire_fields(type(self)):
+            if is_conditional:
+                val = getattr(self, name)
+                ctx.writer.write_uint64(1 if val.is_present else 0)
+                if val.is_present:
+                    inner_writer = _WRITERS.get(ann)
+                    if inner_writer is None:
+                        raise TypeError(f"No writer registered for {ann} in {type(self).__name__}.{name}")
+                    result = inner_writer(val.value, ctx.writer)
+                    # nested models have async serialize, primitives are sync
+                    if asyncio.iscoroutine(result):
+                        await result
+                continue
+
             writer = _WRITERS.get(ann)
             if writer is None:
                 raise TypeError(f"No writer registered for {ann} in {type(self).__name__}.{name}")
-            writer(getattr(self, name), ctx.writer)
+            result = writer(getattr(self, name), ctx.writer)
+            # nested models have async serialize, primitives are sync
+            if asyncio.iscoroutine(result):
+                await result
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext):
         """Read all non-ClassVar fields in declaration order."""
         kwargs = {}
-        for name, ann in _wire_fields(cls):
+        for name, ann, is_conditional in _wire_fields(cls):
+            if is_conditional:
+                reader = _READERS.get(ann)
+                if reader is None:
+                    raise TypeError(f"No reader registered for {ann} in {cls.__name__}.{name}")
+                valid = await ctx.reader.read_uint64()
+                if valid:
+                    kwargs[name] = Conditional(await reader(ctx.reader))
+                else:
+                    kwargs[name] = Conditional(None)
+                continue
+
             reader = _READERS.get(ann)
             if reader is None:
                 raise TypeError(f"No reader registered for {ann} in {cls.__name__}.{name}")
