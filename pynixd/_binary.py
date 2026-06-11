@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, ClassVar, get_type_hints
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic.fields import FieldInfo
 
 from .constants import proto
 from .types.context import ReadContext, WriteContext
@@ -126,6 +127,42 @@ def register_nested_model(model_cls: type[WireMessage]) -> None:
     register_type(model_cls, _read_nested, _write_nested)
 
 
+# ── Version-constrained fields ──
+
+
+class VersionFieldInfo(FieldInfo):  # type: ignore[misc]
+    """FieldInfo with Nix protocol version constraints."""
+
+    def __init__(self, **kwargs):
+        self.min_version: int | None = kwargs.pop("min_version", None)  # type: ignore[assignment]
+        self.max_version: int | None = kwargs.pop("max_version", None)  # type: ignore[assignment]
+        super().__init__(**kwargs)
+
+
+def WireField(  # noqa: N802
+    default: Any = ...,
+    *,
+    default_factory: Any = None,
+    min_version: int | None = None,
+    max_version: int | None = None,
+    **kwargs: Any,
+) -> Any:
+    """A Pydantic Field with Nix protocol version requirements.
+
+    Usage::
+
+        times_built: int = WireField(default=0, min_version=proto(1, 29))
+        legacy_field: str = WireField(default="", max_version=proto(1, 27))
+    """
+    return VersionFieldInfo(
+        default=default,
+        default_factory=default_factory,
+        min_version=min_version,  # type: ignore[arg-type]
+        max_version=max_version,  # type: ignore[arg-type]
+        **kwargs,
+    )
+
+
 # ── Field collection ──
 
 
@@ -134,8 +171,9 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
 
     ClassVar fields are skipped.
 
-    Fields with a ``json_schema_extra`` ``min_version`` higher than
-    ``version`` are omitted, enabling protocol-version-dependent serde.
+    Fields with ``min_version`` or ``max_version`` constraints
+    (set via :func:`WireField`) are filtered against the provided
+    ``version``, enabling protocol-version-dependent serde.
 
     For generic types (e.g. ``set[str]``) the resolved annotation type is
     returned (e.g. ``set``) rather than the parameterized form, so the
@@ -148,9 +186,11 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
     result = []
     for name in cls.model_fields:
         field = cls.model_fields[name]
-        extra = getattr(field, "json_schema_extra", None)
-        min_v = extra.get("min_version") if extra else None
+        min_v = getattr(field, "min_version", None)
+        max_v = getattr(field, "max_version", None)
         if min_v is not None and version is not None and version < min_v:
+            continue
+        if max_v is not None and version is not None and version > max_v:
             continue
 
         ann = hints.get(name)
@@ -290,17 +330,17 @@ class WireBuildResult(WireMessage):
     error_msg: str
 
     # Protocol 1.29 fields
-    times_built: int = Field(default=0, json_schema_extra={"min_version": proto(1, 29)})
-    is_non_deterministic: int = Field(default=0, json_schema_extra={"min_version": proto(1, 29)})
-    start_time: int = Field(default=0, json_schema_extra={"min_version": proto(1, 29)})
-    stop_time: int = Field(default=0, json_schema_extra={"min_version": proto(1, 29)})
+    times_built: int = WireField(default=0, min_version=proto(1, 29))
+    is_non_deterministic: int = WireField(default=0, min_version=proto(1, 29))
+    start_time: int = WireField(default=0, min_version=proto(1, 29))
+    stop_time: int = WireField(default=0, min_version=proto(1, 29))
 
     # Protocol 1.37 fields
-    cpu_user: Conditional[int] = Field(default=Conditional(None), json_schema_extra={"min_version": proto(1, 37)})
-    cpu_system: Conditional[int] = Field(default=Conditional(None), json_schema_extra={"min_version": proto(1, 37)})
+    cpu_user: Conditional[int] = WireField(default=Conditional(None), min_version=proto(1, 37))
+    cpu_system: Conditional[int] = WireField(default=Conditional(None), min_version=proto(1, 37))
 
     # Protocol 1.28 fields
-    built_outputs: dict[str, str] = Field(default_factory=dict, json_schema_extra={"min_version": proto(1, 28)})
+    built_outputs: dict[str, str] = WireField(default_factory=dict, min_version=proto(1, 28))
 
 
 class WireBuildDerivationResponse(WireMessage):
