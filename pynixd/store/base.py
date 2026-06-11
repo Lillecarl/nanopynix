@@ -92,6 +92,7 @@ class Store(ABC):
         self.store_path = getattr(spec, "store_path", Path("/"))
         self.scheduleable = spec.scheduleable
         self.priority = spec.priority
+        self.score_penalty = spec.score_penalty
         self.gc_enabled = spec.gc_enabled
         self.gc_max_age = spec.gc_max_age
         self.no_schedule = spec.no_schedule

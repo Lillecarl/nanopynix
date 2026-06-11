@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import json
 import logging
 import time
 from pathlib import Path
@@ -134,5 +135,22 @@ def pytest_runtest_makereport(item: pytest.Item, call):
                 test_file = item.path.stem
                 test_name = item.name.replace("/", "_").replace("[", "_").replace("]", "_")
                 folder = log_dir / test_file / test_name
+                folder.mkdir(parents=True, exist_ok=True)
+
+                # Write exception to JSONL for machine consumption
+                exc_info = call.excinfo
+                if exc_info:
+                    import traceback as tb
+
+                    entry = {
+                        "timestamp": f"{time.monotonic():.3f}",
+                        "type": exc_info.type.__name__,
+                        "message": str(exc_info.value),
+                        "traceback": "".join(tb.format_exception(exc_info.type, exc_info.value, exc_info.tb)),
+                    }
+                    with (folder / "exceptions.jsonl").open("a") as f:
+                        f.write(json.dumps(entry, default=str) + "\n")
+
+                # Suppress traceback from CLI output; it's in exceptions.jsonl
                 report.longrepr = f"logs: {folder}"
                 report.sections = []

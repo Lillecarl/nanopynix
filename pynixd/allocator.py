@@ -89,15 +89,14 @@ class TelemetryStoreRanker(StoreRanker):
             if store.cpu_util:
                 idle_ratio = 1.0 - (store.cpu_util.utilization / 100.0)
                 score += idle_ratio * self.settings.cpu_idle_weight
-            else:
-                # Assume partially busy if telemetry is missing
-                score += 0.5 * self.settings.cpu_idle_weight
+            # else: no monitor data → neutral (no bonus, no penalty)
 
             # 3. System Pressure (- points)
             if store.monitor and store.monitor.health.psi:
                 psi = store.monitor.health.psi
                 score -= psi.cpu.some_avg10 * self.settings.cpu_pressure_penalty
                 score -= psi.io.some_avg10 * self.settings.io_pressure_penalty
+            # else: no monitor data → neutral (no penalty)
 
             # 4. Concurrency Penalty (- points)
             in_flight = store.in_flight
@@ -112,6 +111,7 @@ class TelemetryStoreRanker(StoreRanker):
             assigned = assigned_this_pass.get(store.store_id, 0)
             score -= assigned * self.settings.thundering_herd_penalty
 
+            score -= store.score_penalty
             if score >= self.settings.min_schedule_score:
                 ranked.append(RankedStore(store.store_id, score * store.priority, store))
             else:

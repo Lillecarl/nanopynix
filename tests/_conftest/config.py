@@ -108,6 +108,7 @@ def make_test_spec(
     store_path: Path | None = None,
     nix_config: NixConfig | None = None,
     no_probe: bool = False,
+    monitor: bool = False,
     **kwargs,
 ) -> LocalSocketStoreSpec:
     if nix_config is None:
@@ -140,6 +141,7 @@ def make_test_spec(
         nix_bin=nix_bin,
         extra_args=extra_args,
         extra_env=extra_env,
+        monitor=monitor,
         **kwargs,
     )
 

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from ..types.build import BuildResult, BuildResultStatus
+from ._helpers import _dp_from
 from .goal import EndGoal, Goal, GoalContext, GoalResult
 
 if TYPE_CHECKING:
@@ -175,7 +176,57 @@ class DerivationTrampolineGoal(Goal):
 
     async def _resolve_flat(self, dp: DerivedPath) -> None:
         """Resolve flat derivation: create one DerivationGoal per output."""
-        goal = self._make_goal(dp)
-        self.add_child(goal)
-        await self.execute_children()
-        self.result = goal.result
+
+        output_names = dp.output_names
+        if len(output_names) <= 1:
+            # Single output (or opaque drv): one DerivationGoal
+            goal = self._make_goal(dp)
+            self.add_child(goal)
+            await self.execute_children()
+            self.result = goal.result
+            if self.result:
+                self.result.path = dp
+        else:
+            # Multiple outputs: one DerivationGoal per output, merge results
+            from ..types.build import BuildResultStatus
+
+            merged_status = BuildResultStatus.BUILT
+            merged_error = ""
+            merged_built_outputs: dict = {}
+            merged_produced: set = set()
+            merged_resolved: dict = {}
+            merged_modulo = ""
+            any_success = False
+            for oname in sorted(output_names):
+                single_dp = _dp_from(dp.base_store_path(), oname)
+                goal = self._make_goal(single_dp)
+                self.add_child(goal)
+            await self.execute_children()
+            for child in self.children:
+                if child.result is None:
+                    continue
+                r = child.result
+                if r.result.status.is_failure:
+                    if merged_status.is_success:
+                        merged_status = r.result.status
+                        merged_error = r.result.error_msg
+                else:
+                    any_success = True
+                    merged_built_outputs.update(r.result.built_outputs)
+                    merged_produced.update(r.produced_paths)
+                    merged_resolved.update(r.resolved_outputs)
+                    if r.modulo_hash:
+                        merged_modulo = r.modulo_hash
+            if not any_success and merged_status.is_success:
+                merged_status = BuildResultStatus.MISC_FAILURE
+            self.result = GoalResult(
+                path=dp,
+                result=BuildResult(
+                    status=merged_status,
+                    error_msg=merged_error,
+                    built_outputs=merged_built_outputs,
+                ),
+                produced_paths=merged_produced,
+                resolved_outputs=merged_resolved,
+                modulo_hash=merged_modulo,
+            )

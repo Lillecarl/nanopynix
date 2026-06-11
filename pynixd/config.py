@@ -87,6 +87,7 @@ class StoreSpecBase(BaseModel):
     idle_ttl: float = 10.0
     scheduleable: bool = True
     priority: float = 1.0
+    score_penalty: int = 0
     gc_enabled: bool = True
     gc_max_age: int | None = None
     no_schedule: bool = False
