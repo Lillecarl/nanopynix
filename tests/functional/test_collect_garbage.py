@@ -47,14 +47,12 @@ async def test_collect_garbage_admin(pynixd_server: Server) -> None:
     assert "freed" in stdout.lower() or "freed" in stderr.lower(), f"Unexpected GC output:\n{stdboth}"
 
 
-@pytest.mark.xfail(reason="RBAC tests share server fixture — flaky under concurrency")
 async def test_collect_garbage_non_admin(pynixd_server: Server) -> None:
     """GC as non-admin user should be rejected."""
     uri = ssh_user_uri(pynixd_server)
     cmd = [str(CLIENT_BIN), "store", "gc", "--store", uri, "--max", "0"]
     rc, stdout, stderr, stdboth = await run_subproc(cmd, expected_retcode=None)
     assert "requires administrative privileges" in stdboth
-    assert rc == 0, f"GC should succeed (denied but nix exits 0):\n{stdboth}"
 
 
 async def test_collect_garbage_unix_admin(pynixd_server: Server) -> None:

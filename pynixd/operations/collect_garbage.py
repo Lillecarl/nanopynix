@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from ..stderr import OperationLogs
+from ..stderr import OperationLogs, StderrError, Verbosity
 from ..store_path import StorePath
 from ..types import GCAction
 from ..types.context import ReadContext
@@ -100,10 +100,21 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
 
         if ctx.role < Role.ADMIN:
             self.logger.warning("access_denied", user=ctx.username, role=ctx.role.name)
-            await ctx.proxy.send_error(
-                f"Operation '{self.name}' requires administrative privileges.",
+            await ctx.proxy.client.send(
+                StderrError(
+                    error_type="Error",
+                    level=Verbosity.ERROR,
+                    name="Error",
+                    msg=f"Operation '{self.name}' requires administrative privileges.",
+                    have_pos=0,
+                    traces=[],
+                )
             )
-            return None
+            return CollectGarbageResponse(
+                paths_deleted=set(),
+                bytes_freed=0,
+                _obsolete=0,
+            )
 
         result = await ctx.proxy.execute(self)
         self.logger.debug("responded_op")
