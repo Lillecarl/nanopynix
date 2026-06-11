@@ -6,7 +6,8 @@ from io import BytesIO
 
 import pytest
 
-from pynixd._binary import Conditional, WireMessage, WireStorePath
+from pynixd._binary import Conditional, WireBuildDerivationResponse, WireBuildResult, WireMessage, WireStorePath
+from pynixd.constants import proto
 from pynixd.derived_path import DerivedPath
 from pynixd.operations.build_paths import BuildPathsRequest
 from pynixd.operations.is_valid_path import (
@@ -52,6 +53,12 @@ class _W:
         self.write_uint64(len(v))
         self._b.write(v)
 
+    def write_dict(self, v: dict) -> None:
+        self.write_uint64(len(v))
+        for k, val in v.items():
+            self.write_string(k)
+            self.write_string(val)
+
 
 class _R:
     def __init__(self, data: bytes) -> None:
@@ -74,6 +81,15 @@ class _R:
     async def read_bytes(self) -> bytes:
         n = await self.read_uint64()
         return self._b.read(n)
+
+    async def read_dict(self) -> dict[str, str]:
+        n = await self.read_uint64()
+        result = {}
+        for _ in range(n):
+            k = await self.read_string(str)
+            v = await self.read_string(str)
+            result[k] = v
+        return result
 
 
 async def test_request_roundtrip():
@@ -259,3 +275,82 @@ async def test_wire_store_path_roundtrip():
 
     assert wm2.path == wm.path
     assert str(wm2.path) == "/nix/store/abc-test"
+
+
+async def test_wire_build_result_roundtrip():
+    """Roundtrip WireBuildResult at protocol 1.38 (all fields present)."""
+    br = WireBuildResult(
+        status=0,
+        error_msg="",
+        times_built=1,
+        is_non_deterministic=0,
+        start_time=1000000,
+        stop_time=1000500,
+        built_outputs={"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'},
+    )
+    br.cpu_user = Conditional(50000)
+    br.cpu_system = Conditional(10000)
+
+    # Wire → bytes
+    buf = BytesIO()
+    await br.serialize(WriteContext(writer=_W(buf), version=proto(1, 38)))  # type: ignore[arg-type]
+    data = buf.getvalue()
+
+    # bytes → Wire (same version)
+    wm = await WireBuildResult.deserialize(ReadContext(reader=_R(data), version=proto(1, 38)))  # type: ignore[arg-type]
+    assert wm.status == 0
+    assert wm.times_built == 1
+    assert wm.start_time == 1000000
+    assert wm.stop_time == 1000500
+    assert wm.built_outputs == {"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'}
+    assert wm.cpu_user.is_present
+    assert wm.cpu_user.value == 50000
+    assert wm.cpu_system.is_present
+    assert wm.cpu_system.value == 10000
+
+    # Full roundtrip
+    buf2 = BytesIO()
+    await wm.serialize(WriteContext(writer=_W(buf2), version=proto(1, 38)))  # type: ignore[arg-type]
+    wm2 = await WireBuildResult.deserialize(ReadContext(reader=_R(buf2.getvalue()), version=proto(1, 38)))  # type: ignore[arg-type]
+    assert wm2.times_built == wm.times_built
+    assert wm2.start_time == wm.start_time
+    assert wm2.cpu_user.value == wm.cpu_user.value
+
+
+async def test_wire_build_result_version_27():
+    """Deserialize at protocol 1.27 — only status + error_msg survive."""
+    br = WireBuildResult(status=0, error_msg="test error")
+    buf = BytesIO()
+    await br.serialize(WriteContext(writer=_W(buf), version=proto(1, 27)))  # type: ignore[arg-type]
+    data = buf.getvalue()
+    wm = await WireBuildResult.deserialize(ReadContext(reader=_R(data), version=proto(1, 27)))  # type: ignore[arg-type]
+    assert wm.status == 0
+    assert wm.error_msg == "test error"
+    # Version 1.27: no fields past status+error_msg
+    assert wm.times_built == 0  # default
+    assert wm.start_time == 0
+    assert wm.built_outputs == {}
+    assert not wm.cpu_user.is_present
+    assert not wm.cpu_system.is_present
+
+
+async def test_wire_build_derivation_response_roundtrip():
+    """Roundtrip WireBuildDerivationResponse containing WireBuildResult."""
+    br = WireBuildResult(
+        status=0,
+        error_msg="",
+        times_built=1,
+        start_time=100,
+        stop_time=200,
+    )
+    br.cpu_user = Conditional(50000)
+    resp = WireBuildDerivationResponse(result=br)
+
+    buf = BytesIO()
+    await resp.serialize(WriteContext(writer=_W(buf), version=proto(1, 38)))  # type: ignore[arg-type]
+    data = buf.getvalue()
+
+    wm = await WireBuildDerivationResponse.deserialize(ReadContext(reader=_R(data), version=proto(1, 38)))  # type: ignore[arg-type]
+    assert wm.result.status == 0
+    assert wm.result.times_built == 1
+    assert wm.result.cpu_user.value == 50000

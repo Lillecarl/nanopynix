@@ -12,8 +12,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any, ClassVar, get_type_hints
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from .constants import proto
 from .types.context import ReadContext, WriteContext
 
 # ── Type registry ──
@@ -55,6 +56,31 @@ register_type(
     set,
     reader=lambda r: r.read_string_set(str),
     writer=lambda v, w: w.write_string_set(v),
+)
+
+
+# dict[str, str] — wire format is count + N key-value string pairs
+async def _read_str_dict(r):
+    n = await r.read_uint64()
+    result = {}
+    for _ in range(n):
+        k = await r.read_string(str)
+        v = await r.read_string(str)
+        result[k] = v
+    return result
+
+
+def _write_str_dict(v, w):
+    w.write_uint64(len(v))
+    for k, val in v.items():
+        w.write_string(k)
+        w.write_string(val)
+
+
+register_type(
+    dict,
+    reader=_read_str_dict,
+    writer=_write_str_dict,
 )
 
 
@@ -103,10 +129,13 @@ def register_nested_model(model_cls: type[WireMessage]) -> None:
 # ── Field collection ──
 
 
-def _wire_fields(cls: type[BaseModel]) -> list[tuple[str, type, bool]]:
+def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple[str, type, bool]]:
     """Return (name, type, is_conditional) triples in declaration order.
 
     ClassVar fields are skipped.
+
+    Fields with a ``json_schema_extra`` ``min_version`` higher than
+    ``version`` are omitted, enabling protocol-version-dependent serde.
 
     For generic types (e.g. ``set[str]``) the resolved annotation type is
     returned (e.g. ``set``) rather than the parameterized form, so the
@@ -118,6 +147,12 @@ def _wire_fields(cls: type[BaseModel]) -> list[tuple[str, type, bool]]:
     hints = get_type_hints(cls, include_extras=True)
     result = []
     for name in cls.model_fields:
+        field = cls.model_fields[name]
+        extra = getattr(field, "json_schema_extra", None)
+        min_v = extra.get("min_version") if extra else None
+        if min_v is not None and version is not None and version < min_v:
+            continue
+
         ann = hints.get(name)
         if ann is None:
             continue
@@ -152,7 +187,7 @@ class WireMessage(BaseModel):
 
     async def serialize(self, ctx: WriteContext) -> None:
         """Write all non-ClassVar fields in declaration order."""
-        for name, ann, is_conditional in _wire_fields(type(self)):
+        for name, ann, is_conditional in _wire_fields(type(self), version=ctx.version):
             if is_conditional:
                 val = getattr(self, name)
                 ctx.writer.write_uint64(1 if val.is_present else 0)
@@ -186,7 +221,7 @@ class WireMessage(BaseModel):
     async def deserialize(cls, ctx: ReadContext):
         """Read all non-ClassVar fields in declaration order."""
         kwargs = {}
-        for name, ann, is_conditional in _wire_fields(cls):
+        for name, ann, is_conditional in _wire_fields(cls, version=ctx.version):
             if is_conditional:
                 reader = _READERS.get(ann)
                 if reader is not None:
@@ -239,3 +274,36 @@ class WireStorePath(WireMessage):
         if not isinstance(other, WireStorePath):
             return NotImplemented
         return self.path == other.path
+
+
+class WireBuildResult(WireMessage):
+    """Nix daemon protocol BuildResult.
+
+    Fields present based on protocol version:
+    - All versions: status, error_msg
+    - >= 1.29: times_built, is_non_deterministic, start_time, stop_time
+    - >= 1.37: cpu_user, cpu_system (Conditional[int])
+    - >= 1.28: built_outputs (dict[str, str])
+    """
+
+    status: int
+    error_msg: str
+
+    # Protocol 1.29 fields
+    times_built: int = Field(default=0, json_schema_extra={"min_version": proto(1, 29)})
+    is_non_deterministic: int = Field(default=0, json_schema_extra={"min_version": proto(1, 29)})
+    start_time: int = Field(default=0, json_schema_extra={"min_version": proto(1, 29)})
+    stop_time: int = Field(default=0, json_schema_extra={"min_version": proto(1, 29)})
+
+    # Protocol 1.37 fields
+    cpu_user: Conditional[int] = Field(default=Conditional(None), json_schema_extra={"min_version": proto(1, 37)})
+    cpu_system: Conditional[int] = Field(default=Conditional(None), json_schema_extra={"min_version": proto(1, 37)})
+
+    # Protocol 1.28 fields
+    built_outputs: dict[str, str] = Field(default_factory=dict, json_schema_extra={"min_version": proto(1, 28)})
+
+
+class WireBuildDerivationResponse(WireMessage):
+    """BuildDerivation response — a BuildResult wrapped in the response body."""
+
+    result: WireBuildResult
