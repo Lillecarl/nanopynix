@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import types
-from typing import Any, ClassVar, get_type_hints
+from dataclasses import dataclass
+from typing import Any, ClassVar, get_args, get_origin, get_type_hints
 
-from pydantic import BaseModel, model_serializer, model_validator
-from pydantic.fields import FieldInfo
+from pydantic import BaseModel, ConfigDict, model_serializer, model_validator
+from pydantic import Field as PydanticField
+from pydantic_core import PydanticUndefined
 
 from .constants import proto
 from .types.context import ReadContext, WriteContext
@@ -165,17 +167,16 @@ def register_nested_model(model_cls: type[WireMessage]) -> None:
 # ── Version-constrained fields ──
 
 
-class VersionFieldInfo(FieldInfo):  # type: ignore[misc]
-    """FieldInfo with Nix protocol version constraints."""
+@dataclass(frozen=True)
+class VersionMeta:
+    """Protocol version constraint for a wire field."""
 
-    def __init__(self, **kwargs):
-        self.min_version: int | None = kwargs.pop("min_version", None)  # type: ignore[assignment]
-        self.max_version: int | None = kwargs.pop("max_version", None)  # type: ignore[assignment]
-        super().__init__(**kwargs)
+    min_version: int | None = None
+    max_version: int | None = None
 
 
 def WireField(  # noqa: N802
-    default: Any = ...,
+    default: Any = PydanticUndefined,
     *,
     default_factory: Any = None,
     min_version: int | None = None,
@@ -189,13 +190,14 @@ def WireField(  # noqa: N802
         times_built: int = WireField(default=0, min_version=proto(1, 29))
         legacy_field: str = WireField(default="", max_version=proto(1, 27))
     """
-    return VersionFieldInfo(
-        default=default,
-        default_factory=default_factory,
-        min_version=min_version,  # type: ignore[arg-type]
-        max_version=max_version,  # type: ignore[arg-type]
-        **kwargs,
-    )
+    if default is not PydanticUndefined:
+        kwargs.setdefault("default", default)
+    if default_factory is not None:
+        kwargs["default_factory"] = default_factory
+
+    field_info = PydanticField(**kwargs)
+    field_info.metadata.append(VersionMeta(min_version, max_version))
+    return field_info
 
 
 # ── Field collection ──
@@ -221,31 +223,32 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
     result = []
     for name in cls.model_fields:
         field = cls.model_fields[name]
-        min_v = getattr(field, "min_version", None)
-        max_v = getattr(field, "max_version", None)
-        if min_v is not None and version is not None and version < min_v:
-            continue
-        if max_v is not None and version is not None and version > max_v:
-            continue
+        # Extract VersionMeta from field metadata
+        version_meta = next((m for m in field.metadata if isinstance(m, VersionMeta)), None)
+        if version_meta is not None:
+            if version_meta.min_version is not None and version is not None and version < version_meta.min_version:
+                continue
+            if version_meta.max_version is not None and version is not None and version > version_meta.max_version:
+                continue
 
         ann = hints.get(name)
         if ann is None:
             continue
-        origin = getattr(ann, "__origin__", None)
+        origin = get_origin(ann)
         if origin is ClassVar:
             continue
 
         # Handle Optional[T] → T (strip None from union types)
         if isinstance(ann, types.UnionType):
-            non_none = tuple(a for a in ann.__args__ if a is not type(None))
+            non_none = tuple(a for a in get_args(ann) if a is not type(None))
             if len(non_none) == 1:
                 ann = non_none[0]
-                origin = getattr(ann, "__origin__", None)
+                origin = get_origin(ann)
             # if 0 or >1 non-None args, leave ann as-is (will fail registry lookup)
 
         if origin is Conditional:
             # Extract inner type for registry lookup; mark as conditional
-            result.append((name, ann.__args__[0], True))
+            result.append((name, get_args(ann)[0], True))
             continue
         if origin is not None:
             # Generic type like set[str] → use origin (set)
@@ -268,7 +271,7 @@ class WireMessage(BaseModel):
             path: str    # length-prefixed UTF-8
     """
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     async def serialize(self, ctx: WriteContext) -> None:
         """Write all non-ClassVar fields in declaration order."""
