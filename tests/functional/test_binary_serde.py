@@ -356,3 +356,74 @@ async def test_wire_build_derivation_response_roundtrip():
     assert wm.result.status == 0
     assert wm.result.times_built == 1
     assert wm.result.cpu_user.value == 50000
+
+
+async def test_wire_build_result_json_roundtrip():
+    """WireBuildResult JSON roundtrip (exercises Conditional + dict + primitives)."""
+    br = WireBuildResult(
+        status=0,
+        error_msg="",
+        times_built=1,
+        is_non_deterministic=0,
+        start_time=1000000,
+        stop_time=1000500,
+        built_outputs={"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'},
+    )
+    br.cpu_user = Conditional(50000)
+    br.cpu_system = Conditional(None)
+
+    # to_json
+    data = br.to_json()
+    assert '"status":0' in data
+    assert '"error_msg":""' in data
+    assert '"times_built":1' in data
+    assert '"start_time":1000000' in data
+    assert '"built_outputs":' in data
+    assert '"cpu_user":50000' in data
+    assert '"cpu_system":null' in data
+
+    # from_json
+    br2 = WireBuildResult.from_json(data)
+    assert isinstance(br2, WireBuildResult)
+    assert br2.status == 0
+    assert br2.times_built == 1
+    assert br2.start_time == 1000000
+    assert br2.built_outputs == {"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'}
+    assert br2.cpu_user.is_present
+    assert br2.cpu_user.value == 50000
+    assert not br2.cpu_system.is_present
+
+
+async def test_wire_store_path_json():
+    """WireStorePath serdes as plain string in JSON."""
+    sp = WireStorePath(path="/nix/store/abc-test")
+
+    class Req(WireMessage):
+        path: WireStorePath
+
+    req = Req(path=sp)
+
+    data = req.to_json()
+    # WireStorePath should be a plain string, not nested object
+    assert data == '{"path":"/nix/store/abc-test"}'
+
+    # from_json back to Req
+    req2 = Req.from_json(data)
+    assert isinstance(req2.path, WireStorePath)  # pyright: ignore[reportAttributeAccessIssue]
+    assert str(req2.path) == "/nix/store/abc-test"  # pyright: ignore[reportAttributeAccessIssue]
+    assert req2.path == sp  # pyright: ignore[reportAttributeAccessIssue]
+
+
+async def test_wire_build_result_json_null_conditional():
+    """Conditional not present → null in JSON."""
+    br = WireBuildResult(status=0, error_msg="")
+    # cpu_user is Conditional(None) by default
+    assert not br.cpu_user.is_present
+
+    json_str = br.to_json()
+    assert '"cpu_user":null' in json_str
+    assert '"cpu_system":null' in json_str
+
+    wm = WireBuildResult.from_json(json_str)
+    assert not wm.cpu_user.is_present  # pyright: ignore[reportAttributeAccessIssue]
+    assert not wm.cpu_system.is_present  # pyright: ignore[reportAttributeAccessIssue]

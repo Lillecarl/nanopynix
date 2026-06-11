@@ -13,7 +13,7 @@ import asyncio
 import types
 from typing import Any, ClassVar, get_type_hints
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_serializer, model_validator
 from pydantic.fields import FieldInfo
 
 from .constants import proto
@@ -107,6 +107,40 @@ class Conditional[T]:
     @property
     def is_present(self) -> bool:
         return self.value is not None
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> Any:
+        """Pydantic core schema for JSON serialization.
+
+        ``Conditional[T]`` is transparent in JSON:
+        - present → the inner value
+        - not present → ``null``
+        """
+        from pydantic_core import core_schema
+
+        inner_type = source_type.__args__[0]
+        inner_schema = handler(inner_type)
+
+        def validate(value: Any, handler) -> Conditional:
+            if isinstance(value, Conditional):
+                return value
+            if value is None:
+                return Conditional(None)
+            return Conditional(handler(value))
+
+        def serialize(value: Any) -> Any:
+            if isinstance(value, Conditional) and value.is_present:
+                return value.value
+            return None
+
+        return core_schema.no_info_wrap_validator_function(
+            validate,
+            inner_schema,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                serialize,
+                return_schema=core_schema.any_schema(),
+            ),
+        )
 
 
 # ── Nested model registry ──
@@ -301,6 +335,23 @@ class WireMessage(BaseModel):
                 raise TypeError(f"No reader registered for {ann} in {cls.__name__}.{name}")
         return cls(**kwargs)
 
+    def to_json(self, **kwargs) -> str:
+        """Serialize to JSON string.
+
+        Uses Pydantic's ``model_dump_json`` with ``arbitrary_types_allowed``
+        serialization handled by ``Conditional.__get_pydantic_core_schema__``
+        and similar.
+        """
+        return self.model_dump_json(**kwargs)
+
+    @classmethod
+    def from_json(cls, json_data: str, **kwargs) -> WireMessage:
+        """Deserialize from JSON string.
+
+        Uses Pydantic's ``model_validate_json``.
+        """
+        return cls.model_validate_json(json_data, **kwargs)  # type: ignore[return-value]
+
 
 class WireStorePath(WireMessage):
     """A store path on the Nix daemon wire protocol.
@@ -325,6 +376,21 @@ class WireStorePath(WireMessage):
         if not isinstance(other, WireStorePath):
             return NotImplemented
         return self.path == other.path
+
+    @model_serializer
+    def ser_model(self) -> str:
+        """Serialize WireStorePath as a plain string in JSON."""
+        return self.path
+
+    @model_validator(mode="before")
+    @classmethod
+    def from_str(cls, data: Any) -> Any:
+        """Deserialize WireStorePath from a plain string in JSON."""
+        if isinstance(data, str):
+            return {"path": data}
+        if isinstance(data, cls):
+            return data
+        return data
 
 
 class WireBuildResult(WireMessage):
