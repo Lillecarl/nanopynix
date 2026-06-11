@@ -50,12 +50,24 @@ register_type(
     writer=lambda v, w: w.write_bytes(v),
 )
 
+# set[str] — wire format is count + N strings
+register_type(
+    set,
+    reader=lambda r: r.read_string_set(str),
+    writer=lambda v, w: w.write_string_set(v),
+)
+
 
 # ── Field collection ──
 
 
 def _wire_fields(cls: type[BaseModel]) -> list[tuple[str, type]]:
-    """Return (name, type) pairs in declaration order, skipping ClassVars."""
+    """Return (name, type) pairs in declaration order, skipping ClassVars.
+
+    For generic types (e.g. ``set[str]``) the resolved annotation type is
+    returned (e.g. ``set``) rather than the parameterized form, so the
+    registry lookup can match on the bare type.
+    """
     hints = get_type_hints(cls, include_extras=True)
     result = []
     for name in cls.model_fields:
@@ -65,7 +77,9 @@ def _wire_fields(cls: type[BaseModel]) -> list[tuple[str, type]]:
         origin = getattr(ann, "__origin__", None)
         if origin is ClassVar:
             continue
-        result.append((name, ann))
+        # For generic types, use the origin (e.g. ``set[str]`` → ``set``)
+        resolved = origin if origin is not None else ann
+        result.append((name, resolved))
     return result
 
 
