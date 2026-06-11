@@ -327,9 +327,9 @@ async def test_wire_build_result_version_27():
     assert wm.status == 0
     assert wm.error_msg == "test error"
     # Version 1.27: no fields past status+error_msg
-    assert wm.times_built == 0  # default
-    assert wm.start_time == 0
-    assert wm.built_outputs == {}
+    assert wm.times_built is None
+    assert wm.start_time is None
+    assert wm.built_outputs is None
     assert not wm.cpu_user.is_present
     assert not wm.cpu_system.is_present
 
@@ -340,8 +340,10 @@ async def test_wire_build_derivation_response_roundtrip():
         status=0,
         error_msg="",
         times_built=1,
+        is_non_deterministic=0,
         start_time=100,
         stop_time=200,
+        built_outputs={"out": "/nix/store/xxx-foo"},
     )
     br.cpu_user = Conditional(50000)
     resp = WireBuildDerivationResponse(result=br)

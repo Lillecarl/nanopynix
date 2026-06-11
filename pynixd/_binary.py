@@ -10,6 +10,7 @@ like op codes that are written/read by the operation layer, not the message body
 from __future__ import annotations
 
 import asyncio
+import types
 from typing import Any, ClassVar, get_type_hints
 
 from pydantic import BaseModel
@@ -199,10 +200,20 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
         origin = getattr(ann, "__origin__", None)
         if origin is ClassVar:
             continue
+
+        # Handle Optional[T] → T (strip None from union types)
+        if isinstance(ann, types.UnionType):
+            non_none = tuple(a for a in ann.__args__ if a is not type(None))
+            if len(non_none) == 1:
+                ann = non_none[0]
+                origin = getattr(ann, "__origin__", None)
+            # if 0 or >1 non-None args, leave ann as-is (will fail registry lookup)
+
         if origin is Conditional:
             # Extract inner type for registry lookup; mark as conditional
             result.append((name, ann.__args__[0], True))
-        elif origin is not None:
+            continue
+        if origin is not None:
             # Generic type like set[str] → use origin (set)
             result.append((name, origin, False))
         else:
@@ -330,17 +341,17 @@ class WireBuildResult(WireMessage):
     error_msg: str
 
     # Protocol 1.29 fields
-    times_built: int = WireField(default=0, min_version=proto(1, 29))
-    is_non_deterministic: int = WireField(default=0, min_version=proto(1, 29))
-    start_time: int = WireField(default=0, min_version=proto(1, 29))
-    stop_time: int = WireField(default=0, min_version=proto(1, 29))
+    times_built: int | None = WireField(default=None, min_version=proto(1, 29))
+    is_non_deterministic: int | None = WireField(default=None, min_version=proto(1, 29))
+    start_time: int | None = WireField(default=None, min_version=proto(1, 29))
+    stop_time: int | None = WireField(default=None, min_version=proto(1, 29))
 
     # Protocol 1.37 fields
     cpu_user: Conditional[int] = WireField(default=Conditional(None), min_version=proto(1, 37))
     cpu_system: Conditional[int] = WireField(default=Conditional(None), min_version=proto(1, 37))
 
     # Protocol 1.28 fields
-    built_outputs: dict[str, str] = WireField(default_factory=dict, min_version=proto(1, 28))
+    built_outputs: dict[str, str] | None = WireField(default=None, min_version=proto(1, 28))
 
 
 class WireBuildDerivationResponse(WireMessage):
