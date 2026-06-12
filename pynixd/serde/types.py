@@ -103,7 +103,7 @@ class WireRealisation(WireMessage):
     validation applies uniformly.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True)
 
     id: WireDrvOutput | None = PydanticField(default=None)
     out_path: WireStorePath | None = PydanticField(default=None, alias="outPath")
