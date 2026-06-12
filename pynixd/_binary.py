@@ -274,11 +274,13 @@ class WireMessage(BaseModel):
                 valid = await ctx.reader.read_uint64()
                 if valid:
                     object.__setattr__(obj, name, await reader(ctx.reader))
+                    obj.__pydantic_fields_set__.add(name)
                 # else: already set to None by default above
                 continue
 
             reader = _find_reader(ann, version=ctx.version)
             object.__setattr__(obj, name, await reader(ctx.reader))
+            obj.__pydantic_fields_set__.add(name)
 
         return obj
 
