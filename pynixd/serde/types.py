@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as json_lib
 from typing import TYPE_CHECKING, Any
 
 from pydantic import model_serializer, model_validator
@@ -80,6 +81,62 @@ class WireString(WireMessage):
 
 class WireStorePath(WireString):
     """A store path — no custom parsing needed."""
+
+
+class WireRealisation(WireString):
+    """A Realisation on the Nix daemon wire — JSON object sent as a string.
+
+    Wire format: length-prefixed UTF-8 containing a JSON object::
+
+        {
+            "id": {"drvHash": "abc", "outputName": "out"},
+            "outPath": "/nix/store/foo",
+            "signatures": ["sig1", "sig2"],
+            "dependentRealisations": {"drvHash:out": "/nix/store/bar"},
+        }
+
+    All keys are optional on the wire.  Access parsed fields via properties.
+    """
+
+    @property
+    def out_path(self) -> str | None:
+        return json_lib.loads(self.value).get("outPath")
+
+    @property
+    def id_drv_hash(self) -> str | None:
+        id_ = json_lib.loads(self.value).get("id", {})
+        return id_.get("drvHash") if isinstance(id_, dict) else None
+
+    @property
+    def id_output_name(self) -> str | None:
+        id_ = json_lib.loads(self.value).get("id", {})
+        return id_.get("outputName") if isinstance(id_, dict) else None
+
+    @property
+    def signatures(self) -> list[str]:
+        return json_lib.loads(self.value).get("signatures", [])
+
+    @classmethod
+    def from_parts(
+        cls,
+        out_path: str | None = None,
+        drv_hash: str | None = None,
+        output_name: str | None = None,
+        signatures: list[str] | None = None,
+    ) -> WireRealisation:
+        data: dict[str, Any] = {}
+        if out_path:
+            data["outPath"] = str(out_path)
+        if drv_hash or output_name:
+            id_: dict[str, str] = {}
+            if drv_hash:
+                id_["drvHash"] = str(drv_hash)
+            if output_name:
+                id_["outputName"] = str(output_name)
+            data["id"] = id_
+        if signatures:
+            data["signatures"] = list(signatures)
+        return cls(value=json_lib.dumps(data))
 
 
 class WireOptMicroseconds(WireMessage):

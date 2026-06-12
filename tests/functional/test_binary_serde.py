@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as json_lib
 from io import BytesIO
 
 import pytest
@@ -21,6 +22,7 @@ from pynixd.serde import (
     WireOptMicroseconds,
     WirePathInfo,
     WireQueryPathInfoResponse,
+    WireRealisation,
     WireStorePath,
 )
 from pynixd.store_path import StorePath
@@ -502,3 +504,32 @@ async def test_wire_version_exclude_unset():
     assert '"start_time"' not in json_str  # version-skipped
     assert '"cpu_user"' not in json_str  # version-skipped
     assert '"built_outputs"' not in json_str  # version-skipped
+
+
+async def test_wire_realisation_roundtrip():
+    """Roundtrip WireRealisation — JSON blob sent as a string on the wire."""
+    r = WireRealisation.from_parts(
+        out_path="/nix/store/foo",
+        drv_hash="sha256:abc",
+        output_name="out",
+        signatures=["sig1", "sig2"],
+    )
+    assert r.out_path == "/nix/store/foo"
+    assert r.id_drv_hash == "sha256:abc"
+    assert r.id_output_name == "out"
+    assert r.signatures == ["sig1", "sig2"]
+
+    # Wire roundtrip
+    buf = BytesIO()
+    await r.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    data = buf.getvalue()
+    wm = await WireRealisation.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    assert wm.out_path == r.out_path
+    assert wm.signatures == r.signatures
+
+    # JSON roundtrip — WireString JSON is the value encoded as a JSON string
+    json_str = r.to_json()
+    assert json_str == json_lib.dumps(r.value)
+    # Parse the inner JSON to access fields
+    parsed = json_lib.loads(r.value)
+    assert parsed["outPath"] == "/nix/store/foo"

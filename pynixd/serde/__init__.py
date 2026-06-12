@@ -16,6 +16,9 @@ from .types import (
     WireQueryPathInfoResponse as WireQueryPathInfoResponse,
 )
 from .types import (
+    WireRealisation as WireRealisation,
+)
+from .types import (
     WireStorePath as WireStorePath,
 )
 from .wire_message import (
