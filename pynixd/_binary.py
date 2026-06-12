@@ -136,7 +136,6 @@ class VersionMeta:
 
     min_version: int | None = None
     max_version: int | None = None
-    wire_conditional: bool = False
     wire_depends_on: Callable | None = None
 
 
@@ -146,7 +145,6 @@ def WireField(  # noqa: N802
     default_factory: Any = None,
     min_version: int | None = None,
     max_version: int | None = None,
-    wire_conditional: bool = False,
     wire_depends_on: Callable | None = None,
     **kwargs: Any,
 ) -> Any:
@@ -163,15 +161,15 @@ def WireField(  # noqa: N802
         kwargs["default_factory"] = default_factory
 
     field_info = PydanticField(**kwargs)
-    field_info.metadata.append(VersionMeta(min_version, max_version, wire_conditional, wire_depends_on))
+    field_info.metadata.append(VersionMeta(min_version, max_version, wire_depends_on))
     return field_info
 
 
 # ── Field collection ──
 
 
-def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple[str, type, bool, Callable | None]]:
-    """Return (name, type, is_conditional, wire_depends_on) tuples in declaration order.
+def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple[str, type, Callable | None]]:
+    """Return (name, type, wire_depends_on) tuples in declaration order.
 
     ClassVar fields are skipped.
 
@@ -182,9 +180,6 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
     For generic types (e.g. ``set[str]``) the resolved annotation type is
     returned (e.g. ``set``) rather than the parameterized form, so the
     registry lookup can match on the bare type.
-
-    The ``is_conditional`` flag is set from ``VersionMeta.wire_conditional``,
-    not from the type annotation.
     """
     hints = get_type_hints(cls, include_extras=True)
     result = []
@@ -212,12 +207,10 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
                 origin = get_origin(ann)
             # if 0 or >1 non-None args, leave ann as-is (will fail registry lookup)
 
-        # is_conditional from metadata, NOT from type annotation
-        is_conditional = version_meta is not None and version_meta.wire_conditional
         wire_depends_on = version_meta.wire_depends_on if version_meta else None
 
         resolved = origin if origin is not None else ann
-        result.append((name, resolved, is_conditional, wire_depends_on))
+        result.append((name, resolved, wire_depends_on))
     return result
 
 
@@ -237,18 +230,12 @@ class WireMessage(BaseModel):
 
     async def serialize(self, ctx: WriteContext) -> None:
         """Write all non-ClassVar fields in declaration order."""
-        for name, ann, is_conditional, wire_depends_on in _wire_fields(type(self), version=ctx.version):
+        for name, ann, wire_depends_on in _wire_fields(type(self), version=ctx.version):
             # Check wire_depends_on — skip field if dependency is False
             if wire_depends_on is not None and not wire_depends_on(self):
                 continue
 
             val = getattr(self, name)
-            if is_conditional:
-                ctx.writer.write_uint64(1 if val is not None else 0)
-                if val is not None:
-                    await _write_value(val, ann, ctx)
-                continue
-
             await _write_value(val, ann, ctx)
 
     @classmethod
@@ -259,23 +246,16 @@ class WireMessage(BaseModel):
         object.__setattr__(obj, "__pydantic_fields_set__", set())
         object.__setattr__(obj, "__pydantic_extra__", None)
         object.__setattr__(obj, "__pydantic_private__", None)
-        # Set defaults for version-conditional and wire-conditional fields
+        # Set defaults for version-gated and conditional fields
         for name, field in cls.model_fields.items():
             if field.default is not PydanticUndefined:
                 object.__setattr__(obj, name, field.default)
+            elif field.default_factory is not None:
+                object.__setattr__(obj, name, field.default_factory())  # pyright: ignore[reportCallIssue]
 
-        for name, ann, is_conditional, wire_depends_on in _wire_fields(cls, version=ctx.version):
+        for name, ann, wire_depends_on in _wire_fields(cls, version=ctx.version):
             # Check wire_depends_on — skip field if dependency is False
             if wire_depends_on is not None and not wire_depends_on(obj):
-                continue
-
-            if is_conditional:
-                reader = _find_reader(ann, version=ctx.version)
-                valid = await ctx.reader.read_uint64()
-                if valid:
-                    object.__setattr__(obj, name, await reader(ctx.reader))
-                    obj.__pydantic_fields_set__.add(name)
-                # else: already set to None by default above
                 continue
 
             reader = _find_reader(ann, version=ctx.version)
@@ -340,13 +320,66 @@ class WireStorePath(WireMessage):
         return data
 
 
+class WireOptMicroseconds(WireMessage):
+    """Optional microseconds — [tag uint64][microseconds uint64 if tag=1].
+
+    Wire format: tag (uint64) — 1 means present, then uint64 value follows.
+    0 means absent, nothing follows.
+
+    JSON format: present → integer, absent → null.
+
+    Attributes:
+        value: int | None — the microseconds value, or None if absent.
+    """
+
+    value: int | None = None
+
+    @property
+    def is_present(self) -> bool:
+        return self.value is not None
+
+    @classmethod
+    async def deserialize(cls, ctx: ReadContext):
+        tag = await ctx.reader.read_uint64()
+        obj = cls.__new__(cls)
+        object.__setattr__(obj, "__pydantic_fields_set__", set())
+        object.__setattr__(obj, "__pydantic_extra__", None)
+        object.__setattr__(obj, "__pydantic_private__", None)
+        if tag == 1:
+            object.__setattr__(obj, "value", await ctx.reader.read_uint64())
+            obj.__pydantic_fields_set__.add("value")
+        else:
+            object.__setattr__(obj, "value", None)
+        return obj
+
+    async def serialize(self, ctx: WriteContext) -> None:
+        if self.value is not None:
+            ctx.writer.write_uint64(1)
+            ctx.writer.write_uint64(self.value)
+        else:
+            ctx.writer.write_uint64(0)
+
+    @model_serializer
+    def _ser(self) -> int | None:
+        return self.value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _val(cls, data: Any) -> Any:
+        if isinstance(data, int | None):
+            return {"value": data}
+        if isinstance(data, cls):
+            return data
+        return data
+
+
 class WireBuildResult(WireMessage):
     """Nix daemon protocol BuildResult.
 
     Fields present based on protocol version:
     - All versions: status, error_msg
     - >= 1.29: times_built, is_non_deterministic, start_time, stop_time
-    - >= 1.37: cpu_user, cpu_system (wire_conditional)
+    - >= 1.37: cpu_user, cpu_system
     - >= 1.28: built_outputs (dict[str, str])
     """
 
@@ -359,9 +392,9 @@ class WireBuildResult(WireMessage):
     start_time: int | None = WireField(default=None, min_version=proto(1, 29))
     stop_time: int | None = WireField(default=None, min_version=proto(1, 29))
 
-    # Protocol 1.37 fields — wire_conditional: own validity flag on wire
-    cpu_user: int | None = WireField(default=None, min_version=proto(1, 37), wire_conditional=True)
-    cpu_system: int | None = WireField(default=None, min_version=proto(1, 37), wire_conditional=True)
+    # Protocol 1.37 fields
+    cpu_user: WireOptMicroseconds = WireField(default_factory=WireOptMicroseconds, min_version=proto(1, 37))
+    cpu_system: WireOptMicroseconds = WireField(default_factory=WireOptMicroseconds, min_version=proto(1, 37))
 
     # Protocol 1.28 fields
     built_outputs: dict[str, str] | None = WireField(default=None, min_version=proto(1, 28))

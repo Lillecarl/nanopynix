@@ -10,6 +10,7 @@ from pynixd._binary import (
     WireBuildDerivationResponse,
     WireBuildResult,
     WireMessage,
+    WireOptMicroseconds,
     WirePathInfo,
     WireQueryPathInfoResponse,
     WireStorePath,
@@ -294,8 +295,8 @@ async def test_wire_build_result_roundtrip():
         stop_time=1000500,
         built_outputs={"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'},
     )
-    br.cpu_user = 50000
-    br.cpu_system = 10000
+    br.cpu_user = WireOptMicroseconds(value=50000)
+    br.cpu_system = WireOptMicroseconds(value=10000)
 
     # Wire → bytes
     buf = BytesIO()
@@ -309,8 +310,10 @@ async def test_wire_build_result_roundtrip():
     assert wm.start_time == 1000000
     assert wm.stop_time == 1000500
     assert wm.built_outputs == {"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'}
-    assert wm.cpu_user == 50000
-    assert wm.cpu_system == 10000
+    assert wm.cpu_user.is_present
+    assert wm.cpu_user.value == 50000
+    assert wm.cpu_system.is_present
+    assert wm.cpu_system.value == 10000
 
     # Full roundtrip
     buf2 = BytesIO()
@@ -334,8 +337,8 @@ async def test_wire_build_result_version_27():
     assert wm.times_built is None
     assert wm.start_time is None
     assert wm.built_outputs is None
-    assert wm.cpu_user is None
-    assert wm.cpu_system is None
+    assert not wm.cpu_user.is_present
+    assert not wm.cpu_system.is_present
 
 
 async def test_wire_build_derivation_response_roundtrip():
@@ -349,7 +352,7 @@ async def test_wire_build_derivation_response_roundtrip():
         stop_time=200,
         built_outputs={"out": "/nix/store/xxx-foo"},
     )
-    br.cpu_user = 50000
+    br.cpu_user = WireOptMicroseconds(value=50000)
     resp = WireBuildDerivationResponse(result=br)
 
     buf = BytesIO()
@@ -359,7 +362,8 @@ async def test_wire_build_derivation_response_roundtrip():
     wm = await WireBuildDerivationResponse.deserialize(ReadContext(reader=_R(data), version=proto(1, 38)))  # type: ignore[arg-type]
     assert wm.result.status == 0
     assert wm.result.times_built == 1
-    assert wm.result.cpu_user == 50000
+    assert wm.result.cpu_user.is_present
+    assert wm.result.cpu_user.value == 50000
 
 
 async def test_wire_build_result_json_roundtrip():
@@ -373,8 +377,8 @@ async def test_wire_build_result_json_roundtrip():
         stop_time=1000500,
         built_outputs={"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'},
     )
-    br.cpu_user = 50000
-    br.cpu_system = None
+    br.cpu_user = WireOptMicroseconds(value=50000)
+    br.cpu_system = WireOptMicroseconds(value=None)
 
     # to_json
     data = br.to_json()
@@ -393,8 +397,9 @@ async def test_wire_build_result_json_roundtrip():
     assert br2.times_built == 1
     assert br2.start_time == 1000000
     assert br2.built_outputs == {"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'}
-    assert br2.cpu_user == 50000
-    assert br2.cpu_system is None
+    assert br2.cpu_user.is_present
+    assert br2.cpu_user.value == 50000
+    assert not br2.cpu_system.is_present
 
 
 async def test_wire_store_path_json():
@@ -418,18 +423,18 @@ async def test_wire_store_path_json():
 
 
 async def test_wire_build_result_json_null_conditional():
-    """wire_conditional not present → null in JSON."""
+    """WireOptMicroseconds not present → null in JSON."""
     br = WireBuildResult(status=0, error_msg="")
-    # cpu_user is None by default
-    assert br.cpu_user is None
+    # cpu_user is WireOptMicroseconds(value=None) by default
+    assert not br.cpu_user.is_present
 
     json_str = br.to_json()
     assert '"cpu_user":null' in json_str
     assert '"cpu_system":null' in json_str
 
     wm = WireBuildResult.from_json(json_str)
-    assert wm.cpu_user is None  # pyright: ignore[reportAttributeAccessIssue]
-    assert wm.cpu_system is None  # pyright: ignore[reportAttributeAccessIssue]
+    assert not wm.cpu_user.is_present  # pyright: ignore[reportAttributeAccessIssue]
+    assert not wm.cpu_system.is_present  # pyright: ignore[reportAttributeAccessIssue]
 
 
 async def test_wire_depends_on_exclude_unset_valid():
