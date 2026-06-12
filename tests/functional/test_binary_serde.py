@@ -15,7 +15,7 @@ from pynixd._binary import (
     WireQueryPathInfoResponse,
     WireStorePath,
 )
-from pynixd.constants import proto
+from pynixd.constants import PROTOCOL_VERSION, proto
 from pynixd.derived_path import DerivedPath
 from pynixd.operations.build_paths import BuildPathsRequest
 from pynixd.operations.is_valid_path import (
@@ -105,35 +105,35 @@ async def test_request_roundtrip():
     orig = IsValidPathRequest(path=sp)
     # orig → bytes
     buf = BytesIO()
-    await orig.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    await orig.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
     # bytes → WireMessage
     r = _R(data)
     await r.read_uint64()  # skip op written by original serialize
-    wm = await Req.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+    wm = await Req.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.path == str(sp)
     # WireMessage → bytes
     buf2 = BytesIO()
-    await wm.serialize(WriteContext(writer=_W(buf2), version=1))  # type: ignore[arg-type]
+    await wm.serialize(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data2 = buf2.getvalue()
     # bytes → WireMessage
-    wm2 = await Req.deserialize(ReadContext(reader=_R(data2), version=1))  # type: ignore[arg-type]
+    wm2 = await Req.deserialize(ReadContext(reader=_R(data2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.path == wm.path
 
 
 async def test_response_roundtrip():
     orig = IsValidPathResponse(valid=True)
     buf = BytesIO()
-    await orig.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    await orig.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
     r = _R(data)
     await r.read_uint64()  # skip STDERR_LAST from empty logs
-    wm = await Resp.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+    wm = await Resp.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.valid == 1
     buf2 = BytesIO()
-    await wm.serialize(WriteContext(writer=_W(buf2), version=1))  # type: ignore[arg-type]
+    await wm.serialize(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data2 = buf2.getvalue()
-    wm2 = await Resp.deserialize(ReadContext(reader=_R(data2), version=1))  # type: ignore[arg-type]
+    wm2 = await Resp.deserialize(ReadContext(reader=_R(data2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.valid == wm.valid
 
 
@@ -149,13 +149,13 @@ async def test_build_paths_request_roundtrip():
 
     # orig → bytes
     buf = BytesIO()
-    await orig.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    await orig.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
 
     # bytes → WireMessage (skip op uint64)
     r = _R(data)
     await r.read_uint64()  # skip op
-    wm = await BuildPathsReq.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+    wm = await BuildPathsReq.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     # Verify fields
     assert wm.build_mode == BuildMode.NORMAL.value  # int value of the enum
@@ -165,11 +165,11 @@ async def test_build_paths_request_roundtrip():
 
     # WireMessage → bytes
     buf2 = BytesIO()
-    await wm.serialize(WriteContext(writer=_W(buf2), version=1))  # type: ignore[arg-type]
+    await wm.serialize(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data2 = buf2.getvalue()
 
     # bytes → second WireMessage
-    wm2 = await BuildPathsReq.deserialize(ReadContext(reader=_R(data2), version=1))  # type: ignore[arg-type]
+    wm2 = await BuildPathsReq.deserialize(ReadContext(reader=_R(data2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.derived_paths == wm.derived_paths
     assert wm2.build_mode == wm.build_mode
 
@@ -203,12 +203,12 @@ async def test_query_path_info_response_roundtrip():
     # Valid response: original → Pydantic
     orig = QueryPathInfoResponse(info=info)
     buf = BytesIO()
-    await orig.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    await orig.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
 
     r = _R(data)
     await r.read_uint64()  # skip logs (STDERR_LAST)
-    wm = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+    wm = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     assert wm.valid
     assert wm.info is not None
@@ -226,9 +226,9 @@ async def test_query_path_info_response_roundtrip():
 
     # WireMessage → bytes → WireMessage
     buf2 = BytesIO()
-    await wm.serialize(WriteContext(writer=_W(buf2), version=1))  # type: ignore[arg-type]
+    await wm.serialize(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data2 = buf2.getvalue()
-    wm2 = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=_R(data2), version=1))  # type: ignore[arg-type]
+    wm2 = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=_R(data2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.valid
     assert wm2.info is not None
     assert wm2.info.deriver == wm.info.deriver
@@ -243,12 +243,12 @@ async def test_query_path_info_response_roundtrip():
     # Invalid response (no info): original → Pydantic
     orig2 = QueryPathInfoResponse(info=None)
     buf3 = BytesIO()
-    await orig2.serialize(WriteContext(writer=_W(buf3), version=1))  # type: ignore[arg-type]
+    await orig2.serialize(WriteContext(writer=_W(buf3), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data3 = buf3.getvalue()
 
     r2 = _R(data3)
     await r2.read_uint64()  # skip logs (STDERR_LAST)
-    wm3 = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r2, version=1))  # type: ignore[arg-type]
+    wm3 = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r2, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert not wm3.valid
     assert wm3.info is None
 
@@ -263,12 +263,12 @@ async def test_wire_store_path_roundtrip():
     req = ReqWithStorePath(path=sp)
 
     buf = BytesIO()
-    await req.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    await req.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
 
     r = _R(data)
     # No op skip needed — ReqWithStorePath has no ClassVar
-    wm = await ReqWithStorePath.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+    wm = await ReqWithStorePath.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     assert str(wm.path) == str(sp)
     assert wm.path == sp
@@ -277,8 +277,8 @@ async def test_wire_store_path_roundtrip():
 
     # Pydantic → bytes → Pydantic (full roundtrip)
     buf2 = BytesIO()
-    await wm.serialize(WriteContext(writer=_W(buf2), version=1))  # type: ignore[arg-type]
-    wm2 = await ReqWithStorePath.deserialize(ReadContext(reader=_R(buf2.getvalue()), version=1))  # type: ignore[arg-type]
+    await wm.serialize(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm2 = await ReqWithStorePath.deserialize(ReadContext(reader=_R(buf2.getvalue()), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     assert wm2.path == wm.path
     assert str(wm2.path) == "/nix/store/abc-test"
@@ -300,11 +300,11 @@ async def test_wire_build_result_roundtrip():
 
     # Wire → bytes
     buf = BytesIO()
-    await br.serialize(WriteContext(writer=_W(buf), version=proto(1, 38)))  # type: ignore[arg-type]
+    await br.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
 
     # bytes → Wire (same version)
-    wm = await WireBuildResult.deserialize(ReadContext(reader=_R(data), version=proto(1, 38)))  # type: ignore[arg-type]
+    wm = await WireBuildResult.deserialize(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.status == 0
     assert wm.times_built == 1
     assert wm.start_time == 1000000
@@ -317,8 +317,8 @@ async def test_wire_build_result_roundtrip():
 
     # Full roundtrip
     buf2 = BytesIO()
-    await wm.serialize(WriteContext(writer=_W(buf2), version=proto(1, 38)))  # type: ignore[arg-type]
-    wm2 = await WireBuildResult.deserialize(ReadContext(reader=_R(buf2.getvalue()), version=proto(1, 38)))  # type: ignore[arg-type]
+    await wm.serialize(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm2 = await WireBuildResult.deserialize(ReadContext(reader=_R(buf2.getvalue()), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.times_built == wm.times_built
     assert wm2.start_time == wm.start_time
     assert wm2.cpu_user == wm.cpu_user
@@ -356,10 +356,10 @@ async def test_wire_build_derivation_response_roundtrip():
     resp = WireBuildDerivationResponse(result=br)
 
     buf = BytesIO()
-    await resp.serialize(WriteContext(writer=_W(buf), version=proto(1, 38)))  # type: ignore[arg-type]
+    await resp.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
 
-    wm = await WireBuildDerivationResponse.deserialize(ReadContext(reader=_R(data), version=proto(1, 38)))  # type: ignore[arg-type]
+    wm = await WireBuildDerivationResponse.deserialize(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.result.status == 0
     assert wm.result.times_built == 1
     assert wm.result.cpu_user.is_present
@@ -446,11 +446,11 @@ async def test_wire_depends_on_exclude_unset_valid():
     )
     orig = QueryPathInfoResponse(info=info)
     buf = BytesIO()
-    await orig.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    await orig.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
     r = _R(data)
     await r.read_uint64()  # skip logs
-    wm = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+    wm = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     assert wm.valid is True
     json_str = wm.to_json(exclude_unset=True)
@@ -462,11 +462,11 @@ async def test_wire_depends_on_exclude_unset_invalid():
     """When valid=False, info is skipped by wire_depends_on — absent from JSON with exclude_unset."""
     orig = QueryPathInfoResponse(info=None)
     buf = BytesIO()
-    await orig.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    await orig.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
     r = _R(data)
     await r.read_uint64()  # skip logs
-    wm = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+    wm = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     assert wm.valid is False
     json_str = wm.to_json(exclude_unset=True)
@@ -488,7 +488,7 @@ async def test_wire_version_exclude_unset():
         built_outputs={},
     )
     buf = BytesIO()
-    await br.serialize(WriteContext(writer=_W(buf), version=proto(1, 38)))  # type: ignore[arg-type]
+    await br.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
     # Deserialize at version 1.27 — all version-gated fields are skipped
     wm = await WireBuildResult.deserialize(ReadContext(reader=_R(data), version=proto(1, 27)))  # type: ignore[arg-type]
