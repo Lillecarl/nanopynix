@@ -321,56 +321,14 @@ class WireStorePath(WireMessage):
 
 
 class WireOptMicroseconds(WireMessage):
-    """Optional microseconds — [tag uint64][microseconds uint64 if tag=1].
+    """Optional microseconds — [tag uint64][value uint64 if tag==1].
 
-    Wire format: tag (uint64) — 1 means present, then uint64 value follows.
-    0 means absent, nothing follows.
-
-    JSON format: present → integer, absent → null.
-
-    Attributes:
-        value: int | None — the microseconds value, or None if absent.
+    tag=1 = present, tag=0 = absent.
+    value is only on the wire when tag==1.
     """
 
-    value: int | None = None
-
-    @property
-    def is_present(self) -> bool:
-        return self.value is not None
-
-    @classmethod
-    async def from_reader(cls, ctx: ReadContext):
-        tag = await ctx.reader.read_uint64()
-        obj = cls.__new__(cls)
-        object.__setattr__(obj, "__pydantic_fields_set__", set())
-        object.__setattr__(obj, "__pydantic_extra__", None)
-        object.__setattr__(obj, "__pydantic_private__", None)
-        if tag == 1:
-            object.__setattr__(obj, "value", await ctx.reader.read_uint64())
-            obj.__pydantic_fields_set__.add("value")
-        else:
-            object.__setattr__(obj, "value", None)
-        return obj
-
-    async def to_writer(self, ctx: WriteContext) -> None:
-        if self.value is not None:
-            ctx.writer.write_uint64(1)
-            ctx.writer.write_uint64(self.value)
-        else:
-            ctx.writer.write_uint64(0)
-
-    @model_serializer
-    def _ser(self) -> int | None:
-        return self.value
-
-    @model_validator(mode="before")
-    @classmethod
-    def _val(cls, data: Any) -> Any:
-        if isinstance(data, int | None):
-            return {"value": data}
-        if isinstance(data, cls):
-            return data
-        return data
+    tag: int = 0
+    value: int | None = WireField(default=None, wire_depends_on=lambda self: self.tag == 1)
 
 
 class WireBuildResult(WireMessage):
