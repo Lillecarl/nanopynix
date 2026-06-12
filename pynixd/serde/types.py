@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json as json_lib
 from typing import TYPE_CHECKING, Any
 
-from pydantic import model_serializer, model_validator
+from pydantic import ConfigDict, model_serializer, model_validator
+from pydantic import Field as PydanticField
 
 from ..constants import proto
 from .wire_message import WireField, WireMessage
@@ -83,60 +83,44 @@ class WireStorePath(WireString):
     """A store path — no custom parsing needed."""
 
 
-class WireRealisation(WireString):
-    """A Realisation on the Nix daemon wire — JSON object sent as a string.
+class WireDrvOutput(WireMessage):
+    """DrvOutput on the wire — a JSON object inside Realisation.
 
-    Wire format: length-prefixed UTF-8 containing a JSON object::
-
-        {
-            "id": {"drvHash": "abc", "outputName": "out"},
-            "outPath": "/nix/store/foo",
-            "signatures": ["sig1", "sig2"],
-            "dependentRealisations": {"drvHash:out": "/nix/store/bar"},
-        }
-
-    All keys are optional on the wire.  Access parsed fields via properties.
+    Nix wire uses camelCase keys.  Pydantic aliases handle the mapping.
     """
 
-    @property
-    def out_path(self) -> str | None:
-        return json_lib.loads(self.value).get("outPath")
+    model_config = ConfigDict(populate_by_name=True)
 
-    @property
-    def id_drv_hash(self) -> str | None:
-        id_ = json_lib.loads(self.value).get("id", {})
-        return id_.get("drvHash") if isinstance(id_, dict) else None
+    drv_hash: str = PydanticField(alias="drvHash")
+    output_name: str = PydanticField(alias="outputName")
 
-    @property
-    def id_output_name(self) -> str | None:
-        id_ = json_lib.loads(self.value).get("id", {})
-        return id_.get("outputName") if isinstance(id_, dict) else None
 
-    @property
-    def signatures(self) -> list[str]:
-        return json_lib.loads(self.value).get("signatures", [])
+class WireRealisation(WireMessage):
+    """A Realisation on the Nix daemon wire.
+
+    Wire format: length-prefixed UTF-8 containing a JSON object.
+    Uses from_json/to_json for both wire and JSON serde, so Pydantic
+    validation applies uniformly.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
+
+    id: WireDrvOutput | None = PydanticField(default=None)
+    out_path: WireStorePath | None = PydanticField(default=None, alias="outPath")
+    signatures: list[str] = PydanticField(default_factory=list)
+    dependent_realisations: dict[str, str] = PydanticField(default_factory=dict, alias="dependentRealisations")
 
     @classmethod
-    def from_parts(
-        cls,
-        out_path: str | None = None,
-        drv_hash: str | None = None,
-        output_name: str | None = None,
-        signatures: list[str] | None = None,
-    ) -> WireRealisation:
-        data: dict[str, Any] = {}
-        if out_path:
-            data["outPath"] = str(out_path)
-        if drv_hash or output_name:
-            id_: dict[str, str] = {}
-            if drv_hash:
-                id_["drvHash"] = str(drv_hash)
-            if output_name:
-                id_["outputName"] = str(output_name)
-            data["id"] = id_
-        if signatures:
-            data["signatures"] = list(signatures)
-        return cls(value=json_lib.dumps(data))
+    async def from_reader(cls, ctx: ReadContext):
+        raw = await ctx.reader.read_string(str)
+        return cls.from_json(raw)
+
+    async def to_writer(self, ctx: WriteContext) -> None:
+        ctx.writer.write_string(self.to_json())
+
+    def to_json(self, **kwargs) -> str:
+        kwargs.setdefault("by_alias", True)
+        return self.model_dump_json(**kwargs)
 
 
 class WireOptMicroseconds(WireMessage):

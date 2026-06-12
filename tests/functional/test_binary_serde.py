@@ -18,6 +18,7 @@ from pynixd.operations.query_path_info import QueryPathInfoResponse
 from pynixd.serde import (
     WireBuildDerivationResponse,
     WireBuildResult,
+    WireDrvOutput,
     WireMessage,
     WireOptMicroseconds,
     WirePathInfo,
@@ -507,16 +508,15 @@ async def test_wire_version_exclude_unset():
 
 
 async def test_wire_realisation_roundtrip():
-    """Roundtrip WireRealisation — JSON blob sent as a string on the wire."""
-    r = WireRealisation.from_parts(
-        out_path="/nix/store/foo",
-        drv_hash="sha256:abc",
-        output_name="out",
+    """Roundtrip WireRealisation — JSON blob with proper Pydantic fields."""
+    r = WireRealisation(
+        id=WireDrvOutput(drv_hash="sha256:abc", output_name="out"),  # pyright: ignore[reportCallIssue]
+        out_path=WireStorePath(value="/nix/store/foo"),  # pyright: ignore[reportCallIssue]
         signatures=["sig1", "sig2"],
+        dependent_realisations={"sha256:xyz!out": "/nix/store/bar"},  # pyright: ignore[reportCallIssue]
     )
-    assert r.out_path == "/nix/store/foo"
-    assert r.id_drv_hash == "sha256:abc"
-    assert r.id_output_name == "out"
+    assert r.out_path == WireStorePath(value="/nix/store/foo")  # pyright: ignore[reportAttributeAccessIssue]
+    assert r.id == WireDrvOutput(drv_hash="sha256:abc", output_name="out")  # pyright: ignore[reportCallIssue, reportAttributeAccessIssue]
     assert r.signatures == ["sig1", "sig2"]
 
     # Wire roundtrip
@@ -524,12 +524,12 @@ async def test_wire_realisation_roundtrip():
     await r.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
     wm = await WireRealisation.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
-    assert wm.out_path == r.out_path
-    assert wm.signatures == r.signatures
+    assert wm.out_path == r.out_path  # pyright: ignore[reportAttributeAccessIssue]
+    assert wm.id == r.id  # pyright: ignore[reportAttributeAccessIssue]
 
-    # JSON roundtrip — WireString JSON is the value encoded as a JSON string
+    # JSON roundtrip — camelCase keys (Nix wire format)
     json_str = r.to_json()
-    assert json_str == json_lib.dumps(r.value)
-    # Parse the inner JSON to access fields
-    parsed = json_lib.loads(r.value)
+    parsed = json_lib.loads(json_str)
     assert parsed["outPath"] == "/nix/store/foo"
+    assert parsed["id"]["drvHash"] == "sha256:abc"
+    assert parsed["id"]["outputName"] == "out"

@@ -7,6 +7,9 @@ from .types import (
     WireBuildResult as WireBuildResult,
 )
 from .types import (
+    WireDrvOutput as WireDrvOutput,
+)
+from .types import (
     WireOptMicroseconds as WireOptMicroseconds,
 )
 from .types import (
