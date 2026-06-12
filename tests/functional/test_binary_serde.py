@@ -6,7 +6,14 @@ from io import BytesIO
 
 import pytest
 
-from pynixd._binary import Conditional, WireBuildDerivationResponse, WireBuildResult, WireMessage, WireStorePath
+from pynixd._binary import (
+    WireBuildDerivationResponse,
+    WireBuildResult,
+    WireMessage,
+    WirePathInfo,
+    WireQueryPathInfoResponse,
+    WireStorePath,
+)
 from pynixd.constants import proto
 from pynixd.derived_path import DerivedPath
 from pynixd.operations.build_paths import BuildPathsRequest
@@ -177,8 +184,7 @@ class PathInfo(WireMessage):
     ca: str
 
 
-class QueryPathInfoResp(WireMessage):
-    info: Conditional[PathInfo]
+# QueryPathInfoResp replaced by WireQueryPathInfoResponse from _binary
 
 
 async def test_query_path_info_response_roundtrip():
@@ -201,37 +207,37 @@ async def test_query_path_info_response_roundtrip():
 
     r = _R(data)
     await r.read_uint64()  # skip logs (STDERR_LAST)
-    wm = await QueryPathInfoResp.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+    wm = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
 
-    assert wm.info.is_present
-    assert wm.info.value is not None
-    assert wm.info.value.deriver == "/nix/store/deriver.drv"
-    assert wm.info.value.nar_hash == "abc123"  # sha256: stripped on wire
-    assert len(wm.info.value.references) == 2
-    assert "/nix/store/ref1" in wm.info.value.references
-    assert "/nix/store/ref2" in wm.info.value.references
-    assert wm.info.value.registration_time == 12345678
-    assert wm.info.value.nar_size == 4096
-    assert wm.info.value.ultimate == 1
-    assert len(wm.info.value.sigs) == 2
-    assert "sig1" in wm.info.value.sigs
-    assert wm.info.value.ca == "fixed:r:sha256:xyz"
+    assert wm.valid
+    assert wm.info is not None
+    assert wm.info.deriver == "/nix/store/deriver.drv"
+    assert wm.info.nar_hash == "abc123"  # sha256: stripped on wire
+    assert len(wm.info.references) == 2
+    assert "/nix/store/ref1" in wm.info.references
+    assert "/nix/store/ref2" in wm.info.references
+    assert wm.info.registration_time == 12345678
+    assert wm.info.nar_size == 4096
+    assert wm.info.ultimate == 1
+    assert len(wm.info.sigs) == 2
+    assert "sig1" in wm.info.sigs
+    assert wm.info.ca == "fixed:r:sha256:xyz"
 
     # WireMessage → bytes → WireMessage
     buf2 = BytesIO()
     await wm.serialize(WriteContext(writer=_W(buf2), version=1))  # type: ignore[arg-type]
     data2 = buf2.getvalue()
-    wm2 = await QueryPathInfoResp.deserialize(ReadContext(reader=_R(data2), version=1))  # type: ignore[arg-type]
-    assert wm2.info.is_present
-    assert wm2.info.value is not None
-    assert wm2.info.value.deriver == wm.info.value.deriver
-    assert wm2.info.value.nar_hash == wm.info.value.nar_hash
-    assert wm2.info.value.references == wm.info.value.references
-    assert wm2.info.value.registration_time == wm.info.value.registration_time
-    assert wm2.info.value.nar_size == wm.info.value.nar_size
-    assert wm2.info.value.ultimate == wm.info.value.ultimate
-    assert wm2.info.value.sigs == wm.info.value.sigs
-    assert wm2.info.value.ca == wm.info.value.ca
+    wm2 = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=_R(data2), version=1))  # type: ignore[arg-type]
+    assert wm2.valid
+    assert wm2.info is not None
+    assert wm2.info.deriver == wm.info.deriver
+    assert wm2.info.nar_hash == wm.info.nar_hash
+    assert wm2.info.references == wm.info.references
+    assert wm2.info.registration_time == wm.info.registration_time
+    assert wm2.info.nar_size == wm.info.nar_size
+    assert wm2.info.ultimate == wm.info.ultimate
+    assert wm2.info.sigs == wm.info.sigs
+    assert wm2.info.ca == wm.info.ca
 
     # Invalid response (no info): original → Pydantic
     orig2 = QueryPathInfoResponse(info=None)
@@ -241,9 +247,9 @@ async def test_query_path_info_response_roundtrip():
 
     r2 = _R(data3)
     await r2.read_uint64()  # skip logs (STDERR_LAST)
-    wm3 = await QueryPathInfoResp.deserialize(ReadContext(reader=r2, version=1))  # type: ignore[arg-type]
-    assert not wm3.info.is_present
-    assert wm3.info.value is None
+    wm3 = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r2, version=1))  # type: ignore[arg-type]
+    assert not wm3.valid
+    assert wm3.info is None
 
 
 class ReqWithStorePath(WireMessage):
@@ -288,8 +294,8 @@ async def test_wire_build_result_roundtrip():
         stop_time=1000500,
         built_outputs={"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'},
     )
-    br.cpu_user = Conditional(50000)
-    br.cpu_system = Conditional(10000)
+    br.cpu_user = 50000
+    br.cpu_system = 10000
 
     # Wire → bytes
     buf = BytesIO()
@@ -303,10 +309,8 @@ async def test_wire_build_result_roundtrip():
     assert wm.start_time == 1000000
     assert wm.stop_time == 1000500
     assert wm.built_outputs == {"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'}
-    assert wm.cpu_user.is_present
-    assert wm.cpu_user.value == 50000
-    assert wm.cpu_system.is_present
-    assert wm.cpu_system.value == 10000
+    assert wm.cpu_user == 50000
+    assert wm.cpu_system == 10000
 
     # Full roundtrip
     buf2 = BytesIO()
@@ -314,7 +318,7 @@ async def test_wire_build_result_roundtrip():
     wm2 = await WireBuildResult.deserialize(ReadContext(reader=_R(buf2.getvalue()), version=proto(1, 38)))  # type: ignore[arg-type]
     assert wm2.times_built == wm.times_built
     assert wm2.start_time == wm.start_time
-    assert wm2.cpu_user.value == wm.cpu_user.value
+    assert wm2.cpu_user == wm.cpu_user
 
 
 async def test_wire_build_result_version_27():
@@ -330,8 +334,8 @@ async def test_wire_build_result_version_27():
     assert wm.times_built is None
     assert wm.start_time is None
     assert wm.built_outputs is None
-    assert not wm.cpu_user.is_present
-    assert not wm.cpu_system.is_present
+    assert wm.cpu_user is None
+    assert wm.cpu_system is None
 
 
 async def test_wire_build_derivation_response_roundtrip():
@@ -345,7 +349,7 @@ async def test_wire_build_derivation_response_roundtrip():
         stop_time=200,
         built_outputs={"out": "/nix/store/xxx-foo"},
     )
-    br.cpu_user = Conditional(50000)
+    br.cpu_user = 50000
     resp = WireBuildDerivationResponse(result=br)
 
     buf = BytesIO()
@@ -355,11 +359,11 @@ async def test_wire_build_derivation_response_roundtrip():
     wm = await WireBuildDerivationResponse.deserialize(ReadContext(reader=_R(data), version=proto(1, 38)))  # type: ignore[arg-type]
     assert wm.result.status == 0
     assert wm.result.times_built == 1
-    assert wm.result.cpu_user.value == 50000
+    assert wm.result.cpu_user == 50000
 
 
 async def test_wire_build_result_json_roundtrip():
-    """WireBuildResult JSON roundtrip (exercises Conditional + dict + primitives)."""
+    """WireBuildResult JSON roundtrip (exercises wire_conditional + dict + primitives)."""
     br = WireBuildResult(
         status=0,
         error_msg="",
@@ -369,8 +373,8 @@ async def test_wire_build_result_json_roundtrip():
         stop_time=1000500,
         built_outputs={"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'},
     )
-    br.cpu_user = Conditional(50000)
-    br.cpu_system = Conditional(None)
+    br.cpu_user = 50000
+    br.cpu_system = None
 
     # to_json
     data = br.to_json()
@@ -389,9 +393,8 @@ async def test_wire_build_result_json_roundtrip():
     assert br2.times_built == 1
     assert br2.start_time == 1000000
     assert br2.built_outputs == {"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'}
-    assert br2.cpu_user.is_present
-    assert br2.cpu_user.value == 50000
-    assert not br2.cpu_system.is_present
+    assert br2.cpu_user == 50000
+    assert br2.cpu_system is None
 
 
 async def test_wire_store_path_json():
@@ -415,15 +418,15 @@ async def test_wire_store_path_json():
 
 
 async def test_wire_build_result_json_null_conditional():
-    """Conditional not present → null in JSON."""
+    """wire_conditional not present → null in JSON."""
     br = WireBuildResult(status=0, error_msg="")
-    # cpu_user is Conditional(None) by default
-    assert not br.cpu_user.is_present
+    # cpu_user is None by default
+    assert br.cpu_user is None
 
     json_str = br.to_json()
     assert '"cpu_user":null' in json_str
     assert '"cpu_system":null' in json_str
 
     wm = WireBuildResult.from_json(json_str)
-    assert not wm.cpu_user.is_present  # pyright: ignore[reportAttributeAccessIssue]
-    assert not wm.cpu_system.is_present  # pyright: ignore[reportAttributeAccessIssue]
+    assert wm.cpu_user is None  # pyright: ignore[reportAttributeAccessIssue]
+    assert wm.cpu_system is None  # pyright: ignore[reportAttributeAccessIssue]

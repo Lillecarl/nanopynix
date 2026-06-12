@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import types
+from collections.abc import Callable  # noqa: TC003
 from dataclasses import dataclass
 from typing import Any, ClassVar, get_args, get_origin, get_type_hints
 
@@ -39,9 +40,15 @@ register_type(
     reader=lambda r: r.read_uint64(),
     writer=lambda v, w: w.write_uint64(v),
 )
+
+
+async def _read_bool(r):
+    return bool(await r.read_uint64())
+
+
 register_type(
     bool,
-    reader=lambda r: bool(r.read_uint64()),
+    reader=_read_bool,
     writer=lambda v, w: w.write_uint64(1 if v else 0),
 )
 register_type(
@@ -88,80 +95,36 @@ register_type(
 )
 
 
-# ── Conditional type ──
+# ── Helpers ──
 
 
-class Conditional[T]:
-    """A protocol field present only when ``valid=true`` on the wire.
+def _find_reader(ann: type, version: int = 0) -> Any:
+    """Look up a reader for a wire type, including nested WireMessage."""
+    reader = _READERS.get(ann)
+    if reader is not None:
+        return reader
+    if isinstance(ann, type) and issubclass(ann, WireMessage):
 
-    Usage::
+        async def _read_nested(r):
+            return await ann.deserialize(ReadContext(reader=r, version=version))
 
-        class MyResponse(WireMessage):
-            info: Conditional[PathInfo]
-
-    On the wire this reads/writes a ``uint64`` validity flag followed by
-    the inner type's fields when present.
-    """
-
-    def __init__(self, value: T | None = None):
-        self.value = value
-
-    @property
-    def is_present(self) -> bool:
-        return self.value is not None
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> Any:
-        """Pydantic core schema for JSON serialization.
-
-        ``Conditional[T]`` is transparent in JSON:
-        - present → the inner value
-        - not present → ``null``
-        """
-        from pydantic_core import core_schema
-
-        inner_type = source_type.__args__[0]
-        inner_schema = handler(inner_type)
-
-        def validate(value: Any, handler) -> Conditional:
-            if isinstance(value, Conditional):
-                return value
-            if value is None:
-                return Conditional(None)
-            return Conditional(handler(value))
-
-        def serialize(value: Any) -> Any:
-            if isinstance(value, Conditional) and value.is_present:
-                return value.value
-            return None
-
-        return core_schema.no_info_wrap_validator_function(
-            validate,
-            inner_schema,
-            serialization=core_schema.plain_serializer_function_ser_schema(
-                serialize,
-                return_schema=core_schema.any_schema(),
-            ),
-        )
+        return _read_nested
+    raise TypeError(f"No reader registered for {ann}")
 
 
-# ── Nested model registry ──
-
-
-def register_nested_model(model_cls: type[WireMessage]) -> None:
-    """Register a WireMessage subclass as a serializable nested type.
-
-    Wraps the model's ``serialize``/``deserialize`` into the type
-    registry so it can be used as an inner type of ``Conditional[T]``.
-    """
-
-    async def _read_nested(r):
-        return await model_cls.deserialize(ReadContext(reader=r, version=0))
-
-    def _write_nested(v, w):
-        return v.serialize(WriteContext(writer=w, version=0))
-
-    register_type(model_cls, _read_nested, _write_nested)
+async def _write_value(val: Any, ann: type, ctx: WriteContext) -> None:
+    """Write a value to the wire using the registered writer or nested serialization."""
+    writer = _WRITERS.get(ann)
+    if writer is not None:
+        result = writer(val, ctx.writer)
+        if asyncio.iscoroutine(result):
+            await result
+    elif isinstance(ann, type) and issubclass(ann, WireMessage):
+        result = val.serialize(ctx)
+        if asyncio.iscoroutine(result):
+            await result
+    else:
+        raise TypeError(f"No writer for {ann}")
 
 
 # ── Version-constrained fields ──
@@ -173,6 +136,8 @@ class VersionMeta:
 
     min_version: int | None = None
     max_version: int | None = None
+    wire_conditional: bool = False
+    wire_depends_on: Callable | None = None
 
 
 def WireField(  # noqa: N802
@@ -181,6 +146,8 @@ def WireField(  # noqa: N802
     default_factory: Any = None,
     min_version: int | None = None,
     max_version: int | None = None,
+    wire_conditional: bool = False,
+    wire_depends_on: Callable | None = None,
     **kwargs: Any,
 ) -> Any:
     """A Pydantic Field with Nix protocol version requirements.
@@ -196,15 +163,15 @@ def WireField(  # noqa: N802
         kwargs["default_factory"] = default_factory
 
     field_info = PydanticField(**kwargs)
-    field_info.metadata.append(VersionMeta(min_version, max_version))
+    field_info.metadata.append(VersionMeta(min_version, max_version, wire_conditional, wire_depends_on))
     return field_info
 
 
 # ── Field collection ──
 
 
-def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple[str, type, bool]]:
-    """Return (name, type, is_conditional) triples in declaration order.
+def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple[str, type, bool, Callable | None]]:
+    """Return (name, type, is_conditional, wire_depends_on) tuples in declaration order.
 
     ClassVar fields are skipped.
 
@@ -216,14 +183,13 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
     returned (e.g. ``set``) rather than the parameterized form, so the
     registry lookup can match on the bare type.
 
-    For ``Conditional[T]``, the inner type ``T`` is returned with
-    ``is_conditional=True``.
+    The ``is_conditional`` flag is set from ``VersionMeta.wire_conditional``,
+    not from the type annotation.
     """
     hints = get_type_hints(cls, include_extras=True)
     result = []
     for name in cls.model_fields:
         field = cls.model_fields[name]
-        # Extract VersionMeta from field metadata
         version_meta = next((m for m in field.metadata if isinstance(m, VersionMeta)), None)
         if version_meta is not None:
             if version_meta.min_version is not None and version is not None and version < version_meta.min_version:
@@ -246,16 +212,12 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
                 origin = get_origin(ann)
             # if 0 or >1 non-None args, leave ann as-is (will fail registry lookup)
 
-        if origin is Conditional:
-            # Extract inner type for registry lookup; mark as conditional
-            result.append((name, get_args(ann)[0], True))
-            continue
-        if origin is not None:
-            # Generic type like set[str] → use origin (set)
-            result.append((name, origin, False))
-        else:
-            # Plain type like int, str, bool
-            result.append((name, ann, False))
+        # is_conditional from metadata, NOT from type annotation
+        is_conditional = version_meta is not None and version_meta.wire_conditional
+        wire_depends_on = version_meta.wire_depends_on if version_meta else None
+
+        resolved = origin if origin is not None else ann
+        result.append((name, resolved, is_conditional, wire_depends_on))
     return result
 
 
@@ -275,75 +237,55 @@ class WireMessage(BaseModel):
 
     async def serialize(self, ctx: WriteContext) -> None:
         """Write all non-ClassVar fields in declaration order."""
-        for name, ann, is_conditional in _wire_fields(type(self), version=ctx.version):
-            if is_conditional:
-                val = getattr(self, name)
-                ctx.writer.write_uint64(1 if val.is_present else 0)
-                if val.is_present:
-                    inner_writer = _WRITERS.get(ann)
-                    if inner_writer is not None:
-                        result = inner_writer(val.value, ctx.writer)
-                        if asyncio.iscoroutine(result):
-                            await result
-                    elif isinstance(ann, type) and issubclass(ann, WireMessage):
-                        result = val.value.serialize(ctx)
-                        if asyncio.iscoroutine(result):
-                            await result
-                    else:
-                        raise TypeError(f"No writer registered for {ann} in {type(self).__name__}.{name}")
+        for name, ann, is_conditional, wire_depends_on in _wire_fields(type(self), version=ctx.version):
+            # Check wire_depends_on — skip field if dependency is False
+            if wire_depends_on is not None and not wire_depends_on(self):
                 continue
 
-            writer = _WRITERS.get(ann)
-            if writer is not None:
-                result = writer(getattr(self, name), ctx.writer)
-                if asyncio.iscoroutine(result):
-                    await result
-            elif isinstance(ann, type) and issubclass(ann, WireMessage):
-                result = getattr(self, name).serialize(ctx)
-                if asyncio.iscoroutine(result):
-                    await result
-            else:
-                raise TypeError(f"No writer registered for {ann} in {type(self).__name__}.{name}")
+            val = getattr(self, name)
+            if is_conditional:
+                ctx.writer.write_uint64(1 if val is not None else 0)
+                if val is not None:
+                    await _write_value(val, ann, ctx)
+                continue
+
+            await _write_value(val, ann, ctx)
 
     @classmethod
     async def deserialize(cls, ctx: ReadContext):
         """Read all non-ClassVar fields in declaration order."""
-        kwargs = {}
-        for name, ann, is_conditional in _wire_fields(cls, version=ctx.version):
-            if is_conditional:
-                reader = _READERS.get(ann)
-                if reader is not None:
-                    valid = await ctx.reader.read_uint64()
-                    if valid:
-                        kwargs[name] = Conditional(await reader(ctx.reader))
-                    else:
-                        kwargs[name] = Conditional(None)
-                elif isinstance(ann, type) and issubclass(ann, WireMessage):
-                    valid = await ctx.reader.read_uint64()
-                    if valid:
-                        inner = await ann.deserialize(ReadContext(reader=ctx.reader, version=ctx.version))
-                        kwargs[name] = Conditional(inner)
-                    else:
-                        kwargs[name] = Conditional(None)
-                else:
-                    raise TypeError(f"No reader registered for {ann} in {cls.__name__}.{name}")
+        obj = cls.__new__(cls)
+        # Initialize Pydantic internals (bypassed __init__)
+        object.__setattr__(obj, "__pydantic_fields_set__", set())
+        object.__setattr__(obj, "__pydantic_extra__", None)
+        object.__setattr__(obj, "__pydantic_private__", None)
+        # Set defaults for version-conditional and wire-conditional fields
+        for name, field in cls.model_fields.items():
+            if field.default is not PydanticUndefined:
+                object.__setattr__(obj, name, field.default)
+
+        for name, ann, is_conditional, wire_depends_on in _wire_fields(cls, version=ctx.version):
+            # Check wire_depends_on — skip field if dependency is False
+            if wire_depends_on is not None and not wire_depends_on(obj):
                 continue
 
-            reader = _READERS.get(ann)
-            if reader is not None:
-                kwargs[name] = await reader(ctx.reader)
-            elif isinstance(ann, type) and issubclass(ann, WireMessage):
-                kwargs[name] = await ann.deserialize(ReadContext(reader=ctx.reader, version=ctx.version))
-            else:
-                raise TypeError(f"No reader registered for {ann} in {cls.__name__}.{name}")
-        return cls(**kwargs)
+            if is_conditional:
+                reader = _find_reader(ann, version=ctx.version)
+                valid = await ctx.reader.read_uint64()
+                if valid:
+                    object.__setattr__(obj, name, await reader(ctx.reader))
+                # else: already set to None by default above
+                continue
+
+            reader = _find_reader(ann, version=ctx.version)
+            object.__setattr__(obj, name, await reader(ctx.reader))
+
+        return obj
 
     def to_json(self, **kwargs) -> str:
         """Serialize to JSON string.
 
-        Uses Pydantic's ``model_dump_json`` with ``arbitrary_types_allowed``
-        serialization handled by ``Conditional.__get_pydantic_core_schema__``
-        and similar.
+        Uses Pydantic's ``model_dump_json``.
         """
         return self.model_dump_json(**kwargs)
 
@@ -402,7 +344,7 @@ class WireBuildResult(WireMessage):
     Fields present based on protocol version:
     - All versions: status, error_msg
     - >= 1.29: times_built, is_non_deterministic, start_time, stop_time
-    - >= 1.37: cpu_user, cpu_system (Conditional[int])
+    - >= 1.37: cpu_user, cpu_system (wire_conditional)
     - >= 1.28: built_outputs (dict[str, str])
     """
 
@@ -415,9 +357,9 @@ class WireBuildResult(WireMessage):
     start_time: int | None = WireField(default=None, min_version=proto(1, 29))
     stop_time: int | None = WireField(default=None, min_version=proto(1, 29))
 
-    # Protocol 1.37 fields
-    cpu_user: Conditional[int] = WireField(default=Conditional(None), min_version=proto(1, 37))
-    cpu_system: Conditional[int] = WireField(default=Conditional(None), min_version=proto(1, 37))
+    # Protocol 1.37 fields — wire_conditional: own validity flag on wire
+    cpu_user: int | None = WireField(default=None, min_version=proto(1, 37), wire_conditional=True)
+    cpu_system: int | None = WireField(default=None, min_version=proto(1, 37), wire_conditional=True)
 
     # Protocol 1.28 fields
     built_outputs: dict[str, str] | None = WireField(default=None, min_version=proto(1, 28))
@@ -427,3 +369,26 @@ class WireBuildDerivationResponse(WireMessage):
     """BuildDerivation response — a BuildResult wrapped in the response body."""
 
     result: WireBuildResult
+
+
+class WirePathInfo(WireMessage):
+    """Wire mirror of UnkeyedValidPathInfo."""
+
+    deriver: str
+    nar_hash: str
+    references: set[str]
+    registration_time: int
+    nar_size: int
+    ultimate: int
+    sigs: set[str]
+    ca: str
+
+
+class WireQueryPathInfoResponse(WireMessage):
+    """QueryPathInfo response — info depends on valid flag."""
+
+    valid: bool
+    info: WirePathInfo | None = WireField(
+        default=None,
+        wire_depends_on=lambda self: self.valid,
+    )
