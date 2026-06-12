@@ -6,15 +6,6 @@ from io import BytesIO
 
 import pytest
 
-from pynixd._binary import (
-    WireBuildDerivationResponse,
-    WireBuildResult,
-    WireMessage,
-    WireOptMicroseconds,
-    WirePathInfo,
-    WireQueryPathInfoResponse,
-    WireStorePath,
-)
 from pynixd.constants import PROTOCOL_VERSION, proto
 from pynixd.derived_path import DerivedPath
 from pynixd.operations.build_paths import BuildPathsRequest
@@ -23,6 +14,15 @@ from pynixd.operations.is_valid_path import (
     IsValidPathResponse,
 )
 from pynixd.operations.query_path_info import QueryPathInfoResponse
+from pynixd.serde import (
+    WireBuildDerivationResponse,
+    WireBuildResult,
+    WireMessage,
+    WireOptMicroseconds,
+    WirePathInfo,
+    WireQueryPathInfoResponse,
+    WireStorePath,
+)
 from pynixd.store_path import StorePath
 from pynixd.types import BuildMode
 from pynixd.types.context import ReadContext, WriteContext
