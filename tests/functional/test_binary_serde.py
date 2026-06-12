@@ -430,3 +430,70 @@ async def test_wire_build_result_json_null_conditional():
     wm = WireBuildResult.from_json(json_str)
     assert wm.cpu_user is None  # pyright: ignore[reportAttributeAccessIssue]
     assert wm.cpu_system is None  # pyright: ignore[reportAttributeAccessIssue]
+
+
+async def test_wire_depends_on_exclude_unset_valid():
+    """When valid=True, info IS set from wire — appears in JSON even with exclude_unset."""
+    info = UnkeyedValidPathInfo(
+        deriver=StorePath("/nix/store/deriver.drv"),
+        nar_hash="sha256:abc123",
+        references={StorePath("/nix/store/ref1")},
+    )
+    orig = QueryPathInfoResponse(info=info)
+    buf = BytesIO()
+    await orig.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    data = buf.getvalue()
+    r = _R(data)
+    await r.read_uint64()  # skip logs
+    wm = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+
+    assert wm.valid is True
+    json_str = wm.to_json(exclude_unset=True)
+    assert '"valid":true' in json_str
+    assert '"info":' in json_str  # info was read from wire → set field
+
+
+async def test_wire_depends_on_exclude_unset_invalid():
+    """When valid=False, info is skipped by wire_depends_on — absent from JSON with exclude_unset."""
+    orig = QueryPathInfoResponse(info=None)
+    buf = BytesIO()
+    await orig.serialize(WriteContext(writer=_W(buf), version=1))  # type: ignore[arg-type]
+    data = buf.getvalue()
+    r = _R(data)
+    await r.read_uint64()  # skip logs
+    wm = await WireQueryPathInfoResponse.deserialize(ReadContext(reader=r, version=1))  # type: ignore[arg-type]
+
+    assert wm.valid is False
+    json_str = wm.to_json(exclude_unset=True)
+    assert '"valid":false' in json_str
+    assert '"info"' not in json_str  # info never read from wire → unset field
+
+
+async def test_wire_version_exclude_unset():
+    """Version-skipped fields don't appear in JSON with exclude_unset."""
+    # Serialize at 1.38 — first serialize a full result so all fields are written
+    # (version-gated fields can't be None at their required wire version)
+    br = WireBuildResult(
+        status=0,
+        error_msg="ok",
+        times_built=1,
+        is_non_deterministic=0,
+        start_time=100,
+        stop_time=200,
+        built_outputs={},
+    )
+    buf = BytesIO()
+    await br.serialize(WriteContext(writer=_W(buf), version=proto(1, 38)))  # type: ignore[arg-type]
+    data = buf.getvalue()
+    # Deserialize at version 1.27 — all version-gated fields are skipped
+    wm = await WireBuildResult.deserialize(ReadContext(reader=_R(data), version=proto(1, 27)))  # type: ignore[arg-type]
+    assert wm.status == 0
+
+    # At 1.27, only status+error_msg on the wire → only those are "set"
+    json_str = wm.to_json(exclude_unset=True)
+    assert '"status":0' in json_str
+    assert '"error_msg":"ok"' in json_str
+    assert '"times_built"' not in json_str  # version-skipped
+    assert '"start_time"' not in json_str  # version-skipped
+    assert '"cpu_user"' not in json_str  # version-skipped
+    assert '"built_outputs"' not in json_str  # version-skipped
