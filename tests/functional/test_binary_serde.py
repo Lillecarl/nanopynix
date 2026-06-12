@@ -533,3 +533,21 @@ async def test_wire_realisation_roundtrip():
     assert parsed["outPath"] == "/nix/store/foo"
     assert parsed["id"]["drvHash"] == "sha256:abc"
     assert parsed["id"]["outputName"] == "out"
+
+
+class TypedCollections(WireMessage):
+    paths: set[WireStorePath]
+    mapping: dict[str, WireStorePath]
+
+
+async def test_typed_collections_roundtrip():
+    """Roundtrip typed collections — generics handled by _find_reader/_write_value."""
+    m = TypedCollections(
+        paths={WireStorePath(value="/nix/store/a"), WireStorePath(value="/nix/store/b")},  # pyright: ignore[reportUnhashable]
+        mapping={"key1": WireStorePath(value="/nix/store/x")},
+    )
+    buf = BytesIO()
+    await m.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm = await TypedCollections.from_reader(ReadContext(reader=_R(buf.getvalue()), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    assert wm.paths == m.paths
+    assert wm.mapping == m.mapping

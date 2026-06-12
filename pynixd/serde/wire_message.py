@@ -61,69 +61,129 @@ register_type(
     writer=lambda v, w: w.write_bytes(v),
 )
 
-# set[str] — wire format is count + N strings
-register_type(
-    set,
-    reader=lambda r: r.read_string_set(str),
-    writer=lambda v, w: w.write_string_set(v),
-)
-
-
-# dict[str, str] — wire format is count + N key-value string pairs
-async def _read_str_dict(r):
-    n = await r.read_uint64()
-    result = {}
-    for _ in range(n):
-        k = await r.read_string(str)
-        v = await r.read_string(str)
-        result[k] = v
-    return result
-
-
-def _write_str_dict(v, w):
-    w.write_uint64(len(v))
-    for k, val in v.items():
-        w.write_string(k)
-        w.write_string(val)
-
-
-register_type(
-    dict,
-    reader=_read_str_dict,
-    writer=_write_str_dict,
-)
-
 
 # ── Helpers ──
 
 
 def _find_reader(ann: type, version: int = 0) -> Any:
-    """Look up a reader for a wire type, including nested WireMessage."""
+    """Look up a reader for a wire type.
+
+    Handles, in order:
+      1. Direct registry hit (int, str, bool, bytes)
+      2. Optional[T] — strip None, delegate to inner type
+      3. list[T] — read count + N elements
+      4. set[T] — read count + N elements
+      5. dict[K, V] — read count + N key-value pairs
+      6. WireMessage subclass — dispatch to ``from_reader``
+    """
     reader = _READERS.get(ann)
     if reader is not None:
         return reader
+
+    origin = get_origin(ann)
+    args = get_args(ann)
+
+    # Optional[T] — strip None, delegate to inner
+    if origin is types.UnionType:
+        non_none = tuple(a for a in args if a is not type(None))
+        if len(non_none) == 1:
+            return _find_reader(non_none[0], version)
+
+    # -- list generics --
+    if origin is list:
+        elem = _find_reader(args[0], version)
+
+        async def _read_list(r):
+            n = await r.read_uint64()
+            return [await elem(r) for _ in range(n)]
+
+        return _read_list
+
+    # -- set generics --
+    if origin is set:
+        elem = _find_reader(args[0], version)
+
+        async def _read_set(r):
+            n = await r.read_uint64()
+            return {await elem(r) for _ in range(n)}
+
+        return _read_set
+
+    # -- dict generics --
+    if origin is dict:
+        k_reader = _find_reader(args[0], version)
+        v_reader = _find_reader(args[1], version)
+
+        async def _read_dict(r):
+            n = await r.read_uint64()
+            d = {}
+            for _ in range(n):
+                key = await k_reader(r)
+                val = await v_reader(r)
+                d[key] = val
+            return d
+
+        return _read_dict
+
+    # WireMessage subclass
     if isinstance(ann, type) and issubclass(ann, WireMessage):
 
         async def _read_nested(r):
             return await ann.from_reader(ReadContext(reader=r, version=version))
 
         return _read_nested
-    raise TypeError(f"No reader registered for {ann}")
+
+    raise TypeError(f"No reader for {ann}")
 
 
 async def _write_value(val: Any, ann: type, ctx: WriteContext) -> None:
-    """Write a value to the wire using the registered writer or nested serialization."""
+    """Write a value to the wire using registered writer, generics, or nested serialization."""
     writer = _WRITERS.get(ann)
     if writer is not None:
         result = writer(val, ctx.writer)
         if asyncio.iscoroutine(result):
             await result
-    elif isinstance(ann, type) and issubclass(ann, WireMessage):
+        return None
+
+    origin = get_origin(ann)
+    args = get_args(ann)
+
+    # Optional[T] — delegate to inner type (val should never be None on the wire)
+    if origin is types.UnionType:
+        non_none = tuple(a for a in args if a is not type(None))
+        if len(non_none) == 1:
+            return await _write_value(val, non_none[0], ctx)
+
+    # -- list generics --
+    if origin is list:
+        ctx.writer.write_uint64(len(val))
+        for item in val:
+            await _write_value(item, args[0], ctx)
+        return None
+
+    # -- set generics --
+    if origin is set:
+        ctx.writer.write_uint64(len(val))
+        for item in val:
+            await _write_value(item, args[0], ctx)
+        return None
+
+    # -- dict generics --
+    if origin is dict:
+        ctx.writer.write_uint64(len(val))
+        for k, v in val.items():
+            await _write_value(k, args[0], ctx)
+            await _write_value(v, args[1], ctx)
+        return None
+
+    # WireMessage subclass
+    if isinstance(ann, type) and issubclass(ann, WireMessage):
         result = val.to_writer(ctx)
         if asyncio.iscoroutine(result):
             await result
-    else:
-        raise TypeError(f"No writer for {ann}")
+        return None
+
+    raise TypeError(f"No writer for {ann}")
 
 
 # ── Version-constrained fields ──
@@ -168,7 +228,7 @@ def WireField(  # noqa: N802
 
 
 def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple[str, type, Callable | None]]:
-    """Return (name, type, wire_depends_on) tuples in declaration order.
+    """Return (name, raw_annotation, wire_depends_on) tuples in declaration order.
 
     ClassVar fields are skipped.
 
@@ -176,9 +236,9 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
     (set via :func:`WireField`) are filtered against the provided
     ``version``, enabling protocol-version-dependent serde.
 
-    For generic types (e.g. ``set[str]``) the resolved annotation type is
-    returned (e.g. ``set``) rather than the parameterized form, so the
-    registry lookup can match on the bare type.
+    Raw annotations (e.g. ``set[str]``, ``int | None``) are passed through
+    without stripping generics or Optional wrappers.  The resolution is
+    handled downstream by ``_find_reader`` / ``_write_value``.
     """
     hints = get_type_hints(cls, include_extras=True)
     result = []
@@ -194,22 +254,11 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
         ann = hints.get(name)
         if ann is None:
             continue
-        origin = get_origin(ann)
-        if origin is ClassVar:
+        if get_origin(ann) is ClassVar:
             continue
 
-        # Handle Optional[T] → T (strip None from union types)
-        if isinstance(ann, types.UnionType):
-            non_none = tuple(a for a in get_args(ann) if a is not type(None))
-            if len(non_none) == 1:
-                ann = non_none[0]
-                origin = get_origin(ann)
-            # if 0 or >1 non-None args, leave ann as-is (will fail registry lookup)
-
         wire_depends_on = version_meta.wire_depends_on if version_meta else None
-
-        resolved = origin if origin is not None else ann
-        result.append((name, resolved, wire_depends_on))
+        result.append((name, ann, wire_depends_on))
     return result
 
 
@@ -226,6 +275,9 @@ class WireMessage(BaseModel):
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def __hash__(self) -> int:
+        return hash(tuple(getattr(self, f) for f in self.model_fields))
 
     async def to_writer(self, ctx: WriteContext) -> None:
         """Write all non-ClassVar fields in declaration order."""
