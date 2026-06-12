@@ -106,7 +106,7 @@ def _find_reader(ann: type, version: int = 0) -> Any:
     if isinstance(ann, type) and issubclass(ann, WireMessage):
 
         async def _read_nested(r):
-            return await ann.deserialize(ReadContext(reader=r, version=version))
+            return await ann.from_reader(ReadContext(reader=r, version=version))
 
         return _read_nested
     raise TypeError(f"No reader registered for {ann}")
@@ -120,7 +120,7 @@ async def _write_value(val: Any, ann: type, ctx: WriteContext) -> None:
         if asyncio.iscoroutine(result):
             await result
     elif isinstance(ann, type) and issubclass(ann, WireMessage):
-        result = val.serialize(ctx)
+        result = val.to_writer(ctx)
         if asyncio.iscoroutine(result):
             await result
     else:
@@ -228,7 +228,7 @@ class WireMessage(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    async def serialize(self, ctx: WriteContext) -> None:
+    async def to_writer(self, ctx: WriteContext) -> None:
         """Write all non-ClassVar fields in declaration order."""
         for name, ann, wire_depends_on in _wire_fields(type(self), version=ctx.version):
             # Check wire_depends_on — skip field if dependency is False
@@ -239,7 +239,7 @@ class WireMessage(BaseModel):
             await _write_value(val, ann, ctx)
 
     @classmethod
-    async def deserialize(cls, ctx: ReadContext):
+    async def from_reader(cls, ctx: ReadContext):
         """Read all non-ClassVar fields in declaration order."""
         obj = cls.__new__(cls)
         # Initialize Pydantic internals (bypassed __init__)
@@ -339,7 +339,7 @@ class WireOptMicroseconds(WireMessage):
         return self.value is not None
 
     @classmethod
-    async def deserialize(cls, ctx: ReadContext):
+    async def from_reader(cls, ctx: ReadContext):
         tag = await ctx.reader.read_uint64()
         obj = cls.__new__(cls)
         object.__setattr__(obj, "__pydantic_fields_set__", set())
@@ -352,7 +352,7 @@ class WireOptMicroseconds(WireMessage):
             object.__setattr__(obj, "value", None)
         return obj
 
-    async def serialize(self, ctx: WriteContext) -> None:
+    async def to_writer(self, ctx: WriteContext) -> None:
         if self.value is not None:
             ctx.writer.write_uint64(1)
             ctx.writer.write_uint64(self.value)
