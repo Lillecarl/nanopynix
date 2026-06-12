@@ -2,52 +2,84 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import model_serializer, model_validator
 
 from ..constants import proto
 from .wire_message import WireField, WireMessage
 
+if TYPE_CHECKING:
+    from ..types.context import ReadContext, WriteContext
 
-class WireStorePath(WireMessage):
-    """A store path on the Nix daemon wire protocol.
 
-    Wire format: single length-prefixed UTF-8 string.
+class WireString(WireMessage):
+    """Base for wire types that serialize as a single string.
 
-    Usage::
+    Wire format:  [uint64 len][UTF-8 bytes]
+    JSON format:  "the-string" (plain string, not object)
 
-        class MyRequest(WireMessage):
-            path: WireStorePath  # auto-detected as WireMessage subtype
+    Subclasses override _parse (post-read transform) and _format
+    (pre-write transform). Auto-detected by WireMessage — no
+    manual registration needed.
     """
 
-    path: str
+    value: str
+
+    # ── Override points ──
+
+    @classmethod
+    def _parse(cls, raw: str) -> str:
+        """Transform raw wire value after reading. Default: identity."""
+        return raw
+
+    def _format(self) -> str:
+        """Transform before writing to wire. Default: identity."""
+        return self.value
+
+    # ── Equality ──
 
     def __str__(self) -> str:
-        return self.path
+        return self.value
 
     def __hash__(self) -> int:
-        return hash(self.path)
+        return hash(self.value)
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, WireStorePath):
-            return NotImplemented
-        return self.path == other.path
+        if isinstance(other, WireString):
+            return self.value == other.value
+        if isinstance(other, str):
+            return self.value == other
+        return NotImplemented
+
+    # ── Binary serde — single string, delegated through _parse/_format ──
+
+    @classmethod
+    async def from_reader(cls, ctx: ReadContext):
+        raw = await ctx.reader.read_string(str)
+        return cls.model_construct(value=cls._parse(raw))
+
+    async def to_writer(self, ctx: WriteContext) -> None:
+        ctx.writer.write_string(self._format())
+
+    # ── JSON serde — plain string ──
 
     @model_serializer
-    def ser_model(self) -> str:
-        """Serialize WireStorePath as a plain string in JSON."""
-        return self.path
+    def _ser(self) -> str:
+        return self.value
 
     @model_validator(mode="before")
     @classmethod
-    def from_str(cls, data: Any) -> Any:
-        """Deserialize WireStorePath from a plain string in JSON."""
+    def _val(cls, data: Any) -> Any:
         if isinstance(data, str):
-            return {"path": data}
+            return {"value": cls._parse(data)}
         if isinstance(data, cls):
             return data
         return data
+
+
+class WireStorePath(WireString):
+    """A store path — no custom parsing needed."""
 
 
 class WireOptMicroseconds(WireMessage):

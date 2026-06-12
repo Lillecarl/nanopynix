@@ -259,7 +259,7 @@ class ReqWithStorePath(WireMessage):
 
 async def test_wire_store_path_roundtrip():
     # Pydantic → bytes → Pydantic
-    sp = WireStorePath(path="/nix/store/abc-test")
+    sp = WireStorePath(value="/nix/store/abc-test")
     req = ReqWithStorePath(path=sp)
 
     buf = BytesIO()
@@ -273,7 +273,7 @@ async def test_wire_store_path_roundtrip():
     assert str(wm.path) == str(sp)
     assert wm.path == sp
     assert isinstance(wm.path, WireStorePath)
-    assert wm.path.path == "/nix/store/abc-test"
+    assert wm.path.value == "/nix/store/abc-test"
 
     # Pydantic → bytes → Pydantic (full roundtrip)
     buf2 = BytesIO()
@@ -404,7 +404,7 @@ async def test_wire_build_result_json_roundtrip():
 
 async def test_wire_store_path_json():
     """WireStorePath serdes as plain string in JSON."""
-    sp = WireStorePath(path="/nix/store/abc-test")
+    sp = WireStorePath(value="/nix/store/abc-test")
 
     class Req(WireMessage):
         path: WireStorePath
