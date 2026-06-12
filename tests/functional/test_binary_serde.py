@@ -510,13 +510,13 @@ async def test_wire_version_exclude_unset():
 async def test_wire_realisation_roundtrip():
     """Roundtrip WireRealisation — JSON blob with proper Pydantic fields."""
     r = WireRealisation(
-        id=WireDrvOutput(drv_hash="sha256:abc", output_name="out"),  # pyright: ignore[reportCallIssue]
-        out_path=WireStorePath(value="/nix/store/foo"),  # pyright: ignore[reportCallIssue]
+        id=WireDrvOutput(drvHash="sha256:abc", outputName="out"),  # pyright: ignore[reportCallIssue]
+        outPath=WireStorePath(value="/nix/store/foo"),  # type: ignore[arg-type]
         signatures=["sig1", "sig2"],
-        dependent_realisations={"sha256:xyz!out": "/nix/store/bar"},  # pyright: ignore[reportCallIssue]
+        dependentRealisations={"sha256:xyz!out": "/nix/store/bar"},  # pyright: ignore[reportCallIssue]
     )
     assert r.out_path == WireStorePath(value="/nix/store/foo")  # pyright: ignore[reportAttributeAccessIssue]
-    assert r.id == WireDrvOutput(drv_hash="sha256:abc", output_name="out")  # pyright: ignore[reportCallIssue, reportAttributeAccessIssue]
+    assert r.id == WireDrvOutput(drvHash="sha256:abc", outputName="out")  # pyright: ignore[reportCallIssue, reportAttributeAccessIssue]
     assert r.signatures == ["sig1", "sig2"]
 
     # Wire roundtrip

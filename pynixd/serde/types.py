@@ -89,7 +89,7 @@ class WireDrvOutput(WireMessage):
     Nix wire uses camelCase keys.  Pydantic aliases handle the mapping.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(validate_by_alias=True)
 
     drv_hash: str = PydanticField(alias="drvHash")
     output_name: str = PydanticField(alias="outputName")
@@ -103,7 +103,7 @@ class WireRealisation(WireMessage):
     validation applies uniformly.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(validate_by_alias=True)
 
     id: WireDrvOutput | None = PydanticField(default=None)
     out_path: WireStorePath | None = PydanticField(default=None, alias="outPath")
