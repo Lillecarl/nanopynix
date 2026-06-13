@@ -15,83 +15,62 @@ if TYPE_CHECKING:
 
 
 class WireString(WireMessage):
-    """Base for wire types that serialize as a single string.
+    """Abstract base: a single length-prefixed string on the wire.
 
-    Wire format:  [uint64 len][UTF-8 bytes]
-    JSON format:  "the-string" (plain string, not object)
+    Holds no fields.  Subclasses define their own.
 
-    Subclasses override _parse (post-read transform) and _format
-    (pre-write transform). Auto-detected by WireMessage — no
-    manual registration needed.
+    ``to_writer`` writes ``str(self)`` as a single wire string.
+    ``__hash__`` / ``__eq__`` delegate to ``str(self)`` so subtypes
+    work in ``set[WireStorePath]`` and similar collections.
     """
 
-    value: str
-
-    # ── Override points ──
-
-    @classmethod
-    def _parse(cls, raw: str) -> str:
-        """Transform raw wire value after reading. Default: identity."""
-        return raw
-
-    def _format(self) -> str:
-        """Transform before writing to wire. Default: identity."""
-        return self.value
-
-    # ── Equality ──
+    async def to_writer(self, ctx: WriteContext) -> None:
+        ctx.writer.write_string(str(self))
 
     def __str__(self) -> str:
-        return self.value
+        raise NotImplementedError(f"{type(self).__name__} must override __str__")
 
     def __hash__(self) -> int:
-        return hash(self.value)
+        return hash(str(self))
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, WireString):
-            return self.value == other.value
+            return str(self) == str(other)
         if isinstance(other, str):
-            return self.value == other
+            return str(self) == other
         return NotImplemented
-
-    # ── Binary serde — single string, delegated through _parse/_format ──
-
-    @classmethod
-    async def from_reader(cls, ctx: ReadContext):
-        raw = await ctx.reader.read_string(str)
-        return cls.model_construct(value=cls._parse(raw))
-
-    async def to_writer(self, ctx: WriteContext) -> None:
-        ctx.writer.write_string(self._format())
-
-    # ── JSON serde — plain string ──
 
     @model_serializer
     def _ser(self) -> str:
-        return self.value
+        return str(self)
 
     @model_validator(mode="before")
     @classmethod
     def _val(cls, data: Any) -> Any:
         if isinstance(data, str):
-            return {"value": cls._parse(data)}
-        if isinstance(data, cls):
-            return data
+            return data  # let Pydantic construct from string
         return data
 
 
 class WireStorePath(WireString):
-    """A store path — no custom parsing needed."""
+    """A store path — single string field."""
+
+    path: str
+
+    def __str__(self) -> str:
+        return self.path
+
+    @model_validator(mode="before")
+    @classmethod
+    def _val(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"path": data}
+        return data
 
 
 class WireSignature(WireString):
-    """A Nix signature — "name:signature" on the wire.
+    """A Nix signature — "name:signature" on the wire."""
 
-    Parsed into fields once during deserialization.  Can be constructed
-    either as ``WireSignature(value="key:abc")`` or
-    ``WireSignature(name="key", signature="abc")``.
-    """
-
-    value: str = ""
     name: str = ""
     signature: str = ""
 
@@ -100,24 +79,16 @@ class WireSignature(WireString):
         raw = await ctx.reader.read_string(str)
         parts = raw.split(":", 1)
         return cls.model_construct(
-            value=raw,
             name=parts[0],
             signature=parts[1] if len(parts) > 1 else "",
         )
 
     def __str__(self) -> str:
-        return self._format()
-
-    def _format(self) -> str:
         return f"{self.name}:{self.signature}"
 
     @classmethod
     def from_parts(cls, name: str, sig: str) -> WireSignature:
         return cls(name=name, signature=sig)
-
-    @model_serializer
-    def _ser(self) -> str:
-        return self._format()
 
 
 class WireDrvOutput(WireMessage):

@@ -269,7 +269,7 @@ class ReqWithStorePath(WireMessage):
 
 async def test_wire_store_path_roundtrip():
     # Pydantic → bytes → Pydantic
-    sp = WireStorePath(value="/nix/store/abc-test")
+    sp = WireStorePath(path="/nix/store/abc-test")
     req = ReqWithStorePath(path=sp)
 
     buf = BytesIO()
@@ -283,7 +283,7 @@ async def test_wire_store_path_roundtrip():
     assert str(wm.path) == str(sp)
     assert wm.path == sp
     assert isinstance(wm.path, WireStorePath)
-    assert wm.path.value == "/nix/store/abc-test"
+    assert str(wm.path) == "/nix/store/abc-test"
 
     # Pydantic → bytes → Pydantic (full roundtrip)
     buf2 = BytesIO()
@@ -414,7 +414,7 @@ async def test_wire_build_result_json_roundtrip():
 
 async def test_wire_store_path_json():
     """WireStorePath serdes as plain string in JSON."""
-    sp = WireStorePath(value="/nix/store/abc-test")
+    sp = WireStorePath(path="/nix/store/abc-test")
 
     class Req(WireMessage):
         path: WireStorePath
@@ -518,11 +518,11 @@ async def test_wire_realisation_roundtrip():
     """Roundtrip WireRealisation — JSON blob with proper Pydantic fields."""
     r = WireRealisation(
         id=WireDrvOutput(drvHash="sha256:abc", outputName="out"),  # pyright: ignore[reportCallIssue]
-        outPath=WireStorePath(value="/nix/store/foo"),  # type: ignore[arg-type]
+        outPath=WireStorePath(path="/nix/store/foo"),  # type: ignore[arg-type]
         signatures=["sig1", "sig2"],
         dependentRealisations={"sha256:xyz!out": "/nix/store/bar"},  # pyright: ignore[reportCallIssue]
     )
-    assert r.out_path == WireStorePath(value="/nix/store/foo")  # pyright: ignore[reportAttributeAccessIssue]
+    assert r.out_path == WireStorePath(path="/nix/store/foo")  # pyright: ignore[reportAttributeAccessIssue]
     assert r.id == WireDrvOutput(drvHash="sha256:abc", outputName="out")  # pyright: ignore[reportCallIssue, reportAttributeAccessIssue]
     assert r.signatures == ["sig1", "sig2"]
 
@@ -571,8 +571,8 @@ class TypedCollections(WireMessage):
 async def test_typed_collections_roundtrip():
     """Roundtrip typed collections — generics handled by _find_reader/_write_value."""
     m = TypedCollections(
-        paths={WireStorePath(value="/nix/store/a"), WireStorePath(value="/nix/store/b")},  # pyright: ignore[reportUnhashable]
-        mapping={"key1": WireStorePath(value="/nix/store/x")},
+        paths={WireStorePath(path="/nix/store/a"), WireStorePath(path="/nix/store/b")},  # pyright: ignore[reportUnhashable]
+        mapping={"key1": WireStorePath(path="/nix/store/x")},
     )
     buf = BytesIO()
     await m.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
