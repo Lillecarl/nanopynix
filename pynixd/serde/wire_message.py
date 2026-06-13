@@ -90,7 +90,7 @@ def _find_reader(ann: type, version: int = 0) -> Any:
         async def _read_string(r):
             assert issubclass(ann, WireString)
             raw = await r.read_string(str)
-            data = ann.from_string(raw)
+            data = ann.from_str(raw)
             if isinstance(data, str):
                 fields = list(ann.model_fields.keys())
                 data = {fields[0]: data} if len(fields) == 1 else {}

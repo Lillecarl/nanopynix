@@ -25,15 +25,15 @@ class WireString(WireMessage):
     ``to_writer`` writes ``str(self)`` as a single wire string.
     ``__hash__`` / ``__eq__`` delegate to ``str(self)``.
 
-    Override ``from_string`` in subclasses that need to transform
-    the raw wire/JSON string into field values (e.g. splitting on ``:``).
+    Override ``from_str`` / ``to_str`` in subclasses that need custom
+    wire format (e.g. ``WireSignature`` splits on ``:``).
     """
 
     async def to_writer(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(str(self))
 
     def __str__(self) -> str:
-        raise NotImplementedError(f"{type(self).__name__} must override __str__")
+        return self.to_str()
 
     def __hash__(self) -> int:
         return hash(str(self))
@@ -52,22 +52,23 @@ class WireString(WireMessage):
 
     @model_serializer
     def to_str(self) -> str:
+        """Override in subclasses to customize wire output. Default: single-field value."""
         if len(type(self).model_fields) == 1:
             return str(getattr(self, next(iter(type(self).model_fields))))
-        return str(self)
+        raise NotImplementedError(f"{type(self).__name__}: override to_str")
 
     @classmethod
-    def from_string(cls, _data: str) -> object:
+    def from_str(cls, data: str) -> object:
         """Default: map string to the single field."""
         if len(cls.model_fields) == 1:
-            return {next(iter(cls.model_fields)): _data}
-        raise NotImplementedError(f"{cls.__name__} has multiple fields, override from_string")
+            return {next(iter(cls.model_fields)): data}
+        raise NotImplementedError(f"{cls.__name__} has multiple fields, override from_str")
 
     @model_validator(mode="before")
     @classmethod
     def transform(cls, data: object) -> object:
         if isinstance(data, str):
-            return cls.from_string(data)
+            return cls.from_str(data)
         return data
 
 
@@ -75,9 +76,6 @@ class WireStorePath(WireString):
     """A store path — single string field."""
 
     path: str
-
-    def __str__(self) -> str:
-        return self.path
 
 
 class WireSignature(WireString):
@@ -87,11 +85,11 @@ class WireSignature(WireString):
     signature: str = ""
 
     @classmethod
-    def from_string(cls, data: str) -> object:
+    def from_str(cls, data: str) -> object:
         parts = data.split(":", 1)
         return {"name": parts[0], "signature": parts[1] if len(parts) > 1 else ""}
 
-    def __str__(self) -> str:
+    def to_str(self) -> str:
         return f"{self.name}:{self.signature}"
 
 
@@ -183,9 +181,6 @@ class WireNARHash(WireString):
     """Base16-encoded NAR SHA256 hash — no algorithm prefix on wire."""
 
     hash: str
-
-    def __str__(self) -> str:
-        return self.hash
 
 
 class WireTime(WireMessage):
