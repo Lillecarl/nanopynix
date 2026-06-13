@@ -86,27 +86,38 @@ class WireStorePath(WireString):
 class WireSignature(WireString):
     """A Nix signature — "name:signature" on the wire.
 
-    Wire format: "cache.nixos.org-1:abc123..."
-    Properties ``name`` and ``signature`` provide structured access.
+    Parsed into fields once during deserialization.  Can be constructed
+    either as ``WireSignature(value="key:abc")`` or
+    ``WireSignature(name="key", signature="abc")``.
     """
 
-    @property
-    def name(self) -> str:
-        """The key name part (e.g. "cache.nixos.org-1")."""
-        if ":" not in self.value:
-            return self.value
-        return self.value.split(":", 1)[0]
+    value: str = ""
+    name: str = ""
+    signature: str = ""
 
-    @property
-    def signature(self) -> str:
-        """The signature part (content after the first colon)."""
-        parts = self.value.split(":", 1)
-        return parts[1] if len(parts) > 1 else ""
+    @classmethod
+    async def from_reader(cls, ctx: ReadContext):
+        raw = await ctx.reader.read_string(str)
+        parts = raw.split(":", 1)
+        return cls.model_construct(
+            value=raw,
+            name=parts[0],
+            signature=parts[1] if len(parts) > 1 else "",
+        )
+
+    def __str__(self) -> str:
+        return self._format()
+
+    def _format(self) -> str:
+        return f"{self.name}:{self.signature}"
 
     @classmethod
     def from_parts(cls, name: str, sig: str) -> WireSignature:
-        """Construct from separate name and signature."""
-        return cls(value=f"{name}:{sig}")
+        return cls(name=name, signature=sig)
+
+    @model_serializer
+    def _ser(self) -> str:
+        return self._format()
 
 
 class WireDrvOutput(WireMessage):
