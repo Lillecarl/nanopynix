@@ -41,14 +41,10 @@ register_type(
 )
 
 
-async def _read_bool(r):
-    return bool(await r.read_uint64())
-
-
 register_type(
     bool,
-    reader=_read_bool,
-    writer=lambda v, w: w.write_uint64(1 if v else 0),
+    reader=lambda r: r.read_bool(),
+    writer=lambda v, w: w.write_bool(v),
 )
 register_type(
     str,

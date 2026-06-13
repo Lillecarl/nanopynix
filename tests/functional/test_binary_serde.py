@@ -50,6 +50,9 @@ class _W:
     def write_uint64(self, v: int) -> None:
         self._b.write(v.to_bytes(8, "little"))
 
+    def write_bool(self, v: bool) -> None:
+        self._b.write((1 if v else 0).to_bytes(8, "little"))
+
     def write_string(self, v: object) -> None:
         encoded = str(v).encode()
         self._b.write(len(encoded).to_bytes(8, "little"))
@@ -77,6 +80,9 @@ class _R:
 
     async def read_uint64(self) -> int:
         return int.from_bytes(self._b.read(8), "little")
+
+    async def read_bool(self) -> bool:
+        return bool(await self.read_uint64())
 
     async def read_string(self, _: type) -> str:
         n = int.from_bytes(self._b.read(8), "little")

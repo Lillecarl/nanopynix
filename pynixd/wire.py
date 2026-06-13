@@ -78,6 +78,9 @@ class NixReader:
     async def read_uint64(self) -> int:
         return _UINT64_STRUCT.unpack(await self.readexactly(8))[0]
 
+    async def read_bool(self) -> bool:
+        return bool(await self.read_uint64())
+
     async def read_optional_uint64(self) -> int | None:
         tag = await self.read_uint64()
         if tag == 0:
@@ -192,6 +195,9 @@ class NixWriter:
 
     def write_uint64(self, val: int) -> None:
         self.write(_UINT64_STRUCT.pack(val))
+
+    def write_bool(self, v: bool) -> None:
+        self.write_uint64(1 if v else 0)
 
     def write_uint64s(self, vals: list[int]) -> None:
         if not vals:
