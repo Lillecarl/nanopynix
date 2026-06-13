@@ -52,6 +52,8 @@ class WireString(WireMessage):
 
     @model_serializer
     def to_str(self) -> str:
+        if len(type(self).model_fields) == 1:
+            return str(getattr(self, next(iter(type(self).model_fields))))
         return str(self)
 
     @classmethod
@@ -73,10 +75,6 @@ class WireStorePath(WireString):
     """A store path — single string field."""
 
     path: str
-
-    @classmethod
-    def from_string(cls, data: str) -> object:
-        return {"path": data}
 
     def __str__(self) -> str:
         return self.path
