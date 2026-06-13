@@ -13,6 +13,7 @@ import asyncio
 import types
 from collections.abc import Callable  # noqa: TC003
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Any, ClassVar, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, ConfigDict
@@ -39,8 +40,6 @@ register_type(
     reader=lambda r: r.read_uint64(),
     writer=lambda v, w: w.write_uint64(v),
 )
-
-
 register_type(
     bool,
     reader=lambda r: r.read_bool(),
@@ -129,6 +128,14 @@ def _find_reader(ann: type, version: int = 0) -> Any:
 
         return _read_nested
 
+    # IntEnum — read uint64, construct via enum
+    if isinstance(ann, type) and issubclass(ann, IntEnum):
+
+        async def _read_enum(r):
+            return ann(await r.read_uint64())
+
+        return _read_enum
+
     raise TypeError(f"No reader for {ann}")
 
 
@@ -177,6 +184,11 @@ async def _write_value(val: Any, ann: type, ctx: WriteContext) -> None:
         result = val.to_writer(ctx)
         if asyncio.iscoroutine(result):
             await result
+        return None
+
+    # IntEnum — write its int value
+    if isinstance(ann, type) and issubclass(ann, IntEnum):
+        ctx.writer.write_uint64(val.value)
         return None
 
     raise TypeError(f"No writer for {ann}")

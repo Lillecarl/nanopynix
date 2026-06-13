@@ -149,7 +149,7 @@ async def test_response_roundtrip():
 
 class BuildPathsReq(WireMessage):
     derived_paths: set[str]  # set[DerivedPath] → set of strings on wire
-    build_mode: int  # BuildMode → uint64 on wire
+    build_mode: BuildMode  # IntEnum → uint64 on wire
 
 
 async def test_build_paths_request_roundtrip():
@@ -168,7 +168,7 @@ async def test_build_paths_request_roundtrip():
     wm = await BuildPathsReq.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     # Verify fields
-    assert wm.build_mode == BuildMode.NORMAL.value  # int value of the enum
+    assert wm.build_mode == BuildMode.NORMAL
     assert len(wm.derived_paths) == 2
     assert "/nix/store/aaa.drv!out" in wm.derived_paths
     assert "/nix/store/bbb.drv!out" in wm.derived_paths
@@ -422,8 +422,8 @@ async def test_wire_store_path_json():
     req = Req(path=sp)
 
     data = req.to_json()
-    # WireStorePath should be a plain string, not nested object
-    assert data == '{"path":"/nix/store/abc-test"}'
+    # WireStorePath serializes as destructed object, not plain string
+    assert data == '{"path":{"path":"/nix/store/abc-test"}}'
 
     # from_json back to Req
     req2 = Req.from_json(data)
@@ -537,7 +537,7 @@ async def test_wire_realisation_roundtrip():
     # JSON roundtrip — camelCase keys (Nix wire format)
     json_str = r.to_json()
     parsed = json_lib.loads(json_str)
-    assert parsed["outPath"] == "/nix/store/foo"
+    assert parsed["outPath"] == {"path": "/nix/store/foo"}
     assert parsed["id"]["drvHash"] == "sha256:abc"
     assert parsed["id"]["outputName"] == "out"
 
@@ -560,7 +560,7 @@ async def test_wire_signature_roundtrip():
 
     # JSON roundtrip
     json_str = sig.to_json()
-    assert json_str == '"cache.nixos.org-1:abc123def456"'
+    assert json_str == '{"name":"cache.nixos.org-1","signature":"abc123def456"}'
 
 
 class TypedCollections(WireMessage):

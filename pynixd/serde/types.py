@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from pydantic import ConfigDict, model_serializer, model_validator
+from pydantic import ConfigDict
 from pydantic import Field as PydanticField
 
 from ..constants import proto
@@ -17,11 +17,11 @@ if TYPE_CHECKING:
 class WireString(WireMessage):
     """Abstract base: a single length-prefixed string on the wire.
 
-    Holds no fields.  Subclasses define their own.
+    Subclasses define their own fields.  JSON is native Pydantic
+    (the destructed object).  Wire format is ``str(self)``.
 
     ``to_writer`` writes ``str(self)`` as a single wire string.
-    ``__hash__`` / ``__eq__`` delegate to ``str(self)`` so subtypes
-    work in ``set[WireStorePath]`` and similar collections.
+    ``__hash__`` / ``__eq__`` delegate to ``str(self)``.
     """
 
     async def to_writer(self, ctx: WriteContext) -> None:
@@ -40,17 +40,6 @@ class WireString(WireMessage):
             return str(self) == other
         return NotImplemented
 
-    @model_serializer
-    def _ser(self) -> str:
-        return str(self)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _val(cls, data: Any) -> Any:
-        if isinstance(data, str):
-            return data  # let Pydantic construct from string
-        return data
-
 
 class WireStorePath(WireString):
     """A store path — single string field."""
@@ -59,13 +48,6 @@ class WireStorePath(WireString):
 
     def __str__(self) -> str:
         return self.path
-
-    @model_validator(mode="before")
-    @classmethod
-    def _val(cls, data: Any) -> Any:
-        if isinstance(data, str):
-            return {"path": data}
-        return data
 
 
 class WireSignature(WireString):
