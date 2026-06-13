@@ -20,12 +20,14 @@ from pynixd.serde import (
     WireBuildResult,
     WireDrvOutput,
     WireMessage,
+    WireNARHash,
     WireOptMicroseconds,
-    WirePathInfo,
     WireQueryPathInfoResponse,
     WireRealisation,
     WireSignature,
     WireStorePath,
+    WireTime,
+    WireUnkeyedValidPathInfo,
 )
 from pynixd.store_path import StorePath
 from pynixd.types import BuildMode
@@ -195,9 +197,6 @@ class PathInfo(WireMessage):
     ca: str
 
 
-# QueryPathInfoResp replaced by WireQueryPathInfoResponse from _binary
-
-
 async def test_query_path_info_response_roundtrip():
     info = UnkeyedValidPathInfo(
         deriver=StorePath("/nix/store/deriver.drv"),
@@ -222,16 +221,19 @@ async def test_query_path_info_response_roundtrip():
 
     assert wm.valid
     assert wm.info is not None
-    assert wm.info.deriver == "/nix/store/deriver.drv"
-    assert wm.info.nar_hash == "abc123"  # sha256: stripped on wire
+    assert isinstance(wm.info, WireUnkeyedValidPathInfo)
+    assert str(wm.info.deriver) == "/nix/store/deriver.drv"
+    assert str(wm.info.nar_hash) == "abc123"  # sha256: stripped on wire
     assert len(wm.info.references) == 2
-    assert "/nix/store/ref1" in wm.info.references
-    assert "/nix/store/ref2" in wm.info.references
-    assert wm.info.registration_time == 12345678
+    assert WireStorePath(path="/nix/store/ref1") in wm.info.references
+    assert WireStorePath(path="/nix/store/ref2") in wm.info.references
+    assert wm.info.registration_time == WireTime(ts=12345678)
     assert wm.info.nar_size == 4096
     assert wm.info.ultimate == 1
     assert len(wm.info.sigs) == 2
-    assert "sig1" in wm.info.sigs
+    # Original writes "sig1" (no colon); WireSignature reads as name="sig1", signature=""
+    assert WireSignature(name="sig1", signature="") in wm.info.sigs
+    assert WireSignature(name="sig2", signature="") in wm.info.sigs
     assert wm.info.ca == "fixed:r:sha256:xyz"
 
     # WireMessage → bytes → WireMessage
@@ -241,6 +243,7 @@ async def test_query_path_info_response_roundtrip():
     wm2 = await WireQueryPathInfoResponse.from_reader(ReadContext(reader=_R(data2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.valid
     assert wm2.info is not None
+    assert isinstance(wm2.info, WireUnkeyedValidPathInfo)
     assert wm2.info.deriver == wm.info.deriver
     assert wm2.info.nar_hash == wm.info.nar_hash
     assert wm2.info.references == wm.info.references

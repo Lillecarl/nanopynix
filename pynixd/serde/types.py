@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import ConfigDict
@@ -157,16 +158,52 @@ class WireBuildDerivationResponse(WireMessage):
     result: WireBuildResult
 
 
-class WirePathInfo(WireMessage):
+class WireNARHash(WireString):
+    """Base16-encoded NAR SHA256 hash — no algorithm prefix on wire."""
+
+    hash: str
+
+    def __str__(self) -> str:
+        return self.hash
+
+
+class WireTime(WireMessage):
+    """Unix timestamp in seconds on the wire. Exposes as datetime property."""
+
+    ts: int = 0
+
+    @classmethod
+    async def from_reader(cls, ctx: ReadContext):
+        return cls.model_construct(ts=await ctx.reader.read_uint64())
+
+    async def to_writer(self, ctx: WriteContext) -> None:
+        ctx.writer.write_uint64(self.ts)
+
+    @property
+    def datetime(self) -> datetime:
+        return datetime.fromtimestamp(self.ts, tz=UTC)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, WireTime):
+            return self.ts == other.ts
+        if isinstance(other, int):
+            return self.ts == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.ts)
+
+
+class WireUnkeyedValidPathInfo(WireMessage):
     """Wire mirror of UnkeyedValidPathInfo."""
 
-    deriver: str
-    nar_hash: str
-    references: set[str]
-    registration_time: int
+    deriver: WireStorePath | None = PydanticField(default=None)
+    nar_hash: WireNARHash
+    references: set[WireStorePath]
+    registration_time: WireTime
     nar_size: int
     ultimate: int
-    sigs: set[str]
+    sigs: set[WireSignature]
     ca: str
 
 
@@ -174,7 +211,7 @@ class WireQueryPathInfoResponse(WireMessage):
     """QueryPathInfo response — info depends on valid flag."""
 
     valid: bool
-    info: WirePathInfo | None = WireField(
+    info: WireUnkeyedValidPathInfo | None = WireField(
         default=None,
         wire_depends_on=lambda self: self.valid,
     )

@@ -285,7 +285,7 @@ class WireMessage(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __hash__(self) -> int:
-        return hash(tuple(getattr(self, f) for f in self.model_fields))
+        return hash(tuple(getattr(self, f) for f in self.__class__.model_fields))
 
     async def to_writer(self, ctx: WriteContext) -> None:
         """Write all non-ClassVar fields in declaration order."""
@@ -336,4 +336,4 @@ class WireMessage(BaseModel):
 
         Uses Pydantic's ``model_validate_json``.
         """
-        return cls.model_validate_json(json_data, **kwargs)  # type: ignore[return-value]
+        return cls.model_validate_json(json_data, **kwargs)

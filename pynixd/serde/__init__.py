@@ -10,10 +10,10 @@ from .types import (
     WireDrvOutput as WireDrvOutput,
 )
 from .types import (
-    WireOptMicroseconds as WireOptMicroseconds,
+    WireNARHash as WireNARHash,
 )
 from .types import (
-    WirePathInfo as WirePathInfo,
+    WireOptMicroseconds as WireOptMicroseconds,
 )
 from .types import (
     WireQueryPathInfoResponse as WireQueryPathInfoResponse,
@@ -27,6 +27,12 @@ from .types import (
 from .types import (
     WireStorePath as WireStorePath,
 )
+from .types import (
+    WireTime as WireTime,
+)
+from .types import (
+    WireUnkeyedValidPathInfo as WireUnkeyedValidPathInfo,
+)
 from .wire_message import (
     VersionMeta as VersionMeta,
 )
@@ -35,7 +41,4 @@ from .wire_message import (
 )
 from .wire_message import (
     WireMessage as WireMessage,
-)
-from .wire_message import (
-    register_type as register_type,
 )
