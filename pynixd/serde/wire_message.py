@@ -22,58 +22,22 @@ from pydantic_core import PydanticUndefined
 
 from ..types.context import ReadContext, WriteContext
 
-# ── Type registry ──
-
-_READERS: dict[type, Any] = {}
-_WRITERS: dict[type, Any] = {}
-
-
-def register_type(py_type: type, reader, writer) -> None:
-    _READERS[py_type] = reader
-    _WRITERS[py_type] = writer
-
-
-# ── Primitive handlers ──
-
-register_type(
-    int,
-    reader=lambda r: r.read_uint64(),
-    writer=lambda v, w: w.write_uint64(v),
-)
-register_type(
-    bool,
-    reader=lambda r: r.read_bool(),
-    writer=lambda v, w: w.write_bool(v),
-)
-register_type(
-    str,
-    reader=lambda r: r.read_string(str),
-    writer=lambda v, w: w.write_string(v),
-)
-register_type(
-    bytes,
-    reader=lambda r: r.read_bytes(),
-    writer=lambda v, w: w.write_bytes(v),
-)
-
-
 # ── Helpers ──
 
 
 def _find_reader(ann: type, version: int = 0) -> Any:
-    """Look up a reader for a wire type.
+    """Look up a reader for a wire type."""
+    from .types import WireString  # lazy: break circular import
 
-    Handles, in order:
-      1. Direct registry hit (int, str, bool, bytes)
-      2. Optional[T] — strip None, delegate to inner type
-      3. list[T] — read count + N elements
-      4. set[T] — read count + N elements
-      5. dict[K, V] — read count + N key-value pairs
-      6. WireMessage subclass — dispatch to ``from_reader``
-    """
-    reader = _READERS.get(ann)
-    if reader is not None:
-        return reader
+    # Primitives
+    if ann is int:
+        return lambda r: r.read_uint64()
+    if ann is str:
+        return lambda r: r.read_string(str)
+    if ann is bool:
+        return lambda r: r.read_bool()
+    if ann is bytes:
+        return lambda r: r.read_bytes()
 
     origin = get_origin(ann)
     args = get_args(ann)
@@ -120,6 +84,19 @@ def _find_reader(ann: type, version: int = 0) -> Any:
 
         return _read_dict
 
+    # WireString — read one string, delegate to from_string + model_construct
+    if isinstance(ann, type) and issubclass(ann, WireString):
+
+        async def _read_string(r):
+            raw = await r.read_string(str)
+            data = ann.from_string(raw)  # pyright: ignore[reportCallIssue]
+            if isinstance(data, str):
+                fields = list(ann.model_fields.keys())
+                data = {fields[0]: data} if len(fields) == 1 else {}
+            return ann.model_construct(**data)  # pyright: ignore[reportArgumentType]
+
+        return _read_string
+
     # WireMessage subclass
     if isinstance(ann, type) and issubclass(ann, WireMessage):
 
@@ -140,12 +117,21 @@ def _find_reader(ann: type, version: int = 0) -> Any:
 
 
 async def _write_value(val: Any, ann: type, ctx: WriteContext) -> None:
-    """Write a value to the wire using registered writer, generics, or nested serialization."""
-    writer = _WRITERS.get(ann)
-    if writer is not None:
-        result = writer(val, ctx.writer)
-        if asyncio.iscoroutine(result):
-            await result
+    """Write a value to the wire using primitives, generics, or nested serialization."""
+    from .types import WireString  # lazy: break circular import
+
+    # Primitives
+    if ann is int:
+        ctx.writer.write_uint64(val)
+        return None
+    if ann is str:
+        ctx.writer.write_string(val)
+        return None
+    if ann is bool:
+        ctx.writer.write_bool(val)
+        return None
+    if ann is bytes:
+        ctx.writer.write_bytes(val)
         return None
 
     origin = get_origin(ann)
@@ -177,6 +163,11 @@ async def _write_value(val: Any, ann: type, ctx: WriteContext) -> None:
         for k, v in val.items():
             await _write_value(k, args[0], ctx)
             await _write_value(v, args[1], ctx)
+        return None
+
+    # WireString — write str(self) as a single wire string
+    if isinstance(ann, type) and issubclass(ann, WireString):
+        ctx.writer.write_string(str(val))
         return None
 
     # WireMessage subclass

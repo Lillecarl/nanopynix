@@ -425,8 +425,8 @@ async def test_wire_store_path_json():
     req = Req(path=sp)
 
     data = req.to_json()
-    # WireStorePath serializes as destructed object, not plain string
-    assert data == '{"path":{"path":"/nix/store/abc-test"}}'
+    # WireStorePath serializes as plain string
+    assert data == '{"path":"/nix/store/abc-test"}'
 
     # from_json back to Req
     req2 = Req.from_json(data)
@@ -540,14 +540,14 @@ async def test_wire_realisation_roundtrip():
     # JSON roundtrip — camelCase keys (Nix wire format)
     json_str = r.to_json()
     parsed = json_lib.loads(json_str)
-    assert parsed["outPath"] == {"path": "/nix/store/foo"}
+    assert parsed["outPath"] == "/nix/store/foo"
     assert parsed["id"]["drvHash"] == "sha256:abc"
     assert parsed["id"]["outputName"] == "out"
 
 
 async def test_wire_signature_roundtrip():
     """Roundtrip WireSignature — WireString with name/signature properties."""
-    sig = WireSignature.from_parts("cache.nixos.org-1", "abc123def456")
+    sig = WireSignature(name="cache.nixos.org-1", signature="abc123def456")
     assert sig.name == "cache.nixos.org-1"
     assert sig.signature == "abc123def456"
     assert str(sig) == "cache.nixos.org-1:abc123def456"
@@ -563,7 +563,7 @@ async def test_wire_signature_roundtrip():
 
     # JSON roundtrip
     json_str = sig.to_json()
-    assert json_str == '{"name":"cache.nixos.org-1","signature":"abc123def456"}'
+    assert json_str == '"cache.nixos.org-1:abc123def456"'
 
 
 class TypedCollections(WireMessage):

@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_serializer, model_validator
 from pydantic import Field as PydanticField
 
 from ..constants import proto
 from .wire_message import WireField, WireMessage
+from .wire_message import _find_reader as _find_reader
 
 if TYPE_CHECKING:
     from ..types.context import ReadContext, WriteContext
@@ -23,6 +24,9 @@ class WireString(WireMessage):
 
     ``to_writer`` writes ``str(self)`` as a single wire string.
     ``__hash__`` / ``__eq__`` delegate to ``str(self)``.
+
+    Override ``from_string`` in subclasses that need to transform
+    the raw wire/JSON string into field values (e.g. splitting on ``:``).
     """
 
     async def to_writer(self, ctx: WriteContext) -> None:
@@ -41,6 +45,25 @@ class WireString(WireMessage):
             return str(self) == other
         return NotImplemented
 
+    @classmethod
+    async def from_reader(cls, ctx: ReadContext):
+        reader = _find_reader(cls, version=ctx.version)
+        return await reader(ctx.reader)
+
+    @model_serializer
+    def to_string(self) -> str:
+        return str(self)
+
+    @model_validator(mode="before")
+    @classmethod
+    def from_string(cls, data: object) -> object:
+        if isinstance(data, str):
+            fields = list(cls.model_fields.keys())
+            if len(fields) == 1:
+                return {fields[0]: data}
+            return data
+        return data
+
 
 class WireStorePath(WireString):
     """A store path — single string field."""
@@ -57,21 +80,16 @@ class WireSignature(WireString):
     name: str = ""
     signature: str = ""
 
+    @model_validator(mode="before")
     @classmethod
-    async def from_reader(cls, ctx: ReadContext):
-        raw = await ctx.reader.read_string(str)
-        parts = raw.split(":", 1)
-        return cls.model_construct(
-            name=parts[0],
-            signature=parts[1] if len(parts) > 1 else "",
-        )
+    def from_string(cls, data: object) -> object:
+        if isinstance(data, str):
+            parts = data.split(":", 1)
+            return {"name": parts[0], "signature": parts[1] if len(parts) > 1 else ""}
+        return data
 
     def __str__(self) -> str:
         return f"{self.name}:{self.signature}"
-
-    @classmethod
-    def from_parts(cls, name: str, sig: str) -> WireSignature:
-        return cls(name=name, signature=sig)
 
 
 class WireDrvOutput(WireMessage):
