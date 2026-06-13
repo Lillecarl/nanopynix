@@ -1,0 +1,125 @@
+[build-system]
+requires = ["scikit-build-core >=0.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "nanopynix"
+version = "0.1.0"
+description = "nanobind-based Python bindings for Nix"
+authors = [
+    { name = "nanopynix contributors" },
+]
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.10"
+classifiers = [
+    "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+]
+
+[project.urls]
+Homepage = "https://github.com/lillecarl/nanopynix"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    # Pyflakes
+    "F",
+    # Pycodestyle errors & warnings
+    "E", "W",
+    # isort
+    "I",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # flake8-type-checking
+    "TC",
+    # Ruff-specific
+    "RUF",
+    # flake8-comprehensions
+    "C4",
+    # commented-out code
+    "ERA",
+    # pyupgrade
+    "UP",
+    # flake8-builtins
+    "A",
+    # flake8-use-pathlib
+    "PTH",
+    # flake8-unused-arguments
+    "ARG",
+    # Perflint
+    "PERF",
+    # flake8-return
+    "RET",
+    # flake8-raise
+    "RSE",
+    # flake8-print
+    "T20",
+    # flake8-pie
+    "PIE",
+    # flake8-2020
+    "YTT",
+    # flake8-async
+    "ASYNC",
+    # tryceratops
+    "TRY",
+    # refurb
+    "FURB",
+    # flake8-tidy-imports
+    "TID",
+    # pep8-naming
+    "N",
+    # flynt
+    "FLY",
+    # flake8-quotes
+    "Q",
+    # flake8-future-annotations
+    "FA",
+    # flake8-pytest-style
+    "PT",
+    # flake8-blind-except
+    "BLE",
+    # flake8-todos
+    "TD",
+    # flake8-logging
+    "LOG",
+]
+
+ignore = [
+    # E501 line length — we use line-length=120 instead of the default 88
+    "E501",
+    # blind except — tests use pytest.raises patterns
+    "BLE001",
+]
+
+[tool.ruff.lint.flake8-type-checking]
+quote-annotations = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ERA001", "RUF059", "F401", "T201", "ARG001"]
+# Store impl tests: interface stubs with unused args by design
+"tests/test_store_impl.py" = ["ARG002"]
+# Tests use os.readlink to resolve /run/current-system symlinks
+"tests/test_store.py" = ["PTH115"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.pyright]
+pythonVersion = "3.13"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+wheel.platlib = false
+wheel.packages = ["src/nanopynix"]
+cmake.define.BUILD_UTIL = "ON"
+cmake.define.BUILD_STORE = "ON"
+cmake.define.BUILD_EXPR = "ON"
+cmake.define.BUILD_FETCHERS = "ON"
+cmake.define.BUILD_FLAKE = "ON"
+cmake.define.BUILD_MAIN = "ON"
