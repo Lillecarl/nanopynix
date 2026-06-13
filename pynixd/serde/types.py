@@ -83,6 +83,32 @@ class WireStorePath(WireString):
     """A store path — no custom parsing needed."""
 
 
+class WireSignature(WireString):
+    """A Nix signature — "name:signature" on the wire.
+
+    Wire format: "cache.nixos.org-1:abc123..."
+    Properties ``name`` and ``signature`` provide structured access.
+    """
+
+    @property
+    def name(self) -> str:
+        """The key name part (e.g. "cache.nixos.org-1")."""
+        if ":" not in self.value:
+            return self.value
+        return self.value.split(":", 1)[0]
+
+    @property
+    def signature(self) -> str:
+        """The signature part (content after the first colon)."""
+        parts = self.value.split(":", 1)
+        return parts[1] if len(parts) > 1 else ""
+
+    @classmethod
+    def from_parts(cls, name: str, sig: str) -> WireSignature:
+        """Construct from separate name and signature."""
+        return cls(value=f"{name}:{sig}")
+
+
 class WireDrvOutput(WireMessage):
     """DrvOutput on the wire — a JSON object inside Realisation.
 

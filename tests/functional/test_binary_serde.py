@@ -24,6 +24,7 @@ from pynixd.serde import (
     WirePathInfo,
     WireQueryPathInfoResponse,
     WireRealisation,
+    WireSignature,
     WireStorePath,
 )
 from pynixd.store_path import StorePath
@@ -539,6 +540,27 @@ async def test_wire_realisation_roundtrip():
     assert parsed["outPath"] == "/nix/store/foo"
     assert parsed["id"]["drvHash"] == "sha256:abc"
     assert parsed["id"]["outputName"] == "out"
+
+
+async def test_wire_signature_roundtrip():
+    """Roundtrip WireSignature — WireString with name/signature properties."""
+    sig = WireSignature.from_parts("cache.nixos.org-1", "abc123def456")
+    assert sig.name == "cache.nixos.org-1"
+    assert sig.signature == "abc123def456"
+    assert str(sig) == "cache.nixos.org-1:abc123def456"
+
+    # Wire roundtrip
+    buf = BytesIO()
+    await sig.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    data = buf.getvalue()
+    wm = await WireSignature.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    assert wm.name == "cache.nixos.org-1"
+    assert wm.signature == "abc123def456"
+    assert str(wm) == "cache.nixos.org-1:abc123def456"
+
+    # JSON roundtrip
+    json_str = sig.to_json()
+    assert json_str == '"cache.nixos.org-1:abc123def456"'
 
 
 class TypedCollections(WireMessage):
