@@ -51,17 +51,21 @@ class WireString(WireMessage):
         return await reader(ctx.reader)
 
     @model_serializer
-    def to_string(self) -> str:
+    def to_str(self) -> str:
         return str(self)
+
+    @classmethod
+    def from_string(cls, _data: str) -> object:
+        """Default: map string to the single field."""
+        if len(cls.model_fields) == 1:
+            return {next(iter(cls.model_fields)): _data}
+        raise NotImplementedError(f"{cls.__name__} has multiple fields, override from_string")
 
     @model_validator(mode="before")
     @classmethod
-    def from_string(cls, data: object) -> object:
+    def transform(cls, data: object) -> object:
         if isinstance(data, str):
-            fields = list(cls.model_fields.keys())
-            if len(fields) == 1:
-                return {fields[0]: data}
-            return data
+            return cls.from_string(data)
         return data
 
 
@@ -69,6 +73,10 @@ class WireStorePath(WireString):
     """A store path — single string field."""
 
     path: str
+
+    @classmethod
+    def from_string(cls, data: str) -> object:
+        return {"path": data}
 
     def __str__(self) -> str:
         return self.path
@@ -80,13 +88,10 @@ class WireSignature(WireString):
     name: str = ""
     signature: str = ""
 
-    @model_validator(mode="before")
     @classmethod
-    def from_string(cls, data: object) -> object:
-        if isinstance(data, str):
-            parts = data.split(":", 1)
-            return {"name": parts[0], "signature": parts[1] if len(parts) > 1 else ""}
-        return data
+    def from_string(cls, data: str) -> object:
+        parts = data.split(":", 1)
+        return {"name": parts[0], "signature": parts[1] if len(parts) > 1 else ""}
 
     def __str__(self) -> str:
         return f"{self.name}:{self.signature}"

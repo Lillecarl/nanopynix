@@ -14,7 +14,7 @@ import types
 from collections.abc import Callable  # noqa: TC003
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, ClassVar, cast, get_args, get_origin, get_type_hints
+from typing import Any, ClassVar, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PydanticField
@@ -88,12 +88,13 @@ def _find_reader(ann: type, version: int = 0) -> Any:
     if isinstance(ann, type) and issubclass(ann, WireString):
 
         async def _read_string(r):
+            assert issubclass(ann, WireString)
             raw = await r.read_string(str)
-            data = ann.from_string(raw)  # pyright: ignore[reportCallIssue]
+            data = ann.from_string(raw)
             if isinstance(data, str):
                 fields = list(ann.model_fields.keys())
                 data = {fields[0]: data} if len(fields) == 1 else {}
-            return cast("WireMessage", ann).model_construct(**data)
+            return ann.model_construct(**data)
 
         return _read_string
 
