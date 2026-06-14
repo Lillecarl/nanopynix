@@ -1,4 +1,4 @@
-"""Roundtrip test: WireMessage ↔ existing dataclass."""
+"""Roundtrip test: WireModel ↔ existing dataclass."""
 
 from __future__ import annotations
 
@@ -16,18 +16,24 @@ from pynixd.operations.is_valid_path import (
 )
 from pynixd.operations.query_path_info import QueryPathInfoResponse
 from pynixd.serde import (
-    WireBuildDerivationResponse,
-    WireBuildResult,
-    WireDrvOutput,
-    WireMessage,
-    WireNARHash,
-    WireOptMicroseconds,
-    WireQueryPathInfoResponse,
-    WireRealisation,
-    WireSignature,
-    WireStorePath,
-    WireTime,
-    WireUnkeyedValidPathInfo,
+    BuildDerivationResponse,
+    BuildResult,
+    DrvOutput,
+    NARHash,
+    OptMicroseconds,
+    Realisation,
+    Signature,
+    Time,
+    WireModel,
+)
+from pynixd.serde import (
+    QueryPathInfoResponse as SerdeQueryPathInfoResponse,
+)
+from pynixd.serde import (
+    StorePath as SerdeStorePath,
+)
+from pynixd.serde import (
+    UnkeyedValidPathInfo as SerdeUnkeyedValidPathInfo,
 )
 from pynixd.store_path import StorePath
 from pynixd.types import BuildMode
@@ -36,11 +42,11 @@ from pynixd.types.path_info import UnkeyedValidPathInfo
 
 
 # Pydantic mirror — same fields, different base class
-class Req(WireMessage):
+class Req(WireModel):
     path: str  # StorePath → string on wire
 
 
-class Resp(WireMessage):
+class Resp(WireModel):
     valid: int  # bool → uint64 on wire
 
 
@@ -119,16 +125,16 @@ async def test_request_roundtrip():
     buf = BytesIO()
     await orig.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
-    # bytes → WireMessage
+    # bytes → WireModel
     r = _R(data)
     await r.read_uint64()  # skip op written by original serialize
     wm = await Req.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.path == str(sp)
-    # WireMessage → bytes
+    # WireModel → bytes
     buf2 = BytesIO()
     await wm.to_writer(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data2 = buf2.getvalue()
-    # bytes → WireMessage
+    # bytes → WireModel
     wm2 = await Req.from_reader(ReadContext(reader=_R(data2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.path == wm.path
 
@@ -149,7 +155,7 @@ async def test_response_roundtrip():
     assert wm2.valid == wm.valid
 
 
-class BuildPathsReq(WireMessage):
+class BuildPathsReq(WireModel):
     derived_paths: set[str]  # set[DerivedPath] → set of strings on wire
     build_mode: BuildMode  # IntEnum → uint64 on wire
 
@@ -164,7 +170,7 @@ async def test_build_paths_request_roundtrip():
     await orig.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
 
-    # bytes → WireMessage (skip op uint64)
+    # bytes → WireModel (skip op uint64)
     r = _R(data)
     await r.read_uint64()  # skip op
     wm = await BuildPathsReq.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
@@ -175,18 +181,18 @@ async def test_build_paths_request_roundtrip():
     assert "/nix/store/aaa.drv!out" in wm.derived_paths
     assert "/nix/store/bbb.drv!out" in wm.derived_paths
 
-    # WireMessage → bytes
+    # WireModel → bytes
     buf2 = BytesIO()
     await wm.to_writer(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data2 = buf2.getvalue()
 
-    # bytes → second WireMessage
+    # bytes → second WireModel
     wm2 = await BuildPathsReq.from_reader(ReadContext(reader=_R(data2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.derived_paths == wm.derived_paths
     assert wm2.build_mode == wm.build_mode
 
 
-class PathInfo(WireMessage):
+class PathInfo(WireModel):
     deriver: str
     nar_hash: str
     references: set[str]
@@ -217,33 +223,33 @@ async def test_query_path_info_response_roundtrip():
 
     r = _R(data)
     await r.read_uint64()  # skip logs (STDERR_LAST)
-    wm = await WireQueryPathInfoResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm = await SerdeQueryPathInfoResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     assert wm.valid
     assert wm.info is not None
-    assert isinstance(wm.info, WireUnkeyedValidPathInfo)
+    assert isinstance(wm.info, SerdeUnkeyedValidPathInfo)
     assert str(wm.info.deriver) == "/nix/store/deriver.drv"
     assert str(wm.info.nar_hash) == "abc123"  # sha256: stripped on wire
     assert len(wm.info.references) == 2
-    assert WireStorePath(path="/nix/store/ref1") in wm.info.references
-    assert WireStorePath(path="/nix/store/ref2") in wm.info.references
-    assert wm.info.registration_time == WireTime(ts=12345678)
+    assert SerdeStorePath(path="/nix/store/ref1") in wm.info.references
+    assert SerdeStorePath(path="/nix/store/ref2") in wm.info.references
+    assert wm.info.registration_time == Time(ts=12345678)
     assert wm.info.nar_size == 4096
     assert wm.info.ultimate == 1
     assert len(wm.info.sigs) == 2
-    # Original writes "sig1" (no colon); WireSignature reads as name="sig1", signature=""
-    assert WireSignature(name="sig1", signature="") in wm.info.sigs
-    assert WireSignature(name="sig2", signature="") in wm.info.sigs
+    # Original writes "sig1" (no colon); Signature reads as name="sig1", signature=""
+    assert Signature(name="sig1", signature="") in wm.info.sigs
+    assert Signature(name="sig2", signature="") in wm.info.sigs
     assert wm.info.ca == "fixed:r:sha256:xyz"
 
-    # WireMessage → bytes → WireMessage
+    # WireModel → bytes → WireModel
     buf2 = BytesIO()
     await wm.to_writer(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data2 = buf2.getvalue()
-    wm2 = await WireQueryPathInfoResponse.from_reader(ReadContext(reader=_R(data2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm2 = await SerdeQueryPathInfoResponse.from_reader(ReadContext(reader=_R(data2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.valid
     assert wm2.info is not None
-    assert isinstance(wm2.info, WireUnkeyedValidPathInfo)
+    assert isinstance(wm2.info, SerdeUnkeyedValidPathInfo)
     assert wm2.info.deriver == wm.info.deriver
     assert wm2.info.nar_hash == wm.info.nar_hash
     assert wm2.info.references == wm.info.references
@@ -261,18 +267,18 @@ async def test_query_path_info_response_roundtrip():
 
     r2 = _R(data3)
     await r2.read_uint64()  # skip logs (STDERR_LAST)
-    wm3 = await WireQueryPathInfoResponse.from_reader(ReadContext(reader=r2, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm3 = await SerdeQueryPathInfoResponse.from_reader(ReadContext(reader=r2, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert not wm3.valid
     assert wm3.info is None
 
 
-class ReqWithStorePath(WireMessage):
-    path: WireStorePath  # auto-detected, no register_nested_model needed
+class ReqWithStorePath(WireModel):
+    path: SerdeStorePath  # auto-detected, no register_nested_model needed
 
 
 async def test_wire_store_path_roundtrip():
     # Pydantic → bytes → Pydantic
-    sp = WireStorePath(path="/nix/store/abc-test")
+    sp = SerdeStorePath(path="/nix/store/abc-test")
     req = ReqWithStorePath(path=sp)
 
     buf = BytesIO()
@@ -285,7 +291,7 @@ async def test_wire_store_path_roundtrip():
 
     assert str(wm.path) == str(sp)
     assert wm.path == sp
-    assert isinstance(wm.path, WireStorePath)
+    assert isinstance(wm.path, SerdeStorePath)
     assert str(wm.path) == "/nix/store/abc-test"
 
     # Pydantic → bytes → Pydantic (full roundtrip)
@@ -298,8 +304,8 @@ async def test_wire_store_path_roundtrip():
 
 
 async def test_wire_build_result_roundtrip():
-    """Roundtrip WireBuildResult at protocol 1.38 (all fields present)."""
-    br = WireBuildResult(
+    """Roundtrip BuildResult at protocol 1.38 (all fields present)."""
+    br = BuildResult(
         status=0,
         error_msg="",
         times_built=1,
@@ -308,8 +314,8 @@ async def test_wire_build_result_roundtrip():
         stop_time=1000500,
         built_outputs={"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'},
     )
-    br.cpu_user = WireOptMicroseconds(tag=1, value=50000)
-    br.cpu_system = WireOptMicroseconds(tag=1, value=10000)
+    br.cpu_user = OptMicroseconds(tag=1, value=50000)
+    br.cpu_system = OptMicroseconds(tag=1, value=10000)
 
     # Wire → bytes
     buf = BytesIO()
@@ -317,7 +323,7 @@ async def test_wire_build_result_roundtrip():
     data = buf.getvalue()
 
     # bytes → Wire (same version)
-    wm = await WireBuildResult.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm = await BuildResult.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.status == 0
     assert wm.times_built == 1
     assert wm.start_time == 1000000
@@ -331,7 +337,7 @@ async def test_wire_build_result_roundtrip():
     # Full roundtrip
     buf2 = BytesIO()
     await wm.to_writer(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
-    wm2 = await WireBuildResult.from_reader(ReadContext(reader=_R(buf2.getvalue()), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm2 = await BuildResult.from_reader(ReadContext(reader=_R(buf2.getvalue()), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm2.times_built == wm.times_built
     assert wm2.start_time == wm.start_time
     assert wm2.cpu_user == wm.cpu_user
@@ -339,11 +345,11 @@ async def test_wire_build_result_roundtrip():
 
 async def test_wire_build_result_version_27():
     """Deserialize at protocol 1.27 — only status + error_msg survive."""
-    br = WireBuildResult(status=0, error_msg="test error")
+    br = BuildResult(status=0, error_msg="test error")
     buf = BytesIO()
     await br.to_writer(WriteContext(writer=_W(buf), version=proto(1, 27)))  # type: ignore[arg-type]
     data = buf.getvalue()
-    wm = await WireBuildResult.from_reader(ReadContext(reader=_R(data), version=proto(1, 27)))  # type: ignore[arg-type]
+    wm = await BuildResult.from_reader(ReadContext(reader=_R(data), version=proto(1, 27)))  # type: ignore[arg-type]
     assert wm.status == 0
     assert wm.error_msg == "test error"
     # Version 1.27: no fields past status+error_msg
@@ -355,8 +361,8 @@ async def test_wire_build_result_version_27():
 
 
 async def test_wire_build_derivation_response_roundtrip():
-    """Roundtrip WireBuildDerivationResponse containing WireBuildResult."""
-    br = WireBuildResult(
+    """Roundtrip BuildDerivationResponse containing BuildResult."""
+    br = BuildResult(
         status=0,
         error_msg="",
         times_built=1,
@@ -365,14 +371,14 @@ async def test_wire_build_derivation_response_roundtrip():
         stop_time=200,
         built_outputs={"out": "/nix/store/xxx-foo"},
     )
-    br.cpu_user = WireOptMicroseconds(tag=1, value=50000)
-    resp = WireBuildDerivationResponse(result=br)
+    br.cpu_user = OptMicroseconds(tag=1, value=50000)
+    resp = BuildDerivationResponse(result=br)
 
     buf = BytesIO()
     await resp.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
 
-    wm = await WireBuildDerivationResponse.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm = await BuildDerivationResponse.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.result.status == 0
     assert wm.result.times_built == 1
     assert wm.result.cpu_user.tag == 1
@@ -380,8 +386,8 @@ async def test_wire_build_derivation_response_roundtrip():
 
 
 async def test_wire_build_result_json_roundtrip():
-    """WireBuildResult JSON roundtrip (exercises wire_conditional + dict + primitives)."""
-    br = WireBuildResult(
+    """BuildResult JSON roundtrip (exercises wire_conditional + dict + primitives)."""
+    br = BuildResult(
         status=0,
         error_msg="",
         times_built=1,
@@ -390,8 +396,8 @@ async def test_wire_build_result_json_roundtrip():
         stop_time=1000500,
         built_outputs={"sha256:abc!out": '{"outPath":"/nix/store/xxx-foo"}'},
     )
-    br.cpu_user = WireOptMicroseconds(tag=1, value=50000)
-    br.cpu_system = WireOptMicroseconds(tag=0, value=None)
+    br.cpu_user = OptMicroseconds(tag=1, value=50000)
+    br.cpu_system = OptMicroseconds(tag=0, value=None)
 
     # to_json
     data = br.to_json()
@@ -404,8 +410,8 @@ async def test_wire_build_result_json_roundtrip():
     assert '"cpu_system":{"tag":0,"value":null}' in data
 
     # from_json
-    br2 = WireBuildResult.from_json(data)
-    assert isinstance(br2, WireBuildResult)
+    br2 = BuildResult.from_json(data)
+    assert isinstance(br2, BuildResult)
     assert br2.status == 0
     assert br2.times_built == 1
     assert br2.start_time == 1000000
@@ -416,36 +422,36 @@ async def test_wire_build_result_json_roundtrip():
 
 
 async def test_wire_store_path_json():
-    """WireStorePath serdes as plain string in JSON."""
-    sp = WireStorePath(path="/nix/store/abc-test")
+    """SerdeStorePath serdes as plain string in JSON."""
+    sp = SerdeStorePath(path="/nix/store/abc-test")
 
-    class Req(WireMessage):
-        path: WireStorePath
+    class Req(WireModel):
+        path: SerdeStorePath
 
     req = Req(path=sp)
 
     data = req.to_json()
-    # WireStorePath serializes as plain string
+    # SerdeStorePath serializes as plain string
     assert data == '{"path":"/nix/store/abc-test"}'
 
     # from_json back to Req
     req2 = Req.from_json(data)
-    assert isinstance(req2.path, WireStorePath)  # pyright: ignore[reportAttributeAccessIssue]
+    assert isinstance(req2.path, SerdeStorePath)  # pyright: ignore[reportAttributeAccessIssue]
     assert str(req2.path) == "/nix/store/abc-test"  # pyright: ignore[reportAttributeAccessIssue]
     assert req2.path == sp  # pyright: ignore[reportAttributeAccessIssue]
 
 
 async def test_wire_build_result_json_null_conditional():
-    """WireOptMicroseconds not present → null in JSON."""
-    br = WireBuildResult(status=0, error_msg="")
-    # cpu_user is WireOptMicroseconds(tag=0) by default
+    """OptMicroseconds not present → null in JSON."""
+    br = BuildResult(status=0, error_msg="")
+    # cpu_user is OptMicroseconds(tag=0) by default
     assert br.cpu_user.tag == 0
 
     json_str = br.to_json()
     assert '"cpu_user":{"tag":0,"value":null}' in json_str
     assert '"cpu_system":{"tag":0,"value":null}' in json_str
 
-    wm = WireBuildResult.from_json(json_str)
+    wm = BuildResult.from_json(json_str)
     assert wm.cpu_user.tag == 0  # pyright: ignore[reportAttributeAccessIssue]
     assert wm.cpu_system.tag == 0  # pyright: ignore[reportAttributeAccessIssue]
 
@@ -463,7 +469,7 @@ async def test_wire_depends_on_exclude_unset_valid():
     data = buf.getvalue()
     r = _R(data)
     await r.read_uint64()  # skip logs
-    wm = await WireQueryPathInfoResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm = await SerdeQueryPathInfoResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     assert wm.valid is True
     json_str = wm.to_json(exclude_unset=True)
@@ -479,7 +485,7 @@ async def test_wire_depends_on_exclude_unset_invalid():
     data = buf.getvalue()
     r = _R(data)
     await r.read_uint64()  # skip logs
-    wm = await WireQueryPathInfoResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm = await SerdeQueryPathInfoResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
 
     assert wm.valid is False
     json_str = wm.to_json(exclude_unset=True)
@@ -491,7 +497,7 @@ async def test_wire_version_exclude_unset():
     """Version-skipped fields don't appear in JSON with exclude_unset."""
     # Serialize at 1.38 — first serialize a full result so all fields are written
     # (version-gated fields can't be None at their required wire version)
-    br = WireBuildResult(
+    br = BuildResult(
         status=0,
         error_msg="ok",
         times_built=1,
@@ -504,7 +510,7 @@ async def test_wire_version_exclude_unset():
     await br.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
     # Deserialize at version 1.27 — all version-gated fields are skipped
-    wm = await WireBuildResult.from_reader(ReadContext(reader=_R(data), version=proto(1, 27)))  # type: ignore[arg-type]
+    wm = await BuildResult.from_reader(ReadContext(reader=_R(data), version=proto(1, 27)))  # type: ignore[arg-type]
     assert wm.status == 0
 
     # At 1.27, only status+error_msg on the wire → only those are "set"
@@ -518,22 +524,22 @@ async def test_wire_version_exclude_unset():
 
 
 async def test_wire_realisation_roundtrip():
-    """Roundtrip WireRealisation — JSON blob with proper Pydantic fields."""
-    r = WireRealisation(
-        id=WireDrvOutput(drvHash="sha256:abc", outputName="out"),  # pyright: ignore[reportCallIssue]
-        outPath=WireStorePath(path="/nix/store/foo"),  # type: ignore[arg-type]
+    """Roundtrip Realisation — JSON blob with proper Pydantic fields."""
+    r = Realisation(
+        id=DrvOutput(drvHash="sha256:abc", outputName="out"),  # pyright: ignore[reportCallIssue]
+        outPath=SerdeStorePath(path="/nix/store/foo"),  # type: ignore[arg-type]
         signatures=["sig1", "sig2"],
         dependentRealisations={"sha256:xyz!out": "/nix/store/bar"},  # pyright: ignore[reportCallIssue]
     )
-    assert r.out_path == WireStorePath(path="/nix/store/foo")  # pyright: ignore[reportAttributeAccessIssue]
-    assert r.id == WireDrvOutput(drvHash="sha256:abc", outputName="out")  # pyright: ignore[reportCallIssue, reportAttributeAccessIssue]
+    assert r.out_path == SerdeStorePath(path="/nix/store/foo")  # pyright: ignore[reportAttributeAccessIssue]
+    assert r.id == DrvOutput(drvHash="sha256:abc", outputName="out")  # pyright: ignore[reportCallIssue, reportAttributeAccessIssue]
     assert r.signatures == ["sig1", "sig2"]
 
     # Wire roundtrip
     buf = BytesIO()
     await r.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
-    wm = await WireRealisation.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm = await Realisation.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.out_path == r.out_path  # pyright: ignore[reportAttributeAccessIssue]
     assert wm.id == r.id  # pyright: ignore[reportAttributeAccessIssue]
 
@@ -546,8 +552,8 @@ async def test_wire_realisation_roundtrip():
 
 
 async def test_wire_signature_roundtrip():
-    """Roundtrip WireSignature — WireString with name/signature properties."""
-    sig = WireSignature(name="cache.nixos.org-1", signature="abc123def456")
+    """Roundtrip Signature — WireString with name/signature properties."""
+    sig = Signature(name="cache.nixos.org-1", signature="abc123def456")
     assert sig.name == "cache.nixos.org-1"
     assert sig.signature == "abc123def456"
     assert str(sig) == "cache.nixos.org-1:abc123def456"
@@ -556,7 +562,7 @@ async def test_wire_signature_roundtrip():
     buf = BytesIO()
     await sig.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     data = buf.getvalue()
-    wm = await WireSignature.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    wm = await Signature.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.name == "cache.nixos.org-1"
     assert wm.signature == "abc123def456"
     assert str(wm) == "cache.nixos.org-1:abc123def456"
@@ -566,16 +572,16 @@ async def test_wire_signature_roundtrip():
     assert json_str == '"cache.nixos.org-1:abc123def456"'
 
 
-class TypedCollections(WireMessage):
-    paths: set[WireStorePath]
-    mapping: dict[str, WireStorePath]
+class TypedCollections(WireModel):
+    paths: set[SerdeStorePath]
+    mapping: dict[str, SerdeStorePath]
 
 
 async def test_typed_collections_roundtrip():
     """Roundtrip typed collections — generics handled by _find_reader/_write_value."""
     m = TypedCollections(
-        paths={WireStorePath(path="/nix/store/a"), WireStorePath(path="/nix/store/b")},  # pyright: ignore[reportUnhashable]
-        mapping={"key1": WireStorePath(path="/nix/store/x")},
+        paths={SerdeStorePath(path="/nix/store/a"), SerdeStorePath(path="/nix/store/b")},  # pyright: ignore[reportUnhashable]
+        mapping={"key1": SerdeStorePath(path="/nix/store/x")},
     )
     buf = BytesIO()
     await m.to_writer(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]

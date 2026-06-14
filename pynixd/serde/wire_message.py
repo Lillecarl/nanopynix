@@ -1,6 +1,6 @@
 """Declarative binary serialization for Nix daemon protocol types.
 
-Pydantic models inherit from ``WireMessage`` to auto-generate
+Pydantic models inherit from ``WireModel`` to auto-generate
 to_writer()/from_reader() from type annotations.
 
 Class variables (ClassVar[int]) are skipped — they're protocol constants
@@ -27,7 +27,7 @@ from ..types.context import ReadContext, WriteContext
 
 def _find_reader(ann: type, version: int = 0) -> Any:
     """Look up a reader for a wire type."""
-    from .types import WireString  # lazy: break circular import
+    from .wire_string import WireString  # lazy: break circular import
 
     # Primitives
     if ann is int:
@@ -98,8 +98,8 @@ def _find_reader(ann: type, version: int = 0) -> Any:
 
         return _read_string
 
-    # WireMessage subclass
-    if isinstance(ann, type) and issubclass(ann, WireMessage):
+    # WireModel subclass
+    if isinstance(ann, type) and issubclass(ann, WireModel):
 
         async def _read_nested(r):
             return await ann.from_reader(ReadContext(reader=r, version=version))
@@ -119,7 +119,7 @@ def _find_reader(ann: type, version: int = 0) -> Any:
 
 async def _write_value(val: Any, ann: type, ctx: WriteContext) -> None:
     """Write a value to the wire using primitives, generics, or nested serialization."""
-    from .types import WireString  # lazy: break circular import
+    from .wire_string import WireString  # lazy: break circular import
 
     # Primitives
     if ann is int:
@@ -171,8 +171,8 @@ async def _write_value(val: Any, ann: type, ctx: WriteContext) -> None:
         ctx.writer.write_string(str(val))
         return None
 
-    # WireMessage subclass
-    if isinstance(ann, type) and issubclass(ann, WireMessage):
+    # WireModel subclass
+    if isinstance(ann, type) and issubclass(ann, WireModel):
         result = val.to_writer(ctx)
         if asyncio.iscoroutine(result):
             await result
@@ -265,11 +265,11 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
 # ── Base class ──
 
 
-class WireMessage(BaseModel):
+class WireModel(BaseModel):
     """Pydantic base class with auto-generated Nix daemon protocol serde.
 
     Usage:
-        class FooResponse(WireMessage):
+        class FooResponse(WireModel):
             valid: int   # uint64 on the wire
             path: str    # length-prefixed UTF-8
     """
@@ -323,7 +323,7 @@ class WireMessage(BaseModel):
         return self.model_dump_json(**kwargs)
 
     @classmethod
-    def from_json(cls, json_data: str, **kwargs) -> WireMessage:
+    def from_json(cls, json_data: str, **kwargs) -> WireModel:
         """Deserialize from JSON string.
 
         Uses Pydantic's ``model_validate_json``.
