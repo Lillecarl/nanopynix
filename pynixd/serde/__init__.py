@@ -6,6 +6,8 @@ from .build_derivation import BuildDerivationResponse as BuildDerivationResponse
 from .build_result import BuildResult as BuildResult
 from .derivation_output import DerivationOutput as DerivationOutput
 from .drv_output import DrvOutput as DrvOutput
+from .is_valid_path import IsValidPathRequest as IsValidPathRequest
+from .is_valid_path import IsValidPathResponse as IsValidPathResponse
 from .logs import ActivityField as ActivityField
 from .logs import LogError as LogError
 from .logs import LogNext as LogNext

@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from pydantic import Field as PydanticField
 
+from .nar_hash import NARHash  # noqa: TC001
+from .signature import Signature  # noqa: TC001
+from .store_path import StorePath  # noqa: TC001
+from .unix_time import Time  # noqa: TC001
 from .wire_message import WireField, WireModel, WireResponse
-
-if TYPE_CHECKING:
-    from .nar_hash import NARHash
-    from .signature import Signature
-    from .store_path import StorePath
-    from .unix_time import Time
 
 
 class UnkeyedValidPathInfo(WireModel):

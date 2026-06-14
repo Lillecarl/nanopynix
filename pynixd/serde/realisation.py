@@ -5,12 +5,12 @@ from typing import TYPE_CHECKING
 from pydantic import ConfigDict
 from pydantic import Field as PydanticField
 
+from .drv_output import DrvOutput  # noqa: TC001
+from .store_path import StorePath  # noqa: TC001
 from .wire_message import WireModel
 
 if TYPE_CHECKING:
     from ..types.context import ReadContext, WriteContext
-    from .drv_output import DrvOutput
-    from .store_path import StorePath
 
 
 class Realisation(WireModel):
