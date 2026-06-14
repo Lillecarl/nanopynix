@@ -20,6 +20,8 @@ from .nar_hash import NARHash as NARHash
 from .opt_microseconds import OptMicroseconds as OptMicroseconds
 from .path_info import QueryPathInfoResponse as QueryPathInfoResponse
 from .path_info import UnkeyedValidPathInfo as UnkeyedValidPathInfo
+from .query_referrers import QueryReferrersRequest as QueryReferrersRequest
+from .query_referrers import QueryReferrersResponse as QueryReferrersResponse
 from .realisation import Realisation as Realisation
 from .signature import Signature as Signature
 from .store_path import StorePath as StorePath
@@ -27,6 +29,6 @@ from .unix_time import Time as Time
 from .wire_message import VersionMeta as VersionMeta
 from .wire_message import WireField as WireField
 from .wire_message import WireModel as WireModel
-from .wire_message import WireRequest as WireRequest
-from .wire_message import WireResponse as WireResponse
+from .wire_ops import WireRequest as WireRequest
+from .wire_ops import WireResponse as WireResponse
 from .wire_string import WireString as WireString

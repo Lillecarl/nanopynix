@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from .store_path import StorePath  # noqa: TC001
-from .wire_message import WireRequest, WireResponse
+from .wire_ops import WireRequest, WireResponse
 
 
 class IsValidPathResponse(WireResponse):
@@ -18,5 +18,5 @@ class IsValidPathRequest(WireRequest):
     """IsValidPath request — single StorePath on wire."""
 
     op: ClassVar[int] = 1
-    response_type: ClassVar[type[IsValidPathResponse]] = IsValidPathResponse
+    response_type = IsValidPathResponse
     path: StorePath

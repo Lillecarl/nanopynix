@@ -115,8 +115,10 @@ async def test_request_roundtrip():
     w2 = BytesWriter()
     await wm.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
     data2 = w2.get_bytes()
-    # bytes → WireModel
-    wm2 = await SerdeIsValidPathRequest.from_reader(ReadContext(reader=BytesReader(data2), version=PROTOCOL_VERSION))
+    # bytes → WireModel (skip op written by to_writer)
+    r2 = BytesReader(data2)
+    await r2.read_uint64()  # skip op
+    wm2 = await SerdeIsValidPathRequest.from_reader(ReadContext(reader=r2, version=PROTOCOL_VERSION))
     assert wm2.path == wm.path
 
 
@@ -126,7 +128,6 @@ async def test_response_roundtrip():
     await orig.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
     data = w.get_bytes()
     r = BytesReader(data)
-    await r.read_uint64()  # skip STDERR_LAST from empty logs
     wm = await SerdeIsValidPathResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
     assert wm.valid is True
     w2 = BytesWriter()
@@ -187,7 +188,6 @@ async def test_query_path_info_response_roundtrip():
     data = w.get_bytes()
 
     r = BytesReader(data)
-    await r.read_uint64()  # skip logs (STDERR_LAST)
     wm = await SerdeQueryPathInfoResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
 
     assert wm.valid
@@ -231,7 +231,6 @@ async def test_query_path_info_response_roundtrip():
     data3 = w3.get_bytes()
 
     r2 = BytesReader(data3)
-    await r2.read_uint64()  # skip logs (STDERR_LAST)
     wm3 = await SerdeQueryPathInfoResponse.from_reader(ReadContext(reader=r2, version=PROTOCOL_VERSION))
     assert not wm3.valid
     assert wm3.info is None
@@ -358,7 +357,6 @@ async def test_wire_depends_on_exclude_unset_valid():
     await orig.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
     data = w.get_bytes()
     r = BytesReader(data)
-    await r.read_uint64()  # skip logs
     wm = await SerdeQueryPathInfoResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
 
     assert wm.valid is True
@@ -374,7 +372,6 @@ async def test_wire_depends_on_exclude_unset_invalid():
     await orig.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
     data = w.get_bytes()
     r = BytesReader(data)
-    await r.read_uint64()  # skip logs
     wm = await SerdeQueryPathInfoResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
 
     assert wm.valid is False
@@ -585,8 +582,8 @@ async def test_old_build_derivation_request_to_new():
     assert new_req.derivation.builder == "/bin/sh"
     assert new_req.build_mode == 0  # BuildMode.NORMAL as int
 
-    # new → bytes (skip op: WireRequest doesn't write op on wire, but old does)
+    # new → bytes (WireRequest now writes op + body, matching old serialize)
     w2 = BytesWriter()
     await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
-    # Body-only bytes should match old bytes minus the 8-byte op prefix
-    assert w2.get_bytes() == data[8:]
+    # Full bytes (op + body) should match old serialize bytes
+    assert w2.get_bytes() == data

@@ -1,0 +1,24 @@
+"""QueryReferrers operation — WireRequest/WireResponse types."""
+
+from __future__ import annotations
+
+from typing import ClassVar
+
+from pydantic import Field as PydanticField
+
+from .store_path import StorePath  # noqa: TC001
+from .wire_ops import WireRequest, WireResponse
+
+
+class QueryReferrersResponse(WireResponse):
+    """QueryReferrers response — set of referrer StorePaths."""
+
+    paths: set[StorePath] = PydanticField(default_factory=set)
+
+
+class QueryReferrersRequest(WireRequest):
+    """QueryReferrers request — single StorePath on wire."""
+
+    op: ClassVar[int] = 6
+    response_type = QueryReferrersResponse
+    path: StorePath

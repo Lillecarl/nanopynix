@@ -6,7 +6,8 @@ from .nar_hash import NARHash  # noqa: TC001
 from .signature import Signature  # noqa: TC001
 from .store_path import StorePath  # noqa: TC001
 from .unix_time import Time  # noqa: TC001
-from .wire_message import WireField, WireModel, WireResponse
+from .wire_message import WireField, WireModel
+from .wire_ops import WireResponse
 
 
 class UnkeyedValidPathInfo(WireModel):

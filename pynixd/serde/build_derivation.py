@@ -5,7 +5,7 @@ from typing import ClassVar
 from .basic_derivation import BasicDerivation  # noqa: TC001
 from .build_result import BuildResult  # noqa: TC001
 from .store_path import StorePath  # noqa: TC001
-from .wire_message import WireRequest, WireResponse
+from .wire_ops import WireRequest, WireResponse
 
 
 class BuildDerivationResponse(WireResponse):
@@ -24,7 +24,7 @@ class BuildDerivationRequest(WireRequest):
     """
 
     op: ClassVar[int] = 36
-    response_type: ClassVar[type[BuildDerivationResponse]] = BuildDerivationResponse
+    response_type = BuildDerivationResponse
 
     drv_path: StorePath
     derivation: BasicDerivation

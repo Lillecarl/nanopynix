@@ -20,7 +20,6 @@ from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PydanticField
 from pydantic_core import PydanticUndefined
 
-from ..stderr import OperationLogs
 from ..types.context import ReadContext, WriteContext
 
 # ── Helpers ──
@@ -344,81 +343,3 @@ class WireModel(BaseModel):
         Uses Pydantic's ``model_validate_json``.
         """
         return cls.model_validate_json(json_data, **kwargs)
-
-
-class WireRequest(WireModel):
-    """Base class for Nix daemon protocol requests.
-
-    Subclasses must define two ClassVar fields::
-
-        class SomeRequest(WireRequest):
-            op: ClassVar[int] = 42
-            response_type: ClassVar[type[SomeResponse]] = SomeResponse
-            # ... wire body fields ...
-
-    ClassVar fields are automatically skipped by ``to_writer`` and
-    ``from_reader`` via ``_wire_fields``.  The ``op`` number is written
-    separately by the RPC transport layer, not by the request body.
-    """
-
-
-class WireResponse(WireModel):
-    """Base class for Nix daemon protocol responses.
-
-    The ``logs`` field holds stderr messages collected by the RPC
-    transport layer.  It is excluded from wire serialization —
-    ``to_writer`` and ``from_reader`` skip it.  The RPC layer
-    writes/reads stderr as a separate framing before the response body.
-
-    Subclasses define wire-body fields as normal::
-
-        class SomeResponse(WireResponse):
-            status: int
-            path: str
-    """
-
-    logs: OperationLogs = PydanticField(default_factory=OperationLogs, init=False)
-
-    async def to_writer(self, ctx: WriteContext) -> None:
-        """Write all fields except ``logs``."""
-        for name, ann, wire_depends_on, serialize, _deserialize in _wire_fields(type(self), version=ctx.version):
-            if name == "logs":
-                continue
-            if not serialize:
-                continue
-            if wire_depends_on is not None and not wire_depends_on(self):
-                continue
-            val = getattr(self, name)
-            await _write_value(val, ann, ctx)
-
-    @classmethod
-    async def from_reader(cls, ctx: ReadContext):
-        """Read all fields except ``logs``."""
-        obj = cls.__new__(cls)
-        object.__setattr__(obj, "__pydantic_fields_set__", set())
-        object.__setattr__(obj, "__pydantic_extra__", None)
-        object.__setattr__(obj, "__pydantic_private__", None)
-
-        for name, field in cls.model_fields.items():
-            if name == "logs":
-                continue
-            if field.default is not PydanticUndefined:
-                object.__setattr__(obj, name, field.default)
-            elif field.default_factory is not None:
-                default_factory: Any = field.default_factory
-                object.__setattr__(obj, name, default_factory())
-
-        for name, ann, wire_depends_on, _serialize, deserialize in _wire_fields(cls, version=ctx.version):
-            if name == "logs":
-                continue
-            if not deserialize:
-                continue
-            if wire_depends_on is not None and not wire_depends_on(obj):
-                continue
-            reader = _find_reader(ann, version=ctx.version)
-            object.__setattr__(obj, name, await reader(ctx.reader))
-            obj.__pydantic_fields_set__.add(name)
-
-        object.__setattr__(obj, "logs", OperationLogs())
-
-        return obj
