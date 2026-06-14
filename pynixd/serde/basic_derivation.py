@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from .derivation_output import DerivationOutput  # noqa: TC001
+from .store_path import StorePath  # noqa: TC001
 from .wire_message import WireModel
-
-if TYPE_CHECKING:
-    from .derivation_output import DerivationOutput
-    from .store_path import StorePath
 
 
 class BasicDerivation(WireModel):

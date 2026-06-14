@@ -6,6 +6,14 @@ from .build_derivation import BuildDerivationResponse as BuildDerivationResponse
 from .build_result import BuildResult as BuildResult
 from .derivation_output import DerivationOutput as DerivationOutput
 from .drv_output import DrvOutput as DrvOutput
+from .logs import ActivityField as ActivityField
+from .logs import LogError as LogError
+from .logs import LogNext as LogNext
+from .logs import LogResult as LogResult
+from .logs import LogStartActivity as LogStartActivity
+from .logs import LogStopActivity as LogStopActivity
+from .logs import TraceLine as TraceLine
+from .logs import WireLogs as WireLogs
 from .nar_hash import NARHash as NARHash
 from .opt_microseconds import OptMicroseconds as OptMicroseconds
 from .path_info import QueryPathInfoResponse as QueryPathInfoResponse
@@ -17,4 +25,6 @@ from .unix_time import Time as Time
 from .wire_message import VersionMeta as VersionMeta
 from .wire_message import WireField as WireField
 from .wire_message import WireModel as WireModel
+from .wire_message import WireRequest as WireRequest
+from .wire_message import WireResponse as WireResponse
 from .wire_string import WireString as WireString

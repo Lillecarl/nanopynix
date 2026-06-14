@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import ClassVar
 
-from .wire_message import WireModel
-
-if TYPE_CHECKING:
-    from .basic_derivation import BasicDerivation
-    from .build_result import BuildResult
-    from .store_path import StorePath
+from .basic_derivation import BasicDerivation  # noqa: TC001
+from .build_result import BuildResult  # noqa: TC001
+from .store_path import StorePath  # noqa: TC001
+from .wire_message import WireRequest, WireResponse
 
 
-class BuildDerivationResponse(WireModel):
+class BuildDerivationResponse(WireResponse):
     """BuildDerivation response — a BuildResult wrapped in the response body."""
 
     result: BuildResult
 
 
-class BuildDerivationRequest(WireModel):
+class BuildDerivationRequest(WireRequest):
     """BuildDerivation request — wire format after the op code.
 
     Wire fields (in order):
@@ -24,6 +22,9 @@ class BuildDerivationRequest(WireModel):
       derivation: BasicDerivation struct
       build_mode: uint64 (BuildMode int)
     """
+
+    op: ClassVar[int] = 36
+    response_type: ClassVar[type[BuildDerivationResponse]] = BuildDerivationResponse
 
     drv_path: StorePath
     derivation: BasicDerivation

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import Field as PydanticField
 
-from .wire_message import WireField, WireModel
+from .wire_message import WireField, WireModel, WireResponse
 
 if TYPE_CHECKING:
     from .nar_hash import NARHash
@@ -26,7 +26,7 @@ class UnkeyedValidPathInfo(WireModel):
     ca: str
 
 
-class QueryPathInfoResponse(WireModel):
+class QueryPathInfoResponse(WireResponse):
     """QueryPathInfo response — info depends on valid flag."""
 
     valid: bool

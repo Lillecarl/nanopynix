@@ -9,12 +9,21 @@ import pytest
 
 from pynixd.constants import PROTOCOL_VERSION, proto
 from pynixd.derived_path import DerivedPath
+from pynixd.operations.build_derivation import (
+    BuildDerivationRequest as OldBuildDerivationRequest,
+)
 from pynixd.operations.build_paths import BuildPathsRequest
 from pynixd.operations.is_valid_path import (
     IsValidPathRequest,
     IsValidPathResponse,
 )
 from pynixd.operations.query_path_info import QueryPathInfoResponse
+from pynixd.serde import (
+    BasicDerivation as SerdeBasicDerivation,
+)
+from pynixd.serde import (
+    BuildDerivationRequest as SerdeBuildDerivationRequest,
+)
 from pynixd.serde import (
     BuildDerivationResponse,
     BuildResult,
@@ -27,6 +36,12 @@ from pynixd.serde import (
     WireModel,
 )
 from pynixd.serde import (
+    BuildResult as SerdeBuildResult,
+)
+from pynixd.serde import (
+    DerivationOutput as SerdeDerivationOutput,
+)
+from pynixd.serde import (
     QueryPathInfoResponse as SerdeQueryPathInfoResponse,
 )
 from pynixd.serde import (
@@ -36,7 +51,19 @@ from pynixd.serde import (
     UnkeyedValidPathInfo as SerdeUnkeyedValidPathInfo,
 )
 from pynixd.store_path import StorePath
-from pynixd.types import BuildMode
+from pynixd.types import (
+    BasicDerivation as OldBasicDerivation,
+)
+from pynixd.types import (
+    BuildMode,
+    BuildResultStatus,
+)
+from pynixd.types import (
+    BuildResult as OldBuildResult,
+)
+from pynixd.types import (
+    DerivationOutput as OldDerivationOutput,
+)
 from pynixd.types.context import ReadContext, WriteContext
 from pynixd.types.path_info import UnkeyedValidPathInfo
 
@@ -81,6 +108,18 @@ class _W:
         for k, val in v.items():
             self.write_string(k)
             self.write_string(val)
+
+    def write_optional_uint64(self, v: int | None) -> None:
+        if v is not None:
+            self.write_uint64(1)
+            self.write_uint64(v)
+        else:
+            self.write_uint64(0)
+
+    def write_string_list(self, v: list) -> None:
+        self.write_uint64(len(v))
+        for item in v:
+            self.write_string(item)
 
 
 class _R:
@@ -588,3 +627,122 @@ async def test_typed_collections_roundtrip():
     wm = await TypedCollections.from_reader(ReadContext(reader=_R(buf.getvalue()), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
     assert wm.paths == m.paths
     assert wm.mapping == m.mapping
+
+
+async def test_old_build_result_to_new():
+    """Old BuildResult serialize → new BuildResult deserialize → byte-identical re-serialize."""
+    old_br = OldBuildResult(
+        status=BuildResultStatus.BUILT,
+        error_msg="",
+        times_built=1,
+        is_non_deterministic=0,
+        start_time=1000000,
+        stop_time=1000500,
+        built_outputs={},
+        cpu_user=50000,
+        cpu_system=10000,
+    )
+    # old → bytes
+    buf = BytesIO()
+    await old_br.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    data = buf.getvalue()
+
+    # bytes → new
+    new_br = await SerdeBuildResult.from_reader(ReadContext(reader=_R(data), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    assert new_br.status == 0
+    assert new_br.error_msg == ""
+    assert new_br.times_built == 1
+    assert new_br.is_non_deterministic == 0
+    assert new_br.start_time == 1000000
+    assert new_br.stop_time == 1000500
+    assert new_br.built_outputs == {}
+    assert new_br.cpu_user.tag == 1
+    assert new_br.cpu_user.value == 50000
+    assert new_br.cpu_system.tag == 1
+    assert new_br.cpu_system.value == 10000
+
+    # new → bytes (must be identical)
+    buf2 = BytesIO()
+    await new_br.to_writer(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    assert buf2.getvalue() == data
+
+
+async def test_old_basic_derivation_to_new():
+    """Old BasicDerivation serialize → new BasicDerivation deserialize → byte-identical re-serialize."""
+    old_drv = OldBasicDerivation(
+        outputs={"out": OldDerivationOutput(path="/nix/store/xxx", method="", hash_digest="")},
+        input_srcs={StorePath("/nix/store/dep1"), StorePath("/nix/store/dep2")},
+        platform="x86_64-linux",
+        builder="/bin/sh",
+        args=["-c", "echo hi"],
+        env={"PATH": "/bin", "HOME": "/tmp"},
+    )
+    # old → bytes
+    buf = BytesIO()
+    await old_drv.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    data = buf.getvalue()
+
+    # bytes → new
+    new_drv = await SerdeBasicDerivation.from_reader(
+        ReadContext(reader=_R(data), version=PROTOCOL_VERSION)  # type: ignore[arg-type]
+    )
+    assert new_drv.platform == "x86_64-linux"
+    assert new_drv.builder == "/bin/sh"
+    assert new_drv.args == ["-c", "echo hi"]
+    assert new_drv.env == {"PATH": "/bin", "HOME": "/tmp"}
+    assert len(new_drv.outputs) == 1
+    assert "out" in new_drv.outputs
+    assert new_drv.outputs["out"].path == "/nix/store/xxx"
+    assert len(new_drv.input_srcs) == 2
+    assert SerdeStorePath(path="/nix/store/dep1") in new_drv.input_srcs
+    assert SerdeStorePath(path="/nix/store/dep2") in new_drv.input_srcs
+
+    # new → bytes → new again (content equivalence, sets are unordered)
+    buf2 = BytesIO()
+    await new_drv.to_writer(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    new_drv2 = await SerdeBasicDerivation.from_reader(
+        ReadContext(reader=_R(buf2.getvalue()), version=PROTOCOL_VERSION)  # type: ignore[arg-type]
+    )
+    assert new_drv2.platform == new_drv.platform
+    assert new_drv2.builder == new_drv.builder
+    assert new_drv2.args == new_drv.args
+    assert new_drv2.env == new_drv.env
+    assert new_drv2.outputs == new_drv.outputs
+    assert new_drv2.input_srcs == new_drv.input_srcs
+
+
+async def test_old_build_derivation_request_to_new():
+    """Old BuildDerivationRequest serialize → new BuildDerivationRequest deserialize."""
+    old_drv = OldBasicDerivation(
+        outputs={"out": OldDerivationOutput(path="/nix/store/xxx", method="", hash_digest="")},
+        input_srcs=set(),
+        platform="x86_64-linux",
+        builder="/bin/sh",
+        args=["-c", "echo hi"],
+        env={},
+    )
+    old_req = OldBuildDerivationRequest(
+        drv_path=StorePath("/nix/store/test.drv"),
+        derivation=old_drv,
+        build_mode=BuildMode.NORMAL,
+    )
+    # old → bytes
+    buf = BytesIO()
+    await old_req.serialize(WriteContext(writer=_W(buf), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    data = buf.getvalue()
+
+    # bytes → new (skip op uint64 written by old serialize)
+    r = _R(data)
+    await r.read_uint64()
+    new_req = await SerdeBuildDerivationRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+
+    assert str(new_req.drv_path) == "/nix/store/test.drv"
+    assert new_req.derivation.platform == "x86_64-linux"
+    assert new_req.derivation.builder == "/bin/sh"
+    assert new_req.build_mode == 0  # BuildMode.NORMAL as int
+
+    # new → bytes (skip op: WireRequest doesn't write op on wire, but old does)
+    buf2 = BytesIO()
+    await new_req.to_writer(WriteContext(writer=_W(buf2), version=PROTOCOL_VERSION))  # type: ignore[arg-type]
+    # Body-only bytes should match old bytes minus the 8-byte op prefix
+    assert buf2.getvalue() == data[8:]

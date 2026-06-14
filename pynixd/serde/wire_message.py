@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PydanticField
 from pydantic_core import PydanticUndefined
 
+from ..stderr import OperationLogs
 from ..types.context import ReadContext, WriteContext
 
 # ── Helpers ──
@@ -195,6 +196,8 @@ class VersionMeta:
 
     min_version: int | None = None
     max_version: int | None = None
+    serialize: bool | None = None
+    deserialize: bool | None = None
     wire_depends_on: Callable | None = None
 
 
@@ -204,6 +207,8 @@ def WireField(  # noqa: N802
     default_factory: Any = None,
     min_version: int | None = None,
     max_version: int | None = None,
+    serialize: bool | None = None,
+    deserialize: bool | None = None,
     wire_depends_on: Callable | None = None,
     **kwargs: Any,
 ) -> Any:
@@ -220,31 +225,31 @@ def WireField(  # noqa: N802
         kwargs["default_factory"] = default_factory
 
     field_info = PydanticField(**kwargs)
-    field_info.metadata.append(VersionMeta(min_version, max_version, wire_depends_on))
+    field_info.metadata.append(VersionMeta(min_version, max_version, serialize, deserialize, wire_depends_on))
     return field_info
 
 
 # ── Field collection ──
 
 
-def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple[str, type, Callable | None]]:
-    """Return (name, raw_annotation, wire_depends_on) tuples in declaration order.
+def _wire_fields(
+    cls: type[BaseModel], version: int | None = None
+) -> list[tuple[str, type, Callable | None, bool, bool]]:
+    """Return (name, raw_annotation, wire_depends_on, serialize, deserialize) tuples.
 
-    ClassVar fields are skipped.
+    ClassVar fields default to serialize=False, deserialize=False unless
+    ``WireField(serialize=..., deserialize=...)`` overrides them explicitly.
 
-    Fields with ``min_version`` or ``max_version`` constraints
-    (set via :func:`WireField`) are filtered against the provided
-    ``version``, enabling protocol-version-dependent serde.
-
-    Raw annotations (e.g. ``set[str]``, ``int | None``) are passed through
-    without stripping generics or Optional wrappers.  The resolution is
-    handled downstream by ``_find_reader`` / ``_write_value``.
+    Fields with ``min_version`` or ``max_version`` constraints are filtered
+    against the provided ``version``.
     """
     hints = get_type_hints(cls, include_extras=True)
     result = []
     for name in cls.model_fields:
         field = cls.model_fields[name]
-        version_meta = next((m for m in field.metadata if isinstance(m, VersionMeta)), None)
+        version_meta: VersionMeta | None = next((m for m in field.metadata if isinstance(m, VersionMeta)), None)
+
+        # Version-gating
         if version_meta is not None:
             if version_meta.min_version is not None and version is not None and version < version_meta.min_version:
                 continue
@@ -254,11 +259,19 @@ def _wire_fields(cls: type[BaseModel], version: int | None = None) -> list[tuple
         ann = hints.get(name)
         if ann is None:
             continue
-        if get_origin(ann) is ClassVar:
-            continue
+
+        is_classvar = get_origin(ann) is ClassVar
+
+        # Resolve serialize / deserialize flags
+        if version_meta is not None:
+            _serialize = version_meta.serialize if version_meta.serialize is not None else (not is_classvar)
+            _deserialize = version_meta.deserialize if version_meta.deserialize is not None else (not is_classvar)
+        else:
+            _serialize = not is_classvar
+            _deserialize = not is_classvar
 
         wire_depends_on = version_meta.wire_depends_on if version_meta else None
-        result.append((name, ann, wire_depends_on))
+        result.append((name, ann, wire_depends_on, _serialize, _deserialize))
     return result
 
 
@@ -281,8 +294,9 @@ class WireModel(BaseModel):
 
     async def to_writer(self, ctx: WriteContext) -> None:
         """Write all non-ClassVar fields in declaration order."""
-        for name, ann, wire_depends_on in _wire_fields(type(self), version=ctx.version):
-            # Check wire_depends_on — skip field if dependency is False
+        for name, ann, wire_depends_on, serialize, _deserialize in _wire_fields(type(self), version=ctx.version):
+            if not serialize:
+                continue
             if wire_depends_on is not None and not wire_depends_on(self):
                 continue
 
@@ -304,8 +318,9 @@ class WireModel(BaseModel):
             elif field.default_factory is not None:
                 object.__setattr__(obj, name, field.default_factory())  # pyright: ignore[reportCallIssue]
 
-        for name, ann, wire_depends_on in _wire_fields(cls, version=ctx.version):
-            # Check wire_depends_on — skip field if dependency is False
+        for name, ann, wire_depends_on, _serialize, deserialize in _wire_fields(cls, version=ctx.version):
+            if not deserialize:
+                continue
             if wire_depends_on is not None and not wire_depends_on(obj):
                 continue
 
@@ -329,3 +344,81 @@ class WireModel(BaseModel):
         Uses Pydantic's ``model_validate_json``.
         """
         return cls.model_validate_json(json_data, **kwargs)
+
+
+class WireRequest(WireModel):
+    """Base class for Nix daemon protocol requests.
+
+    Subclasses must define two ClassVar fields::
+
+        class SomeRequest(WireRequest):
+            op: ClassVar[int] = 42
+            response_type: ClassVar[type[SomeResponse]] = SomeResponse
+            # ... wire body fields ...
+
+    ClassVar fields are automatically skipped by ``to_writer`` and
+    ``from_reader`` via ``_wire_fields``.  The ``op`` number is written
+    separately by the RPC transport layer, not by the request body.
+    """
+
+
+class WireResponse(WireModel):
+    """Base class for Nix daemon protocol responses.
+
+    The ``logs`` field holds stderr messages collected by the RPC
+    transport layer.  It is excluded from wire serialization —
+    ``to_writer`` and ``from_reader`` skip it.  The RPC layer
+    writes/reads stderr as a separate framing before the response body.
+
+    Subclasses define wire-body fields as normal::
+
+        class SomeResponse(WireResponse):
+            status: int
+            path: str
+    """
+
+    logs: OperationLogs = PydanticField(default_factory=OperationLogs, init=False)
+
+    async def to_writer(self, ctx: WriteContext) -> None:
+        """Write all fields except ``logs``."""
+        for name, ann, wire_depends_on, serialize, _deserialize in _wire_fields(type(self), version=ctx.version):
+            if name == "logs":
+                continue
+            if not serialize:
+                continue
+            if wire_depends_on is not None and not wire_depends_on(self):
+                continue
+            val = getattr(self, name)
+            await _write_value(val, ann, ctx)
+
+    @classmethod
+    async def from_reader(cls, ctx: ReadContext):
+        """Read all fields except ``logs``."""
+        obj = cls.__new__(cls)
+        object.__setattr__(obj, "__pydantic_fields_set__", set())
+        object.__setattr__(obj, "__pydantic_extra__", None)
+        object.__setattr__(obj, "__pydantic_private__", None)
+
+        for name, field in cls.model_fields.items():
+            if name == "logs":
+                continue
+            if field.default is not PydanticUndefined:
+                object.__setattr__(obj, name, field.default)
+            elif field.default_factory is not None:
+                default_factory: Any = field.default_factory
+                object.__setattr__(obj, name, default_factory())
+
+        for name, ann, wire_depends_on, _serialize, deserialize in _wire_fields(cls, version=ctx.version):
+            if name == "logs":
+                continue
+            if not deserialize:
+                continue
+            if wire_depends_on is not None and not wire_depends_on(obj):
+                continue
+            reader = _find_reader(ann, version=ctx.version)
+            object.__setattr__(obj, name, await reader(ctx.reader))
+            obj.__pydantic_fields_set__.add(name)
+
+        object.__setattr__(obj, "logs", OperationLogs())
+
+        return obj
