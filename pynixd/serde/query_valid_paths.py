@@ -1,0 +1,27 @@
+"""QueryValidPaths operation — WireRequest/WireResponse types."""
+
+from __future__ import annotations
+
+from typing import ClassVar
+
+from pydantic import Field as PydanticField
+
+from ..constants import proto
+from .store_path import StorePath  # noqa: TC001
+from .wire_message import WireField
+from .wire_ops import WireRequest, WireResponse
+
+
+class QueryValidPathsResponse(WireResponse):
+    """QueryValidPaths response — set of valid StorePaths."""
+
+    paths: set[StorePath] = PydanticField(default_factory=set)
+
+
+class QueryValidPathsRequest(WireRequest):
+    """QueryValidPaths request — set of paths + version-gated substitute flag."""
+
+    op: ClassVar[int] = 31
+    response_type = QueryValidPathsResponse
+    paths: set[StorePath] = PydanticField(default_factory=set)
+    substitute: int | None = WireField(default=None, min_version=proto(1, 27))

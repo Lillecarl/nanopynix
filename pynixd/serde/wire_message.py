@@ -34,6 +34,13 @@ def _find_reader(ann: type, version: int = 0) -> Any:
     # Primitives
     if ann is int:
         return lambda r: r.read_uint64()
+    # IntEnum — read uint64, convert to enum member
+    if isinstance(ann, type) and issubclass(ann, IntEnum):
+
+        async def _read_enum(r):
+            return ann(await r.read_uint64())
+
+        return _read_enum
     if ann is str:
         return lambda r: r.read_string(str)
     if ann is bool:

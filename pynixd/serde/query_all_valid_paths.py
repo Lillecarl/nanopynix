@@ -1,0 +1,23 @@
+"""QueryAllValidPaths operation — WireRequest/WireResponse types."""
+
+from __future__ import annotations
+
+from typing import ClassVar
+
+from pydantic import Field as PydanticField
+
+from .store_path import StorePath  # noqa: TC001
+from .wire_ops import WireRequest, WireResponse
+
+
+class QueryAllValidPathsResponse(WireResponse):
+    """QueryAllValidPaths response — set of all valid StorePaths."""
+
+    paths: set[StorePath] = PydanticField(default_factory=set)
+
+
+class QueryAllValidPathsRequest(WireRequest):
+    """QueryAllValidPaths request — no body fields, just op code."""
+
+    op: ClassVar[int] = 23
+    response_type = QueryAllValidPathsResponse

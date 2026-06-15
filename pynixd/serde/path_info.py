@@ -11,9 +11,8 @@ if TYPE_CHECKING:
 from .nar_hash import NARHash  # noqa: TC001
 from .signature import Signature  # noqa: TC001
 from .store_path import StorePath  # noqa: TC001
-from .unix_time import Time  # noqa: TC001
-from .wire_message import WireField, WireModel
-from .wire_ops import WireResponse
+from .wire_message import WireModel
+from .wire_time import Time  # noqa: TC001
 
 
 class UnkeyedValidPathInfo(WireModel):
@@ -33,13 +32,3 @@ class UnkeyedValidPathInfo(WireModel):
         from .valid_path_info import ValidPathInfo  # lazy to avoid circular
 
         return ValidPathInfo(path=path, info=self)
-
-
-class QueryPathInfoResponse(WireResponse):
-    """QueryPathInfo response — info depends on valid flag."""
-
-    valid: bool
-    info: UnkeyedValidPathInfo | None = WireField(
-        default=None,
-        wire_depends_on=lambda self: self.valid,
-    )
