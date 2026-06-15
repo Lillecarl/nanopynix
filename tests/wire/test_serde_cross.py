@@ -14,11 +14,23 @@ from pynixd.operations.add_indirect_root import (
 from pynixd.operations.add_indirect_root import (
     AddIndirectRootResponse as OldAddIndirectRootResponse,
 )
+from pynixd.operations.add_signatures import (
+    AddSignaturesRequest as OldAddSignaturesRequest,
+)
+from pynixd.operations.add_signatures import (
+    AddSignaturesResponse as OldAddSignaturesResponse,
+)
 from pynixd.operations.add_temp_root import (
     AddTempRootRequest as OldAddTempRootRequest,
 )
 from pynixd.operations.add_temp_root import (
     AddTempRootResponse as OldAddTempRootResponse,
+)
+from pynixd.operations.add_to_store_nar import (
+    AddToStoreNarRequest as OldAddToStoreNarRequest,
+)
+from pynixd.operations.add_to_store_nar import (
+    AddToStoreNarResponse as OldAddToStoreNarResponse,
 )
 from pynixd.operations.build_derivation import (
     BuildDerivationRequest as OldBuildDerivationRequest,
@@ -54,11 +66,32 @@ from pynixd.operations.is_valid_path import (
     IsValidPathRequest,
     IsValidPathResponse,
 )
+from pynixd.operations.nar_from_path import (
+    NarFromPathRequest as OldNarFromPathRequest,
+)
+from pynixd.operations.optimise_store import (
+    OptimiseStoreRequest as OldOptimiseStoreRequest,
+)
+from pynixd.operations.optimise_store import (
+    OptimiseStoreResponse as OldOptimiseStoreResponse,
+)
 from pynixd.operations.query_all_valid_paths import (
     QueryAllValidPathsRequest as OldQueryAllValidPathsRequest,
 )
 from pynixd.operations.query_all_valid_paths import (
     QueryAllValidPathsResponse as OldQueryAllValidPathsResponse,
+)
+from pynixd.operations.query_derivation_output_map import (
+    QueryDerivationOutputMapRequest as OldQueryDerivationOutputMapRequest,
+)
+from pynixd.operations.query_derivation_output_map import (
+    QueryDerivationOutputMapResponse as OldQueryDerivationOutputMapResponse,
+)
+from pynixd.operations.query_missing import (
+    QueryMissingRequest as OldQueryMissingRequest,
+)
+from pynixd.operations.query_missing import (
+    QueryMissingResponse as OldQueryMissingResponse,
 )
 from pynixd.operations.query_path_from_hash_part import (
     QueryPathFromHashPartRequest as OldQueryPathFromHashPartRequest,
@@ -80,6 +113,12 @@ from pynixd.operations.query_substitutable_paths import (
 from pynixd.operations.query_substitutable_paths import (
     QuerySubstitutablePathsResponse as OldQuerySubstitutablePathsResponse,
 )
+from pynixd.operations.query_valid_derivers import (
+    QueryValidDeriversRequest as OldQueryValidDeriversRequest,
+)
+from pynixd.operations.query_valid_derivers import (
+    QueryValidDeriversResponse as OldQueryValidDeriversResponse,
+)
 from pynixd.operations.query_valid_paths import (
     QueryValidPathsRequest as OldQueryValidPathsRequest,
 )
@@ -92,6 +131,12 @@ from pynixd.operations.set_options import (
 from pynixd.operations.set_options import (
     SetOptionsResponse as OldSetOptionsResponse,
 )
+from pynixd.operations.verify_store import (
+    VerifyStoreRequest as OldVerifyStoreRequest,
+)
+from pynixd.operations.verify_store import (
+    VerifyStoreResponse as OldVerifyStoreResponse,
+)
 from pynixd.serde import (
     AddIndirectRootRequest as SerdeAddIndirectRootRequest,
 )
@@ -99,10 +144,22 @@ from pynixd.serde import (
     AddIndirectRootResponse as SerdeAddIndirectRootResponse,
 )
 from pynixd.serde import (
+    AddSignaturesRequest as SerdeAddSignaturesRequest,
+)
+from pynixd.serde import (
+    AddSignaturesResponse as SerdeAddSignaturesResponse,
+)
+from pynixd.serde import (
     AddTempRootRequest as SerdeAddTempRootRequest,
 )
 from pynixd.serde import (
     AddTempRootResponse as SerdeAddTempRootResponse,
+)
+from pynixd.serde import (
+    AddToStoreNarRequest as SerdeAddToStoreNarRequest,
+)
+from pynixd.serde import (
+    AddToStoreNarResponse as SerdeAddToStoreNarResponse,
 )
 from pynixd.serde import (
     BasicDerivation as SerdeBasicDerivation,
@@ -164,10 +221,34 @@ from pynixd.serde import (
     IsValidPathResponse as SerdeIsValidPathResponse,
 )
 from pynixd.serde import (
+    NarFromPathRequest as SerdeNarFromPathRequest,
+)
+from pynixd.serde import (
+    NarFromPathResponse as SerdeNarFromPathResponse,
+)
+from pynixd.serde import (
+    OptimiseStoreRequest as SerdeOptimiseStoreRequest,
+)
+from pynixd.serde import (
+    OptimiseStoreResponse as SerdeOptimiseStoreResponse,
+)
+from pynixd.serde import (
     QueryAllValidPathsRequest as SerdeQueryAllValidPathsRequest,
 )
 from pynixd.serde import (
     QueryAllValidPathsResponse as SerdeQueryAllValidPathsResponse,
+)
+from pynixd.serde import (
+    QueryDerivationOutputMapRequest as SerdeQueryDerivationOutputMapRequest,
+)
+from pynixd.serde import (
+    QueryDerivationOutputMapResponse as SerdeQueryDerivationOutputMapResponse,
+)
+from pynixd.serde import (
+    QueryMissingRequest as SerdeQueryMissingRequest,
+)
+from pynixd.serde import (
+    QueryMissingResponse as SerdeQueryMissingResponse,
 )
 from pynixd.serde import (
     QueryPathFromHashPartRequest as SerdeQueryPathFromHashPartRequest,
@@ -194,6 +275,12 @@ from pynixd.serde import (
     QuerySubstitutablePathsResponse as SerdeQuerySubstitutablePathsResponse,
 )
 from pynixd.serde import (
+    QueryValidDeriversRequest as SerdeQueryValidDeriversRequest,
+)
+from pynixd.serde import (
+    QueryValidDeriversResponse as SerdeQueryValidDeriversResponse,
+)
+from pynixd.serde import (
     QueryValidPathsRequest as SerdeQueryValidPathsRequest,
 )
 from pynixd.serde import (
@@ -210,6 +297,12 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     UnkeyedValidPathInfo as SerdeUnkeyedValidPathInfo,
+)
+from pynixd.serde import (
+    VerifyStoreRequest as SerdeVerifyStoreRequest,
+)
+from pynixd.serde import (
+    VerifyStoreResponse as SerdeVerifyStoreResponse,
 )
 from pynixd.store_path import StorePath
 from pynixd.types import (
@@ -1187,6 +1280,310 @@ async def test_old_query_substitutable_paths_to_new():
     await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
     new_resp2 = await SerdeQuerySubstitutablePathsResponse.from_reader(read_ctx(w4.get_bytes()))
     assert new_resp2.paths == new_resp.paths
+
+
+async def test_old_query_valid_derivers_to_new():
+    """Old QueryValidDeriversRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/some-drv.drv")
+
+    # Request: old → bytes → new
+    old_req = OldQueryValidDeriversRequest(path=sp)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeQueryValidDeriversRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/some-drv.drv"
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    drv1 = StorePath("/nix/store/deriver-1")
+    drv2 = StorePath("/nix/store/deriver-2")
+    old_resp = OldQueryValidDeriversResponse(paths={drv1, drv2})
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeQueryValidDeriversResponse.from_reader(read_ctx(data3))
+    assert len(new_resp.paths) == 2
+    assert SerdeStorePath(path="/nix/store/deriver-1") in new_resp.paths
+    assert SerdeStorePath(path="/nix/store/deriver-2") in new_resp.paths
+
+    # Response: new → bytes → content roundtrip (sets are unordered)
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    new_resp2 = await SerdeQueryValidDeriversResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert new_resp2.paths == new_resp.paths
+
+
+async def test_old_optimise_store_to_new():
+    """Old OptimiseStoreRequest/Response serialize → new serde deserialize."""
+
+    # Request: old → bytes → new (no body, just op)
+    old_req = OldOptimiseStoreRequest()
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeOptimiseStoreRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert isinstance(new_req, SerdeOptimiseStoreRequest)
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldOptimiseStoreResponse(value=42)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeOptimiseStoreResponse.from_reader(read_ctx(data3))
+    assert new_resp.value == 42
+
+    # Response: new → bytes
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_verify_store_to_new():
+    """Old VerifyStoreRequest/Response serialize → new serde deserialize."""
+
+    # Request: old → bytes → new
+    old_req = OldVerifyStoreRequest(check_contents=1, repair=0)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeVerifyStoreRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert new_req.check_contents == 1
+    assert new_req.repair == 0
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldVerifyStoreResponse(value=7)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeVerifyStoreResponse.from_reader(read_ctx(data3))
+    assert new_resp.value == 7
+
+    # Response: new → bytes
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_nar_from_path_to_new():
+    """Old NarFromPathRequest serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/nar-me")
+
+    # Request: old → bytes → new
+    old_req = OldNarFromPathRequest(path=sp, nar_size=0)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeNarFromPathRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/nar-me"
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+
+async def test_old_add_signatures_to_new():
+    """Old AddSignaturesRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/sig-me")
+
+    # Request: old → bytes → new
+    old_req = OldAddSignaturesRequest(path=sp, sigs={"sig-abc", "sig-def"})
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeAddSignaturesRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/sig-me"
+    assert len(new_req.sigs) == 2
+    sig_names = {s.name for s in new_req.sigs}
+    assert "sig-abc" in sig_names
+    assert "sig-def" in sig_names
+
+    # Request: new → bytes → content roundtrip (sets are unordered)
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    new_req2 = await SerdeAddSignaturesRequest.from_reader(
+        ReadContext(reader=BytesReader(w2.get_bytes()[8:]), version=PROTOCOL_VERSION),
+    )
+    assert new_req2.path == new_req.path
+    assert new_req2.sigs == new_req.sigs
+
+    # Response: old → bytes → new
+    old_resp = OldAddSignaturesResponse(value=1)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeAddSignaturesResponse.from_reader(read_ctx(data3))
+    assert new_resp.value == 1
+
+    # Response: new → bytes
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_add_to_store_nar_to_new():
+    """Old AddToStoreNarRequest serialize → new serde deserialize (header only)."""
+    from pynixd.types.path_info import ValidPathInfo as OldValidPathInfo
+
+    # Build old-style ValidPathInfo (flat dataclass, not nested)
+    old_info = OldValidPathInfo(
+        path=StorePath("/nix/store/nar-item"),
+        nar_hash="sha256:abc123",
+        nar_size=1024,
+        registration_time=1000,
+    )
+
+    # Request: old → bytes → new
+    old_req = OldAddToStoreNarRequest(
+        info=old_info,
+        repair=0,
+        dont_check_sigs=1,
+    )
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeAddToStoreNarRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.info.path) == "/nix/store/nar-item"
+    assert new_req.repair == 0
+    assert new_req.dont_check_sigs == 1
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new (empty body)
+    old_resp = OldAddToStoreNarResponse()
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeAddToStoreNarResponse.from_reader(read_ctx(data3))
+    assert isinstance(new_resp, SerdeAddToStoreNarResponse)
+
+    # Response: new → bytes
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_query_missing_to_new():
+    """Old QueryMissingRequest/Response serialize → new serde deserialize."""
+    dp1 = DerivedPath("/nix/store/drv1.drv!out")
+    dp2 = DerivedPath("/nix/store/drv2.drv!dev")
+
+    # Request: old → bytes → new
+    old_req = OldQueryMissingRequest(derived_paths={dp1, dp2})
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeQueryMissingRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert len(new_req.derived_paths) == 2
+
+    # Request: new → bytes → content roundtrip (sets are unordered)
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    new_req2 = await SerdeQueryMissingRequest.from_reader(
+        ReadContext(reader=BytesReader(w2.get_bytes()[8:]), version=PROTOCOL_VERSION),
+    )
+    assert new_req2.derived_paths == new_req.derived_paths
+
+    # Response: old → bytes → new
+    sb1 = StorePath("/nix/store/will-sub-1")
+    wb1 = StorePath("/nix/store/will-build-1")
+    old_resp = OldQueryMissingResponse(
+        will_build={wb1},
+        will_substitute={sb1},
+        unknown=set(),
+        download_size=1024,
+        nar_size=2048,
+    )
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeQueryMissingResponse.from_reader(read_ctx(data3))
+    assert SerdeStorePath(path="/nix/store/will-build-1") in new_resp.will_build
+    assert SerdeStorePath(path="/nix/store/will-sub-1") in new_resp.will_substitute
+    assert len(new_resp.unknown) == 0
+    assert new_resp.download_size == 1024
+    assert new_resp.nar_size == 2048
+
+    # Response: new → bytes → content roundtrip
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    new_resp2 = await SerdeQueryMissingResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert new_resp2.will_build == new_resp.will_build
+    assert new_resp2.will_substitute == new_resp.will_substitute
+    assert new_resp2.unknown == new_resp.unknown
+    assert new_resp2.download_size == new_resp.download_size
+    assert new_resp2.nar_size == new_resp.nar_size
+
+
+async def test_old_query_derivation_output_map_to_new():
+    """Old QueryDerivationOutputMapRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/some-drv.drv")
+
+    # Request: old → bytes → new
+    old_req = OldQueryDerivationOutputMapRequest(path=sp)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeQueryDerivationOutputMapRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/some-drv.drv"
+
+    # Request: new → bytes → full bytes match
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldQueryDerivationOutputMapResponse(
+        items={"out": StorePath("/nix/store/out-path"), "dev": None},
+    )
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeQueryDerivationOutputMapResponse.from_reader(read_ctx(data3))
+    assert len(new_resp.items) == 2
+    assert str(new_resp.items["out"]) == "/nix/store/out-path"
+    # None in old → empty StorePath in new (wire has empty string)
+    assert str(new_resp.items["dev"]) == ""
+
+    # Response: new → bytes → content roundtrip
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    new_resp2 = await SerdeQueryDerivationOutputMapResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert new_resp2.items == new_resp.items
 
 
 async def test_old_query_referrers_to_new():

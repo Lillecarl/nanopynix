@@ -1,0 +1,24 @@
+"""QueryDerivationOutputMap operation — WireRequest/WireResponse types."""
+
+from __future__ import annotations
+
+from typing import ClassVar
+
+from pydantic import Field as PydanticField
+
+from .store_path import StorePath  # noqa: TC001
+from .wire_ops import WireRequest, WireResponse
+
+
+class QueryDerivationOutputMapResponse(WireResponse):
+    """QueryDerivationOutputMap response — output name → StorePath mapping."""
+
+    items: dict[str, StorePath] = PydanticField(default_factory=dict)
+
+
+class QueryDerivationOutputMapRequest(WireRequest):
+    """QueryDerivationOutputMap request — single derivation StorePath."""
+
+    op: ClassVar[int] = 41
+    response_type = QueryDerivationOutputMapResponse
+    path: StorePath
