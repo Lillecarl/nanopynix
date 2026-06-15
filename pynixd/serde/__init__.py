@@ -93,6 +93,8 @@ from .register_drv_output import RegisterDrvOutputRequest as RegisterDrvOutputRe
 from .register_drv_output import RegisterDrvOutputResponse as RegisterDrvOutputResponse
 from .set_options import SetOptionsRequest as SetOptionsRequest
 from .set_options import SetOptionsResponse as SetOptionsResponse
+from .sign_path_info import SignPathInfoRequest as SignPathInfoRequest
+from .sign_path_info import SignPathInfoResponse as SignPathInfoResponse
 from .signature import Signature as Signature
 from .store_path import StorePath as StorePath
 from .valid_path_info import ValidPathInfo as ValidPathInfo

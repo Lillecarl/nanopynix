@@ -197,6 +197,12 @@ from pynixd.operations.set_options import (
 from pynixd.operations.set_options import (
     SetOptionsResponse as OldSetOptionsResponse,
 )
+from pynixd.operations.sign_path_info import (
+    SignPathInfoRequest as OldSignPathInfoRequest,
+)
+from pynixd.operations.sign_path_info import (
+    SignPathInfoResponse as OldSignPathInfoResponse,
+)
 from pynixd.operations.verify_store import (
     VerifyStoreRequest as OldVerifyStoreRequest,
 )
@@ -429,6 +435,12 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     SetOptionsResponse as SerdeSetOptionsResponse,
+)
+from pynixd.serde import (
+    SignPathInfoRequest as SerdeSignPathInfoRequest,
+)
+from pynixd.serde import (
+    SignPathInfoResponse as SerdeSignPathInfoResponse,
 )
 from pynixd.serde import (
     StorePath as SerdeStorePath,
@@ -1222,6 +1234,63 @@ async def test_old_set_options_to_new():
     assert isinstance(new_resp, SerdeSetOptionsResponse)
 
     # Response: new → bytes (no stderr = just WireLogs empty)
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_sign_path_info_to_new():
+    """Old SignPathInfoRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/sign-me")
+
+    from pynixd.types.path_info import (
+        UnkeyedValidPathInfo as OldUnkeyedValidPathInfo,
+    )
+    from pynixd.types.path_info import (
+        ValidPathInfo as OldValidPathInfo,
+    )
+
+    uinfo = OldUnkeyedValidPathInfo(
+        nar_hash="sha256:abc",
+        references={StorePath("/nix/store/ref")},
+        registration_time=100,
+        nar_size=1024,
+        ultimate=0,
+        sigs=set(),
+        ca="",
+    )
+    old_info = uinfo.with_path(sp)
+
+    # Request: old → bytes → new
+    old_req = OldSignPathInfoRequest(info=old_info)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeSignPathInfoRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.info.path) == "/nix/store/sign-me"
+    assert str(new_req.info.info.nar_hash) == "abc"  # sha256: stripped on wire
+    assert new_req.info.info.nar_size == 1024
+    assert new_req.info.info.ultimate is False
+    assert SerdeStorePath(path="/nix/store/ref") in new_req.info.info.references
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldSignPathInfoResponse(info=old_info)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeSignPathInfoResponse.from_reader(read_ctx(data3))
+    assert str(new_resp.info.path) == "/nix/store/sign-me"
+    assert str(new_resp.info.info.nar_hash) == "abc"
+    assert new_resp.info.info.nar_size == 1024
+
+    # Response: new → bytes → full bytes match old serialize
     w4 = BytesWriter()
     await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
     assert w4.get_bytes() == data3
