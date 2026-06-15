@@ -112,6 +112,12 @@ from pynixd.operations.optimise_store import (
 from pynixd.operations.optimise_store import (
     OptimiseStoreResponse as OldOptimiseStoreResponse,
 )
+from pynixd.operations.probe_features import (
+    ProbeFeaturesRequest as OldProbeFeaturesRequest,
+)
+from pynixd.operations.probe_features import (
+    ProbeFeaturesResponse as OldProbeFeaturesResponse,
+)
 from pynixd.operations.probe_systems import (
     ProbeSystemsRequest as OldProbeSystemsRequest,
 )
@@ -340,6 +346,12 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     OptimiseStoreResponse as SerdeOptimiseStoreResponse,
+)
+from pynixd.serde import (
+    ProbeFeaturesRequest as SerdeProbeFeaturesRequest,
+)
+from pynixd.serde import (
+    ProbeFeaturesResponse as SerdeProbeFeaturesResponse,
 )
 from pynixd.serde import (
     ProbeSystemsRequest as SerdeProbeSystemsRequest,
@@ -1884,6 +1896,50 @@ async def test_old_probe_systems_to_new():
     # Verify new response can be read back
     new_resp2 = await SerdeProbeSystemsResponse.from_reader(read_ctx(w4.get_bytes()))
     assert isinstance(new_resp2, SerdeProbeSystemsResponse)
+    assert len(new_resp2.logs.messages) == 0
+
+
+async def test_old_probe_features_to_new():
+    """Old ProbeFeaturesRequest/Response serialize → new serde deserialize.
+
+    Internal operation — old serialize writes nothing (no op, no body).
+    New serde follows standard WireRequest/WireResponse format.
+    """
+
+    # Old request: serialize writes nothing
+    old_req = OldProbeFeaturesRequest(systems=set(), system_features=set())
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    assert w.get_bytes() == b""
+
+    # New request: construct and roundtrip
+    new_req = SerdeProbeFeaturesRequest()
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    # New writes op code only (uint64 109)
+    assert w2.get_bytes() == struct.pack("<Q", 109)
+
+    # Verify new request can be read back
+    new_req2 = await SerdeProbeFeaturesRequest.from_reader(
+        ReadContext(reader=BytesReader(w2.get_bytes()[8:]), version=PROTOCOL_VERSION),
+    )
+    assert isinstance(new_req2, SerdeProbeFeaturesRequest)
+
+    # Old response: serialize writes nothing
+    old_resp = OldProbeFeaturesResponse(feature_matrix={})
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    assert w3.get_bytes() == b""
+
+    # New response: empty WireLogs produces STDERR_LAST
+    w4 = BytesWriter()
+    new_resp = SerdeProbeFeaturesResponse()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == struct.pack("<Q", 0x616C7473)  # STDERR_LAST
+
+    # Verify new response can be read back
+    new_resp2 = await SerdeProbeFeaturesResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert isinstance(new_resp2, SerdeProbeFeaturesResponse)
     assert len(new_resp2.logs.messages) == 0
 
 

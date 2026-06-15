@@ -53,6 +53,8 @@ from .opt_microseconds import OptMicroseconds as OptMicroseconds
 from .optimise_store import OptimiseStoreRequest as OptimiseStoreRequest
 from .optimise_store import OptimiseStoreResponse as OptimiseStoreResponse
 from .path_info import UnkeyedValidPathInfo as UnkeyedValidPathInfo
+from .probe_features import ProbeFeaturesRequest as ProbeFeaturesRequest
+from .probe_features import ProbeFeaturesResponse as ProbeFeaturesResponse
 from .probe_systems import ProbeSystemsRequest as ProbeSystemsRequest
 from .probe_systems import ProbeSystemsResponse as ProbeSystemsResponse
 from .protocol import GCAction as GCAction
