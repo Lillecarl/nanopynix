@@ -6,6 +6,8 @@ Compares serialize and deserialize for IsValidPath and AddTempRoot
 
 from __future__ import annotations
 
+import asyncio
+import os
 import time
 
 import pytest
@@ -39,7 +41,7 @@ from pynixd.serde import (
 from pynixd.serde import StorePath as SerdeStorePath
 from pynixd.store_path import StorePath
 from pynixd.types.context import ReadContext, WriteContext
-from pynixd.wire import BytesReader, BytesWriter
+from pynixd.wire import BytesReader, BytesWriter, UnixNixReader, UnixNixWriter
 
 # ── Configuration ─────────────────────────────────────────────────
 
@@ -309,3 +311,156 @@ async def test_profile_new_deserialize():
     profiler.stop()
 
     profiler.print(show_all=True)
+
+
+@pytest.mark.no_profile
+@pytest.mark.bench
+@pytest.mark.asyncio
+async def test_profile_new_serialize_response():
+    """Profile JUST the new serde serialize loop (IsValidPath response)."""
+    obj = _PAYLOADS["new_isv_resp"]
+
+    for _ in range(1_000):
+        w = BytesWriter()
+        await obj.to_writer(WriteContext(writer=w, version=PROTOCOL_VERSION))
+
+    profiler = Profiler(async_mode="enabled")
+    profiler.start()
+    for _ in range(10_000):
+        w = BytesWriter()
+        await obj.to_writer(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    profiler.stop()
+
+    profiler.print(show_all=True)
+
+
+@pytest.mark.no_profile
+@pytest.mark.bench
+@pytest.mark.asyncio
+async def test_profile_new_deserialize_response():
+    """Profile JUST the new serde deserialize loop (IsValidPath response)."""
+    data = _NEW_ISV_RESP_BYTES
+
+    for _ in range(1_000):
+        r = BytesReader(data)
+        await NewIsValidPathResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+
+    profiler = Profiler(async_mode="enabled")
+    profiler.start()
+    for _ in range(10_000):
+        r = BytesReader(data)
+        await NewIsValidPathResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    profiler.stop()
+
+    profiler.print(show_all=True)
+
+
+
+
+
+@pytest.mark.no_profile
+@pytest.mark.bench
+@pytest.mark.asyncio
+async def test_unix_socket_is_valid_path_new():
+    """Unix socket round-trip: new framework IsValidPath."""
+    sock_path = f"/tmp/pynixd-bench-isv-new-{os.getpid()}.sock"
+    req_obj = _PAYLOADS["new_isv_req"]
+    resp_cls = NewIsValidPathResponse
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        r = UnixNixReader(reader=reader, identifier="srv")
+        w = UnixNixWriter(writer=writer, identifier="srv")
+        while True:
+            try:
+                op = await r.read_uint64()
+            except EOFError:
+                break
+            if op == 1:
+                await NewIsValidPathRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+                resp = NewIsValidPathResponse(valid=True)
+                await resp.to_writer(WriteContext(writer=w, version=PROTOCOL_VERSION))
+                await w.drain()
+
+    server = await asyncio.start_unix_server(handler, sock_path)
+    try:
+        reader, writer = await asyncio.open_unix_connection(sock_path)
+        r = UnixNixReader(reader=reader, identifier="cli")
+        w = UnixNixWriter(writer=writer, identifier="cli")
+
+        for _ in range(50):  # warmup
+            await req_obj.to_writer(WriteContext(writer=w, version=PROTOCOL_VERSION))
+            await w.drain()
+            await resp_cls.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+
+        num_iters = 1_000
+        profiler = Profiler(async_mode="enabled")
+        profiler.start()
+        for _ in range(num_iters):
+            await req_obj.to_writer(WriteContext(writer=w, version=PROTOCOL_VERSION))
+            await w.drain()
+            await resp_cls.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+        profiler.stop()
+        profiler.print(show_all=True)
+
+        writer.close()
+    finally:
+        server.close()
+        await server.wait_closed()
+        from contextlib import suppress
+
+        with suppress(OSError):
+            os.unlink(sock_path)  # noqa: PTH108
+
+
+@pytest.mark.no_profile
+@pytest.mark.bench
+@pytest.mark.asyncio
+async def test_unix_socket_is_valid_path_old():
+    """Unix socket round-trip: old framework IsValidPath."""
+    sock_path = f"/tmp/pynixd-bench-isv-old-{os.getpid()}.sock"
+    req_obj = _PAYLOADS["old_isv_req"]
+    resp_cls = OldIsValidPathResponse
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        r = UnixNixReader(reader=reader, identifier="srv")
+        w = UnixNixWriter(writer=writer, identifier="srv")
+        while True:
+            try:
+                op = await r.read_uint64()
+            except EOFError:
+                break
+            if op == 1:
+                await OldIsValidPathRequest.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))
+                resp = OldIsValidPathResponse(valid=True)
+                await resp.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+                await w.drain()
+
+    server = await asyncio.start_unix_server(handler, sock_path)
+    try:
+        reader, writer = await asyncio.open_unix_connection(sock_path)
+        r = UnixNixReader(reader=reader, identifier="cli")
+        w = UnixNixWriter(writer=writer, identifier="cli")
+
+        for _ in range(50):
+            await req_obj.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+            await w.drain()
+            await resp_cls.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))
+
+        num_iters = 1_000
+        profiler = Profiler(async_mode="enabled")
+        profiler.start()
+        for _ in range(num_iters):
+            await req_obj.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+            await w.drain()
+            await resp_cls.deserialize(ReadContext(reader=r, version=PROTOCOL_VERSION))
+        profiler.stop()
+        profiler.print(show_all=True)
+
+        writer.close()
+    finally:
+        server.close()
+        await server.wait_closed()
+        from contextlib import suppress
+
+        with suppress(OSError):
+            os.unlink(sock_path)  # noqa: PTH108

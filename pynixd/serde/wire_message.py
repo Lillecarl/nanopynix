@@ -86,17 +86,35 @@ def _find_reader(ann: type, version: int = 0) -> Any:
 
         return _read_dict
 
-    # WireString — read one string, delegate to from_string + model_construct
+    # WireString — read one string, construct directly (no model_construct)
     if isinstance(ann, type) and issubclass(ann, WireString):
+        n_fields = len(ann.model_fields)
+        if n_fields == 1:
+            _field_name: str = next(iter(ann.model_fields.keys()))
 
-        async def _read_string(r):
-            assert issubclass(ann, WireString)
-            raw = await r.read_string(str)
-            data = ann.from_str(raw)
-            if isinstance(data, str):
-                fields = list(ann.model_fields.keys())
-                data = {fields[0]: data} if len(fields) == 1 else {}
-            return ann.model_construct(**data)
+            async def _read_string(r):
+                raw = await r.read_string(str)
+                obj = ann.__new__(ann)
+                object.__setattr__(obj, "__pydantic_extra__", None)
+                object.__setattr__(obj, "__pydantic_private__", None)
+                object.__setattr__(obj, _field_name, raw)
+                object.__setattr__(obj, "__pydantic_fields_set__", {_field_name})
+                return obj
+        else:
+
+            async def _read_string(r):
+                raw = await r.read_string(str)
+                data = ann.from_str(raw)
+                if not isinstance(data, dict):
+                    raise TypeError(f"from_str returned {type(data).__name__}, expected dict")
+                obj = ann.__new__(ann)
+                field_names = set(data.keys())
+                object.__setattr__(obj, "__pydantic_extra__", None)
+                object.__setattr__(obj, "__pydantic_private__", None)
+                object.__setattr__(obj, "__pydantic_fields_set__", field_names)
+                for k, v in data.items():
+                    object.__setattr__(obj, k, v)
+                return obj
 
         return _read_string
 
