@@ -48,6 +48,14 @@ if TYPE_CHECKING:
     from ..types.aliases import StorePathSet
     from ..types.ids import StoreId
 
+
+def _get_executor(op: int) -> type | None:
+    """Look up an executor for the given op code. Lazy import avoids circular deps."""
+    from pynixd.executors._base import EXECUTOR_REGISTRY
+
+    return EXECUTOR_REGISTRY.get(op)
+
+
 log = structlog.get_logger(__name__)
 _CB_THRESHOLD: int = 3  # failures before cooldown
 _CB_MAX_COOLDOWN: float = 300.0  # 5 min max
@@ -526,6 +534,18 @@ class Store(ABC):
         """
         if not skip_probe:
             await self.probe()
+
+        # Try executor fast-path first
+        if executor_cls := _get_executor(request.op):
+            executor = executor_cls()
+            if result := await executor.execute(
+                request,
+                self,
+                client=client,
+                suppress_last=suppress_last,
+            ):
+                return result
+
         return await request.execute(
             self,
             client=client,
