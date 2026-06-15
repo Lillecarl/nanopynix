@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from pydantic import ConfigDict
 from pydantic import Field as PydanticField
 
-from .drv_output import DrvOutput  # noqa: TC001
+from .drv_output import DrvOutput
 from .store_path import StorePath  # noqa: TC001
 from .wire_message import WireModel
 
@@ -17,13 +17,14 @@ class Realisation(WireModel):
     """A Realisation on the Nix daemon wire.
 
     Wire format: length-prefixed UTF-8 containing a JSON object.
-    Uses from_json/to_json for both wire and JSON serde, so Pydantic
-    validation applies uniformly.
+    ``id`` and ``dependentRealisations`` keys/values are plain strings
+    on the wire (e.g. ``"sha256-abc123!out"``), matching the old
+    framework's JSON serialization.
     """
 
     model_config = ConfigDict(validate_by_alias=True)
 
-    id: DrvOutput | None = PydanticField(default=None)
+    id: DrvOutput = PydanticField(default_factory=DrvOutput)
     out_path: StorePath | None = PydanticField(default=None, alias="outPath")
     signatures: list[str] = PydanticField(default_factory=list)
     dependent_realisations: dict[str, str] = PydanticField(default_factory=dict, alias="dependentRealisations")

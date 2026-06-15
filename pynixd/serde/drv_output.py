@@ -1,18 +1,27 @@
+"""DrvOutput — a derivation output identifier on the wire.
+
+Wire format: plain string like ``sha256:abc123!out``.
+"""
+
 from __future__ import annotations
 
-from pydantic import ConfigDict
-from pydantic import Field as PydanticField
-
-from .wire_message import WireModel
+from .wire_string import WireString
 
 
-class DrvOutput(WireModel):
-    """DrvOutput on the wire — a JSON object inside Realisation.
+class DrvOutput(WireString):
+    """DrvOutput on the wire — ``"drvHash!outputName"`` format.
 
-    Nix wire uses camelCase keys.  Pydantic aliases handle the mapping.
+    Uses the same ``from_str``/``to_str`` pattern as ``Signature``
+    but with ``!`` as the delimiter instead of ``:``.
     """
 
-    model_config = ConfigDict(validate_by_alias=True, serialize_by_alias=True)
+    drv_hash: str = ""
+    output_name: str = ""
 
-    drv_hash: str = PydanticField(alias="drvHash")
-    output_name: str = PydanticField(alias="outputName")
+    @classmethod
+    def from_str(cls, data: str) -> object:
+        parts = data.split("!", 1)
+        return {"drv_hash": parts[0], "output_name": parts[1] if len(parts) > 1 else ""}
+
+    def to_str(self) -> str:
+        return f"{self.drv_hash}!{self.output_name}"

@@ -8,11 +8,29 @@ import pytest
 
 from pynixd.constants import PROTOCOL_VERSION, proto
 from pynixd.derived_path import DerivedPath
+from pynixd.operations.add_build_log import (
+    AddBuildLogRequest as OldAddBuildLogRequest,
+)
+from pynixd.operations.add_build_log import (
+    AddBuildLogResponse as OldAddBuildLogResponse,
+)
 from pynixd.operations.add_indirect_root import (
     AddIndirectRootRequest as OldAddIndirectRootRequest,
 )
 from pynixd.operations.add_indirect_root import (
     AddIndirectRootResponse as OldAddIndirectRootResponse,
+)
+from pynixd.operations.add_multiple_to_store import (
+    AddMultipleToStoreRequest as OldAddMultipleToStoreRequest,
+)
+from pynixd.operations.add_multiple_to_store import (
+    AddMultipleToStoreResponse as OldAddMultipleToStoreResponse,
+)
+from pynixd.operations.add_perm_root import (
+    AddPermRootRequest as OldAddPermRootRequest,
+)
+from pynixd.operations.add_perm_root import (
+    AddPermRootResponse as OldAddPermRootResponse,
 )
 from pynixd.operations.add_signatures import (
     AddSignaturesRequest as OldAddSignaturesRequest,
@@ -40,6 +58,24 @@ from pynixd.operations.build_paths import (
 )
 from pynixd.operations.build_paths import (
     BuildPathsResponse as OldBuildPathsResponse,
+)
+from pynixd.operations.build_paths import (
+    BuildPathsWithResultsRequest as OldBuildPathsWithResultsRequest,
+)
+from pynixd.operations.build_paths import (
+    BuildPathsWithResultsResponse as OldBuildPathsWithResultsResponse,
+)
+from pynixd.operations.ca_derivations import (
+    QueryRealisationRequest as OldQueryRealisationRequest,
+)
+from pynixd.operations.ca_derivations import (
+    QueryRealisationResponse as OldQueryRealisationResponse,
+)
+from pynixd.operations.ca_derivations import (
+    RegisterDrvOutputRequest as OldRegisterDrvOutputRequest,
+)
+from pynixd.operations.ca_derivations import (
+    RegisterDrvOutputResponse as OldRegisterDrvOutputResponse,
 )
 from pynixd.operations.collect_garbage import (
     CollectGarbageRequest as OldCollectGarbageRequest,
@@ -138,10 +174,28 @@ from pynixd.operations.verify_store import (
     VerifyStoreResponse as OldVerifyStoreResponse,
 )
 from pynixd.serde import (
+    AddBuildLogRequest as SerdeAddBuildLogRequest,
+)
+from pynixd.serde import (
+    AddBuildLogResponse as SerdeAddBuildLogResponse,
+)
+from pynixd.serde import (
     AddIndirectRootRequest as SerdeAddIndirectRootRequest,
 )
 from pynixd.serde import (
     AddIndirectRootResponse as SerdeAddIndirectRootResponse,
+)
+from pynixd.serde import (
+    AddMultipleToStoreRequest as SerdeAddMultipleToStoreRequest,
+)
+from pynixd.serde import (
+    AddMultipleToStoreResponse as SerdeAddMultipleToStoreResponse,
+)
+from pynixd.serde import (
+    AddPermRootRequest as SerdeAddPermRootRequest,
+)
+from pynixd.serde import (
+    AddPermRootResponse as SerdeAddPermRootResponse,
 )
 from pynixd.serde import (
     AddSignaturesRequest as SerdeAddSignaturesRequest,
@@ -185,6 +239,12 @@ from pynixd.serde import (
     BuildPathsResponse as SerdeBuildPathsResponse,
 )
 from pynixd.serde import (
+    BuildPathsWithResultsRequest as SerdeBuildPathsWithResultsRequest,
+)
+from pynixd.serde import (
+    BuildPathsWithResultsResponse as SerdeBuildPathsWithResultsResponse,
+)
+from pynixd.serde import (
     BuildResult as SerdeBuildResult,
 )
 from pynixd.serde import (
@@ -219,6 +279,9 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     IsValidPathResponse as SerdeIsValidPathResponse,
+)
+from pynixd.serde import (
+    KeyedBuildResult as SerdeKeyedBuildResult,
 )
 from pynixd.serde import (
     NarFromPathRequest as SerdeNarFromPathRequest,
@@ -263,6 +326,12 @@ from pynixd.serde import (
     QueryPathInfoResponse as SerdeQueryPathInfoResponse,
 )
 from pynixd.serde import (
+    QueryRealisationRequest as SerdeQueryRealisationRequest,
+)
+from pynixd.serde import (
+    QueryRealisationResponse as SerdeQueryRealisationResponse,
+)
+from pynixd.serde import (
     QueryReferrersRequest as SerdeQueryReferrersRequest,
 )
 from pynixd.serde import (
@@ -285,6 +354,12 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     QueryValidPathsResponse as SerdeQueryValidPathsResponse,
+)
+from pynixd.serde import (
+    RegisterDrvOutputRequest as SerdeRegisterDrvOutputRequest,
+)
+from pynixd.serde import (
+    RegisterDrvOutputResponse as SerdeRegisterDrvOutputResponse,
 )
 from pynixd.serde import (
     SetOptionsRequest as SerdeSetOptionsRequest,
@@ -319,6 +394,9 @@ from pynixd.types import (
     DerivationOutput as OldDerivationOutput,
 )
 from pynixd.types import GCAction as GCAction
+from pynixd.types.build import (
+    KeyedBuildResult as OldKeyedBuildResult,
+)
 from pynixd.types.context import ReadContext, WriteContext
 from pynixd.types.path_info import UnkeyedValidPathInfo
 from pynixd.types.protocol import Verbosity
@@ -591,13 +669,13 @@ async def test_wire_version_exclude_unset():
 async def test_wire_realisation_roundtrip():
     """Roundtrip Realisation — JSON blob with proper Pydantic fields."""
     r = Realisation(
-        id=DrvOutput(drvHash="sha256:abc", outputName="out"),  # pyright: ignore[reportCallIssue]
+        id=DrvOutput(drv_hash="sha256:abc", output_name="out"),
         outPath=SerdeStorePath(path="/nix/store/foo"),  # type: ignore[arg-type]
         signatures=["sig1", "sig2"],
         dependentRealisations={"sha256:xyz!out": "/nix/store/bar"},  # pyright: ignore[reportCallIssue]
     )
     assert r.out_path == SerdeStorePath(path="/nix/store/foo")  # pyright: ignore[reportAttributeAccessIssue]
-    assert r.id == DrvOutput(drvHash="sha256:abc", outputName="out")  # pyright: ignore[reportCallIssue, reportAttributeAccessIssue]
+    assert r.id == DrvOutput(drv_hash="sha256:abc", output_name="out")
     assert r.signatures == ["sig1", "sig2"]
 
     # Wire roundtrip
@@ -612,8 +690,7 @@ async def test_wire_realisation_roundtrip():
     json_str = r.to_json()
     parsed = json_lib.loads(json_str)
     assert parsed["outPath"] == "/nix/store/foo"
-    assert parsed["id"]["drvHash"] == "sha256:abc"
-    assert parsed["id"]["outputName"] == "out"
+    assert parsed["id"] == "sha256:abc!out"
 
 
 async def test_wire_signature_roundtrip():
@@ -805,6 +882,54 @@ async def test_old_build_paths_to_new():
     w4 = BytesWriter()
     await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
     assert w4.get_bytes() == data3
+
+
+async def test_old_build_paths_with_results_to_new():
+    """Old BuildPathsWithResults serialize → new serde deserialize."""
+    from pynixd.operations.build_paths import (
+        BuildPathsWithResultsRequest as OldBPWRReq,
+    )
+    from pynixd.operations.build_paths import (
+        BuildPathsWithResultsResponse as OldBPWRResp,
+    )
+    from pynixd.serde import (
+        BuildPathsWithResultsRequest as NewBPWRReq,
+    )
+    from pynixd.serde import (
+        BuildPathsWithResultsResponse as NewBPWRResp,
+    )
+    from pynixd.types.build import BuildResult as OldBuildResult
+    from pynixd.types.build import KeyedBuildResult as OldKBR
+
+    dp1 = DerivedPath("/nix/store/aaa.drv!out")
+
+    # Request: old → bytes → new
+    old_req = OldBPWRReq(derived_paths={dp1}, build_mode=BuildMode.NORMAL)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await NewBPWRReq.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert new_req.build_mode == 0
+    assert len(new_req.derived_paths) == 1
+
+    # Request: new → bytes → body matches old body
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_br = OldBuildResult(status=BuildResultStatus.BUILT, error_msg="")
+    old_kbr = OldKBR(path=dp1, result=old_br)
+    old_resp = OldBPWRResp(results=[old_kbr])
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await NewBPWRResp.from_reader(read_ctx(data3))
+    assert len(new_resp.results) == 1
+    assert str(new_resp.results[0].path) == "/nix/store/aaa.drv!out"
+    assert new_resp.results[0].result.status == 0
 
 
 async def test_old_is_valid_path_to_new():
@@ -1493,6 +1618,72 @@ async def test_old_add_to_store_nar_to_new():
     assert w4.get_bytes() == data3
 
 
+async def test_old_add_multiple_to_store_to_new():
+    """Old AddMultipleToStoreRequest/Response serialize → new serde deserialize (header only)."""
+
+    # Request: old → bytes → new
+    old_req = OldAddMultipleToStoreRequest(repair=1, dont_check_sigs=0)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeAddMultipleToStoreRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert new_req.repair == 1
+    assert new_req.dont_check_sigs == 0
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new (empty body)
+    old_resp = OldAddMultipleToStoreResponse()
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeAddMultipleToStoreResponse.from_reader(read_ctx(data3))
+    assert isinstance(new_resp, SerdeAddMultipleToStoreResponse)
+
+    # Response: new → bytes
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_add_build_log_to_new():
+    """Old AddBuildLogRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/log-me")
+
+    # Request: old → bytes → new
+    old_req = OldAddBuildLogRequest(path=sp)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeAddBuildLogRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/log-me"
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldAddBuildLogResponse(value=42)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeAddBuildLogResponse.from_reader(read_ctx(data3))
+    assert new_resp.value == 42
+
+    # Response: new → bytes
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
 async def test_old_query_missing_to_new():
     """Old QueryMissingRequest/Response serialize → new serde deserialize."""
     dp1 = DerivedPath("/nix/store/drv1.drv!out")
@@ -1584,6 +1775,120 @@ async def test_old_query_derivation_output_map_to_new():
     await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
     new_resp2 = await SerdeQueryDerivationOutputMapResponse.from_reader(read_ctx(w4.get_bytes()))
     assert new_resp2.items == new_resp.items
+
+
+async def test_old_register_drv_output_to_new():
+    """Old RegisterDrvOutput serialize → new serde deserialize."""
+    from pynixd.operations.ca_derivations import RegisterDrvOutputRequest as OldRDOReq
+    from pynixd.serde import Realisation as NewRealisation
+    from pynixd.serde import RegisterDrvOutputRequest as NewRDOReq
+    from pynixd.store_path import DrvOutput as OldDrvOutput
+    from pynixd.types.ca import Realisation as OldRealisation
+
+    old_real = OldRealisation(
+        id=OldDrvOutput("sha256:abc!out"),
+        outPath=StorePath("/nix/store/foo"),
+        signatures=["sig1"],
+        dependentRealisations={},
+    )
+    old_req = OldRDOReq(realisation=old_real)
+
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await NewRDOReq.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+
+    assert new_req.realisation.id == "sha256:abc!out"
+    # Old wire sends StorePath.base() (no /nix/store/ prefix)
+    assert str(new_req.realisation.out_path) == "foo"
+    assert new_req.realisation.signatures == ["sig1"]
+
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes()[8:] == data[8:]
+
+
+async def test_old_query_realisation_to_new():
+    """Old QueryRealisationRequest/Response serialize → new serde deserialize."""
+    from pynixd.store_path import DrvOutput as OldDrvOutput
+    from pynixd.types.ca import Realisation as OldRealisation
+
+    # Request: old → bytes → new
+    old_req = OldQueryRealisationRequest(
+        drv_output=OldDrvOutput("sha256:abc!out"),
+    )
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeQueryRealisationRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.drv_output) == "sha256:abc!out"
+
+    # Request: new → bytes → full bytes match (skip op)
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes()[8:] == data[8:]
+
+    # Response: old → bytes → new
+    from pynixd.store_path import DrvOutput as OldDrvOutput
+
+    old_real = OldRealisation(
+        id=OldDrvOutput("sha256:abc!out"),
+        outPath=StorePath("/nix/store/foo"),
+        signatures=["sig1"],
+    )
+    old_resp = OldQueryRealisationResponse(realisations=[old_real])
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeQueryRealisationResponse.from_reader(read_ctx(data3))
+    assert len(new_resp.realisations) == 1
+    assert new_resp.realisations[0].id == "sha256:abc!out"
+    assert new_resp.realisations[0].signatures == ["sig1"]
+
+    # Response: new → bytes → content roundtrip
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    new_resp2 = await SerdeQueryRealisationResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert new_resp2.realisations[0].id == new_resp.realisations[0].id
+    assert new_resp2.realisations[0].signatures == new_resp.realisations[0].signatures
+
+
+async def test_old_add_perm_root_to_new():
+    """Old AddPermRootRequest/Response serialize → new serde deserialize."""
+
+    # Request: old → bytes → new
+    old_req = OldAddPermRootRequest(store_path="/nix/store/perm-1", gc_root="/nix/var/nix/gcroots/perm-1")
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeAddPermRootRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert new_req.store_path == "/nix/store/perm-1"
+    assert new_req.gc_root == "/nix/var/nix/gcroots/perm-1"
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldAddPermRootResponse(gc_root="/nix/var/nix/gcroots/perm-1")
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeAddPermRootResponse.from_reader(read_ctx(data3))
+    assert new_resp.gc_root == "/nix/var/nix/gcroots/perm-1"
+
+    # Response: new → bytes
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
 
 
 async def test_old_query_referrers_to_new():

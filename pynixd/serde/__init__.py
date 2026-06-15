@@ -1,7 +1,13 @@
 """Declarative binary serialization for Nix daemon protocol types."""
 
+from .add_build_log import AddBuildLogRequest as AddBuildLogRequest
+from .add_build_log import AddBuildLogResponse as AddBuildLogResponse
 from .add_indirect_root import AddIndirectRootRequest as AddIndirectRootRequest
 from .add_indirect_root import AddIndirectRootResponse as AddIndirectRootResponse
+from .add_multiple_to_store import AddMultipleToStoreRequest as AddMultipleToStoreRequest
+from .add_multiple_to_store import AddMultipleToStoreResponse as AddMultipleToStoreResponse
+from .add_perm_root import AddPermRootRequest as AddPermRootRequest
+from .add_perm_root import AddPermRootResponse as AddPermRootResponse
 from .add_signatures import AddSignaturesRequest as AddSignaturesRequest
 from .add_signatures import AddSignaturesResponse as AddSignaturesResponse
 from .add_temp_root import AddTempRootRequest as AddTempRootRequest
@@ -15,6 +21,8 @@ from .build_derivation import BuildDerivationRequest as BuildDerivationRequest
 from .build_derivation import BuildDerivationResponse as BuildDerivationResponse
 from .build_paths import BuildPathsRequest as BuildPathsRequest
 from .build_paths import BuildPathsResponse as BuildPathsResponse
+from .build_paths_with_results import BuildPathsWithResultsRequest as BuildPathsWithResultsRequest
+from .build_paths_with_results import BuildPathsWithResultsResponse as BuildPathsWithResultsResponse
 from .build_result import BuildResult as BuildResult
 from .collect_garbage import CollectGarbageRequest as CollectGarbageRequest
 from .collect_garbage import CollectGarbageResponse as CollectGarbageResponse
@@ -29,6 +37,7 @@ from .find_roots import FindRootsRequest as FindRootsRequest
 from .find_roots import FindRootsResponse as FindRootsResponse
 from .is_valid_path import IsValidPathRequest as IsValidPathRequest
 from .is_valid_path import IsValidPathResponse as IsValidPathResponse
+from .keyed_build_result import KeyedBuildResult as KeyedBuildResult
 from .logs import ActivityField as ActivityField
 from .logs import LogError as LogError
 from .logs import LogNext as LogNext
@@ -56,6 +65,8 @@ from .query_path_from_hash_part import QueryPathFromHashPartRequest as QueryPath
 from .query_path_from_hash_part import QueryPathFromHashPartResponse as QueryPathFromHashPartResponse
 from .query_path_info import QueryPathInfoRequest as QueryPathInfoRequest
 from .query_path_info import QueryPathInfoResponse as QueryPathInfoResponse
+from .query_realisation import QueryRealisationRequest as QueryRealisationRequest
+from .query_realisation import QueryRealisationResponse as QueryRealisationResponse
 from .query_referrers import QueryReferrersRequest as QueryReferrersRequest
 from .query_referrers import QueryReferrersResponse as QueryReferrersResponse
 from .query_substitutable_paths import QuerySubstitutablePathsRequest as QuerySubstitutablePathsRequest
@@ -65,6 +76,8 @@ from .query_valid_derivers import QueryValidDeriversResponse as QueryValidDerive
 from .query_valid_paths import QueryValidPathsRequest as QueryValidPathsRequest
 from .query_valid_paths import QueryValidPathsResponse as QueryValidPathsResponse
 from .realisation import Realisation as Realisation
+from .register_drv_output import RegisterDrvOutputRequest as RegisterDrvOutputRequest
+from .register_drv_output import RegisterDrvOutputResponse as RegisterDrvOutputResponse
 from .set_options import SetOptionsRequest as SetOptionsRequest
 from .set_options import SetOptionsResponse as SetOptionsResponse
 from .signature import Signature as Signature
