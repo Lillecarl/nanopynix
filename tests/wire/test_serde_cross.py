@@ -8,6 +8,18 @@ import pytest
 
 from pynixd.constants import PROTOCOL_VERSION, proto
 from pynixd.derived_path import DerivedPath
+from pynixd.operations.add_indirect_root import (
+    AddIndirectRootRequest as OldAddIndirectRootRequest,
+)
+from pynixd.operations.add_indirect_root import (
+    AddIndirectRootResponse as OldAddIndirectRootResponse,
+)
+from pynixd.operations.add_temp_root import (
+    AddTempRootRequest as OldAddTempRootRequest,
+)
+from pynixd.operations.add_temp_root import (
+    AddTempRootResponse as OldAddTempRootResponse,
+)
 from pynixd.operations.build_derivation import (
     BuildDerivationRequest as OldBuildDerivationRequest,
 )
@@ -16,6 +28,12 @@ from pynixd.operations.build_paths import (
 )
 from pynixd.operations.build_paths import (
     BuildPathsResponse as OldBuildPathsResponse,
+)
+from pynixd.operations.ensure_path import (
+    EnsurePathRequest as OldEnsurePathRequest,
+)
+from pynixd.operations.ensure_path import (
+    EnsurePathResponse as OldEnsurePathResponse,
 )
 from pynixd.operations.is_valid_path import (
     IsValidPathRequest,
@@ -27,6 +45,18 @@ from pynixd.operations.query_referrers import (
 )
 from pynixd.operations.query_referrers import (
     QueryReferrersResponse as OldQueryReferrersResponse,
+)
+from pynixd.serde import (
+    AddIndirectRootRequest as SerdeAddIndirectRootRequest,
+)
+from pynixd.serde import (
+    AddIndirectRootResponse as SerdeAddIndirectRootResponse,
+)
+from pynixd.serde import (
+    AddTempRootRequest as SerdeAddTempRootRequest,
+)
+from pynixd.serde import (
+    AddTempRootResponse as SerdeAddTempRootResponse,
 )
 from pynixd.serde import (
     BasicDerivation as SerdeBasicDerivation,
@@ -59,6 +89,12 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     DerivedPath as SerdeDerivedPath,
+)
+from pynixd.serde import (
+    EnsurePathRequest as SerdeEnsurePathRequest,
+)
+from pynixd.serde import (
+    EnsurePathResponse as SerdeEnsurePathResponse,
 )
 from pynixd.serde import (
     IsValidPathRequest as SerdeIsValidPathRequest,
@@ -610,6 +646,105 @@ async def test_old_is_valid_path_to_new():
     assert new_resp.valid is True
 
     # Response: new → bytes
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_ensure_path_to_new():
+    """Old EnsurePathRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/abc-test")
+
+    # Request: old → bytes → new
+    old_req = OldEnsurePathRequest(path=sp)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeEnsurePathRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/abc-test"
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldEnsurePathResponse(value=42)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeEnsurePathResponse.from_reader(read_ctx(data3))
+    assert new_resp.value == 42
+
+    # Response: new → bytes (no stderr = just WireLogs empty + value)
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_add_temp_root_to_new():
+    """Old AddTempRootRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/tmp-root")
+
+    # Request: old → bytes → new
+    old_req = OldAddTempRootRequest(path=sp)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeAddTempRootRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/tmp-root"
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldAddTempRootResponse(value=1)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeAddTempRootResponse.from_reader(read_ctx(data3))
+    assert new_resp.value == 1
+
+    # Response: new → bytes (no stderr = just WireLogs empty + value)
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_add_indirect_root_to_new():
+    """Old AddIndirectRootRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/indirect-root")
+
+    # Request: old → bytes → new
+    old_req = OldAddIndirectRootRequest(path=sp)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeAddIndirectRootRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/indirect-root"
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldAddIndirectRootResponse(value=1)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeAddIndirectRootResponse.from_reader(read_ctx(data3))
+    assert new_resp.value == 1
+
+    # Response: new → bytes (no stderr = just WireLogs empty + value)
     w4 = BytesWriter()
     await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
     assert w4.get_bytes() == data3

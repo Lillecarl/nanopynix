@@ -355,9 +355,6 @@ async def test_profile_new_deserialize_response():
     profiler.print(show_all=True)
 
 
-
-
-
 @pytest.mark.no_profile
 @pytest.mark.bench
 @pytest.mark.asyncio

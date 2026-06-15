@@ -1,5 +1,7 @@
 """Declarative binary serialization for Nix daemon protocol types."""
 
+from .add_indirect_root import AddIndirectRootRequest as AddIndirectRootRequest
+from .add_indirect_root import AddIndirectRootResponse as AddIndirectRootResponse
 from .add_temp_root import AddTempRootRequest as AddTempRootRequest
 from .add_temp_root import AddTempRootResponse as AddTempRootResponse
 from .add_to_store import AddToStoreRequest as AddToStoreRequest
@@ -14,6 +16,8 @@ from .content_address import ContentAddress as ContentAddress
 from .derivation_output import DerivationOutput as DerivationOutput
 from .derived_path import DerivedPath as DerivedPath
 from .drv_output import DrvOutput as DrvOutput
+from .ensure_path import EnsurePathRequest as EnsurePathRequest
+from .ensure_path import EnsurePathResponse as EnsurePathResponse
 from .is_valid_path import IsValidPathRequest as IsValidPathRequest
 from .is_valid_path import IsValidPathResponse as IsValidPathResponse
 from .logs import ActivityField as ActivityField
