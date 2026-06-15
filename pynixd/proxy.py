@@ -17,6 +17,7 @@ from . import wire
 from .config import ScheduleMode
 from .connection import ClientConn
 from .exceptions import BackendError, OpNotImplementedError
+from .handlers._base import HANDLER_REGISTRY
 from .operations import OP_REGISTRY
 from .operations.base import OpRequest, OpResponse, Resp, Role
 from .protocol import get_extension_features
@@ -270,6 +271,17 @@ class DaemonProxy:
 
     async def dispatch(self, op_num: int) -> OpResponse | None:
         """Route an operation to its request type's handle method."""
+        # NEW: try new handler registry first
+        if handler_cls := HANDLER_REGISTRY.get(op_num):
+            return await handler_cls().handle(
+                RequestContext(
+                    proxy=self,
+                    role=self.role,
+                    version=self.version,
+                    username=self.username,
+                )
+            )
+
         req_cls = OP_REGISTRY.get(op_num)
         if req_cls is None:
             log.warning("unhandled_op", op_num=op_num)
