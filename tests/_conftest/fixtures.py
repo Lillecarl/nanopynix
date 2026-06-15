@@ -78,6 +78,10 @@ def profiler(request: pytest.FixtureRequest, test_logging: Path):
         yield None
         return
 
+    if request.node.get_closest_marker("no_profile"):
+        yield None
+        return
+
     # ── Setup: ensure no stale profiler is running ──
     # The pyinstrument StackSampler is a singleton. If a previous test's
     # profiler wasn't stopped (e.g., due to crash), its subscriber is

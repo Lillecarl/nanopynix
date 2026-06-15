@@ -10,6 +10,7 @@ like op codes that are written/read by the operation layer, not the message body
 from __future__ import annotations
 
 import asyncio
+import functools
 import types
 from collections.abc import Callable  # noqa: TC003
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from ..types.context import ReadContext, WriteContext
 # ── Helpers ──
 
 
+@functools.lru_cache(maxsize=256)
 def _find_reader(ann: type, version: int = 0) -> Any:
     """Look up a reader for a wire type."""
     from .wire_string import WireString  # lazy: break circular import
@@ -231,16 +233,15 @@ def WireField(  # noqa: N802
 # ── Field collection ──
 
 
-def _wire_fields(
-    cls: type[BaseModel], version: int | None = None
-) -> list[tuple[str, type, Callable | None, bool, bool]]:
+@functools.lru_cache(maxsize=256)
+def _wire_fields(cls: type[BaseModel], version: int = 0) -> list[tuple[str, type, Callable | None, bool, bool]]:
     """Return (name, raw_annotation, wire_depends_on, serialize, deserialize) tuples.
 
     ClassVar fields default to serialize=False, deserialize=False unless
     ``WireField(serialize=..., deserialize=...)`` overrides them explicitly.
 
     Fields with ``min_version`` or ``max_version`` constraints are filtered
-    against the provided ``version``.
+    against the provided ``version``.  ``version=0`` means no filtering.
     """
     hints = get_type_hints(cls, include_extras=True)
     result = []
@@ -248,11 +249,11 @@ def _wire_fields(
         field = cls.model_fields[name]
         version_meta: VersionMeta | None = next((m for m in field.metadata if isinstance(m, VersionMeta)), None)
 
-        # Version-gating
-        if version_meta is not None:
-            if version_meta.min_version is not None and version is not None and version < version_meta.min_version:
+        # Version-gating (0 means no filtering)
+        if version_meta is not None and version:
+            if version_meta.min_version is not None and version < version_meta.min_version:
                 continue
-            if version_meta.max_version is not None and version is not None and version > version_meta.max_version:
+            if version_meta.max_version is not None and version > version_meta.max_version:
                 continue
 
         ann = hints.get(name)

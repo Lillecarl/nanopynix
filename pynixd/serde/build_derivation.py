@@ -25,6 +25,7 @@ class BuildDerivationRequest(WireRequest):
 
     op: ClassVar[int] = 36
     response_type = BuildDerivationResponse
+    forward: ClassVar[bool] = False
 
     drv_path: StorePath
     derivation: BasicDerivation

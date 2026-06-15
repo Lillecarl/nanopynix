@@ -30,6 +30,8 @@ class WireRequest(WireModel):
 
     op: ClassVar[int]
     response_type: ClassVar[type]
+    forward: ClassVar[bool] = True
+    is_extension: ClassVar[bool] = False
 
     async def to_writer(self, ctx: WriteContext) -> None:
         """Write op code then body."""

@@ -11,12 +11,23 @@ from pynixd.derived_path import DerivedPath
 from pynixd.operations.build_derivation import (
     BuildDerivationRequest as OldBuildDerivationRequest,
 )
-from pynixd.operations.build_paths import BuildPathsRequest
+from pynixd.operations.build_paths import (
+    BuildPathsRequest as OldBuildPathsRequest,
+)
+from pynixd.operations.build_paths import (
+    BuildPathsResponse as OldBuildPathsResponse,
+)
 from pynixd.operations.is_valid_path import (
     IsValidPathRequest,
     IsValidPathResponse,
 )
 from pynixd.operations.query_path_info import QueryPathInfoResponse
+from pynixd.operations.query_referrers import (
+    QueryReferrersRequest as OldQueryReferrersRequest,
+)
+from pynixd.operations.query_referrers import (
+    QueryReferrersResponse as OldQueryReferrersResponse,
+)
 from pynixd.serde import (
     BasicDerivation as SerdeBasicDerivation,
 )
@@ -35,10 +46,19 @@ from pynixd.serde import (
     WireModel,
 )
 from pynixd.serde import (
+    BuildPathsRequest as SerdeBuildPathsRequest,
+)
+from pynixd.serde import (
+    BuildPathsResponse as SerdeBuildPathsResponse,
+)
+from pynixd.serde import (
     BuildResult as SerdeBuildResult,
 )
 from pynixd.serde import (
     DerivationOutput as SerdeDerivationOutput,
+)
+from pynixd.serde import (
+    DerivedPath as SerdeDerivedPath,
 )
 from pynixd.serde import (
     IsValidPathRequest as SerdeIsValidPathRequest,
@@ -48,6 +68,12 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     QueryPathInfoResponse as SerdeQueryPathInfoResponse,
+)
+from pynixd.serde import (
+    QueryReferrersRequest as SerdeQueryReferrersRequest,
+)
+from pynixd.serde import (
+    QueryReferrersResponse as SerdeQueryReferrersResponse,
 )
 from pynixd.serde import (
     StorePath as SerdeStorePath,
@@ -73,10 +99,7 @@ from pynixd.types.context import ReadContext, WriteContext
 from pynixd.types.path_info import UnkeyedValidPathInfo
 from pynixd.wire import BytesReader, BytesWriter
 
-
-class BuildPathsReq(WireModel):
-    derived_paths: set[str]  # set[DerivedPath] → set of strings on wire
-    build_mode: BuildMode  # IntEnum → uint64 on wire
+from .conftest import read_ctx
 
 
 class PathInfo(WireModel):
@@ -97,76 +120,6 @@ class ReqWithStorePath(WireModel):
 class TypedCollections(WireModel):
     paths: set[SerdeStorePath]
     mapping: dict[str, SerdeStorePath]
-
-
-async def test_request_roundtrip():
-    sp = StorePath("/nix/store/abc-test")
-    orig = IsValidPathRequest(path=sp)
-    # orig → bytes
-    w = BytesWriter()
-    await orig.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
-    data = w.get_bytes()
-    # bytes → WireModel
-    r = BytesReader(data)
-    await r.read_uint64()  # skip op written by original serialize
-    wm = await SerdeIsValidPathRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
-    assert str(wm.path) == str(sp)
-    # WireModel → bytes
-    w2 = BytesWriter()
-    await wm.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
-    data2 = w2.get_bytes()
-    # bytes → WireModel (skip op written by to_writer)
-    r2 = BytesReader(data2)
-    await r2.read_uint64()  # skip op
-    wm2 = await SerdeIsValidPathRequest.from_reader(ReadContext(reader=r2, version=PROTOCOL_VERSION))
-    assert wm2.path == wm.path
-
-
-async def test_response_roundtrip():
-    orig = IsValidPathResponse(valid=True)
-    w = BytesWriter()
-    await orig.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
-    data = w.get_bytes()
-    r = BytesReader(data)
-    wm = await SerdeIsValidPathResponse.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
-    assert wm.valid is True
-    w2 = BytesWriter()
-    await wm.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
-    data2 = w2.get_bytes()
-    wm2 = await SerdeIsValidPathResponse.from_reader(ReadContext(reader=BytesReader(data2), version=PROTOCOL_VERSION))
-    assert wm2.valid == wm.valid
-
-
-async def test_build_paths_request_roundtrip():
-    dp1 = DerivedPath("/nix/store/aaa.drv!out")
-    dp2 = DerivedPath("/nix/store/bbb.drv!out")
-    orig = BuildPathsRequest(derived_paths={dp1, dp2}, build_mode=BuildMode.NORMAL)
-
-    # orig → bytes
-    w = BytesWriter()
-    await orig.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
-    data = w.get_bytes()
-
-    # bytes → WireModel (skip op uint64)
-    r = BytesReader(data)
-    await r.read_uint64()  # skip op
-    wm = await BuildPathsReq.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
-
-    # Verify fields
-    assert wm.build_mode == BuildMode.NORMAL
-    assert len(wm.derived_paths) == 2
-    assert "/nix/store/aaa.drv!out" in wm.derived_paths
-    assert "/nix/store/bbb.drv!out" in wm.derived_paths
-
-    # WireModel → bytes
-    w2 = BytesWriter()
-    await wm.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
-    data2 = w2.get_bytes()
-
-    # bytes → second WireModel
-    wm2 = await BuildPathsReq.from_reader(ReadContext(reader=BytesReader(data2), version=PROTOCOL_VERSION))
-    assert wm2.derived_paths == wm.derived_paths
-    assert wm2.build_mode == wm.build_mode
 
 
 async def test_query_path_info_response_roundtrip():
@@ -200,7 +153,7 @@ async def test_query_path_info_response_roundtrip():
     assert SerdeStorePath(path="/nix/store/ref2") in wm.info.references
     assert wm.info.registration_time == Time(ts=12345678)
     assert wm.info.nar_size == 4096
-    assert wm.info.ultimate == 1
+    assert wm.info.ultimate is True
     assert len(wm.info.sigs) == 2
     # Original writes "sig1" (no colon); Signature reads as name="sig1", signature=""
     assert Signature(name="sig1", signature="") in wm.info.sigs
@@ -587,3 +540,112 @@ async def test_old_build_derivation_request_to_new():
     await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
     # Full bytes (op + body) should match old serialize bytes
     assert w2.get_bytes() == data
+
+
+async def test_old_build_paths_to_new():
+    """Old BuildPathsRequest/Response serialize → new serde deserialize."""
+    dp1 = DerivedPath("/nix/store/aaa.drv!out")
+    dp2 = DerivedPath("/nix/store/bbb.drv!out")
+
+    # Request: old → bytes → new
+    old_req = OldBuildPathsRequest(derived_paths={dp1, dp2}, build_mode=BuildMode.NORMAL)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeBuildPathsRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(SerdeDerivedPath(value="/nix/store/aaa.drv!out")) in new_req.derived_paths
+    assert str(SerdeDerivedPath(value="/nix/store/bbb.drv!out")) in new_req.derived_paths
+    assert new_req.build_mode == 0  # NORMAL
+
+    # Request: new → bytes → content roundtrip (sets are unordered)
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    new_req2 = await SerdeBuildPathsRequest.from_reader(
+        ReadContext(reader=BytesReader(w2.get_bytes()[8:]), version=PROTOCOL_VERSION),
+    )
+    assert new_req2.derived_paths == new_req.derived_paths
+    assert new_req2.build_mode == new_req.build_mode
+
+    # Response: old → bytes → new
+    old_resp = OldBuildPathsResponse(value=42)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeBuildPathsResponse.from_reader(read_ctx(data3))
+    assert new_resp.value == 42
+
+    # Response: new → bytes (no stderr = just WireLogs empty + value)
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_is_valid_path_to_new():
+    """Old IsValidPathRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/abc-test")
+
+    # Request: old → bytes → new
+    old_req = IsValidPathRequest(path=sp)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeIsValidPathRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/abc-test"
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = IsValidPathResponse(valid=True)
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeIsValidPathResponse.from_reader(read_ctx(data3))
+    assert new_resp.valid is True
+
+    # Response: new → bytes
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == data3
+
+
+async def test_old_query_referrers_to_new():
+    """Old QueryReferrersRequest/Response serialize → new serde deserialize."""
+    sp = StorePath("/nix/store/ref-me")
+
+    # Request: old → bytes → new
+    old_req = OldQueryReferrersRequest(path=sp)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeQueryReferrersRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert str(new_req.path) == "/nix/store/ref-me"
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Response: old → bytes → new
+    old_resp = OldQueryReferrersResponse(paths={StorePath("/nix/store/a"), StorePath("/nix/store/b")})
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeQueryReferrersResponse.from_reader(read_ctx(data3))
+    assert len(new_resp.paths) == 2
+    assert SerdeStorePath(path="/nix/store/a") in new_resp.paths
+    assert SerdeStorePath(path="/nix/store/b") in new_resp.paths
+
+    # Response: new → bytes → content roundtrip (sets are unordered)
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    new_resp2 = await SerdeQueryReferrersResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert new_resp2.paths == new_resp.paths
