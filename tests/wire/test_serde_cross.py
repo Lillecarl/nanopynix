@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json as json_lib
+import struct
 
 import pytest
 
@@ -110,6 +111,12 @@ from pynixd.operations.optimise_store import (
 )
 from pynixd.operations.optimise_store import (
     OptimiseStoreResponse as OldOptimiseStoreResponse,
+)
+from pynixd.operations.probe_systems import (
+    ProbeSystemsRequest as OldProbeSystemsRequest,
+)
+from pynixd.operations.probe_systems import (
+    ProbeSystemsResponse as OldProbeSystemsResponse,
 )
 from pynixd.operations.pynixd_collect_garbage import (
     PynixdCollectGarbageRequest as OldPynixdCollectGarbageRequest,
@@ -333,6 +340,12 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     OptimiseStoreResponse as SerdeOptimiseStoreResponse,
+)
+from pynixd.serde import (
+    ProbeSystemsRequest as SerdeProbeSystemsRequest,
+)
+from pynixd.serde import (
+    ProbeSystemsResponse as SerdeProbeSystemsResponse,
 )
 from pynixd.serde import (
     PynixdCollectGarbageRequest as SerdePynixdCollectGarbageRequest,
@@ -1821,6 +1834,57 @@ async def test_old_optimise_store_to_new():
     w4 = BytesWriter()
     await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
     assert w4.get_bytes() == data3
+
+
+async def test_old_probe_systems_to_new():
+    """Old ProbeSystemsRequest/Response serialize → new serde deserialize.
+
+    Both request and response have empty bodies (no fields).
+    The old serialize writes nothing after the op code (not even WireLogs),
+    while the new serde response writes STDERR_LAST (uint64 41) for empty
+    WireLogs. So byte-identical roundtrip only works for the request.
+    """
+
+    # Request: old → bytes → new
+    # The old serialize writes nothing at all (no op, no body) —
+    # this is an internal operation not dispatched over the daemon wire.
+    # Verify the new types work in isolation.
+    old_req = OldProbeSystemsRequest(systems=set())
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    # old serialize writes zero bytes (no op, no body)
+    assert w.get_bytes() == b""
+
+    # New request: construct and roundtrip
+    new_req = SerdeProbeSystemsRequest()
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    # New writes op code only (uint64 108)
+    assert w2.get_bytes() == struct.pack("<Q", 108)  # op 108
+
+    # Verify new request can be read back
+    new_req2 = await SerdeProbeSystemsRequest.from_reader(
+        ReadContext(reader=BytesReader(w2.get_bytes()[8:]), version=PROTOCOL_VERSION),
+    )
+    assert isinstance(new_req2, SerdeProbeSystemsRequest)
+
+    # Response: old → bytes (old writes nothing)
+    old_resp = OldProbeSystemsResponse(systems=set())
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    # old response serialize writes zero bytes
+    assert w3.get_bytes() == b""
+
+    # New response: empty WireLogs produces STDERR_LAST
+    w4 = BytesWriter()
+    new_resp = SerdeProbeSystemsResponse()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    assert w4.get_bytes() == struct.pack("<Q", 0x616C7473)  # STDERR_LAST
+
+    # Verify new response can be read back
+    new_resp2 = await SerdeProbeSystemsResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert isinstance(new_resp2, SerdeProbeSystemsResponse)
+    assert len(new_resp2.logs.messages) == 0
 
 
 async def test_old_verify_store_to_new():
