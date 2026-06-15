@@ -141,6 +141,12 @@ from pynixd.operations.query_derivation_output_map import (
 from pynixd.operations.query_derivation_output_map import (
     QueryDerivationOutputMapResponse as OldQueryDerivationOutputMapResponse,
 )
+from pynixd.operations.query_derivation_output_map_batch import (
+    DerivationOutputMapBatchResponse as OldDerivationOutputMapBatchResponse,
+)
+from pynixd.operations.query_derivation_output_map_batch import (
+    QueryDerivationOutputMapBatchRequest as OldQueryDerivationOutputMapBatchRequest,
+)
 from pynixd.operations.query_missing import (
     QueryMissingRequest as OldQueryMissingRequest,
 )
@@ -281,6 +287,9 @@ from pynixd.serde import (
     DerivationOutput as SerdeDerivationOutput,
 )
 from pynixd.serde import (
+    DerivationOutputMapBatchResponse as SerdeDerivationOutputMapBatchResponse,
+)
+from pynixd.serde import (
     DerivedPath as SerdeDerivedPath,
 )
 from pynixd.serde import (
@@ -345,6 +354,9 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     QueryClosureWithInfoResponse as SerdeQueryClosureWithInfoResponse,
+)
+from pynixd.serde import (
+    QueryDerivationOutputMapBatchRequest as SerdeQueryDerivationOutputMapBatchRequest,
 )
 from pynixd.serde import (
     QueryDerivationOutputMapRequest as SerdeQueryDerivationOutputMapRequest,
@@ -2040,6 +2052,61 @@ async def test_old_query_derivation_output_map_to_new():
     await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
     new_resp2 = await SerdeQueryDerivationOutputMapResponse.from_reader(read_ctx(w4.get_bytes()))
     assert new_resp2.items == new_resp.items
+
+
+async def test_old_query_derivation_output_map_batch_to_new():
+    """Old QueryDerivationOutputMapBatch serialize → new serde deserialize."""
+    sp1 = StorePath("/nix/store/drv-a.drv")
+    sp2 = StorePath("/nix/store/drv-b.drv")
+
+    # Request: old → bytes → new
+    old_req = OldQueryDerivationOutputMapBatchRequest(drv_paths={sp1, sp2})
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeQueryDerivationOutputMapBatchRequest.from_reader(
+        ReadContext(reader=r, version=PROTOCOL_VERSION)
+    )
+    assert len(new_req.drv_paths) == 2
+    assert SerdeStorePath(path="/nix/store/drv-a.drv") in new_req.drv_paths
+    assert SerdeStorePath(path="/nix/store/drv-b.drv") in new_req.drv_paths
+
+    # Request: new → bytes → content roundtrip (sets are unordered)
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    new_req2 = await SerdeQueryDerivationOutputMapBatchRequest.from_reader(
+        ReadContext(reader=BytesReader(w2.get_bytes()[8:]), version=PROTOCOL_VERSION),
+    )
+    assert new_req2.drv_paths == new_req.drv_paths
+
+    # Response: old → bytes → new
+    old_resp = OldDerivationOutputMapBatchResponse(
+        outputs={
+            sp1: {"out": StorePath("/nix/store/a-out"), "dev": None},
+            sp2: {"out": StorePath("/nix/store/b-out")},
+        },
+    )
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeDerivationOutputMapBatchResponse.from_reader(read_ctx(data3))
+    assert len(new_resp.outputs) == 2
+    assert SerdeStorePath(path="/nix/store/drv-a.drv") in new_resp.outputs
+    assert SerdeStorePath(path="/nix/store/drv-b.drv") in new_resp.outputs
+    a_outputs = new_resp.outputs[SerdeStorePath(path="/nix/store/drv-a.drv")]
+    assert a_outputs["out"] == SerdeStorePath(path="/nix/store/a-out")
+    # None in old → empty StorePath in new (wire has empty string)
+    assert a_outputs["dev"] == SerdeStorePath(path="")
+    b_outputs = new_resp.outputs[SerdeStorePath(path="/nix/store/drv-b.drv")]
+    assert b_outputs["out"] == SerdeStorePath(path="/nix/store/b-out")
+
+    # Response: new → bytes → content roundtrip
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    new_resp2 = await SerdeDerivationOutputMapBatchResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert new_resp2.outputs == new_resp.outputs
 
 
 async def test_old_register_drv_output_to_new():

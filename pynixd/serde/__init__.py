@@ -66,6 +66,10 @@ from .query_closure_with_info import QueryClosureWithInfoRequest as QueryClosure
 from .query_closure_with_info import QueryClosureWithInfoResponse as QueryClosureWithInfoResponse
 from .query_derivation_output_map import QueryDerivationOutputMapRequest as QueryDerivationOutputMapRequest
 from .query_derivation_output_map import QueryDerivationOutputMapResponse as QueryDerivationOutputMapResponse
+from .query_derivation_output_map_batch import DerivationOutputMapBatchResponse as DerivationOutputMapBatchResponse
+from .query_derivation_output_map_batch import (
+    QueryDerivationOutputMapBatchRequest as QueryDerivationOutputMapBatchRequest,
+)
 from .query_missing import QueryMissingRequest as QueryMissingRequest
 from .query_missing import QueryMissingResponse as QueryMissingResponse
 from .query_path_from_hash_part import QueryPathFromHashPartRequest as QueryPathFromHashPartRequest
