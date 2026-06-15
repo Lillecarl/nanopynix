@@ -141,3 +141,139 @@ class LocalDBStore(LocalStore):
                 return result
 
         return None  # fall through to DaemonStore.call()
+
+    async def query_closure(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        if self.db is not None:
+            import json
+
+            from pynixd.operations.query_closure import (
+                QUERY_CLOSURE,
+                QueryClosureResponse,
+            )
+            from pynixd.store_path import StorePath
+
+            seeds_json = json.dumps([str(p) for p in request.paths])
+            async with self.db.execute(QUERY_CLOSURE, (seeds_json,)) as cursor:
+                rows = await cursor.fetchall()
+            result = QueryClosureResponse(paths={StorePath(row[0]) for row in rows})
+            self.tracker.add_known_paths(result.paths)
+            return result
+
+        return None  # fall through to DaemonStore.call()
+
+    async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        if not request.paths:
+            from pynixd.operations.query_closure_with_info import QueryClosureWithInfoResponse
+
+            return QueryClosureWithInfoResponse(infos=[])
+
+        if self.db is not None:
+            import json
+
+            from pynixd.operations.base import UnkeyedValidPathInfo
+            from pynixd.operations.query_closure_with_info import (
+                QUERY_CLOSURE_WITH_INFO,
+                QueryClosureWithInfoResponse,
+            )
+            from pynixd.store_path import StorePath
+
+            seeds_json = json.dumps([str(p) for p in request.paths])
+            async with self.db.execute(QUERY_CLOSURE_WITH_INFO, (seeds_json,)) as cursor:
+                rows = await cursor.fetchall()
+
+            sorted_infos: list = []
+            for (
+                path,
+                deriver,
+                nar_hash,
+                reg_time,
+                nar_size,
+                ultimate,
+                sigs,
+                ca,
+                refs_str,
+            ) in rows:
+                p = StorePath(path)
+                references = {StorePath(r) for r in refs_str.split()} if refs_str else set()
+                uinfo = UnkeyedValidPathInfo(
+                    deriver=StorePath(deriver or ""),
+                    nar_hash=nar_hash,
+                    references=references,
+                    registration_time=reg_time,
+                    nar_size=nar_size or 0,
+                    ultimate=1 if ultimate else 0,
+                    sigs=set(sigs.split()) if sigs else set(),
+                    ca=ca or "",
+                )
+                sorted_infos.append(uinfo.with_path(p))
+
+            self.tracker.add_known_paths({info.path for info in sorted_infos})
+            self.add_path_infos(sorted_infos)
+            return QueryClosureWithInfoResponse(infos=sorted_infos)
+
+        return None  # fall through to DaemonStore.call()
+
+    async def query_path_infos(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        if not request.paths:
+            from pynixd.operations.query_path_infos import QueryPathInfosResponse
+
+            return QueryPathInfosResponse(infos={})
+
+        cached: dict = {}
+        uncached: list = []
+        for path in request.paths:
+            cached_info = self.get_path_info(path)
+            if cached_info is not None:
+                cached[path] = cached_info
+            else:
+                uncached.append(path)
+
+        if not uncached:
+            self.add_path_infos(cached.values())
+            from pynixd.operations.query_path_infos import QueryPathInfosResponse
+
+            return QueryPathInfosResponse(infos=cached)
+
+        if self.db is not None:
+            import json
+
+            from pynixd.operations.base import UnkeyedValidPathInfo
+            from pynixd.operations.query_path_infos import (
+                QUERY_PATH_INFOS_BATCH,
+                QUERY_REFERENCES_BATCH,
+                QueryPathInfosResponse,
+            )
+            from pynixd.store_path import StorePath
+
+            paths_json = json.dumps([str(p) for p in uncached])
+            async with self.db.execute(QUERY_PATH_INFOS_BATCH, (paths_json,)) as cursor:
+                rows = await cursor.fetchall()
+            async with self.db.execute(QUERY_REFERENCES_BATCH, (paths_json,)) as cursor:
+                ref_rows = await cursor.fetchall()
+
+            refs_map: dict = {}
+            for referrer, reference in ref_rows:
+                refs_map.setdefault(StorePath(referrer), set()).add(
+                    StorePath(reference),
+                )
+
+            infos: dict = dict(cached)
+            for path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca in rows:
+                p = StorePath(path)
+                uinfo = UnkeyedValidPathInfo(
+                    deriver=StorePath(deriver or ""),
+                    nar_hash=nar_hash,
+                    references=refs_map.get(p, set()),
+                    registration_time=reg_time,
+                    nar_size=nar_size or 0,
+                    ultimate=1 if ultimate else 0,
+                    sigs=set(sigs.split()) if sigs else set(),
+                    ca=ca or "",
+                )
+                infos[p] = uinfo.with_path(p)
+
+            self.tracker.add_known_paths(set(infos.keys()))
+            self.add_path_infos(infos.values())
+            return QueryPathInfosResponse(infos=infos)
+
+        return None  # fall through to DaemonStore.call()
