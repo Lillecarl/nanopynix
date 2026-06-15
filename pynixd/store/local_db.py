@@ -84,3 +84,60 @@ class LocalDBStore(LocalStore):
             return QueryPathInfoResponse(info=info)
 
         return None  # fall through to DaemonStore.call()
+
+    async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        if self.db is not None:
+            from pynixd.operations.query_all_valid_paths import (
+                QUERY_ALL_VALID_PATHS,
+                QueryAllValidPathsResponse,
+            )
+            from pynixd.store_path import StorePath
+
+            try:
+                async with self.db.execute(QUERY_ALL_VALID_PATHS) as cursor:
+                    rows = await cursor.fetchall()
+                return QueryAllValidPathsResponse(
+                    paths={StorePath(r[0]) for r in rows},
+                )
+            except Exception:
+                pass
+
+        return None  # fall through to DaemonStore.call()
+
+    async def query_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        if self.db is not None:
+            import json
+
+            from pynixd.operations.query_valid_paths import (
+                QUERY_VALID_PATHS,
+                QueryValidPathsResponse,
+            )
+            from pynixd.store_path import StorePath
+
+            paths_json = json.dumps([str(p) for p in request.paths])
+            async with self.db.execute(QUERY_VALID_PATHS, (paths_json,)) as cursor:
+                rows = await cursor.fetchall()
+            resp = QueryValidPathsResponse(paths={StorePath(r[0]) for r in rows})
+            self.tracker.add_known_paths(resp.paths)
+            return resp
+
+        return None  # fall through to DaemonStore.call()
+
+    async def query_path_from_hash_part(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        if self.db is not None:
+            from pynixd.operations.query_path_from_hash_part import (
+                QUERY_PATH_FROM_HASH_PART,
+                QueryPathFromHashPartResponse,
+            )
+            from pynixd.store_path import StorePath
+
+            prefix = f"/nix/store/{request.path}"
+            upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+            async with self.db.execute(QUERY_PATH_FROM_HASH_PART, (prefix, upper)) as cursor:
+                row = await cursor.fetchone()
+            if row:
+                result = QueryPathFromHashPartResponse(value=StorePath(row[0]))
+                self.tracker.add_known_path(result.value)
+                return result
+
+        return None  # fall through to DaemonStore.call()
