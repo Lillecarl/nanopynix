@@ -111,6 +111,12 @@ from pynixd.operations.optimise_store import (
 from pynixd.operations.optimise_store import (
     OptimiseStoreResponse as OldOptimiseStoreResponse,
 )
+from pynixd.operations.pynixd_collect_garbage import (
+    PynixdCollectGarbageRequest as OldPynixdCollectGarbageRequest,
+)
+from pynixd.operations.pynixd_collect_garbage import (
+    PynixdCollectGarbageResponse as OldPynixdCollectGarbageResponse,
+)
 from pynixd.operations.query_all_valid_paths import (
     QueryAllValidPathsRequest as OldQueryAllValidPathsRequest,
 )
@@ -296,6 +302,15 @@ from pynixd.serde import (
     OptimiseStoreResponse as SerdeOptimiseStoreResponse,
 )
 from pynixd.serde import (
+    PynixdCollectGarbageRequest as SerdePynixdCollectGarbageRequest,
+)
+from pynixd.serde import (
+    PynixdCollectGarbageResponse as SerdePynixdCollectGarbageResponse,
+)
+from pynixd.serde import (
+    PynixdGCAction as SerdePynixdGCAction,
+)
+from pynixd.serde import (
     QueryAllValidPathsRequest as SerdeQueryAllValidPathsRequest,
 )
 from pynixd.serde import (
@@ -394,6 +409,7 @@ from pynixd.types import (
     DerivationOutput as OldDerivationOutput,
 )
 from pynixd.types import GCAction as GCAction
+from pynixd.types import PynixdGCAction as OldPynixdGCAction
 from pynixd.types.build import (
     KeyedBuildResult as OldKeyedBuildResult,
 )
@@ -1889,6 +1905,62 @@ async def test_old_add_perm_root_to_new():
     w4 = BytesWriter()
     await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
     assert w4.get_bytes() == data3
+
+
+async def test_old_pynixd_collect_garbage_to_new():
+    """Old PynixdCollectGarbageRequest/Response serialize → new serde deserialize."""
+
+    # Request: old → bytes → new
+    old_req = OldPynixdCollectGarbageRequest(action=OldPynixdGCAction.DRY_RUN)
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdePynixdCollectGarbageRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert new_req.action == SerdePynixdGCAction.DRY_RUN
+
+    # Request: new → bytes → full bytes match old serialize
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    assert w2.get_bytes() == data
+
+    # Request: EXECUTE variant
+    old_req2 = OldPynixdCollectGarbageRequest(action=OldPynixdGCAction.EXECUTE)
+    w5 = BytesWriter()
+    await old_req2.serialize(WriteContext(writer=w5, version=PROTOCOL_VERSION))
+    data5 = w5.get_bytes()
+    r5 = BytesReader(data5)
+    await r5.read_uint64()
+    new_req2 = await SerdePynixdCollectGarbageRequest.from_reader(ReadContext(reader=r5, version=PROTOCOL_VERSION))
+    assert new_req2.action == SerdePynixdGCAction.EXECUTE
+
+    w6 = BytesWriter()
+    await new_req2.to_writer(WriteContext(writer=w6, version=PROTOCOL_VERSION))
+    assert w6.get_bytes() == data5
+
+    # Response: old → bytes → new
+    sp1 = StorePath("/nix/store/gc-d-1")
+    sp2 = StorePath("/nix/store/gc-d-2")
+    old_resp = OldPynixdCollectGarbageResponse(
+        store_paths={sp1, sp2},
+        bytes=123456,
+    )
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdePynixdCollectGarbageResponse.from_reader(read_ctx(data3))
+    assert len(new_resp.store_paths) == 2
+    assert SerdeStorePath(path="/nix/store/gc-d-1") in new_resp.store_paths
+    assert SerdeStorePath(path="/nix/store/gc-d-2") in new_resp.store_paths
+    assert new_resp.bytes == 123456
+
+    # Response: new → bytes → content roundtrip (sets are unordered)
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    new_resp2 = await SerdePynixdCollectGarbageResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert new_resp2.store_paths == new_resp.store_paths
+    assert new_resp2.bytes == new_resp.bytes
 
 
 async def test_old_query_referrers_to_new():

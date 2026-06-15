@@ -54,7 +54,10 @@ from .optimise_store import OptimiseStoreRequest as OptimiseStoreRequest
 from .optimise_store import OptimiseStoreResponse as OptimiseStoreResponse
 from .path_info import UnkeyedValidPathInfo as UnkeyedValidPathInfo
 from .protocol import GCAction as GCAction
+from .protocol import PynixdGCAction as PynixdGCAction
 from .protocol import Verbosity as Verbosity
+from .pynixd_collect_garbage import PynixdCollectGarbageRequest as PynixdCollectGarbageRequest
+from .pynixd_collect_garbage import PynixdCollectGarbageResponse as PynixdCollectGarbageResponse
 from .query_all_valid_paths import QueryAllValidPathsRequest as QueryAllValidPathsRequest
 from .query_all_valid_paths import QueryAllValidPathsResponse as QueryAllValidPathsResponse
 from .query_derivation_output_map import QueryDerivationOutputMapRequest as QueryDerivationOutputMapRequest

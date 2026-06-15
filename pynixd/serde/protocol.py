@@ -25,3 +25,10 @@ class GCAction(IntEnum):
     RETURN_DEAD = 1
     DELETE_DEAD = 2
     DELETE_SPECIFIC = 3
+
+
+class PynixdGCAction(IntEnum):
+    """Actions for pynixd's custom collect-garbage operation."""
+
+    DRY_RUN = 0
+    EXECUTE = 1
