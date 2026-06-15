@@ -62,6 +62,8 @@ from .query_all_valid_paths import QueryAllValidPathsRequest as QueryAllValidPat
 from .query_all_valid_paths import QueryAllValidPathsResponse as QueryAllValidPathsResponse
 from .query_closure import QueryClosureRequest as QueryClosureRequest
 from .query_closure import QueryClosureResponse as QueryClosureResponse
+from .query_closure_with_info import QueryClosureWithInfoRequest as QueryClosureWithInfoRequest
+from .query_closure_with_info import QueryClosureWithInfoResponse as QueryClosureWithInfoResponse
 from .query_derivation_output_map import QueryDerivationOutputMapRequest as QueryDerivationOutputMapRequest
 from .query_derivation_output_map import QueryDerivationOutputMapResponse as QueryDerivationOutputMapResponse
 from .query_missing import QueryMissingRequest as QueryMissingRequest
