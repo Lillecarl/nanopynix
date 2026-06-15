@@ -68,6 +68,8 @@ from .query_path_from_hash_part import QueryPathFromHashPartRequest as QueryPath
 from .query_path_from_hash_part import QueryPathFromHashPartResponse as QueryPathFromHashPartResponse
 from .query_path_info import QueryPathInfoRequest as QueryPathInfoRequest
 from .query_path_info import QueryPathInfoResponse as QueryPathInfoResponse
+from .query_path_infos import QueryPathInfosRequest as QueryPathInfosRequest
+from .query_path_infos import QueryPathInfosResponse as QueryPathInfosResponse
 from .query_realisation import QueryRealisationRequest as QueryRealisationRequest
 from .query_realisation import QueryRealisationResponse as QueryRealisationResponse
 from .query_referrers import QueryReferrersRequest as QueryReferrersRequest
