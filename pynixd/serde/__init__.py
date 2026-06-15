@@ -60,6 +60,8 @@ from .pynixd_collect_garbage import PynixdCollectGarbageRequest as PynixdCollect
 from .pynixd_collect_garbage import PynixdCollectGarbageResponse as PynixdCollectGarbageResponse
 from .query_all_valid_paths import QueryAllValidPathsRequest as QueryAllValidPathsRequest
 from .query_all_valid_paths import QueryAllValidPathsResponse as QueryAllValidPathsResponse
+from .query_closure import QueryClosureRequest as QueryClosureRequest
+from .query_closure import QueryClosureResponse as QueryClosureResponse
 from .query_derivation_output_map import QueryDerivationOutputMapRequest as QueryDerivationOutputMapRequest
 from .query_derivation_output_map import QueryDerivationOutputMapResponse as QueryDerivationOutputMapResponse
 from .query_missing import QueryMissingRequest as QueryMissingRequest

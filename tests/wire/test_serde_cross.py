@@ -123,6 +123,12 @@ from pynixd.operations.query_all_valid_paths import (
 from pynixd.operations.query_all_valid_paths import (
     QueryAllValidPathsResponse as OldQueryAllValidPathsResponse,
 )
+from pynixd.operations.query_closure import (
+    QueryClosureRequest as OldQueryClosureRequest,
+)
+from pynixd.operations.query_closure import (
+    QueryClosureResponse as OldQueryClosureResponse,
+)
 from pynixd.operations.query_derivation_output_map import (
     QueryDerivationOutputMapRequest as OldQueryDerivationOutputMapRequest,
 )
@@ -321,6 +327,12 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     QueryAllValidPathsResponse as SerdeQueryAllValidPathsResponse,
+)
+from pynixd.serde import (
+    QueryClosureRequest as SerdeQueryClosureRequest,
+)
+from pynixd.serde import (
+    QueryClosureResponse as SerdeQueryClosureResponse,
 )
 from pynixd.serde import (
     QueryDerivationOutputMapRequest as SerdeQueryDerivationOutputMapRequest,
@@ -1402,6 +1414,50 @@ async def test_old_query_path_infos_to_new():
     info_map2 = {str(i.path): i for i in new_resp2.infos}
     assert "/nix/store/info-1" in info_map2
     assert "/nix/store/info-2" in info_map2
+
+
+async def test_old_query_closure_to_new():
+    """Old QueryClosureRequest/Response serialize → new serde deserialize."""
+    sp1 = StorePath("/nix/store/closure-a")
+    sp2 = StorePath("/nix/store/closure-b")
+    sp3 = StorePath("/nix/store/closure-c")
+
+    # Request: old → bytes → new
+    old_req = OldQueryClosureRequest(paths={sp1, sp2})
+    w = BytesWriter()
+    await old_req.serialize(WriteContext(writer=w, version=PROTOCOL_VERSION))
+    data = w.get_bytes()
+    r = BytesReader(data)
+    await r.read_uint64()  # skip op
+    new_req = await SerdeQueryClosureRequest.from_reader(ReadContext(reader=r, version=PROTOCOL_VERSION))
+    assert len(new_req.paths) == 2
+    assert SerdeStorePath(path="/nix/store/closure-a") in new_req.paths
+    assert SerdeStorePath(path="/nix/store/closure-b") in new_req.paths
+
+    # Request: new → bytes → content roundtrip (sets are unordered)
+    w2 = BytesWriter()
+    await new_req.to_writer(WriteContext(writer=w2, version=PROTOCOL_VERSION))
+    new_req2 = await SerdeQueryClosureRequest.from_reader(
+        ReadContext(reader=BytesReader(w2.get_bytes()[8:]), version=PROTOCOL_VERSION),
+    )
+    assert new_req2.paths == new_req.paths
+
+    # Response: old → bytes → new
+    old_resp = OldQueryClosureResponse(paths={sp1, sp2, sp3})
+    w3 = BytesWriter()
+    await old_resp.serialize(WriteContext(writer=w3, version=PROTOCOL_VERSION))
+    data3 = w3.get_bytes()
+    new_resp = await SerdeQueryClosureResponse.from_reader(read_ctx(data3))
+    assert len(new_resp.paths) == 3
+    assert SerdeStorePath(path="/nix/store/closure-a") in new_resp.paths
+    assert SerdeStorePath(path="/nix/store/closure-b") in new_resp.paths
+    assert SerdeStorePath(path="/nix/store/closure-c") in new_resp.paths
+
+    # Response: new → bytes → content roundtrip
+    w4 = BytesWriter()
+    await new_resp.to_writer(WriteContext(writer=w4, version=PROTOCOL_VERSION))
+    new_resp2 = await SerdeQueryClosureResponse.from_reader(read_ctx(w4.get_bytes()))
+    assert new_resp2.paths == new_resp.paths
 
 
 async def test_old_query_path_from_hash_part_to_new():
