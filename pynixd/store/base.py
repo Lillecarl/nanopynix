@@ -11,7 +11,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import anyio
 import structlog
@@ -564,6 +564,42 @@ class Store(ABC):
     def get_path_info(self, path: StorePath) -> ValidPathInfo | None:
         """Get ValidPathInfo from cache if available."""
         return self.path_info_cache.get(path)
+
+    # ── Fast-path hooks ──────────────────────────────────────────
+    # Subclasses override these to provide local optimizations.
+    # Return None to fall through to daemon forward().
+
+    async def is_valid_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        return None
+
+    async def query_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        return None
+
+    async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        return None
+
+    async def query_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        return None
+
+    async def query_path_from_hash_part(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        return None
+
+    async def query_closure(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        return None
+
+    async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        return None
+
+    async def query_path_infos(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        return None
+
+    async def query_derivation_output_map_batch(
+        self, request: Any, client: Any = None, suppress_last: bool = False
+    ) -> Any:
+        return None
+
+    async def query_missing(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        return None
 
     @abstractmethod
     async def create_conn(self) -> Connection:
