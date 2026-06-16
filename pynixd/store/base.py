@@ -11,7 +11,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import anyio
 import structlog
@@ -47,13 +47,6 @@ if TYPE_CHECKING:
     from ..signing import SecretKey
     from ..types.aliases import StorePathSet
     from ..types.ids import StoreId
-
-
-def _get_executor(op: int) -> type | None:
-    """Look up an executor for the given op code. Lazy import avoids circular deps."""
-    from pynixd.executors._base import EXECUTOR_REGISTRY
-
-    return EXECUTOR_REGISTRY.get(op)
 
 
 log = structlog.get_logger(__name__)
@@ -520,6 +513,18 @@ class Store(ABC):
             self.record_failure()
             raise
 
+    _executors: ClassVar[dict[int, str]] = {}
+
+    @classmethod
+    def executor(cls, op: int):
+        """Decorator: register a method as the fast-path executor for an operation."""
+
+        def decorator(method):
+            cls._executors[op] = method.__name__
+            return method
+
+        return decorator
+
     async def execute(
         self,
         request: OpRequest[Resp],
@@ -535,15 +540,10 @@ class Store(ABC):
         if not skip_probe:
             await self.probe()
 
-        # Try executor fast-path first
-        if executor_cls := _get_executor(request.op):
-            executor = executor_cls()
-            if result := await executor.execute(
-                request,
-                self,
-                client=client,
-                suppress_last=suppress_last,
-            ):
+        # Try executor fast-path via decorator-based dispatch
+        if method_name := self._executors.get(request.op):
+            fn = getattr(self, method_name)
+            if result := await fn(self, request):
                 return result
 
         return await request.execute(

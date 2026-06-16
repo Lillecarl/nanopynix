@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from .base import Store
 from .local_daemon import LocalStore
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ class LocalDBStore(LocalStore):
 
     # ── Fast-path overrides ────────────────────────────────────────
 
+    @Store.executor(op=1)
     async def is_valid_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if self.tracker.has_path(request.path):
             from pynixd.operations.is_valid_path import IsValidPathResponse
@@ -41,6 +43,7 @@ class LocalDBStore(LocalStore):
 
         return None  # fall through to DaemonStore.call()
 
+    @Store.executor(op=26)
     async def query_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         cached = self.get_path_info(request.path)
         if cached is not None:
@@ -85,6 +88,7 @@ class LocalDBStore(LocalStore):
 
         return None  # fall through to DaemonStore.call()
 
+    @Store.executor(op=23)
     async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if self.db is not None:
             from pynixd.operations.query_all_valid_paths import (
@@ -104,6 +108,7 @@ class LocalDBStore(LocalStore):
 
         return None  # fall through to DaemonStore.call()
 
+    @Store.executor(op=31)
     async def query_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if self.db is not None:
             import json
@@ -123,6 +128,7 @@ class LocalDBStore(LocalStore):
 
         return None  # fall through to DaemonStore.call()
 
+    @Store.executor(op=29)
     async def query_path_from_hash_part(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if self.db is not None:
             from pynixd.operations.query_path_from_hash_part import (
@@ -142,6 +148,7 @@ class LocalDBStore(LocalStore):
 
         return None  # fall through to DaemonStore.call()
 
+    @Store.executor(op=104)
     async def query_closure(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if self.db is not None:
             import json
@@ -161,6 +168,7 @@ class LocalDBStore(LocalStore):
 
         return None  # fall through to DaemonStore.call()
 
+    @Store.executor(op=105)
     async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if not request.paths:
             from pynixd.operations.query_closure_with_info import QueryClosureWithInfoResponse
@@ -213,6 +221,7 @@ class LocalDBStore(LocalStore):
 
         return None  # fall through to DaemonStore.call()
 
+    @Store.executor(op=103)
     async def query_path_infos(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if not request.paths:
             from pynixd.operations.query_path_infos import QueryPathInfosResponse
@@ -278,6 +287,7 @@ class LocalDBStore(LocalStore):
 
         return None  # fall through to DaemonStore.call()
 
+    @Store.executor(op=106)
     async def query_derivation_output_map_batch(
         self, request: Any, client: Any = None, suppress_last: bool = False
     ) -> Any:
