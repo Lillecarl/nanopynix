@@ -6,12 +6,16 @@ from typing import TYPE_CHECKING, ClassVar
 
 import structlog
 
-from ..operations.add_to_store_nar import AddToStoreNarRequest, AddToStoreNarResponse
-from ..types.context import ReadContext
+from ..serde.add_to_store_nar import (
+    AddToStoreNarRequest,
+    AddToStoreNarResponse,
+)
+from ..store_path import StorePath as OldStorePath
+from ..types.context import ReadContext, WriteContext
+from ..wire import forward_framed
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..operations.base import OpResponse
     from ..types import RequestContext
 
 logger = structlog.get_logger(__name__)
@@ -22,11 +26,28 @@ class AddToStoreNarHandler(Handler):
 
     op: ClassVar[int] = 39
 
-    async def handle(self, ctx: RequestContext) -> OpResponse | None:
+    async def handle(self, ctx: RequestContext) -> AddToStoreNarResponse | None:
         structlog.contextvars.bind_contextvars(operation=type(self).__name__)
         async with ctx.proxy.local_store.transfer_conn() as conn:
-            req = object.__new__(AddToStoreNarRequest)
-            path = await req.forward(ctx.proxy.r, conn.w)
-            resp = await AddToStoreNarResponse.deserialize(ReadContext.from_conn(conn))
-            ctx.proxy.local_store.tracker.add_known_path(path)
-        return resp
+            # 1. Read request header from client (serde)
+            req = await AddToStoreNarRequest.from_reader(
+                ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
+            )
+
+            # 2. Write request header to daemon
+            await req.to_writer(WriteContext.from_conn(conn))
+            await conn.w.drain()
+
+            # 3. Forward framed NAR bytes from client to daemon
+            await forward_framed(ctx.proxy.r, conn.w)
+
+            # 4. Read response from daemon
+            resp = await AddToStoreNarResponse.from_reader(
+                ReadContext.from_conn(conn),
+            )
+
+            # 5. Update tracker
+            old_path = OldStorePath(str(req.info.path))
+            ctx.proxy.local_store.tracker.add_known_path(old_path)
+
+            return resp
