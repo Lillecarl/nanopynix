@@ -11,7 +11,6 @@ from ..serde.add_multiple_to_store import (
     AddMultipleToStoreRequest,
     AddMultipleToStoreResponse,
 )
-from ..store_path import StorePath as OldStorePath
 from ..types.context import ReadContext, WriteContext
 from ..types.path_info import ValidPathInfo as OldValidPathInfo
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter

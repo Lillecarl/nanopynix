@@ -22,6 +22,7 @@ from pynixd.operations.query_closure_with_info import (
 )
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
 from pynixd.psi import CpuUtil
+from pynixd.serde.wire_message import WireModel
 from pynixd.store.base import Store
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from pynixd.connection import ClientConn, Connection
     from pynixd.drv_parser import Derivation
     from pynixd.operations.base import OpRequest, Resp
+    from pynixd.serde.wire_ops import WireRequest
     from pynixd.wire import NixReader, NixWriter
 
 
@@ -230,14 +232,16 @@ class MockStore(Store):
 
         return await read_drv_file(self.store_path, drv_store_path)
 
-    async def execute(
+    async def execute(  # type: ignore[override]
         self,
-        request: OpRequest[Resp],
+        request: OpRequest[Resp] | WireRequest,
         client: ClientConn | None = None,
         suppress_last: bool = False,
         skip_probe: bool = False,
-    ) -> Resp:
+    ) -> Any:
         """Always use the dynamic mock logic, bypassing request.execute()."""
+        if isinstance(request, WireModel):
+            return await self.call(request, client=client, suppress_last=suppress_last)
         # Record the operation for test verification
         async with self.transfer_conn() as conn:
             # We know it's a MockConnection which has op_log

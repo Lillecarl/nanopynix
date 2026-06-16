@@ -156,7 +156,9 @@ class DaemonStore(Store):
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     @Store.executor(op=106)
-    async def query_derivation_output_map_batch(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+    async def query_derivation_output_map_batch(
+        self, request: Any, client: Any = None, suppress_last: bool = False
+    ) -> Any:
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     @Store.executor(op=107)
