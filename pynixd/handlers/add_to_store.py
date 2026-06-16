@@ -6,16 +6,35 @@ from typing import TYPE_CHECKING, ClassVar
 
 import structlog
 
-from ..operations.add_to_store import AddToStoreRequest, AddToStoreResponse
-from ..operations.sign_path_info import SignPathInfoRequest
-from ..types.context import ReadContext
+from ..serde import AddToStoreRequest
+from ..serde.add_to_store import AddToStoreResponse as SerdeAddToStoreResponse
+from ..serde.sign_path_info import SignPathInfoRequest as SerdeSignPathInfoRequest
+from ..store_path import StorePath as OldStorePath
+from ..types.context import ReadContext, WriteContext
+from ..types.path_info import ValidPathInfo as OldValidPathInfo
+from ..wire import forward_framed
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..operations.base import OpResponse
+    from ..serde.valid_path_info import ValidPathInfo as SerdeValidPathInfo
     from ..types import RequestContext
 
 logger = structlog.get_logger(__name__)
+
+
+def _serde_to_old_path_info(info: SerdeValidPathInfo) -> OldValidPathInfo:
+    """Convert serde ValidPathInfo to legacy ValidPathInfo for tracker/cache."""
+    return OldValidPathInfo(
+        path=OldStorePath(str(info.path)),
+        deriver=OldStorePath(str(info.info.deriver)) if info.info.deriver else OldStorePath(""),
+        nar_hash=str(info.info.nar_hash),
+        references={OldStorePath(str(r)) for r in info.info.references},
+        registration_time=info.info.registration_time.ts,
+        nar_size=info.info.nar_size,
+        ultimate=1 if info.info.ultimate else 0,
+        sigs={sig.to_str() for sig in info.info.sigs},
+        ca=str(info.info.ca),
+    )
 
 
 class AddToStoreHandler(Handler):
@@ -23,21 +42,34 @@ class AddToStoreHandler(Handler):
 
     op: ClassVar[int] = 7
 
-    async def handle(self, ctx: RequestContext) -> OpResponse | None:
+    async def handle(self, ctx: RequestContext) -> SerdeAddToStoreResponse | None:
         logger.debug("received_op")
         async with ctx.proxy.local_store.transfer_conn() as conn:
-            req = object.__new__(AddToStoreRequest)
-            await req.forward(ctx.proxy.r, conn.w)
+            # 1. Read request header from client (serde)
+            req = await AddToStoreRequest.from_reader(
+                ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
+            )
+
+            # 2. Write request header to daemon
+            await req.to_writer(WriteContext.from_conn(conn))
             await conn.w.drain()
 
-            resp = await AddToStoreResponse.deserialize(ReadContext.from_conn(conn))
+            # 3. Forward framed NAR bytes from client to daemon
+            await forward_framed(ctx.proxy.r, conn.w)
+
+            # 4. Read response from daemon
+            resp = await SerdeAddToStoreResponse.from_reader(
+                ReadContext.from_conn(conn),
+            )
+
+            # 5. Sign path info and update tracker
             if resp.info is not None:
-                resp.info = (
-                    await ctx.proxy.local_store.execute(
-                        SignPathInfoRequest(info=resp.info),
-                    )
-                ).info
-                if resp.info is not None:
-                    ctx.proxy.local_store.tracker.add_known_path(resp.info.path)
-                    ctx.proxy.local_store.add_path_info(resp.info)
+                sign_req = SerdeSignPathInfoRequest(info=resp.info)
+                sign_resp = await ctx.proxy.local_store.call(sign_req)
+                resp.info = sign_resp.info
+
+                old_path = OldStorePath(str(resp.info.path))
+                ctx.proxy.local_store.tracker.add_known_path(old_path)
+                ctx.proxy.local_store.add_path_info(_serde_to_old_path_info(resp.info))
+
             return resp

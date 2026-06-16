@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from ..operations.base import OpResponse
+    from ..serde.wire_message import WireModel
     from ..types import RequestContext
 
 HANDLER_REGISTRY: dict[int, type[Handler]] = {}
@@ -27,7 +28,7 @@ class Handler(ABC):
             HANDLER_REGISTRY[cls.op] = cls
 
     @abstractmethod
-    async def handle(self, ctx: RequestContext) -> OpResponse | None:
+    async def handle(self, ctx: RequestContext) -> OpResponse | WireModel | None:
         """Handle this operation from a client.
 
         Must consume the request body from ``ctx``, process it, and

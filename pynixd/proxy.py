@@ -273,7 +273,7 @@ class DaemonProxy:
             f"Extension operation {type(request).__name__} (op={request.op}) not supported by any configured store",
         )
 
-    async def dispatch(self, op_num: int) -> OpResponse | None:
+    async def dispatch(self, op_num: int) -> OpResponse | WireModel | None:
         """Route an operation to its request type's handle method."""
         # NEW: try new handler registry first
         if handler_cls := HANDLER_REGISTRY.get(op_num):
