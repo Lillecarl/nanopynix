@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..types.context import WriteContext
 from .path_info import UnkeyedValidPathInfo  # noqa: TC001
 from .store_path import StorePath  # noqa: TC001
 from .wire_message import WireModel
@@ -17,3 +18,12 @@ class ValidPathInfo(WireModel):
 
     path: StorePath
     info: UnkeyedValidPathInfo
+
+    async def bytes_wire(self) -> bytes:
+        """Serialize this ValidPathInfo to bytes (in-memory BytesWriter is sync)."""
+        from ..wire import BytesWriter
+
+        buf = BytesWriter()
+        ctx = WriteContext(writer=buf, version=0)
+        await self.to_writer(ctx)
+        return buf.get_bytes()

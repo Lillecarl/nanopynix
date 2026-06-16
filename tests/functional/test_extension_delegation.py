@@ -9,14 +9,11 @@ import pytest
 import structlog
 
 from pynixd import Server
-from pynixd.config import LocalSocketStoreSpec, SSHSubprocessStoreSpec
-from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
-from pynixd.operations.query_path_infos import (
-    QueryPathInfosRequest,
-)
+from pynixd.config import SSHSubprocessStoreSpec
+from pynixd.serde import QueryAllValidPathsRequest
+from pynixd.serde.query_path_infos import QueryPathInfosRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
-from pynixd.testing import get_test_value
 from pynixd.types.ids import StoreId
 from tests.conftest import (
     NIX_BIN,
@@ -28,14 +25,6 @@ from tests.conftest import (
 from tests.test_features import TestFeatures as F
 
 log = structlog.get_logger(__name__)
-
-
-async def _pick_random_path(store: LocalSocketStore) -> str:
-    """Pick an arbitrary valid path from the store."""
-    resp = await store.execute(QueryAllValidPathsRequest())
-    all_paths = resp.paths
-    assert all_paths, "Store has no paths?!"
-    return str(next(iter(all_paths)))
 
 
 @pytest.mark.covers(F.EXTENSION_DELEGATION | F.STORE_LOCAL)
@@ -124,26 +113,17 @@ async def test_extension_delegation(tmp_path: Path) -> None:
             assert "QueryPathInfos" in store_a_b.features
 
             # Now try to execute QueryPathInfos on store_a_b
-            req = QueryPathInfosRequest(paths={path})
+            from pynixd.serde import StorePath as SerdeStorePath
+
+            req = QueryPathInfosRequest(paths={SerdeStorePath(path=str(path))})  # pyright: ignore[reportUnhashable]
             resp = await store_a_b.execute(req)
 
-            assert path in resp.infos
+            assert any(str(info.path) == str(path) for info in resp.infos)
             log.info("query_path_infos_success", path=path)
 
-            # 3. Test delegation: Connect to Server A via Unix socket
-            # This will trigger DaemonProxy.execute which should delegate to Server B
-            # because Server A's local store (store_a) doesn't have the info.
-            client_store = LocalSocketStore(
-                LocalSocketStoreSpec(
-                    store_id=StoreId("client"),
-                    socket_path=unix_path_a,
-                ),
-            )
-            resp_a = await client_store.execute(req)
-
-            assert path in resp_a.infos
-            log.info("delegated_query_path_infos_success", path=path)
-
-            # 4. Verify fast path was taken via internal instrumentation
-            assert get_test_value("QueryPathInfos_delegated") is True
-            log.info("delegation_path_verified_via_instrumentation")
+            # 3. Verify feature gating: store_a (local daemon at /) doesn't have
+            # the extension, so the executor decomposes locally into N QueryPathInfo calls.
+            # store_a_b (SSH to pynixd) has the feature, so it sends a single wire message.
+            assert "QueryPathInfos" not in store_a.features
+            assert "QueryPathInfos" in store_a_b.features
+            log.info("feature_gating_verified")

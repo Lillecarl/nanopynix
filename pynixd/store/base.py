@@ -18,16 +18,9 @@ import structlog
 from cachetools import TTLCache
 
 from .. import wire
-from ..exceptions import BackendError, OpNotImplementedError
 from ..monitor import ResourceGate, ResourceMonitor
-from ..operations.probe_features import ProbeFeaturesRequest
-from ..operations.probe_systems import ProbeSystemsRequest
-from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
-from ..operations.query_valid_paths import QueryValidPathsRequest
 from ..path_tracker import PathTrackerInstance
 from ..serde.wire_message import WireModel
-from ..store_path import StorePath
-from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
 
 if TYPE_CHECKING:
@@ -47,6 +40,7 @@ if TYPE_CHECKING:
     from ..psi import CpuUtil, MemInfo
     from ..serde.wire_ops import WireRequest
     from ..signing import SecretKey
+    from ..store_path import StorePath
     from ..types.aliases import StorePathSet
     from ..types.ids import StoreId
 
@@ -194,54 +188,9 @@ class Store(ABC):
     async def sync_paths(self) -> None:
         """Synchronize known paths from the store into the tracker.
 
-        Tries QueryAllValidPaths on the wire first. When the operation
-        is not implemented by the remote store (e.g. nixbuild.net),
-        falls back to cached paths from the tracker's DB, verifying
-        them via QueryValidPaths.
+        Daemon-backed stores override this; non-daemon stores (substituters)
+        have no path inventory to sync.
         """
-        try:
-            resp = await self.execute(QueryAllValidPathsRequest())
-            self.tracker.add_known_paths(resp.paths)
-            log.info("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
-        except (BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e:
-            known_paths: StorePathSet | None = None
-            if self.tracker.parent is not None and self.tracker.parent.db is not None:
-                known_paths = await self.tracker.parent.db.get_known_paths(self.store_id)
-            known_paths = known_paths or set(self.tracker.known_paths)
-
-            if not known_paths:
-                log.info("store_paths_sync_skipped", store_id=self.store_id)
-                return
-
-            log.info(
-                "verifying_cached_paths",
-                store_id=self.store_id,
-                error=str(e),
-                count=len(known_paths),
-            )
-            try:
-                verified = await self.execute(
-                    QueryValidPathsRequest(paths=known_paths, substitute=0),
-                )
-                stale = known_paths - verified.paths
-                if stale:
-                    self.tracker.remove_known_paths(stale)
-                self.tracker.add_known_paths(verified.paths)
-                log.info(
-                    "store_paths_verified",
-                    store_id=self.store_id,
-                    total=len(known_paths),
-                    verified=len(verified.paths),
-                    removed=len(stale),
-                )
-            except (BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e2:
-                log.warning("path_verification_failed", store_id=self.store_id, error=str(e2))
-                self.tracker.add_known_paths(known_paths)
-                log.info(
-                    "store_paths_sync_cached",
-                    store_id=self.store_id,
-                    count=len(known_paths),
-                )
 
     def _on_connection_created(self, conn: Connection) -> None:
         """Update store metadata from a newly created connection."""
@@ -831,8 +780,8 @@ class Store(ABC):
         if not skip_probe:
             await self.probe()
 
-        # Try executor fast-path via decorator-based dispatch
-        if method_name := self._executors.get(request.op):
+        # Try executor fast-path via decorator-based dispatch (WireModel only)
+        if isinstance(request, WireModel) and (method_name := self._executors.get(request.op)):
             fn = getattr(self, method_name)
             if result := await fn(request, client=client, suppress_last=suppress_last):
                 return result
@@ -905,36 +854,17 @@ class Store(ABC):
             self._probe_event.set()
             return
 
-        existing_systems = set(self._feature_matrix.keys()) if self._feature_matrix else set()
-        existing_features: set[str] = set()
-        if self._feature_matrix:
-            for feats in self._feature_matrix.values():
-                existing_features.update(feats)
-
-        candidate_systems = existing_systems or set(PROBE_SYSTEMS)
-        candidate_features = existing_features or set(KNOWN_FEATURES)
-
-        systems_resp = await ProbeSystemsRequest(
-            systems=candidate_systems,
-        ).execute(self)
-        systems = systems_resp.systems
-
-        features_resp = await ProbeFeaturesRequest(
-            systems=systems,
-            system_features=candidate_features,
-        ).execute(self)
-
-        self._feature_matrix = features_resp.feature_matrix
-
-        log.info(
-            "store_probed",
-            store_id=self.store_id,
-            systems=sorted(self._feature_matrix.keys()) if self._feature_matrix else [],
-            feature_matrix={k: sorted(v) for k, v in (self._feature_matrix or {}).items()},
-        )
+        await self._probe_daemon()
 
         self.probe_state = ProbeState.PROBED
         self._probe_event.set()
+
+    async def _probe_daemon(self) -> None:
+        """Discover systems and per-system features from the daemon.
+
+        DaemonStore overrides this with the actual wire probing.
+        Non-daemon stores (substituters) skip this.
+        """
 
     @property
     def pressure(self) -> float | None:
@@ -983,6 +913,13 @@ class Store(ABC):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(store_id={self.store_id!r}, in_flight={self.in_flight}, pool_stats={self.pool_stats})"
+
+
+# Populate Store._executors from methods decorated with @executor (__init_subclass__
+# only fires for subclasses, not the base class itself).
+for _name, _method in Store.__dict__.items():
+    if callable(_method) and (op := getattr(_method, "_pynixd_op", None)) is not None:
+        Store._executors[op] = _name
 
 
 def get_current_system() -> str:

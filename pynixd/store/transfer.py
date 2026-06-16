@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING
 import structlog
 
 from .. import wire
-from ..operations.add_multiple_to_store import AddMultipleToStoreRequest
-from ..operations.nar_from_path import NarFromPathRequest
-from ..operations.query_closure_with_info import QueryClosureWithInfoRequest
-from ..store_path import StorePath
+from ..serde import StorePath as SerdeStorePath
+from ..serde.add_multiple_to_store import AddMultipleToStoreRequest, AddMultipleToStoreResponse
+from ..serde.nar_from_path import NarFromPathRequest
+from ..serde.query_closure_with_info import QueryClosureWithInfoRequest
+from ..store_path import StorePath as RealStorePath
 from ..types.context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
@@ -18,8 +19,7 @@ if TYPE_CHECKING:
 
     import anyio
 
-    from ..types.aliases import StorePathSet
-    from ..types.path_info import ValidPathInfo
+    from ..serde.valid_path_info import ValidPathInfo
     from .base import Store
 
 
@@ -29,7 +29,7 @@ log = structlog.get_logger(__name__)
 async def stream_paths_store_to_store(
     src: Store,
     dst: Store,
-    paths: Iterable[StorePath],
+    paths: Iterable[RealStorePath],
     cancel_event: anyio.Event | None = None,
 ) -> None:
     """Copy paths from src store to dst via streaming, querying closure first.
@@ -37,13 +37,13 @@ async def stream_paths_store_to_store(
     Bypasses the normal handle() path, so we update dst knowledge manually.
     Only transfers paths that dst doesn't already have.
     """
-    paths_set: StorePathSet = {StorePath(p) for p in paths}
+    paths_set = {SerdeStorePath(path=str(p)) for p in paths}  # pyright: ignore[reportUnhashable]
     if not paths_set:
         return
 
     # Fast-path for MockStore (used in tests)
     if type(src).__name__ == "MockStore" and type(dst).__name__ == "MockStore":
-        dst.tracker.add_known_paths(paths_set)
+        dst.tracker.add_known_paths({RealStorePath(str(p)) for p in paths_set})  # pyright: ignore[reportUnhashable]
         log.debug(
             "mock_path_transfer_complete",
             src=src.store_id,
@@ -61,7 +61,9 @@ async def stream_paths_store_to_store(
         return
 
     # 2. Filter out paths already in destination
-    to_transfer: list[ValidPathInfo] = [info for info in closure_resp.infos if info.path not in dst.tracker.known_paths]
+    to_transfer: list[ValidPathInfo] = [
+        info for info in closure_resp.infos if RealStorePath(str(info.path)) not in dst.tracker.known_paths
+    ]
     if not to_transfer:
         return
 
@@ -72,7 +74,7 @@ async def stream_paths_store_to_store(
             repair=0,
             dont_check_sigs=1,
         )
-        await req.serialize(WriteContext.from_conn(dst_conn))
+        await req.to_writer(WriteContext.from_conn(dst_conn))
         await dst_conn.w.drain()
 
         fw = dst_conn.w.framed()
@@ -87,10 +89,11 @@ async def stream_paths_store_to_store(
             dst_conn.op_log.append("AddToStoreNar (stream_paths_to)")
 
             # Use info.to_bytes() to send metadata as a single frame
-            fw.write(info.to_bytes())
+            fw.write(await info.bytes_wire())
 
             # Request NAR from source
-            await NarFromPathRequest(path=path, nar_size=info.nar_size).serialize(WriteContext.from_conn(src_conn))
+            sp = SerdeStorePath(path=str(path))
+            await NarFromPathRequest(path=sp).to_writer(WriteContext.from_conn(src_conn))
             await src_conn.w.drain()
 
             # Source will send stderr logs followed by STDERR_LAST before NAR data
@@ -100,14 +103,37 @@ async def stream_paths_store_to_store(
             await wire.pipe_raw_to_framed_writer(
                 src_conn.r,
                 fw,
-                info.nar_size,
+                info.info.nar_size,
             )
             await dst_conn.w.drain()
 
         await fw.finalize()
         await dst_conn.w.drain()
-        await req.response_type.deserialize(ReadContext.from_conn(dst_conn))
+        await AddMultipleToStoreResponse.from_reader(ReadContext.from_conn(dst_conn))
 
-    # 4. Update destination store's knowledge
-    dst.add_path_infos(set(to_transfer))
-    dst.tracker.add_known_paths({i.path for i in to_transfer})
+    # 4. Update destination store's knowledge (convert serde types to old types for store API)
+    from ..types.path_info import (
+        UnkeyedValidPathInfo as OldUnkeyedValidPathInfo,
+    )
+    from ..types.path_info import (
+        ValidPathInfo as OldValidPathInfo,
+    )
+
+    old_infos: list[OldValidPathInfo] = []
+    for info in to_transfer:
+        old_path = RealStorePath(str(info.path))
+        si = info.info
+        old_unkeyed = OldUnkeyedValidPathInfo(
+            deriver=RealStorePath(str(si.deriver)) if si.deriver else RealStorePath(""),
+            nar_hash=si.nar_hash.hash,
+            references={RealStorePath(str(r)) for r in si.references},
+            registration_time=si.registration_time.ts,
+            nar_size=si.nar_size,
+            ultimate=1 if si.ultimate else 0,
+            sigs={str(s) for s in si.sigs},
+            ca=si.ca.value,
+        )
+        old_infos.append(OldValidPathInfo(path=old_path, **vars(old_unkeyed)))
+
+    dst.add_path_infos(old_infos)
+    dst.tracker.add_known_paths({RealStorePath(str(i.path)) for i in to_transfer})

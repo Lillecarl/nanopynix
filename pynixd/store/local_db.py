@@ -184,7 +184,9 @@ class LocalDBStore(LocalStore):
             self.tracker.add_known_paths({RealStorePath(str(p)) for p in result.paths})
             return result
 
-        return None  # fall through to DaemonStore.call()
+        from pynixd.serde import QueryClosureResponse
+
+        return QueryClosureResponse(paths=set())
 
     async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if not request.paths:
@@ -243,7 +245,9 @@ class LocalDBStore(LocalStore):
             self.tracker.add_known_paths({RealStorePath(str(info.path)) for info in sorted_infos})
             return QueryClosureWithInfoResponse(infos=sorted_infos)
 
-        return None  # fall through to DaemonStore.call()
+        from pynixd.serde import QueryClosureWithInfoResponse
+
+        return QueryClosureWithInfoResponse(infos=[])
 
     async def query_path_infos(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if not request.paths:
@@ -261,7 +265,9 @@ class LocalDBStore(LocalStore):
                 uncached.append(path)
 
         if not uncached:
-            return None  # cache hit — fall through
+            from pynixd.serde import QueryPathInfosResponse
+
+            return QueryPathInfosResponse(infos=[])
 
         if self.db is not None:
             import json
@@ -314,7 +320,9 @@ class LocalDBStore(LocalStore):
             self.tracker.add_known_paths({RealStorePath(str(info.path)) for info in infos})
             return QueryPathInfosResponse(infos=infos)
 
-        return None  # fall through to DaemonStore.call()
+        from pynixd.serde import QueryPathInfosResponse
+
+        return QueryPathInfosResponse(infos=[])
 
     async def query_derivation_output_map_batch(
         self, request: Any, client: Any = None, suppress_last: bool = False
@@ -364,4 +372,6 @@ class LocalDBStore(LocalStore):
 
             return DerivationOutputMapBatchResponse(outputs=result)
 
-        return None  # fall through to DaemonStore.call()
+        from pynixd.serde.query_derivation_output_map_batch import DerivationOutputMapBatchResponse
+
+        return DerivationOutputMapBatchResponse(outputs={})
