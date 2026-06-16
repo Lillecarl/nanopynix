@@ -68,24 +68,27 @@ class LocalDBStore(LocalStore):
     async def query_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         cached = self.get_path_info(request.path)
         if cached is not None:
-            from pynixd.operations.query_path_info import QueryPathInfoResponse
-
             self.tracker.add_known_path(request.path)
-            return QueryPathInfoResponse(info=cached)
+            return None  # cache hit — fall through to old path until cache stores serde types
 
         if self.db is not None:
-            from pynixd.operations.base import UnkeyedValidPathInfo
             from pynixd.operations.query_path_info import (
                 QUERY_PATH_INFO,
                 QUERY_REFERENCES,
-                QueryPathInfoResponse,
             )
-            from pynixd.store_path import StorePath
+            from pynixd.serde import QueryPathInfoResponse
+            from pynixd.serde import StorePath as SerdeStorePath
+            from pynixd.serde.content_address import ContentAddress
+            from pynixd.serde.nar_hash import NARHash
+            from pynixd.serde.path_info import UnkeyedValidPathInfo as SerdeUnkeyedValidPathInfo
+            from pynixd.serde.signature import Signature
+            from pynixd.serde.wire_time import Time
+            from pynixd.store_path import StorePath as RealStorePath
 
             async with self.db.execute(QUERY_PATH_INFO, (str(request.path),)) as cursor:
                 row = await cursor.fetchone()
             if row is None:
-                return QueryPathInfoResponse()
+                return QueryPathInfoResponse(valid=False)
 
             _path, deriver, nar_hash, reg_time, nar_size, ultimate, sigs, ca = row
 
@@ -93,19 +96,23 @@ class LocalDBStore(LocalStore):
                 ref_rows = await cursor.fetchall()
             refs = {r[0] for r in ref_rows}
 
-            info = UnkeyedValidPathInfo(
-                deriver=StorePath(deriver or ""),
-                nar_hash=nar_hash,
-                references={StorePath(r) for r in refs},
-                registration_time=reg_time,
+            sig_set: set = set()
+            if sigs:
+                for s in sigs.split():
+                    sig_set.add(Signature(s))  # type: ignore[arg-type]
+
+            info = SerdeUnkeyedValidPathInfo(
+                deriver=SerdeStorePath(path=deriver or ""),
+                nar_hash=NARHash(hash=nar_hash),
+                references={SerdeStorePath(path=r) for r in refs},  # type: ignore[arg-type]
+                registration_time=Time(ts=reg_time),
                 nar_size=nar_size or 0,
-                ultimate=1 if ultimate else 0,
-                sigs=set(sigs.split()) if sigs else set(),
-                ca=ca or "",
+                ultimate=bool(ultimate),
+                sigs=sig_set,
+                ca=ContentAddress(value=ca or ""),
             )
-            self.tracker.add_known_path(request.path)
-            self.add_path_info(info.with_path(request.path))
-            return QueryPathInfoResponse(info=info)
+            self.tracker.add_known_path(RealStorePath(str(request.path)))
+            return QueryPathInfoResponse(valid=True, info=info)
 
         return None  # fall through to DaemonStore.call()
 
