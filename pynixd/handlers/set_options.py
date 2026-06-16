@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from ..operations.base import Role
-from ..operations.set_options import SetOptionsRequest, SetOptionsResponse
+from ..operations.set_options import SetOptionsResponse
+from ..serde import SetOptionsRequest
 from ..stderr import StderrNext
 from ..types.context import ReadContext
 from ._base import Handler
@@ -21,7 +22,9 @@ class SetOptionsHandler(Handler):
     op: ClassVar[int] = 19
 
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
-        self_req = await SetOptionsRequest.deserialize(ReadContext.from_request(ctx))
+        req = await SetOptionsRequest.from_reader(
+            ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
+        )
 
         if ctx.role < Role.ADMIN:
             resp = SetOptionsResponse()
@@ -29,4 +32,4 @@ class SetOptionsHandler(Handler):
             resp.logs.add(msg)
             return resp
 
-        return await ctx.proxy.execute(self_req)
+        return await ctx.proxy.local_store.call(req)
