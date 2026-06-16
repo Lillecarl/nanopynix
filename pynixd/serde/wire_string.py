@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import model_serializer, model_validator
+from pydantic import ConfigDict, model_serializer, model_validator
 
 from .wire_message import WireModel, _find_reader
 
@@ -24,6 +24,8 @@ class WireString(WireModel):
     Override ``from_str`` / ``to_str`` in subclasses that need custom
     wire format (e.g. ``WireSignature`` splits on ``:``).
     """
+
+    model_config = ConfigDict(frozen=True)
 
     async def to_writer(self, ctx: WriteContext) -> None:
         ctx.writer.write_string(str(self))
