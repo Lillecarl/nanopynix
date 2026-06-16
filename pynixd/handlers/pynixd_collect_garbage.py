@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from ..operations.base import Role
-from ..operations.pynixd_collect_garbage import PynixdCollectGarbageRequest
+from ..serde import PynixdCollectGarbageRequest
 from ..types.context import ReadContext
 from ._base import Handler
 
@@ -20,12 +20,14 @@ class PynixdCollectGarbageHandler(Handler):
     op: ClassVar[int] = 101
 
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
-        self_req = await PynixdCollectGarbageRequest.deserialize(ReadContext.from_request(ctx))
+        req = await PynixdCollectGarbageRequest.from_reader(
+            ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
+        )
 
         if ctx.role < Role.ADMIN:
             await ctx.proxy.send_error(
-                f"Operation '{self_req.name}' requires administrative privileges.",
+                "Operation 'PynixdCollectGarbage' requires administrative privileges.",
             )
             return None
 
-        return await ctx.proxy.execute(self_req)
+        return await ctx.proxy.local_store.call(req)
