@@ -332,7 +332,7 @@ class PynixdSettings(BaseSettings):
 
     def to_stores(self) -> dict[StoreId, Store]:
         """Convert all store specs to live Store instances."""
-        from .store import LocalSocketStore
+        from .store import LocalStore
 
         stores: dict[StoreId, Store] = {}
         for key, spec in self.stores.items():
@@ -346,6 +346,6 @@ class PynixdSettings(BaseSettings):
                 monitor=False,
                 settings=self,
             )
-            stores[StoreId("local")] = LocalSocketStore(spec)
+            stores[StoreId("local")] = LocalStore(spec)
 
         return stores

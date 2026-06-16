@@ -25,7 +25,7 @@ from .reverse_server import start_reverse_acceptor
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
 from .stderr import OperationLogs
-from .store import LocalSocketStore, Store
+from .store import LocalStore, Store
 from .substitution import HttpBinaryCacheSubstituter, SubstitutionManager
 from .types import PynixdGCAction
 from .types.ids import StoreId
@@ -62,13 +62,13 @@ class Server:
 
         if stores is None:
             stores = {
-                StoreId("local"): LocalSocketStore(
+                StoreId("local"): LocalStore(
                     LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False),
                 ),
             }
         elif StoreId("local") not in stores:
             stores = dict(stores)
-            stores[StoreId("local")] = LocalSocketStore(
+            stores[StoreId("local")] = LocalStore(
                 LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False),
             )
 

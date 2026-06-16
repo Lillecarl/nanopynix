@@ -10,7 +10,7 @@ import structlog
 
 from ..config import LocalSocketStoreSpec
 from ..operations.pynixd_collect_garbage import PynixdCollectGarbageRequest
-from ..store import LocalSocketStore
+from ..store import LocalStore as LocalSocketStore
 from ..types import PynixdGCAction
 from ..types.ids import StoreId
 from .base import load_settings, setup_logging
