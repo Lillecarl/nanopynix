@@ -112,18 +112,15 @@ class LocalDBStore(LocalStore):
     @Store.executor(op=23)
     async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if self.db is not None:
-            from pynixd.operations.query_all_valid_paths import (
-                QUERY_ALL_VALID_PATHS,
-                QueryAllValidPathsResponse,
-            )
-            from pynixd.store_path import StorePath
+            from pynixd.operations.query_all_valid_paths import QUERY_ALL_VALID_PATHS
+            from pynixd.serde import QueryAllValidPathsResponse
+            from pynixd.serde import StorePath as SerdeStorePath
 
             try:
                 async with self.db.execute(QUERY_ALL_VALID_PATHS) as cursor:
                     rows = await cursor.fetchall()
-                return QueryAllValidPathsResponse(
-                    paths={StorePath(r[0]) for r in rows},
-                )
+                paths: set = {SerdeStorePath(path=r[0]) for r in rows}  # type: ignore[arg-type]
+                return QueryAllValidPathsResponse(paths=paths)
             except Exception:
                 pass
 

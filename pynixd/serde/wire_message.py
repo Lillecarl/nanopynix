@@ -312,7 +312,7 @@ class WireModel(BaseModel):
             path: str    # length-prefixed UTF-8
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     def __hash__(self) -> int:
         return hash(tuple(getattr(self, f) for f in self.__class__.model_fields))
