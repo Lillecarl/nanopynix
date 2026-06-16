@@ -6,7 +6,7 @@ both ``wire_message`` (WireModel, WireField) and ``logs`` (WireLogs).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import Field as PydanticField
 
@@ -15,6 +15,8 @@ from .wire_message import WireModel
 
 if TYPE_CHECKING:
     from ..types.context import ReadContext, WriteContext
+
+WIRE_REGISTRY: dict[int, type[WireRequest]] = {}
 
 
 class WireRequest(WireModel):
@@ -32,6 +34,11 @@ class WireRequest(WireModel):
     response_type: ClassVar[type]
     forward: ClassVar[bool] = True
     is_extension: ClassVar[bool] = False
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if "op" in cls.__dict__:
+            WIRE_REGISTRY[cls.op] = cls
 
     async def to_writer(self, ctx: WriteContext) -> None:
         """Write op code then body."""
