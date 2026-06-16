@@ -150,19 +150,18 @@ class LocalDBStore(LocalStore):
     @Store.executor(op=29)
     async def query_path_from_hash_part(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if self.db is not None:
-            from pynixd.operations.query_path_from_hash_part import (
-                QUERY_PATH_FROM_HASH_PART,
-                QueryPathFromHashPartResponse,
-            )
-            from pynixd.store_path import StorePath
+            from pynixd.operations.query_path_from_hash_part import QUERY_PATH_FROM_HASH_PART
+            from pynixd.serde import QueryPathFromHashPartResponse
+            from pynixd.serde import StorePath as SerdeStorePath
+            from pynixd.store_path import StorePath as RealStorePath
 
             prefix = f"/nix/store/{request.path}"
             upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
             async with self.db.execute(QUERY_PATH_FROM_HASH_PART, (prefix, upper)) as cursor:
                 row = await cursor.fetchone()
             if row:
-                result = QueryPathFromHashPartResponse(value=StorePath(row[0]))
-                self.tracker.add_known_path(result.value)
+                result = QueryPathFromHashPartResponse(value=SerdeStorePath(path=row[0]))
+                self.tracker.add_known_path(RealStorePath(row[0]))
                 return result
 
         return None  # fall through to DaemonStore.call()
