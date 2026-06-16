@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from .daemon import DaemonStore
+from .local import LocalSocketStore
 
 
-class LocalStore(DaemonStore):
-    """DaemonStore connected via Unix socket.
-
-    No database access — for reading the root Nix store as a user process
-    where the Nix DB is owned by root.  All operations fall through to
-    the daemon via the wire protocol.
+class LocalStore(LocalSocketStore):
+    """Unix socket-connected store without SQLite fast-paths.
 
     For a store with SQLite fast-paths, use LocalDBStore instead.
+
+    All operations fall through to the daemon via the wire protocol.
+    This exists as a base for LocalDBStore and for configs where
+    use_db=False.
     """

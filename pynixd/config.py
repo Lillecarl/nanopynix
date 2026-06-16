@@ -116,11 +116,13 @@ class LocalSocketStoreSpec(StoreSpecBase):
     monitor: bool = True
 
     def to_store(self, store_id: str) -> Store:
-        from .store import LocalSocketStore
+        from .store.local_daemon import LocalStore
+        from .store.local_db import LocalDBStore
 
-        return LocalSocketStore(
-            self.model_copy(update={"store_id": StoreId(store_id)}),
-        )
+        spec = self.model_copy(update={"store_id": StoreId(store_id)})
+        if spec.use_db:
+            return LocalDBStore(spec)
+        return LocalStore(spec)
 
 
 class LocalSubprocessStoreSpec(StoreSpecBase):
@@ -133,11 +135,13 @@ class LocalSubprocessStoreSpec(StoreSpecBase):
     socket_path: Path | None = None
 
     def to_store(self, store_id: str) -> Store:
-        from .store import LocalSocketStore
+        from .store.local_daemon import LocalStore
+        from .store.local_db import LocalDBStore
 
-        return LocalSocketStore(
-            self.model_copy(update={"store_id": StoreId(store_id)}),
-        )
+        spec = self.model_copy(update={"store_id": StoreId(store_id)})
+        if spec.use_db:
+            return LocalDBStore(spec)
+        return LocalStore(spec)
 
 
 class ReverseStoreSpec(StoreSpecBase):
