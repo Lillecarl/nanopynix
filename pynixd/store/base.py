@@ -11,7 +11,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self, overload
 
 import anyio
 import structlog
@@ -25,6 +25,7 @@ from ..operations.probe_systems import ProbeSystemsRequest
 from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
 from ..operations.query_valid_paths import QueryValidPathsRequest
 from ..path_tracker import PathTrackerInstance
+from ..serde.wire_message import WireModel
 from ..store_path import StorePath
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
         ValidPathInfo,
     )
     from ..psi import CpuUtil, MemInfo
+    from ..serde.wire_ops import WireRequest
     from ..signing import SecretKey
     from ..types.aliases import StorePathSet
     from ..types.ids import StoreId
@@ -480,6 +482,17 @@ class Store(ABC):
     def count_common_paths(self, paths: StorePathSet) -> int:
         return len(paths & self.tracker.known_paths)
 
+    @overload
+    async def call(
+        self,
+        request: WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        raise_on_error: bool = False,
+        skip_probe: bool = False,
+    ) -> Any: ...
+
+    @overload
     async def call(
         self,
         request: OpRequest[Resp],
@@ -487,19 +500,27 @@ class Store(ABC):
         suppress_last: bool = False,
         raise_on_error: bool = False,
         skip_probe: bool = False,
-    ) -> Resp:
+    ) -> Resp: ...
+
+    async def call(
+        self,
+        request: OpRequest[Resp] | WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        raise_on_error: bool = False,
+        skip_probe: bool = False,
+    ) -> Any:
         """Send an operation to this store. Handles connection lifecycle.
 
-        Args:
-            request: The operation request object.
-            client: Optional client connection for stderr forwarding.
-            suppress_last: If True, consume but don't forward STDERR_LAST.
-            raise_on_error: Whether to raise BackendError on daemon errors.
+        Supports both old-style OpRequest and new WireModel-based requests.
         """
         if not skip_probe:
             await self.probe()
 
-        pool = self.build_conn if request.is_build else self.transfer_conn
+        # Pick connection pool: build pool for build ops
+        is_build = not request.forward if isinstance(request, WireModel) else request.is_build
+
+        pool = self.build_conn if is_build else self.transfer_conn
 
         try:
             async with pool() as conn:
