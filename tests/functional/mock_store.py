@@ -23,7 +23,7 @@ from pynixd.operations.query_closure_with_info import (
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
 from pynixd.psi import CpuUtil
 from pynixd.serde.wire_message import WireModel
-from pynixd.store.base import Store
+from pynixd.store.daemon import DaemonStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
 from pynixd.types.path_info import ValidPathInfo
@@ -114,7 +114,7 @@ class MockConnection:
         self.connected = False
 
 
-class MockStore(Store):
+class MockStore(DaemonStore):
     """Store with pre-recorded or dynamically generated responses.
 
     Useful for testing complex orchestration logic (like build decomposition

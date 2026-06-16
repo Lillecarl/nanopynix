@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .base import Store
 from .local_daemon import LocalStore
 
 if TYPE_CHECKING:

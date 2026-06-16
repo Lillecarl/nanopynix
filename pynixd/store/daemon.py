@@ -122,7 +122,9 @@ class DaemonStore(Store):
     async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         return await self.call(request, client=client, suppress_last=suppress_last)
 
-    async def query_derivation_output_map_batch(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+    async def query_derivation_output_map_batch(
+        self, request: Any, client: Any = None, suppress_last: bool = False
+    ) -> Any:
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def sign_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:

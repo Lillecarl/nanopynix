@@ -539,8 +539,8 @@ class Store(ABC):
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         for name, method in cls.__dict__.items():
-            if callable(method) and hasattr(method, '_pynixd_op'):
-                cls._executors[method._pynixd_op] = name
+            if callable(method) and hasattr(method, "_pynixd_op"):
+                cls._executors[method._pynixd_op] = name  # type: ignore[union-attr]
 
     @classmethod
     def _register_executor(cls, op: int, name: str) -> None:
@@ -557,9 +557,11 @@ class Store(ABC):
             @abstractmethod
             async def is_valid_path(self, request, ...): ...
         """
+
         def decorator(method):
             method._pynixd_op = op
             return method
+
         return decorator
 
     # ── Operation executors (abstract — subclasses MUST override) ───
@@ -772,7 +774,9 @@ class Store(ABC):
 
     @executor(op=106)
     @abstractmethod
-    async def query_derivation_output_map_batch(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+    async def query_derivation_output_map_batch(
+        self, request: Any, client: Any = None, suppress_last: bool = False
+    ) -> Any:
         """QueryDerivationOutputMapBatch (op 106)."""
         raise NotImplementedError
 
@@ -855,42 +859,6 @@ class Store(ABC):
     def get_path_info(self, path: StorePath) -> ValidPathInfo | None:
         """Get ValidPathInfo from cache if available."""
         return self.path_info_cache.get(path)
-
-    # ── Fast-path hooks ──────────────────────────────────────────
-    # Subclasses override these to provide local optimizations.
-    # Return None to fall through to daemon forward().
-
-    async def is_valid_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return None
-
-    async def query_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return None
-
-    async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return None
-
-    async def query_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return None
-
-    async def query_path_from_hash_part(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return None
-
-    async def query_closure(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return None
-
-    async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return None
-
-    async def query_path_infos(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return None
-
-    async def query_derivation_output_map_batch(
-        self, request: Any, client: Any = None, suppress_last: bool = False
-    ) -> Any:
-        return None
-
-    async def query_missing(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return None
 
     @abstractmethod
     async def create_conn(self) -> Connection:
