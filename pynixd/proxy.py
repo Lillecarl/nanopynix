@@ -22,9 +22,10 @@ from .operations import OP_REGISTRY
 from .operations.base import OpRequest, OpResponse, Resp, Role
 from .protocol import get_extension_features
 from .serde.wire_message import WireModel
+from .serde.wire_ops import WIRE_REGISTRY
 from .stderr import StderrError
 from .types import RequestContext as RequestContext
-from .types.context import WriteContext
+from .types.context import ReadContext, WriteContext
 from .types.ids import StoreId
 from .types.protocol import OptTrusted, Verbosity
 
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from .build_queue import BuildQueue
     from .context import PynixdContext
     from .scheduler import Scheduler
+    from .serde.wire_ops import WireRequest
     from .store import Store
     from .wire import NixReader, NixWriter
 
@@ -236,11 +238,14 @@ class DaemonProxy:
 
     # ── Dispatch ─────────────────────────────────────────────────────
 
-    async def execute(
+    async def execute(  # type: ignore[no-overload-impl]
         self,
-        request: OpRequest[Resp],
-    ) -> Resp:
+        request: OpRequest[Resp] | WireRequest,
+    ) -> Any:
         """Execute an operation, falling back to other stores for extensions."""
+        if isinstance(request, WireModel):
+            return await self.local_store.execute(request, client=self.client)
+
         local_resp: Resp | None = None
         try:
             local_resp = await self.local_store.execute(request, client=self.client)
@@ -285,6 +290,13 @@ class DaemonProxy:
                     username=self.username,
                 )
             )
+
+        # NEW: try serde wire registry for handler-less ops
+        if wire_cls := WIRE_REGISTRY.get(op_num):
+            req = await wire_cls.from_reader(
+                ReadContext(reader=self.r, version=self.version),
+            )
+            return await self.execute(req)
 
         req_cls = OP_REGISTRY.get(op_num)
         if req_cls is None:

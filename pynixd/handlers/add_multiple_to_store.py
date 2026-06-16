@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, ClassVar
 
 import structlog
@@ -10,6 +11,7 @@ from ..serde.add_multiple_to_store import (
     AddMultipleToStoreRequest,
     AddMultipleToStoreResponse,
 )
+from ..store_path import StorePath as OldStorePath
 from ..types.context import ReadContext, WriteContext
 from ..types.path_info import ValidPathInfo as OldValidPathInfo
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
@@ -37,13 +39,16 @@ class AddMultipleToStoreHandler(Handler):
             await req.to_writer(WriteContext.from_conn(conn))
             await conn.w.drain()
 
-            # 3. Forward framed path data from client to daemon
-            infos = await self._forward_stream(ctx.proxy.r, conn.w)
+            # 3. Concurrently: forward payload + read daemon response
+            async def _read_response() -> AddMultipleToStoreResponse:
+                return await AddMultipleToStoreResponse.from_reader(
+                    ReadContext.from_conn(conn),
+                )
 
-            # 4. Read response from daemon
-            resp = await AddMultipleToStoreResponse.from_reader(
-                ReadContext.from_conn(conn),
-            )
+            async with asyncio.TaskGroup() as tg:
+                resp_task = tg.create_task(_read_response())
+                infos = await self._forward_stream(ctx.proxy.r, conn.w)
+                resp = await resp_task
 
             # 5. Update tracker/cache
             ctx.proxy.local_store.add_path_infos(infos)
