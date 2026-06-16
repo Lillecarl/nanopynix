@@ -16,7 +16,7 @@ Lifecycle:
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast, overload
 
 import anyio
 import structlog
@@ -28,12 +28,14 @@ from .operations.base import (
     Resp,
 )
 from .protocol import get_extension_features
+from .serde.wire_message import WireModel
 from .types.context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
     from pathlib import Path
     from types import TracebackType
 
+    from .serde.wire_ops import WireRequest
     from .wire import (
         NixReader,
         NixWriter,
@@ -139,14 +141,34 @@ class Connection:
         with contextlib.suppress(Exception):
             await self.w.close()
 
+    @overload
+    async def call(
+        self,
+        request: WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        raise_on_error: bool = False,
+    ) -> Any: ...
+
+    @overload
     async def call(
         self,
         request: OpRequest[Resp],
         client: ClientConn | None = None,
         suppress_last: bool = False,
         raise_on_error: bool = False,
-    ) -> Resp:
+    ) -> Resp: ...
+
+    async def call(
+        self,
+        request: OpRequest[Resp] | WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        raise_on_error: bool = False,
+    ) -> Any:
         """Send an operation on the established connection.
+
+        Supports both old-style OpRequest and new WireModel-based requests.
 
         Args:
             request: Request object with ClassVars for op and response_type
@@ -158,15 +180,21 @@ class Connection:
         if not self.connected:
             raise RuntimeError(f"Connection {self.id!r} not connected")
 
-        req_cls = type(request)
-        response_type = req_cls.response_type
-        op_name = req_cls.name
+        self.op_log.append(type(request).__name__)
 
-        self.op_log.append(op_name)
+        # New serde path (WireModel-based)
+        if isinstance(request, WireModel):
+            await request.to_writer(WriteContext.from_conn(self))
+            await self.w.drain()
+            resp_cls = type(request).response_type
+            return await resp_cls.from_reader(
+                ReadContext.from_conn(self, client=client),
+            )
 
+        # Old path (OpRequest-based, unchanged)
+        response_type = type(request).response_type
         await request.serialize(WriteContext.from_conn(self))
         await self.w.drain()
-
         response = await response_type.deserialize(
             ReadContext.from_conn(self, client=client),
         )
