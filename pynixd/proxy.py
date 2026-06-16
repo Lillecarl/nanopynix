@@ -21,6 +21,7 @@ from .handlers._base import HANDLER_REGISTRY
 from .operations import OP_REGISTRY
 from .operations.base import OpRequest, OpResponse, Resp, Role
 from .protocol import get_extension_features
+from .serde.wire_message import WireModel
 from .stderr import StderrError
 from .types import RequestContext as RequestContext
 from .types.context import WriteContext
@@ -217,7 +218,10 @@ class DaemonProxy:
 
                 if response is not None:
                     await self.client.flush()
-                    await response.serialize(WriteContext.from_proxy(self))
+                    if isinstance(response, WireModel):
+                        await response.to_writer(WriteContext.from_proxy(self))
+                    else:
+                        await response.serialize(WriteContext.from_proxy(self))
                     await self.w.drain()
                 # else: already handled (streaming, error, etc.)
 

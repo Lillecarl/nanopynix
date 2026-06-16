@@ -564,7 +564,7 @@ class Store(ABC):
         # Try executor fast-path via decorator-based dispatch
         if method_name := self._executors.get(request.op):
             fn = getattr(self, method_name)
-            if result := await fn(self, request):
+            if result := await fn(request, client=client, suppress_last=suppress_last):
                 return result
 
         return await request.execute(

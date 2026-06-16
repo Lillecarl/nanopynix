@@ -27,18 +27,23 @@ class LocalDBStore(LocalStore):
 
     @Store.executor(op=1)
     async def is_valid_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        if self.tracker.has_path(request.path):
-            from pynixd.operations.is_valid_path import IsValidPathResponse
+        path_str = str(request.path)
+        from pynixd.store_path import StorePath as RealStorePath
+
+        sp = RealStorePath(path_str)
+        if self.tracker.has_path(sp):
+            from pynixd.serde import IsValidPathResponse
 
             return IsValidPathResponse(valid=True)
 
         if self.db is not None:
-            from pynixd.operations.is_valid_path import IS_VALID_PATH, IsValidPathResponse
+            from pynixd.operations.is_valid_path import IS_VALID_PATH
+            from pynixd.serde import IsValidPathResponse
 
-            async with self.db.execute(IS_VALID_PATH, (str(request.path),)) as cursor:
+            async with self.db.execute(IS_VALID_PATH, (path_str,)) as cursor:
                 row = await cursor.fetchone()
             if row is not None:
-                self.tracker.add_known_path(request.path)
+                self.tracker.add_known_path(sp)
                 return IsValidPathResponse(valid=True)
 
         return None  # fall through to DaemonStore.call()
