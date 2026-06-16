@@ -23,7 +23,7 @@ from ..config import (
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, GenericResourcePoller, ResourceMonitor
 from ..wire import SSHNixReader, SSHNixWriter
-from .base import Store
+from .daemon import DaemonStore
 
 if TYPE_CHECKING:
     from ..psi import (
@@ -35,10 +35,10 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
-class _SSHStoreMixin(Store):
+class SSHStore(DaemonStore):
     """Shared SSH connection management with exponential backoff reconnection.
 
-    Subclasses must set host, port, username on __init__.
+    Subclasses set host, port, username on __init__.
     """
 
     host: str
@@ -226,7 +226,7 @@ class _SSHStoreMixin(Store):
             self.conn = None
 
 
-class SSHSubprocessStore(_SSHStoreMixin):
+class SSHSubprocessStore(SSHStore):
     """Persistent SSH connection, spawns nix-daemon --stdio channels.
 
     Used primarily for "fake Nix" stores like nixbuild.net that provide
@@ -297,7 +297,7 @@ class SSHSubprocessStore(_SSHStoreMixin):
 _DAEMON_SOCKET_PATH = Path("/nix/var/nix/daemon-socket/socket")
 
 
-class SSHSocketStore(_SSHStoreMixin):
+class SSHSocketStore(SSHStore):
     """Persistent SSH connection, tunnels to remote Unix socket."""
 
     def __init__(self, spec: SSHSocketStoreSpec) -> None:

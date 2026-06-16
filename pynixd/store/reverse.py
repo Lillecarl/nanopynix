@@ -15,20 +15,19 @@ import structlog
 
 from .. import wire
 from ..connection import Connection
-from ..store_path import StorePath
 from ..wire import SSHNixReader, SSHNixWriter
-from .base import ProbeState, Store
+from .base import ProbeState
+from .ssh import SSHStore
 
 if TYPE_CHECKING:
     import asyncssh
 
     from ..config import ReverseStoreSpec
-    from ..drv_parser import Derivation
 
 log = structlog.get_logger(__name__)
 
 
-class ReverseStore(Store):
+class ReverseStore(SSHStore):
     """A store where the builder connected TO us via reverse SSH.
 
     The controller holds an ``SSHClientConnection`` (obtained via
@@ -62,39 +61,6 @@ class ReverseStore(Store):
         )
         await conn.connect()
         return conn
-
-    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
-        """Fetch and parse a .drv file via nix-daemon protocol over reverse SSH."""
-        from ..drv_parser import parse_drv
-        from ..nar import NarRegular, parse_nar
-        from ..operations.is_valid_path import IsValidPathRequest
-        from ..operations.nar_from_path import NarFromPathRequest
-
-        sp = StorePath(str(drv_store_path))
-
-        valid = (await IsValidPathRequest(path=sp).execute(self)).valid
-        if not valid:
-            log.warning(
-                "drv_not_found",
-                drv_path=str(drv_store_path),
-                reason="not_valid_on_remote",
-            )
-            return None
-
-        resp = await NarFromPathRequest(path=sp, nar_size=0).execute(self)
-        if not resp.nar_data:
-            log.warning(
-                "drv_not_found",
-                drv_path=str(drv_store_path),
-                reason="nar_empty",
-            )
-            return None
-
-        node = parse_nar(resp.nar_data)
-        if not isinstance(node, NarRegular):
-            return None
-
-        return parse_drv(node.contents.decode())
 
     async def probe(self) -> None:
         """Mark as probed immediately — metadata comes from the registration handshake."""
