@@ -22,12 +22,10 @@ from ..config import (
 )
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, GenericResourcePoller, ResourceMonitor
-from ..store_path import StorePath
 from ..wire import SSHNixReader, SSHNixWriter
 from .base import Store
 
 if TYPE_CHECKING:
-    from ..drv_parser import Derivation
     from ..psi import (
         CpuUtil,
         MemInfo,
@@ -226,39 +224,6 @@ class _SSHStoreMixin(Store):
         if self.conn is not None:
             self.conn.close()
             self.conn = None
-
-    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
-        """Fetch and parse a .drv file from the remote store via NAR."""
-        from ..drv_parser import parse_drv
-        from ..nar import NarRegular, parse_nar
-        from ..operations.is_valid_path import IsValidPathRequest
-        from ..operations.nar_from_path import NarFromPathRequest
-
-        sp = StorePath(str(drv_store_path))
-
-        valid = (await IsValidPathRequest(path=sp).execute(self)).valid
-        if not valid:
-            log.warning(
-                "drv_not_found",
-                drv_path=str(drv_store_path),
-                reason="not_valid_on_remote",
-            )
-            return None
-
-        resp = await NarFromPathRequest(path=sp, nar_size=0).execute(self)
-        if not resp.nar_data:
-            log.warning(
-                "drv_not_found",
-                drv_path=str(drv_store_path),
-                reason="nar_empty",
-            )
-            return None
-
-        node = parse_nar(resp.nar_data)
-        if not isinstance(node, NarRegular):
-            return None
-
-        return parse_drv(node.contents.decode())
 
 
 class SSHSubprocessStore(_SSHStoreMixin):

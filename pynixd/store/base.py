@@ -25,6 +25,7 @@ from ..operations.probe_systems import ProbeSystemsRequest
 from ..operations.query_all_valid_paths import QueryAllValidPathsRequest
 from ..operations.query_valid_paths import QueryValidPathsRequest
 from ..path_tracker import PathTrackerInstance
+from ..store_path import StorePath
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from .pool import ConnectionPool
 
@@ -44,7 +45,6 @@ if TYPE_CHECKING:
     )
     from ..psi import CpuUtil, MemInfo
     from ..signing import SecretKey
-    from ..store_path import StorePath
     from ..types.aliases import StorePathSet
     from ..types.ids import StoreId
 
@@ -606,17 +606,31 @@ class Store(ABC):
         """Create transport, construct Connection, and connect it."""
         ...
 
-    @abstractmethod
     async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
-        """Read and parse a .drv file from this store.
+        """Fetch and parse a .drv file from this store via NAR."""
+        from ..drv_parser import parse_drv
+        from ..nar import NarRegular, parse_nar
+        from ..operations.is_valid_path import IsValidPathRequest
+        from ..operations.nar_from_path import NarFromPathRequest
 
-        Args:
-            drv_store_path: The full store path (e.g., "/nix/store/xxx.drv").
+        sp = StorePath(str(drv_store_path))
 
-        Returns:
-            Parsed Derivation or None if the file doesn't exist.
-        """
-        ...
+        valid = (await IsValidPathRequest(path=sp).execute(self)).valid
+        if not valid:
+            log.warning("drv_not_found", drv_path=str(drv_store_path), reason="not_valid")
+            return None
+
+        resp = await NarFromPathRequest(path=sp, nar_size=0).execute(self)
+        if not resp.nar_data:
+            log.warning("drv_not_found", drv_path=str(drv_store_path), reason="nar_empty")
+            return None
+
+        node = parse_nar(resp.nar_data)
+        if not isinstance(node, NarRegular):
+            log.warning("drv_not_found", drv_path=str(drv_store_path), reason="not_regular_file")
+            return None
+
+        return parse_drv(node.contents.decode())
 
     async def probe(self) -> None:
         """Discover the daemon's protocol version, systems, and system features.
