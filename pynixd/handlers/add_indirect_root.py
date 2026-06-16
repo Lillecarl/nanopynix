@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..operations.add_indirect_root import AddIndirectRootRequest
+from ..operations.base import Role
+from ..serde import AddIndirectRootRequest, AddIndirectRootResponse
 from ..types.context import ReadContext
 from ._base import Handler
 
@@ -14,10 +15,16 @@ if TYPE_CHECKING:
 
 
 class AddIndirectRootHandler(Handler):
-    """Server handler for AddIndirectRoot — delegates to proxy.execute."""
+    """Server handler for AddIndirectRoot — admin forwards to daemon, non-admin no-op."""
 
     op: ClassVar[int] = 12
 
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
-        self = await AddIndirectRootRequest.deserialize(ReadContext.from_request(ctx))
-        return await ctx.proxy.execute(self)
+        if ctx.role == Role.ADMIN:
+            req = await AddIndirectRootRequest.from_reader(
+                ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
+            )
+            return await ctx.proxy.local_store.call(req)
+        # Non-admin: consume request body, return no-op success
+        await ctx.proxy.r.read_bytes()
+        return AddIndirectRootResponse(value=1)  # type: ignore[return-value]
