@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .base import Store
@@ -20,8 +21,23 @@ class LocalDBStore(LocalStore):
     when the database can't answer a query.
     """
 
-    db: LocalStoreDB | None  # set by factory — always non-None in practice
+    db: LocalStoreDB | None  # always non-None in practice after start()
     tracker: PathTrackerInstance
+
+    async def start(self, sync_paths: bool = True) -> None:
+        await super().start(sync_paths=sync_paths)
+        if self.db is None:
+            from ..local_store_db import LocalStoreDB
+            from ..path_tracker import PathTracker
+
+            self.db = await LocalStoreDB.open(self.store_path or Path("/"))  # type: ignore[assignment]
+            path_tracker = PathTracker(db=self.db)
+            self.tracker = path_tracker.create_instance(store_id=self.store_id)
+
+    async def close(self) -> None:
+        if self.db is not None:
+            await self.db.close()
+        await super().close()
 
     # ── Fast-path overrides ────────────────────────────────────────
 

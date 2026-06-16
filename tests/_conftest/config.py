@@ -15,6 +15,7 @@ from pynixd import Server
 from pynixd.config import LocalSocketStoreSpec
 from pynixd.instance import NixImplementation
 from pynixd.store import LocalSocketStore
+from pynixd.store.local_db import LocalDBStore
 from pynixd.types.ids import StoreId
 from tests._conftest.constants import (
     _NO_PROBE_FEATURE_MATRIX,
