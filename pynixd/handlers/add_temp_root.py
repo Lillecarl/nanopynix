@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..serde import AddTempRootRequest
+from ..operations.base import Role
+from ..serde import AddTempRootRequest, AddTempRootResponse
 from ..types.context import ReadContext
 from ._base import Handler
 
@@ -14,12 +15,16 @@ if TYPE_CHECKING:
 
 
 class AddTempRootHandler(Handler):
-    """Server handler for AddTempRoot — delegates to local_store.call()."""
+    """Server handler for AddTempRoot — admin forwards to daemon, non-admin no-op."""
 
     op: ClassVar[int] = 11
 
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
-        req = await AddTempRootRequest.from_reader(
-            ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
-        )
-        return await ctx.proxy.local_store.call(req)
+        if ctx.role == Role.ADMIN:
+            req = await AddTempRootRequest.from_reader(
+                ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
+            )
+            return await ctx.proxy.local_store.call(req)
+        # Non-admin: consume request body, return no-op success
+        await ctx.proxy.r.read_bytes()
+        return AddTempRootResponse(value=1)  # type: ignore[return-value]
