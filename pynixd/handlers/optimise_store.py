@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from ..operations.base import Role
-from ..operations.optimise_store import OptimiseStoreRequest
+from ..serde import OptimiseStoreRequest
 from ..types.context import ReadContext
 from ._base import Handler
 
@@ -20,12 +20,14 @@ class OptimiseStoreHandler(Handler):
     op: ClassVar[int] = 34
 
     async def handle(self, ctx: RequestContext) -> OpResponse | None:
-        self_req = await OptimiseStoreRequest.deserialize(ReadContext.from_request(ctx))
+        req = await OptimiseStoreRequest.from_reader(
+            ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
+        )
 
         if ctx.role < Role.ADMIN:
             await ctx.proxy.send_error(
-                f"Operation '{self_req.name}' requires administrative privileges.",
+                "Operation 'OptimiseStore' requires administrative privileges.",
             )
             return None
 
-        return await ctx.proxy.execute(self_req)
+        return await ctx.proxy.local_store.call(req)
