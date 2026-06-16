@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import structlog
+
+from ..store_path import StorePath
 from .base import Store
+
+if TYPE_CHECKING:
+    from ..drv_parser import Derivation
+
+log = structlog.get_logger(__name__)
 
 
 class DaemonStore(Store):
@@ -135,3 +143,31 @@ class DaemonStore(Store):
 
     async def probe_features(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         return await self.call(request, client=client, suppress_last=suppress_last)
+
+    # ── Derivation reading ──────────────────────────────────────────
+
+    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        """Fetch and parse a .drv file from the daemon via NAR."""
+        from ..drv_parser import parse_drv
+        from ..nar import NarRegular, parse_nar
+        from ..operations.is_valid_path import IsValidPathRequest
+        from ..operations.nar_from_path import NarFromPathRequest
+
+        sp = StorePath(str(drv_store_path))
+
+        valid = (await IsValidPathRequest(path=sp).execute(self)).valid
+        if not valid:
+            log.warning("drv_not_found", drv_path=str(drv_store_path), reason="not_valid")
+            return None
+
+        resp = await NarFromPathRequest(path=sp, nar_size=0).execute(self)
+        if not resp.nar_data:
+            log.warning("drv_not_found", drv_path=str(drv_store_path), reason="nar_empty")
+            return None
+
+        node = parse_nar(resp.nar_data)
+        if not isinstance(node, NarRegular):
+            log.warning("drv_not_found", drv_path=str(drv_store_path), reason="not_regular_file")
+            return None
+
+        return parse_drv(node.contents.decode())

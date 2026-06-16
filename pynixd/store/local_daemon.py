@@ -21,10 +21,12 @@ import structlog
 from ..config import LocalSocketStoreSpec, LocalSubprocessStoreSpec, PynixdSettings
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, create_monitor
+from ..store_path import StorePath
 from ..wire import UnixNixReader, UnixNixWriter
 from .daemon import DaemonStore
 
 if TYPE_CHECKING:
+    from ..drv_parser import Derivation
     from ..monitor import ResourceMonitor
 
 log = structlog.get_logger(__name__)
@@ -284,6 +286,19 @@ class LocalStore(DaemonStore):
         )
         await conn.connect()
         return conn
+
+    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        """Fast-path: read .drv file directly from the filesystem."""
+        from ..drv_parser import parse_drv
+
+        sp = StorePath(str(drv_store_path))
+        drv_file = self.store_path / "nix" / "store" / str(sp)
+        try:
+            contents = drv_file.read_bytes()
+        except (FileNotFoundError, OSError):
+            return await super().read_derivation(drv_store_path)
+
+        return parse_drv(contents.decode())
 
     async def close(self) -> None:
         """Close stores, stop monitor and terminate managed daemon if any."""
