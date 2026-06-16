@@ -277,3 +277,50 @@ class LocalDBStore(LocalStore):
             return QueryPathInfosResponse(infos=infos)
 
         return None  # fall through to DaemonStore.call()
+
+    async def query_derivation_output_map_batch(
+        self, request: Any, client: Any = None, suppress_last: bool = False
+    ) -> Any:
+        if not request.drv_paths:
+            from pynixd.operations.query_derivation_output_map_batch import (
+                DerivationOutputMapBatchResponse,
+            )
+
+            return DerivationOutputMapBatchResponse({})
+
+        if self.db is not None:
+            import json
+
+            from pynixd.operations.query_derivation_output_map_batch import (
+                QUERY_DERIVATION_OUTPUT_MAP_BATCH,
+                DerivationOutputMapBatchResponse,
+            )
+            from pynixd.store_path import StorePath
+
+            paths_json = json.dumps([str(p) for p in request.drv_paths])
+            async with self.db.execute(
+                QUERY_DERIVATION_OUTPUT_MAP_BATCH,
+                (paths_json,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+            result: dict = {}
+            for drv_path, output_name, output_path in rows:
+                result.setdefault(StorePath(drv_path), {})[output_name] = (
+                    StorePath(output_path) if output_path else None
+                )
+
+            for drv_path in request.drv_paths:
+                if StorePath(drv_path) in result:
+                    continue
+                try:
+                    parsed = await self.read_derivation(drv_path)
+                    if parsed is None:
+                        continue
+                    result[StorePath(drv_path)] = dict(parsed.output_paths().items())
+                except FileNotFoundError:
+                    pass
+
+            return DerivationOutputMapBatchResponse(outputs=result)
+
+        return None  # fall through to DaemonStore.call()
