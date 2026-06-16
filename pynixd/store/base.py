@@ -546,13 +546,31 @@ class Store(ABC):
 
         return decorator
 
+    @overload
+    async def execute(
+        self,
+        request: WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        skip_probe: bool = False,
+    ) -> Any: ...
+
+    @overload
     async def execute(
         self,
         request: OpRequest[Resp],
         client: ClientConn | None = None,
         suppress_last: bool = False,
         skip_probe: bool = False,
-    ) -> Resp:
+    ) -> Resp: ...
+
+    async def execute(
+        self,
+        request: OpRequest[Resp] | WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        skip_probe: bool = False,
+    ) -> Any:
         """Execute an operation on this store.
 
         Delegates logic to the request object, which may use fast-paths
@@ -566,6 +584,10 @@ class Store(ABC):
             fn = getattr(self, method_name)
             if result := await fn(request, client=client, suppress_last=suppress_last):
                 return result
+
+        # Fallthrough: WireRequest → daemon via call(); OpRequest → legacy execute()
+        if isinstance(request, WireModel):
+            return await self.call(request, client=client, suppress_last=suppress_last)
 
         return await request.execute(
             self,
