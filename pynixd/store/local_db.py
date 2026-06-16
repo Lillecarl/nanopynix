@@ -131,17 +131,18 @@ class LocalDBStore(LocalStore):
         if self.db is not None:
             import json
 
-            from pynixd.operations.query_valid_paths import (
-                QUERY_VALID_PATHS,
-                QueryValidPathsResponse,
-            )
-            from pynixd.store_path import StorePath
+            from pynixd.operations.query_valid_paths import QUERY_VALID_PATHS
+            from pynixd.serde import QueryValidPathsResponse
+            from pynixd.serde import StorePath as SerdeStorePath
 
             paths_json = json.dumps([str(p) for p in request.paths])
             async with self.db.execute(QUERY_VALID_PATHS, (paths_json,)) as cursor:
                 rows = await cursor.fetchall()
-            resp = QueryValidPathsResponse(paths={StorePath(r[0]) for r in rows})
-            self.tracker.add_known_paths(resp.paths)
+            from pynixd.store_path import StorePath as RealStorePath
+
+            paths: set = {SerdeStorePath(path=r[0]) for r in rows}  # type: ignore[arg-type]
+            resp = QueryValidPathsResponse(paths=paths)
+            self.tracker.add_known_paths({RealStorePath(str(p)) for p in resp.paths})
             return resp
 
         return None  # fall through to DaemonStore.call()
