@@ -11,7 +11,8 @@ import pytest
 import structlog
 
 from pynixd.operations.nar_from_path import NarFromPathRequest
-from pynixd.operations.query_path_info import QueryPathInfoRequest
+from pynixd.serde import QueryPathInfoRequest
+from pynixd.serde import StorePath as SerdeStorePath
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
@@ -79,10 +80,10 @@ async def test_http_upload(
     root_store = LocalSocketStore(
         make_test_spec(store_id="root", store_path=Path("/"), no_probe=True),
     )
-    info_resp = await root_store.execute(QueryPathInfoRequest(path=path))
+    info_resp = await root_store.execute(QueryPathInfoRequest(path=SerdeStorePath(path=str(path))))
     assert info_resp.valid
     assert info_resp.info is not None
-    vinfo = info_resp.info.with_path(path)
+    vinfo = info_resp.info
 
     nar_data = bytearray()
 
@@ -97,14 +98,31 @@ async def test_http_upload(
         ),
     )
 
-    narinfo = vinfo.to_narinfo()
+    # Build narinfo using NAR hash in URL (matches what handle_put_nar saves as)
+    nar_hash = str(vinfo.nar_hash)
+    if not nar_hash.startswith("sha256:"):
+        nar_hash = f"sha256:{nar_hash}"
+    nar_hash_part = nar_hash.split(":")[-1]
+    narinfo_lines = [
+        f"StorePath: {path}",
+        f"URL: nar/{nar_hash_part}.nar",
+        "Compression: none",
+        f"NarHash: {nar_hash}",
+        f"NarSize: {vinfo.nar_size}",
+    ]
+    refs = sorted(str(r) for r in vinfo.references)
+    if refs:
+        narinfo_lines.append(f"References: {' '.join(r.rsplit('/', 1)[-1] for r in refs)}")
+    if vinfo.deriver:
+        narinfo_lines.append(f"Deriver: {str(vinfo.deriver).rsplit('/', 1)[-1]}")
+    narinfo = "\n".join(narinfo_lines) + "\n"
 
     base_url = f"http://127.0.0.1:{pynixd_server.http_bound_port}"
 
     async with aiohttp.ClientSession() as session:
         headers = {"Authorization": HTTP_AUTH_HEADER}
         # 3. PUT NAR
-        nar_hash_part = vinfo.nar_hash.split(":")[-1]
+        nar_hash_part = str(vinfo.nar_hash).split(":")[-1]
         log.info("uploading_nar", hash=nar_hash_part, size=len(nar_data))
         async with session.put(
             f"{base_url}/nar/{nar_hash_part}.nar",
@@ -125,7 +143,7 @@ async def test_http_upload(
             assert await resp.text() == "ok\n"
 
     # 5. Verify it now exists in the local store (HTTP uploads go to local_store)
-    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=path))
+    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=SerdeStorePath(path=str(path))))
     assert info_resp.valid, f"Path {path} should be valid in local store after upload"
 
 
@@ -154,5 +172,5 @@ async def test_nix_copy_to_http(
     assert rc == 0, f"nix copy failed:\n{stderr}"
 
     # 4. Verify it now exists in the local store (HTTP uploads go to local_store)
-    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=path))
+    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=SerdeStorePath(path=str(path))))
     assert info_resp.valid, f"Path {path} should be valid in local store after nix copy"
