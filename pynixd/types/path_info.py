@@ -149,11 +149,13 @@ class ValidPathInfo(UnkeyedValidPathInfo):
         if not nar_hash.startswith("sha256:"):
             nar_hash = f"sha256:{nar_hash}"
 
-        nar_hash_part = nar_hash.split(":")[-1]
+        # Use store path hash in the NAR URL so the cache can resolve it
+        # without needing a DB-backed NAR hash index.
+        path_hash = str(self.path).rsplit("/", 1)[-1].split("-", 1)[0]
 
         lines = [
             f"StorePath: {self.path}",
-            f"URL: nar/{nar_hash_part}.nar",
+            f"URL: nar/{path_hash}.nar",
             "Compression: none",
             f"NarHash: {nar_hash}",
             f"NarSize: {self.nar_size}",

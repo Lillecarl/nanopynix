@@ -3,37 +3,29 @@
 from __future__ import annotations
 
 import random
-from pathlib import Path
-from typing import TYPE_CHECKING
 
 import aiohttp
 import pytest
 import structlog
 
 from pynixd import Server
-from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
-from pynixd.operations.query_path_info import QueryPathInfoRequest
-from pynixd.store import LocalSocketStore
-from pynixd.types.ids import StoreId
+from pynixd.serde import QueryAllValidPathsRequest, QueryPathInfoRequest
+from pynixd.serde import StorePath as StorePath
+from pynixd.store import DaemonStore
 from tests.conftest import (
     CLIENT_BIN,
     SESSION_HTTP_PASS,
     SESSION_HTTP_USER,
     STORE_PREFIX,
-    make_test_spec,
     rmtree_robust,
     run_subproc,
-    server_uri,
 )
 from tests.test_features import TestFeatures as F
-
-if TYPE_CHECKING:
-    from pynixd.store_path import StorePath
 
 log = structlog.get_logger(__name__)
 
 
-async def _pick_random_path(store: LocalSocketStore) -> StorePath:
+async def _pick_random_path(store: DaemonStore) -> StorePath:
     """Pick an arbitrary valid path from the store."""
     resp = await store.execute(QueryAllValidPathsRequest())
     all_paths = list(resp.paths)
@@ -59,114 +51,95 @@ async def _pick_random_path(store: LocalSocketStore) -> StorePath:
 
 
 @pytest.mark.covers(F.SERVER_HTTP | F.STORE_HTTP_BINARY_CACHE | F.NAR_FROM_PATH | F.QUERY_PATH_INFO | F.STORE_LOCAL)
-async def test_narinfo() -> None:
-    """Test fetching .narinfo from the HTTP cache.
+async def test_narinfo(pynixd_server: Server) -> None:
+    """Test fetching .narinfo from the HTTP cache."""
+    local_store = pynixd_server.local_store
+    base_url = f"http://127.0.0.1:{pynixd_server.http_bound_port}"
 
-    Store operations triggered:
-    - QueryAllValidPaths: Queries all valid paths for cache synchronization
-    """
-    local_store = LocalSocketStore(
-        make_test_spec(store_id="local", store_path=Path("/"), no_probe=True),
-    )
+    path = await _pick_random_path(local_store)
+    hash_part = path.hash_part()
+    log.info("test_narinfo", path=path, hash_part=hash_part, url=base_url)
 
-    async with Server(stores={StoreId("local"): local_store}, http_port=0) as server:
-        path = await _pick_random_path(local_store)
-        hash_part = path.hash_part()
-        base_url = f"http://127.0.0.1:{server.http_bound_port}"
-        log.info("test_narinfo", path=path, hash_part=hash_part, url=base_url)
-
-        async with aiohttp.ClientSession() as session:
-            url = f"{base_url}/{hash_part}.narinfo"
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                assert resp.status == 200
-                text = await resp.text()
-                assert f"StorePath: {path}" in text
-                assert "URL: nar/" in text
+    async with aiohttp.ClientSession() as session:
+        auth = aiohttp.BasicAuth(SESSION_HTTP_USER, SESSION_HTTP_PASS)
+        url = f"{base_url}/{hash_part}.narinfo"
+        async with session.get(url, auth=auth, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            assert resp.status == 200
+            text = await resp.text()
+            assert f"StorePath: {path}" in text
+            assert "URL: nar/" in text
 
 
-async def test_nar_streaming() -> None:
-    """Test streaming a NAR from the HTTP cache.
+async def test_nar_streaming(pynixd_server: Server) -> None:
+    """Test streaming a NAR from the HTTP cache."""
+    local_store = pynixd_server.local_store
+    base_url = f"http://127.0.0.1:{pynixd_server.http_bound_port}"
 
-    Store operations triggered:
-    - QueryAllValidPaths: Queries all valid paths for cache synchronization
-    """
-    local_store = LocalSocketStore(
-        make_test_spec(store_id="local", store_path=Path("/"), no_probe=True),
-    )
+    path = await _pick_random_path(local_store)
+    hash_part = path.hash_part()
 
-    async with Server(stores={StoreId("local"): local_store}, http_port=0) as server:
-        path = await _pick_random_path(local_store)
-        hash_part = path.hash_part()
-        base_url = f"http://127.0.0.1:{server.http_bound_port}"
+    auth = aiohttp.BasicAuth(SESSION_HTTP_USER, SESSION_HTTP_PASS)
+    async with aiohttp.ClientSession() as session:
+        url = f"{base_url}/{hash_part}.narinfo"
+        async with session.get(url, auth=auth, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            assert resp.status == 200
+            narinfo = await resp.text()
+            nar_url = ""
+            for line in narinfo.splitlines():
+                if line.startswith("URL: "):
+                    nar_url = line.split(": ", 1)[1].strip()
+                    break
+            assert nar_url
 
-        # Get .narinfo to find the NAR URL
-        async with aiohttp.ClientSession() as session:
-            url = f"{base_url}/{hash_part}.narinfo"
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                assert resp.status == 200
-                narinfo = await resp.text()
-                nar_url = ""
-                for line in narinfo.splitlines():
-                    if line.startswith("URL: "):
-                        nar_url = line.split(": ", 1)[1].strip()
-                        break
-                assert nar_url
-
-            # Stream the NAR and verify it's not empty
-            async with session.get(
-                f"{base_url}/{nar_url}",
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as resp:
-                assert resp.status == 200
-                total_bytes = 0
-                async for chunk in resp.content.iter_chunked(1024 * 1024):
-                    total_bytes += len(chunk)
-                assert total_bytes > 0
+        # Stream the NAR and verify it's not empty
+        async with session.get(
+            f"{base_url}/{nar_url}",
+            auth=auth,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            assert resp.status == 200
+            total_bytes = 0
+            async for chunk in resp.content.iter_chunked(1024 * 1024):
+                total_bytes += len(chunk)
+            assert total_bytes > 0
 
 
-async def test_cache_as_substituter() -> None:
-    """Test using pynixd HTTP cache as a substituter for another nix build.
+async def test_cache_as_substituter(pynixd_server: Server) -> None:
+    """Test using pynixd HTTP cache as a substituter."""
+    local_store = pynixd_server.local_store
 
-    Store operations triggered:
-    - QueryAllValidPaths: Queries all valid paths for cache synchronization
-    """
-    local_store = LocalSocketStore(
-        make_test_spec(store_id="local", store_path=Path("/"), no_probe=True),
-    )
+    target_path = await _pick_random_path(local_store)
+    base_url = f"http://{SESSION_HTTP_USER}:{SESSION_HTTP_PASS}@127.0.0.1:{pynixd_server.http_bound_port}"
 
-    async with Server(stores={StoreId("local"): local_store}, http_port=0) as server:
-        target_path = await _pick_random_path(local_store)
-        base_url = f"http://127.0.0.1:{server.http_bound_port}"
+    # Use a fresh temporary store for substitution
+    subst_store_path = STORE_PREFIX / "http-subst-functional"
+    rmtree_robust(subst_store_path)
+    subst_store_path.mkdir(parents=True, exist_ok=True)
 
-        # Use a fresh temporary store for substitution
-        subst_store_path = STORE_PREFIX / "http-subst-functional"
-        rmtree_robust(subst_store_path)
-        subst_store_path.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        str(CLIENT_BIN),
+        "copy",
+        "--to",
+        f"file://{subst_store_path}",
+        "--from",
+        base_url,
+        str(target_path),
+    ]
 
-        cmd = [
-            str(CLIENT_BIN),
-            "copy",
-            "--to",
-            f"file://{subst_store_path}",
-            "--from",
-            base_url,
-            str(target_path),
-        ]
+    rc, stdout, stderr, _ = await run_subproc(cmd)
+    assert rc == 0, f"Copy via cache failed:\n{stderr}"
 
-        rc, stdout, stderr, _ = await run_subproc(cmd)
-        assert rc == 0, f"Copy via cache failed:\n{stderr}"
-
-        # Verify it exists in the new store
-        cmd = [
-            str(CLIENT_BIN),
-            "store",
-            "ls",
-            "--store",
-            f"file://{subst_store_path!s}",
-            str(target_path),
-        ]
-        rc, stdout, stderr, _ = await run_subproc(cmd)
-        assert rc == 0, f"path check failed:\n{stderr}"
+    # Verify it exists in the new store
+    cmd = [
+        str(CLIENT_BIN),
+        "store",
+        "ls",
+        "--store",
+        f"file://{subst_store_path!s}",
+        str(target_path),
+    ]
+    rc, stdout, stderr, _ = await run_subproc(cmd)
+    assert rc == 0, f"path check failed:\n{stderr}"
 
 
 async def test_cache_not_found(pynixd_server: Server) -> None:

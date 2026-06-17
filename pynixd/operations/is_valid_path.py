@@ -71,7 +71,7 @@ class IsValidPathRequest(OpRequest[IsValidPathResponse]):
         if store.tracker.has_path(self.path):
             return IsValidPathResponse(valid=True)
 
-        if (db := store.db) is not None:
+        if (db := getattr(store, "db", None)) is not None:
             async with db.execute(IS_VALID_PATH, (str(self.path),)) as cursor:
                 row = await cursor.fetchone()
             if row is not None:

@@ -43,7 +43,7 @@ from .store_path import StorePath
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from .local_store_db import LocalStoreDB
+
     from .store import LocalStore
     from .wire import NixWriter
 
@@ -102,10 +102,6 @@ class PynixdHttpServer:
             if self.upload_dir:
                 self.app.router.add_put("/nar/{filename:.+}", self.handle_put_nar)
                 self.app.router.add_put("/{hash}.narinfo", self.handle_put_narinfo)
-
-    @property
-    def db(self) -> LocalStoreDB | None:
-        return self.store.db
 
     # ── Auth middleware ────────────────────────────────────────────────
 
@@ -190,10 +186,6 @@ class PynixdHttpServer:
             return web.Response(status=HTTPStatus.NOT_FOUND, text="not found\n")
 
         narinfo = vinfo.to_narinfo()
-
-        if self.db is not None:
-            self.db.mark_path(path)
-
         return web.Response(
             text=narinfo,
             content_type="text/x-nix-narinfo",
@@ -249,9 +241,6 @@ class PynixdHttpServer:
             if request.protocol and request.protocol.transport:
                 request.protocol.transport.close()
             raise
-
-        if self.db is not None:
-            self.db.mark_path(path)
 
         await response.write_eof()
         return response
@@ -444,13 +433,10 @@ class PynixdHttpServer:
     async def resolve_path(self, hash_part: str) -> StorePath | None:
         """Resolve a store hash or NAR hash to a full store path."""
         # 1. Try resolving as a NAR hash (SHA256, 64 chars) if we have a DB
-        if len(hash_part) == 64 and self.db is not None:
-            # Nix stores NAR hashes as 'sha256:...' in the DB
-            # but sometimes they are stored without the prefix or with a different one.
-            # We try both.
+        if len(hash_part) == 64 and (db := getattr(self.store, "db", None)) is not None:
             for prefix in ["sha256:", ""]:
                 full_hash = f"{prefix}{hash_part}"
-                async with self.db.execute(
+                async with db.execute(
                     "SELECT path FROM ValidPaths WHERE hash = ?",
                     (full_hash,),
                 ) as cursor:
@@ -458,7 +444,7 @@ class PynixdHttpServer:
                 if row:
                     return StorePath(row[0])
 
-        # 2. Fall back to standard QueryPathFromHashPart (for 32-char store path hashes)
+        # 2. Fall back to standard QueryPathFromHashPart
         resp = await self.store.execute(
             QueryPathFromHashPartRequest(path=hash_part),
         )
