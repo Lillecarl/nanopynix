@@ -88,7 +88,7 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
             store.tracker.add_known_path(self.path)
             return QueryPathInfoResponse(info=cached)
 
-        if (db := store.db) is not None:
+        if (db := getattr(store, "db", None)) is not None:
             async with db.execute(QUERY_PATH_INFO, (str(self.path),)) as cursor:
                 row = await cursor.fetchone()
             if row is None:

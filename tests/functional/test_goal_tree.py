@@ -24,9 +24,9 @@ from pynixd.derived_path import DerivedPath
 from pynixd.goals.goal import GoalContext, make_build_goal
 from pynixd.goals.manager import GoalManager
 from pynixd.nar import NarRegular, parse_nar
-from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.operations.nar_from_path import NarFromPathRequest
-from pynixd.operations.query_path_info import QueryPathInfoRequest
+from pynixd.serde import IsValidPathRequest, QueryPathInfoRequest
+from pynixd.serde import StorePath as SerdeStorePath
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from pynixd.substitution import (
@@ -181,7 +181,7 @@ async def test_simple_build(
     assert result.produced_paths, "no produced paths"
 
     for sp in result.produced_paths:
-        valid = (await store.execute(IsValidPathRequest(path=sp))).valid
+        valid = (await store.execute(IsValidPathRequest(path=SerdeStorePath(path=str(sp))))).valid
         assert valid, f"produced path {sp} is not valid"
 
 
@@ -203,7 +203,7 @@ async def test_ca_simple(
     assert result.produced_paths, "no produced paths"
 
     for sp in result.produced_paths:
-        valid = (await store.execute(IsValidPathRequest(path=sp))).valid
+        valid = (await store.execute(IsValidPathRequest(path=SerdeStorePath(path=str(sp))))).valid
         assert valid, f"CA output {sp} is not valid"
 
 
@@ -319,7 +319,7 @@ async def test_ca_fixed(
     assert result.produced_paths, "no produced paths"
 
     for sp in result.produced_paths:
-        valid = (await store.execute(IsValidPathRequest(path=sp))).valid
+        valid = (await store.execute(IsValidPathRequest(path=SerdeStorePath(path=str(sp))))).valid
         assert valid, f"CA fixed output {sp} is not valid"
 
 
@@ -488,7 +488,7 @@ async def test_nar_from_path_roundtrip(
 
     # 3. QueryPathInfo to get nar_size
     drv_store_path = StorePath(drv_path_str)
-    info_resp = await store.execute(QueryPathInfoRequest(path=drv_store_path))
+    info_resp = await store.execute(QueryPathInfoRequest(path=SerdeStorePath(path=drv_path_str)))
     assert info_resp.valid, f"path not found (invalid): {drv_path_str}"
     assert info_resp.info is not None, f"path not found (no info): {drv_path_str}"
     nar_size = info_resp.info.nar_size
