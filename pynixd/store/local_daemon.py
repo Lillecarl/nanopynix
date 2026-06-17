@@ -58,7 +58,6 @@ class LocalStore(DaemonStore):
 
         self.managed = managed
         self.nix_bin = spec.nix_bin
-        self.use_db = spec.use_db
         self.monitor_enabled = spec.monitor
         self.daemon_proc: asyncio.subprocess.Process | None = None
         self.daemon_ready: anyio.Event | None = None
@@ -77,10 +76,6 @@ class LocalStore(DaemonStore):
             if self.monitor_enabled
             else DummyResourceMonitor(self.gate, self.settings)
         )
-
-    @property
-    def db_enabled(self) -> bool:
-        return self.use_db
 
     async def start(self, sync_paths: bool = True) -> None:
         """Spawn managed daemon and initialize the store."""

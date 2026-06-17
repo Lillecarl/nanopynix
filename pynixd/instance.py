@@ -259,14 +259,12 @@ class Server:
                 "Please upgrade your Nix daemon.",
             )
 
-        if local_store.db_enabled:
-            self.ctx.db = await LocalStoreDB.open(local_store.store_path or Path("/"))
-            if isinstance(local_store, LocalDBStore):
-                local_store.db = self.ctx.db
+        if isinstance(local_store, LocalDBStore):
+            self.ctx.db = local_store.db
             self.ctx.path_tracker.db = self.ctx.db
             log.info(
                 "local_store_db_connected",
-                db_path=str(self.ctx.db.db_path) if self.ctx.db else "none",
+                db_path=str(self.ctx.db.db_path),
             )
         else:
             self.ctx.db = None
