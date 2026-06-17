@@ -13,7 +13,7 @@ from .base import OpRequest, OpResponse, Role
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..store import Store
+    from ..store import DaemonStore
     from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
     from ..types.context import WriteContext
@@ -122,7 +122,7 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
 
     async def execute(
         self,
-        store: Store,
+        store: DaemonStore,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> CollectGarbageResponse:

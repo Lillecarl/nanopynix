@@ -25,6 +25,11 @@ class ScheduleMode(StrEnum):
 
 if TYPE_CHECKING:
     from .store import (
+        DaemonStore,
+        LocalDBStore,
+        LocalStore,
+        SSHSocketStore,
+        SSHSubprocessStore,
         Store,
     )
 
@@ -115,7 +120,7 @@ class LocalSocketStoreSpec(StoreSpecBase):
     use_db: bool = True
     monitor: bool = True
 
-    def to_store(self, store_id: str) -> Store:
+    def to_store(self, store_id: str) -> LocalStore | LocalDBStore:
         from .store.local_daemon import LocalStore
         from .store.local_db import LocalDBStore
 
@@ -134,7 +139,7 @@ class LocalSubprocessStoreSpec(StoreSpecBase):
     monitor: bool = True
     socket_path: Path | None = None
 
-    def to_store(self, store_id: str) -> Store:
+    def to_store(self, store_id: str) -> LocalStore | LocalDBStore:
         from .store.local_daemon import LocalStore
         from .store.local_db import LocalDBStore
 
@@ -154,7 +159,7 @@ class ReverseStoreSpec(StoreSpecBase):
 
     type: Literal["reverse"] = "reverse"
 
-    def to_store(self, store_id: str) -> Store:
+    def to_store(self, store_id: str) -> DaemonStore:
         raise NotImplementedError("Reverse stores are created dynamically, not from config")
 
 
@@ -203,7 +208,7 @@ class SSHSubprocessStoreSpec(StoreSpecBase):
     monitor: bool = True
     client_keys: list[Any] = Field(default_factory=list)
 
-    def to_store(self, store_id: str) -> Store:
+    def to_store(self, store_id: str) -> SSHSubprocessStore:
         from .store import SSHSubprocessStore
 
         return SSHSubprocessStore(
@@ -220,7 +225,7 @@ class SSHSocketStoreSpec(StoreSpecBase):
     monitor: bool = True
     client_keys: list[Any] = Field(default_factory=list)
 
-    def to_store(self, store_id: str) -> Store:
+    def to_store(self, store_id: str) -> SSHSocketStore:
         from .store import SSHSocketStore
 
         return SSHSocketStore(
@@ -330,11 +335,11 @@ class PynixdSettings(BaseSettings):
 
         return (init_settings, env_settings, _ConfigFileSource(settings_cls))
 
-    def to_stores(self) -> dict[StoreId, Store]:
+    def to_stores(self) -> dict[StoreId, DaemonStore]:
         """Convert all store specs to live Store instances."""
         from .store import LocalStore
 
-        stores: dict[StoreId, Store] = {}
+        stores: dict[StoreId, DaemonStore] = {}
         for key, spec in self.stores.items():
             spec.settings = self
             store = spec.to_store(store_id=key)

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from ..connection import ClientConn
-    from ..store import Store
+    from ..store import DaemonStore
     from ..types import RequestContext
     from ..types.aliases import StorePathSet
 
@@ -84,7 +84,7 @@ class AddToStoreRequest(OpRequest[AddToStoreResponse]):
 
     async def execute(
         self,
-        store: Store,
+        store: DaemonStore,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> AddToStoreResponse:

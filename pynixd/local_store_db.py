@@ -497,6 +497,5 @@ def resolve_db_path(store_path: Path) -> Path | None:
         db_path = store_path / "nix" / "var" / "nix" / "db" / "db.sqlite"
 
     if not db_path.exists():
-        log.warning("nix_db_not_found", db_path=db_path)
-        return None
+        db_path.parent.mkdir(parents=True, exist_ok=True)
     return db_path

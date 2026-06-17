@@ -29,7 +29,7 @@ from .store_path import DrvOutput, StorePath
 from .types.ca import Realisation
 
 if TYPE_CHECKING:
-    from .store import Store
+    from .store import DaemonStore
     from .types.path_info import SubstitutablePathInfo
     from .wire import NixWriter
 
@@ -63,7 +63,7 @@ class Substituter(ABC):
         self,
         paths: set[StorePath],
         infos: dict[StorePath, NarInfo],
-        store: Store,
+        store: DaemonStore,
     ) -> dict[StorePath, bool]:
         """Download NARs for *paths* and import them into *store*.
 
@@ -227,7 +227,7 @@ class HttpBinaryCacheSubstituter(Substituter):
         self,
         paths: set[StorePath],
         infos: dict[StorePath, NarInfo],
-        store: Store,
+        store: DaemonStore,
     ) -> dict[StorePath, bool]:
         """Download and import NARs in parallel.
 
@@ -251,7 +251,7 @@ class HttpBinaryCacheSubstituter(Substituter):
         self,
         path: StorePath,
         info: NarInfo,
-        store: Store,
+        store: DaemonStore,
         results: dict[StorePath, bool],
     ) -> None:
         assert self._session is not None
@@ -320,7 +320,7 @@ class StoreSubstituter(Substituter):
     ``NarFromPath → AddToStoreNar`` directly into the destination store.
     """
 
-    def __init__(self, store: Store) -> None:
+    def __init__(self, store: DaemonStore) -> None:
         self._store = store
 
     async def query_paths(self, paths: set[StorePath]) -> set[StorePath]:
@@ -378,7 +378,7 @@ class StoreSubstituter(Substituter):
         self,
         paths: set[StorePath],
         infos: dict[StorePath, NarInfo],
-        store: Store,
+        store: DaemonStore,
     ) -> dict[StorePath, bool]:
         """Stream NARs from the wrapped daemon into *store* via ``NarFromPath → AddToStoreNar``.
 
@@ -438,7 +438,7 @@ class StoreSubstituter(Substituter):
         self,
         path: StorePath,
         info: NarInfo,
-        dst_store: Store,
+        dst_store: DaemonStore,
         results: dict[StorePath, bool],
     ) -> None:
         from .operations.add_to_store_nar import AddToStoreNarRequest, AddToStoreNarResponse
@@ -588,7 +588,7 @@ class SubstitutionManager:
 
     # ── substitute_path / substitute_paths ─────────────────────────
 
-    async def substitute_path(self, path: StorePath, store: Store) -> bool:
+    async def substitute_path(self, path: StorePath, store: DaemonStore) -> bool:
         """Download and import a single store path."""
         result = await self.substitute_paths({path}, store)
         return result.get(path, False)
@@ -596,7 +596,7 @@ class SubstitutionManager:
     async def substitute_paths(
         self,
         paths: set[StorePath],
-        store: Store,
+        store: DaemonStore,
     ) -> dict[StorePath, bool]:
         """Download and import paths via available substituters.
 

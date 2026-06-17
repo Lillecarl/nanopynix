@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """QueryClosureWithInfo operation request/response types. This is a custom operation."""
 
 from __future__ import annotations

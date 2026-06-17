@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from ..connection import ClientConn
-    from ..store import Store
+    from ..store import DaemonStore
     from ..types import RequestContext as RequestContext
 
 
@@ -70,7 +70,7 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
 
     async def execute(
         self,
-        store: Store,
+        store: DaemonStore,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> AddToStoreNarResponse:

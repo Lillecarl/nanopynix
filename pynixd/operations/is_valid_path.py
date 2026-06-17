@@ -1,4 +1,5 @@
 """IsValidPath operation request/response types."""
+# pyright: reportAttributeAccessIssue=false
 
 from __future__ import annotations
 

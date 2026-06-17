@@ -25,7 +25,7 @@ from .reverse_server import start_reverse_acceptor
 from .scheduler import Scheduler
 from .ssh_server import start_ssh_server
 from .stderr import OperationLogs
-from .store import LocalStore, Store
+from .store import DaemonStore, LocalDBStore, LocalStore
 from .substitution import HttpBinaryCacheSubstituter, SubstitutionManager
 from .types import PynixdGCAction
 from .types.ids import StoreId
@@ -54,23 +54,19 @@ class Server:
 
     def __init__(
         self,
-        stores: dict[StoreId, Store] | None = None,
+        stores: dict[StoreId, DaemonStore] | None = None,
         settings: PynixdSettings | None = None,
         **kwargs: Any,
     ) -> None:
         settings = settings or PynixdSettings(**kwargs)
 
         if stores is None:
-            stores = {
-                StoreId("local"): LocalStore(
-                    LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False),
-                ),
-            }
+            spec = LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False)
+            stores = {StoreId("local"): spec.to_store(str(StoreId("local")))}
         elif StoreId("local") not in stores:
             stores = dict(stores)
-            stores[StoreId("local")] = LocalStore(
-                LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False),
-            )
+            spec = LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False)
+            stores[StoreId("local")] = spec.to_store(str(StoreId("local")))
 
         path_tracker = PathTracker(db=None)
 
@@ -95,11 +91,11 @@ class Server:
         self._done_event = anyio.Event()
 
     @property
-    def local_store(self) -> Store:
+    def local_store(self) -> LocalStore:
         return self.ctx.local_store
 
     @property
-    def stores(self) -> Mapping[StoreId, Store]:
+    def stores(self) -> Mapping[StoreId, DaemonStore]:
         return self.ctx.stores
 
     @property
@@ -114,7 +110,7 @@ class Server:
     def path_tracker(self) -> PathTracker:
         return self.ctx.path_tracker
 
-    async def add_store(self, store: Store, dynamic: bool = False) -> None:
+    async def add_store(self, store: DaemonStore, dynamic: bool = False) -> None:
         """Add a store to the server, setting up path tracking for scheduling.
 
         If dynamic=True, the store's feature_matrix is also registered in
@@ -129,7 +125,7 @@ class Server:
             store.tracker = self.path_tracker.create_instance(store.store_id, is_local=False)
 
         local_store = self.local_store
-        if local_store.db is not None and store.tracker.parent is not None:
+        if isinstance(local_store, LocalDBStore) and store.tracker.parent is not None:
             paths = await local_store.db.get_known_paths(store.store_id)
             if paths:
                 store.tracker.add_known_paths(paths, update_regtime=False)
@@ -180,7 +176,7 @@ class Server:
             return
 
         local_store = self.local_store
-        if local_store.db is not None:
+        if isinstance(local_store, LocalDBStore):
             try:
                 async with local_store.db.acquire_conn() as conn:
                     await conn.execute(
@@ -265,7 +261,8 @@ class Server:
 
         if local_store.db_enabled:
             self.ctx.db = await LocalStoreDB.open(local_store.store_path or Path("/"))
-            local_store.db = self.ctx.db
+            if isinstance(local_store, LocalDBStore):
+                local_store.db = self.ctx.db
             self.ctx.path_tracker.db = self.ctx.db
             log.info(
                 "local_store_db_connected",
@@ -273,7 +270,6 @@ class Server:
             )
         else:
             self.ctx.db = None
-            local_store.db = None
             self.ctx.path_tracker.db = None
             log.warning("local_store_db_disabled")
 

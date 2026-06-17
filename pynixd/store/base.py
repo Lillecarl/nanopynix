@@ -1,43 +1,33 @@
 """
-Base Store ABC and pooling logic for pynixd.
+Base Store ABC for pynixd.
+
+Defines the minimal contract that every store backend must fulfill:
+path tracking, signing keys, operation execution, and lifecycle
+management.  Daemon-specific logic (connection pooling, probing,
+feature matrices, circuit breaking) lives in DaemonStore.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import platform
-import time
 from abc import ABC, abstractmethod
-from enum import IntEnum
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self, overload
 
-import anyio
 import structlog
 from cachetools import TTLCache
 
-from .. import wire
-from ..monitor import ResourceGate, ResourceMonitor
 from ..path_tracker import PathTrackerInstance
-from ..serde.wire_message import WireModel
-from .pool import ConnectionPool
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable, Mapping
-    from collections.abc import Set as AbstractSet
-    from contextlib import AbstractAsyncContextManager
+    from collections.abc import Iterable, Mapping
 
     from ..config import StoreSpecBase
     from ..connection import ClientConn, Connection
     from ..drv_parser import Derivation
-    from ..local_store_db import LocalStoreDB
     from ..operations.base import (
         OpRequest,
         Resp,
         ValidPathInfo,
     )
-    from ..psi import CpuUtil, MemInfo
     from ..serde.wire_ops import WireRequest
     from ..signing import SecretKey
     from ..store_path import StorePath
@@ -46,106 +36,47 @@ if TYPE_CHECKING:
 
 
 log = structlog.get_logger(__name__)
-_CB_THRESHOLD: int = 3  # failures before cooldown
-_CB_MAX_COOLDOWN: float = 300.0  # 5 min max
-
-try:
-    import asyncssh
-except ImportError:
-    _SSH_ERRORS: tuple[type[BaseException], ...] = ()
-else:
-    _SSH_ERRORS = (asyncssh.misc.Error,)
-
-_TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
-    ConnectionError,
-    EOFError,
-    OSError,
-    TimeoutError,
-    *_SSH_ERRORS,
-)
-
-
-class ProbeState(IntEnum):
-    NOT_PROBED = 0
-    PROBING = 1
-    PROBED = 2
 
 
 class Store(ABC):
-    """A build store with on-demand connection pooling.
+    """Minimal store contract.
 
-    Subclasses implement create_conn() to set up transport and
-    return a connected Connection. The base class handles pooling,
-    concurrency limiting, and idle TTL cleanup.
-
-    Idle connections are automatically closed after idle_ttl seconds.
+    Subclasses implement create_conn() and the operation executors.
+    Daemon-backed stores extend DaemonStore, which adds connection
+    pooling, probing, and circuit-breaking.
     """
 
+    _executors: ClassVar[dict[int, str]] = {}
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        for name, method in cls.__dict__.items():
+            if callable(method) and hasattr(method, "_pynixd_op"):
+                cls._executors[method._pynixd_op] = name  # type: ignore[union-attr]
+
     def __init__(self, spec: StoreSpecBase) -> None:
-        self.spec = spec
         if spec.store_id is None:
             raise RuntimeError("store_id must be set on the spec before Store construction")
         self.store_id: StoreId = spec.store_id
-        self.store_path = getattr(spec, "store_path", Path("/"))
-        self.scheduleable = spec.scheduleable
-        self.priority = spec.priority
-        self.score_penalty = spec.score_penalty
-        self.gc_enabled = spec.gc_enabled
-        self.gc_max_age = spec.gc_max_age
-        self.no_schedule = spec.no_schedule
-        self.idle_ttl = spec.idle_ttl
-        self.version: int = wire.PROTOCOL_VERSION
-        self.nix_version: str = ""
-        self.conn_counter = 0
-
-        fm = spec._effective_feature_matrix()
-        self._feature_matrix: dict[str, set[str]] | None = fm
-        if spec.probe is not None:
-            self._probe = spec.probe
-        else:
-            self._probe = fm is None
-
-        self.gate = ResourceGate()
-        self.pool = ConnectionPool(
-            store_id=self.store_id,
-            factory=self._create_conn_with_counter,
-            gate=self.gate,
-            idle_ttl=self.idle_ttl,
-            on_connection_created=self._on_connection_created,
-        )
-
-        self.monitor: ResourceMonitor | None = None
-        self.tracker: PathTrackerInstance = PathTrackerInstance(store_id=self.store_id)
+        self._signing_keys: dict[str, SecretKey] = {}
+        self.tracker = PathTrackerInstance(store_id=self.store_id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(  # type: ignore[type-var]
             maxsize=10000,
             ttl=300,
         )
-        self.consecutive_failures: int = 0
-        self.cooldown_until: float = 0.0
-        self.db: LocalStoreDB | None = None
-        self._features: set[str] = set()
-        self.probe_state: ProbeState = ProbeState.NOT_PROBED
-        self._probe_event: anyio.Event = anyio.Event()
-        self._signing_keys: dict[str, SecretKey] = {}
-        self.draining: bool = False
         self._started: bool = False
-        self.reconnect_enabled = spec.reconnect
-        self.reconnect_min_delay = spec.reconnect_min_delay
-        self.reconnect_max_delay = spec.reconnect_max_delay
-        self._reconnect_task: asyncio.Task[None] | None = None
-        self._reconnect_trigger = anyio.Event()
-        self._reconnect_delay = self.reconnect_min_delay
-        self._on_reconnect: Callable[[], Awaitable[None]] | None = None
 
-    @property
-    def features(self) -> AbstractSet[str]:
-        """Read-only view of features supported by this store."""
-        return self._features
+    # ── Lifecycle ───────────────────────────────────────────────────
 
-    @property
-    def signing_keys(self) -> Mapping[str, SecretKey]:
-        """Read-only mapping of signing keys configured on this store."""
-        return self._signing_keys
+    @abstractmethod
+    async def start(self, sync_paths: bool = True) -> None:
+        """Explicitly start the store and ensure it is ready for operations."""
+        ...
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close all resources."""
+        ...
 
     async def __aenter__(self) -> Self:
         await self.start()
@@ -154,282 +85,12 @@ class Store(ABC):
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
-    async def start(self, sync_paths: bool = True) -> None:
-        """Explicitly start the store and ensure it is ready for operations.
+    # ── Connection / execution ──────────────────────────────────────
 
-        Subclasses should override this to perform their specific resource
-        setup (like spawning a daemon or connecting SSH) and MUST call
-        await super().start().
-
-        Args:
-            sync_paths: If True, synchronize known paths from the store
-                into the tracker after probing. Set to False for ephemeral
-                CLI connections that don't use path tracking.
-        """
-        if self._started:
-            return
-
-        # 1. Ensure the protocol is bootstrapped and discovery is done.
-        # This also guarantees that backend daemons have initialized their
-        # files (like db.sqlite) by the time probe() returns.
-        await self.probe()
-
-        # 2. Synchronize paths to populate the tracker
-        if sync_paths:
-            await self.sync_paths()
-
-        # 3. Activate monitoring if configured
-        if self.monitor:
-            self.monitor.start()
-
-        self._started = True
-        self._start_reconnect_loop()
-
-    async def sync_paths(self) -> None:
-        """Synchronize known paths from the store into the tracker.
-
-        Daemon-backed stores override this; non-daemon stores (substituters)
-        have no path inventory to sync.
-        """
-
-    def _on_connection_created(self, conn: Connection) -> None:
-        """Update store metadata from a newly created connection."""
-        self.version = conn.version
-        self.nix_version = conn.nix_version
-        self._features = conn.features
-
-        # Check for announced feature_matrix to skip probing
-        if self._feature_matrix is None and any(f.startswith("feature_matrix:") for f in conn.features):
-            fm: dict[str, set[str]] = {}
-            for f in conn.features:
-                if not f.startswith("feature_matrix:"):
-                    continue
-                parts = f.split(":")
-                if len(parts) == 2:  # feature_matrix:$system
-                    system = parts[1]
-                    if system not in fm:
-                        fm[system] = set()
-                elif len(parts) == 3:  # feature_matrix:$system:$feature
-                    system, feat = parts[1], parts[2]
-                    if system not in fm:
-                        fm[system] = set()
-                    fm[system].add(feat)
-
-            if fm:
-                self._feature_matrix = fm
-                self.probe_state = ProbeState.PROBED
-                self._probe_event.set()
-                log.info(
-                    "store_probed_via_handshake",
-                    store_id=self.store_id,
-                    systems=sorted(fm.keys()),
-                    feature_matrix={k: sorted(v) for k, v in fm.items()},
-                )
-
-    async def _create_conn_with_counter(self) -> Connection:
-        """Wrap create_conn to increment the counter."""
-        self.conn_counter += 1
-        return await self.create_conn()
-
-    @property
-    def db_enabled(self) -> bool:
-        """True if this store should use a local SQLite DB for metadata."""
-        return True
-
-    @property
-    def signing_key_names(self) -> list[str]:
-        """List of signing key names configured on this store."""
-        return list(self._signing_keys.keys())
-
-    def get_signing_key(self, name: str) -> SecretKey:
-        """Get a signing key by name."""
-        key = self._signing_keys.get(name)
-        if key is None:
-            raise KeyError(f"Signing key '{name}' not found")
-        return key
-
-    @property
-    def feature_matrix(self) -> dict[str, set[str]]:
-        """Per-system feature mapping: {system: {features}}."""
-        if self._feature_matrix is not None:
-            return self._feature_matrix
-        return {}
-
-    @feature_matrix.setter
-    def feature_matrix(self, value: dict[str, set[str]]) -> None:
-        self._feature_matrix = value
-
-    @property
-    def systems(self) -> set[str] | None:
-        """Set of systems this store supports, derived from feature_matrix keys."""
-        fm = self._feature_matrix
-        if fm is not None:
-            return set(fm.keys()) if fm else None
-        return None
-
-    @systems.setter
-    def systems(self, value: set[str] | None) -> None:
-        """Setting systems updates the feature_matrix keys, preserving features."""
-        if self._feature_matrix is not None:
-            if value is None:
-                self._feature_matrix = {}
-                return
-            old = self._feature_matrix
-            self._feature_matrix = {s: old.get(s, set()) for s in value}
-        elif value is not None:
-            self._feature_matrix = {s: set() for s in value}
-
-    def supports_system(self, system: str) -> bool:
-        """Check if this store supports the given system."""
-        fm = self._feature_matrix
-        if fm is None:
-            return True
-        return system in fm
-
-    def supports_derivation(
-        self,
-        system: str,
-        features: set[str] | None = None,
-    ) -> bool:
-        """Check if this store can build a derivation requiring the given
-        system and set of requiredSystemFeatures.
-
-        Returns True only if the store supports the system AND that system
-        has ALL the required features in the feature matrix.
-        """
-        fm = self._feature_matrix
-        if fm is not None:
-            sys_features = fm.get(system)
-            if sys_features is None:
-                return False
-            if not features:
-                return True
-            return features.issubset(sys_features)
-        if not features:
-            return True
-        # Unprobed store — reject platform-specific features that
-        # could not exist on an arbitrary system (e.g. kvm on Darwin).
-        _platform_specific = frozenset({"kvm", "apple-virt"})
-        return features.isdisjoint(_platform_specific)
-
-    # ── Circuit breaker ──────────────────────────────────────────────
-
-    @property
-    def is_healthy(self) -> bool:
-        """False while in cooldown. Becomes True when cooldown expires (half-open)."""
-        return time.monotonic() >= self.cooldown_until
-
-    def record_success(self) -> None:
-        """Reset circuit breaker on successful operation."""
-        if self.consecutive_failures > 0:
-            log.info(
-                "store_recovered",
-                store_id=self.store_id,
-                consecutive_failures=self.consecutive_failures,
-            )
-        self.consecutive_failures = 0
-        self.cooldown_until = 0.0
-
-    def record_failure(self) -> None:
-        """Record a failure. After threshold, enter cooldown and schedule reconnect."""
-        self.consecutive_failures += 1
-        if self.consecutive_failures >= _CB_THRESHOLD:
-            cooldown = min(
-                30 * 2 ** (self.consecutive_failures - _CB_THRESHOLD),
-                _CB_MAX_COOLDOWN,
-            )
-            self.cooldown_until = time.monotonic() + cooldown
-            log.warning(
-                "store_cooldown",
-                store_id=self.store_id,
-                consecutive_failures=self.consecutive_failures,
-                cooldown=cooldown,
-            )
-        self._schedule_reconnect()
-
-    # ── Reconnect loop ──────────────────────────────────────────────
-
-    def _schedule_reconnect(self) -> None:
-        """Wake the reconnect loop. Safe to call from any context."""
-        if self._reconnect_task is not None and not self._reconnect_task.done():
-            self._reconnect_trigger.set()
-
-    def _start_reconnect_loop(self) -> None:
-        """Start the background reconnect loop if enabled."""
-        if not self.reconnect_enabled:
-            return
-        if self._reconnect_task is None or self._reconnect_task.done():
-            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
-
-    async def _stop_reconnect_loop(self) -> None:
-        """Cancel the reconnect loop."""
-        if self._reconnect_task is not None:
-            self._reconnect_task.cancel()
-            with contextlib.suppress(anyio.get_cancelled_exc_class()):
-                await self._reconnect_task
-            self._reconnect_task = None
-
-    async def _do_reconnect(self) -> None:
-        """Probe and sync — actual reconnection."""
-        await self.pool.close()
-        self.probe_state = ProbeState.NOT_PROBED
-        self._probe_event = anyio.Event()
-        await self.probe()
-        await self.sync_paths()
-
-    async def _reconnect_loop(self) -> None:
-        """Background loop: wait for trigger, backoff, reconnect."""
-        while True:
-            await self._reconnect_trigger.wait()
-            self._reconnect_trigger = anyio.Event()
-
-            while True:
-                delay = self._reconnect_delay
-                await anyio.sleep(delay)
-
-                try:
-                    await self._do_reconnect()
-                except _TRANSPORT_ERRORS:
-                    self._reconnect_delay = min(
-                        self._reconnect_delay * 2,
-                        self.reconnect_max_delay,
-                    )
-                    log.warning(
-                        "store_reconnect_failed",
-                        store_id=self.store_id,
-                        next_retry=self._reconnect_delay,
-                    )
-                    continue
-                except anyio.get_cancelled_exc_class():
-                    raise
-                except Exception:
-                    log.exception(
-                        "store_reconnect_unexpected_error",
-                        store_id=self.store_id,
-                    )
-                    self._reconnect_delay = min(
-                        self._reconnect_delay * 2,
-                        self.reconnect_max_delay,
-                    )
-                    continue
-                else:
-                    self._reconnect_delay = self.reconnect_min_delay
-                    self.record_success()
-                    log.info("store_reconnected", store_id=self.store_id)
-                    if self._on_reconnect:
-                        await self._on_reconnect()
-                    break
-
-    # ── Known paths tracking ────────────────────────────────────────
-
-    def has_path(self, path: StorePath) -> bool:
-        return path in self.tracker.known_paths
-
-    def has_all_paths(self, paths: StorePathSet) -> bool:
-        return paths.issubset(self.tracker.known_paths)
-
-    def count_common_paths(self, paths: StorePathSet) -> int:
-        return len(paths & self.tracker.known_paths)
+    @abstractmethod
+    async def create_conn(self) -> Connection:
+        """Create transport, construct Connection, and connect it."""
+        ...
 
     @overload
     async def call(
@@ -451,6 +112,7 @@ class Store(ABC):
         skip_probe: bool = False,
     ) -> Resp: ...
 
+    @abstractmethod
     async def call(
         self,
         request: OpRequest[Resp] | WireRequest,
@@ -459,37 +121,84 @@ class Store(ABC):
         raise_on_error: bool = False,
         skip_probe: bool = False,
     ) -> Any:
-        """Send an operation to this store. Handles connection lifecycle.
+        """Send an operation to this store."""
+        ...
 
-        Supports both old-style OpRequest and new WireModel-based requests.
-        """
-        if not skip_probe:
-            await self.probe()
+    @overload
+    async def execute(
+        self,
+        request: WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        skip_probe: bool = False,
+    ) -> Any: ...
 
-        # Pick connection pool: build pool for build ops
-        is_build = not request.forward if isinstance(request, WireModel) else request.is_build
+    @overload
+    async def execute(
+        self,
+        request: OpRequest[Resp],
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        skip_probe: bool = False,
+    ) -> Resp: ...
 
-        pool = self.build_conn if is_build else self.transfer_conn
+    @abstractmethod
+    async def execute(
+        self,
+        request: OpRequest[Resp] | WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        skip_probe: bool = False,
+    ) -> Any:
+        """Execute an operation on this store."""
+        ...
 
-        try:
-            async with pool() as conn:
-                return await conn.call(
-                    request,
-                    client=client,
-                    suppress_last=suppress_last,
-                    raise_on_error=raise_on_error,
-                )
-        except _TRANSPORT_ERRORS:
-            self.record_failure()
-            raise
+    @abstractmethod
+    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        """Fetch and parse a .drv file from this store."""
+        ...
 
-    _executors: ClassVar[dict[int, str]] = {}
+    # ── Signing ─────────────────────────────────────────────────────
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-        for name, method in cls.__dict__.items():
-            if callable(method) and hasattr(method, "_pynixd_op"):
-                cls._executors[method._pynixd_op] = name  # type: ignore[union-attr]
+    @property
+    def signing_keys(self) -> Mapping[str, SecretKey]:
+        """Read-only mapping of signing keys configured on this store."""
+        return self._signing_keys
+
+    @property
+    def signing_key_names(self) -> list[str]:
+        """List of signing key names configured on this store."""
+        return list(self._signing_keys.keys())
+
+    def get_signing_key(self, name: str) -> SecretKey:
+        """Get a signing key by name."""
+        key = self._signing_keys.get(name)
+        if key is None:
+            raise KeyError(f"Signing key '{name}' not found")
+        return key
+
+    # ── Path tracking ──────────────────────────────────────────────
+
+    def has_path(self, path: StorePath) -> bool:
+        return path in self.tracker.known_paths
+
+    def has_all_paths(self, paths: StorePathSet) -> bool:
+        return paths.issubset(self.tracker.known_paths)
+
+    def count_common_paths(self, paths: StorePathSet) -> int:
+        return len(paths & self.tracker.known_paths)
+
+    def add_path_info(self, info: ValidPathInfo) -> None:
+        self.path_info_cache[info.path] = info
+
+    def add_path_infos(self, infos: Iterable[ValidPathInfo]) -> None:
+        for info in infos:
+            self.path_info_cache[info.path] = info
+
+    def get_path_info(self, path: StorePath) -> ValidPathInfo | None:
+        return self.path_info_cache.get(path)
+
+    # ── Executor infrastructure ─────────────────────────────────────
 
     @classmethod
     def _register_executor(cls, op: int, name: str) -> None:
@@ -498,14 +207,7 @@ class Store(ABC):
 
     @staticmethod
     def executor(op: int):
-        """Decorator: register a method as the executor for an operation.
-
-        Usage inside class body::
-
-            @executor(op=1)
-            @abstractmethod
-            async def is_valid_path(self, request, ...): ...
-        """
+        """Decorator: register a method as the executor for an operation."""
 
         def decorator(method):
             method._pynixd_op = op
@@ -747,172 +449,16 @@ class Store(ABC):
         """ProbeFeatures (op 109)."""
         raise NotImplementedError
 
-    @overload
-    async def execute(
-        self,
-        request: WireRequest,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-        skip_probe: bool = False,
-    ) -> Any: ...
 
-    @overload
-    async def execute(
-        self,
-        request: OpRequest[Resp],
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-        skip_probe: bool = False,
-    ) -> Resp: ...
+def get_current_system() -> str:
+    """Return the current system identifier (e.g., x86_64-linux)."""
+    import platform
 
-    async def execute(
-        self,
-        request: OpRequest[Resp] | WireRequest,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-        skip_probe: bool = False,
-    ) -> Any:
-        """Execute an operation on this store.
-
-        Delegates logic to the request object, which may use fast-paths
-        (SQLite, memory), schedule builds or fallback to this store's 'call' method.
-        """
-        if not skip_probe:
-            await self.probe()
-
-        # Try executor fast-path via decorator-based dispatch (WireModel only)
-        if isinstance(request, WireModel) and (method_name := self._executors.get(request.op)):
-            fn = getattr(self, method_name)
-            if result := await fn(request, client=client, suppress_last=suppress_last):
-                return result
-
-        # Fallthrough: WireRequest → daemon via call(); OpRequest → legacy execute()
-        if isinstance(request, WireModel):
-            return await self.call(request, client=client, suppress_last=suppress_last)
-
-        return await request.execute(
-            self,
-            client=client,
-            suppress_last=suppress_last,
-        )
-
-    def add_path_info(self, info: ValidPathInfo) -> None:
-        """Add ValidPathInfo to the cache."""
-        self.path_info_cache[info.path] = info
-
-    def add_path_infos(self, infos: Iterable[ValidPathInfo]) -> None:
-        """Add multiple ValidPathInfos to the cache."""
-        for info in infos:
-            self.path_info_cache[info.path] = info
-
-    def get_path_info(self, path: StorePath) -> ValidPathInfo | None:
-        """Get ValidPathInfo from cache if available."""
-        return self.path_info_cache.get(path)
-
-    @abstractmethod
-    async def create_conn(self) -> Connection:
-        """Create transport, construct Connection, and connect it."""
-        ...
-
-    @abstractmethod
-    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
-        """Fetch and parse a .drv file from this store."""
-        ...
-
-    async def probe(self) -> None:
-        """Discover the daemon's protocol version, systems, and system features.
-
-        Concurrent callers block on ``_probe_event`` while the first caller
-        does the work.  The state transitions NOT_PROBED -> PROBING -> PROBED.
-
-        When ``_probe`` is False, build-based probing is skipped — the
-        feature_matrix supplied at construction is used as-is and the
-        store is marked probed after warming the connection pool.
-        """
-        if self.probe_state == ProbeState.PROBED:
-            return
-
-        if self.probe_state == ProbeState.PROBING:
-            await self._probe_event.wait()
-            return
-
-        self.probe_state = ProbeState.PROBING
-
-        # Ensure protocol contact and handshake by acquiring a connection.
-        # This populates self.version, self.features, etc. and ensures
-        # backend resources (daemon/SSH) are fully initialized.
-        async with self.pool.acquire("probe"):
-            pass
-
-        # If _on_connection_created already set us to PROBED (e.g. via handshake), stop.
-        if self.probe_state == ProbeState.PROBED:
-            log.debug("probe_skipped_probed_via_handshake", store_id=self.store_id)
-            return
-
-        if not self._probe:
-            self.probe_state = ProbeState.PROBED
-            self._probe_event.set()
-            return
-
-        await self._probe_daemon()
-
-        self.probe_state = ProbeState.PROBED
-        self._probe_event.set()
-
-    async def _probe_daemon(self) -> None:
-        """Discover systems and per-system features from the daemon.
-
-        DaemonStore overrides this with the actual wire probing.
-        Non-daemon stores (substituters) skip this.
-        """
-
-    @property
-    def pressure(self) -> float | None:
-        """System pressure score (0-100), or None if unavailable."""
-        return None
-
-    @property
-    def meminfo(self) -> MemInfo | None:
-        """System memory info, or None if unavailable."""
-        return None
-
-    @property
-    def cpu_util(self) -> CpuUtil | None:
-        """CPU utilization from cgroupv2, or None if unavailable."""
-        return None
-
-    @property
-    def in_flight(self) -> int:
-        return self.pool.active_connections
-
-    @property
-    def is_lix(self) -> bool:
-        """True if this store is Lix (protocol version 1.35 and version string)."""
-        if self.version != wire.proto(1, 35):
-            return False
-
-        return "lix" in self.nix_version.lower()
-
-    def build_conn(self) -> AbstractAsyncContextManager[Connection]:
-        """Acquire a build connection."""
-        return self.pool.acquire("build")
-
-    def transfer_conn(self) -> AbstractAsyncContextManager[Connection]:
-        """Acquire a transfer connection."""
-        return self.pool.acquire("transfer")
-
-    async def close(self) -> None:
-        """Close all pooled connections, stop background tasks."""
-        await self._stop_reconnect_loop()
-        await self.pool.close()
-
-    @property
-    def pool_stats(self) -> str:
-        """Human-readable pool statistics."""
-        return self.pool.stats
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}(store_id={self.store_id!r}, in_flight={self.in_flight}, pool_stats={self.pool_stats})"
+    machine = platform.machine()
+    system = platform.system().lower()
+    if system == "darwin":
+        system = "darwin"
+    return f"{machine}-{system}"
 
 
 # Populate Store._executors from methods decorated with @executor (__init_subclass__
@@ -920,12 +466,3 @@ class Store(ABC):
 for _name, _method in Store.__dict__.items():
     if callable(_method) and (op := getattr(_method, "_pynixd_op", None)) is not None:
         Store._executors[op] = _name
-
-
-def get_current_system() -> str:
-    """Return the current system identifier (e.g., x86_64-linux)."""
-    machine = platform.machine()
-    system = platform.system().lower()
-    if system == "darwin":
-        system = "darwin"
-    return f"{machine}-{system}"

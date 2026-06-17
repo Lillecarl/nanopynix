@@ -28,6 +28,7 @@ from .exceptions import BackendError, InfrastructureError, ResourceExhaustedErro
 from .operations.base import UnkeyedValidPathInfo
 from .operations.query_valid_paths import QueryValidPathsRequest
 from .stderr import StderrNext
+from .store import LocalDBStore
 from .store.transfer import stream_paths_store_to_store
 from .store_path import StorePath
 
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
         BuildDerivationRequest,
         BuildDerivationResponse,
     )
-    from .store import Store
+    from .store import DaemonStore
     from .types.aliases import StorePathSet
     from .types.ids import BuildId, RequestId, StoreId
 
@@ -66,7 +67,7 @@ class Scheduler:
         self.running = False
 
     @property
-    def stores(self) -> Mapping[StoreId, Store]:
+    def stores(self) -> Mapping[StoreId, DaemonStore]:
         return self.ctx.stores
 
     @property
@@ -96,7 +97,7 @@ class Scheduler:
         """Signal that a scheduling pass is needed."""
         self.trigger_event.set()
 
-    def on_store_added(self, store: Store, dynamic: bool = False) -> None:
+    def on_store_added(self, store: DaemonStore, dynamic: bool = False) -> None:
         """Hook called by Server when a new store is added.
 
         If dynamic=True, the store's feature_matrix is also registered in
@@ -163,7 +164,7 @@ class Scheduler:
         """Add a build to the queue and trigger the scheduler."""
         t0 = time.monotonic()
         hint = None
-        if self.local_store.db:
+        if isinstance(self.local_store, LocalDBStore):
             pname = request.derivation.env.get("pname", None)
             if pname:
                 hint = await self.local_store.db.get_build_stats_hint(
@@ -403,7 +404,7 @@ class Scheduler:
         self,
         build: QueuedBuild,
         build_features: set[str] | None,
-        compatible: list[Store],
+        compatible: list[DaemonStore],
     ) -> None:
         """Permanently fail a build blacklisted by all compatible stores."""
         failed_ids = [s.store_id for s in compatible]
@@ -448,7 +449,7 @@ class Scheduler:
         except (BackendError, OSError, ConnectionError):
             log.exception("validate_known_paths_failed", count=len(unknown))
 
-    async def execute_build(self, build: QueuedBuild, store: Store) -> None:
+    async def execute_build(self, build: QueuedBuild, store: DaemonStore) -> None:
         """Execute build on a store, handling inputs and outputs.
 
         Internal phases:
@@ -496,7 +497,7 @@ class Scheduler:
     async def _prepare_build(
         self,
         build: QueuedBuild,
-        store: Store,
+        store: DaemonStore,
         conn: Connection,  # build connection (opaque to this method)
     ) -> None:
         """Register CA realisations, resolve deferred derivations, stream inputs.
@@ -529,7 +530,7 @@ class Scheduler:
     async def _execute(
         self,
         build: QueuedBuild,
-        store: Store,
+        store: DaemonStore,
         conn: Connection,
     ) -> BuildDerivationResponse:
         """Call the backend daemon and return the response.
@@ -559,7 +560,7 @@ class Scheduler:
     async def _collect_outputs(
         self,
         build: QueuedBuild,
-        store: Store,
+        store: DaemonStore,
         conn: Connection,  # build connection
         resp: BuildDerivationResponse,
     ) -> None:
@@ -599,7 +600,7 @@ class Scheduler:
         )
 
         # Record build statistics
-        if self.local_store.db:
+        if isinstance(self.local_store, LocalDBStore):
             pname = build.request.derivation.env.get("pname")
             if pname:
                 started_at = build.started_at

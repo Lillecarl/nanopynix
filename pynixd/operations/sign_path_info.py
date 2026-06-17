@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false
 """SignPathInfo operation - sign a ValidPathInfo with configured secret keys.
 This is a custom operation."""
 

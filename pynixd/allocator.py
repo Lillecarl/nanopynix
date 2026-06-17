@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     from .build_queue import QueuedBuild
     from .config import PynixdSettings
-    from .store import Store
+    from .store import DaemonStore
     from .types.ids import StoreId
 
 log = structlog.get_logger(__name__)
@@ -26,7 +26,7 @@ TINY_BUILD_THRESHOLD_MS = 2500
 class RankedStore:
     store_id: StoreId
     score: float
-    store: Store
+    store: DaemonStore
 
 
 class RankedStores:
@@ -53,7 +53,7 @@ class StoreRanker(ABC):
     def rank_stores(
         self,
         build: QueuedBuild,
-        stores: list[Store],
+        stores: list[DaemonStore],
         assigned_this_pass: Mapping[StoreId, int],
         override_in_flight: Mapping[StoreId, int] | None = None,
     ) -> RankedStores:
@@ -70,7 +70,7 @@ class TelemetryStoreRanker(StoreRanker):
     def rank_stores(
         self,
         build: QueuedBuild,
-        stores: list[Store],
+        stores: list[DaemonStore],
         assigned_this_pass: Mapping[StoreId, int],
         override_in_flight: Mapping[StoreId, int] | None = None,
     ) -> RankedStores:
@@ -130,8 +130,8 @@ class BuildAllocator:
 
     def __init__(
         self,
-        stores: Mapping[StoreId, Store],
-        local_store: Store,
+        stores: Mapping[StoreId, DaemonStore],
+        local_store: DaemonStore,
         ranker: StoreRanker,
     ) -> None:
         self.stores = stores

@@ -16,7 +16,7 @@ import structlog
 from .. import wire
 from ..connection import Connection
 from ..wire import SSHNixReader, SSHNixWriter
-from .base import ProbeState
+from .daemon import ProbeState
 from .ssh import SSHStore
 
 if TYPE_CHECKING:

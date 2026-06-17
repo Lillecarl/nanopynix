@@ -55,16 +55,17 @@ class DrvOutputSubstitutionGoal(Goal):
             if resp.realisations:
                 r = resp.realisations[0]
                 if r.out_path:
-                    self.output_info = r.out_path.with_store_prefix()
+                    out_path = r.out_path.with_store_prefix()
+                    self.output_info = out_path
                     log.info(
                         "drv_output_sub_found_local",
                         drv_output=str(self.drv_output),
-                        path=self.output_info,
+                        path=out_path,
                     )
                     self.result = GoalResult(
                         path=self._fake_dp_empty(),
                         result=BuildResult(status=BuildResultStatus.SUBSTITUTED),
-                        produced_paths={self.output_info},
+                        produced_paths={out_path},
                     )
                     return
         except Exception:
@@ -79,16 +80,17 @@ class DrvOutputSubstitutionGoal(Goal):
         if remote:
             r = next(iter(remote.values()))
             if r.out_path:
-                self.output_info = r.out_path.with_store_prefix()
+                out_path = r.out_path.with_store_prefix()
+                self.output_info = out_path
                 log.info(
                     "drv_output_sub_found_remote",
                     drv_output=str(self.drv_output),
-                    path=self.output_info,
+                    path=out_path,
                 )
                 self.result = GoalResult(
                     path=self._fake_dp_empty(),
                     result=BuildResult(status=BuildResultStatus.SUBSTITUTED),
-                    produced_paths={self.output_info},
+                    produced_paths={out_path},
                 )
                 return
 

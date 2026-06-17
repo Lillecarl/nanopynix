@@ -31,7 +31,7 @@ from ..store_path import StorePath  # noqa: TC001 — used in dataclass fields
 log = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
-    from ..store.base import Store
+    from ..store.daemon import DaemonStore
     from ..substitution import SubstitutionManager
     from .manager import GoalManager
 
@@ -53,7 +53,7 @@ class GoalContext:
     def __init__(
         self,
         goal_manager: GoalManager,
-        store: Store,
+        store: DaemonStore,
         substitution_manager: SubstitutionManager,
         end_goal: str = EndGoal.BUILD,
         scheduler: object | None = None,
@@ -128,9 +128,14 @@ class Goal(ABC):
 
     async def execute_children(self) -> None:
         """Execute all children in parallel (dedup via ``run()``)."""
-        async with TaskGroup() as tg:
-            for child in self.children:
-                tg.create_task(child.run())
+        try:
+            async with TaskGroup() as tg:
+                for child in self.children:
+                    tg.create_task(child.run())
+        except* Exception as eg:
+            for exc in eg.exceptions:
+                log.exception("goal_child_crashed", child_type=type(exc).__name__, error=str(exc))
+            raise
 
     def collect_results(self) -> list[GoalResult | None]:
         """Depth-first collection of all results in the subtree."""

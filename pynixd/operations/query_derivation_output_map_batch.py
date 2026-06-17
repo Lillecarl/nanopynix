@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """QueryDerivationOutputMapBatch extension (op 106, pynixd-internal).
 
 Batch reads derivation output maps from the local SQLite DerivationOutputs table

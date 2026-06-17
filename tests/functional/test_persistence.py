@@ -15,7 +15,7 @@ from pynixd.operations.query_valid_paths import (
     QueryValidPathsRequest,
     QueryValidPathsResponse,
 )
-from pynixd.store import LocalSocketStore
+from pynixd.store import LocalDBStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
 from tests.conftest import (
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
-class NoQueryAllValidPathsStore(LocalSocketStore):
+class NoQueryAllValidPathsStore(LocalDBStore):
     """A store that fails QueryAllValidPaths to simulate nixbuild.net."""
 
     async def call(
@@ -69,10 +69,10 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
     rmtree_robust(pynixd_remote_path)
 
     # 1. Start server and add a path to the remote store
-    pynixd_local = LocalSocketStore(
+    pynixd_local = LocalDBStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
-    pynixd_remote = LocalSocketStore(
+    pynixd_remote = LocalDBStore(
         make_test_spec(store_id="remote-stub", store_path=pynixd_remote_path, no_probe=True),
     )
 
@@ -105,7 +105,7 @@ async def test_known_paths_persistence(tmp_path: Path) -> None:
     # 2. Restart server with a store that FAILS QueryAllValidPaths
     # It should load the path from the DB and VERIFY it via QueryValidPaths.
 
-    pynixd_local_2 = LocalSocketStore(
+    pynixd_local_2 = LocalDBStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     # Use our stub that fails QueryAllValidPaths
@@ -134,10 +134,10 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
     rmtree_robust(pynixd_remote_path)
 
     # 1. Start server and add two paths to the remote store
-    pynixd_local = LocalSocketStore(
+    pynixd_local = LocalDBStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
-    pynixd_remote = LocalSocketStore(
+    pynixd_remote = LocalDBStore(
         make_test_spec(store_id="remote", store_path=pynixd_remote_path, no_probe=True),
     )
 
@@ -173,7 +173,7 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
                 skip_probe=skip_probe,
             )
 
-    pynixd_local_2 = LocalSocketStore(
+    pynixd_local_2 = LocalDBStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     pynixd_remote_2 = PartialVerifyStore(
@@ -210,10 +210,10 @@ async def test_is_valid_path_isolation(tmp_path: Path) -> None:
     rmtree_robust(pynixd_local_path)
     rmtree_robust(pynixd_remote_path)
 
-    pynixd_local = LocalSocketStore(
+    pynixd_local = LocalDBStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
-    pynixd_remote = LocalSocketStore(
+    pynixd_remote = LocalDBStore(
         make_test_spec(store_id="remote", store_path=pynixd_remote_path, no_probe=True),
     )
 

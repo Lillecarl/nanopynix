@@ -14,7 +14,6 @@ from environs import env
 from pynixd import Server
 from pynixd.config import LocalSocketStoreSpec
 from pynixd.instance import NixImplementation
-from pynixd.store import LocalSocketStore
 from pynixd.store.local_db import LocalDBStore
 from pynixd.types.ids import StoreId
 from tests._conftest.constants import (
@@ -174,7 +173,7 @@ async def pynixd_server(
     local_bin = LIX_BIN if request.config.getoption("local_bin") == "lix" else NIX_BIN
     builder_bin = LIX_BIN if request.config.getoption("builder_bin") == "lix" else NIX_BIN
 
-    local_store = LocalSocketStore(
+    local_store = LocalDBStore(
         make_test_spec(
             store_id="local",
             store_path=local_path,
@@ -182,7 +181,7 @@ async def pynixd_server(
             nix_bin=str(local_bin),
         ),
     )
-    builder_store = LocalSocketStore(
+    builder_store = LocalDBStore(
         make_test_spec(
             store_id="builder",
             store_path=builder_path,

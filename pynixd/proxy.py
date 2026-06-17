@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from .context import PynixdContext
     from .scheduler import Scheduler
     from .serde.wire_ops import WireRequest
-    from .store import Store
+    from .store import DaemonStore, LocalStore
     from .wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
@@ -72,8 +72,8 @@ class DaemonProxy:
         self._op_timing: dict[int, tuple[int, float]] = {}
 
     @property
-    def local_store(self) -> Store:
-        return self.ctx._stores[StoreId("local")]
+    def local_store(self) -> LocalStore:
+        return self.ctx.local_store
 
     @property
     def scheduler(self) -> Scheduler | None:
@@ -96,7 +96,7 @@ class DaemonProxy:
         return self.scheduler.trigger if self.scheduler else None
 
     @property
-    def stores(self) -> Mapping[StoreId, Store]:
+    def stores(self) -> Mapping[StoreId, DaemonStore]:
         return self.ctx.stores
 
     @property
@@ -249,7 +249,7 @@ class DaemonProxy:
         local_resp: Resp | None = None
         try:
             local_resp = await self.local_store.execute(request, client=self.client)
-            if not (request.is_extension and local_resp.is_not_found):
+            if local_resp is not None and not (request.is_extension and local_resp.is_not_found):
                 return local_resp
         except OpNotImplementedError:
             if not request.is_extension:

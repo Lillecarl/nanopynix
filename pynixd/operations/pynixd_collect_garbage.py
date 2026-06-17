@@ -28,6 +28,7 @@ from .base import OpRequest, OpResponse
 if TYPE_CHECKING:
     from ..context import PynixdContext
     from ..store.base import Store as Store
+    from ..store.daemon import DaemonStore as DaemonStore
     from ..types import RequestContext as RequestContext
     from ..types.aliases import StorePathSet
     from ..types.context import WriteContext
@@ -135,7 +136,7 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
                 stale_cache[age] = result or set()
             return stale_cache[age]
 
-        store_gc_targets: list[tuple[Store, StorePathSet]] = []
+        store_gc_targets: list[tuple[DaemonStore, StorePathSet]] = []
 
         for store in pynixd_ctx.stores.values():
             if not store.gc_enabled:
@@ -157,7 +158,7 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
 
         all_paths: set[StorePath] = set()
         total_bytes = 0
-        store_tasks: list[tuple[Store, asyncio.Task[CollectGarbageResponse | None]]] = []
+        store_tasks: list[tuple[DaemonStore, asyncio.Task[CollectGarbageResponse | None]]] = []
 
         try:
             async with asyncio.TaskGroup() as tg:
@@ -189,7 +190,7 @@ class PynixdCollectGarbageRequest(OpRequest[PynixdCollectGarbageResponse]):
     @classmethod
     async def _gc_store(
         cls,
-        store: Store,
+        store: DaemonStore,
         paths: StorePathSet,
         *,
         logs: OperationLogs,

@@ -16,7 +16,7 @@ from pynixd import wire
 from pynixd.config import LocalSocketStoreSpec
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
-from pynixd.store import LocalSocketStore, Store
+from pynixd.store import DaemonStore, LocalSocketStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
 from tests.conftest import CLIENT_BIN, rmtree_robust, run_subproc
@@ -40,7 +40,7 @@ _STORE_TYPES = ["local-socket"]
 _CONCURRENCY_LEVELS = [1, 4, 8]
 
 
-async def _make_store(store_type: str) -> Store:
+async def _make_store(store_type: str) -> DaemonStore:
     """Create a store that reads from the system store."""
     if store_type == "local-socket":
         return LocalSocketStore(LocalSocketStoreSpec(store_id=StoreId("local-socket")))
@@ -48,7 +48,7 @@ async def _make_store(store_type: str) -> Store:
 
 
 @pytest.fixture(params=_STORE_TYPES)
-async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
+async def bench_store(request: pytest.FixtureRequest) -> AsyncIterator[DaemonStore]:
     """Parametrized store fixture — yields one store per type."""
     s = await _make_store(request.param)
     yield s
@@ -73,13 +73,13 @@ def _set_chunk_size(kb: int) -> int:
     return old
 
 
-def _store_label(s: Store) -> str:
+def _store_label(s: DaemonStore) -> str:
     if isinstance(s, LocalSocketStore):
         return "local"
     return "unknown"
 
 
-async def _pick_a_path(s: Store, need_no_refs: bool = False) -> StorePath:
+async def _pick_a_path(s: DaemonStore, need_no_refs: bool = False) -> StorePath:
     resp = await s.execute(QueryAllValidPathsRequest())
     paths = list(resp.paths)
     # Prefer something sizeable but not insane
@@ -95,7 +95,7 @@ async def _pick_a_path(s: Store, need_no_refs: bool = False) -> StorePath:
     return paths[0]
 
 
-async def _pick_small_paths(s: Store, limit: int = 100) -> list[tuple[StorePath, ValidPathInfo]]:
+async def _pick_small_paths(s: DaemonStore, limit: int = 100) -> list[tuple[StorePath, ValidPathInfo]]:
     """Pick small paths by using .drv files directly (always small, no per-path queries)."""
     resp = await s.execute(QueryAllValidPathsRequest())
     picked = []
@@ -124,7 +124,7 @@ async def _create_big_path(size_mb: int) -> StorePath:
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
-async def test_bench_nar_streaming_latency(bench_store: Store, dst_store: Store, chunk_kb: int):
+async def test_bench_nar_streaming_latency(bench_store: DaemonStore, dst_store: DaemonStore, chunk_kb: int):
     """Benchmark: stream a single ~1MB path via stream_paths_store_to_store."""
     store_path = await _pick_a_path(bench_store)
     info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
@@ -151,7 +151,7 @@ async def test_bench_nar_streaming_latency(bench_store: Store, dst_store: Store,
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
-async def test_bench_nar_streaming_throughput(bench_store: Store, dst_store: Store, chunk_kb: int):
+async def test_bench_nar_streaming_throughput(bench_store: DaemonStore, dst_store: DaemonStore, chunk_kb: int):
     """Benchmark: stream a 100MB NAR via stream_paths_store_to_store at various chunk sizes."""
     store_path = await _create_big_path(100)
     info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
@@ -179,7 +179,7 @@ async def test_bench_nar_streaming_throughput(bench_store: Store, dst_store: Sto
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
-async def test_bench_copy_paths_latency(bench_store: Store, dst_store: Store, chunk_kb: int):
+async def test_bench_copy_paths_latency(bench_store: DaemonStore, dst_store: DaemonStore, chunk_kb: int):
     """Benchmark: stream a single ~1MB path via copy_paths."""
     store_path = await _pick_a_path(bench_store, need_no_refs=True)
     info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
@@ -206,7 +206,7 @@ async def test_bench_copy_paths_latency(bench_store: Store, dst_store: Store, ch
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
-async def test_bench_copy_paths_throughput(bench_store: Store, dst_store: Store, chunk_kb: int):
+async def test_bench_copy_paths_throughput(bench_store: DaemonStore, dst_store: DaemonStore, chunk_kb: int):
     """Benchmark: stream a 100MB NAR via copy_paths at various chunk sizes."""
     store_path = await _create_big_path(100)
     info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
@@ -234,7 +234,7 @@ async def test_bench_copy_paths_throughput(bench_store: Store, dst_store: Store,
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("chunk_kb", _CHUNK_SIZES_KB)
-async def test_bench_copy_paths_batch(bench_store: Store, dst_store: Store, chunk_kb: int):
+async def test_bench_copy_paths_batch(bench_store: DaemonStore, dst_store: DaemonStore, chunk_kb: int):
     """Benchmark: stream 100 small paths (.drv files) in a single batch.
 
     Tests the efficiency of AddMultipleToStore for small files.

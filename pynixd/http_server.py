@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false
 """Unified HTTP server for pynixd.
 
 Provides:
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from .local_store_db import LocalStoreDB
-    from .store import Store
+    from .store import LocalStore
     from .wire import NixWriter
 
 log = structlog.get_logger(__name__)
@@ -58,7 +59,7 @@ class PynixdHttpServer:
 
     def __init__(
         self,
-        local_store: Store,
+        local_store: LocalStore,
         *,
         enable_cache: bool = True,
         enable_metrics: bool = True,

@@ -21,7 +21,7 @@ from .probe_systems import _send_probe
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..store import Store
+    from ..store import DaemonStore
     from ..types.context import ReadContext, WriteContext
 
 log = structlog.get_logger(__name__)
@@ -63,7 +63,7 @@ class ProbeFeaturesRequest(OpRequest[ProbeFeaturesResponse]):
 
     async def execute(
         self,
-        store: Store,
+        store: DaemonStore,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> ProbeFeaturesResponse:

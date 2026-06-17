@@ -65,7 +65,7 @@ logging.getLogger("pynixd.types.BuildResult").setLevel(logging.WARNING)
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..store import Store
+    from ..store import DaemonStore
     from ..types import RequestContext
 
 log = structlog.get_logger(__name__)
@@ -117,7 +117,7 @@ class OpRequest[Resp: OpResponse](ABC):
 
     async def execute(
         self,
-        store: Store,
+        store: DaemonStore,
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> Resp:

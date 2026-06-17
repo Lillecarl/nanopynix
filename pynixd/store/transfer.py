@@ -20,15 +20,15 @@ if TYPE_CHECKING:
     import anyio
 
     from ..serde.valid_path_info import ValidPathInfo
-    from .base import Store
+    from .daemon import DaemonStore
 
 
 log = structlog.get_logger(__name__)
 
 
 async def stream_paths_store_to_store(
-    src: Store,
-    dst: Store,
+    src: DaemonStore,
+    dst: DaemonStore,
     paths: Iterable[RealStorePath],
     cancel_event: anyio.Event | None = None,
 ) -> None:

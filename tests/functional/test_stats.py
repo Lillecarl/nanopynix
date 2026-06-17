@@ -37,7 +37,7 @@ from pynixd.operations.query_closure_with_info import (
     QueryClosureWithInfoResponse,
 )
 from pynixd.psi import CpuUtil
-from pynixd.store import LocalSocketStore
+from pynixd.store import LocalDBStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import BuildId, StoreId
 from tests.conftest import STORE_PREFIX, make_test_spec, rmtree_robust
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 
-class StatsTestStore(LocalSocketStore):
+class StatsTestStore(LocalDBStore):
     """A store that simulates builds with specific durations."""
 
     def __init__(self, *args, **kwargs):
@@ -149,7 +149,7 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
     pynixd_local_path.mkdir(parents=True, exist_ok=True)
     pynixd_remote_path.mkdir(parents=True, exist_ok=True)
 
-    pynixd_local = LocalSocketStore(
+    pynixd_local = LocalDBStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     pynixd_remote = StatsTestStore(
@@ -216,7 +216,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
     pynixd_local_path.mkdir(parents=True, exist_ok=True)
     pynixd_remote_path.mkdir(parents=True, exist_ok=True)
 
-    pynixd_local = LocalSocketStore(
+    pynixd_local = LocalDBStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     pynixd_remote = StatsTestStore(
@@ -297,7 +297,7 @@ async def test_build_stats_hint_by_pname(tmp_path: Path) -> None:
     conn.execute("CREATE TABLE ValidPaths (id INTEGER PRIMARY KEY, path TEXT UNIQUE)")
     conn.close()
 
-    pynixd_local = LocalSocketStore(
+    pynixd_local = LocalDBStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     db = await LocalStoreDB.open(pynixd_local_path)
@@ -367,7 +367,7 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
     rmtree_robust(pynixd_busy_path)
     rmtree_robust(pynixd_free_path)
 
-    pynixd_local = LocalSocketStore(
+    pynixd_local = LocalDBStore(
         make_test_spec(store_id="local", store_path=pynixd_local_path, no_probe=True),
     )
     pynixd_busy = CpuUtilTestStore(

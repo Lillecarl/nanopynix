@@ -17,7 +17,8 @@ if TYPE_CHECKING:
     from .local_store_db import LocalStoreDB
     from .path_tracker import PathTracker
     from .scheduler import Scheduler
-    from .store.base import Store
+    from .store.daemon import DaemonStore
+    from .store.local_daemon import LocalStore
     from .substitution import SubstitutionManager
 
 
@@ -30,7 +31,7 @@ class PynixdContext:
     """
 
     settings: PynixdSettings
-    _stores: dict[StoreId, Store]
+    _stores: dict[StoreId, DaemonStore]
     path_tracker: PathTracker
     goal_manager: GoalManager = field(default_factory=GoalManager)
     substitution_manager: SubstitutionManager | None = None
@@ -38,10 +39,10 @@ class PynixdContext:
     scheduler: Scheduler | None = None
 
     @property
-    def local_store(self) -> Store:
-        return self._stores[StoreId("local")]
+    def local_store(self) -> LocalStore:
+        return self._stores[StoreId("local")]  # type: ignore[return-value]
 
     @property
-    def stores(self) -> Mapping[StoreId, Store]:
+    def stores(self) -> Mapping[StoreId, DaemonStore]:
         """Read-only view of all connected stores (including local)."""
         return self._stores

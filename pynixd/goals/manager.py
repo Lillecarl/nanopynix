@@ -18,7 +18,7 @@ from ..types.build import BuildResultStatus, KeyedBuildResult
 if TYPE_CHECKING:
     from ..drv_parser import DrvOutput
     from ..operations.query_missing import QueryMissingResponse
-    from ..store.base import Store
+    from ..store.daemon import DaemonStore
     from ..substitution import SubstitutionManager
     from .goal import Goal, GoalContext
 
@@ -138,7 +138,7 @@ class GoalManager:
     async def build_paths(
         self,
         derived_paths: set[DerivedPath],
-        store: Store,
+        store: DaemonStore,
         substitution_manager: SubstitutionManager,
         scheduler: object | None = None,
     ) -> list[KeyedBuildResult]:
@@ -166,7 +166,7 @@ class GoalManager:
     async def query_paths(
         self,
         derived_paths: set[DerivedPath],
-        store: Store,
+        store: DaemonStore,
         substitution_manager: SubstitutionManager,
         scheduler: object | None = None,
     ) -> QueryMissingResponse:
