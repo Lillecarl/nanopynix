@@ -662,7 +662,34 @@ class DaemonStore(Store):
         return DerivationOutputMapBatchResponse(outputs=outputs)
 
     async def sign_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        return await self.call(request, client=client, suppress_last=suppress_last)
+        if "SignPathInfo" in self.features:
+            return await self.call(request, client=client, suppress_last=suppress_last)
+
+        # Decompose: sign locally with pynixd keys, then call AddSignatures on daemon
+        from ..serde.add_signatures import AddSignaturesRequest
+        from ..serde.sign_path_info import SignPathInfoResponse
+        from ..serde.signature import Signature
+        from ..signing import fingerprint
+
+        info = request.info
+        refs = {str(r) for r in info.info.references}
+        fp = fingerprint(
+            store_path=str(info.path),
+            nar_hash=str(info.info.nar_hash),
+            nar_size=info.info.nar_size,
+            references=refs,
+        )
+        for key in self._signing_keys.values():
+            sig_str = key.sign_fingerprint(fp)
+            name, _, sig_val = sig_str.partition(":")
+            info.info.sigs.add(Signature(name=name, signature=sig_val))
+
+        await self.call(
+            AddSignaturesRequest(path=info.path, sigs=info.info.sigs),
+            client=client,
+            suppress_last=suppress_last,
+        )
+        return SignPathInfoResponse(info=info)
 
     async def probe_systems(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         return await self.call(request, client=client, suppress_last=suppress_last)
