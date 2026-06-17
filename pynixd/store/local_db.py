@@ -51,7 +51,7 @@ class LocalDBStore(LocalStore):
             return IsValidPathResponse(valid=True)
 
         if self.db is not None:
-            from pynixd.operations.is_valid_path import IS_VALID_PATH
+            from .queries import IS_VALID_PATH
             from pynixd.serde import IsValidPathResponse
 
             async with self.db.execute(IS_VALID_PATH, (path_str,)) as cursor:
@@ -69,7 +69,7 @@ class LocalDBStore(LocalStore):
             return None  # cache hit — fall through to old path until cache stores serde types
 
         if self.db is not None:
-            from pynixd.operations.query_path_info import (
+            from .queries import (
                 QUERY_PATH_INFO,
                 QUERY_REFERENCES,
             )
@@ -115,7 +115,7 @@ class LocalDBStore(LocalStore):
 
     async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if self.db is not None:
-            from pynixd.operations.query_all_valid_paths import QUERY_ALL_VALID_PATHS
+            from .queries import QUERY_ALL_VALID_PATHS
             from pynixd.serde import QueryAllValidPathsResponse
             from pynixd.serde import StorePath as SerdeStorePath
 
@@ -133,7 +133,7 @@ class LocalDBStore(LocalStore):
         if self.db is not None:
             import json
 
-            from pynixd.operations.query_valid_paths import QUERY_VALID_PATHS
+            from .queries import QUERY_VALID_PATHS
             from pynixd.serde import QueryValidPathsResponse
             from pynixd.serde import StorePath as SerdeStorePath
 
@@ -151,7 +151,7 @@ class LocalDBStore(LocalStore):
 
     async def query_path_from_hash_part(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if self.db is not None:
-            from pynixd.operations.query_path_from_hash_part import QUERY_PATH_FROM_HASH_PART
+            from .queries import QUERY_PATH_FROM_HASH_PART
             from pynixd.serde import QueryPathFromHashPartResponse
             from pynixd.serde import StorePath as SerdeStorePath
             from pynixd.store_path import StorePath as RealStorePath
@@ -171,7 +171,7 @@ class LocalDBStore(LocalStore):
         if self.db is not None:
             import json
 
-            from pynixd.operations.query_closure import QUERY_CLOSURE
+            from .queries import QUERY_CLOSURE
             from pynixd.serde import QueryClosureResponse
             from pynixd.serde import StorePath as SerdeStorePath
             from pynixd.store_path import StorePath as RealStorePath
@@ -197,7 +197,7 @@ class LocalDBStore(LocalStore):
         if self.db is not None:
             import json
 
-            from pynixd.operations.query_closure_with_info import QUERY_CLOSURE_WITH_INFO
+            from .queries import QUERY_CLOSURE_WITH_INFO
             from pynixd.serde import QueryClosureWithInfoResponse
             from pynixd.serde import StorePath as SerdeStorePath
             from pynixd.serde.content_address import ContentAddress
@@ -272,7 +272,7 @@ class LocalDBStore(LocalStore):
         if self.db is not None:
             import json
 
-            from pynixd.operations.query_path_infos import (
+            from .queries import (
                 QUERY_PATH_INFOS_BATCH,
                 QUERY_REFERENCES_BATCH,
             )
@@ -337,7 +337,7 @@ class LocalDBStore(LocalStore):
         if self.db is not None:
             import json
 
-            from pynixd.operations.query_derivation_output_map_batch import (
+            from .queries import (
                 QUERY_DERIVATION_OUTPUT_MAP_BATCH,
             )
             from pynixd.serde import StorePath as SerdeStorePath
