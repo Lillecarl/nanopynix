@@ -43,7 +43,6 @@ async def stream_paths_store_to_store(
 
     # Fast-path for MockStore (used in tests)
     if type(src).__name__ == "MockStore" and type(dst).__name__ == "MockStore":
-        dst.tracker.add_known_paths({RealStorePath(str(p)) for p in paths_set})  # pyright: ignore[reportUnhashable]
         log.debug(
             "mock_path_transfer_complete",
             src=src.store_id,
@@ -61,8 +60,12 @@ async def stream_paths_store_to_store(
         return
 
     # 2. Filter out paths already in destination
+    from ..serde.query_valid_paths import QueryValidPathsRequest as SerdeQueryValidPathsRequest
+
+    check = await dst.execute(SerdeQueryValidPathsRequest(paths=paths_set, substitute=0))
+    check_paths_set = {RealStorePath(str(p)) for p in check.paths}
     to_transfer: list[ValidPathInfo] = [
-        info for info in closure_resp.infos if RealStorePath(str(info.path)) not in dst.tracker.known_paths
+        info for info in closure_resp.infos if RealStorePath(str(info.path)) not in check_paths_set
     ]
     if not to_transfer:
         return
@@ -136,4 +139,3 @@ async def stream_paths_store_to_store(
         old_infos.append(OldValidPathInfo(path=old_path, **vars(old_unkeyed)))
 
     dst.add_path_infos(old_infos)
-    dst.tracker.add_known_paths({RealStorePath(str(i.path)) for i in to_transfer})

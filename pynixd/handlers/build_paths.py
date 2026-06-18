@@ -9,7 +9,6 @@ import structlog
 from ..operations.build_paths import (
     BuildPathsRequest,
     BuildPathsResponse,
-    BuildPathsWithResultsResponse,
 )
 from ..types.context import ReadContext
 from ._base import Handler
@@ -35,15 +34,6 @@ class BuildPathsHandler(Handler):
             logger.debug("handle_local_mode_fallback")
             result = await ctx.proxy.local_store.execute(self_req, client=ctx.proxy.client)
 
-            # Track newly built paths
-            if isinstance(result, BuildPathsWithResultsResponse):
-                for kr in result.results:
-                    if kr.result.status == 0:
-                        for output in kr.result.built_outputs.values():
-                            ctx.proxy.local_store.tracker.add_known_path(
-                                output.out_path.with_store_prefix(),
-                            )
-
             logger.debug("responded_op")
             return result
 
@@ -54,15 +44,6 @@ class BuildPathsHandler(Handler):
             ctx.proxy.substitution_manager,
             scheduler=ctx.proxy.scheduler,
         )
-
-        # Register successful output paths in the tracker (so subsequent
-        # IsValidPathRequest fast-paths can find them without hitting the daemon).
-        for kr in keyed_results:
-            if kr.result.status.is_success:
-                for output in kr.result.built_outputs.values():
-                    ctx.proxy.local_store.tracker.add_known_path(
-                        output.out_path.with_store_prefix(),
-                    )
 
         for kr in keyed_results:
             if kr.result.status.is_failure:

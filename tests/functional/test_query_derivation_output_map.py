@@ -2,7 +2,6 @@
 Tests for QueryDerivationOutputMap (op 41).
 
 This operation queries the output -> path mapping for a derivation.
-It also updates the path tracker when resolved paths are found.
 """
 
 from __future__ import annotations

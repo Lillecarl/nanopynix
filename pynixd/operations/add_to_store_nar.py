@@ -99,10 +99,8 @@ class AddToStoreNarRequest(OpRequest[AddToStoreNarResponse]):
         """Override handle because this is a streaming operation."""
         structlog.contextvars.bind_contextvars(operation=type(self).__name__)
         async with ctx.proxy.local_store.transfer_conn() as conn:
-            path = await self.forward(ctx.proxy.r, conn.w)
-            resp = await AddToStoreNarResponse.deserialize(ReadContext.from_conn(conn))
-            ctx.proxy.local_store.tracker.add_known_path(path)
-        return resp
+            await self.forward(ctx.proxy.r, conn.w)
+            return await AddToStoreNarResponse.deserialize(ReadContext.from_conn(conn))
 
     async def forward(self, src: NixReader, dst: NixWriter) -> StorePath:
         """Forward request prefix and stream framed NAR data. Returns store path."""

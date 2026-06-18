@@ -23,7 +23,7 @@ logger = structlog.get_logger(__name__)
 
 
 def _serde_to_old_path_info(info: SerdeValidPathInfo) -> OldValidPathInfo:
-    """Convert serde ValidPathInfo to legacy ValidPathInfo for tracker/cache."""
+    """Convert serde ValidPathInfo to legacy ValidPathInfo for cache."""
     return OldValidPathInfo(
         path=OldStorePath(str(info.path)),
         deriver=OldStorePath(str(info.info.deriver)) if info.info.deriver else OldStorePath(""),
@@ -62,14 +62,12 @@ class AddToStoreHandler(Handler):
                 ReadContext.from_conn(conn),
             )
 
-        # 5. Sign path info and update tracker (outside conn so we don't re-enter the pool)
+        # 5. Sign path info and update cache (outside conn so we don't re-enter the pool)
         if resp.info is not None:
             sign_req = SerdeSignPathInfoRequest(info=resp.info)
             sign_resp = await ctx.proxy.local_store.execute(sign_req)
             resp.info = sign_resp.info
 
-            old_path = OldStorePath(str(resp.info.path))
-            ctx.proxy.local_store.tracker.add_known_path(old_path)
             ctx.proxy.local_store.add_path_info(_serde_to_old_path_info(resp.info))
 
         return resp

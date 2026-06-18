@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from ..local_store_db import LocalStoreDB
-from ..path_tracker import PathTracker
 from .local_daemon import LocalStore
 
 
@@ -23,8 +22,6 @@ class LocalDBStore(LocalStore):
     async def start(self, sync_paths: bool = True) -> None:
         await self.ensure_daemon()
         self.db = await LocalStoreDB.open(self.store_path or Path("/"))
-        path_tracker = PathTracker(db=self.db)
-        self.tracker = path_tracker.create_instance(store_id=self.store_id)
         await super().start(sync_paths=sync_paths)
 
     async def close(self) -> None:
@@ -35,13 +32,6 @@ class LocalDBStore(LocalStore):
 
     async def is_valid_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         path_str = str(request.path)
-        from pynixd.store_path import StorePath as RealStorePath
-
-        sp = RealStorePath(path_str)
-        if self.tracker.has_path(sp):
-            from pynixd.serde import IsValidPathResponse
-
-            return IsValidPathResponse(valid=True)
 
         from pynixd.serde import IsValidPathResponse
 
@@ -50,7 +40,6 @@ class LocalDBStore(LocalStore):
         async with self.db.execute(IS_VALID_PATH, (path_str,)) as cursor:
             row = await cursor.fetchone()
         if row is not None:
-            self.tracker.add_known_path(sp)
             return IsValidPathResponse(valid=True)
 
         return IsValidPathResponse(valid=False)
@@ -58,7 +47,6 @@ class LocalDBStore(LocalStore):
     async def query_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         cached = self.get_path_info(request.path)
         if cached is not None:
-            self.tracker.add_known_path(request.path)
             return None  # cache hit — fall through to old path until cache stores serde types
 
         from pynixd.serde import QueryPathInfoResponse
@@ -68,7 +56,6 @@ class LocalDBStore(LocalStore):
         from pynixd.serde.path_info import UnkeyedValidPathInfo as SerdeUnkeyedValidPathInfo
         from pynixd.serde.signature import Signature
         from pynixd.serde.wire_time import Time
-        from pynixd.store_path import StorePath as RealStorePath
 
         from .queries import QUERY_PATH_INFO, QUERY_REFERENCES
 
@@ -98,7 +85,6 @@ class LocalDBStore(LocalStore):
             sigs=sig_set,
             ca=ContentAddress(value=ca or ""),
         )
-        self.tracker.add_known_path(RealStorePath(str(request.path)))
         return QueryPathInfoResponse(valid=True, info=info)
 
     async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
@@ -117,7 +103,6 @@ class LocalDBStore(LocalStore):
 
         from pynixd.serde import QueryValidPathsResponse
         from pynixd.serde import StorePath as SerdeStorePath
-        from pynixd.store_path import StorePath as RealStorePath
 
         from .queries import QUERY_VALID_PATHS
 
@@ -126,14 +111,11 @@ class LocalDBStore(LocalStore):
             rows = await cursor.fetchall()
 
         paths: set = {SerdeStorePath(path=r[0]) for r in rows}  # type: ignore[arg-type]
-        resp = QueryValidPathsResponse(paths=paths)
-        self.tracker.add_known_paths({RealStorePath(str(p)) for p in resp.paths})
-        return resp
+        return QueryValidPathsResponse(paths=paths)
 
     async def query_path_from_hash_part(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         from pynixd.serde import QueryPathFromHashPartResponse
         from pynixd.serde import StorePath as SerdeStorePath
-        from pynixd.store_path import StorePath as RealStorePath
 
         from .queries import QUERY_PATH_FROM_HASH_PART
 
@@ -142,9 +124,7 @@ class LocalDBStore(LocalStore):
         async with self.db.execute(QUERY_PATH_FROM_HASH_PART, (prefix, upper)) as cursor:
             row = await cursor.fetchone()
         if row:
-            result = QueryPathFromHashPartResponse(value=SerdeStorePath(path=row[0]))
-            self.tracker.add_known_path(RealStorePath(row[0]))
-            return result
+            return QueryPathFromHashPartResponse(value=SerdeStorePath(path=row[0]))
 
         return None  # fall through
 
@@ -153,7 +133,6 @@ class LocalDBStore(LocalStore):
 
         from pynixd.serde import QueryClosureResponse
         from pynixd.serde import StorePath as SerdeStorePath
-        from pynixd.store_path import StorePath as RealStorePath
 
         from .queries import QUERY_CLOSURE
 
@@ -161,9 +140,7 @@ class LocalDBStore(LocalStore):
         async with self.db.execute(QUERY_CLOSURE, (seeds_json,)) as cursor:
             rows = await cursor.fetchall()
         paths: set = {SerdeStorePath(path=row[0]) for row in rows}  # type: ignore[arg-type]
-        result = QueryClosureResponse(paths=paths)
-        self.tracker.add_known_paths({RealStorePath(str(p)) for p in result.paths})
-        return result
+        return QueryClosureResponse(paths=paths)
 
     async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         if not request.paths:
@@ -181,7 +158,6 @@ class LocalDBStore(LocalStore):
         from pynixd.serde.signature import Signature
         from pynixd.serde.valid_path_info import ValidPathInfo as SerdeValidPathInfo
         from pynixd.serde.wire_time import Time
-        from pynixd.store_path import StorePath as RealStorePath
 
         from .queries import QUERY_CLOSURE_WITH_INFO
 
@@ -209,7 +185,6 @@ class LocalDBStore(LocalStore):
             )
             sorted_infos.append(SerdeValidPathInfo(path=sp, info=uinfo))
 
-        self.tracker.add_known_paths({RealStorePath(str(info.path)) for info in sorted_infos})
         return QueryClosureWithInfoResponse(infos=sorted_infos)
 
     async def query_path_infos(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
@@ -242,7 +217,6 @@ class LocalDBStore(LocalStore):
         from pynixd.serde.signature import Signature
         from pynixd.serde.valid_path_info import ValidPathInfo as SerdeValidPathInfo
         from pynixd.serde.wire_time import Time
-        from pynixd.store_path import StorePath as RealStorePath
 
         from .queries import QUERY_PATH_INFOS_BATCH, QUERY_REFERENCES_BATCH
 
@@ -277,7 +251,6 @@ class LocalDBStore(LocalStore):
             )
             infos.append(SerdeValidPathInfo(path=sp, info=uinfo))
 
-        self.tracker.add_known_paths({RealStorePath(str(info.path)) for info in infos})
         return QueryPathInfosResponse(infos=infos)
 
     async def query_derivation_output_map_batch(

@@ -32,12 +32,7 @@ class BuildDerivationHandler(Handler):
             result: BuildDerivationResponse = await ctx.proxy.local_store.execute(self_req, client=ctx.proxy.client)
 
             if result.result.status == 0:
-                for output in result.result.built_outputs.values():
-                    ctx.proxy.local_store.tracker.add_known_path(
-                        output.out_path.with_store_prefix(),
-                    )
-
-            logger.debug("responded_op")
+                logger.debug("responded_op")
             return result
 
         if ctx.proxy.scheduler is None:

@@ -2,8 +2,7 @@
 Base Store ABC for pynixd.
 
 Defines the minimal contract that every store backend must fulfill:
-path tracking, signing keys, operation execution, and lifecycle
-management.  Daemon-specific logic (connection pooling, probing,
+signing keys, operation execution, and lifecycle management.  Daemon-specific logic (connection pooling, probing,
 feature matrices, circuit breaking) lives in DaemonStore.
 """
 
@@ -14,8 +13,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self, overload
 
 import structlog
 from cachetools import TTLCache
-
-from ..path_tracker import PathTrackerInstance
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -31,7 +28,6 @@ if TYPE_CHECKING:
     from ..serde.wire_ops import WireRequest
     from ..signing import SecretKey
     from ..store_path import StorePath
-    from ..types.aliases import StorePathSet
     from ..types.ids import StoreId
 
 
@@ -59,7 +55,6 @@ class Store(ABC):
             raise RuntimeError("store_id must be set on the spec before Store construction")
         self.store_id: StoreId = spec.store_id
         self._signing_keys: dict[str, SecretKey] = {}
-        self.tracker = PathTrackerInstance(store_id=self.store_id)
         self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(  # type: ignore[type-var]
             maxsize=10000,
             ttl=300,
@@ -177,16 +172,7 @@ class Store(ABC):
             raise KeyError(f"Signing key '{name}' not found")
         return key
 
-    # ── Path tracking ──────────────────────────────────────────────
-
-    def has_path(self, path: StorePath) -> bool:
-        return path in self.tracker.known_paths
-
-    def has_all_paths(self, paths: StorePathSet) -> bool:
-        return paths.issubset(self.tracker.known_paths)
-
-    def count_common_paths(self, paths: StorePathSet) -> int:
-        return len(paths & self.tracker.known_paths)
+    # ── Path info cache ──────────────────────────────────────────────
 
     def add_path_info(self, info: ValidPathInfo) -> None:
         self.path_info_cache[info.path] = info

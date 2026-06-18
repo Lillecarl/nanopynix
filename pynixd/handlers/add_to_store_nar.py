@@ -10,7 +10,6 @@ from ..serde.add_to_store_nar import (
     AddToStoreNarRequest,
     AddToStoreNarResponse,
 )
-from ..store_path import StorePath as OldStorePath
 from ..types.context import ReadContext, WriteContext
 from ..wire import forward_framed
 from ._base import Handler
@@ -42,12 +41,6 @@ class AddToStoreNarHandler(Handler):
             await forward_framed(ctx.proxy.r, conn.w)
 
             # 4. Read response from daemon
-            resp = await AddToStoreNarResponse.from_reader(
+            return await AddToStoreNarResponse.from_reader(
                 ReadContext.from_conn(conn),
             )
-
-            # 5. Update tracker
-            old_path = OldStorePath(str(req.info.path))
-            ctx.proxy.local_store.tracker.add_known_path(old_path)
-
-            return resp

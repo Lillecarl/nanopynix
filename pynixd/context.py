@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
     from .config import PynixdSettings
     from .local_store_db import LocalStoreDB
-    from .path_tracker import PathTracker
     from .scheduler import Scheduler
     from .store.daemon import DaemonStore
     from .store.local_daemon import LocalStore
@@ -32,7 +31,6 @@ class PynixdContext:
 
     settings: PynixdSettings
     _stores: dict[StoreId, DaemonStore]
-    path_tracker: PathTracker
     goal_manager: GoalManager = field(default_factory=GoalManager)
     substitution_manager: SubstitutionManager | None = None
     db: LocalStoreDB | None = None

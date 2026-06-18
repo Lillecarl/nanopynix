@@ -42,7 +42,6 @@ async def test_dynamic_store_management():
 
         # 2. Enqueue a build and block it
         drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-        local_store.tracker.add_known_path(drv_path)
         request = BuildDerivationRequest(
             drv_path=drv_path,
             derivation=BasicDerivation(platform="x86_64-linux", builder=""),

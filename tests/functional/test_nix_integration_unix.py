@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 from pynixd import Server
+from pynixd.serde import IsValidPathRequest
+from pynixd.serde import StorePath as SerdeStorePath
 from pynixd.store import LocalSocketStore
-from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
 from tests.conftest import CLIENT_BIN, make_test_spec, run_subproc
 from tests.test_features import TestFeatures as F
@@ -82,8 +83,11 @@ async def test_nix_build_via_unix(pynixd_server):
         rc, stdout, stderr, stdboth = await run_subproc(cmd)
         assert rc == 0
         assert "/nix/store/" in stdout
-        out_path = StorePath(stdout.strip())
-        assert server.local_store.tracker.has_path(out_path)
+        out_path = stdout.strip()
+        resp = await server.local_store.execute(
+            IsValidPathRequest(path=SerdeStorePath(path=out_path))
+        )
+        assert resp.valid
     finally:
         with contextlib.suppress(OSError):
             expr_path.unlink()  # noqa: ASYNC240 — test cleanup
@@ -112,4 +116,7 @@ async def test_nix_copy_via_unix(pynixd_server, tmp_path: Path):
     assert rc == 0
 
     # Verify it exists in pynixd's local store
-    assert server.local_store.tracker.has_path(StorePath(system_path))
+    resp = await server.local_store.execute(
+        IsValidPathRequest(path=SerdeStorePath(path=system_path))
+    )
+    assert resp.valid

@@ -6,10 +6,8 @@ import asyncio
 import contextlib
 import os
 from enum import Enum, auto
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import aiosqlite
 import anyio
 import structlog
 
@@ -17,9 +15,7 @@ from . import wire
 from .config import LocalSocketStoreSpec, PynixdSettings
 from .context import PynixdContext
 from .http_server import PynixdHttpServer
-from .local_store_db import LocalStoreDB
 from .operations.pynixd_collect_garbage import PynixdCollectGarbageRequest
-from .path_tracker import PathTracker
 from .reverse_client import ReverseInitiator
 from .reverse_server import start_reverse_acceptor
 from .scheduler import Scheduler
@@ -68,13 +64,10 @@ class Server:
             spec = LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False)
             stores[StoreId("local")] = spec.to_store(str(StoreId("local")))
 
-        path_tracker = PathTracker(db=None)
-
         self.ctx = PynixdContext(
             settings=settings,
             _stores=stores,
             substitution_manager=SubstitutionManager([HttpBinaryCacheSubstituter("https://cache.nixos.org/")]),
-            path_tracker=path_tracker,
         )
 
         self.ctx.scheduler = Scheduler(self.ctx)
@@ -106,31 +99,13 @@ class Server:
     def scheduler(self) -> Scheduler | None:
         return self.ctx.scheduler
 
-    @property
-    def path_tracker(self) -> PathTracker:
-        return self.ctx.path_tracker
-
     async def add_store(self, store: DaemonStore, dynamic: bool = False) -> None:
-        """Add a store to the server, setting up path tracking for scheduling.
+        """Add a store to the server.
 
         If dynamic=True, the store's feature_matrix is also registered in
         the scheduler's dynamic_feature_matrix, so builds for that platform
         continue to queue even after the store is removed.
-
-        Stores already configured with a tracker (e.g. local_store) keep
-        theirs. Remote stores get a path tracker instance linked to the
-        central DB so the scheduler knows which paths they have.
         """
-        if store.tracker.parent is None:
-            store.tracker = self.path_tracker.create_instance(store.store_id, is_local=False)
-
-        local_store = self.local_store
-        if isinstance(local_store, LocalDBStore) and store.tracker.parent is not None:
-            paths = await local_store.db.get_known_paths(store.store_id)
-            if paths:
-                store.tracker.add_known_paths(paths, update_regtime=False)
-                log.info("loaded_cached_paths", store_id=store.store_id, count=len(paths))
-
         # Wire reconnect callback before start so the loop is ready
         captured_dynamic = dynamic
 
@@ -177,20 +152,8 @@ class Server:
 
         local_store = self.local_store
         if isinstance(local_store, LocalDBStore):
-            try:
-                async with local_store.db.acquire_conn() as conn:
-                    await conn.execute(
-                        "DELETE FROM PynixdKnownPaths WHERE storeId = ?",
-                        (str(store_id),),
-                    )
-                    await conn.commit()
-                    log.info("removed_store_path_data", store_id=store_id)
-            except (aiosqlite.Error, RuntimeError):
-                log.warning(
-                    "remove_store_db_cleanup_failed",
-                    store_id=store_id,
-                    exc_info=True,
-                )
+            # DB cleanup is handled at the DB layer when paths are flushed.
+            pass
 
         # Finally, close the store connection
         await store.close()
@@ -261,20 +224,13 @@ class Server:
 
         if isinstance(local_store, LocalDBStore):
             self.ctx.db = local_store.db
-            self.ctx.path_tracker.db = self.ctx.db
             log.info(
                 "local_store_db_connected",
                 db_path=str(self.ctx.db.db_path),
             )
         else:
             self.ctx.db = None
-            self.ctx.path_tracker.db = None
             log.warning("local_store_db_disabled")
-
-        local_store.tracker = self.ctx.path_tracker.create_instance(
-            local_store.store_id,
-            is_local=True,
-        )
 
         if self.ctx.db:
             self.ctx.db.start()

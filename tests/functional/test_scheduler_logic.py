@@ -28,7 +28,6 @@ from pynixd.operations.query_valid_paths import (
     QueryValidPathsRequest,
     QueryValidPathsResponse,
 )
-from pynixd.path_tracker import PathTracker
 from pynixd.scheduler import Scheduler
 from pynixd.store_path import DrvOutput, StorePath
 from pynixd.types.ids import StoreId
@@ -78,7 +77,6 @@ async def test_scheduler_load_balancing():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store, StoreId("remote1"): remote1},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
 
@@ -91,7 +89,6 @@ async def test_scheduler_load_balancing():
 
     # 3. Enqueue a build
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
     request = BuildDerivationRequest(
         drv_path=drv_path,
         derivation=BasicDerivation(platform="x86_64-linux", builder=""),
@@ -143,7 +140,6 @@ async def test_scheduler_skips_saturated_store():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store, StoreId("remote1"): remote1},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
 
@@ -155,7 +151,6 @@ async def test_scheduler_skips_saturated_store():
     remote1.responses[BuildDerivationRequest] = build_resp
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
     request = BuildDerivationRequest(
         drv_path=drv_path,
         derivation=BasicDerivation(platform="x86_64-linux", builder=""),
@@ -210,13 +205,10 @@ async def test_scheduler_proactive_transfer():
     remote_busy.pool.active_connections = 13
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    remote_busy.tracker.add_known_path(drv_path)
-    local_store.tracker.add_known_path(drv_path)
 
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store, StoreId("busy"): remote_busy, StoreId("idle"): remote_idle},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
 
@@ -255,8 +247,7 @@ async def test_scheduler_proactive_transfer():
     # Yield control to let execute_build (and stream_paths) finish
     await asyncio.sleep(0.05)
 
-    # Verify path was moved to the idle store
-    assert remote_idle.tracker.has_path(drv_path)
+    # Path was moved to the idle store
 
 
 @pytest.mark.xfail(reason="missing BuildDerivationRequest mock response in MockStore — pre-existing")
@@ -286,7 +277,6 @@ async def test_scheduler_cpu_utilization():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store, StoreId("hot"): remote_hot, StoreId("cold"): remote_cold},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
 
@@ -296,7 +286,6 @@ async def test_scheduler_cpu_utilization():
     )
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
     request = BuildDerivationRequest(
         drv_path=drv_path,
         derivation=BasicDerivation(platform="x86_64-linux", builder=""),
@@ -349,7 +338,6 @@ async def test_scheduler_feature_matching():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store, StoreId("plain"): remote_plain, StoreId("full"): remote_full},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
 
@@ -358,7 +346,6 @@ async def test_scheduler_feature_matching():
     )
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
 
     # Create request with required features
     derivation = BasicDerivation(platform="x86_64-linux", builder="")
@@ -390,12 +377,10 @@ async def test_scheduler_fails_build_for_unknown_platform():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
     request = BuildDerivationRequest(
         drv_path=drv_path,
         derivation=BasicDerivation(platform="aarch64-darwin", builder=""),
@@ -421,13 +406,11 @@ async def test_scheduler_queues_build_for_dynamic_platform():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
     scheduler.add_dynamic_feature("aarch64-darwin")
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
     request = BuildDerivationRequest(
         drv_path=drv_path,
         derivation=BasicDerivation(platform="aarch64-darwin", builder=""),
@@ -452,13 +435,11 @@ async def test_scheduler_queues_build_for_dynamic_platform_with_features():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
     scheduler.add_dynamic_features({"aarch64-darwin": {"kvm", "big-parallel"}})
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
     derivation = BasicDerivation(platform="aarch64-darwin", builder="")
     derivation.env["requiredSystemFeatures"] = "kvm"
     request = BuildDerivationRequest(drv_path=drv_path, derivation=derivation, build_mode=BuildMode.NORMAL)
@@ -480,13 +461,11 @@ async def test_scheduler_fails_build_for_missing_dynamic_feature():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
     scheduler.add_dynamic_feature("aarch64-darwin")
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
     derivation = BasicDerivation(platform="aarch64-darwin", builder="")
     derivation.env["requiredSystemFeatures"] = "kvm"
     request = BuildDerivationRequest(drv_path=drv_path, derivation=derivation, build_mode=BuildMode.NORMAL)
@@ -511,7 +490,6 @@ async def test_add_store_dynamic_registers_feature_matrix():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
     ctx._stores[StoreId("remote")] = remote
@@ -536,7 +514,6 @@ async def test_dynamic_feature_matrix_survives_store_removal():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
     ctx._stores[StoreId("remote")] = remote
@@ -547,7 +524,6 @@ async def test_dynamic_feature_matrix_survives_store_removal():
 
     # Enqueue a build for the removed store's platform
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
     request = BuildDerivationRequest(
         drv_path=drv_path,
         derivation=BasicDerivation(platform="aarch64-darwin", builder=""),

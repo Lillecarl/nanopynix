@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import random
+from typing import TYPE_CHECKING
 
 import aiohttp
 import pytest
 import structlog
 
-from pynixd import Server
 from pynixd.serde import QueryAllValidPathsRequest, QueryPathInfoRequest
 from pynixd.serde import StorePath as StorePath
-from pynixd.store import DaemonStore
 from tests.conftest import (
     CLIENT_BIN,
     SESSION_HTTP_PASS,
@@ -21,6 +20,10 @@ from tests.conftest import (
     run_subproc,
 )
 from tests.test_features import TestFeatures as F
+
+if TYPE_CHECKING:
+    from pynixd import Server
+    from pynixd.store import DaemonStore
 
 log = structlog.get_logger(__name__)
 

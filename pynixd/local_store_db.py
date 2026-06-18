@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from .types.aliases import StorePathSet
-    from .types.ids import StoreId
 
 log = structlog.get_logger(__name__)
 
@@ -70,24 +69,6 @@ WHERE id IN (
     )
     SELECT id FROM closure
 );
-"""
-
-INSERT_KNOWN_PATHS = """
-INSERT OR IGNORE INTO PynixdKnownPaths (storeId, path)
-SELECT ?, value FROM json_each(?)
-"""
-
-REMOVE_KNOWN_PATHS = """
-DELETE FROM PynixdKnownPaths
-WHERE storeId = ? AND path IN (SELECT value FROM json_each(?))
-"""
-
-GET_KNOWN_PATHS = """
-SELECT path FROM PynixdKnownPaths WHERE storeId = ?
-"""
-
-DELETE_STORE_KNOWN_PATHS = """
-DELETE FROM PynixdKnownPaths WHERE storeId = ?
 """
 
 INSERT_BUILD_STATS = """
@@ -134,8 +115,6 @@ class LocalStoreDB:
         self.regtime_flush_interval = regtime_flush_interval
 
         self.pending_regtime: StorePathSet = set()
-        self.pending_known_paths: dict[StoreId, StorePathSet] = {}
-        self.pending_removed_known_paths: dict[StoreId, StorePathSet] = {}
         self.flush_task: asyncio.Task[None] | None = None
 
         self._all_conns: list[aiosqlite.Connection] = []
@@ -225,13 +204,6 @@ class LocalStoreDB:
             async with instance.acquire_conn() as db:
                 if not read_only:
                     await db.execute("PRAGMA journal_mode=WAL")
-                    await db.execute(
-                        "CREATE TABLE IF NOT EXISTS PynixdKnownPaths ("
-                        "storeId TEXT, "
-                        "path TEXT, "
-                        "PRIMARY KEY (storeId, path)"
-                        ")",
-                    )
                     await db.execute("DROP TABLE IF EXISTS DerivationStats")
                     await db.execute(
                         "CREATE TABLE DerivationStats ("
@@ -298,52 +270,6 @@ class LocalStoreDB:
         """Queue multiple paths for registration time update."""
         if self.active and not self.read_only:
             self.pending_regtime.update(paths)
-
-    def mark_known_paths(self, store_id: StoreId, paths: StorePathSet) -> None:
-        """Queue paths to be recorded as known on a specific store."""
-        if self.active and not self.read_only:
-            if store_id not in self.pending_known_paths:
-                self.pending_known_paths[store_id] = set()
-            self.pending_known_paths[store_id].update(paths)
-
-    def unmark_known_paths(self, store_id: StoreId, paths: StorePathSet) -> None:
-        """Queue paths to be removed from the known paths for a store."""
-        if self.active and not self.read_only:
-            if store_id not in self.pending_removed_known_paths:
-                self.pending_removed_known_paths[store_id] = set()
-            self.pending_removed_known_paths[store_id].update(paths)
-
-    async def get_known_paths(
-        self,
-        store_id: StoreId,
-        conn: aiosqlite.Connection | None = None,
-    ) -> StorePathSet:
-        """Fetch all known paths for a store from the DB."""
-        if not self.active:
-            return set()
-        try:
-            if conn:
-                async with conn.execute(GET_KNOWN_PATHS, (store_id,)) as cursor:
-                    rows = await cursor.fetchall()
-            else:
-                async with self.execute(GET_KNOWN_PATHS, (store_id,)) as cursor:
-                    rows = await cursor.fetchall()
-            return {StorePath(r[0]) for r in rows}
-        except aiosqlite.Error:
-            log.warning("get_known_paths_failed", store_id=store_id, exc_info=True)
-            return set()
-
-    async def remove_store_paths(self, store_id: StoreId) -> None:
-        """Remove all known path records for a store from the DB."""
-        if not self.active or self.read_only:
-            return
-        try:
-            async with self.acquire_conn() as db:
-                await db.execute(DELETE_STORE_KNOWN_PATHS, (store_id,))
-                await db.commit()
-            log.info("removed_store_paths", store_id=store_id)
-        except aiosqlite.Error:
-            log.warning("remove_store_paths_failed", store_id=store_id, exc_info=True)
 
     async def record_build_stats(
         self,
@@ -412,17 +338,11 @@ class LocalStoreDB:
         """Flush pending registration time updates to SQLite."""
         if not self.active or self.read_only:
             return
-        if not self.pending_regtime and not self.pending_known_paths and not self.pending_removed_known_paths:
+        if not self.pending_regtime:
             return
 
         paths = self.pending_regtime
         self.pending_regtime = set()
-
-        known_paths = self.pending_known_paths
-        self.pending_known_paths = {}
-
-        removed_known_paths = self.pending_removed_known_paths
-        self.pending_removed_known_paths = {}
 
         try:
             t0 = time.monotonic()
@@ -430,17 +350,11 @@ class LocalStoreDB:
                 if paths:
                     paths_json = json.dumps([str(p) for p in paths])
                     await db.execute(UPDATE_REGTIME, (paths_json,))
-                for sid, pths in known_paths.items():
-                    await db.execute(INSERT_KNOWN_PATHS, (sid, json.dumps([str(p) for p in pths])))
-                for sid, pths in removed_known_paths.items():
-                    await db.execute(REMOVE_KNOWN_PATHS, (sid, json.dumps([str(p) for p in pths])))
                 await db.commit()
             elapsed = time.monotonic() - t0
             log.debug(
                 "db_flush_complete",
                 regtime_count=len(paths),
-                known_stores=len(known_paths),
-                removed_stores=len(removed_known_paths),
                 elapsed_ms=elapsed * 1000,
             )
         except aiosqlite.Error:

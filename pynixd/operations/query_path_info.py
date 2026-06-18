@@ -85,7 +85,6 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
     ) -> QueryPathInfoResponse:
         cached = store.get_path_info(self.path)
         if cached is not None:
-            store.tracker.add_known_path(self.path)
             return QueryPathInfoResponse(info=cached)
 
         if (db := getattr(store, "db", None)) is not None:
@@ -110,13 +109,10 @@ class QueryPathInfoRequest(OpRequest[QueryPathInfoResponse]):
                 sigs=set(sigs.split()) if sigs else set(),
                 ca=ca or "",
             )
-            store.tracker.add_known_path(self.path)
             store.add_path_info(info.with_path(self.path))
             return QueryPathInfoResponse(info=info)
 
         resp = await store.call(self, client=client, suppress_last=suppress_last)
-        if resp.valid:
-            store.tracker.add_known_path(self.path)
-            if resp.info is not None:
-                store.add_path_info(resp.info.with_path(self.path))
+        if resp.valid and resp.info is not None:
+            store.add_path_info(resp.info.with_path(self.path))
         return resp

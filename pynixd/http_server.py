@@ -43,7 +43,6 @@ from .store_path import StorePath
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-
     from .store import LocalStore
     from .wire import NixWriter
 
@@ -424,7 +423,6 @@ class PynixdHttpServer:
                 nar_temp_path.unlink()
 
         self.store.add_path_info(vinfo)
-        self.store.tracker.add_known_path(vinfo.path)
         log.info("upload_to_store_complete", path=vinfo.path)
         return web.Response(status=HTTPStatus.OK, text="ok\n")
 

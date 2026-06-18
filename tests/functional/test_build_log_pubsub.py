@@ -17,7 +17,6 @@ from pynixd.operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )
-from pynixd.path_tracker import PathTracker
 from pynixd.scheduler import Scheduler
 from pynixd.stderr import OperationLogs, StderrNext
 from pynixd.store_path import StorePath
@@ -49,12 +48,10 @@ async def test_build_log_pubsub_two_clients():
     ctx = PynixdContext(
         settings=PynixdSettings(),
         _stores={StoreId("local"): local_store, StoreId("remote"): remote},
-        path_tracker=PathTracker(db=None),
     )
     scheduler = Scheduler(ctx)
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
-    local_store.tracker.add_known_path(drv_path)
 
     # Build a response with 10 pre-populated log lines (simulating a build
     # that printed 1-10). The scheduler's _execute() will fan these out

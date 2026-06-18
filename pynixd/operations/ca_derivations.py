@@ -74,13 +74,8 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> RegisterDrvOutputResponse:
-        resp = await store.call(self, client=client, suppress_last=suppress_last)
+        return await store.call(self, client=client, suppress_last=suppress_last)
 
-        out_path = self.realisation.out_path
-        if out_path:
-            store.tracker.add_known_path(out_path.with_store_prefix())
-
-        return resp
 
 
 # ── QueryRealisation (op 43) ───────────────────────────────────────────
@@ -145,11 +140,5 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryRealisationResponse:
-        resp = await store.call(self, client=client, suppress_last=suppress_last)
+        return await store.call(self, client=client, suppress_last=suppress_last)
 
-        for r in resp.realisations:
-            out_path = r.out_path
-            if out_path:
-                store.tracker.add_known_path(out_path.with_store_prefix())
-
-        return resp

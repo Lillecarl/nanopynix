@@ -49,9 +49,8 @@ class AddMultipleToStoreHandler(Handler):
                 infos = await self._forward_stream(ctx.proxy.r, conn.w)
                 resp = await resp_task
 
-            # 5. Update tracker/cache
+            # Update path info cache
             ctx.proxy.local_store.add_path_infos(infos)
-            ctx.proxy.local_store.tracker.add_known_paths({i.path for i in infos})
 
             return resp
 

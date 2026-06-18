@@ -86,10 +86,6 @@ class QueryValidPathsRequest(OpRequest[QueryValidPathsResponse]):
                 (paths_json,),
             ) as cursor:
                 rows = await cursor.fetchall()
-            resp = QueryValidPathsResponse(paths={StorePath(r[0]) for r in rows})
-            store.tracker.add_known_paths(resp.paths)
-            return resp
+            return QueryValidPathsResponse(paths={StorePath(r[0]) for r in rows})
 
-        resp = await store.call(self, client=client, suppress_last=suppress_last)
-        store.tracker.add_known_paths(resp.paths)
-        return resp
+        return await store.call(self, client=client, suppress_last=suppress_last)

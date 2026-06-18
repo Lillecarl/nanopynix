@@ -88,7 +88,6 @@ class AddMultipleToStoreRequest(OpRequest[AddMultipleToStoreResponse]):
                 resp = await resp_task
 
             ctx.proxy.local_store.add_path_infos(infos)
-            ctx.proxy.local_store.tracker.add_known_paths({i.path for i in infos})
             return resp
 
     async def forward_stream(

@@ -13,7 +13,6 @@ import anyio
 import structlog
 
 from .. import wire
-from ..exceptions import OpNotImplementedError
 from ..monitor import ResourceGate, ResourceMonitor
 from ..serde.wire_ops import WireRequest
 from .base import Store
@@ -251,7 +250,6 @@ class DaemonStore(Store):
         self.probe_state = ProbeState.NOT_PROBED
         self._probe_event = anyio.Event()
         await self.probe()
-        await self.sync_paths()
 
     async def _reconnect_loop(self) -> None:
         while True:
@@ -288,8 +286,6 @@ class DaemonStore(Store):
         if self._started:
             return
         await self.probe()
-        if sync_paths:
-            await self.sync_paths()
         if self.monitor:
             self.monitor.start()
         self._started = True
@@ -414,51 +410,6 @@ class DaemonStore(Store):
 
         self.probe_state = ProbeState.PROBED
         self._probe_event.set()
-
-    # ── Path sync ───────────────────────────────────────────────────
-
-    async def sync_paths(self) -> None:
-        from ..exceptions import BackendError as _BackendError
-        from ..serde import QueryAllValidPathsRequest, QueryValidPathsRequest
-        from ..serde import StorePath as SerdeStorePath
-        from ..store_path import StorePath as RealStorePath
-
-        try:
-            resp = await self.execute(QueryAllValidPathsRequest())
-            known: set[RealStorePath] = {RealStorePath(str(p)) for p in resp.paths}
-            self.tracker.add_known_paths(known)
-            log.info("store_paths_synced", store_id=self.store_id, count=len(resp.paths))
-        except (_BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e:
-            known_paths: set[RealStorePath] | None = None
-            if self.tracker.parent is not None and self.tracker.parent.db is not None:
-                known_paths = await self.tracker.parent.db.get_known_paths(self.store_id)
-            known_paths = known_paths or set(self.tracker.known_paths)
-
-            if not known_paths:
-                log.info("store_paths_sync_skipped", store_id=self.store_id)
-                return
-
-            log.info("verifying_cached_paths", store_id=self.store_id, error=str(e), count=len(known_paths))
-            try:
-                serde_paths = {SerdeStorePath(path=str(p)) for p in known_paths}  # pyright: ignore[reportUnhashable]
-                verified = await self.execute(QueryValidPathsRequest(paths=serde_paths, substitute=0))
-                known_set = {RealStorePath(str(p)) for p in known_paths}
-                verified_set = {RealStorePath(str(p)) for p in verified.paths}
-                stale = known_set - verified_set
-                if stale:
-                    self.tracker.remove_known_paths(stale)
-                self.tracker.add_known_paths(verified_set)
-                log.info(
-                    "store_paths_verified",
-                    store_id=self.store_id,
-                    total=len(known_paths),
-                    verified=len(verified.paths),
-                    removed=len(stale),
-                )
-            except (_BackendError, OSError, ConnectionError, EOFError, OpNotImplementedError) as e2:
-                log.warning("path_verification_failed", store_id=self.store_id, error=str(e2))
-                self.tracker.add_known_paths(known_paths)
-                log.info("store_paths_sync_cached", store_id=self.store_id, count=len(known_paths))
 
     # ── Standard operations ──────────────────────────────────────────
 

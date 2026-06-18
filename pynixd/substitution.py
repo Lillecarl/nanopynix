@@ -296,7 +296,6 @@ class HttpBinaryCacheSubstituter(Substituter):
                     async_provider=_provider,
                 ).execute(store)
 
-                store.tracker.add_known_path(path)
                 results[path] = True
 
         except Exception:
@@ -486,7 +485,6 @@ class StoreSubstituter(Substituter):
                     ReadContext(reader=dst.r, version=dst_store.version),
                 )
 
-                dst_store.tracker.add_known_path(path)
                 results[path] = True
 
         except Exception:

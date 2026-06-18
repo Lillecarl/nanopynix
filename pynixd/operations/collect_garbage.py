@@ -126,6 +126,4 @@ class CollectGarbageRequest(OpRequest[CollectGarbageResponse]):
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> CollectGarbageResponse:
-        resp = await super().execute(store, client, suppress_last)
-        store.tracker.remove_known_paths(resp.paths_deleted)
-        return resp
+        return await super().execute(store, client, suppress_last)

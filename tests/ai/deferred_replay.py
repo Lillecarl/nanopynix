@@ -72,7 +72,6 @@ async def add_text_to_store(
     try:
         resp = await req.execute(store, suppress_last=True)
         if resp.info is not None:
-            store.tracker.add_known_path(resp.info.path)
             store.add_path_info(resp.info)
             return resp.info.path
         print(f"  AddToStore returned no path info! logs={resp.logs.messages}")

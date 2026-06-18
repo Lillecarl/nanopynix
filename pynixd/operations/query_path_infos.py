@@ -136,7 +136,6 @@ class QueryPathInfosRequest(OpRequest[QueryPathInfosResponse]):
                 )
                 infos[p] = uinfo.with_path(p)
 
-            store.tracker.add_known_paths(set(infos.keys()))
             store.add_path_infos(infos.values())
             return QueryPathInfosResponse(infos=infos)
 

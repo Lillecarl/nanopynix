@@ -69,8 +69,4 @@ class QueryDerivationOutputMapRequest(OpRequest[QueryDerivationOutputMapResponse
         client: ClientConn | None = None,
         suppress_last: bool = False,
     ) -> QueryDerivationOutputMapResponse:
-        resp = await store.call(self, client=client, suppress_last=suppress_last)
-        resolved = {v for v in resp.items.values() if v is not None}
-        if resolved:
-            store.tracker.add_known_paths(resolved)
-        return resp
+        return await store.call(self, client=client, suppress_last=suppress_last)

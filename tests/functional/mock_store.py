@@ -23,7 +23,8 @@ from pynixd.operations.query_closure_with_info import (
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
 from pynixd.psi import CpuUtil
 from pynixd.serde import StorePath as SerdeStorePath
-from pynixd.serde.query_all_valid_paths import QueryAllValidPathsRequest as SerdeQueryAllValidPathsRequest, QueryAllValidPathsResponse as SerdeQueryAllValidPathsResponse
+from pynixd.serde.query_all_valid_paths import QueryAllValidPathsRequest as SerdeQueryAllValidPathsRequest
+from pynixd.serde.query_all_valid_paths import QueryAllValidPathsResponse as SerdeQueryAllValidPathsResponse
 from pynixd.serde.wire_message import WireModel
 from pynixd.store.daemon import DaemonStore
 from pynixd.store_path import StorePath
@@ -137,6 +138,7 @@ class MockStore(DaemonStore):
             probe=False,
         )
         super().__init__(spec)
+        self._mock_known_paths: set[StorePath] = set()
         self.store_path = Path(f"/mock/{store_id}")
         self.nix_version = "pynixd-mock-2.18.1"
         # responses: Maps Request type -> fixed Response object
@@ -197,8 +199,8 @@ class MockStore(DaemonStore):
         if isinstance(request, QueryValidPathsRequest):
             return cast("Resp", QueryValidPathsResponse(paths=request.paths))
 
-        if req_type == QueryAllValidPathsRequest or req_type == SerdeQueryAllValidPathsRequest:
-            return cast("Resp", SerdeQueryAllValidPathsResponse(paths={SerdeStorePath(path=str(p)) for p in self.tracker.known_paths}))
+        if req_type in (QueryAllValidPathsRequest, SerdeQueryAllValidPathsRequest):
+            return cast("Resp", SerdeQueryAllValidPathsResponse(paths={SerdeStorePath(path=str(p)) for p in self._mock_known_paths}))  # pyright: ignore[reportUnhashable]
         if isinstance(request, QueryClosureWithInfoRequest):
             # Just return some dummy info for everything
 

@@ -71,11 +71,6 @@ class QueryPathFromHashPartRequest(OpRequest[QueryPathFromHashPartResponse]):
             async with db.execute(QUERY_PATH_FROM_HASH_PART, (prefix, upper)) as cursor:
                 row = await cursor.fetchone()
             if row:
-                result = QueryPathFromHashPartResponse(value=StorePath(row[0]))
-                store.tracker.add_known_path(result.value)
-                return result
+                return QueryPathFromHashPartResponse(value=StorePath(row[0]))
 
-        resp = await store.call(self, client=client, suppress_last=suppress_last)
-        if resp.value:
-            store.tracker.add_known_path(StorePath(resp.value))
-        return resp
+        return await store.call(self, client=client, suppress_last=suppress_last)

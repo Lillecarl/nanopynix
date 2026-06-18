@@ -78,36 +78,29 @@ class TelemetryStoreRanker(StoreRanker):
         for store in stores:
             score = 0.0
 
-            # 1. Data Locality (+ points)
-            input_srcs = build.request.derivation.input_srcs
-            if input_srcs:
-                common = store.tracker.count_common_paths(input_srcs)
-                ratio = common / len(input_srcs)
-                score += ratio * self.settings.locality_weight
-
-            # 2. CPU Availability (+ points)
+            # 1. CPU Availability (+ points)
             if store.cpu_util:
                 idle_ratio = 1.0 - (store.cpu_util.utilization / 100.0)
                 score += idle_ratio * self.settings.cpu_idle_weight
             # else: no monitor data → neutral (no bonus, no penalty)
 
-            # 3. System Pressure (- points)
+            # 2. System Pressure (- points)
             if store.monitor and store.monitor.health.psi:
                 psi = store.monitor.health.psi
                 score -= psi.cpu.some_avg10 * self.settings.cpu_pressure_penalty
                 score -= psi.io.some_avg10 * self.settings.io_pressure_penalty
             # else: no monitor data → neutral (no penalty)
 
-            # 4. Concurrency Penalty (- points)
+            # 3. Concurrency Penalty (- points)
             in_flight = store.in_flight
             if override_in_flight and store.store_id in override_in_flight:
                 in_flight = override_in_flight[store.store_id]
             score -= in_flight * self.settings.concurrency_penalty
 
-            # 5. Predicted Load Penalty (- points)
+            # 4. Predicted Load Penalty (- points)
             # (Requires build duration estimation, placeholder for now)
 
-            # 6. Thundering Herd Penalty (- points)
+            # 5. Thundering Herd Penalty (- points)
             assigned = assigned_this_pass.get(store.store_id, 0)
             score -= assigned * self.settings.thundering_herd_penalty
 

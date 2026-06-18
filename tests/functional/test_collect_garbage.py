@@ -5,7 +5,7 @@ GC operation (op 20) requires admin privileges and is forwarded to the
 remote daemon. Tests verify:
 - Admin users can GC successfully
 - Non-admin users get an error
-- GC correctly updates the path tracker
+- GC correctly reclaims storage
 """
 
 from __future__ import annotations

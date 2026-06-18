@@ -91,8 +91,6 @@ async def test_local_db_store_is_valid_path_serde_cache_hit() -> None:
 
     try:
         path = StorePath("/nix/store/abc123-test-cache-hit")
-        # Pre-populate tracker cache
-        store.tracker.add_known_path(path)
 
         req = IsValidPathRequest(path=SerdeStorePath(path=str(path)))
         resp = await store.execute(req)  # type: ignore[arg-type]

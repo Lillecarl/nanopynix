@@ -230,7 +230,7 @@ class Scheduler:
             self._update_store_metrics()
             return
 
-        schedulable, waiting_paths, override_in_flight = self._filter_schedulable(pending)
+        schedulable, override_in_flight = self._filter_schedulable(pending)
 
         waiting_slot = await self._assign_to_stores(schedulable, override_in_flight)
 
@@ -239,7 +239,6 @@ class Scheduler:
         log.debug(
             "scheduling_pass_done",
             pending=len(pending),
-            waiting_paths=len(waiting_paths),
             waiting_slot=len(waiting_slot),
             in_flight={s.store_id: s.in_flight for s in self.stores.values()},
             cpu_util={
@@ -250,19 +249,14 @@ class Scheduler:
     def _filter_schedulable(
         self,
         pending: list[QueuedBuild],
-    ) -> tuple[list[QueuedBuild], list[QueuedBuild], dict[StoreId, int]]:
-        """Triage pending builds into schedulable and waiting_paths.
+    ) -> tuple[list[QueuedBuild], dict[StoreId, int]]:
+        """Triage pending builds into schedulable.
 
-        Returns (schedulable, waiting_paths, override_in_flight).
+        Returns (schedulable, override_in_flight).
         override_in_flight accounts for builds assigned this cycle but not yet
         reflected in ``store.in_flight``.
-
-        Criteria for "schedulable":
-        - Not already building
-        - All ``required_paths`` are in the local store tracker
         """
         schedulable: list[QueuedBuild] = []
-        waiting_paths: list[QueuedBuild] = []
 
         # Count builds that are already building per store (may exceed
         # store.in_flight because the counter hasn't been updated yet).
@@ -281,15 +275,11 @@ class Scheduler:
             if build.is_building:
                 continue
 
-            # Paths check: all required paths must be in the local store.
-            # The tracker is an in-memory cache of local ValidPaths entries,
-            # populated during probing and updated on path transfers.
-            if self.local_store.tracker.has_all_paths(build.request.derivation.input_srcs):
-                schedulable.append(build)
-            else:
-                waiting_paths.append(build)
+            # All builds are schedulable; missing inputs are
+            # discovered and pulled during execution.
+            schedulable.append(build)
 
-        return schedulable, waiting_paths, override_in_flight
+        return schedulable, override_in_flight
 
     async def _assign_to_stores(
         self,
@@ -429,25 +419,15 @@ class Scheduler:
                 )
 
     async def validate_known_paths(self, paths: StorePathSet) -> None:
-        """Query unknown paths against the local store and update the tracker.
-
-        Only paths not already in local_store.tracker.known_paths are
-        queried via QueryValidPathsRequest.  This avoids redundant
-        daemon queries when paths are already tracked in memory.
-        """
-        unknown = paths - self.local_store.tracker.known_paths
-        if not unknown:
+        """Query paths against the local store via QueryValidPaths."""
+        if not paths:
             return
         try:
-            resp = await self.local_store.execute(
-                QueryValidPathsRequest(paths=unknown, substitute=0),
-            )
-            self.local_store.tracker.add_known_paths(
-                resp.paths,
-                update_regtime=False,
+            await self.local_store.execute(
+                QueryValidPathsRequest(paths=paths, substitute=0),
             )
         except (BackendError, OSError, ConnectionError):
-            log.exception("validate_known_paths_failed", count=len(unknown))
+            log.exception("validate_known_paths_failed", count=len(paths))
 
     async def execute_build(self, build: QueuedBuild, store: DaemonStore) -> None:
         """Execute build on a store, handling inputs and outputs.
@@ -508,10 +488,26 @@ class Scheduler:
         # Strip pynixd-handled features from requiredSystemFeatures
         self.allocator.strip_handled_features(build)
 
-        # 1. Ensure all inputs are present on the builder
-        missing_info = {
-            p: UnkeyedValidPathInfo() for p in build.request.derivation.input_srcs if p not in store.tracker.known_paths
-        }
+        # 1. Filter inputs already present on the builder store
+        input_srcs = build.request.derivation.input_srcs
+        if input_srcs:
+            # Query builder store for which paths it already has
+            from pynixd.serde import StorePath as SerdeStorePath
+            from pynixd.serde.query_valid_paths import QueryValidPathsRequest as SerdeQueryValidPathsRequest
+
+            try:
+                check = await store.execute(
+                    SerdeQueryValidPathsRequest(
+                        paths={SerdeStorePath(path=str(p)) for p in input_srcs},  # pyright: ignore[reportUnhashable]
+                        substitute=0,
+                    )
+                )
+                known = {p for p in input_srcs if str(p) in {str(cp) for cp in check.paths}}
+            except (BackendError, OSError, ConnectionError):
+                known = set()
+            missing_info = {p: UnkeyedValidPathInfo() for p in input_srcs if p not in known}
+        else:
+            missing_info = {}
         if missing_info:
             missing_size = sum(info.nar_size for info in missing_info.values())
             log.debug(
@@ -585,7 +581,6 @@ class Scheduler:
         outputs = build.request.derivation.output_paths()
         static_paths = {p for p in outputs.values() if p != StorePath("")}
         all_output_paths = static_paths | ca_output_paths
-        store.tracker.add_known_paths(all_output_paths)
         log.info(
             "pulling_paths",
             store_id=store.store_id,
