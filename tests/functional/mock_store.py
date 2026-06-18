@@ -22,6 +22,8 @@ from pynixd.operations.query_closure_with_info import (
 )
 from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
 from pynixd.psi import CpuUtil
+from pynixd.serde import StorePath as SerdeStorePath
+from pynixd.serde.query_all_valid_paths import QueryAllValidPathsRequest as SerdeQueryAllValidPathsRequest, QueryAllValidPathsResponse as SerdeQueryAllValidPathsResponse
 from pynixd.serde.wire_message import WireModel
 from pynixd.store.daemon import DaemonStore
 from pynixd.store_path import StorePath
@@ -195,8 +197,8 @@ class MockStore(DaemonStore):
         if isinstance(request, QueryValidPathsRequest):
             return cast("Resp", QueryValidPathsResponse(paths=request.paths))
 
-        if req_type == QueryAllValidPathsRequest:
-            return cast("Resp", QueryAllValidPathsResponse(paths=set(self.tracker.known_paths)))
+        if req_type == QueryAllValidPathsRequest or req_type == SerdeQueryAllValidPathsRequest:
+            return cast("Resp", SerdeQueryAllValidPathsResponse(paths={SerdeStorePath(path=str(p)) for p in self.tracker.known_paths}))
         if isinstance(request, QueryClosureWithInfoRequest):
             # Just return some dummy info for everything
 

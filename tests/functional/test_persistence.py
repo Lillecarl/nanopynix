@@ -15,6 +15,11 @@ from pynixd.operations.query_valid_paths import (
     QueryValidPathsRequest,
     QueryValidPathsResponse,
 )
+from pynixd.serde import StorePath as SerdeStorePath
+from pynixd.serde.query_valid_paths import (
+    QueryValidPathsRequest as SerdeQueryValidPathsRequest,
+    QueryValidPathsResponse as SerdeQueryValidPathsResponse,
+)
 from pynixd.store import LocalDBStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
@@ -36,6 +41,9 @@ log = structlog.get_logger(__name__)
 
 class NoQueryAllValidPathsStore(LocalDBStore):
     """A store that fails QueryAllValidPaths to simulate nixbuild.net."""
+
+    async def query_all_valid_paths(self, request, client=None, suppress_last=False):
+        raise OpNotImplementedError("QueryAllValidPaths not supported")
 
     async def call(
         self,
@@ -163,9 +171,10 @@ async def test_known_paths_cleanup(tmp_path: Path) -> None:
             suppress_last=False,
             skip_probe=False,
         ):
-            if isinstance(request, QueryValidPathsRequest):
+            if isinstance(request, (QueryValidPathsRequest, SerdeQueryValidPathsRequest)):
                 # Only return the valid one
-                return QueryValidPathsResponse(paths={path_valid})
+                resp = SerdeQueryValidPathsResponse(paths={SerdeStorePath(path=str(path_valid))})
+                return resp
             return await super().execute(
                 request,
                 client,
