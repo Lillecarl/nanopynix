@@ -155,14 +155,10 @@ async def test_pynixd_delegation_build(tmp_path: Path) -> None:
             # 4. Verify results
             # The path should exist in server_b's store (it built it)
             StorePath(out_path)
-            resp_b = await server_b.local_store.execute(
-                IsValidPathRequest(path=SerdeStorePath(path=out_path))
-            )
+            resp_b = await server_b.local_store.execute(IsValidPathRequest(path=SerdeStorePath(path=out_path)))
             assert resp_b.valid
 
             # The path should also be known by server_a (it tracked the result)
-            resp_a = await server_a.local_store.execute(
-                IsValidPathRequest(path=SerdeStorePath(path=out_path))
-            )
+            resp_a = await server_a.local_store.execute(IsValidPathRequest(path=SerdeStorePath(path=out_path)))
             assert resp_a.valid
             log.info("delegation_build_verified")

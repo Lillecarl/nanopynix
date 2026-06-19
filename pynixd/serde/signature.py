@@ -8,7 +8,7 @@ class Signature(WireString):
     signature: str = ""
 
     @classmethod
-    def from_str(cls, data: str) -> object:
+    def from_str(cls, data: str) -> dict[str, str]:
         parts = data.split(":", 1)
         return {"name": parts[0], "signature": parts[1] if len(parts) > 1 else ""}
 

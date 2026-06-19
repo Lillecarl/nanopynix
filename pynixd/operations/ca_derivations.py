@@ -77,7 +77,6 @@ class RegisterDrvOutputRequest(OpRequest[RegisterDrvOutputResponse]):
         return await store.call(self, client=client, suppress_last=suppress_last)
 
 
-
 # ── QueryRealisation (op 43) ───────────────────────────────────────────
 
 
@@ -141,4 +140,3 @@ class QueryRealisationRequest(OpRequest[QueryRealisationResponse]):
         suppress_last: bool = False,
     ) -> QueryRealisationResponse:
         return await store.call(self, client=client, suppress_last=suppress_last)
-

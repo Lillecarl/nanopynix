@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from .operations.base import ValidPathInfo
     from .store_path import StorePath
-    from .types.aliases import NARHash, StorePathSet
+    from .types.aliases import NARHash
 
 
 # Nix32 alphabet (kept for reference; encoding is in utils.py)
@@ -94,16 +94,21 @@ class SecretKey:
 
 
 def fingerprint(
-    store_path: StorePath,
+    store_path: StorePath | str,
     nar_hash: NARHash,
     nar_size: int,
-    references: StorePathSet,
+    references: object,
 ) -> str:
     """Build the Nix fingerprint string that gets signed.
 
     Format: ``1;<store-path>;sha256:<nix32-hash>;<nar-size>;<comma-separated-refs>``
     """
-    refs = ",".join(sorted(str(r) for r in references))
+    refs = ",".join(sorted(str(r) for r in references))  # type: ignore[attr-defined]
+    """Build the Nix fingerprint string that gets signed.
+
+    Format: ``1;<store-path>;sha256:<nix32-hash>;<nar-size>;<comma-separated-refs>``
+    """
+    refs = ",".join(sorted(str(r) for r in references))  # type: ignore[attr-defined]
     return f"1;{store_path};{nar_hash};{nar_size};{refs}"
 
 

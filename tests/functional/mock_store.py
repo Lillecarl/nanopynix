@@ -200,7 +200,10 @@ class MockStore(DaemonStore):
             return cast("Resp", QueryValidPathsResponse(paths=request.paths))
 
         if req_type in (QueryAllValidPathsRequest, SerdeQueryAllValidPathsRequest):
-            return cast("Resp", SerdeQueryAllValidPathsResponse(paths={SerdeStorePath(path=str(p)) for p in self._mock_known_paths}))  # pyright: ignore[reportUnhashable]
+            return cast(
+                "Resp",
+                SerdeQueryAllValidPathsResponse(paths={SerdeStorePath(path=str(p)) for p in self._mock_known_paths}),  # pyright: ignore[reportUnhashable]
+            )
         if isinstance(request, QueryClosureWithInfoRequest):
             # Just return some dummy info for everything
 

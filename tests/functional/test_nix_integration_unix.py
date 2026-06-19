@@ -84,9 +84,7 @@ async def test_nix_build_via_unix(pynixd_server):
         assert rc == 0
         assert "/nix/store/" in stdout
         out_path = stdout.strip()
-        resp = await server.local_store.execute(
-            IsValidPathRequest(path=SerdeStorePath(path=out_path))
-        )
+        resp = await server.local_store.execute(IsValidPathRequest(path=SerdeStorePath(path=out_path)))
         assert resp.valid
     finally:
         with contextlib.suppress(OSError):
@@ -116,7 +114,5 @@ async def test_nix_copy_via_unix(pynixd_server, tmp_path: Path):
     assert rc == 0
 
     # Verify it exists in pynixd's local store
-    resp = await server.local_store.execute(
-        IsValidPathRequest(path=SerdeStorePath(path=system_path))
-    )
+    resp = await server.local_store.execute(IsValidPathRequest(path=SerdeStorePath(path=system_path)))
     assert resp.valid
