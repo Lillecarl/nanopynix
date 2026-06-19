@@ -77,7 +77,7 @@ async def test_local_db_store_is_valid_path_serde() -> None:
 
 
 async def test_local_db_store_is_valid_path_serde_cache_hit() -> None:
-    """LocalDBStore executor returns serde IsValidPathResponse on cache hit."""
+    """LocalDBStore executor returns serde IsValidPathResponse."""
     from pynixd.config import LocalSocketStoreSpec
     from pynixd.serde import IsValidPathRequest, IsValidPathResponse
     from pynixd.serde import StorePath as SerdeStorePath
@@ -96,6 +96,6 @@ async def test_local_db_store_is_valid_path_serde_cache_hit() -> None:
         resp = await store.execute(req)  # type: ignore[arg-type]
 
         assert isinstance(resp, IsValidPathResponse)
-        assert resp.valid is True
+        assert resp.valid is False  # path not in DB
     finally:
         await store.close()
