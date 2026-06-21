@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..operations.set_options import SetOptionsResponse
-from ..serde import SetOptionsRequest
-from ..stderr import StderrNext
+from ..serde import SetOptionsRequest, SetOptionsResponse
+from ..serde.logs import LogNext
 from ..types.auth import Role
 from ..types.context import ReadContext
 from ._base import Handler
@@ -27,8 +26,7 @@ class SetOptionsHandler(Handler):
 
         if ctx.role < Role.ADMIN:
             resp = SetOptionsResponse()
-            msg = StderrNext("pynixd: SetOptions ignored (no-op)")
-            resp.logs.add(msg)
+            resp.logs.add(LogNext(text="pynixd: SetOptions ignored (no-op)"))
             return resp
 
         return await ctx.proxy.local_store.call(req)

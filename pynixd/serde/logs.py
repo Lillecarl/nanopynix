@@ -135,6 +135,10 @@ class WireLogs(WireModel):
 
     messages: list[LogMessage] = PydanticField(default_factory=list)  # type: ignore[valid-type]
 
+    def add(self, msg: LogMessage) -> None:  # type: ignore[valid-type]
+        """Append a log message to the stream."""
+        self.messages.append(msg)
+
     @classmethod
     async def from_reader(cls, ctx: ReadContext) -> WireLogs:
         """Read tagged-union stderr stream."""

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..operations.add_perm_root import AddPermRootResponse as OldAddPermRootResponse
 from ..serde import AddPermRootRequest
-from ..stderr import StderrNext
+from ..serde.add_perm_root import AddPermRootResponse
+from ..serde.logs import LogNext
 from ..types.auth import Role
 from ..types.context import ReadContext
 from ._base import Handler
@@ -30,7 +30,6 @@ class AddPermRootHandler(Handler):
         # Non-admin: consume request body, return no-op success
         await ctx.proxy.r.read_bytes()
         await ctx.proxy.r.read_bytes()
-        resp = OldAddPermRootResponse(gc_root="")
-        msg = StderrNext("pynixd: AddPermRoot ignored (no-op)")
-        resp.logs.add(msg)
+        resp = AddPermRootResponse(gc_root="")
+        resp.logs.add(LogNext(text="pynixd: AddPermRoot ignored (no-op)"))
         return resp
