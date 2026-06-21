@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import structlog
 
-from ..serde.build_paths_with_results import (
+from ..operations.build_paths import (
     BuildPathsWithResultsRequest,
     BuildPathsWithResultsResponse,
 )
@@ -14,6 +14,7 @@ from ..types.context import ReadContext
 from ._base import Handler
 
 if TYPE_CHECKING:
+    from ..operations.base import OpResponse
     from ..types import RequestContext
 
 logger = structlog.get_logger(__name__)
@@ -24,10 +25,10 @@ class BuildPathsWithResultsHandler(Handler):
 
     op: ClassVar[int] = 46
 
-    async def handle(self, ctx: RequestContext) -> object | None:
+    async def handle(self, ctx: RequestContext) -> OpResponse | None:
         logger.debug("received_op")
 
-        self_req = await BuildPathsWithResultsRequest.from_reader(ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version))
+        self_req = await BuildPathsWithResultsRequest.deserialize(ReadContext.from_request(ctx))
 
         if not ctx.proxy.use_scheduler_for_builds or ctx.proxy.substitution_manager is None:
             logger.debug("handle_local_mode_fallback")

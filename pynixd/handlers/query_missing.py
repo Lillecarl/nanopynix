@@ -11,6 +11,7 @@ from ..types.context import ReadContext
 from ._base import Handler
 
 if TYPE_CHECKING:
+    from ..operations.base import OpResponse
     from ..types import RequestContext
 
 logger = structlog.get_logger(__name__)
@@ -21,7 +22,7 @@ class QueryMissingHandler(Handler):
 
     op: ClassVar[int] = 40
 
-    async def handle(self, ctx: RequestContext) -> object | None:
+    async def handle(self, ctx: RequestContext) -> OpResponse | None:
         logger.debug("received_op")
         self_req = await QueryMissingRequest.deserialize(ReadContext.from_request(ctx))
 
