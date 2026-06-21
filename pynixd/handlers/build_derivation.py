@@ -6,12 +6,11 @@ from typing import TYPE_CHECKING, ClassVar
 
 import structlog
 
-from ..operations.build_derivation import BuildDerivationRequest, BuildDerivationResponse
+from ..serde.build_derivation import BuildDerivationRequest, BuildDerivationResponse
 from ..types.context import ReadContext
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..operations.base import OpResponse
     from ..types import RequestContext
 
 logger = structlog.get_logger(__name__)
@@ -22,10 +21,10 @@ class BuildDerivationHandler(Handler):
 
     op: ClassVar[int] = 36
 
-    async def handle(self, ctx: RequestContext) -> OpResponse | None:
+    async def handle(self, ctx: RequestContext) -> object | None:
         logger.debug("received_op")
 
-        self_req = await BuildDerivationRequest.deserialize(ReadContext.from_request(ctx))
+        self_req = await BuildDerivationRequest.from_reader(ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version))
 
         if not ctx.proxy.use_scheduler_for_builds:
             logger.debug("handle_local_mode_fallback")

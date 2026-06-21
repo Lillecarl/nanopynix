@@ -5,14 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from ..operations.add_perm_root import AddPermRootResponse as OldAddPermRootResponse
-from ..operations.base import Role
 from ..serde import AddPermRootRequest
 from ..stderr import StderrNext
+from ..types.auth import Role
 from ..types.context import ReadContext
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..operations.base import OpResponse
     from ..types import RequestContext
 
 
@@ -21,7 +20,7 @@ class AddPermRootHandler(Handler):
 
     op: ClassVar[int] = 47
 
-    async def handle(self, ctx: RequestContext) -> OpResponse | None:
+    async def handle(self, ctx: RequestContext) -> object | None:
         if ctx.role == Role.ADMIN:
             req = await AddPermRootRequest.from_reader(
                 ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),

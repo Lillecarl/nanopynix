@@ -15,9 +15,9 @@ import structlog
 
 from . import wire
 from .config import ScheduleMode
-from .operations.base import Role
 from .proxy import DaemonProxy
 from .sftp_server import PSIMonitorSFTPServer
+from .types.auth import Role
 from .wire import SSHNixReader, SSHNixWriter
 
 if TYPE_CHECKING:

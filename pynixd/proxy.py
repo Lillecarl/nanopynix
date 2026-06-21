@@ -8,7 +8,7 @@ and dispatches them to request type handle() classmethods.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import asyncssh
 import structlog
@@ -19,15 +19,18 @@ from .connection import ClientConn
 from .exceptions import BackendError, OpNotImplementedError
 from .handlers._base import HANDLER_REGISTRY
 from .operations import OP_REGISTRY
-from .operations.base import OpRequest, OpResponse, Resp, Role
 from .protocol import get_extension_features
 from .serde.wire_message import WireModel
 from .serde.wire_ops import WIRE_REGISTRY
 from .stderr import StderrError
 from .types import RequestContext as RequestContext
+from .types.auth import Role
 from .types.context import ReadContext, WriteContext
 from .types.ids import StoreId
 from .types.protocol import OptTrusted, Verbosity
+
+if TYPE_CHECKING:
+    from .operations.base import OpRequest, OpResponse, Resp
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -216,7 +219,7 @@ class DaemonProxy:
 
             t0 = time.monotonic()
             try:
-                response = await self.dispatch(op_num)
+                response = cast("OpResponse | WireModel | None", await self.dispatch(op_num))
 
                 if response is not None:
                     await self.client.flush()
@@ -278,7 +281,7 @@ class DaemonProxy:
             f"Extension operation {type(request).__name__} (op={request.op}) not supported by any configured store",
         )
 
-    async def dispatch(self, op_num: int) -> OpResponse | WireModel | None:
+    async def dispatch(self, op_num: int) -> object | None:
         """Route an operation to its request type's handle method."""
         # NEW: try new handler registry first
         if handler_cls := HANDLER_REGISTRY.get(op_num):

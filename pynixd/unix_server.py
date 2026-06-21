@@ -14,8 +14,8 @@ import anyio
 import structlog
 
 from .config import ScheduleMode
-from .operations.base import Role
 from .proxy import DaemonProxy
+from .types.auth import Role
 from .wire import UnixNixReader, UnixNixWriter
 
 if TYPE_CHECKING:

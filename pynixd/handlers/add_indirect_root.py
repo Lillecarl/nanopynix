@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..operations.base import Role
 from ..serde import AddIndirectRootRequest, AddIndirectRootResponse
+from ..types.auth import Role
 from ..types.context import ReadContext
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..operations.base import OpResponse
     from ..types import RequestContext
 
 
@@ -19,7 +18,7 @@ class AddIndirectRootHandler(Handler):
 
     op: ClassVar[int] = 12
 
-    async def handle(self, ctx: RequestContext) -> OpResponse | None:
+    async def handle(self, ctx: RequestContext) -> object | None:
         if ctx.role == Role.ADMIN:
             req = await AddIndirectRootRequest.from_reader(
                 ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
