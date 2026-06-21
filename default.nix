@@ -41,10 +41,12 @@ let
     dependencies = [
       # python.pkgs.asyncssh
       (python.pkgs.asyncssh.overrideAttrs {
-        src = fetchTree {
-          type = "github";
+        src = pkgs.fetchFromGitHub {
+          # type = "github";
           repo = "asyncssh";
           owner = "ronf";
+          rev = "v2.23.1";
+          hash = "sha256-6x/Ww25G9MmVIdUJjpPgzNAza0Qx7VArQN6BgPHsIc4=";
         };
         doCheck = false;
         doInstallCheck = false;
@@ -132,8 +134,6 @@ let
         ruff check --fix "$src" ./tests || true
         echo "=== pyright ==="
         pyright --pythonpath ${pyinstance}/bin/python "$src" ./tests || true
-        # echo "=== zuban ==="
-        # zuban check --follow-untyped-imports --python-executable ${pyinstance}/bin/python "$src" || true
       '';
     };
 in
