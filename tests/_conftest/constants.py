@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.nix_config import NixConfig
+from tests._conftest.nix_config import for_test_store
 from tests.test_features import TestFeatures
 
 # ── Pyinstrument availability ─────────────────────────────────────
@@ -36,8 +36,8 @@ TEST_NIX = Path("tests/nix")
 
 DEFAULT_SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
-DEFAULT_NIX_CONFIG = NixConfig.for_test_store()
-SESSION_NIX_CONFIG = NixConfig.for_test_store(
+DEFAULT_NIX_CONFIG = for_test_store()
+SESSION_NIX_CONFIG = for_test_store(
     experimental_features=(
         "nix-command",
         "flakes",

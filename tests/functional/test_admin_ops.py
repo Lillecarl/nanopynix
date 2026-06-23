@@ -19,7 +19,6 @@ import structlog
 from tests.conftest import (
     CLIENT_BIN,
     run_subproc,
-    server_uri,
     ssh_admin_uri,
     ssh_user_uri,
     unix_session_uri,

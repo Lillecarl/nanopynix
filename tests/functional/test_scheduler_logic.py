@@ -4,8 +4,6 @@ import pytest
 
 from pynixd.config import PynixdSettings
 from pynixd.context import PynixdContext
-from pynixd.derived_path import DerivedPath
-from pynixd.drv_parser import Derivation
 from pynixd.operations.base import (
     BasicDerivation,
     BuildMode,
@@ -16,20 +14,8 @@ from pynixd.operations.build_derivation import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )
-from pynixd.operations.query_derivation_output_map_batch import (
-    DerivationOutputMapBatchResponse,
-    QueryDerivationOutputMapBatchRequest,
-)
-from pynixd.operations.query_missing import (
-    QueryMissingRequest,
-    QueryMissingResponse,
-)
-from pynixd.operations.query_valid_paths import (
-    QueryValidPathsRequest,
-    QueryValidPathsResponse,
-)
 from pynixd.scheduler import Scheduler
-from pynixd.store_path import DrvOutput, StorePath
+from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
 from tests.functional.mock_store import MockStore
 from tests.test_features import TestFeatures as F

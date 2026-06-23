@@ -10,6 +10,7 @@ import pytest
 import structlog
 
 from pynixd.store import LocalSocketStore
+from tests._conftest.nix_config import for_ca_derivations, for_dynamic_derivations
 from tests.conftest import (
     CLIENT_BIN,
     SESSION_STORE_PREFIX,
@@ -19,8 +20,6 @@ from tests.conftest import (
     run_subproc,
     server_uri,
 )
-from tests.nix_config import NixConfig
-from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
     import pyinstrument
@@ -31,7 +30,7 @@ log = structlog.get_logger(__name__)
 
 TEST_NIX = Path("tests/nix")
 
-CA_NIX_CONFIG = NixConfig.for_ca_derivations(
+CA_NIX_CONFIG = for_ca_derivations(
     substituters=(
         "https://nixkube.cachix.org/",
         "unix:///nix/var/nix/daemon-socket/socket?root=/",
@@ -563,7 +562,7 @@ async def test_dynamic_drv_trampoline(profiler: pyinstrument.Profiler, dyn_env) 
     assert not out_path.endswith(".drv"), f"Expected non-.drv output from trampoline, got: {out_path}"
 
 
-DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
+DYN_NIX_CONFIG = for_dynamic_derivations(
     substituters=(
         "https://nixkube.cachix.org/",
         "unix:///nix/var/nix/daemon-socket/socket?root=/",

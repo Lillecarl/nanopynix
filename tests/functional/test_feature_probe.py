@@ -14,17 +14,17 @@ import structlog
 from pynixd.config import SSHSubprocessStoreSpec
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.types.ids import StoreId
+from tests._conftest.nix_config import for_ca_derivations
 from tests.conftest import (
     STORE_PREFIX,
     make_test_spec,
     rmtree_robust,
 )
-from tests.nix_config import NixConfig
 from tests.test_features import TestFeatures as F
 
 log = structlog.get_logger(__name__)
 
-FEATURE_NIX_CONFIG = NixConfig.for_ca_derivations(
+FEATURE_NIX_CONFIG = for_ca_derivations(
     substituters=(
         "https://nixkube.cachix.org/",
         "unix:///nix/var/nix/daemon-socket/socket?root=/",

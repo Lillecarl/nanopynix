@@ -21,7 +21,6 @@ from tests._conftest.constants import (
     ConsoleRenderer,
     Profiler,
     _default_store_ids,
-    _log_dir_key,
 )
 from tests._conftest.helpers import rmtree_robust, rmtree_robust_glob
 

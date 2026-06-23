@@ -12,7 +12,6 @@ that protocol serialization works correctly.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest

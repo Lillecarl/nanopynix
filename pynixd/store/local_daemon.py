@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import anyio
 import structlog
 
-from ..config import LocalSocketStoreSpec, LocalSubprocessStoreSpec, PynixdSettings
+from ..config import LocalSocketStoreSpec, PynixdSettings
 from ..connection import Connection
 from ..monitor import DummyResourceMonitor, create_monitor
 from ..store_path import StorePath
@@ -31,44 +31,41 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
-DAEMON_SOCKET_PATH = Path("/nix/var/nix/daemon-socket/socket")
-
 
 class LocalStore(DaemonStore):
-    """Connects to local nix-daemon via Unix socket.
+    """Connects to a local nix-daemon via Unix socket.
 
-    Can optionally spawn and manage its own daemon subprocess with a
-    custom --store path. The socket is placed at
-    ``<store_path>/var/nix/daemon-socket/socket`` and the daemon is
-    told about it via NIX_DAEMON_SOCKET_PATH.
+    Always spawns and manages its own daemon subprocess with a custom
+    --store path. The socket is placed at
+    ``<store_path>/<socket_path>`` and the daemon is told about it via
+    NIX_DAEMON_SOCKET_PATH.
 
-    If no store_path is given (or store_path="/"), connects to the
-    system daemon socket without spawning anything.
+    If the configured socket_path is relative (the default), it is
+    resolved relative to store_path. Absolute socket_paths are used as-is.
     """
 
-    def __init__(self, spec: LocalSocketStoreSpec | LocalSubprocessStoreSpec) -> None:
+    def __init__(self, spec: LocalSocketStoreSpec) -> None:
         super().__init__(spec)
-        managed = self.store_path != Path("/")
-        if spec.socket_path:
-            self.socket_path = spec.socket_path
-        elif managed:
-            self.socket_path = self.store_path / "var" / "nix" / "daemon-socket" / "socket"
-        else:
-            self.socket_path = DAEMON_SOCKET_PATH
+        self.managed = True
 
-        self.managed = managed
+        socket_path = spec.socket_path or Path("nix/var/nix/daemon-socket/pynixd-nix")
+        if not socket_path.is_absolute():
+            self.socket_path = self.store_path / socket_path
+        else:
+            self.socket_path = socket_path
+
         self.nix_bin = spec.nix_bin
         self.monitor_enabled = spec.monitor
         self.daemon_proc: asyncio.subprocess.Process | None = None
         self.daemon_ready: anyio.Event | None = None
         self._daemon_log_task: asyncio.Task | None = None
+        self.nix_config = spec.nix_config
         self.extra_env = spec.extra_env or {}
         self.extra_args = spec.extra_args or []
         self.settings = spec.settings or PynixdSettings()
 
         # Register atexit handler to ensure daemon is killed even if close() is never called
-        if self.managed:
-            atexit.register(self._atexit_kill_daemon)
+        atexit.register(self._atexit_kill_daemon)
 
         # Resource Monitoring
         self.monitor: ResourceMonitor | None = (
@@ -85,26 +82,13 @@ class LocalStore(DaemonStore):
     async def ensure_daemon(self) -> None:
         """Ensure a daemon is reachable, spawning one if needed.
 
-        For managed stores (store_path != /), always spawns a daemon.
-
-        For unmanaged stores (store_path = /), probes the socket first.
-        If the socket is already accepting connections, no daemon is
-        spawned. Otherwise, auto-spawns a daemon and owns its lifecycle.
-
-        Uses an Event to coordinate concurrent callers.
+        Always spawns a private nix-daemon subprocess.  Uses an Event
+        to coordinate concurrent callers.
         """
         if self.daemon_proc is not None:
             if self.daemon_ready is not None:
                 await self.daemon_ready.wait()
             return
-
-        if not self.managed:
-            if await self._probe_socket():
-                return
-            log.info(
-                "socket_not_reachable_auto_spawning",
-                socket_path=str(self.socket_path),
-            )
 
         self.daemon_ready = anyio.Event()
 
@@ -134,6 +118,7 @@ class LocalStore(DaemonStore):
             nix_bin=self.nix_bin,
             store_path=str(path),
             socket_path=str(self.socket_path),
+            builder_frontend="NIX_CONFIG" in self.extra_env,
             cmd=shlex.join(cmd),
         )
         env = os.environ.copy()
@@ -176,6 +161,10 @@ class LocalStore(DaemonStore):
                 f"Managed daemon did not create socket at {self.socket_path} within 10s (pid={self.daemon_proc.pid})",
             )
 
+        daemon_ready = self.daemon_ready
+        if daemon_ready is None:
+            raise RuntimeError("daemon_ready event was not initialized")
+
         # Socket file exists but daemon may not be listening yet — probe
         for _attempt in range(100):
             if self.daemon_proc.returncode is not None:
@@ -189,7 +178,7 @@ class LocalStore(DaemonStore):
             if await self._probe_socket():
                 log.info("daemon_socket_ready", socket_path=str(self.socket_path))
                 await anyio.sleep(0.1)
-                self.daemon_ready.set()
+                daemon_ready.set()
                 return
             await anyio.sleep(0.05)
 
@@ -314,9 +303,8 @@ class LocalStore(DaemonStore):
         kill the entire group with `os.killpg`.
         """
         # Unregister atexit handler so we don't double-kill
-        if self.managed:
-            with contextlib.suppress(ValueError):
-                atexit.unregister(self._atexit_kill_daemon)
+        with contextlib.suppress(ValueError):
+            atexit.unregister(self._atexit_kill_daemon)
 
         if self.daemon_proc is None:
             return

@@ -8,13 +8,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
-from pynixd import metrics, wire
 from pynixd.config import StoreSpecBase
-from pynixd.operations.base import OpResponse
 from pynixd.operations.build_derivation import BuildDerivationRequest
 from pynixd.operations.query_all_valid_paths import (
     QueryAllValidPathsRequest,
-    QueryAllValidPathsResponse,
 )
 from pynixd.operations.query_closure_with_info import (
     QueryClosureWithInfoRequest,
@@ -32,8 +29,6 @@ from pynixd.types.ids import StoreId
 from pynixd.types.path_info import ValidPathInfo
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from pynixd.connection import ClientConn, Connection
     from pynixd.drv_parser import Derivation
     from pynixd.operations.base import OpRequest, Resp

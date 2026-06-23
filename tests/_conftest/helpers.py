@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from pynixd.nix_config import NixConfig
 from tests._conftest.constants import DEFAULT_NIX_CONFIG, DEFAULT_SSH_OPTS
-from tests.nix_config import NixConfig
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

@@ -14,6 +14,7 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from .nix_config import NixConfig
 from .types.ids import StoreId
 
 
@@ -114,30 +115,12 @@ class StoreSpecBase(BaseModel):
 class LocalSocketStoreSpec(StoreSpecBase):
     type: Literal["local-socket"] = "local-socket"
     store_path: Path = Path("/")
-    socket_path: Path | None = None
+    socket_path: Path = Path("nix/var/nix/daemon-socket/pynixd-nix")
+    nix_config: NixConfig | None = None
     extra_env: dict[str, str] | None = None
     extra_args: list[str] | None = None
     use_db: bool = True
     monitor: bool = True
-
-    def to_store(self, store_id: str) -> LocalStore | LocalDBStore:
-        from .store.local_daemon import LocalStore
-        from .store.local_db import LocalDBStore
-
-        spec = self.model_copy(update={"store_id": StoreId(store_id)})
-        if spec.use_db:
-            return LocalDBStore(spec)
-        return LocalStore(spec)
-
-
-class LocalSubprocessStoreSpec(StoreSpecBase):
-    type: Literal["local-subprocess"] = "local-subprocess"
-    store_path: Path  # Required — overrides parent default of /
-    extra_env: dict[str, str] | None = None
-    extra_args: list[str] | None = None
-    use_db: bool = True
-    monitor: bool = True
-    socket_path: Path | None = None
 
     def to_store(self, store_id: str) -> LocalStore | LocalDBStore:
         from .store.local_daemon import LocalStore
@@ -234,7 +217,7 @@ class SSHSocketStoreSpec(StoreSpecBase):
 
 
 StoreSpec = Annotated[
-    LocalSocketStoreSpec | LocalSubprocessStoreSpec | SSHSubprocessStoreSpec | SSHSocketStoreSpec | ReverseStoreSpec,
+    LocalSocketStoreSpec | SSHSubprocessStoreSpec | SSHSocketStoreSpec | ReverseStoreSpec,
     Field(discriminator="type"),
 ]
 
@@ -280,7 +263,7 @@ class PynixdSettings(BaseSettings):
     ssh_port: int | None = 2234
     ssh_host_key: Path | None = None
 
-    unix_path: Path | None = None
+    unix_path: Path | None = Path("/run/pynixd/pynixd.sock")
 
     http_host: str = "0.0.0.0"
     http_port: int | None = None

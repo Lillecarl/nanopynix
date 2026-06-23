@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from pynixd.constants import PROTOCOL_VERSION
 from pynixd.serde import (
-    BuildDerivationResponse,
     BuildResult,
     OptMicroseconds,
     WireModel,
@@ -14,10 +10,6 @@ from pynixd.serde import (
 from pynixd.serde import (
     StorePath as SerdeStorePath,
 )
-from pynixd.store_path import StorePath
-from pynixd.types.context import ReadContext, WriteContext
-from pynixd.types.path_info import UnkeyedValidPathInfo
-from pynixd.wire import BytesReader, BytesWriter
 
 
 async def test_wire_build_result_json_roundtrip():

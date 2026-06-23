@@ -11,7 +11,6 @@ import json
 import pytest
 
 from pynixd.store_path import StorePath
-from pynixd.system_features import PYNIXD_HANDLED_FEATURES
 from pynixd.types.derivation import BasicDerivation, DerivationOutput, OutputKind
 from tests.test_features import TestFeatures as F
 

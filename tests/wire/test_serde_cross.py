@@ -5,8 +5,6 @@ from __future__ import annotations
 import json as json_lib
 import struct
 
-import pytest
-
 from pynixd.constants import PROTOCOL_VERSION, proto
 from pynixd.derived_path import DerivedPath
 from pynixd.operations.add_build_log import (
@@ -60,23 +58,11 @@ from pynixd.operations.build_paths import (
 from pynixd.operations.build_paths import (
     BuildPathsResponse as OldBuildPathsResponse,
 )
-from pynixd.operations.build_paths import (
-    BuildPathsWithResultsRequest as OldBuildPathsWithResultsRequest,
-)
-from pynixd.operations.build_paths import (
-    BuildPathsWithResultsResponse as OldBuildPathsWithResultsResponse,
-)
 from pynixd.operations.ca_derivations import (
     QueryRealisationRequest as OldQueryRealisationRequest,
 )
 from pynixd.operations.ca_derivations import (
     QueryRealisationResponse as OldQueryRealisationResponse,
-)
-from pynixd.operations.ca_derivations import (
-    RegisterDrvOutputRequest as OldRegisterDrvOutputRequest,
-)
-from pynixd.operations.ca_derivations import (
-    RegisterDrvOutputResponse as OldRegisterDrvOutputResponse,
 )
 from pynixd.operations.collect_garbage import (
     CollectGarbageRequest as OldCollectGarbageRequest,
@@ -274,7 +260,6 @@ from pynixd.serde import (
     BuildDerivationResponse,
     BuildResult,
     DrvOutput,
-    NARHash,
     OptMicroseconds,
     Realisation,
     Signature,
@@ -288,12 +273,6 @@ from pynixd.serde import (
     BuildPathsResponse as SerdeBuildPathsResponse,
 )
 from pynixd.serde import (
-    BuildPathsWithResultsRequest as SerdeBuildPathsWithResultsRequest,
-)
-from pynixd.serde import (
-    BuildPathsWithResultsResponse as SerdeBuildPathsWithResultsResponse,
-)
-from pynixd.serde import (
     BuildResult as SerdeBuildResult,
 )
 from pynixd.serde import (
@@ -301,9 +280,6 @@ from pynixd.serde import (
 )
 from pynixd.serde import (
     CollectGarbageResponse as SerdeCollectGarbageResponse,
-)
-from pynixd.serde import (
-    DerivationOutput as SerdeDerivationOutput,
 )
 from pynixd.serde import (
     DerivationOutputMapBatchResponse as SerdeDerivationOutputMapBatchResponse,
@@ -318,9 +294,6 @@ from pynixd.serde import (
     EnsurePathResponse as SerdeEnsurePathResponse,
 )
 from pynixd.serde import (
-    FindRootsEntry as SerdeFindRootsEntry,
-)
-from pynixd.serde import (
     FindRootsRequest as SerdeFindRootsRequest,
 )
 from pynixd.serde import (
@@ -333,13 +306,7 @@ from pynixd.serde import (
     IsValidPathResponse as SerdeIsValidPathResponse,
 )
 from pynixd.serde import (
-    KeyedBuildResult as SerdeKeyedBuildResult,
-)
-from pynixd.serde import (
     NarFromPathRequest as SerdeNarFromPathRequest,
-)
-from pynixd.serde import (
-    NarFromPathResponse as SerdeNarFromPathResponse,
 )
 from pynixd.serde import (
     OptimiseStoreRequest as SerdeOptimiseStoreRequest,
@@ -450,12 +417,6 @@ from pynixd.serde import (
     QueryValidPathsResponse as SerdeQueryValidPathsResponse,
 )
 from pynixd.serde import (
-    RegisterDrvOutputRequest as SerdeRegisterDrvOutputRequest,
-)
-from pynixd.serde import (
-    RegisterDrvOutputResponse as SerdeRegisterDrvOutputResponse,
-)
-from pynixd.serde import (
     SetOptionsRequest as SerdeSetOptionsRequest,
 )
 from pynixd.serde import (
@@ -495,9 +456,6 @@ from pynixd.types import (
 )
 from pynixd.types import GCAction as GCAction
 from pynixd.types import PynixdGCAction as OldPynixdGCAction
-from pynixd.types.build import (
-    KeyedBuildResult as OldKeyedBuildResult,
-)
 from pynixd.types.context import ReadContext, WriteContext
 from pynixd.types.path_info import UnkeyedValidPathInfo
 from pynixd.types.protocol import Verbosity
@@ -1271,9 +1229,6 @@ async def test_old_sign_path_info_to_new():
     from pynixd.types.path_info import (
         UnkeyedValidPathInfo as OldUnkeyedValidPathInfo,
     )
-    from pynixd.types.path_info import (
-        ValidPathInfo as OldValidPathInfo,
-    )
 
     uinfo = OldUnkeyedValidPathInfo(
         nar_hash="sha256:abc",
@@ -1478,9 +1433,6 @@ async def test_old_query_path_infos_to_new():
     from pynixd.types.path_info import (
         UnkeyedValidPathInfo as OldUnkeyedValidPathInfo,
     )
-    from pynixd.types.path_info import (
-        ValidPathInfo as OldValidPathInfo,
-    )
 
     uinfo1 = OldUnkeyedValidPathInfo(
         nar_hash="sha256:abc",
@@ -1606,9 +1558,6 @@ async def test_old_query_closure_with_info_to_new():
     # Response: old → bytes → new
     from pynixd.types.path_info import (
         UnkeyedValidPathInfo as OldUnkeyedValidPathInfo,
-    )
-    from pynixd.types.path_info import (
-        ValidPathInfo as OldValidPathInfo,
     )
 
     uinfo1 = OldUnkeyedValidPathInfo(
@@ -2301,7 +2250,6 @@ async def test_old_query_derivation_output_map_batch_to_new():
 async def test_old_register_drv_output_to_new():
     """Old RegisterDrvOutput serialize → new serde deserialize."""
     from pynixd.operations.ca_derivations import RegisterDrvOutputRequest as OldRDOReq
-    from pynixd.serde import Realisation as NewRealisation
     from pynixd.serde import RegisterDrvOutputRequest as NewRDOReq
     from pynixd.store_path import DrvOutput as OldDrvOutput
     from pynixd.types.ca import Realisation as OldRealisation

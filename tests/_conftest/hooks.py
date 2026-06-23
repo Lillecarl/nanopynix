@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
-import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 import structlog
@@ -18,7 +17,7 @@ from tests._conftest.subsumption import _sort_by_subsumption
 from tests.test_features import TestFeatures
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Generator, Sequence
+    pass
 
 log = structlog.get_logger(__name__)
 
@@ -67,7 +66,6 @@ def pytest_terminal_summary(
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]):
     """Wrap async tests in asyncio.timeout, sort by subsumption, handle Lix skips."""
-    from tests._conftest.config import CLIENT_BIN, LIX_BIN, NIX_BIN
 
     # Sort by descending covers-popcount so broad tests run first.
     if not config.getoption("no_test_subsumption"):

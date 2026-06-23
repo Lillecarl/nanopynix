@@ -33,9 +33,10 @@ from pynixd.operations.ca_derivations import (
 from pynixd.operations.query_derivation_output_map import (
     QueryDerivationOutputMapRequest as QdomRequest,
 )
-from pynixd.store import LocalSocketStore, Store
+from pynixd.store import LocalSocketStore
 from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
+from tests._conftest.nix_config import for_ca_derivations
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
@@ -43,10 +44,9 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
-from tests.nix_config import NixConfig
 
 CA_NIX = Path(__file__).resolve().parent.parent / "nix"
-CA_NIX_CONFIG = NixConfig.for_ca_derivations(
+CA_NIX_CONFIG = for_ca_derivations(
     substituters=(
         "https://nixkube.cachix.org/",
         "unix:///nix/var/nix/daemon-socket/socket?root=/",

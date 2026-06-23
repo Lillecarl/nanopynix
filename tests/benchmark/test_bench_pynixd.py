@@ -15,9 +15,8 @@ from pynixd.operations.is_valid_path import IsValidPathRequest
 from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
 from pynixd.operations.query_path_info import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore, Store
-from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
-from tests.conftest import CLIENT_BIN, rmtree_robust, run_subproc
+from tests.conftest import CLIENT_BIN, run_subproc
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

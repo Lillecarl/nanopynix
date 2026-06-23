@@ -9,15 +9,12 @@ Tests are split into two parts:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from pynixd.constants import proto
 from pynixd.derived_path import DerivedPath
-from pynixd.drv_parser import parse_drv
-from pynixd.operations import OP_REGISTRY
 from pynixd.operations.add_build_log import AddBuildLogRequest, AddBuildLogResponse
 from pynixd.operations.add_indirect_root import AddIndirectRootRequest, AddIndirectRootResponse
 from pynixd.operations.add_multiple_to_store import AddMultipleToStoreRequest, AddMultipleToStoreResponse
@@ -106,8 +103,6 @@ from pynixd.wire import (
     BytesWriter,
     FramedReader,
     FramedWriter,
-    NixReader,
-    NixWriter,
 )
 
 # ═════════════════════════════════════════════════════════════════════════════

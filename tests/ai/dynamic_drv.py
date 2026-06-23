@@ -29,6 +29,7 @@ from pynixd.operations.query_derivation_output_map import (
 )
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import DrvOutput, StorePath
+from tests._conftest.nix_config import for_dynamic_derivations
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,
@@ -36,10 +37,9 @@ from tests.conftest import (
     rmtree_robust,
     run_subproc,
 )
-from tests.nix_config import NixConfig
 
 DYN_NIX = Path(__file__).resolve().parent.parent / "nix"
-DYN_NIX_CONFIG = NixConfig.for_dynamic_derivations(
+DYN_NIX_CONFIG = for_dynamic_derivations(
     substituters=(
         "https://nixkube.cachix.org/",
         "unix:///nix/var/nix/daemon-socket/socket?root=/",

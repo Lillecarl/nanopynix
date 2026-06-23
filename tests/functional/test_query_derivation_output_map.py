@@ -7,7 +7,6 @@ This operation queries the output -> path mapping for a derivation.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest

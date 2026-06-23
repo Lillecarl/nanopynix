@@ -21,7 +21,6 @@ from tests.conftest import (
     SESSION_HTTP_USER,
     make_test_spec,
     run_subproc,
-    server_uri,
 )
 from tests.test_features import TestFeatures as F
 

@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 import pytest
 import structlog
 from environs import env
@@ -14,6 +11,7 @@ from environs import env
 from pynixd import Server
 from pynixd.config import LocalSocketStoreSpec
 from pynixd.instance import NixImplementation
+from pynixd.nix_config import NixConfig
 from pynixd.store.local_db import LocalDBStore
 from pynixd.types.ids import StoreId
 from tests._conftest.constants import (
@@ -23,12 +21,12 @@ from tests._conftest.constants import (
     STORE_PREFIX,
 )
 from tests._conftest.helpers import rmtree_robust
-from tests.nix_config import NixConfig
+from tests._conftest.nix_config import for_test_store
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from pathlib import Path
 
-    import pyinstrument
 
 log = structlog.get_logger(__name__)
 
@@ -111,9 +109,9 @@ def make_test_spec(
     monitor: bool = False,
     **kwargs,
 ) -> LocalSocketStoreSpec:
-    if nix_config is None:
-        nix_config = NixConfig.for_test_store()
     """Create a LocalSocketStoreSpec with test defaults."""
+    if nix_config is None:
+        nix_config = for_test_store()
     extra_args = nix_config.to_daemon_args()
     if "extra_args" in kwargs:
         extra_args.extend(kwargs.pop("extra_args"))
@@ -139,6 +137,7 @@ def make_test_spec(
         store_id=StoreId(store_id),
         store_path=store_path,
         nix_bin=nix_bin,
+        nix_config=nix_config,
         extra_args=extra_args,
         extra_env=extra_env,
         monitor=monitor,

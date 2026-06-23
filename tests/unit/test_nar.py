@@ -8,7 +8,6 @@ from pynixd.nar import (
     NarDirectory,
     NarDirectoryEntry,
     NarForwarder,
-    NarNode,
     NarPath,
     NarRegular,
     NarSymlink,

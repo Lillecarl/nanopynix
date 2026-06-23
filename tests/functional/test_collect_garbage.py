@@ -10,7 +10,6 @@ remote daemon. Tests verify:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,7 +18,6 @@ import structlog
 from tests.conftest import (
     CLIENT_BIN,
     run_subproc,
-    server_uri,
     ssh_admin_uri,
     ssh_user_uri,
     unix_session_uri,
