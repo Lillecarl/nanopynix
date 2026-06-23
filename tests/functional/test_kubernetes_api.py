@@ -6,8 +6,9 @@ import aiohttp
 import pytest
 
 from pynixd import Server
-from pynixd.operations.base import BasicDerivation, BuildMode, BuildResult, BuildResultStatus
-from pynixd.operations.build_derivation import (
+from pynixd.serde import BasicDerivation, BuildResult
+from pynixd.types import BuildMode, BuildResultStatus
+from pynixd.serde import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )

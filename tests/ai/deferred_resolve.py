@@ -25,12 +25,12 @@ import anyio
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pynixd.drv_parser import Derivation, read_drv_file
-from pynixd.operations.base import BasicDerivation, BuildMode, DerivationOutput
-from pynixd.operations.build_derivation import BuildDerivationRequest
-from pynixd.operations.ca_derivations import (
+from pynixd.types import BasicDerivation, BuildMode, DerivationOutput
+from pynixd.serde import BuildDerivationRequest
+from pynixd.serde import (
     RegisterDrvOutputRequest,
 )
-from pynixd.operations.query_derivation_output_map import (
+from pynixd.serde import (
     QueryDerivationOutputMapRequest as QdomRequest,
 )
 from pynixd.store import LocalSocketStore

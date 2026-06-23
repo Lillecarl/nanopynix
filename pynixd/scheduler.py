@@ -25,8 +25,8 @@ from . import metrics
 from .allocator import TINY_BUILD_THRESHOLD_MS, BuildAllocator, TelemetryStoreRanker
 from .build_queue import BuildQueue, QueuedBuild
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
-from .operations.base import UnkeyedValidPathInfo
-from .operations.query_valid_paths import QueryValidPathsRequest
+from .serde import QueryValidPathsRequest
+from .types import UnkeyedValidPathInfo
 from .stderr import StderrNext
 from .store import LocalDBStore
 from .store.transfer import stream_paths_store_to_store
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from .connection import Connection
     from .context import PynixdContext
     from .derived_path import DerivedPath
-    from .operations.build_derivation import (
+    from .serde import (
         BuildDerivationRequest,
         BuildDerivationResponse,
     )

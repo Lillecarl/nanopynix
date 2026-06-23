@@ -15,8 +15,8 @@ class BuildResult(WireModel):
     - >= 1.28: built_outputs (dict[str, str])
     """
 
-    status: int
-    error_msg: str
+    status: int = 0
+    error_msg: str = ""
 
     # Protocol 1.29 fields
     times_built: int | None = WireField(default=None, min_version=proto(1, 29))

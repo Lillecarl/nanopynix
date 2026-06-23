@@ -12,8 +12,8 @@ import structlog
 
 from pynixd import wire
 from pynixd.config import LocalSocketStoreSpec
-from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
-from pynixd.operations.query_path_info import QueryPathInfoRequest
+from pynixd.serde import QueryAllValidPathsRequest
+from pynixd.serde import QueryPathInfoRequest
 from pynixd.store import DaemonStore, LocalSocketStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId

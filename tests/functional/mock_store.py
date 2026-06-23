@@ -9,29 +9,31 @@ from typing import TYPE_CHECKING, Any, cast
 import structlog
 
 from pynixd.config import StoreSpecBase
-from pynixd.operations.build_derivation import BuildDerivationRequest
-from pynixd.operations.query_all_valid_paths import (
+from pynixd.serde import (
+    BuildDerivationRequest,
     QueryAllValidPathsRequest,
-)
-from pynixd.operations.query_closure_with_info import (
     QueryClosureWithInfoRequest,
     QueryClosureWithInfoResponse,
+    QueryValidPathsRequest,
+    QueryValidPathsResponse,
+    StorePath as SerdeStorePath,
 )
-from pynixd.operations.query_valid_paths import QueryValidPathsRequest, QueryValidPathsResponse
 from pynixd.psi import CpuUtil
-from pynixd.serde import StorePath as SerdeStorePath
+from pynixd.serde.content_address import ContentAddress
+from pynixd.serde.nar_hash import NARHash
+from pynixd.serde.path_info import UnkeyedValidPathInfo
 from pynixd.serde.query_all_valid_paths import QueryAllValidPathsRequest as SerdeQueryAllValidPathsRequest
 from pynixd.serde.query_all_valid_paths import QueryAllValidPathsResponse as SerdeQueryAllValidPathsResponse
+from pynixd.serde.valid_path_info import ValidPathInfo
 from pynixd.serde.wire_message import WireModel
+from pynixd.serde.wire_time import Time
 from pynixd.store.daemon import DaemonStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
-from pynixd.types.path_info import ValidPathInfo
 
 if TYPE_CHECKING:
     from pynixd.connection import ClientConn, Connection
     from pynixd.drv_parser import Derivation
-    from pynixd.operations.base import OpRequest, Resp
     from pynixd.serde.wire_ops import WireRequest
     from pynixd.wire import NixReader, NixWriter
 
@@ -100,11 +102,11 @@ class MockConnection:
 
     async def call(
         self,
-        request: OpRequest[Resp],
+        request: WireRequest,
         client: ClientConn | None = None,
         suppress_last: bool = False,
         raise_on_error: bool = False,
-    ) -> Resp:
+    ) -> Any:
         """Forward all calls to the parent MockStore's execute_mock method."""
         return await self.store.execute_mock(request)
 
@@ -137,9 +139,9 @@ class MockStore(DaemonStore):
         self.store_path = Path(f"/mock/{store_id}")
         self.nix_version = "pynixd-mock-2.18.1"
         # responses: Maps Request type -> fixed Response object
-        self.responses: dict[type[OpRequest], Any] = {}
+        self.responses: dict[type[WireRequest], Any] = {}
         # call_handlers: Maps Request type -> async handler function
-        self.call_handlers: dict[type[OpRequest], Any] = {}
+        self.call_handlers: dict[type[WireRequest], Any] = {}
 
         self.build_blockers: dict[str, asyncio.Event] = {}
         self.cpu_utilization_val = cpu_utilization
@@ -173,7 +175,7 @@ class MockStore(DaemonStore):
         """Return a MockConnection that delegates back to us."""
         return cast("Connection", MockConnection(self))
 
-    async def execute_mock(self, request: OpRequest[Resp]) -> Resp:
+    async def execute_mock(self, request: WireRequest) -> Any:
         """Internal dispatcher for the MockConnection."""
         req_type = type(request)
 
@@ -188,35 +190,34 @@ class MockStore(DaemonStore):
             return await self.call_handlers[req_type](request)
 
         if req_type in self.responses:
-            return cast("Resp", self.responses[req_type])
+            return self.responses[req_type]
 
         # Dynamic defaults for common queries
         if isinstance(request, QueryValidPathsRequest):
-            return cast("Resp", QueryValidPathsResponse(paths=request.paths))
+            return QueryValidPathsResponse(paths=request.paths)
 
         if req_type in (QueryAllValidPathsRequest, SerdeQueryAllValidPathsRequest):
-            return cast(
-                "Resp",
-                SerdeQueryAllValidPathsResponse(paths={SerdeStorePath(path=str(p)) for p in self._mock_known_paths}),  # pyright: ignore[reportUnhashable]
-            )
+            return SerdeQueryAllValidPathsResponse(paths={SerdeStorePath(path=str(p)) for p in self._mock_known_paths})  # pyright: ignore[reportUnhashable]
         if isinstance(request, QueryClosureWithInfoRequest):
             # Just return some dummy info for everything
 
             infos = [
                 ValidPathInfo(
-                    path=p,
-                    deriver=StorePath(""),
-                    nar_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000",
-                    nar_size=1024,
-                    references=set(),
-                    registration_time=0,
-                    ultimate=1,
-                    sigs=set(),
-                    ca="",
+                    path=SerdeStorePath(path=str(p)),
+                    info=UnkeyedValidPathInfo(
+                        deriver=None,
+                        nar_hash=NARHash(hash="0000000000000000000000000000000000000000000000000000000000000000"),
+                        nar_size=1024,
+                        references=set(),
+                        registration_time=Time(ts=0),
+                        ultimate=True,
+                        sigs=set(),
+                        ca=ContentAddress(value=""),
+                    ),
                 )
                 for p in request.paths
             ]
-            return cast("Resp", QueryClosureWithInfoResponse(infos=infos))
+            return QueryClosureWithInfoResponse(infos=infos)
 
         log.warning(
             "mock_store_no_response",
@@ -236,7 +237,7 @@ class MockStore(DaemonStore):
 
     async def execute(  # type: ignore[override]
         self,
-        request: OpRequest[Resp] | WireRequest,
+        request: WireRequest,
         client: ClientConn | None = None,
         suppress_last: bool = False,
         skip_probe: bool = False,
@@ -244,9 +245,4 @@ class MockStore(DaemonStore):
         """Always use the dynamic mock logic, bypassing request.execute()."""
         if isinstance(request, WireModel):
             return await self.call(request, client=client, suppress_last=suppress_last)
-        # Record the operation for test verification
-        async with self.transfer_conn() as conn:
-            # We know it's a MockConnection which has op_log
-            cast("Any", conn).op_log.append(type(request).__name__)
-
-        return await self.execute_mock(request)
+        raise TypeError(f"MockStore only supports WireRequest, got {type(request).__name__}")

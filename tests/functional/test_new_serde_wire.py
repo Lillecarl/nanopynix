@@ -61,8 +61,8 @@ async def test_local_db_store_is_valid_path_serde() -> None:
     await store.start()
 
     try:
-        from pynixd.operations.is_valid_path import IsValidPathRequest as OldReq
-        from pynixd.operations.is_valid_path import IsValidPathResponse as OldResp
+        from pynixd.serde import IsValidPathRequest as OldReq
+        from pynixd.serde import IsValidPathResponse as OldResp
 
         # Use old IsValidPathRequest — executor accepts it and returns old IsValidPathResponse
         # for paths not found (executor returns None → falls through to daemon)

@@ -26,9 +26,9 @@ from pynixd.nar import (
     parse_nar,
     write_nar,
 )
-from pynixd.operations.nar_from_path import NarFromPathRequest
-from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
-from pynixd.operations.query_path_info import QueryPathInfoRequest
+from pynixd.serde import NarFromPathRequest
+from pynixd.serde import QueryAllValidPathsRequest
+from pynixd.serde import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
 from tests.conftest import make_test_spec
 

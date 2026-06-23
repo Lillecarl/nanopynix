@@ -30,6 +30,7 @@ class ReadContext:
     version: int
     client: ClientConn | None = None
     buffer_logs: bool = True
+    raise_on_error: bool = True
 
     @classmethod
     def from_request(cls, ctx: RequestContext) -> ReadContext:
@@ -41,10 +42,17 @@ class ReadContext:
         conn: Connection,
         client: ClientConn | None = None,
         buffer_logs: bool | None = None,
+        raise_on_error: bool = True,
     ) -> ReadContext:
         if buffer_logs is None:
             buffer_logs = client is None
-        return cls(reader=conn.r, version=conn.version, client=client, buffer_logs=buffer_logs)
+        return cls(
+            reader=conn.r,
+            version=conn.version,
+            client=client,
+            buffer_logs=buffer_logs,
+            raise_on_error=raise_on_error,
+        )
 
 
 @dataclass(frozen=True)

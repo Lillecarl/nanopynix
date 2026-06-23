@@ -58,9 +58,9 @@ KEEP_LOGGERS = frozenset(
         "pynixd.instance",
         "pynixd.reverse_server",
         "pynixd.reverse_client",
-        "pynixd.operations.probe_systems",
-        "pynixd.operations.probe_features",
-        "pynixd.operations.build_paths",
+        "pynixd.serde.probe_systems",
+        "pynixd.serde.probe_features",
+        "pynixd.serde.build_paths",
     },
 )
 
@@ -71,7 +71,7 @@ KEEP_LOGGERS_DEBUG = frozenset(
     },
 )
 
-DROP_LOGGERS = frozenset({"pynixd.operations.AddMultipleToStoreRequest"})
+DROP_LOGGERS = frozenset({"pynixd.serde.AddMultipleToStoreRequest"})
 
 ALWAYS_KEEP_LEVELS = frozenset({"error", "critical"})
 

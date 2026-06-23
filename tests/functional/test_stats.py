@@ -16,23 +16,25 @@ import structlog
 from pynixd import Server
 from pynixd.build_queue import QueuedBuild
 from pynixd.local_store_db import LocalStoreDB
-from pynixd.operations.base import (
+from pynixd.serde import (
     BasicDerivation,
-    BuildMode,
     BuildResult,
-    BuildResultStatus,
     DerivationOutput,
+)
+from pynixd.types import (
+    BuildMode,
+    BuildResultStatus,
     ValidPathInfo,
 )
-from pynixd.operations.build_derivation import (
+from pynixd.serde import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )
-from pynixd.operations.query_all_valid_paths import (
+from pynixd.serde import (
     QueryAllValidPathsRequest,
     QueryAllValidPathsResponse,
 )
-from pynixd.operations.query_closure_with_info import (
+from pynixd.serde import (
     QueryClosureWithInfoRequest,
     QueryClosureWithInfoResponse,
 )

@@ -9,7 +9,7 @@ feature matrices, circuit breaking) lives in DaemonStore.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, Self, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import structlog
 from cachetools import TTLCache
@@ -20,15 +20,11 @@ if TYPE_CHECKING:
     from ..config import StoreSpecBase
     from ..connection import ClientConn, Connection
     from ..drv_parser import Derivation
-    from ..operations.base import (
-        OpRequest,
-        Resp,
-        ValidPathInfo,
-    )
     from ..serde.wire_ops import WireRequest
     from ..signing import SecretKey
     from ..store_path import StorePath
     from ..types.ids import StoreId
+    from ..types.path_info import ValidPathInfo
 
 
 log = structlog.get_logger(__name__)
@@ -87,30 +83,10 @@ class Store(ABC):
         """Create transport, construct Connection, and connect it."""
         ...
 
-    @overload
-    async def call(
-        self,
-        request: WireRequest,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-        raise_on_error: bool = False,
-        skip_probe: bool = False,
-    ) -> Any: ...
-
-    @overload
-    async def call(
-        self,
-        request: OpRequest[Resp],
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-        raise_on_error: bool = False,
-        skip_probe: bool = False,
-    ) -> Resp: ...
-
     @abstractmethod
     async def call(
         self,
-        request: OpRequest[Resp] | WireRequest,
+        request: WireRequest,
         client: ClientConn | None = None,
         suppress_last: bool = False,
         raise_on_error: bool = False,
@@ -119,28 +95,10 @@ class Store(ABC):
         """Send an operation to this store."""
         ...
 
-    @overload
-    async def execute(
-        self,
-        request: WireRequest,
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-        skip_probe: bool = False,
-    ) -> Any: ...
-
-    @overload
-    async def execute(
-        self,
-        request: OpRequest[Resp],
-        client: ClientConn | None = None,
-        suppress_last: bool = False,
-        skip_probe: bool = False,
-    ) -> Resp: ...
-
     @abstractmethod
     async def execute(
         self,
-        request: OpRequest[Resp] | WireRequest,
+        request: WireRequest,
         client: ClientConn | None = None,
         suppress_last: bool = False,
         skip_probe: bool = False,

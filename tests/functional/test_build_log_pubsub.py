@@ -7,13 +7,15 @@ import pytest
 from pynixd.config import PynixdSettings
 from pynixd.connection import ClientConn
 from pynixd.context import PynixdContext
-from pynixd.operations.base import (
+from pynixd.serde import (
     BasicDerivation,
-    BuildMode,
     BuildResult,
+)
+from pynixd.types import (
+    BuildMode,
     BuildResultStatus,
 )
-from pynixd.operations.build_derivation import (
+from pynixd.serde import (
     BuildDerivationRequest,
     BuildDerivationResponse,
 )

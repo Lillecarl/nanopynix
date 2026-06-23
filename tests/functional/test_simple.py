@@ -112,7 +112,7 @@ async def test_store(
             lambda _logger, _method, event_dict: (
                 event_dict.update({_lk: event_dict.get(_lk, 0) - 1}) or event_dict
                 if (
-                    event_dict.get("logger") == "pynixd.operations.AddMultipleToStoreRequest"
+                    event_dict.get("logger") == "pynixd.serde.AddMultipleToStoreRequest"
                     and str(event_dict.get("event", "")).startswith("forward")
                 )
                 else event_dict

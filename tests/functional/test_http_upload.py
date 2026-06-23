@@ -10,7 +10,7 @@ import aiohttp
 import pytest
 import structlog
 
-from pynixd.operations.nar_from_path import NarFromPathRequest
+from pynixd.serde import NarFromPathRequest
 from pynixd.serde import QueryPathInfoRequest
 from pynixd.serde import StorePath as SerdeStorePath
 from pynixd.store import LocalSocketStore

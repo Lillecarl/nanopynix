@@ -7,10 +7,9 @@ from typing import TYPE_CHECKING, ClassVar
 import structlog
 
 from .. import wire
-from ..operations.base import OperationLogs
-from ..operations.query_path_info import QueryPathInfoRequest as OldQueryPathInfoRequest
+from ..serde import QueryPathInfoRequest
+from ..serde.logs import WireLogs
 from ..serde.nar_from_path import NarFromPathRequest
-from ..store_path import StorePath as OldStorePath
 from ..types.context import ReadContext, WriteContext
 from ..wire import _CHUNK_SIZE
 from ._base import Handler
@@ -31,17 +30,16 @@ class NarFromPathHandler(Handler):
         req = await NarFromPathRequest.from_reader(
             ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
         )
-        path = OldStorePath(str(req.path))
 
         # 2. Query path info to determine nar_size
-        info_resp = await ctx.proxy.local_store.execute(OldQueryPathInfoRequest(path=path))
+        info_resp = await ctx.proxy.local_store.execute(QueryPathInfoRequest(path=req.path))
         if not info_resp.valid or info_resp.info is None:
-            logger.warning("nar_not_in_local_store", path=path)
+            logger.warning("nar_not_in_local_store", path=req.path)
             logger.debug("responded_op")
             return
 
         nar_size = info_resp.info.nar_size
-        logger.debug("nar_from_path_streaming", path=path, size=nar_size)
+        logger.debug("nar_from_path_streaming", path=req.path, size=nar_size)
 
         # 3. Forward request to daemon (serde), stream NAR to client
         async with ctx.proxy.local_store.transfer_conn() as conn:
@@ -49,11 +47,11 @@ class NarFromPathHandler(Handler):
             await conn.w.drain()
 
             # 4. Read stderr logs from daemon
-            logs = await OperationLogs.deserialize(ReadContext.from_conn(conn))
+            logs = await WireLogs.from_reader(ReadContext.from_conn(conn))
 
             # 5. Write logs to client
             await ctx.proxy.client.flush()
-            logs.serialize(WriteContext(writer=ctx.proxy.w, version=ctx.version))
+            await logs.to_writer(WriteContext(writer=ctx.proxy.w, version=ctx.version))
 
             # 6. Stream unframed NAR bytes from daemon to client
             if nar_size > 0:

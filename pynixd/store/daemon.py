@@ -13,8 +13,15 @@ import anyio
 import structlog
 
 from .. import wire
+from ..exceptions import BackendError
 from ..monitor import ResourceGate, ResourceMonitor
+from ..serde import BasicDerivation, BuildDerivationRequest, DerivationOutput
+from ..serde import StorePath as SerdeStorePath
+from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
+from ..types.build import BuildMode, BuildResultStatus
+from ..types.context import WriteContext
 from ..serde.wire_ops import WireRequest
+from ..utils import random_nix32_hash
 from .base import Store
 from .pool import ConnectionPool
 
@@ -317,15 +324,12 @@ class DaemonStore(Store):
         if not skip_probe:
             await self.probe()
 
-        if isinstance(request, WireRequest) and (method_name := self._executors.get(request.op)):
+        if method_name := self._executors.get(request.op):
             fn = getattr(self, method_name)
             if result := await fn(request, client=client, suppress_last=suppress_last):
                 return result
 
-        if isinstance(request, WireRequest):
-            return await self.call(request, client=client, suppress_last=suppress_last)
-
-        return await request.execute(self, client=client, suppress_last=suppress_last)
+        return await self.call(request, client=client, suppress_last=suppress_last)
 
     # ── Probing ─────────────────────────────────────────────────────
 
@@ -382,10 +386,6 @@ class DaemonStore(Store):
             self._probe_event.set()
             return
 
-        from ..operations.probe_features import ProbeFeaturesRequest
-        from ..operations.probe_systems import ProbeSystemsRequest
-        from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
-
         existing_systems = set(self._feature_matrix.keys()) if self._feature_matrix else set()
         existing_features: set[str] = set()
         if self._feature_matrix:
@@ -395,11 +395,8 @@ class DaemonStore(Store):
         candidate_systems = existing_systems or set(PROBE_SYSTEMS)
         candidate_features = existing_features or set(KNOWN_FEATURES)
 
-        systems_resp = await ProbeSystemsRequest(systems=candidate_systems).execute(self)
-        systems = systems_resp.systems
-
-        features_resp = await ProbeFeaturesRequest(systems=systems, system_features=candidate_features).execute(self)
-        self._feature_matrix = features_resp.feature_matrix
+        systems = await self._probe_systems(candidate_systems)
+        self._feature_matrix = await self._probe_features(systems, candidate_features)
 
         log.info(
             "store_probed",
@@ -410,6 +407,132 @@ class DaemonStore(Store):
 
         self.probe_state = ProbeState.PROBED
         self._probe_event.set()
+
+    async def _probe_systems(self, candidates: set[str]) -> set[str]:
+        async with asyncio.TaskGroup() as tg:
+            tasks = [
+                tg.create_task(
+                    self._send_probe(
+                        f"probe-system-{system}",
+                        system,
+                        "",
+                        ["-c", f"echo {system} > $out"],
+                    )
+                )
+                for system in candidates
+            ]
+
+        systems = {system for system, task in zip(candidates, tasks, strict=True) if task.result()[1]}
+        log.info("systems_probed", store_id=self.store_id, systems=sorted(systems))
+        return systems
+
+    async def _probe_features(self, systems: set[str], system_features: set[str]) -> dict[str, set[str]]:
+        to_probe = (system_features or set()) | KNOWN_FEATURES
+        probes = []
+        probe_keys: list[tuple[str, str]] = []
+        for system in systems:
+            for feature in to_probe:
+                if feature == "kvm":
+                    args = [
+                        "-c",
+                        "test -w /dev/kvm && echo kvm > $out || { echo 'kvm: /dev/kvm not writable' >&2; exit 1; }",
+                    ]
+                else:
+                    args = ["-c", f"echo {feature} > $out"]
+
+                extra_env: dict[str, str] = {
+                    "requiredSystemFeatures": feature,
+                    "NIXBUILDNET_MIN_CPU": "1",
+                    "NIXBUILDNET_MAX_CPU": "1",
+                    "NIXBUILDNET_MIN_MEM": "128",
+                    "NIXBUILDNET_MAX_MEM": "128",
+                }
+                probe_keys.append((system, feature))
+                probes.append(
+                    self._send_probe(
+                        f"probe-feature-{feature}",
+                        system,
+                        feature,
+                        args,
+                        extra_env,
+                    ),
+                )
+
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(probe) for probe in probes]
+
+        feature_matrix: dict[str, set[str]] = {system: set() for system in systems}
+        for (system, feature), task in zip(probe_keys, tasks, strict=True):
+            if task.result()[1]:
+                feature_matrix[system].add(feature)
+
+        self._feature_matrix = feature_matrix
+        log.info(
+            "features_probed",
+            store_id=self.store_id,
+            feature_matrix={key: sorted(value) for key, value in feature_matrix.items()},
+        )
+        return feature_matrix
+
+    async def _send_probe(
+        self,
+        name: str,
+        system: str,
+        required_features: str,
+        args: list[str],
+        extra_env: dict[str, str] | None = None,
+    ) -> tuple[str, bool]:
+        drv_hash = random_nix32_hash()
+        out_path = f"/nix/store/{drv_hash}-{name}"
+        drv_path = SerdeStorePath(path=f"/nix/store/{drv_hash}-{name}.drv")
+
+        env: dict[str, str] = {
+            "builder": "/bin/sh",
+            "name": name,
+            "out": out_path,
+            "system": system,
+            "hash": drv_hash,
+        }
+        if required_features:
+            env["requiredSystemFeatures"] = required_features
+        if extra_env:
+            env.update(extra_env)
+
+        request = BuildDerivationRequest(
+            drv_path=drv_path,
+            derivation=BasicDerivation(
+                outputs={"out": DerivationOutput(path=out_path, method="", hash_digest="")},
+                input_srcs=set(),
+                platform=system,
+                builder="/bin/sh",
+                args=args,
+                env=env,
+            ),
+            build_mode=BuildMode.NORMAL,
+        )
+        try:
+            resp = await self.call(request, skip_probe=True)
+            accepted = resp.result.status in (
+                BuildResultStatus.BUILT,
+                BuildResultStatus.SUBSTITUTED,
+                BuildResultStatus.ALREADY_VALID,
+                BuildResultStatus.RESOLVES_TO_ALREADY_VALID,
+            )
+            if accepted:
+                log.debug("probe_accepted", store_id=self.store_id, probe=name)
+            else:
+                log.debug(
+                    "probe_denied",
+                    store_id=self.store_id,
+                    probe=name,
+                    status=resp.result.status,
+                    error_msg=resp.result.error_msg,
+                )
+        except (BackendError, OSError, ConnectionError) as e:
+            log.debug("probe_exception", store_id=self.store_id, probe=name, error=str(e))
+            return name, False
+        else:
+            return name, accepted
 
     # ── Standard operations ──────────────────────────────────────────
 
@@ -653,25 +776,35 @@ class DaemonStore(Store):
     async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
         from ..drv_parser import parse_drv
         from ..nar import NarRegular, parse_nar
-        from ..operations.nar_from_path import NarFromPathRequest
-        from ..serde import IsValidPathRequest
+        from ..serde import IsValidPathRequest, NarFromPathRequest, QueryPathInfoRequest
         from ..serde import StorePath as SerdeStorePath
-        from ..store_path import StorePath as OldStorePath
 
         sp = SerdeStorePath(path=str(drv_store_path))
-        old_sp = OldStorePath(str(drv_store_path))
 
         valid_resp = await self.execute(IsValidPathRequest(path=sp))
         if not valid_resp.valid:
             log.warning("drv_not_found", drv_path=str(drv_store_path), reason="not_valid")
             return None
 
-        resp = await NarFromPathRequest(path=old_sp, nar_size=0).execute(self)
-        if not resp.nar_data:
+        info_resp = await self.execute(QueryPathInfoRequest(path=sp))
+        nar_size = info_resp.info.nar_size if info_resp.valid and info_resp.info is not None else 0
+
+        async with self.transfer_conn() as conn:
+            await NarFromPathRequest(path=sp).to_writer(WriteContext.from_conn(conn))
+            await conn.w.drain()
+            await conn.r.drain_stderr()
+            if nar_size > 0:
+                nar_data = await conn.r.readexactly(nar_size)
+            else:
+                collector = wire.BytesWriter("drv-nar")
+                await wire.stream_parse_nar(conn.r, collector, capture=False)
+                nar_data = collector.get_bytes()
+
+        if not nar_data:
             log.warning("drv_not_found", drv_path=str(drv_store_path), reason="nar_empty")
             return None
 
-        node = parse_nar(resp.nar_data)
+        node = parse_nar(nar_data)
         if not isinstance(node, NarRegular):
             log.warning("drv_not_found", drv_path=str(drv_store_path), reason="not_regular_file")
             return None

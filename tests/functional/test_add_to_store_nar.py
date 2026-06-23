@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pynixd.operations.query_path_info import QueryPathInfoRequest
+from pynixd.serde import QueryPathInfoRequest
 from pynixd.store_path import StorePath
 from tests.conftest import (
     CLIENT_BIN,

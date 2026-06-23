@@ -11,7 +11,7 @@ import base64
 import nacl.bindings
 import pytest
 
-from pynixd.operations.base import ValidPathInfo
+from pynixd.types import ValidPathInfo
 from pynixd.signing import SecretKey, fingerprint, get_default_signing_key, sign_path_info
 from pynixd.store_path import StorePath
 from tests.test_features import TestFeatures as F

@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from .drv_parser import ChildMapNode, _aterm_escape
-from .operations.base import BasicDerivation, DerivationOutput
+from .types import BasicDerivation, DerivationOutput
 from .store_path import StorePath
 from .utils import nix32_encode
 

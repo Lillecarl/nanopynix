@@ -18,9 +18,9 @@ from environs import env
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .operations.base import ValidPathInfo
     from .store_path import StorePath
     from .types.aliases import NARHash
+    from .types.path_info import ValidPathInfo
 
 
 # Nix32 alphabet (kept for reference; encoding is in utils.py)

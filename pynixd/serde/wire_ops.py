@@ -31,12 +31,16 @@ class WireRequest(WireModel):
     """
 
     op: ClassVar[int]
+    name: ClassVar[str]
     response_type: ClassVar[type]
     forward: ClassVar[bool] = True
     is_extension: ClassVar[bool] = False
+    is_query: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        if "name" not in cls.__dict__:
+            cls.name = cls.__name__.removesuffix("Request")
         if "op" in cls.__dict__:
             WIRE_REGISTRY[cls.op] = cls
 
@@ -66,3 +70,8 @@ class WireResponse(WireModel):
     """
 
     logs: WireLogs = PydanticField(default_factory=WireLogs)
+
+    @property
+    def is_not_found(self) -> bool:
+        """True when extension fallback should continue to another store."""
+        return False

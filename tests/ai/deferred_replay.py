@@ -28,11 +28,11 @@ from pynixd.derivation_resolution import (
     resolve_derivation,
 )
 from pynixd.drv_parser import read_drv_file
-from pynixd.operations.add_to_store import AddToStoreRequest
-from pynixd.operations.base import BuildMode
-from pynixd.operations.build_derivation import BuildDerivationRequest
-from pynixd.operations.ca_derivations import RegisterDrvOutputRequest
-from pynixd.operations.query_valid_paths import QueryValidPathsRequest
+from pynixd.serde import AddToStoreRequest
+from pynixd.types import BuildMode
+from pynixd.serde import BuildDerivationRequest
+from pynixd.serde import RegisterDrvOutputRequest
+from pynixd.serde import QueryValidPathsRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath

@@ -13,7 +13,7 @@ import pytest
 import structlog
 
 from pynixd.drv_parser import parse_drv
-from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
+from pynixd.serde import QueryAllValidPathsRequest
 from pynixd.store import LocalSocketStore
 from tests.conftest import make_test_spec
 

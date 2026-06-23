@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from pydantic import model_validator
 
 from .wire_string import WireString
 
@@ -9,6 +10,17 @@ class StorePath(WireString):
     """A store path — single string field."""
 
     path: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def transform(cls, data: object) -> object:
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, str):
+            return cls.from_str(data)
+        if hasattr(data, "__str__"):
+            return cls.from_str(str(data))
+        return data
 
     def endswith(self, suffix: str) -> bool:
         return self.path.endswith(suffix)

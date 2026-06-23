@@ -17,7 +17,7 @@ from .config import LocalSocketStoreSpec, PynixdSettings
 from .context import PynixdContext
 from .http_server import PynixdHttpServer
 from .nix_config import merge_builder_frontend
-from .operations.pynixd_collect_garbage import PynixdCollectGarbageRequest
+from .serde import PynixdCollectGarbageRequest
 from .reverse_client import ReverseInitiator
 from .reverse_server import start_reverse_acceptor
 from .scheduler import Scheduler

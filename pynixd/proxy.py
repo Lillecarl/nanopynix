@@ -8,7 +8,7 @@ and dispatches them to request type handle() classmethods.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import asyncssh
 import structlog
@@ -18,7 +18,6 @@ from .config import ScheduleMode
 from .connection import ClientConn
 from .exceptions import BackendError, OpNotImplementedError
 from .handlers._base import HANDLER_REGISTRY
-from .operations import OP_REGISTRY
 from .protocol import get_extension_features
 from .serde.wire_message import WireModel
 from .serde.wire_ops import WIRE_REGISTRY
@@ -28,9 +27,6 @@ from .types.auth import Role
 from .types.context import ReadContext, WriteContext
 from .types.ids import StoreId
 from .types.protocol import OptTrusted, Verbosity
-
-if TYPE_CHECKING:
-    from .operations.base import OpRequest, OpResponse, Resp
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -124,7 +120,7 @@ class DaemonProxy:
                 total_ops = sum(n for n, _ in self._op_timing.values())
                 breakdown = {}
                 for op_num, (count, acc_time) in sorted(self._op_timing.items()):
-                    req_cls = OP_REGISTRY.get(op_num)
+                    req_cls = WIRE_REGISTRY.get(op_num)
                     name = req_cls.name if req_cls else f"op_{op_num}"
                     breakdown[name] = f"x{count} {acc_time:.3f}s"
                 log.info(
@@ -201,24 +197,22 @@ class DaemonProxy:
             except (EOFError, asyncssh.misc.ConnectionLost):
                 break
 
-            req_cls = OP_REGISTRY.get(op_num)
-            if req_cls is None:
+            req_cls = WIRE_REGISTRY.get(op_num)
+            handler_cls = HANDLER_REGISTRY.get(op_num)
+            if req_cls is None and handler_cls is None:
                 log.warning("unknown_op", op_num=op_num)
                 await self.send_error(f"Unsupported operation: {op_num}")
                 continue
 
-            op_name = req_cls.name
+            op_name = req_cls.name if req_cls else handler_cls.__name__
 
             t0 = time.monotonic()
             try:
-                response = cast("OpResponse | WireModel | None", await self.dispatch(op_num))
+                response = await self.dispatch(op_num)
 
                 if response is not None:
                     await self.client.flush()
-                    if isinstance(response, WireModel):
-                        await response.to_writer(WriteContext.from_proxy(self))
-                    else:
-                        await response.serialize(WriteContext.from_proxy(self))
+                    await response.to_writer(WriteContext.from_proxy(self))
                     await self.w.drain()
                 # else: already handled (streaming, error, etc.)
 
@@ -235,13 +229,10 @@ class DaemonProxy:
 
     async def execute(  # type: ignore[no-overload-impl]
         self,
-        request: OpRequest[Resp] | WireRequest,
+        request: WireRequest,
     ) -> Any:
         """Execute an operation, falling back to other stores for extensions."""
-        if isinstance(request, WireModel):
-            return await self.local_store.execute(request, client=self.client)
-
-        local_resp: Resp | None = None
+        local_resp: WireModel | None = None
         try:
             local_resp = await self.local_store.execute(request, client=self.client)
             if local_resp is not None and not (request.is_extension and local_resp.is_not_found):
@@ -293,24 +284,9 @@ class DaemonProxy:
             )
             return await self.execute(req)
 
-        req_cls = OP_REGISTRY.get(op_num)
-        if req_cls is None:
-            log.warning("unhandled_op", op_num=op_num)
-            await self.send_error(f"Unhandled operation: {op_num}")
-            return None
-
-        try:
-            request = object.__new__(req_cls)
-            return await request.handle(
-                RequestContext(
-                    proxy=self,
-                    role=self.role,
-                    version=self.version,
-                    username=self.username,
-                )
-            )
-        except BackendError:
-            return None
+        log.warning("unhandled_op", op_num=op_num)
+        await self.send_error(f"Unhandled operation: {op_num}")
+        return None
 
     # ── Helpers ───────────────────────────────────────────────────────
 

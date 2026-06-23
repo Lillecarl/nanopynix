@@ -24,6 +24,14 @@ from ..constants import (
     STDERR_START_ACTIVITY,
     STDERR_STOP_ACTIVITY,
 )
+from ..exceptions import BackendError
+from ..stderr import (
+    StderrError,
+    StderrNext,
+    StderrResult,
+    StderrStartActivity,
+    StderrStopActivity,
+)
 from ..types.protocol import FieldType
 from .wire_message import WireField, WireModel
 
@@ -123,6 +131,36 @@ _LOG_PARSERS: dict[int, type[WireModel]] = {
 }
 
 
+def _to_stderr_msg(msg: WireModel):
+    if isinstance(msg, LogNext):
+        return StderrNext(text=msg.text)
+    if isinstance(msg, LogStartActivity):
+        fields = [field.valint if field.type == FieldType.INT else field.valstr or "" for field in msg.fields]
+        return StderrStartActivity(
+            act_id=msg.act_id,
+            level=msg.level,
+            type=msg.type,
+            text=msg.text,
+            fields=fields,
+            parent=msg.parent,
+        )
+    if isinstance(msg, LogStopActivity):
+        return StderrStopActivity(act_id=msg.act_id)
+    if isinstance(msg, LogResult):
+        fields = [field.valint if field.type == FieldType.INT else field.valstr or "" for field in msg.fields]
+        return StderrResult(act_id=msg.act_id, result_type=msg.result_type, fields=fields)
+    if isinstance(msg, LogError):
+        return StderrError(
+            error_type=msg.type,
+            level=msg.level,
+            name=msg.name,
+            msg=msg.msg,
+            have_pos=msg.have_pos,
+            traces=[(trace.pos, trace.hint) for trace in msg.traces],
+        )
+    raise TypeError(f"Unsupported log message type: {type(msg).__name__}")
+
+
 class WireLogs(WireModel):
     """Container for a complete stderr stream.
 
@@ -160,10 +198,15 @@ class WireLogs(WireModel):
                 continue
 
             msg = await parser.from_reader(ctx)
-            msgs.append(msg)
+            if ctx.client:
+                await ctx.client.send(_to_stderr_msg(msg))
+            if ctx.buffer_logs:
+                msgs.append(msg)
 
             # Error terminates the stream (no STDERR_LAST after error)
             if isinstance(msg, LogError):
+                if ctx.raise_on_error:
+                    raise BackendError(f"Daemon error ({msg.type}): {msg.msg}")
                 break
 
         object.__setattr__(obj, "messages", msgs)

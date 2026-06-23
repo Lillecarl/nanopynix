@@ -2,8 +2,6 @@
 Tests for substitution-related queries over the daemon protocol.
 
 Tests these protocol operations:
-- QuerySubstitutablePathInfo (op 21): Single path substitutability check
-- QuerySubstitutablePathInfos (op 30): Batch substitutability check
 - QuerySubstitutablePaths (op 32): Which paths are substitutable
 
 These operations are forwarded to the upstream daemon — they test
@@ -28,7 +26,7 @@ log = structlog.get_logger(__name__)
 
 
 @pytest.mark.covers(
-    F.QUERY_SUBSTITUTABLE_PATH_INFOS | F.QUERY_SUBSTITUTABLE_PATHS | F.QUERY_SUBSTITUTABLE_PATH_INFO | F.STORE_LOCAL
+    F.QUERY_SUBSTITUTABLE_PATHS | F.STORE_LOCAL
 )
 async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
     """Build a path and verify it via path-info through pynixd."""

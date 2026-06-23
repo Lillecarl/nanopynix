@@ -23,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pynixd.derivation_resolution import _unparse_basic_derivation
 from pynixd.drv_parser import read_drv_file, to_basic_derivation
-from pynixd.operations.ca_derivations import QueryRealisationRequest
-from pynixd.operations.query_derivation_output_map import (
+from pynixd.serde import QueryRealisationRequest
+from pynixd.serde import (
     QueryDerivationOutputMapRequest,
 )
 from pynixd.store import LocalSocketStore

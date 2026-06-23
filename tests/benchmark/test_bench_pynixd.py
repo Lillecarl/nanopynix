@@ -11,9 +11,9 @@ import pytest
 import structlog
 
 from pynixd.config import LocalSocketStoreSpec
-from pynixd.operations.is_valid_path import IsValidPathRequest
-from pynixd.operations.query_all_valid_paths import QueryAllValidPathsRequest
-from pynixd.operations.query_path_info import QueryPathInfoRequest
+from pynixd.serde import IsValidPathRequest
+from pynixd.serde import QueryAllValidPathsRequest
+from pynixd.serde import QueryPathInfoRequest
 from pynixd.store import LocalSocketStore, Store
 from pynixd.types.ids import StoreId
 from tests.conftest import CLIENT_BIN, run_subproc
