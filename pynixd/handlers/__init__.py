@@ -9,13 +9,10 @@ from . import (
     add_to_store,  # noqa: F401
     add_to_store_nar,  # noqa: F401
     build_derivation,  # noqa: F401
-    build_paths,  # noqa: F401
-    build_paths_with_results,  # noqa: F401
     collect_garbage,  # noqa: F401
     nar_from_path,  # noqa: F401
     optimise_store,  # noqa: F401
     pynixd_collect_garbage,  # noqa: F401
-    query_missing,  # noqa: F401
     set_options,  # noqa: F401
     sign_path_info,  # noqa: F401
     verify_store,  # noqa: F401

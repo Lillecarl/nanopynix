@@ -4,10 +4,9 @@ Shared application context for pynixd dependencies.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .goals.manager import GoalManager
 from .types.ids import StoreId
 
 if TYPE_CHECKING:
@@ -18,7 +17,6 @@ if TYPE_CHECKING:
     from .scheduler import Scheduler
     from .store.daemon import DaemonStore
     from .store.local_daemon import LocalStore
-    from .substitution import SubstitutionManager
 
 
 @dataclass
@@ -31,8 +29,6 @@ class PynixdContext:
 
     settings: PynixdSettings
     _stores: dict[StoreId, DaemonStore]
-    goal_manager: GoalManager = field(default_factory=GoalManager)
-    substitution_manager: SubstitutionManager | None = None
     db: LocalStoreDB | None = None
     scheduler: Scheduler | None = None
 

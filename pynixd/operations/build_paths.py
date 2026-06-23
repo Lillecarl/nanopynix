@@ -7,11 +7,10 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from ..derived_path import DerivedPath
 from ..stderr import OperationLogs
-from ..types.context import ReadContext, WriteContext
 from .base import BuildMode, KeyedBuildResult, OpRequest, OpResponse
 
 if TYPE_CHECKING:
-    from ..types import RequestContext
+    from ..types.context import ReadContext, WriteContext
 
 # ── BuildPaths ───────────────────────────────────────────────────────
 
@@ -63,40 +62,6 @@ class BuildPathsRequest(OpRequest[BuildPathsResponse]):
         ctx.writer.write_uint64(self.op)
         ctx.writer.write_string_set(self.derived_paths)
         ctx.writer.write_uint64(self.build_mode.value)
-
-    async def handle(self, ctx: RequestContext) -> OpResponse | None:
-        self.logger.debug("received_op")
-
-        self = await self.deserialize(ReadContext.from_request(ctx))
-
-        if not ctx.proxy.use_scheduler_for_builds or ctx.proxy.substitution_manager is None:
-            self.logger.debug("handle_local_mode_fallback")
-            result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
-
-            # Track newly built paths
-            self.logger.debug("responded_op")
-            return result
-
-        self.logger.debug("build_paths_goals", count=len(self.derived_paths))
-        keyed_results = await ctx.proxy.goal_manager.build_paths(
-            self.derived_paths,
-            ctx.proxy.local_store,
-            ctx.proxy.substitution_manager,
-            scheduler=ctx.proxy.scheduler,
-        )
-
-        # Register successful output paths
-        for kr in keyed_results:
-            if kr.result.status.is_failure:
-                self.logger.warning(
-                    "build_paths_goal_failed",
-                    path=kr.path,
-                    status=kr.result.status,
-                    error=kr.result.error_msg,
-                )
-
-        self.logger.debug("responded_op")
-        return BuildPathsResponse(value=1)
 
 
 # ── BuildPathsWithResults ────────────────────────────────────────────
@@ -154,42 +119,3 @@ class BuildPathsWithResultsRequest(OpRequest[BuildPathsWithResultsResponse]):
         ctx.writer.write_uint64(self.op)
         ctx.writer.write_string_set(self.derived_paths)
         ctx.writer.write_uint64(self.build_mode.value)
-
-    async def handle(self, ctx: RequestContext) -> OpResponse | None:
-        self.logger.debug("received_op")
-
-        self = await self.deserialize(ReadContext.from_request(ctx))
-
-        if not ctx.proxy.use_scheduler_for_builds or ctx.proxy.substitution_manager is None:
-            self.logger.debug("handle_local_mode_fallback")
-            result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
-
-            # Track newly built paths
-            self.logger.debug("handle_local_mode_fallback")
-            result = await ctx.proxy.local_store.execute(self, client=ctx.proxy.client)
-
-            self.logger.debug("responded_op")
-            return result
-
-        self.logger.debug(
-            "build_paths_with_results_goals",
-            num_derivations=len(self.derived_paths),
-        )
-        keyed_results = await ctx.proxy.goal_manager.build_paths(
-            self.derived_paths,
-            ctx.proxy.local_store,
-            ctx.proxy.substitution_manager,
-            scheduler=ctx.proxy.scheduler,
-        )
-
-        for kr in keyed_results:
-            if kr.result.status.is_failure:
-                self.logger.warning(
-                    "build_paths_with_results_goal_failed",
-                    path=kr.path,
-                    status=kr.result.status,
-                    error=kr.result.error_msg,
-                )
-
-        self.logger.debug("responded_op")
-        return BuildPathsWithResultsResponse(results=keyed_results)
