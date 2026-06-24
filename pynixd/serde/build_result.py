@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..constants import proto
 from .opt_microseconds import OptMicroseconds
+from .realisation import Realisation  # noqa: TC001
 from .wire_message import WireField, WireModel
 
 
@@ -29,4 +30,4 @@ class BuildResult(WireModel):
     cpu_system: OptMicroseconds = WireField(default_factory=OptMicroseconds, min_version=proto(1, 37))
 
     # Protocol 1.28 fields
-    built_outputs: dict[str, str] | None = WireField(default=None, min_version=proto(1, 28))
+    built_outputs: dict[str, Realisation] | None = WireField(default=None, min_version=proto(1, 28))

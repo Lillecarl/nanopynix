@@ -4,19 +4,18 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field as PydanticField
-
 from .derived_path import DerivedPath  # noqa: TC001
 from .store_path import StorePath  # noqa: TC001
+from .wire_message import WireField
 from .wire_ops import WireRequest, WireResponse
 
 
 class QueryMissingResponse(WireResponse):
     """QueryMissing response — build/substitute/unknown classification."""
 
-    will_build: set[StorePath] = PydanticField(default_factory=set)
-    will_substitute: set[StorePath] = PydanticField(default_factory=set)
-    unknown: set[StorePath] = PydanticField(default_factory=set)
+    will_build: set[StorePath] = WireField(default_factory=set)
+    will_substitute: set[StorePath] = WireField(default_factory=set)
+    unknown: set[StorePath] = WireField(default_factory=set)
     download_size: int
     nar_size: int
 
@@ -26,4 +25,4 @@ class QueryMissingRequest(WireRequest):
 
     op: ClassVar[int] = 40
     response_type = QueryMissingResponse
-    derived_paths: set[DerivedPath] = PydanticField(default_factory=set)
+    derived_paths: set[DerivedPath] = WireField(default_factory=set)

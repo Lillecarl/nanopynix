@@ -24,7 +24,7 @@ ATerm .drv format (Dynamic DrvWithVersion):
 
 Output fields: (name, path, hash_algo, hash_value)
 
-Compatibility with DerivationOutput (operations/base.py):
+Compatibility with serde DerivationOutput:
   DrvOutput: hash_algo, hash_value, output_name, path  (parser - raw ATerm fields)
   DerivationOutput: name, path, method, hash_digest  (wire protocol)
   Mapping: name->name, path->path, hash_algo->method, hash_value->hash_digest

@@ -11,6 +11,7 @@ Exercises the exact code path that pynixd's scheduler will use:
    - Builder store: AddToStoreNar with updated ValidPathInfo + NAR of resolved content
 7. BuildDerivation with the original .drv path and resolved BasicDerivation
 """
+# pyright: reportArgumentType=false, reportCallIssue=false, reportAttributeAccessIssue=false
 
 from __future__ import annotations
 
@@ -28,14 +29,11 @@ from pynixd.derivation_resolution import (
     resolve_derivation,
 )
 from pynixd.drv_parser import read_drv_file
-from pynixd.serde import AddToStoreRequest
-from pynixd.types import BuildMode
-from pynixd.serde import BuildDerivationRequest
-from pynixd.serde import RegisterDrvOutputRequest
-from pynixd.serde import QueryValidPathsRequest
+from pynixd.serde import AddToStoreRequest, BuildDerivationRequest, QueryValidPathsRequest, RegisterDrvOutputRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
+from pynixd.types import BuildMode
 from tests._conftest.nix_config import for_ca_derivations
 from tests.conftest import (
     NIX_BIN,
@@ -43,6 +41,7 @@ from tests.conftest import (
     make_test_spec,
     rmtree_robust,
     run_subproc,
+    serde_path_set,
 )
 
 CA_NIX = Path(__file__).resolve().parent.parent / "nix"
@@ -221,7 +220,7 @@ async def main() -> None:
     )
 
     valid_resp = await builder_store.execute(
-        QueryValidPathsRequest(paths=paths_to_transfer, substitute=0),
+        QueryValidPathsRequest(paths=serde_path_set(paths_to_transfer), substitute=0),
     )
     print(
         f"Builder store has {len(valid_resp.paths)} of {len(paths_to_transfer)} paths",

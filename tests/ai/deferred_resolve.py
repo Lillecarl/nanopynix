@@ -10,6 +10,7 @@ Implements the Nix derivation resolution algorithm in Python:
 
 Validates against known Nix output paths.
 """
+# pyright: reportArgumentType=false
 
 from __future__ import annotations
 
@@ -25,9 +26,8 @@ import anyio
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pynixd.drv_parser import Derivation, read_drv_file
-from pynixd.types import BasicDerivation, BuildMode, DerivationOutput
-from pynixd.serde import BuildDerivationRequest
 from pynixd.serde import (
+    BuildDerivationRequest,
     RegisterDrvOutputRequest,
 )
 from pynixd.serde import (
@@ -36,6 +36,7 @@ from pynixd.serde import (
 from pynixd.store import LocalSocketStore
 from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
+from pynixd.types import BasicDerivation, BuildMode, DerivationOutput
 from tests._conftest.nix_config import for_ca_derivations
 from tests.conftest import (
     NIX_BIN,

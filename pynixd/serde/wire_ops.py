@@ -8,10 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from pydantic import Field as PydanticField
-
 from .logs import WireLogs
-from .wire_message import WireModel
+from .wire_message import WireField, WireModel
 
 if TYPE_CHECKING:
     from ..types.context import ReadContext, WriteContext
@@ -69,7 +67,7 @@ class WireResponse(WireModel):
             valid: bool
     """
 
-    logs: WireLogs = PydanticField(default_factory=WireLogs)
+    logs: WireLogs = WireField(default_factory=WireLogs)
 
     @property
     def is_not_found(self) -> bool:

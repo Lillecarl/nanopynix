@@ -60,11 +60,11 @@ def _to_serde_path_info(info: ValidPathInfo) -> SerdeValidPathInfo:
         info=SerdeUnkeyedValidPathInfo(
             deriver=SerdeStorePath(path=str(info.deriver)) if info.deriver else None,
             nar_hash=NARHash(hash=info.nar_hash.removeprefix("sha256:")),
-            references={SerdeStorePath(path=str(ref)) for ref in info.references},  # pyright: ignore[reportArgumentType]
+            references={SerdeStorePath(path=str(ref)) for ref in info.references},  # pyright: ignore[reportArgumentType,reportUnhashable]
             registration_time=Time(ts=info.registration_time),
             nar_size=info.nar_size,
             ultimate=bool(info.ultimate),
-            sigs={Signature(**Signature.from_str(sig)) for sig in info.sigs},
+            sigs={Signature(**Signature.from_str(sig)) for sig in info.sigs},  # pyright: ignore[reportUnhashable]
             ca=ContentAddress(value=info.ca),
         ),
     )

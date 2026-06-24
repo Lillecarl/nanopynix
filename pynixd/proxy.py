@@ -8,7 +8,7 @@ and dispatches them to request type handle() classmethods.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import asyncssh
 import structlog
@@ -16,11 +16,10 @@ import structlog
 from . import wire
 from .config import ScheduleMode
 from .connection import ClientConn
-from .exceptions import BackendError, OpNotImplementedError
+from .exceptions import OpNotImplementedError
 from .handlers._base import HANDLER_REGISTRY
 from .protocol import get_extension_features
-from .serde.wire_message import WireModel
-from .serde.wire_ops import WIRE_REGISTRY
+from .serde.wire_ops import WIRE_REGISTRY, WireResponse
 from .stderr import StderrError
 from .types import RequestContext as RequestContext
 from .types.auth import Role
@@ -204,7 +203,7 @@ class DaemonProxy:
                 await self.send_error(f"Unsupported operation: {op_num}")
                 continue
 
-            op_name = req_cls.name if req_cls else handler_cls.__name__
+            op_name = req_cls.name if req_cls else handler_cls.__name__ if handler_cls else f"op_{op_num}"
 
             t0 = time.monotonic()
             try:
@@ -232,7 +231,7 @@ class DaemonProxy:
         request: WireRequest,
     ) -> Any:
         """Execute an operation, falling back to other stores for extensions."""
-        local_resp: WireModel | None = None
+        local_resp: WireResponse | None = None
         try:
             local_resp = await self.local_store.execute(request, client=self.client)
             if local_resp is not None and not (request.is_extension and local_resp.is_not_found):
@@ -264,17 +263,20 @@ class DaemonProxy:
             f"Extension operation {type(request).__name__} (op={request.op}) not supported by any configured store",
         )
 
-    async def dispatch(self, op_num: int) -> object | None:
+    async def dispatch(self, op_num: int) -> WireResponse | None:
         """Route an operation to its request type's handle method."""
         # NEW: try new handler registry first
         if handler_cls := HANDLER_REGISTRY.get(op_num):
-            return await handler_cls().handle(
-                RequestContext(
-                    proxy=self,
-                    role=self.role,
-                    version=self.version,
-                    username=self.username,
-                )
+            return cast(
+                "WireResponse | None",
+                await handler_cls().handle(
+                    RequestContext(
+                        proxy=self,
+                        role=self.role,
+                        version=self.version,
+                        username=self.username,
+                    )
+                ),
             )
 
         # NEW: try serde wire registry for handler-less ops

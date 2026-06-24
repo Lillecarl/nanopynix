@@ -1,104 +1,13 @@
-"""Unit tests for pynixd.wire — wire protocol primitives and operation roundtrips.
-
-Tests are split into two parts:
-1. Primitive roundtrips: uint64, string, bytes, set, list, optional, framed.
-2. Operation roundtrips: for every operation with from_reader/to_writer,
-   construct a realistic instance, serialize via BytesWriter, deserialize
-   via BytesReader, and verify field equality.
-"""
+"""Unit tests for pynixd.wire protocol primitives."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 
-from pynixd.constants import proto
-from pynixd.derived_path import DerivedPath
-from pynixd.operations.add_build_log import AddBuildLogRequest, AddBuildLogResponse
-from pynixd.operations.add_indirect_root import AddIndirectRootRequest, AddIndirectRootResponse
-from pynixd.operations.add_multiple_to_store import AddMultipleToStoreRequest, AddMultipleToStoreResponse
-from pynixd.operations.add_perm_root import AddPermRootRequest, AddPermRootResponse
-from pynixd.operations.add_signatures import AddSignaturesRequest, AddSignaturesResponse
-from pynixd.operations.add_temp_root import AddTempRootRequest, AddTempRootResponse
-from pynixd.serde import AddToStoreRequest, AddToStoreResponse
-from pynixd.operations.add_to_store_nar import AddToStoreNarRequest, AddToStoreNarResponse
-from pynixd.serde import BuildDerivationRequest, BuildDerivationResponse
-from pynixd.operations.build_paths import (
-    BuildPathsRequest,
-    BuildPathsResponse,
-    BuildPathsWithResultsRequest,
-    BuildPathsWithResultsResponse,
-)
-from pynixd.serde import (
-    QueryRealisationRequest,
-    QueryRealisationResponse,
-    RegisterDrvOutputRequest,
-    RegisterDrvOutputResponse,
-)
-from pynixd.operations.collect_garbage import (
-    CollectGarbageRequest,
-    CollectGarbageResponse,
-    GCAction,
-)
-from pynixd.operations.ensure_path import EnsurePathRequest, EnsurePathResponse
-from pynixd.operations.find_roots import FindRootsEntry, FindRootsRequest, FindRootsResponse
-from pynixd.serde import IsValidPathRequest, IsValidPathResponse
-from pynixd.serde import NarFromPathRequest
-from pynixd.operations.optimise_store import OptimiseStoreRequest, OptimiseStoreResponse
-from pynixd.serde import QueryAllValidPathsRequest, QueryAllValidPathsResponse
-from pynixd.operations.query_closure import QueryClosureRequest, QueryClosureResponse
-from pynixd.serde import QueryClosureWithInfoRequest, QueryClosureWithInfoResponse
-from pynixd.serde import (
-    QueryDerivationOutputMapRequest,
-    QueryDerivationOutputMapResponse,
-)
-from pynixd.operations.query_derivation_output_map_batch import (
-    DerivationOutputMapBatchResponse,
-    QueryDerivationOutputMapBatchRequest,
-)
-from pynixd.operations.query_missing import QueryMissingRequest, QueryMissingResponse
-from pynixd.operations.query_path_from_hash_part import (
-    QueryPathFromHashPartRequest,
-    QueryPathFromHashPartResponse,
-)
-from pynixd.serde import QueryPathInfoRequest, QueryPathInfoResponse
-from pynixd.operations.query_path_infos import QueryPathInfosRequest, QueryPathInfosResponse
-from pynixd.operations.query_referrers import QueryReferrersRequest, QueryReferrersResponse
-from pynixd.operations.query_subst_path_info import (
-    QuerySubstitutablePathInfoRequest,
-    QuerySubstitutablePathInfoResponse,
-)
-from pynixd.operations.query_subst_path_infos import (
-    QuerySubstitutablePathInfosRequest,
-    QuerySubstitutablePathInfosResponse,
-    SubstitutablePathInfoEntry,
-)
-from pynixd.operations.query_substitutable_paths import (
-    QuerySubstitutablePathsRequest,
-    QuerySubstitutablePathsResponse,
-)
-from pynixd.operations.query_valid_derivers import QueryValidDeriversRequest, QueryValidDeriversResponse
-from pynixd.serde import QueryValidPathsRequest, QueryValidPathsResponse
-from pynixd.operations.set_options import SetOptionsRequest, SetOptionsResponse
-from pynixd.operations.sign_path_info import SignPathInfoRequest, SignPathInfoResponse
-from pynixd.operations.verify_store import VerifyStoreRequest, VerifyStoreResponse
-from pynixd.stderr import StderrNext, StderrStartActivity
-from pynixd.store_path import DrvOutput, StorePath
-from pynixd.types import KeyedBuildResult
-from pynixd.types.ca import Realisation
-from pynixd.types.path_info import SubstitutablePathInfo
-
-if TYPE_CHECKING:
-    from pynixd.types.aliases import OutputMap
-from pynixd.stderr import OperationLogs
-from pynixd.types.build import BuildMode, BuildResult, BuildResultStatus
-from pynixd.types.context import ReadContext, WriteContext
-from pynixd.types.derivation import BasicDerivation, DerivationOutput
-from pynixd.types.path_info import UnkeyedValidPathInfo, ValidPathInfo
-from pynixd.types.protocol import ActivityType, Verbosity
+from pynixd.store_path import StorePath
 from pynixd.wire import (
-    PROTOCOL_VERSION,
     BytesReader,
     BytesWriter,
     FramedReader,

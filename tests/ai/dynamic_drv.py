@@ -9,6 +9,7 @@ Exercises the full dynamic derivation lifecycle against a root Nix store:
 6. Inspect .drv structure (DrvWithVersion, dynamic_input_drvs, etc.)
 7. Query derivation output map and realisations
 """
+# pyright: reportArgumentType=false
 
 from __future__ import annotations
 
@@ -23,9 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pynixd.derivation_resolution import _unparse_basic_derivation
 from pynixd.drv_parser import read_drv_file, to_basic_derivation
-from pynixd.serde import QueryRealisationRequest
 from pynixd.serde import (
     QueryDerivationOutputMapRequest,
+    QueryRealisationRequest,
 )
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import DrvOutput, StorePath

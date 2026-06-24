@@ -17,14 +17,13 @@ from .config import LocalSocketStoreSpec, PynixdSettings
 from .context import PynixdContext
 from .http_server import PynixdHttpServer
 from .nix_config import merge_builder_frontend
-from .serde import PynixdCollectGarbageRequest
 from .reverse_client import ReverseInitiator
 from .reverse_server import start_reverse_acceptor
 from .scheduler import Scheduler
+from .serde import PynixdCollectGarbageRequest
+from .serde.protocol import PynixdGCAction
 from .ssh_server import start_ssh_server
-from .stderr import OperationLogs
 from .store import DaemonStore, LocalDBStore, LocalStore
-from .types import PynixdGCAction
 from .types.ids import StoreId
 from .unix_server import start_unix_server
 
@@ -209,11 +208,7 @@ class Server:
         while True:
             await anyio.sleep(self.ctx.settings.gc_interval)
             try:
-                await PynixdCollectGarbageRequest.run_gc(
-                    self.ctx,
-                    PynixdGCAction.EXECUTE,
-                    logs=OperationLogs(),
-                )
+                await self.local_store.execute(PynixdCollectGarbageRequest(action=PynixdGCAction.EXECUTE))
             except anyio.get_cancelled_exc_class():
                 return
             except Exception:

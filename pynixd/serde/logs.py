@@ -14,8 +14,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import Field as PydanticField
-
 from ..constants import (
     STDERR_ERROR,
     STDERR_LAST,
@@ -32,7 +30,7 @@ from ..stderr import (
     StderrStartActivity,
     StderrStopActivity,
 )
-from ..types.protocol import FieldType
+from ..types.protocol import ActivityType, FieldType, ResultType, Verbosity
 from .wire_message import WireField, WireModel
 
 if TYPE_CHECKING:
@@ -84,7 +82,7 @@ class LogStartActivity(WireModel):
     level: int = 0
     type: int = 0
     text: str = ""
-    fields: list[ActivityField] = PydanticField(default_factory=list)
+    fields: list[ActivityField] = WireField(default_factory=list)
     parent: int = 0
 
 
@@ -101,7 +99,7 @@ class LogResult(WireModel):
     code: int = WireField(default=STDERR_RESULT, serialize=True, deserialize=False)
     act_id: int = 0
     result_type: int = 0
-    fields: list[ActivityField] = PydanticField(default_factory=list)
+    fields: list[ActivityField] = WireField(default_factory=list)
 
 
 class LogError(WireModel):
@@ -113,7 +111,7 @@ class LogError(WireModel):
     name: str = ""
     msg: str = ""
     have_pos: int = 0
-    traces: list[TraceLine] = PydanticField(default_factory=list)
+    traces: list[TraceLine] = WireField(default_factory=list)
 
 
 # ── Tagged-union container ───────────────────────────────────────────
@@ -135,11 +133,14 @@ def _to_stderr_msg(msg: WireModel):
     if isinstance(msg, LogNext):
         return StderrNext(text=msg.text)
     if isinstance(msg, LogStartActivity):
-        fields = [field.valint if field.type == FieldType.INT else field.valstr or "" for field in msg.fields]
+        fields: list[int | str] = [
+            field.valint if field.type == FieldType.INT and field.valint is not None else field.valstr or ""
+            for field in msg.fields
+        ]
         return StderrStartActivity(
             act_id=msg.act_id,
-            level=msg.level,
-            type=msg.type,
+            level=Verbosity(msg.level),
+            type=ActivityType(msg.type),
             text=msg.text,
             fields=fields,
             parent=msg.parent,
@@ -147,12 +148,15 @@ def _to_stderr_msg(msg: WireModel):
     if isinstance(msg, LogStopActivity):
         return StderrStopActivity(act_id=msg.act_id)
     if isinstance(msg, LogResult):
-        fields = [field.valint if field.type == FieldType.INT else field.valstr or "" for field in msg.fields]
-        return StderrResult(act_id=msg.act_id, result_type=msg.result_type, fields=fields)
+        fields: list[int | str] = [
+            field.valint if field.type == FieldType.INT and field.valint is not None else field.valstr or ""
+            for field in msg.fields
+        ]
+        return StderrResult(act_id=msg.act_id, result_type=ResultType(msg.result_type), fields=fields)
     if isinstance(msg, LogError):
         return StderrError(
             error_type=msg.type,
-            level=msg.level,
+            level=Verbosity(msg.level),
             name=msg.name,
             msg=msg.msg,
             have_pos=msg.have_pos,
@@ -171,7 +175,7 @@ class WireLogs(WireModel):
     by ``STDERR_LAST``.
     """
 
-    messages: list[LogMessage] = PydanticField(default_factory=list)  # type: ignore[valid-type]
+    messages: list[LogMessage] = WireField(default_factory=list)  # type: ignore[valid-type]
 
     def add(self, msg: LogMessage) -> None:  # type: ignore[valid-type]
         """Append a log message to the stream."""

@@ -28,8 +28,8 @@ from typing import TYPE_CHECKING
 import structlog
 
 from .drv_parser import ChildMapNode, _aterm_escape
-from .types import BasicDerivation, DerivationOutput
 from .store_path import StorePath
+from .types import BasicDerivation, DerivationOutput
 from .utils import nix32_encode
 
 if TYPE_CHECKING:

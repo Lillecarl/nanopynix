@@ -3,11 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pydantic import ConfigDict
-from pydantic import Field as PydanticField
 
 from .drv_output import DrvOutput
 from .store_path import StorePath  # noqa: TC001
-from .wire_message import WireModel
+from .wire_message import WireField, WireModel
 
 if TYPE_CHECKING:
     from ..types.context import ReadContext, WriteContext
@@ -24,10 +23,10 @@ class Realisation(WireModel):
 
     model_config = ConfigDict(validate_by_alias=True)
 
-    id: DrvOutput = PydanticField(default_factory=DrvOutput)
-    out_path: StorePath | None = PydanticField(default=None, alias="outPath")
-    signatures: list[str] = PydanticField(default_factory=list)
-    dependent_realisations: dict[str, str] = PydanticField(default_factory=dict, alias="dependentRealisations")
+    id: DrvOutput = WireField(default_factory=DrvOutput)
+    out_path: StorePath | None = WireField(default=None, alias="outPath")
+    signatures: list[str] = WireField(default_factory=list)
+    dependent_realisations: dict[str, str] = WireField(default_factory=dict, alias="dependentRealisations")
 
     @classmethod
     async def from_reader(cls, ctx: ReadContext):

@@ -4,15 +4,14 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field as PydanticField
-
+from .wire_message import WireField
 from .wire_ops import WireRequest, WireResponse
 
 
 class ProbeSystemsResponse(WireResponse):
     """ProbeSystems response — supported systems discovered by probing."""
 
-    systems: set[str] = PydanticField(default_factory=set)
+    systems: set[str] = WireField(default_factory=set)
 
 
 class ProbeSystemsRequest(WireRequest):
@@ -21,4 +20,4 @@ class ProbeSystemsRequest(WireRequest):
     op: ClassVar[int] = 108
     is_extension: ClassVar[bool] = True
     response_type = ProbeSystemsResponse
-    systems: set[str] = PydanticField(default_factory=set)
+    systems: set[str] = WireField(default_factory=set)

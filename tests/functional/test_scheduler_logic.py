@@ -4,21 +4,20 @@ import pytest
 
 from pynixd.config import PynixdSettings
 from pynixd.context import PynixdContext
+from pynixd.scheduler import Scheduler
 from pynixd.serde import (
     BasicDerivation,
+    BuildDerivationRequest,
+    BuildDerivationResponse,
     BuildResult,
 )
+from pynixd.store_path import StorePath
 from pynixd.types import (
     BuildMode,
     BuildResultStatus,
 )
-from pynixd.serde import (
-    BuildDerivationRequest,
-    BuildDerivationResponse,
-)
-from pynixd.scheduler import Scheduler
-from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
+from tests.conftest import serde_path
 from tests.functional.mock_store import MockStore
 from tests.test_features import TestFeatures as F
 
@@ -78,7 +77,7 @@ async def test_scheduler_load_balancing():
     # 3. Enqueue a build
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     request = BuildDerivationRequest(
-        drv_path=drv_path,
+        drv_path=serde_path(drv_path),
         derivation=BasicDerivation(platform="x86_64-linux", builder=""),
         build_mode=BuildMode.NORMAL,
     )
@@ -140,7 +139,7 @@ async def test_scheduler_skips_saturated_store():
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     request = BuildDerivationRequest(
-        drv_path=drv_path,
+        drv_path=serde_path(drv_path),
         derivation=BasicDerivation(platform="x86_64-linux", builder=""),
         build_mode=BuildMode.NORMAL,
     )
@@ -209,7 +208,7 @@ async def test_scheduler_proactive_transfer():
     remote_idle.responses[BuildDerivationRequest] = build_resp
 
     request = BuildDerivationRequest(
-        drv_path=drv_path,
+        drv_path=serde_path(drv_path),
         derivation=BasicDerivation(platform="x86_64-linux", builder=""),
         build_mode=BuildMode.NORMAL,
     )
@@ -275,7 +274,7 @@ async def test_scheduler_cpu_utilization():
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     request = BuildDerivationRequest(
-        drv_path=drv_path,
+        drv_path=serde_path(drv_path),
         derivation=BasicDerivation(platform="x86_64-linux", builder=""),
         build_mode=BuildMode.NORMAL,
     )
@@ -339,7 +338,7 @@ async def test_scheduler_feature_matching():
     derivation = BasicDerivation(platform="x86_64-linux", builder="")
     derivation.env["requiredSystemFeatures"] = "kvm big-parallel"
 
-    request = BuildDerivationRequest(drv_path=drv_path, derivation=derivation, build_mode=BuildMode.NORMAL)
+    request = BuildDerivationRequest(drv_path=serde_path(drv_path), derivation=derivation, build_mode=BuildMode.NORMAL)
 
     build_id, _future = await scheduler.build_derivation(
         request,
@@ -370,7 +369,7 @@ async def test_scheduler_fails_build_for_unknown_platform():
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     request = BuildDerivationRequest(
-        drv_path=drv_path,
+        drv_path=serde_path(drv_path),
         derivation=BasicDerivation(platform="aarch64-darwin", builder=""),
         build_mode=BuildMode.NORMAL,
     )
@@ -400,7 +399,7 @@ async def test_scheduler_queues_build_for_dynamic_platform():
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     request = BuildDerivationRequest(
-        drv_path=drv_path,
+        drv_path=serde_path(drv_path),
         derivation=BasicDerivation(platform="aarch64-darwin", builder=""),
         build_mode=BuildMode.NORMAL,
     )
@@ -430,7 +429,7 @@ async def test_scheduler_queues_build_for_dynamic_platform_with_features():
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     derivation = BasicDerivation(platform="aarch64-darwin", builder="")
     derivation.env["requiredSystemFeatures"] = "kvm"
-    request = BuildDerivationRequest(drv_path=drv_path, derivation=derivation, build_mode=BuildMode.NORMAL)
+    request = BuildDerivationRequest(drv_path=serde_path(drv_path), derivation=derivation, build_mode=BuildMode.NORMAL)
 
     build_id, _ = await scheduler.build_derivation(
         request,
@@ -456,7 +455,7 @@ async def test_scheduler_fails_build_for_missing_dynamic_feature():
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     derivation = BasicDerivation(platform="aarch64-darwin", builder="")
     derivation.env["requiredSystemFeatures"] = "kvm"
-    request = BuildDerivationRequest(drv_path=drv_path, derivation=derivation, build_mode=BuildMode.NORMAL)
+    request = BuildDerivationRequest(drv_path=serde_path(drv_path), derivation=derivation, build_mode=BuildMode.NORMAL)
 
     build_id, _ = await scheduler.build_derivation(
         request,
@@ -513,7 +512,7 @@ async def test_dynamic_feature_matrix_survives_store_removal():
     # Enqueue a build for the removed store's platform
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     request = BuildDerivationRequest(
-        drv_path=drv_path,
+        drv_path=serde_path(drv_path),
         derivation=BasicDerivation(platform="aarch64-darwin", builder=""),
         build_mode=BuildMode.NORMAL,
     )

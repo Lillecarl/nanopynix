@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field as PydanticField
-
 from .store_path import StorePath  # noqa: TC001
+from .wire_message import WireField
 from .wire_ops import WireRequest, WireResponse
 
 
 class QueryClosureResponse(WireResponse):
     """QueryClosure response — set of all StorePaths in the closure."""
 
-    paths: set[StorePath] = PydanticField(default_factory=set)
+    paths: set[StorePath] = WireField(default_factory=set)
 
 
 class QueryClosureRequest(WireRequest):
@@ -22,4 +21,4 @@ class QueryClosureRequest(WireRequest):
     op: ClassVar[int] = 104
     is_extension: ClassVar[bool] = True
     response_type = QueryClosureResponse
-    paths: set[StorePath] = PydanticField(default_factory=set)
+    paths: set[StorePath] = WireField(default_factory=set)

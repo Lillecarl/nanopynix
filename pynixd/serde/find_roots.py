@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field as PydanticField
-
-from .wire_message import WireModel
+from .wire_message import WireField, WireModel
 from .wire_ops import WireRequest, WireResponse
 
 
@@ -20,7 +18,7 @@ class FindRootsEntry(WireModel):
 class FindRootsResponse(WireResponse):
     """FindRoots response — list of link/target entries."""
 
-    roots: list[FindRootsEntry] = PydanticField(default_factory=list)
+    roots: list[FindRootsEntry] = WireField(default_factory=list)
 
 
 class FindRootsRequest(WireRequest):

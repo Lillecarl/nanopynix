@@ -26,11 +26,9 @@ from pynixd.nar import (
     parse_nar,
     write_nar,
 )
-from pynixd.serde import NarFromPathRequest
-from pynixd.serde import QueryAllValidPathsRequest
-from pynixd.serde import QueryPathInfoRequest
+from pynixd.serde import QueryAllValidPathsRequest, QueryPathInfoRequest
 from pynixd.store import LocalSocketStore
-from tests.conftest import make_test_spec
+from tests.conftest import make_test_spec, read_nar_from_store, serde_path
 
 log = structlog.get_logger(__name__)
 
@@ -78,15 +76,12 @@ async def test_nar_roundtrip_via_streaming(store_path_str: str) -> None:
         make_test_spec(store_id="system", store_path=Path("/"), no_probe=True),
     )
     try:
-        info_resp = await store.execute(QueryPathInfoRequest(path=spath))
+        info_resp = await store.execute(QueryPathInfoRequest(path=serde_path(spath)))
         if not info_resp.valid or info_resp.info is None:
             pytest.skip(f"No path info for {spath}")
 
         nar_size = info_resp.info.nar_size
-        nar_resp = await store.execute(
-            NarFromPathRequest(path=spath, nar_size=nar_size),
-        )
-        original = nar_resp.nar_data
+        original = await read_nar_from_store(store, spath, nar_size)
         if not original:
             pytest.skip(f"Empty NAR for {spath}")
 
@@ -129,15 +124,12 @@ async def test_nar_forwarder_convenience(store_path_str: str) -> None:
         make_test_spec(store_id="system", store_path=Path("/"), no_probe=True),
     )
     try:
-        info_resp = await store.execute(QueryPathInfoRequest(path=spath))
+        info_resp = await store.execute(QueryPathInfoRequest(path=serde_path(spath)))
         if not info_resp.valid or info_resp.info is None:
             pytest.skip(f"No path info for {spath}")
 
         nar_size = info_resp.info.nar_size
-        nar_resp = await store.execute(
-            NarFromPathRequest(path=spath, nar_size=nar_size),
-        )
-        original = nar_resp.nar_data
+        original = await read_nar_from_store(store, spath, nar_size)
         if not original:
             pytest.skip(f"Empty NAR for {spath}")
 

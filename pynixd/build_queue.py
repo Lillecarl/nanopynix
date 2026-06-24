@@ -11,8 +11,8 @@ import anyio
 import structlog
 
 from . import metrics, wire
-from .serde import BuildDerivationResponse
-from .types.build import BuildResult, BuildResultStatus
+from .serde import BuildDerivationResponse, BuildResult
+from .types.build import BuildResultStatus
 from .types.ids import BuildId, RequestId, StoreId
 
 if TYPE_CHECKING:
@@ -20,10 +20,9 @@ if TYPE_CHECKING:
 
     from .connection import ClientConn
     from .derived_path import DerivedPath
-    from .serde import BuildDerivationRequest
+    from .serde import BuildDerivationRequest, Realisation
     from .stderr import StderrMsg
     from .types.build import BuildMode
-    from .types.ca import Realisation
 
 log = structlog.get_logger(__name__)
 

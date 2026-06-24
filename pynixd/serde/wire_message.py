@@ -314,6 +314,9 @@ class WireModel(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+
     def __hash__(self) -> int:
         return hash(tuple(getattr(self, f) for f in self.__class__.model_fields))
 

@@ -38,7 +38,14 @@ from tests._conftest.fixtures import (
     profiler,
     tmp_path,
 )
-from tests._conftest.helpers import rmtree_robust, rmtree_robust_glob, run_subproc
+from tests._conftest.helpers import (
+    read_nar_from_store,
+    rmtree_robust,
+    rmtree_robust_glob,
+    run_subproc,
+    serde_path,
+    serde_path_set,
+)
 from tests._conftest.hooks import (
     pytest_collection_modifyitems,
     pytest_ignore_collect,
@@ -81,12 +88,15 @@ __all__ = [
     "pytest_sessionstart",
     "pytest_terminal_summary",
     "pynixd_server",
+    "read_nar_from_store",
     "revive_messages_containing",
     "revive_messages_matching",
     "rmtree_robust",
     "rmtree_robust_glob",
     "run_subproc",
     "server_uri",
+    "serde_path",
+    "serde_path_set",
     "SESSION_HTTP_PASS",
     "SESSION_HTTP_PORT",
     "SESSION_HTTP_USER",

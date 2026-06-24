@@ -6,14 +6,16 @@ import aiohttp
 import pytest
 
 from pynixd import Server
-from pynixd.serde import BasicDerivation, BuildResult
-from pynixd.types import BuildMode, BuildResultStatus
 from pynixd.serde import (
+    BasicDerivation,
     BuildDerivationRequest,
     BuildDerivationResponse,
+    BuildResult,
 )
 from pynixd.store_path import StorePath
+from pynixd.types import BuildMode, BuildResultStatus
 from pynixd.types.ids import StoreId
+from tests.conftest import serde_path
 from tests.functional.mock_store import MockStore
 from tests.test_features import TestFeatures as F
 
@@ -44,7 +46,7 @@ async def test_dynamic_store_management():
         # 2. Enqueue a build and block it
         drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
         request = BuildDerivationRequest(
-            drv_path=drv_path,
+            drv_path=serde_path(drv_path),
             derivation=BasicDerivation(platform="x86_64-linux", builder=""),
             build_mode=BuildMode.NORMAL,
         )

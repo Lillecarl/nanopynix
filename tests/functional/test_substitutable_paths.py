@@ -25,9 +25,7 @@ from tests.test_features import TestFeatures as F
 log = structlog.get_logger(__name__)
 
 
-@pytest.mark.covers(
-    F.QUERY_SUBSTITUTABLE_PATHS | F.STORE_LOCAL
-)
+@pytest.mark.covers(F.QUERY_SUBSTITUTABLE_PATHS | F.STORE_LOCAL)
 async def test_substitutable_paths_via_store(pynixd_server: Server) -> None:
     """Build a path and verify it via path-info through pynixd."""
     uri = server_uri(pynixd_server)

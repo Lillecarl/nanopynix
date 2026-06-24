@@ -17,10 +17,10 @@ from ..exceptions import BackendError
 from ..monitor import ResourceGate, ResourceMonitor
 from ..serde import BasicDerivation, BuildDerivationRequest, DerivationOutput
 from ..serde import StorePath as SerdeStorePath
+from ..serde.wire_ops import WireRequest
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
 from ..types.build import BuildMode, BuildResultStatus
 from ..types.context import WriteContext
-from ..serde.wire_ops import WireRequest
 from ..utils import random_nix32_hash
 from .base import Store
 from .pool import ConnectionPool
@@ -659,7 +659,6 @@ class DaemonStore(Store):
 
     async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         from ..serde import QueryClosureWithInfoResponse, QueryPathInfosRequest
-        from ..serde import StorePath as SerdeStorePath
 
         if not request.paths:
             return QueryClosureWithInfoResponse(infos=[])

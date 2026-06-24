@@ -16,33 +16,31 @@ import structlog
 from pynixd import Server
 from pynixd.build_queue import QueuedBuild
 from pynixd.local_store_db import LocalStoreDB
+from pynixd.psi import CpuUtil
 from pynixd.serde import (
     BasicDerivation,
+    BuildDerivationRequest,
+    BuildDerivationResponse,
     BuildResult,
+    ContentAddress,
     DerivationOutput,
+    NARHash,
+    QueryAllValidPathsRequest,
+    QueryAllValidPathsResponse,
+    QueryClosureWithInfoRequest,
+    QueryClosureWithInfoResponse,
+    Time,
+    UnkeyedValidPathInfo,
+    ValidPathInfo,
 )
+from pynixd.store import LocalDBStore
+from pynixd.store_path import StorePath
 from pynixd.types import (
     BuildMode,
     BuildResultStatus,
-    ValidPathInfo,
 )
-from pynixd.serde import (
-    BuildDerivationRequest,
-    BuildDerivationResponse,
-)
-from pynixd.serde import (
-    QueryAllValidPathsRequest,
-    QueryAllValidPathsResponse,
-)
-from pynixd.serde import (
-    QueryClosureWithInfoRequest,
-    QueryClosureWithInfoResponse,
-)
-from pynixd.psi import CpuUtil
-from pynixd.store import LocalDBStore
-from pynixd.store_path import StorePath
 from pynixd.types.ids import BuildId, StoreId
-from tests.conftest import STORE_PREFIX, make_test_spec, rmtree_robust
+from tests.conftest import STORE_PREFIX, make_test_spec, rmtree_robust, serde_path
 from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
@@ -109,9 +107,17 @@ class StatsTestStore(LocalDBStore):
             # Mock closure response so "pulling paths" succeeds
             infos = [
                 ValidPathInfo(
-                    path=p,
-                    registration_time=1,
-                    nar_hash="sha256:0000000000000000000000000000000000000000000000000000",
+                    path=serde_path(p),
+                    info=UnkeyedValidPathInfo(
+                        deriver=None,
+                        nar_hash=NARHash(hash="0000000000000000000000000000000000000000000000000000000000000000"),
+                        references=set(),
+                        registration_time=Time(ts=1),
+                        nar_size=0,
+                        ultimate=True,
+                        sigs=set(),
+                        ca=ContentAddress(value=""),
+                    ),
                 )
                 for p in request.paths
             ]
@@ -180,8 +186,10 @@ async def test_build_stats_recording(tmp_path: Path) -> None:
             },
         )
         req = BuildDerivationRequest(
-            drv_path=StorePath(
-                "/nix/store/00000000000000000000000000000001-fast-pkg.drv",
+            drv_path=serde_path(
+                StorePath(
+                    "/nix/store/00000000000000000000000000000001-fast-pkg.drv",
+                ),
             ),
             derivation=drv,
             build_mode=BuildMode.NORMAL,
@@ -246,8 +254,10 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
         pynixd_remote.build_delays["blocker"] = 10.0
         blocker_drv = BasicDerivation(platform="x86_64-linux", builder="", env={"pname": "blocker"})
         blocker_req = BuildDerivationRequest(
-            drv_path=StorePath(
-                "/nix/store/00000000000000000000000000000000-blocker.drv",
+            drv_path=serde_path(
+                StorePath(
+                    "/nix/store/00000000000000000000000000000000-blocker.drv",
+                ),
             ),
             derivation=blocker_drv,
             build_mode=BuildMode.NORMAL,
@@ -265,7 +275,7 @@ async def test_scheduler_local_fasttrack(tmp_path: Path) -> None:
         # It should be fast-tracked to LOCAL because remote is full
         tiny_drv = BasicDerivation(platform="x86_64-linux", builder="", env={"pname": "tiny-pkg"})
         tiny_req = BuildDerivationRequest(
-            drv_path=StorePath("/nix/store/00000000000000000000000000000003-tiny.drv"),
+            drv_path=serde_path(StorePath("/nix/store/00000000000000000000000000000003-tiny.drv")),
             derivation=tiny_drv,
             build_mode=BuildMode.NORMAL,
         )
@@ -394,8 +404,10 @@ async def test_scheduler_skips_saturated_store(tmp_path: Path) -> None:
 
         drv = BasicDerivation(platform="x86_64-linux", builder="", env={"pname": "test-pkg"})
         req = BuildDerivationRequest(
-            drv_path=StorePath(
-                "/nix/store/00000000000000000000000000000000-test-pkg.drv",
+            drv_path=serde_path(
+                StorePath(
+                    "/nix/store/00000000000000000000000000000000-test-pkg.drv",
+                ),
             ),
             derivation=drv,
             build_mode=BuildMode.NORMAL,

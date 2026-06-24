@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field as PydanticField
-
 from .store_path import StorePath  # noqa: TC001
+from .wire_message import WireField
 from .wire_ops import WireRequest, WireResponse
 
 
 class QueryDerivationOutputMapResponse(WireResponse):
     """QueryDerivationOutputMap response — output name → StorePath mapping."""
 
-    items: dict[str, StorePath] = PydanticField(default_factory=dict)
+    items: dict[str, StorePath] = WireField(default_factory=dict)
 
 
 class QueryDerivationOutputMapRequest(WireRequest):

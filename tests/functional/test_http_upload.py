@@ -10,9 +10,7 @@ import aiohttp
 import pytest
 import structlog
 
-from pynixd.serde import NarFromPathRequest
 from pynixd.serde import QueryPathInfoRequest
-from pynixd.serde import StorePath as SerdeStorePath
 from pynixd.store import LocalSocketStore
 from pynixd.store_path import StorePath
 from tests.conftest import (
@@ -20,7 +18,9 @@ from tests.conftest import (
     SESSION_HTTP_PASS,
     SESSION_HTTP_USER,
     make_test_spec,
+    read_nar_from_store,
     run_subproc,
+    serde_path,
 )
 from tests.test_features import TestFeatures as F
 
@@ -79,23 +79,12 @@ async def test_http_upload(
     root_store = LocalSocketStore(
         make_test_spec(store_id="root", store_path=Path("/"), no_probe=True),
     )
-    info_resp = await root_store.execute(QueryPathInfoRequest(path=SerdeStorePath(path=str(path))))
+    info_resp = await root_store.execute(QueryPathInfoRequest(path=serde_path(path)))
     assert info_resp.valid
     assert info_resp.info is not None
     vinfo = info_resp.info
 
-    nar_data = bytearray()
-
-    async def collect_nar(chunk: bytes):
-        nar_data.extend(chunk)
-
-    await root_store.execute(
-        NarFromPathRequest(
-            path=path,
-            nar_size=vinfo.nar_size,
-            async_callback=collect_nar,
-        ),
-    )
+    nar_data = await read_nar_from_store(root_store, path, vinfo.nar_size)
 
     # Build narinfo using NAR hash in URL (matches what handle_put_nar saves as)
     nar_hash = str(vinfo.nar_hash)
@@ -142,7 +131,7 @@ async def test_http_upload(
             assert await resp.text() == "ok\n"
 
     # 5. Verify it now exists in the local store (HTTP uploads go to local_store)
-    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=SerdeStorePath(path=str(path))))
+    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=serde_path(path)))
     assert info_resp.valid, f"Path {path} should be valid in local store after upload"
 
 
@@ -171,5 +160,5 @@ async def test_nix_copy_to_http(
     assert rc == 0, f"nix copy failed:\n{stderr}"
 
     # 4. Verify it now exists in the local store (HTTP uploads go to local_store)
-    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=SerdeStorePath(path=str(path))))
+    info_resp = await pynixd_server.local_store.execute(QueryPathInfoRequest(path=serde_path(path)))
     assert info_resp.valid, f"Path {path} should be valid in local store after nix copy"

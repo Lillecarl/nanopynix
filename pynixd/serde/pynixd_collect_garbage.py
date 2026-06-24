@@ -4,17 +4,16 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field as PydanticField
-
 from .protocol import PynixdGCAction  # noqa: TC001
 from .store_path import StorePath  # noqa: TC001
+from .wire_message import WireField
 from .wire_ops import WireRequest, WireResponse
 
 
 class PynixdCollectGarbageResponse(WireResponse):
     """PynixdCollectGarbage response — store paths deleted + bytes freed."""
 
-    store_paths: set[StorePath] = PydanticField(default_factory=set)
+    store_paths: set[StorePath] = WireField(default_factory=set)
     bytes: int = 0
 
 

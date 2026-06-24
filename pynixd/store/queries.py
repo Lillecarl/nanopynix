@@ -1,6 +1,6 @@
 """SQLite queries for the local store database.
 
-Extracted from pynixd.operations to break the dependency on the old
+Extracted from the old operation modules to break the dependency on the legacy
 operation classes.  These are pure string constants used by
 LocalDBStore for SQLite fast-path queries.
 """

@@ -7,23 +7,24 @@ import pytest
 from pynixd.config import PynixdSettings
 from pynixd.connection import ClientConn
 from pynixd.context import PynixdContext
+from pynixd.scheduler import Scheduler
 from pynixd.serde import (
     BasicDerivation,
+    BuildDerivationRequest,
+    BuildDerivationResponse,
     BuildResult,
+    LogNext,
+    WireLogs,
 )
+from pynixd.stderr import StderrNext
+from pynixd.store_path import StorePath
 from pynixd.types import (
     BuildMode,
     BuildResultStatus,
 )
-from pynixd.serde import (
-    BuildDerivationRequest,
-    BuildDerivationResponse,
-)
-from pynixd.scheduler import Scheduler
-from pynixd.stderr import OperationLogs, StderrNext
-from pynixd.store_path import StorePath
 from pynixd.types.ids import BuildId, StoreId
 from pynixd.wire import BytesWriter
+from tests.conftest import serde_path
 from tests.functional.mock_store import MockStore
 from tests.test_features import TestFeatures as F
 
@@ -58,9 +59,9 @@ async def test_build_log_pubsub_two_clients():
     # Build a response with 10 pre-populated log lines (simulating a build
     # that printed 1-10). The scheduler's _execute() will fan these out
     # to all subscribers after the mock returns.
-    logs = OperationLogs()
+    logs = WireLogs()
     for i in range(1, 11):
-        logs.add(StderrNext(text=f"{i}\n"))
+        logs.messages.append(LogNext(text=f"{i}\n"))
 
     build_resp = BuildDerivationResponse(
         result=BuildResult(status=BuildResultStatus.BUILT),
@@ -74,7 +75,7 @@ async def test_build_log_pubsub_two_clients():
     build_blocker = remote.block_build(drv_path)
 
     request = BuildDerivationRequest(
-        drv_path=drv_path,
+        drv_path=serde_path(drv_path),
         derivation=BasicDerivation(platform="x86_64-linux", builder=""),
         build_mode=BuildMode.NORMAL,
     )
@@ -145,7 +146,7 @@ async def test_build_log_pubsub_late_subscriber_gets_full_history():
 
     drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
     request = BuildDerivationRequest(
-        drv_path=drv_path,
+        drv_path=serde_path(drv_path),
         derivation=BasicDerivation(platform="x86_64-linux", builder=""),
         build_mode=BuildMode.NORMAL,
     )

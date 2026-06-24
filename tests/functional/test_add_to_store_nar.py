@@ -11,6 +11,7 @@ from pynixd.store_path import StorePath
 from tests.conftest import (
     CLIENT_BIN,
     run_subproc,
+    serde_path,
     server_uri,
 )
 
@@ -48,7 +49,7 @@ async def test_add_to_store_nar(pynixd_server: Server, tmp_path: Path):
     assert rc == 0, f"nix store add-path failed:\n{stderr}"
     path = StorePath(stdout.strip())
 
-    info_resp = await target_store.execute(QueryPathInfoRequest(path=path))
+    info_resp = await target_store.execute(QueryPathInfoRequest(path=serde_path(path)))
     assert info_resp.valid, f"Path {path} should be valid in target store"
     assert info_resp.info is not None, "Info should not be none"
     assert not info_resp.info.references, "Path should have no references"

@@ -12,12 +12,11 @@ import structlog
 
 from pynixd import wire
 from pynixd.config import LocalSocketStoreSpec
-from pynixd.serde import QueryAllValidPathsRequest
-from pynixd.serde import QueryPathInfoRequest
+from pynixd.serde import QueryAllValidPathsRequest, QueryPathInfoRequest
 from pynixd.store import DaemonStore, LocalSocketStore
 from pynixd.store_path import StorePath
 from pynixd.types.ids import StoreId
-from tests.conftest import CLIENT_BIN, rmtree_robust, run_subproc
+from tests.conftest import CLIENT_BIN, rmtree_robust, run_subproc, serde_path
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -125,7 +124,7 @@ async def _create_big_path(size_mb: int) -> StorePath:
 async def test_bench_nar_streaming_latency(bench_store: DaemonStore, dst_store: DaemonStore, chunk_kb: int):
     """Benchmark: stream a single ~1MB path via stream_paths_store_to_store."""
     store_path = await _pick_a_path(bench_store)
-    info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
+    info_resp = await bench_store.execute(QueryPathInfoRequest(path=serde_path(store_path)))
     info = info_resp.info.with_path(store_path) if info_resp.info else None
     assert info is not None
 
@@ -152,7 +151,7 @@ async def test_bench_nar_streaming_latency(bench_store: DaemonStore, dst_store: 
 async def test_bench_nar_streaming_throughput(bench_store: DaemonStore, dst_store: DaemonStore, chunk_kb: int):
     """Benchmark: stream a 100MB NAR via stream_paths_store_to_store at various chunk sizes."""
     store_path = await _create_big_path(100)
-    info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
+    info_resp = await bench_store.execute(QueryPathInfoRequest(path=serde_path(store_path)))
     info = info_resp.info.with_path(store_path) if info_resp.info else None
     assert info is not None
 
@@ -180,7 +179,7 @@ async def test_bench_nar_streaming_throughput(bench_store: DaemonStore, dst_stor
 async def test_bench_copy_paths_latency(bench_store: DaemonStore, dst_store: DaemonStore, chunk_kb: int):
     """Benchmark: stream a single ~1MB path via copy_paths."""
     store_path = await _pick_a_path(bench_store, need_no_refs=True)
-    info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
+    info_resp = await bench_store.execute(QueryPathInfoRequest(path=serde_path(store_path)))
     info = info_resp.info
     assert info is not None
 
@@ -207,7 +206,7 @@ async def test_bench_copy_paths_latency(bench_store: DaemonStore, dst_store: Dae
 async def test_bench_copy_paths_throughput(bench_store: DaemonStore, dst_store: DaemonStore, chunk_kb: int):
     """Benchmark: stream a 100MB NAR via copy_paths at various chunk sizes."""
     store_path = await _create_big_path(100)
-    info_resp = await bench_store.execute(QueryPathInfoRequest(path=store_path))
+    info_resp = await bench_store.execute(QueryPathInfoRequest(path=serde_path(store_path)))
     info = info_resp.info
     assert info is not None
 

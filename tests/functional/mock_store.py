@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 import structlog
 
 from pynixd.config import StoreSpecBase
+from pynixd.psi import CpuUtil
 from pynixd.serde import (
     BuildDerivationRequest,
     QueryAllValidPathsRequest,
@@ -16,9 +17,10 @@ from pynixd.serde import (
     QueryClosureWithInfoResponse,
     QueryValidPathsRequest,
     QueryValidPathsResponse,
+)
+from pynixd.serde import (
     StorePath as SerdeStorePath,
 )
-from pynixd.psi import CpuUtil
 from pynixd.serde.content_address import ContentAddress
 from pynixd.serde.nar_hash import NARHash
 from pynixd.serde.path_info import UnkeyedValidPathInfo

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field as PydanticField
-
 from .derived_path import DerivedPath  # noqa: TC001
+from .wire_message import WireField
 from .wire_ops import WireRequest, WireResponse
 
 
@@ -22,5 +21,5 @@ class BuildPathsRequest(WireRequest):
     op: ClassVar[int] = 9
     response_type = BuildPathsResponse
     forward: ClassVar[bool] = False
-    derived_paths: set[DerivedPath] = PydanticField(default_factory=set)
+    derived_paths: set[DerivedPath] = WireField(default_factory=set)
     build_mode: int

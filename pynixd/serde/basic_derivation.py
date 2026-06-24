@@ -6,19 +6,18 @@ from ..store_path import StorePath as DomainStorePath
 from ..system_features import PYNIXD_HANDLED_FEATURES
 from .derivation_output import DerivationOutput  # noqa: TC001
 from .store_path import StorePath  # noqa: TC001
-from .wire_message import WireField
-from .wire_message import WireModel
+from .wire_message import WireField, WireModel
 
 
 class BasicDerivation(WireModel):
     """Wire mirror of BasicDerivation."""
 
-    outputs: dict[str, DerivationOutput]
-    input_srcs: set[StorePath]
+    outputs: dict[str, DerivationOutput] = WireField(default_factory=dict)
+    input_srcs: set[StorePath] = WireField(default_factory=set)
     platform: str
     builder: str
-    args: list[str]
-    env: dict[str, str]
+    args: list[str] = WireField(default_factory=list)
+    env: dict[str, str] = WireField(default_factory=dict)
     is_dynamic: bool = WireField(default=False, serialize=False, deserialize=False)
 
     @property

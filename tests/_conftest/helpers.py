@@ -14,10 +14,15 @@ from typing import TYPE_CHECKING
 import structlog
 
 from pynixd.nix_config import NixConfig
+from pynixd.serde import NarFromPathRequest
+from pynixd.serde import StorePath as SerdeStorePath
+from pynixd.types.context import WriteContext
 from tests._conftest.constants import DEFAULT_NIX_CONFIG, DEFAULT_SSH_OPTS
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
+
+    from pynixd.store import DaemonStore
 
 log = structlog.get_logger(__name__)
 
@@ -55,6 +60,25 @@ def rmtree_robust_glob(pattern: str) -> None:
     """Remove all directories matching a glob pattern."""
     for path_str in glob_module.glob(pattern):  # noqa: PTH207
         rmtree_robust(Path(path_str))
+
+
+def serde_path(path: object) -> SerdeStorePath:
+    """Convert domain/test path objects to the wire StorePath model."""
+    return SerdeStorePath(path=str(path))
+
+
+def serde_path_set(paths: Iterable[object]) -> set[SerdeStorePath]:
+    """Convert a path iterable to the wire StorePath set used by request models."""
+    return {serde_path(path) for path in paths}  # pyright: ignore[reportUnhashable]
+
+
+async def read_nar_from_store(store: DaemonStore, path: object, nar_size: int) -> bytes:
+    """Read a NAR stream from a store using the streaming NarFromPath protocol."""
+    async with store.transfer_conn() as conn:
+        await NarFromPathRequest(path=serde_path(path)).to_writer(WriteContext.from_conn(conn))
+        await conn.w.drain()
+        await conn.r.drain_stderr()
+        return await conn.r.readexactly(nar_size)
 
 
 async def run_subproc(

@@ -26,11 +26,12 @@ from .allocator import TINY_BUILD_THRESHOLD_MS, BuildAllocator, TelemetryStoreRa
 from .build_queue import BuildQueue, QueuedBuild
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .serde import QueryValidPathsRequest
-from .types import UnkeyedValidPathInfo
+from .serde import StorePath as SerdeStorePath
 from .stderr import StderrNext
 from .store import LocalDBStore
 from .store.transfer import stream_paths_store_to_store
 from .store_path import StorePath
+from .types import UnkeyedValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -424,7 +425,10 @@ class Scheduler:
             return
         try:
             await self.local_store.execute(
-                QueryValidPathsRequest(paths=paths, substitute=0),
+                QueryValidPathsRequest(
+                    paths={SerdeStorePath(path=str(path)) for path in paths},  # pyright: ignore[reportUnhashable]
+                    substitute=0,
+                ),
             )
         except (BackendError, OSError, ConnectionError):
             log.exception("validate_known_paths_failed", count=len(paths))
@@ -491,21 +495,19 @@ class Scheduler:
         # 1. Filter inputs already present on the builder store
         input_srcs = build.request.derivation.input_srcs
         if input_srcs:
-            # Query builder store for which paths it already has
-            from pynixd.serde import StorePath as SerdeStorePath
-            from pynixd.serde.query_valid_paths import QueryValidPathsRequest as SerdeQueryValidPathsRequest
-
+            paths_to_check = {SerdeStorePath(path=str(p)) for p in input_srcs}  # pyright: ignore[reportUnhashable]
             try:
                 check = await store.execute(
-                    SerdeQueryValidPathsRequest(
-                        paths={SerdeStorePath(path=str(p)) for p in input_srcs},  # pyright: ignore[reportUnhashable]
+                    QueryValidPathsRequest(
+                        paths=paths_to_check,
                         substitute=0,
                     )
                 )
-                known = {p for p in input_srcs if str(p) in {str(cp) for cp in check.paths}}
+                valid_paths = [str(cp) for cp in check.paths]
+                known = [str(p) for p in input_srcs if str(p) in valid_paths]
             except (BackendError, OSError, ConnectionError):
-                known = set()
-            missing_info = {p: UnkeyedValidPathInfo() for p in input_srcs if p not in known}
+                known = []
+            missing_info = {StorePath(str(p)): UnkeyedValidPathInfo() for p in input_srcs if str(p) not in known}
         else:
             missing_info = {}
         if missing_info:
@@ -571,7 +573,7 @@ class Scheduler:
         ca_output_paths: StorePathSet = set()
         if resp.result.built_outputs:
             for realisation in resp.result.built_outputs.values():
-                out_path = realisation.out_path
+                out_path = StorePath(str(realisation.out_path)) if realisation.out_path else StorePath("")
                 if out_path:
                     ca_output_paths.add(
                         out_path.with_store_prefix(),
@@ -605,8 +607,8 @@ class Scheduler:
                         pname=pname,
                         platform=build.request.derivation.platform,
                         derivation_json=build.request.derivation.to_stats_json(),
-                        cpu_user_us=resp.result.cpu_user,
-                        cpu_system_us=resp.result.cpu_system,
+                        cpu_user_us=resp.result.cpu_user.value if resp.result.cpu_user else None,
+                        cpu_system_us=resp.result.cpu_system.value if resp.result.cpu_system else None,
                         duration_ms=duration,
                     )
                     expected = build.expected_duration

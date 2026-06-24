@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field as PydanticField
-
 from .store_path import StorePath  # noqa: TC001
+from .wire_message import WireField
 from .wire_ops import WireRequest, WireResponse
 
 
 class QuerySubstitutablePathsResponse(WireResponse):
     """QuerySubstitutablePaths response — set of substitutable StorePaths."""
 
-    paths: set[StorePath] = PydanticField(default_factory=set)
+    paths: set[StorePath] = WireField(default_factory=set)
 
 
 class QuerySubstitutablePathsRequest(WireRequest):
@@ -21,4 +20,4 @@ class QuerySubstitutablePathsRequest(WireRequest):
 
     op: ClassVar[int] = 32
     response_type = QuerySubstitutablePathsResponse
-    paths: set[StorePath] = PydanticField(default_factory=set)
+    paths: set[StorePath] = WireField(default_factory=set)
