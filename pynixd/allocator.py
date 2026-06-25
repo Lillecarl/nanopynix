@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
-# Duration threshold for "tiny" builds that can be fast-tracked to the local store (2.5s)
+# Duration threshold for tiny-build heuristics (2.5s).
 TINY_BUILD_THRESHOLD_MS = 2500
 
 
@@ -141,17 +141,9 @@ class BuildAllocator:
         build_features = build.request.derivation.effective_required_features
         candidates = []
 
-        # Include the local store as a candidate alongside remotes
-        if (
-            self.local_store.is_healthy
-            and not self.local_store.draining
-            and not self.local_store.no_schedule
-            and self.local_store.supports_derivation(build.request.derivation.platform, build_features)
-            and not build.is_blacklisted(self.local_store.store_id)
-        ):
-            candidates.append(self.local_store)
-
         for store_id, store in self.stores.items():
+            if store_id == self.local_store.store_id:
+                continue
             if not store.is_healthy or store.draining or store.no_schedule:
                 continue
             if not store.supports_derivation(build.request.derivation.platform, build_features):

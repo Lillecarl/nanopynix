@@ -11,8 +11,9 @@ import anyio
 import structlog
 
 from . import metrics, wire
-from .serde import BuildDerivationResponse, BuildResult
+from .serde import BuildDerivationResponse, BuildResult, WireModel
 from .types.build import BuildResultStatus
+from .types.context import WriteContext
 from .types.ids import BuildId, RequestId, StoreId
 
 if TYPE_CHECKING:
@@ -189,10 +190,14 @@ class QueuedBuild:
 
     # ── Log pub/sub methods ───────────────────────────────────────────
 
-    def post_log(self, msg: StderrMsg) -> bytes:
+    async def post_log(self, msg: StderrMsg) -> bytes:
         """Serialize and store a log entry. Returns the raw bytes."""
         before = self._log_writer.tell()
-        msg.to_writer(self._log_writer)
+        msg_any: Any = msg
+        if isinstance(msg_any, WireModel):
+            await msg_any.to_writer(WriteContext(writer=self._log_writer, version=wire.PROTOCOL_VERSION))
+        else:
+            msg_any.to_writer(self._log_writer)
         return self._log_writer.get_bytes()[before:]
 
     async def _send_raw_safe(self, sub: ClientConn, raw: bytes) -> None:
@@ -219,7 +224,7 @@ class QueuedBuild:
 
     async def post_log_and_fanout(self, msg: StderrMsg) -> None:
         """Store a log entry and fan out to all subscribers."""
-        raw = self.post_log(msg)
+        raw = await self.post_log(msg)
         await self.post_log_bytes(raw)
 
     async def add_subscriber(self, client: ClientConn) -> None:

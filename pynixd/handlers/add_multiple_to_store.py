@@ -69,11 +69,17 @@ class AddMultipleToStoreHandler(Handler):
 
         expected = await fsrc.read_uint64()
         fdst.write_uint64(expected)
+        logger.debug("add_multiple_forward_start", expected=expected)
 
         infos: set[OldValidPathInfo] = set()
         for _ in range(expected):
             info = await OldValidPathInfo.deserialize(ReadContext(reader=fsrc, version=1))
             infos.add(info)
+            logger.debug(
+                "add_multiple_forward_path",
+                path=str(info.path),
+                nar_size=info.nar_size,
+            )
             fdst.write(info.to_bytes())
             sent_bytes = 0
             while sent_bytes < info.nar_size:

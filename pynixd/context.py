@@ -4,7 +4,7 @@ Shared application context for pynixd dependencies.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .types.ids import StoreId
@@ -31,6 +31,7 @@ class PynixdContext:
     _stores: dict[StoreId, DaemonStore]
     db: LocalStoreDB | None = None
     scheduler: Scheduler | None = None
+    output_locations: dict[str, StoreId] = field(default_factory=dict)
 
     @property
     def local_store(self) -> LocalStore:

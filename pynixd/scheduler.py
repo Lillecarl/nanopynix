@@ -14,15 +14,18 @@ they are pulled automatically.
 from __future__ import annotations
 
 import asyncio
+import json
+import shutil
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import anyio
 import structlog
+from anyio import to_thread
 
 from . import metrics
-from .allocator import TINY_BUILD_THRESHOLD_MS, BuildAllocator, TelemetryStoreRanker
+from .allocator import BuildAllocator, TelemetryStoreRanker
 from .build_queue import BuildQueue, QueuedBuild
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .serde import QueryValidPathsRequest
@@ -305,27 +308,6 @@ class Scheduler:
             if build.is_building:
                 continue
 
-            # Tiny build fast-track to local store
-            if (
-                build.expected_duration is not None
-                and build.expected_duration <= TINY_BUILD_THRESHOLD_MS
-                and self.local_store.supports_derivation(build.request.derivation.platform, build_features)
-                and self.local_store.in_flight < 4
-            ):
-                log.info(
-                    "build_fasttracked_local",
-                    build_id=build.build_id,
-                    duration=build.expected_duration,
-                )
-                metrics.QUEUE_SIZE.labels(status="pending").dec()
-                metrics.QUEUE_SIZE.labels(status="building").inc()
-                if build.wait_time is not None:
-                    metrics.QUEUE_WAIT_DURATION.observe(build.wait_time)
-                build.build_task = asyncio.create_task(
-                    self.execute_build(build, self.local_store),
-                )
-                continue
-
             # Standard remote backend assignment
             ranked = self.allocator.rank_stores(
                 build,
@@ -354,9 +336,7 @@ class Scheduler:
             else:
                 # All compatible stores are busy, or this build can't be placed
                 all_compatible = [
-                    s
-                    for s in [self.local_store, *self.stores.values()]
-                    if s.supports_derivation(build.request.derivation.platform, build_features)
+                    s for s in self.stores.values() if s.supports_derivation(build.request.derivation.platform, build_features)
                 ]
                 if all_compatible and all(build.is_blacklisted(s.store_id) for s in all_compatible):
                     await self._fail_all_compatible_blacklisted(build, build_features, all_compatible)
@@ -372,10 +352,10 @@ class Scheduler:
     ) -> bool:
         """Check if any live or dynamic store could ever support this build."""
         all_stores = list(self.stores.values())
-        if self.local_store.supports_derivation(build.request.derivation.platform, build_features):
-            return True
         return any(
-            s.supports_derivation(build.request.derivation.platform, build_features) for s in all_stores
+            s.store_id != self.local_store.store_id
+            and s.supports_derivation(build.request.derivation.platform, build_features)
+            for s in all_stores
         ) or self._dynamic_supports(build.request.derivation.platform, build_features)
 
     async def _fail_no_compatible_store(
@@ -443,6 +423,7 @@ class Scheduler:
         """
         build.assigned_store_id = store.store_id
         build_resp: BuildDerivationResponse | None = None
+        completed = False
         try:
             async with store.build_conn() as conn:
                 await self._prepare_build(build, store, conn)
@@ -450,7 +431,14 @@ class Scheduler:
                     StderrNext(text=f"pynixd: starting build on {store.store_id} at {datetime.now(UTC).isoformat()}\n")
                 )
                 build_resp = await self._execute(build, store, conn)
-                await self._collect_outputs(build, store, conn, build_resp)
+                if build_resp.result.status == 0:
+                    await self.queue.complete(build.build_id, build_resp)
+                    completed = True
+                    self.trigger()
+                    try:
+                        await self._collect_outputs(build, store, conn, build_resp)
+                    except Exception:
+                        log.exception("output_pull_failed_after_build_response", build_id=build.build_id)
 
         except ResourceExhaustedError as e:
             log.info(
@@ -474,7 +462,7 @@ class Scheduler:
             await self.queue.fail(build.build_id, "Internal scheduler error")
             self.trigger()
 
-        if build_resp is not None:
+        if build_resp is not None and not completed:
             await self.queue.complete(build.build_id, build_resp)
             self.trigger()
 
@@ -583,18 +571,20 @@ class Scheduler:
         outputs = build.request.derivation.output_paths()
         static_paths = {p for p in outputs.values() if p != StorePath("")}
         all_output_paths = static_paths | ca_output_paths
+        for path in all_output_paths:
+            self.ctx.output_locations[str(path)] = store.store_id
         log.info(
             "pulling_paths",
             store_id=store.store_id,
             count=len(all_output_paths),
         )
 
-        await stream_paths_store_to_store(store, self.local_store, all_output_paths)
         log.debug(
-            "pulled_paths_into_local_store",
+            "output_paths_left_to_frontend_daemon",
             count=len(all_output_paths),
             store_id=store.store_id,
         )
+        await self._direct_import_localdb_outputs(store, all_output_paths)
 
         # Record build statistics
         if isinstance(self.local_store, LocalDBStore):
@@ -620,3 +610,114 @@ class Scheduler:
                         actual_ms=duration,
                         error_pct=f"{(duration - expected) / expected * 100:.1f}" if expected else None,
                     )
+
+    async def _wait_for_local_paths(
+        self,
+        paths: StorePathSet,
+        timeout: float = 2.0,
+    ) -> StorePathSet:
+        """Wait briefly for the frontend daemon's own output import."""
+        if not paths:
+            return set()
+        if not isinstance(self.local_store, LocalDBStore):
+            log.debug(
+                "skip_wait_for_local_paths_without_db",
+                count=len(paths),
+                store_id=self.local_store.store_id,
+            )
+            return set()
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                resp = await self.local_store.query_valid_paths(
+                    QueryValidPathsRequest(
+                        paths={SerdeStorePath(path=str(path)) for path in paths},  # pyright: ignore[reportUnhashable]
+                        substitute=0,
+                    ),
+                )
+                valid = {StorePath(str(path)) for path in resp.paths}
+                if valid >= paths or time.monotonic() >= deadline:
+                    return valid
+            except (BackendError, OSError, ConnectionError):
+                if time.monotonic() >= deadline:
+                    return set()
+                log.exception("wait_for_local_paths_failed", count=len(paths))
+
+            await anyio.sleep(0.05)
+
+    async def _direct_import_localdb_outputs(
+        self,
+        store: DaemonStore,
+        paths: StorePathSet,
+    ) -> None:
+        if not paths or not isinstance(store, LocalDBStore) or not isinstance(self.local_store, LocalDBStore):
+            return
+        if store.store_path is None or self.local_store.store_path is None:
+            return
+
+        for path in paths:
+            src = store.store_path / str(path).lstrip("/")
+            dst = self.local_store.store_path / str(path).lstrip("/")
+            if not src.exists() and not src.is_symlink():
+                log.warning("direct_output_import_missing_source", path=str(path), store_id=store.store_id)
+                continue
+            if not dst.exists() and not dst.is_symlink():
+                await to_thread.run_sync(self._copy_store_path, src, dst)
+
+        paths_json = json.dumps([str(path) for path in paths])
+        async with store.db.acquire_conn() as src_db:
+            async with self.local_store.db.acquire_conn() as dst_db:
+                rows_cursor = await src_db.execute(
+                    """
+                    SELECT path, hash, registrationTime, narSize, deriver, ultimate, sigs, ca
+                    FROM ValidPaths
+                    WHERE path IN (SELECT value FROM json_each(?))
+                    """,
+                    (paths_json,),
+                )
+                rows = await rows_cursor.fetchall()
+                for row in rows:
+                    await dst_db.execute(
+                        """
+                        INSERT OR IGNORE INTO ValidPaths
+                            (path, hash, registrationTime, narSize, deriver, ultimate, sigs, ca)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        row,
+                    )
+
+                refs_cursor = await src_db.execute(
+                    """
+                    SELECT referrer.path, reference.path
+                    FROM Refs r
+                    JOIN ValidPaths referrer ON r.referrer = referrer.id
+                    JOIN ValidPaths reference ON r.reference = reference.id
+                    WHERE referrer.path IN (SELECT value FROM json_each(?))
+                    """,
+                    (paths_json,),
+                )
+                refs = await refs_cursor.fetchall()
+                for referrer, reference in refs:
+                    await dst_db.execute(
+                        """
+                        INSERT OR IGNORE INTO Refs (referrer, reference)
+                        SELECT referrer.id, reference.id
+                        FROM ValidPaths referrer, ValidPaths reference
+                        WHERE referrer.path = ? AND reference.path = ?
+                        """,
+                        (referrer, reference),
+                    )
+                await dst_db.commit()
+
+        log.info("direct_output_import_complete", count=len(paths), store_id=store.store_id)
+
+    @staticmethod
+    def _copy_store_path(src, dst) -> None:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_symlink():
+            dst.symlink_to(src.readlink())
+        elif src.is_dir():
+            shutil.copytree(src, dst, symlinks=True)
+        else:
+            shutil.copy2(src, dst)

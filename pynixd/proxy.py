@@ -19,6 +19,13 @@ from .connection import ClientConn
 from .exceptions import OpNotImplementedError
 from .handlers._base import HANDLER_REGISTRY
 from .protocol import get_extension_features
+from .serde import (
+    IsValidPathRequest,
+    IsValidPathResponse,
+    QueryPathInfoRequest,
+    QueryValidPathsRequest,
+    QueryValidPathsResponse,
+)
 from .serde.wire_ops import WIRE_REGISTRY, WireResponse
 from .stderr import StderrError
 from .types import RequestContext as RequestContext
@@ -234,6 +241,9 @@ class DaemonProxy:
         local_resp: WireResponse | None = None
         try:
             local_resp = await self.local_store.execute(request, client=self.client)
+            mapped_resp = await self._mapped_output_response(request, local_resp)
+            if mapped_resp is not None:
+                return mapped_resp
             if local_resp is not None and not (request.is_extension and local_resp.is_not_found):
                 return local_resp
         except OpNotImplementedError:
@@ -262,6 +272,39 @@ class DaemonProxy:
         raise OpNotImplementedError(
             f"Extension operation {type(request).__name__} (op={request.op}) not supported by any configured store",
         )
+
+    async def _mapped_output_response(self, request: WireRequest, local_resp: WireResponse | None) -> WireResponse | None:
+        if isinstance(request, QueryPathInfoRequest):
+            if local_resp is not None and getattr(local_resp, "valid", False):
+                return None
+            store = self.store_for_output_path(str(request.path))
+            if store is None:
+                return None
+            return cast("WireResponse", await store.execute(request, client=self.client))
+
+        if isinstance(request, IsValidPathRequest):
+            if local_resp is not None and getattr(local_resp, "valid", False):
+                return None
+            if self.store_for_output_path(str(request.path)) is None:
+                return None
+            return IsValidPathResponse(valid=True)
+
+        if isinstance(request, QueryValidPathsRequest):
+            paths = set(getattr(local_resp, "paths", set())) if local_resp is not None else set()
+            for path in request.paths:
+                if self.store_for_output_path(str(path)) is not None:
+                    paths.add(path)
+            if local_resp is not None and paths == getattr(local_resp, "paths", set()):
+                return None
+            return QueryValidPathsResponse(paths=paths)
+
+        return None
+
+    def store_for_output_path(self, path: str) -> DaemonStore | None:
+        store_id = self.ctx.output_locations.get(path)
+        if store_id is None:
+            return None
+        return self.ctx._stores.get(store_id)
 
     async def dispatch(self, op_num: int) -> WireResponse | None:
         """Route an operation to its request type's handle method."""
