@@ -23,12 +23,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from pynixd.derivation_resolution import (
+from pynixd.drv_parser import read_drv_file
+from pynixd.goals.resolution import (
     _nix_drv_name,
     _unparse_basic_derivation,
     resolve_derivation,
 )
-from pynixd.drv_parser import read_drv_file
 from pynixd.serde import AddToStoreRequest, BuildDerivationRequest, QueryValidPathsRequest, RegisterDrvOutputRequest
 from pynixd.store import LocalSocketStore
 from pynixd.store.transfer import stream_paths_store_to_store

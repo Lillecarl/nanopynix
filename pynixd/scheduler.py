@@ -34,7 +34,6 @@ from .stderr import StderrNext
 from .store import LocalDBStore
 from .store.transfer import stream_paths_store_to_store
 from .store_path import StorePath
-from .types import UnkeyedValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -336,7 +335,9 @@ class Scheduler:
             else:
                 # All compatible stores are busy, or this build can't be placed
                 all_compatible = [
-                    s for s in self.stores.values() if s.supports_derivation(build.request.derivation.platform, build_features)
+                    s
+                    for s in self.stores.values()
+                    if s.supports_derivation(build.request.derivation.platform, build_features)
                 ]
                 if all_compatible and all(build.is_blacklisted(s.store_id) for s in all_compatible):
                     await self._fail_all_compatible_blacklisted(build, build_features, all_compatible)
@@ -495,22 +496,20 @@ class Scheduler:
                 known = [str(p) for p in input_srcs if str(p) in valid_paths]
             except (BackendError, OSError, ConnectionError):
                 known = []
-            missing_info = {StorePath(str(p)): UnkeyedValidPathInfo() for p in input_srcs if str(p) not in known}
+            missing_paths = {StorePath(str(p)) for p in input_srcs if str(p) not in known}
         else:
-            missing_info = {}
-        if missing_info:
-            missing_size = sum(info.nar_size for info in missing_info.values())
+            missing_paths = set()
+        if missing_paths:
             log.debug(
                 "build_sending_inputs",
                 build_id=build.build_id,
                 store_id=store.store_id,
-                count=len(missing_info),
-                size=missing_size,
+                count=len(missing_paths),
             )
             await stream_paths_store_to_store(
                 self.local_store,
                 store,
-                set(missing_info.keys()),
+                missing_paths,
             )
 
     async def _execute(

@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -19,7 +20,6 @@ import anyio
 import structlog
 
 from .store_path import StorePath
-from .types import SubstitutablePathInfo
 
 if TYPE_CHECKING:
     import asyncio
@@ -43,6 +43,16 @@ _NARINFO_KEYS = {
     "System",
     "CA",
 }
+
+
+@dataclass
+class SubstitutablePathInfo:
+    """Metadata for a substitutable path returned by a binary cache."""
+
+    deriver: StorePath
+    references: set[StorePath]
+    download_size: int
+    nar_size: int
 
 
 class Substituter(ABC):

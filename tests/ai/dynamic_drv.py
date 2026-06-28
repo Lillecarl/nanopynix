@@ -22,8 +22,8 @@ import anyio
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from pynixd.derivation_resolution import _unparse_basic_derivation
 from pynixd.drv_parser import read_drv_file, to_basic_derivation
+from pynixd.goals.resolution import _unparse_basic_derivation
 from pynixd.serde import (
     QueryDerivationOutputMapRequest,
     QueryRealisationRequest,

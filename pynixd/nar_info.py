@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from .store_path import StorePath
 
 if TYPE_CHECKING:
-    from .types import ValidPathInfo
+    from .serde.valid_path_info import ValidPathInfo
     from .types.aliases import StorePathSet
 
 
@@ -39,14 +39,24 @@ class NarInfo:
 
     def to_valid_path_info(self) -> ValidPathInfo:
         """Convert to :class:`ValidPathInfo` for ``AddToStoreNar`` wire protocol."""
-        from .types import ValidPathInfo
+        from .serde import StorePath as SerdeStorePath
+        from .serde.content_address import ContentAddress
+        from .serde.nar_hash import NARHash
+        from .serde.path_info import UnkeyedValidPathInfo
+        from .serde.signature import Signature
+        from .serde.valid_path_info import ValidPathInfo
+        from .serde.wire_time import Time
 
         return ValidPathInfo(
-            path=self.store_path,
-            nar_hash=self.nar_hash,
-            nar_size=self.nar_size,
-            references=self.references,
-            deriver=self.deriver,
-            ca=self.ca,
-            sigs=self.sigs,
+            path=SerdeStorePath(path=str(self.store_path)),
+            info=UnkeyedValidPathInfo(
+                deriver=SerdeStorePath(path=str(self.deriver)) if self.deriver else None,
+                nar_hash=NARHash(hash=self.nar_hash.removeprefix("sha256:")),
+                references={SerdeStorePath(path=str(ref)) for ref in self.references},  # pyright: ignore[reportUnhashable]
+                registration_time=Time(ts=0),
+                nar_size=self.nar_size,
+                ultimate=False,
+                sigs={Signature(**Signature.from_str(sig)) for sig in self.sigs},  # pyright: ignore[reportUnhashable]
+                ca=ContentAddress(value=self.ca),
+            ),
         )

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from .config import PynixdSettings
+    from .goals import GoalEngine
     from .local_store_db import LocalStoreDB
     from .scheduler import Scheduler
     from .store.daemon import DaemonStore
@@ -31,6 +32,7 @@ class PynixdContext:
     _stores: dict[StoreId, DaemonStore]
     db: LocalStoreDB | None = None
     scheduler: Scheduler | None = None
+    goal_engine: GoalEngine | None = None
     output_locations: dict[str, StoreId] = field(default_factory=dict)
 
     @property

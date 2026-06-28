@@ -16,15 +16,24 @@ import structlog
 from . import wire
 from .config import ScheduleMode
 from .connection import ClientConn
+from .derived_path import DerivedPath as DomainDerivedPath
 from .exceptions import OpNotImplementedError
+from .goals import GoalEngine
 from .handlers._base import HANDLER_REGISTRY
 from .protocol import get_extension_features
 from .serde import (
+    BuildPathsRequest,
+    BuildPathsWithResultsRequest,
     IsValidPathRequest,
     IsValidPathResponse,
+    QueryMissingRequest,
+    QueryMissingResponse,
     QueryPathInfoRequest,
     QueryValidPathsRequest,
     QueryValidPathsResponse,
+)
+from .serde import (
+    StorePath as SerdeStorePath,
 )
 from .serde.wire_ops import WIRE_REGISTRY, WireResponse
 from .stderr import StderrError
@@ -87,6 +96,12 @@ class DaemonProxy:
     @property
     def build_queue(self) -> BuildQueue | None:
         return self.scheduler.queue if self.scheduler else None
+
+    @property
+    def goal_engine(self) -> GoalEngine:
+        if self.ctx.goal_engine is None:
+            self.ctx.goal_engine = GoalEngine(self.ctx)
+        return self.ctx.goal_engine
 
     @property
     def scheduler_trigger(self) -> Callable[[], None] | None:
@@ -238,6 +253,13 @@ class DaemonProxy:
         request: WireRequest,
     ) -> Any:
         """Execute an operation, falling back to other stores for extensions."""
+        if isinstance(request, BuildPathsWithResultsRequest):
+            return await self.goal_engine.build_paths_with_results(request, client=self.client)
+        if isinstance(request, BuildPathsRequest):
+            return await self.goal_engine.build_paths(request, client=self.client)
+        if isinstance(request, QueryMissingRequest):
+            return await self._query_missing_for_goals(request)
+
         local_resp: WireResponse | None = None
         try:
             local_resp = await self.local_store.execute(request, client=self.client)
@@ -273,7 +295,9 @@ class DaemonProxy:
             f"Extension operation {type(request).__name__} (op={request.op}) not supported by any configured store",
         )
 
-    async def _mapped_output_response(self, request: WireRequest, local_resp: WireResponse | None) -> WireResponse | None:
+    async def _mapped_output_response(
+        self, request: WireRequest, local_resp: WireResponse | None
+    ) -> WireResponse | None:
         if isinstance(request, QueryPathInfoRequest):
             if local_resp is not None and getattr(local_resp, "valid", False):
                 return None
@@ -300,6 +324,35 @@ class DaemonProxy:
 
         return None
 
+    async def _query_missing_for_goals(self, request: QueryMissingRequest) -> QueryMissingResponse:
+        will_build: set[SerdeStorePath] = set()
+        unknown: set[SerdeStorePath] = set()
+
+        for wire_path in request.derived_paths:
+            derived_path = DomainDerivedPath(wire_path.value)
+            base_path = derived_path.base_store_path()
+            if base_path.is_derivation():
+                will_build.add(SerdeStorePath(path=str(base_path)))
+                continue
+
+            response = await self.local_store.execute(IsValidPathRequest(path=SerdeStorePath(path=str(base_path))))
+            if not response.valid:
+                unknown.add(SerdeStorePath(path=str(base_path)))
+
+        log.debug(
+            "query_missing_goal_plan",
+            requested=len(request.derived_paths),
+            will_build=len(will_build),
+            unknown=len(unknown),
+        )
+        return QueryMissingResponse(
+            will_build=will_build,
+            will_substitute=set(),
+            unknown=unknown,
+            download_size=0,
+            nar_size=0,
+        )
+
     def store_for_output_path(self, path: str) -> DaemonStore | None:
         store_id = self.ctx.output_locations.get(path)
         if store_id is None:
@@ -310,16 +363,17 @@ class DaemonProxy:
         """Route an operation to its request type's handle method."""
         # NEW: try new handler registry first
         if handler_cls := HANDLER_REGISTRY.get(op_num):
+            response = await handler_cls().handle(
+                RequestContext(
+                    proxy=self,
+                    role=self.role,
+                    version=self.version,
+                    username=self.username,
+                )
+            )
             return cast(
                 "WireResponse | None",
-                await handler_cls().handle(
-                    RequestContext(
-                        proxy=self,
-                        role=self.role,
-                        version=self.version,
-                        username=self.username,
-                    )
-                ),
+                response,
             )
 
         # NEW: try serde wire registry for handler-less ops

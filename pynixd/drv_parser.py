@@ -40,8 +40,10 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict
 
 import anyio
 
+from .serde import BasicDerivation, DerivationOutput
+from .serde import StorePath as SerdeStorePath
 from .store_path import DrvOutput, StorePath
-from .types import BasicDerivation, DerivationOutput, OutputKind
+from .types import OutputKind
 from .utils import compress_hash, nix32_encode
 
 if TYPE_CHECKING:
@@ -908,7 +910,7 @@ async def to_basic_derivation(
     }
 
     # Start with the explicit input sources
-    input_srcs: StorePathSet = set(parsed.input_srcs)
+    input_srcs = {SerdeStorePath(path=str(path)) for path in parsed.input_srcs}  # pyright: ignore[reportUnhashable]
 
     # Resolve inputDrvs: for each input drv, look up its output paths
     # and add them to input_srcs (this is what nix does before sending
@@ -919,7 +921,7 @@ async def to_basic_derivation(
             for name in output_names:
                 p = cached.get(name)
                 if p:
-                    input_srcs.add(p)
+                    input_srcs.add(SerdeStorePath(path=str(p)))
             continue
 
         try:
@@ -928,31 +930,14 @@ async def to_basic_derivation(
             input_parsed = None
 
         if input_parsed is None:
-            input_srcs.add(StorePath(drv_path))
+            input_srcs.add(SerdeStorePath(path=str(drv_path)))
             continue
 
         all_outputs = input_parsed.output_paths()
         for name in output_names:
             p = all_outputs.get(name)
             if p:
-                input_srcs.add(p)
-            continue
-
-        try:
-            input_parsed = await read_drv_file(store_path, drv_path)
-        except FileNotFoundError:
-            input_parsed = None
-
-        if input_parsed is None:
-            # Can't resolve — add the drv itself as a dependency
-            input_srcs.add(StorePath(drv_path))
-            continue
-
-        all_outputs = input_parsed.output_paths()
-        for name in output_names:
-            p = all_outputs.get(name)
-            if p:
-                input_srcs.add(p)
+                input_srcs.add(SerdeStorePath(path=str(p)))
 
     return BasicDerivation(
         outputs=outputs,

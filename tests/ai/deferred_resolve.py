@@ -27,16 +27,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pynixd.drv_parser import Derivation, read_drv_file
 from pynixd.serde import (
+    BasicDerivation,
     BuildDerivationRequest,
+    DerivationOutput,
     RegisterDrvOutputRequest,
 )
 from pynixd.serde import (
     QueryDerivationOutputMapRequest as QdomRequest,
 )
+from pynixd.serde import StorePath as SerdeStorePath
 from pynixd.store import LocalSocketStore
 from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
-from pynixd.types import BasicDerivation, BuildMode, DerivationOutput
+from pynixd.types import BuildMode
 from tests._conftest.nix_config import for_ca_derivations
 from tests.conftest import (
     NIX_BIN,
@@ -246,7 +249,7 @@ def resolve_derivation(
 
     # Compute the placeholder for each input drv output
     rewrites: dict[str, str] = {}
-    new_input_srcs: set[StorePath] = set(drv.input_srcs)
+    new_input_srcs = {SerdeStorePath(path=str(path)) for path in drv.input_srcs}  # pyright: ignore[reportUnhashable]
 
     for input_drv_path, output_names in drv.input_drvs.items():
         input_drv_str = str(input_drv_path)
@@ -265,7 +268,7 @@ def resolve_derivation(
             if actual_path is None:
                 raise ValueError(f"No resolved path for {input_drv_path}!{output_name}")
             rewrites[placeholder] = str(actual_path)
-            new_input_srcs.add(StorePath(str(actual_path)))
+            new_input_srcs.add(SerdeStorePath(path=str(actual_path)))
 
     # Create a BasicDerivation (copy from Derivation)
     resolved = BasicDerivation(

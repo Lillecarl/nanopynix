@@ -11,9 +11,14 @@ import base64
 import nacl.bindings
 import pytest
 
+from pynixd.serde import StorePath as SerdeStorePath
+from pynixd.serde import ValidPathInfo
+from pynixd.serde.content_address import ContentAddress
+from pynixd.serde.nar_hash import NARHash
+from pynixd.serde.path_info import UnkeyedValidPathInfo
+from pynixd.serde.wire_time import Time
 from pynixd.signing import SecretKey, fingerprint, get_default_signing_key, sign_path_info
 from pynixd.store_path import StorePath
-from pynixd.types import ValidPathInfo
 from tests.test_features import TestFeatures as F
 
 _SEED_32 = b"\x00" * 32
@@ -119,18 +124,26 @@ class TestSignPathInfo:
     def test_sign_path_info_roundtrip(self):
 
         key = SecretKey._parse(f"test:{_SEED_32_B64}")
-        path = StorePath("/nix/store/abc123-foo")
+        path = SerdeStorePath(path="/nix/store/abc123-foo")
+        references = {SerdeStorePath(path="/nix/store/ref1-dep")}  # pyright: ignore[reportUnhashable]
         info = ValidPathInfo(
             path=path,
-            nar_hash="sha256:xyz",
-            nar_size=42,
-            references={StorePath("/nix/store/ref1-dep")},
+            info=UnkeyedValidPathInfo(
+                deriver=None,
+                nar_hash=NARHash(hash="xyz"),
+                references=references,
+                registration_time=Time(ts=0),
+                nar_size=42,
+                ultimate=False,
+                sigs=set(),
+                ca=ContentAddress(value=""),
+            ),
         )
 
         sig = sign_path_info(key, info)
         assert sig.startswith("test:")
 
-        fp = fingerprint(info.path, info.nar_hash, info.nar_size, info.references)
+        fp = fingerprint(info.path, "sha256:xyz", info.info.nar_size, info.info.references)
         sig_bytes = sig.split(":", 1)[1]
         signed_msg = base64.b64decode(sig_bytes) + fp.encode("utf-8")
         nacl.bindings.crypto_sign_open(signed_msg, key.public_key_bytes)

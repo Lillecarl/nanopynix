@@ -11,8 +11,8 @@ from ..serde.add_multiple_to_store import (
     AddMultipleToStoreRequest,
     AddMultipleToStoreResponse,
 )
+from ..serde.valid_path_info import ValidPathInfo
 from ..types.context import ReadContext, WriteContext
-from ..types.path_info import ValidPathInfo as OldValidPathInfo
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
 from ._base import Handler
 
@@ -58,7 +58,7 @@ class AddMultipleToStoreHandler(Handler):
         self,
         src: NixReader,
         dst: NixWriter,
-    ) -> set[OldValidPathInfo]:
+    ) -> list[ValidPathInfo]:
         """Forward AddMultipleToStore payload, snooping ValidPathInfos.
 
         Payload structure after the header:
@@ -71,23 +71,21 @@ class AddMultipleToStoreHandler(Handler):
         fdst.write_uint64(expected)
         logger.debug("add_multiple_forward_start", expected=expected)
 
-        infos: set[OldValidPathInfo] = set()
+        infos: list[ValidPathInfo] = []
         for _ in range(expected):
-            info = await OldValidPathInfo.deserialize(ReadContext(reader=fsrc, version=1))
-            infos.add(info)
-            logger.debug(
-                "add_multiple_forward_path",
-                path=str(info.path),
-                nar_size=info.nar_size,
-            )
-            fdst.write(info.to_bytes())
+            info = await ValidPathInfo.from_reader(ReadContext(reader=fsrc, version=1))
+            infos.append(info)
+            fdst.write(await info.bytes_wire())
             sent_bytes = 0
-            while sent_bytes < info.nar_size:
-                read = min(info.nar_size - sent_bytes, 1024 * 1024)
+            while sent_bytes < info.info.nar_size:
+                read = min(info.info.nar_size - sent_bytes, 1024 * 1024)
                 data = await fsrc.readexactly(read)
                 fdst.write(data)
                 sent_bytes += len(data)
 
         await fdst.finalize()
-        await fsrc.ensure_eof()
+        try:
+            await asyncio.wait_for(fsrc.ensure_eof(), timeout=10)
+        except TimeoutError:
+            logger.warning("add_multiple_forward_source_eof_timeout", count=len(infos))
         return infos

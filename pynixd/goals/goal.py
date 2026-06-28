@@ -1,0 +1,64 @@
+"""Shared goal lifecycle primitives."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Generic, TypeVar
+
+import anyio
+
+if TYPE_CHECKING:
+    from .engine import GoalEngine
+
+
+T = TypeVar("T")
+U = TypeVar("U")
+
+
+class Goal(Generic[T]):
+    """A deduped async computation shared by multiple request waiters."""
+
+    def __init__(self, engine: GoalEngine) -> None:
+        self.engine = engine
+        self._lock = anyio.Lock()
+        self._task: asyncio.Task[T] | None = None
+
+    async def result(self) -> T:
+        async with self._lock:
+            if self._task is None:
+                self._task = asyncio.create_task(self._run())
+            task = self._task
+        return await task
+
+    async def _run(self) -> T:
+        raise NotImplementedError
+
+
+class GoalHolder(Goal[T]):
+    """A coordinator goal that advances through child goals serially."""
+
+    async def run_child(self, child: Goal[U]) -> U:
+        return await child.result()
+
+    async def run_children(self, children: Sequence[Goal[U]]) -> list[U]:
+        results: list[U] = []
+        for child in children:
+            results.append(await child.result())
+        return results
+
+
+class ExecutionGoal(Goal[T]):
+    """A fan-out goal that waits for child goals in parallel."""
+
+    async def run_children(self, children: Sequence[Goal[U]]) -> list[U]:
+        results: list[U | None] = [None] * len(children)
+
+        async def run_one(index: int, child: Goal[U]) -> None:
+            results[index] = await child.result()
+
+        async with asyncio.TaskGroup() as tg:
+            for index, child in enumerate(children):
+                tg.create_task(run_one(index, child))
+
+        return [result for result in results if result is not None]

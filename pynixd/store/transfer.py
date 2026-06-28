@@ -14,8 +14,6 @@ from ..serde.nar_from_path import NarFromPathRequest
 from ..serde.query_closure_with_info import QueryClosureWithInfoRequest
 from ..store_path import StorePath as RealStorePath
 from ..types.context import ReadContext, WriteContext
-from ..types.path_info import UnkeyedValidPathInfo as OldUnkeyedValidPathInfo
-from ..types.path_info import ValidPathInfo as OldValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -97,8 +95,8 @@ async def stream_paths_store_to_store(
             log.debug("stream_paths_acquired_dst", src=src.store_id, dst=dst.store_id, conn_id=dst_conn.id)
             await _stream_paths_over_conns(src_conn, dst_conn, to_transfer, cancel_event)
 
-    # 4. Update destination store's knowledge (convert serde types to old types for store API)
-    dst.add_path_infos([_to_old_valid_path_info(info) for info in to_transfer])
+    # 4. Update destination store's knowledge.
+    dst.add_path_infos(to_transfer)
 
 
 async def _stream_paths_over_conns(
@@ -142,9 +140,7 @@ async def _stream_paths_over_conns(
             )
             dst_conn.op_log.append("AddToStoreNar (stream_paths_to)")
 
-            # Reuse the proven path-info serializer until ValidPathInfo is fully
-            # migrated to the new wire model byte-for-byte.
-            fw.write(_to_old_valid_path_info(info).to_bytes())
+            fw.write(await info.bytes_wire())
 
             # Request NAR from source
             sp = SerdeStorePath(path=str(path))
@@ -166,19 +162,3 @@ async def _stream_paths_over_conns(
         await fw.finalize()
         await dst_conn.w.drain()
         await response_task
-
-
-def _to_old_valid_path_info(info: ValidPathInfo) -> OldValidPathInfo:
-    old_path = RealStorePath(str(info.path))
-    si = info.info
-    old_unkeyed = OldUnkeyedValidPathInfo(
-        deriver=RealStorePath(str(si.deriver)) if si.deriver else RealStorePath(""),
-        nar_hash=si.nar_hash.hash,
-        references={RealStorePath(str(r)) for r in si.references},
-        registration_time=si.registration_time.ts,
-        nar_size=si.nar_size,
-        ultimate=1 if si.ultimate else 0,
-        sigs={str(s) for s in si.sigs},
-        ca=si.ca.value,
-    )
-    return OldValidPathInfo(path=old_path, **vars(old_unkeyed))

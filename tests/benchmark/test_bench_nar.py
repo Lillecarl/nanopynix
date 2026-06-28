@@ -21,7 +21,7 @@ from tests.conftest import CLIENT_BIN, rmtree_robust, run_subproc, serde_path
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from pynixd.types.path_info import ValidPathInfo
+    from pynixd.serde.valid_path_info import ValidPathInfo
 
 from pynixd.store.transfer import stream_paths_store_to_store
 
@@ -86,7 +86,7 @@ async def _pick_a_path(s: DaemonStore, need_no_refs: bool = False) -> StorePath:
         info_resp = await s.execute(QueryPathInfoRequest(path=p))
         info = info_resp.info
         if info and 100_000 < info.nar_size < 10_000_000:
-            if need_no_refs and info.references - {p}:
+            if need_no_refs and info.references - {p}:  # pyright: ignore[reportOperatorIssue]
                 continue
             return p
     return paths[0]
@@ -101,7 +101,7 @@ async def _pick_small_paths(s: DaemonStore, limit: int = 100) -> list[tuple[Stor
             continue
         info_resp = await s.execute(QueryPathInfoRequest(path=p))
         if info_resp.info:
-            picked.append((p, info_resp.info.with_path(p)))
+            picked.append((p, info_resp.info.to_valid_path_info(p)))
             if len(picked) >= limit:
                 break
     return picked
@@ -125,7 +125,7 @@ async def test_bench_nar_streaming_latency(bench_store: DaemonStore, dst_store: 
     """Benchmark: stream a single ~1MB path via stream_paths_store_to_store."""
     store_path = await _pick_a_path(bench_store)
     info_resp = await bench_store.execute(QueryPathInfoRequest(path=serde_path(store_path)))
-    info = info_resp.info.with_path(store_path) if info_resp.info else None
+    info = info_resp.info.to_valid_path_info(serde_path(store_path)) if info_resp.info else None
     assert info is not None
 
     label = _store_label(bench_store)
@@ -141,7 +141,7 @@ async def test_bench_nar_streaming_latency(bench_store: DaemonStore, dst_store: 
         "bench_nar_latency",
         store=label,
         chunk_kb=chunk_kb,
-        size_kb=info.nar_size // 1024,
+        size_kb=info.info.nar_size // 1024,
         elapsed_ms=int(elapsed * 1000),
     )
 
@@ -152,7 +152,7 @@ async def test_bench_nar_streaming_throughput(bench_store: DaemonStore, dst_stor
     """Benchmark: stream a 100MB NAR via stream_paths_store_to_store at various chunk sizes."""
     store_path = await _create_big_path(100)
     info_resp = await bench_store.execute(QueryPathInfoRequest(path=serde_path(store_path)))
-    info = info_resp.info.with_path(store_path) if info_resp.info else None
+    info = info_resp.info.to_valid_path_info(serde_path(store_path)) if info_resp.info else None
     assert info is not None
 
     label = _store_label(bench_store)

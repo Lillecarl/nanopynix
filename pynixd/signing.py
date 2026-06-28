@@ -18,9 +18,8 @@ from environs import env
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .store_path import StorePath
+    from .serde.valid_path_info import ValidPathInfo
     from .types.aliases import NARHash
-    from .types.path_info import ValidPathInfo
 
 
 # Nix32 alphabet (kept for reference; encoding is in utils.py)
@@ -94,7 +93,7 @@ class SecretKey:
 
 
 def fingerprint(
-    store_path: StorePath | str,
+    store_path: object,
     nar_hash: NARHash,
     nar_size: int,
     references: object,
@@ -125,5 +124,10 @@ def sign_path_info(
     Returns:
         Signature in ``<name>:<base64>`` format
     """
-    fp = fingerprint(info.path, info.nar_hash, info.nar_size, info.references)
+    fp = fingerprint(
+        info.path,
+        f"sha256:{info.info.nar_hash}",
+        info.info.nar_size,
+        info.info.references,
+    )
     return key.sign_fingerprint(fp)

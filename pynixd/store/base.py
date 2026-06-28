@@ -9,10 +9,12 @@ feature matrices, circuit breaking) lives in DaemonStore.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 
 import structlog
 from cachetools import TTLCache
+
+from ..serde.valid_path_info import ValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -24,7 +26,6 @@ if TYPE_CHECKING:
     from ..signing import SecretKey
     from ..store_path import StorePath
     from ..types.ids import StoreId
-    from ..types.path_info import ValidPathInfo
 
 
 log = structlog.get_logger(__name__)
@@ -51,9 +52,12 @@ class Store(ABC):
             raise RuntimeError("store_id must be set on the spec before Store construction")
         self.store_id: StoreId = spec.store_id
         self._signing_keys: dict[str, SecretKey] = {}
-        self.path_info_cache: TTLCache[StorePath, ValidPathInfo] = TTLCache(  # type: ignore[type-var]
-            maxsize=10000,
-            ttl=300,
+        self.path_info_cache = cast(
+            TTLCache[str, ValidPathInfo, float],
+            TTLCache(
+                maxsize=10000,
+                ttl=300,
+            ),
         )
         self._started: bool = False
 
@@ -133,14 +137,14 @@ class Store(ABC):
     # ── Path info cache ──────────────────────────────────────────────
 
     def add_path_info(self, info: ValidPathInfo) -> None:
-        self.path_info_cache[info.path] = info
+        self.path_info_cache[str(info.path)] = info
 
     def add_path_infos(self, infos: Iterable[ValidPathInfo]) -> None:
         for info in infos:
-            self.path_info_cache[info.path] = info
+            self.path_info_cache[str(info.path)] = info
 
-    def get_path_info(self, path: StorePath) -> ValidPathInfo | None:
-        return self.path_info_cache.get(path)
+    def get_path_info(self, path: object) -> ValidPathInfo | None:
+        return self.path_info_cache.get(str(path))
 
     # ── Executor infrastructure ─────────────────────────────────────
 

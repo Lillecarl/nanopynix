@@ -35,15 +35,9 @@ from passlib.apache import HtpasswdFile
 from . import metrics
 from .serde import AddToStoreNarRequest, NarFromPathRequest, QueryPathFromHashPartRequest, QueryPathInfoRequest
 from .serde import StorePath as SerdeStorePath
-from .serde.content_address import ContentAddress
-from .serde.nar_hash import NARHash
-from .serde.path_info import UnkeyedValidPathInfo as SerdeUnkeyedValidPathInfo
-from .serde.signature import Signature
 from .serde.valid_path_info import ValidPathInfo as SerdeValidPathInfo
-from .serde.wire_time import Time
 from .store_path import StorePath
 from .types.context import ReadContext, WriteContext
-from .types.path_info import ValidPathInfo
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -52,22 +46,6 @@ if TYPE_CHECKING:
     from .wire import NixWriter
 
 log = structlog.get_logger(__name__)
-
-
-def _to_serde_path_info(info: ValidPathInfo) -> SerdeValidPathInfo:
-    return SerdeValidPathInfo(
-        path=SerdeStorePath(path=str(info.path)),
-        info=SerdeUnkeyedValidPathInfo(
-            deriver=SerdeStorePath(path=str(info.deriver)) if info.deriver else None,
-            nar_hash=NARHash(hash=info.nar_hash.removeprefix("sha256:")),
-            references={SerdeStorePath(path=str(ref)) for ref in info.references},  # pyright: ignore[reportArgumentType,reportUnhashable]
-            registration_time=Time(ts=info.registration_time),
-            nar_size=info.nar_size,
-            ultimate=bool(info.ultimate),
-            sigs={Signature(**Signature.from_str(sig)) for sig in info.sigs},  # pyright: ignore[reportUnhashable]
-            ca=ContentAddress(value=info.ca),
-        ),
-    )
 
 
 class PynixdHttpServer:
@@ -237,7 +215,7 @@ class PynixdHttpServer:
             status=HTTPStatus.OK,
             headers={
                 "Content-Type": "application/x-nix-nar",
-                "Content-Length": str(vinfo.nar_size),
+                "Content-Length": str(vinfo.info.nar_size),
             },
         )
         await response.prepare(request)
@@ -247,7 +225,7 @@ class PynixdHttpServer:
                 await NarFromPathRequest(path=SerdeStorePath(path=str(path))).to_writer(WriteContext.from_conn(conn))
                 await conn.w.drain()
                 await conn.r.drain_stderr()
-                remaining = vinfo.nar_size
+                remaining = vinfo.info.nar_size
                 while remaining > 0:
                     chunk = await conn.r.readexactly(min(remaining, 1024 * 1024))
                     await response.write(chunk)
@@ -319,7 +297,7 @@ class PynixdHttpServer:
         content = await request.text()
 
         try:
-            vinfo = ValidPathInfo.from_narinfo(content)
+            vinfo = SerdeValidPathInfo.from_narinfo(content)
         except (ValueError, KeyError, IndexError) as e:
             log.warning("invalid_narinfo_upload", error=str(e))
             return web.Response(
@@ -356,7 +334,7 @@ class PynixdHttpServer:
             log.warning(
                 "nar_missing_for_narinfo",
                 nar_hash=nar_hash_part,
-                path=vinfo.path,
+                path=str(vinfo.path),
             )
             return web.Response(
                 status=HTTPStatus.NOT_FOUND,
@@ -427,17 +405,17 @@ class PynixdHttpServer:
             await framed.finalize()
             log.debug("provide_nar_done")
 
-        log.info("finalizing_upload_to_store", path=vinfo.path)
+        log.info("finalizing_upload_to_store", path=str(vinfo.path))
         try:
             async with self.store.transfer_conn() as conn:
-                req = AddToStoreNarRequest(info=_to_serde_path_info(vinfo), repair=0, dont_check_sigs=0)
+                req = AddToStoreNarRequest(info=vinfo, repair=0, dont_check_sigs=0)
                 await req.to_writer(WriteContext.from_conn(conn))
                 await conn.w.drain()
                 await provide_nar(conn.w)
                 await conn.w.drain()
                 await req.response_type.from_reader(ReadContext.from_conn(conn))
         except Exception as e:
-            log.exception("finalize_upload_failed", path=vinfo.path)
+            log.exception("finalize_upload_failed", path=str(vinfo.path))
             return web.Response(
                 status=HTTPStatus.INTERNAL_SERVER_ERROR,
                 text=f"Finalize failed: {e}\n",
@@ -448,7 +426,7 @@ class PynixdHttpServer:
                 nar_temp_path.unlink()
 
         self.store.add_path_info(vinfo)
-        log.info("upload_to_store_complete", path=vinfo.path)
+        log.info("upload_to_store_complete", path=str(vinfo.path))
         return web.Response(status=HTTPStatus.OK, text="ok\n")
 
     # ── Path resolution helpers ───────────────────────────────────────
@@ -476,22 +454,12 @@ class PynixdHttpServer:
 
         return None
 
-    async def get_path_info(self, path: StorePath) -> ValidPathInfo | None:
+    async def get_path_info(self, path: StorePath) -> SerdeValidPathInfo | None:
         """Get ValidPathInfo for a store path. Returns ValidPathInfo or None."""
         serde_path = SerdeStorePath(path=str(path))
         resp = await self.store.execute(QueryPathInfoRequest(path=serde_path))
         if resp.valid and resp.info:
-            return ValidPathInfo(
-                path=path,
-                deriver=StorePath(str(resp.info.deriver)) if resp.info.deriver else StorePath(""),
-                nar_hash=str(resp.info.nar_hash),
-                references={StorePath(str(ref)) for ref in resp.info.references},
-                registration_time=resp.info.registration_time.ts,
-                nar_size=resp.info.nar_size,
-                ultimate=1 if resp.info.ultimate else 0,
-                sigs={str(sig) for sig in resp.info.sigs},
-                ca=resp.info.ca.value,
-            )
+            return SerdeValidPathInfo(path=serde_path, info=resp.info)
         return None
 
     # ── Lifecycle ─────────────────────────────────────────────────────

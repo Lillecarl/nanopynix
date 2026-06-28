@@ -31,6 +31,9 @@ class LocalDBStore(LocalStore):
     # ── Fast-path overrides ────────────────────────────────────────
 
     async def is_valid_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        if not self.db.active:
+            return None
+
         path_str = str(request.path)
 
         from pynixd.serde import IsValidPathResponse
@@ -47,7 +50,9 @@ class LocalDBStore(LocalStore):
     async def query_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         cached = self.get_path_info(request.path)
         if cached is not None:
-            return None  # cache hit — fall through to old path until cache stores serde types
+            from pynixd.serde import QueryPathInfoResponse
+
+            return QueryPathInfoResponse(valid=True, info=cached.info)
 
         from pynixd.serde import QueryPathInfoResponse
         from pynixd.serde import StorePath as SerdeStorePath
@@ -205,7 +210,7 @@ class LocalDBStore(LocalStore):
         if not uncached:
             from pynixd.serde import QueryPathInfosResponse
 
-            return QueryPathInfosResponse(infos=[])
+            return QueryPathInfosResponse(infos=list(cached.values()))
 
         import json
 
@@ -251,7 +256,7 @@ class LocalDBStore(LocalStore):
             )
             infos.append(SerdeValidPathInfo(path=sp, info=uinfo))
 
-        return QueryPathInfosResponse(infos=infos)
+        return QueryPathInfosResponse(infos=[*cached.values(), *infos])
 
     async def query_derivation_output_map_batch(
         self, request: Any, client: Any = None, suppress_last: bool = False

@@ -91,6 +91,10 @@ class TelemetryStoreRanker(StoreRanker):
                 score -= psi.io.some_avg10 * self.settings.io_pressure_penalty
             # else: no monitor data → neutral (no penalty)
 
+            has_resource_signal = store.cpu_util is not None or (
+                store.monitor is not None and store.monitor.health.psi is not None
+            )
+
             # 3. Concurrency Penalty (- points)
             in_flight = store.in_flight
             if override_in_flight and store.store_id in override_in_flight:
@@ -105,7 +109,7 @@ class TelemetryStoreRanker(StoreRanker):
             score -= assigned * self.settings.thundering_herd_penalty
 
             score -= store.score_penalty
-            if score >= self.settings.min_schedule_score:
+            if score >= self.settings.min_schedule_score or not has_resource_signal:
                 ranked.append(RankedStore(store.store_id, score * store.priority, store))
             else:
                 log.debug(
