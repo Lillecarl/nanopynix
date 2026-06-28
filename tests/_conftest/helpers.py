@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import glob as glob_module
 import os
 import shlex
 import shutil
+import signal
 import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -128,6 +130,7 @@ async def run_subproc(
         env=os.environ.copy() | run_env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
         **kwargs,
     )
 
@@ -146,10 +149,24 @@ async def run_subproc(
             if verbose:
                 log.info(name, message=decoded_line.rstrip())
 
-    await asyncio.gather(
-        stream("stdout", stdout, proc.stdout),
-        stream("stderr", stderr, proc.stderr),
-    )
+    try:
+        await asyncio.gather(
+            stream("stdout", stdout, proc.stdout),
+            stream("stderr", stderr, proc.stderr),
+        )
+        await proc.wait()
+    except asyncio.CancelledError:
+        log.warning("run_subproc_cancelled", cmd=shlex.join(str_cmd), pid=proc.pid)
+        if proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                await proc.wait()
+        raise
     rc = proc.returncode if proc.returncode is not None else 0
     if expected_retcode is not None and rc != expected_retcode:
         raise RuntimeError(

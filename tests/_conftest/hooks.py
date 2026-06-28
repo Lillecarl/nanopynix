@@ -96,14 +96,15 @@ def _wrap_with_asyncio_timeout(item: pytest.Function):
 
     @functools.wraps(original_func)
     async def wrapped(*args, **kwargs):
+        timeout = item.config.getoption("async_test_timeout")
         try:
-            async with asyncio.timeout(120):
+            async with asyncio.timeout(timeout):
                 return await original_func(*args, **kwargs)
         except TimeoutError:
             log.exception(
                 "test_timeout_triggered",
                 test=item.nodeid,
-                timeout=120,
+                timeout=timeout,
             )
             raise
 

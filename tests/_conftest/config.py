@@ -50,6 +50,12 @@ def pytest_addoption(parser):
         default=False,
         help="Disable test subsumption (run full suite even if features are already covered)",
     )
+    parser.addoption(
+        "--async-test-timeout",
+        type=float,
+        default=120.0,
+        help="Timeout in seconds for async tests wrapped with asyncio.timeout",
+    )
 
 
 def pytest_configure(config):
