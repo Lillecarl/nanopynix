@@ -28,9 +28,8 @@ from . import metrics
 from .allocator import BuildAllocator, TelemetryStoreRanker
 from .build_queue import BuildQueue, QueuedBuild
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
-from .serde import QueryValidPathsRequest
+from .serde import LogNext, QueryValidPathsRequest
 from .serde import StorePath as SerdeStorePath
-from .stderr import StderrNext
 from .store import LocalDBStore
 from .store.transfer import stream_paths_store_to_store
 from .store_path import StorePath
@@ -370,7 +369,7 @@ class Scheduler:
         )
         await self.queue.fail(build.build_id, error_msg)
         for line in error_msg.split("\n"):
-            await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
+            await build.post_log_and_fanout(LogNext(text=f"pynixd: {line}\n"))
 
     async def _fail_all_compatible_blacklisted(
         self,
@@ -387,7 +386,7 @@ class Scheduler:
         )
         await self.queue.fail(build.build_id, error_msg)
         for line in error_msg.split("\n"):
-            await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
+            await build.post_log_and_fanout(LogNext(text=f"pynixd: {line}\n"))
 
     def _update_store_metrics(self) -> None:
         """Update per-store metrics."""
@@ -429,7 +428,7 @@ class Scheduler:
             async with store.build_conn() as conn:
                 await self._prepare_build(build, store, conn)
                 await build.post_log_and_fanout(
-                    StderrNext(text=f"pynixd: starting build on {store.store_id} at {datetime.now(UTC).isoformat()}\n")
+                    LogNext(text=f"pynixd: starting build on {store.store_id} at {datetime.now(UTC).isoformat()}\n")
                 )
                 build_resp = await self._execute(build, store, conn)
                 if build_resp.result.status == 0:
@@ -453,13 +452,13 @@ class Scheduler:
         except (BackendError, InfrastructureError) as e:
             log.warning("build_failed_retryable", build_id=build.build_id, error=str(e))
             await build.post_log_and_fanout(
-                StderrNext(text=f"pynixd: build failed on {store.store_id}, retrying: {e}\n")
+                LogNext(text=f"pynixd: build failed on {store.store_id}, retrying: {e}\n")
             )
             build.reset_for_retry(store.store_id)
             self.trigger()
         except Exception:
             log.exception("build_crashed", build_id=build.build_id)
-            await build.post_log_and_fanout(StderrNext(text="pynixd: internal scheduler error, failing build\n"))
+            await build.post_log_and_fanout(LogNext(text="pynixd: internal scheduler error, failing build\n"))
             await self.queue.fail(build.build_id, "Internal scheduler error")
             self.trigger()
 
@@ -534,7 +533,7 @@ class Scheduler:
                 await build.post_log_and_fanout(msg)
         if resp.result.status != 0 and resp.result.error_msg:
             for line in resp.result.error_msg.split("\n"):
-                await build.post_log_and_fanout(StderrNext(text=f"pynixd: {line}\n"))
+                await build.post_log_and_fanout(LogNext(text=f"pynixd: {line}\n"))
         log.debug(
             "build_executed",
             build_id=build.build_id,

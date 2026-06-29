@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import anyio
 import structlog
 
 from . import metrics, wire
-from .serde import BuildDerivationResponse, BuildMode, BuildResult, BuildResultStatus, WireModel
+from .serde import BuildDerivationResponse, BuildMode, BuildResult, BuildResultStatus
+from .serde.logs import LogMessage
 from .types.context import WriteContext
 from .types.ids import BuildId, RequestId, StoreId
 
@@ -21,7 +22,6 @@ if TYPE_CHECKING:
     from .connection import ClientConn
     from .derived_path import DerivedPath
     from .serde import BuildDerivationRequest, Realisation
-    from .stderr import StderrMsg
 log = structlog.get_logger(__name__)
 
 MAX_STORE_RETRIES = 3
@@ -91,7 +91,7 @@ class QueuedBuild:
         self.finished_at: float | None = None
         self.retries = 0
         self.store_failures: dict[StoreId, int] = {}
-        self.build_task: asyncio.Task[Any] | None = None
+        self.build_task: asyncio.Task[object] | None = None
 
         self.from_goal_path: bool = False
 
@@ -187,14 +187,10 @@ class QueuedBuild:
 
     # ── Log pub/sub methods ───────────────────────────────────────────
 
-    async def post_log(self, msg: StderrMsg) -> bytes:
+    async def post_log(self, msg: LogMessage) -> bytes:
         """Serialize and store a log entry. Returns the raw bytes."""
         before = self._log_writer.tell()
-        msg_any: Any = msg
-        if isinstance(msg_any, WireModel):
-            await msg_any.to_writer(WriteContext(writer=self._log_writer, version=wire.PROTOCOL_VERSION))
-        else:
-            msg_any.to_writer(self._log_writer)
+        await msg.to_writer(WriteContext(writer=self._log_writer, version=wire.PROTOCOL_VERSION))
         return self._log_writer.get_bytes()[before:]
 
     async def _send_raw_safe(self, sub: ClientConn, raw: bytes) -> None:
@@ -219,7 +215,7 @@ class QueuedBuild:
                 for sub in self.subscribers:
                     tg.start_soon(self._send_raw_safe, sub, raw)
 
-    async def post_log_and_fanout(self, msg: StderrMsg) -> None:
+    async def post_log_and_fanout(self, msg: LogMessage) -> None:
         """Store a log entry and fan out to all subscribers."""
         raw = await self.post_log(msg)
         await self.post_log_bytes(raw)

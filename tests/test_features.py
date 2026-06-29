@@ -75,7 +75,7 @@ class TestFeatures(Flag):
     QUERY_DERIVER = auto()
     # SET_OPTIONS (op 19): Update daemon settings at runtime.
     # Accepts key=value option pairs.  No-op in pynixd for regular users;
-    # logged via StderrNext for transparency.
+    # logged via LogNext for transparency.
     SET_OPTIONS = auto()
     # COLLECT_GARBAGE (op 20): Run garbage collection — delete paths not reachable
     # from any GC root.  Supports min-age and max-freed bounds.
@@ -160,7 +160,7 @@ class TestFeatures(Flag):
     BUILD_PATHS_WITH_RESULTS = auto()
     # ADD_PERM_ROOT (op 47): Add a permanent GC root.
     # Creates a named symlink in the gcroot directory.  No-op for unprivileged
-    # users in pynixd; logged via StderrNext for transparency.
+    # users in pynixd; logged via LogNext for transparency.
     ADD_PERM_ROOT = auto()
 
     # ═══════════════════════════════════════════════════════════

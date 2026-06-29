@@ -21,9 +21,10 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import structlog
 
-from . import stderr, wire
+from . import wire
 from .exceptions import InfrastructureError
 from .protocol import get_extension_features
+from .serde.wire_message import WireModel
 from .types.context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
@@ -56,10 +57,10 @@ class ClientConn:
         self.w = w
         self._write_lock = anyio.Lock()
 
-    async def send(self, msg: stderr.StderrMsg) -> None:
+    async def send(self, msg: WireModel) -> None:
         """Send a stderr message to the client. Safe to call from multiple tasks."""
         buf = wire.BytesWriter("client")
-        msg.to_writer(buf)
+        await msg.to_writer(WriteContext(writer=buf, version=wire.PROTOCOL_VERSION))
         data = buf.get_bytes()
         if data:
             async with self._write_lock:

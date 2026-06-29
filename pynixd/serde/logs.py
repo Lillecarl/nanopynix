@@ -12,7 +12,7 @@ the individual message's ``from_reader``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..constants import (
     STDERR_ERROR,
@@ -23,18 +23,11 @@ from ..constants import (
     STDERR_STOP_ACTIVITY,
 )
 from ..exceptions import BackendError
-from ..stderr import (
-    StderrError,
-    StderrNext,
-    StderrResult,
-    StderrStartActivity,
-    StderrStopActivity,
-)
-from ..types.protocol import ActivityType, FieldType, ResultType, Verbosity
+from ..types.protocol import FieldType
 from .wire_message import WireField, WireModel
 
 if TYPE_CHECKING:
-    from typing import Any
+    from collections.abc import AsyncIterator
 
     from ..types.context import ReadContext, WriteContext
 
@@ -117,7 +110,7 @@ class LogError(WireModel):
 # ── Tagged-union container ───────────────────────────────────────────
 
 # Union of all log message types — used for type annotations
-LogMessage: type = LogNext | LogStartActivity | LogStopActivity | LogResult | LogError  # type: ignore[assignment]
+LogMessage = LogNext | LogStartActivity | LogStopActivity | LogResult | LogError
 
 # Dispatch table: uint64 code → message class
 _LOG_PARSERS: dict[int, type[WireModel]] = {
@@ -129,40 +122,40 @@ _LOG_PARSERS: dict[int, type[WireModel]] = {
 }
 
 
-def _to_stderr_msg(msg: WireModel):
-    if isinstance(msg, LogNext):
-        return StderrNext(text=msg.text)
-    if isinstance(msg, LogStartActivity):
-        fields: list[int | str] = [
-            field.valint if field.type == FieldType.INT and field.valint is not None else field.valstr or ""
-            for field in msg.fields
-        ]
-        return StderrStartActivity(
-            act_id=msg.act_id,
-            level=Verbosity(msg.level),
-            type=ActivityType(msg.type),
-            text=msg.text,
-            fields=fields,
-            parent=msg.parent,
-        )
-    if isinstance(msg, LogStopActivity):
-        return StderrStopActivity(act_id=msg.act_id)
-    if isinstance(msg, LogResult):
-        fields: list[int | str] = [
-            field.valint if field.type == FieldType.INT and field.valint is not None else field.valstr or ""
-            for field in msg.fields
-        ]
-        return StderrResult(act_id=msg.act_id, result_type=ResultType(msg.result_type), fields=fields)
-    if isinstance(msg, LogError):
-        return StderrError(
-            error_type=msg.type,
-            level=Verbosity(msg.level),
-            name=msg.name,
-            msg=msg.msg,
-            have_pos=msg.have_pos,
-            traces=[(trace.pos, trace.hint) for trace in msg.traces],
-        )
-    raise TypeError(f"Unsupported log message type: {type(msg).__name__}")
+async def read_stream(ctx: ReadContext) -> AsyncIterator[LogMessage]:
+    """Yield stderr/log messages until STDERR_LAST."""
+    unknown_streak = 0
+    while True:
+        msg_type = await ctx.reader.read_uint64()
+
+        if msg_type == STDERR_LAST:
+            return
+
+        parser = _LOG_PARSERS.get(msg_type)
+        if parser is None:
+            unknown_streak += 1
+            if unknown_streak >= 3:
+                raise ConnectionError(
+                    f"Protocol desync: {unknown_streak} consecutive unknown stderr msg_types (last: 0x{msg_type:x})",
+                )
+            continue
+
+        unknown_streak = 0
+        msg = cast(LogMessage, await parser.from_reader(ctx))
+        yield msg
+        if isinstance(msg, LogError):
+            return
+
+
+async def drain(ctx: ReadContext, raise_on_error: bool = True) -> LogError | None:
+    """Read and discard all stderr/log messages until STDERR_LAST."""
+    last_error: LogError | None = None
+    async for msg in read_stream(ctx):
+        if isinstance(msg, LogError):
+            last_error = msg
+            if raise_on_error:
+                raise BackendError(f"Backend error: {msg.msg}")
+    return last_error
 
 
 class WireLogs(WireModel):
@@ -189,28 +182,17 @@ class WireLogs(WireModel):
         object.__setattr__(obj, "__pydantic_extra__", None)
         object.__setattr__(obj, "__pydantic_private__", None)
 
-        msgs: list[Any] = []
-        while True:
-            code = await ctx.reader.read_uint64()
-
-            if code == STDERR_LAST:
-                break
-
-            parser = _LOG_PARSERS.get(code)
-            if parser is None:
-                # Unknown code — skip (tolerant, like old read_stream)
-                continue
-
-            msg = await parser.from_reader(ctx)
+        msgs: list[LogMessage] = []
+        async for msg in read_stream(ctx):
             if ctx.client:
-                await ctx.client.send(_to_stderr_msg(msg))
+                await ctx.client.send(msg)
             if ctx.buffer_logs:
                 msgs.append(msg)
 
             # Error terminates the stream (no STDERR_LAST after error)
             if isinstance(msg, LogError):
                 if ctx.raise_on_error:
-                    raise BackendError(f"Daemon error ({msg.type}): {msg.msg}")
+                    raise BackendError(f"Backend error: {msg.msg}")
                 break
 
         object.__setattr__(obj, "messages", msgs)

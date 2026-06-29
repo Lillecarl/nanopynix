@@ -18,7 +18,6 @@ from pynixd.serde import (
     LogNext,
     WireLogs,
 )
-from pynixd.stderr import StderrNext
 from pynixd.store_path import StorePath
 from pynixd.types.ids import BuildId, StoreId
 from pynixd.wire import BytesWriter
@@ -126,7 +125,7 @@ async def test_build_log_pubsub_two_clients():
     assert data1 == data2
     assert len(data1) > 0
 
-    # Verify the actual content: 10 serialized StderrNext messages.
+    # Verify the actual content: 10 serialized LogNext messages.
     # Each message has a uint64 code + length-prefixed string.
     # We can verify by checking the buffer is non-empty and both match.
     # For a more precise check, count the STDERR_NEXT codes (0x64 = 100).
@@ -168,7 +167,7 @@ async def test_build_log_pubsub_late_subscriber_gets_full_history():
 
     # Post 10 log messages (simulating what _execute() does).
     for i in range(1, 11):
-        await build.post_log_and_fanout(StderrNext(text=f"{i}\n"))
+        await build.post_log_and_fanout(LogNext(text=f"{i}\n"))
 
     # Subscribe client2 after all logs are posted.
     await build.add_subscriber(client2)
@@ -178,7 +177,7 @@ async def test_build_log_pubsub_late_subscriber_gets_full_history():
 
     # Post one more message — only client1 should get it (client2 was added
     # after the last fan-out, but both are now subscribed).
-    await build.post_log_and_fanout(StderrNext(text="done\n"))
+    await build.post_log_and_fanout(LogNext(text="done\n"))
 
     # Now both should still be identical (both got "done\n").
     assert buf1.get_bytes() == buf2.get_bytes()

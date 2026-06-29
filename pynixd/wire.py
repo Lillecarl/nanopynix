@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 import asyncssh
 from environs import env
 
-from . import stderr
 from .constants import (
     MINIMUM_REMOTE_PROTOCOL as MINIMUM_REMOTE_PROTOCOL,
 )
@@ -41,6 +40,10 @@ from .constants import (
 from .constants import (
     proto_str as proto_str,
 )
+from .serde.logs import LogMessage
+from .serde.logs import drain as drain_log_stream
+from .serde.logs import read_stream as read_log_stream
+from .types.context import ReadContext
 
 if TYPE_CHECKING:
     import asyncio
@@ -108,11 +111,11 @@ class NixReader:
 
     async def drain_stderr(self, raise_on_error: bool = True) -> None:
         """Read and discard all stderr messages until STDERR_LAST."""
-        await stderr.drain(self, raise_on_error=raise_on_error)
+        await drain_log_stream(ReadContext(reader=self, version=PROTOCOL_VERSION), raise_on_error=raise_on_error)
 
-    def read_stderr(self) -> AsyncIterator[stderr.StderrMsg]:
+    def read_stderr(self) -> AsyncIterator[LogMessage]:
         """Return an AsyncIterator that yields stderr messages until STDERR_LAST."""
-        return stderr.read_stream(self)
+        return read_log_stream(ReadContext(reader=self, version=PROTOCOL_VERSION))
 
     async def is_dirty(self) -> bool:
         return self._transport_is_dirty()

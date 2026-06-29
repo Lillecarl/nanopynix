@@ -26,6 +26,7 @@ from .serde import (
     BuildPathsWithResultsRequest,
     IsValidPathRequest,
     IsValidPathResponse,
+    LogError,
     QueryMissingRequest,
     QueryMissingResponse,
     QueryPathInfoRequest,
@@ -36,7 +37,6 @@ from .serde import (
     StorePath as SerdeStorePath,
 )
 from .serde.wire_ops import WIRE_REGISTRY, WireResponse
-from .stderr import StderrError
 from .types import RequestContext as RequestContext
 from .types.auth import Role
 from .types.context import ReadContext, WriteContext
@@ -392,8 +392,8 @@ class DaemonProxy:
     async def send_error(self, msg: str) -> None:
         """Send a STDERR_ERROR to the client."""
         await self.client.send(
-            StderrError(
-                error_type="Error",
+            LogError(
+                type="Error",
                 level=Verbosity.ERROR,
                 name="Error",
                 msg=msg,
