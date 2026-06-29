@@ -21,7 +21,9 @@ from pynixd.serde import (
     BasicDerivation,
     BuildDerivationRequest,
     BuildDerivationResponse,
+    BuildMode,
     BuildResult,
+    BuildResultStatus,
     ContentAddress,
     DerivationOutput,
     NARHash,
@@ -35,10 +37,6 @@ from pynixd.serde import (
 )
 from pynixd.store import LocalDBStore
 from pynixd.store_path import StorePath
-from pynixd.types import (
-    BuildMode,
-    BuildResultStatus,
-)
 from pynixd.types.ids import BuildId, StoreId
 from tests.conftest import STORE_PREFIX, make_test_spec, rmtree_robust, serde_path
 from tests.test_features import TestFeatures as F

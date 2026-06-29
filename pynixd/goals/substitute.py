@@ -16,7 +16,7 @@ import aiohttp
 import structlog
 import zstandard as zstd
 
-from ..serde import AddToStoreNarRequest, IsValidPathRequest
+from ..serde import AddToStoreNarRequest, BuildResultStatus, IsValidPathRequest
 from ..serde.content_address import ContentAddress
 from ..serde.nar_hash import NARHash
 from ..serde.path_info import UnkeyedValidPathInfo
@@ -25,7 +25,6 @@ from ..serde.store_path import StorePath as SerdeStorePath
 from ..serde.valid_path_info import ValidPathInfo
 from ..serde.wire_time import Time
 from ..store_path import StorePath
-from ..types import BuildResultStatus
 from ..types.context import ReadContext, WriteContext
 from .goal import ExecutionGoal
 from .results import GoalResult, goal_failure, goal_success

@@ -23,11 +23,15 @@ from .build_paths import BuildPathsRequest as BuildPathsRequest
 from .build_paths import BuildPathsResponse as BuildPathsResponse
 from .build_paths_with_results import BuildPathsWithResultsRequest as BuildPathsWithResultsRequest
 from .build_paths_with_results import BuildPathsWithResultsResponse as BuildPathsWithResultsResponse
+from .build_result import BuildMode as BuildMode
 from .build_result import BuildResult as BuildResult
+from .build_result import BuildResultStatus as BuildResultStatus
+from .build_result import BuiltOutput as BuiltOutput
 from .collect_garbage import CollectGarbageRequest as CollectGarbageRequest
 from .collect_garbage import CollectGarbageResponse as CollectGarbageResponse
 from .content_address import ContentAddress as ContentAddress
 from .derivation_output import DerivationOutput as DerivationOutput
+from .derivation_output import OutputKind as OutputKind
 from .derived_path import DerivedPath as DerivedPath
 from .drv_output import DrvOutput as DrvOutput
 from .ensure_path import EnsurePathRequest as EnsurePathRequest

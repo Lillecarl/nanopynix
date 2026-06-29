@@ -1,7 +1,18 @@
 from __future__ import annotations
 
-from ..types.derivation import OutputKind
+from enum import Enum, auto
+
 from .wire_message import WireModel
+
+
+class OutputKind(Enum):
+    """Classification of a single derivation output."""
+
+    INPUT_ADDRESSED = auto()
+    CA_FIXED = auto()
+    CA_FLOATING = auto()
+    DEFERRED = auto()
+    IMPURE = auto()
 
 
 class DerivationOutput(WireModel):

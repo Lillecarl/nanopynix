@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..serde import BuildResult
-from ..types import BuildResultStatus
+from ..serde import BuildResult, BuildResultStatus
 
 if TYPE_CHECKING:
     from ..store_path import StorePath

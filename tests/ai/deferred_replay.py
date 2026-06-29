@@ -29,11 +29,16 @@ from pynixd.goals.resolution import (
     _unparse_basic_derivation,
     resolve_derivation,
 )
-from pynixd.serde import AddToStoreRequest, BuildDerivationRequest, QueryValidPathsRequest, RegisterDrvOutputRequest
+from pynixd.serde import (
+    AddToStoreRequest,
+    BuildDerivationRequest,
+    BuildMode,
+    QueryValidPathsRequest,
+    RegisterDrvOutputRequest,
+)
 from pynixd.store import LocalSocketStore
 from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
-from pynixd.types import BuildMode
 from tests._conftest.nix_config import for_ca_derivations
 from tests.conftest import (
     NIX_BIN,

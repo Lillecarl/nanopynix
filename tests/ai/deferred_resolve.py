@@ -29,6 +29,7 @@ from pynixd.drv_parser import Derivation, read_drv_file
 from pynixd.serde import (
     BasicDerivation,
     BuildDerivationRequest,
+    BuildMode,
     DerivationOutput,
     RegisterDrvOutputRequest,
 )
@@ -39,7 +40,6 @@ from pynixd.serde import StorePath as SerdeStorePath
 from pynixd.store import LocalSocketStore
 from pynixd.store.transfer import stream_paths_store_to_store
 from pynixd.store_path import StorePath
-from pynixd.types import BuildMode
 from tests._conftest.nix_config import for_ca_derivations
 from tests.conftest import (
     NIX_BIN,

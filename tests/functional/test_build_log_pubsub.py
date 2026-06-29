@@ -12,16 +12,14 @@ from pynixd.serde import (
     BasicDerivation,
     BuildDerivationRequest,
     BuildDerivationResponse,
+    BuildMode,
     BuildResult,
+    BuildResultStatus,
     LogNext,
     WireLogs,
 )
 from pynixd.stderr import StderrNext
 from pynixd.store_path import StorePath
-from pynixd.types import (
-    BuildMode,
-    BuildResultStatus,
-)
 from pynixd.types.ids import BuildId, StoreId
 from pynixd.wire import BytesWriter
 from tests.conftest import serde_path

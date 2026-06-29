@@ -1,4 +1,4 @@
-"""Unit tests for pynixd.types.build — BuildResult, BuiltOutput, enums.
+"""Unit tests for pynixd.serde build types — BuildResult, BuiltOutput, enums.
 
 Tests BuildResultStatus/BuildMode enum values, BuiltOutput JSON serialization,
 and BuildResult wire format helpers. All tests are pure — no I/O.
@@ -10,8 +10,8 @@ import json
 
 import pytest
 
+from pynixd.serde import BuildMode, BuildResult, BuildResultStatus, BuiltOutput
 from pynixd.store_path import StorePath
-from pynixd.types.build import BuildMode, BuildResult, BuildResultStatus, BuiltOutput
 from tests.test_features import TestFeatures as F
 
 

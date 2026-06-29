@@ -15,11 +15,10 @@ import structlog
 from .. import wire
 from ..exceptions import BackendError
 from ..monitor import ResourceGate, ResourceMonitor
-from ..serde import BasicDerivation, BuildDerivationRequest, DerivationOutput
+from ..serde import BasicDerivation, BuildDerivationRequest, BuildMode, BuildResultStatus, DerivationOutput
 from ..serde import StorePath as SerdeStorePath
 from ..serde.wire_ops import WireRequest
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
-from ..types.build import BuildMode, BuildResultStatus
 from ..types.context import WriteContext
 from ..utils import random_nix32_hash
 from .base import Store

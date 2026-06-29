@@ -19,9 +19,9 @@ import anyio
 import pytest
 
 from pynixd.drv_parser import Derivation, parse_drv, to_basic_derivation
+from pynixd.serde import OutputKind
 from pynixd.serde import StorePath as SerdeStorePath
 from pynixd.store_path import DrvOutput, StorePath
-from pynixd.types.derivation import OutputKind
 from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:

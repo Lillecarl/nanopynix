@@ -10,10 +10,11 @@ from pynixd.serde import (
     BasicDerivation,
     BuildDerivationRequest,
     BuildDerivationResponse,
+    BuildMode,
     BuildResult,
+    BuildResultStatus,
 )
 from pynixd.store_path import StorePath
-from pynixd.types import BuildMode, BuildResultStatus
 from pynixd.types.ids import StoreId
 from tests.conftest import serde_path
 from tests.functional.mock_store import MockStore

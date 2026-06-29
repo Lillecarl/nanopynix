@@ -60,3 +60,19 @@ class BasicDerivation(WireModel):
     @property
     def has_dynamic_outputs(self) -> bool:
         return any(output.is_dynamic_output for output in self.outputs.values())
+
+    @property
+    def has_ca_floating(self) -> bool:
+        return any(output.is_floating_ca and not output.is_text_hashed for output in self.outputs.values())
+
+    @property
+    def has_deferred(self) -> bool:
+        return any(output.is_deferred for output in self.outputs.values())
+
+    @property
+    def has_impure(self) -> bool:
+        return any(output.is_impure for output in self.outputs.values())
+
+    @property
+    def has_text_hashed(self) -> bool:
+        return any(output.is_text_hashed for output in self.outputs.values())

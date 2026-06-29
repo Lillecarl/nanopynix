@@ -11,8 +11,7 @@ import anyio
 import structlog
 
 from . import metrics, wire
-from .serde import BuildDerivationResponse, BuildResult, WireModel
-from .types.build import BuildResultStatus
+from .serde import BuildDerivationResponse, BuildMode, BuildResult, BuildResultStatus, WireModel
 from .types.context import WriteContext
 from .types.ids import BuildId, RequestId, StoreId
 
@@ -23,8 +22,6 @@ if TYPE_CHECKING:
     from .derived_path import DerivedPath
     from .serde import BuildDerivationRequest, Realisation
     from .stderr import StderrMsg
-    from .types.build import BuildMode
-
 log = structlog.get_logger(__name__)
 
 MAX_STORE_RETRIES = 3

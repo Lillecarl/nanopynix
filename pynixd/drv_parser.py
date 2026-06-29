@@ -40,10 +40,9 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict
 
 import anyio
 
-from .serde import BasicDerivation, DerivationOutput
+from .serde import BasicDerivation, DerivationOutput, OutputKind
 from .serde import StorePath as SerdeStorePath
 from .store_path import DrvOutput, StorePath
-from .types import OutputKind
 from .utils import compress_hash, nix32_encode
 
 if TYPE_CHECKING:

@@ -1,4 +1,4 @@
-"""Unit tests for pynixd.types.derivation — OutputKind, DerivationOutput, BasicDerivation.
+"""Unit tests for pynixd.serde derivation types — OutputKind, DerivationOutput, BasicDerivation.
 
 Tests the classification logic and property accessors for derivation types.
 All tests are pure — no I/O, no wire protocol.
@@ -10,8 +10,8 @@ import json
 
 import pytest
 
+from pynixd.serde import BasicDerivation, DerivationOutput, OutputKind
 from pynixd.store_path import StorePath
-from pynixd.types.derivation import BasicDerivation, DerivationOutput, OutputKind
 from tests.test_features import TestFeatures as F
 
 
