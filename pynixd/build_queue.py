@@ -12,9 +12,9 @@ import structlog
 
 from . import metrics, wire
 from .serde import BuildDerivationResponse, BuildMode, BuildResult, BuildResultStatus
+from .serde.context import WriteContext
+from .serde.ids import BuildId, RequestId, StoreId
 from .serde.logs import LogMessage
-from .types.context import WriteContext
-from .types.ids import BuildId, RequestId, StoreId
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

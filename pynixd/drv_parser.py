@@ -48,7 +48,7 @@ from .utils import compress_hash, nix32_encode
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .types.aliases import OutputMap, StorePathSet
+    from .serde.aliases import OutputMap, StorePathSet
 
 
 # Recursive type for input drv nodes in unparse.

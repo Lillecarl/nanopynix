@@ -35,9 +35,9 @@ from pynixd.serde import (
     UnkeyedValidPathInfo,
     ValidPathInfo,
 )
+from pynixd.serde.ids import BuildId, StoreId
 from pynixd.store import LocalDBStore
 from pynixd.store_path import StorePath
-from pynixd.types.ids import BuildId, StoreId
 from tests.conftest import STORE_PREFIX, make_test_spec, rmtree_robust, serde_path
 from tests.test_features import TestFeatures as F
 

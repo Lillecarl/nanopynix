@@ -18,8 +18,8 @@ from environs import env
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .serde.aliases import NARHash
     from .serde.valid_path_info import ValidPathInfo
-    from .types.aliases import NARHash
 
 
 # Nix32 alphabet (kept for reference; encoding is in utils.py)

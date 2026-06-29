@@ -8,8 +8,8 @@ import pytest
 from pynixd import Server
 from pynixd.serde import IsValidPathRequest
 from pynixd.serde import StorePath as SerdeStorePath
+from pynixd.serde.ids import StoreId
 from pynixd.store import LocalSocketStore
-from pynixd.types.ids import StoreId
 from tests.conftest import CLIENT_BIN, make_test_spec, run_subproc
 from tests.test_features import TestFeatures as F
 

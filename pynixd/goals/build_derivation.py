@@ -16,7 +16,7 @@ from .results import GoalResult, goal_failure
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
-    from ..types.ids import BuildId
+    from ..serde.ids import BuildId
     from .engine import GoalEngine
 
 log = structlog.get_logger(__name__)

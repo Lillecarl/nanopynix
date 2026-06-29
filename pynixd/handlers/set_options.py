@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from ..serde import SetOptionsRequest, SetOptionsResponse
+from ..serde.auth import Role
+from ..serde.context import ReadContext
 from ..serde.logs import LogNext
-from ..types.auth import Role
-from ..types.context import ReadContext
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..types import RequestContext
+    from ..serde.context import RequestContext
 
 
 class SetOptionsHandler(Handler):

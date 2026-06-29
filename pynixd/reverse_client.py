@@ -19,7 +19,7 @@ import structlog
 from . import wire
 from .config import ReverseInitiatorSettings, ScheduleMode
 from .proxy import DaemonProxy
-from .types.auth import Role
+from .serde.auth import Role
 from .wire import SSHNixReader, SSHNixWriter
 
 if TYPE_CHECKING:

@@ -14,8 +14,8 @@ from pynixd.serde import (
     BuildResult,
     BuildResultStatus,
 )
+from pynixd.serde.ids import StoreId
 from pynixd.store_path import StorePath
-from pynixd.types.ids import StoreId
 from tests.conftest import serde_path
 from tests.functional.mock_store import MockStore
 from tests.test_features import TestFeatures as F

@@ -11,10 +11,10 @@ import structlog
 from pynixd import Server
 from pynixd.config import SSHSubprocessStoreSpec
 from pynixd.serde import QueryAllValidPathsRequest
+from pynixd.serde.ids import StoreId
 from pynixd.serde.query_path_infos import QueryPathInfosRequest
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
-from pynixd.types.ids import StoreId
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,

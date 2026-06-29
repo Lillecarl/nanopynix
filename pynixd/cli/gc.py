@@ -9,10 +9,10 @@ import anyio
 import structlog
 
 from ..config import LocalSocketStoreSpec
+from ..serde.ids import StoreId
 from ..serde.protocol import PynixdGCAction
 from ..serde.pynixd_collect_garbage import PynixdCollectGarbageRequest
 from ..store import LocalStore as LocalSocketStore
-from ..types.ids import StoreId
 from .base import load_settings, setup_logging
 
 if TYPE_CHECKING:

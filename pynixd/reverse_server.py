@@ -18,8 +18,8 @@ import asyncssh
 import structlog
 
 from .config import ReverseAcceptorSettings, ReverseStoreSpec
+from .serde.ids import StoreId
 from .store.reverse import ReverseStore
-from .types.ids import StoreId
 
 if TYPE_CHECKING:
     from .instance import Server

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..types.context import WriteContext
 from .content_address import ContentAddress
+from .context import WriteContext
 from .nar_hash import NARHash
 from .path_info import UnkeyedValidPathInfo  # noqa: TC001
 from .signature import Signature

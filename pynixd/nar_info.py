@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 from .store_path import StorePath
 
 if TYPE_CHECKING:
+    from .serde.aliases import StorePathSet
     from .serde.valid_path_info import ValidPathInfo
-    from .types.aliases import StorePathSet
 
 
 @dataclass

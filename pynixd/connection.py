@@ -24,8 +24,8 @@ import structlog
 from . import wire
 from .exceptions import InfrastructureError
 from .protocol import get_extension_features
+from .serde.context import ReadContext, WriteContext
 from .serde.wire_message import WireModel
-from .types.context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
     from pathlib import Path

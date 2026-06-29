@@ -12,8 +12,8 @@ import pytest
 import structlog
 
 from pynixd.instance import Server
+from pynixd.serde.ids import StoreId
 from pynixd.store import LocalSocketStore, get_current_system
-from pynixd.types.ids import StoreId
 from tests.conftest import (
     CLIENT_BIN,
     NIX_BIN,

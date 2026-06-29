@@ -35,9 +35,9 @@ from passlib.apache import HtpasswdFile
 from . import metrics
 from .serde import AddToStoreNarRequest, NarFromPathRequest, QueryPathFromHashPartRequest, QueryPathInfoRequest
 from .serde import StorePath as SerdeStorePath
+from .serde.context import ReadContext, WriteContext
 from .serde.valid_path_info import ValidPathInfo as SerdeValidPathInfo
 from .store_path import StorePath
-from .types.context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

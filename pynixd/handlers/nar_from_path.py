@@ -8,14 +8,14 @@ import structlog
 
 from .. import wire
 from ..serde import QueryPathInfoRequest
+from ..serde.context import ReadContext, WriteContext
 from ..serde.logs import WireLogs
 from ..serde.nar_from_path import NarFromPathRequest
-from ..types.context import ReadContext, WriteContext
 from ..wire import _CHUNK_SIZE
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..types import RequestContext
+    from ..serde.context import RequestContext
 
 logger = structlog.get_logger(__name__)
 

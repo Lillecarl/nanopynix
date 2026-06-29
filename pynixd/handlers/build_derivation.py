@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING, ClassVar
 import structlog
 
 from ..serde import BuildDerivationRequest, BuildDerivationResponse
-from ..types.context import ReadContext
+from ..serde.context import ReadContext
 from ._base import Handler
 
 if TYPE_CHECKING:
+    from ..serde.context import RequestContext
     from ..serde.wire_ops import WireResponse
-    from ..types import RequestContext
 
 logger = structlog.get_logger(__name__)
 

@@ -9,9 +9,9 @@ if TYPE_CHECKING:
     from _pytest.tmpdir import TempPathFactory
 
 from pynixd.config import LocalSocketStoreSpec
+from pynixd.serde.ids import StoreId
 from pynixd.store import LocalStore
 from pynixd.store_path import StorePath
-from pynixd.types.ids import StoreId
 
 
 async def test_new_serde_is_valid_path_roundtrip(tmp_path_factory: TempPathFactory) -> None:
@@ -51,9 +51,9 @@ async def test_new_serde_is_valid_path_roundtrip(tmp_path_factory: TempPathFacto
 async def test_local_db_store_is_valid_path_serde() -> None:
     """LocalDBStore executor returns serde IsValidPathResponse."""
     from pynixd.config import LocalSocketStoreSpec
+    from pynixd.serde.ids import StoreId
     from pynixd.store.local_db import LocalDBStore
     from pynixd.store_path import StorePath
-    from pynixd.types.ids import StoreId
 
     # Create a LocalDBStore (not LocalSocketStore)
     spec = LocalSocketStoreSpec(store_id=StoreId("test-serde"), use_db=True, monitor=False, probe=False)
@@ -79,9 +79,9 @@ async def test_local_db_store_is_valid_path_serde_cache_hit() -> None:
     from pynixd.config import LocalSocketStoreSpec
     from pynixd.serde import IsValidPathRequest, IsValidPathResponse
     from pynixd.serde import StorePath as SerdeStorePath
+    from pynixd.serde.ids import StoreId
     from pynixd.store.local_db import LocalDBStore
     from pynixd.store_path import StorePath
-    from pynixd.types.ids import StoreId
 
     spec = LocalSocketStoreSpec(store_id=StoreId("test-serde-cache"), use_db=True, monitor=False, probe=False)
     store = LocalDBStore(spec)

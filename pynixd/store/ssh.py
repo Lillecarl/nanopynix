@@ -30,7 +30,7 @@ if TYPE_CHECKING:
         CpuUtil,
         MemInfo,
     )
-    from ..types.ids import StoreId
+    from ..serde.ids import StoreId
 
 log = structlog.get_logger(__name__)
 

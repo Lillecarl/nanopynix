@@ -10,10 +10,10 @@ import structlog
 from .. import wire
 from ..serde import StorePath as SerdeStorePath
 from ..serde.add_multiple_to_store import AddMultipleToStoreRequest, AddMultipleToStoreResponse
+from ..serde.context import ReadContext, WriteContext
 from ..serde.nar_from_path import NarFromPathRequest
 from ..serde.query_closure_with_info import QueryClosureWithInfoRequest
 from ..store_path import StorePath as RealStorePath
-from ..types.context import ReadContext, WriteContext
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

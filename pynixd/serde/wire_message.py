@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PydanticField
 from pydantic_core import PydanticUndefined
 
-from ..types.context import ReadContext, WriteContext
+from .context import ReadContext, WriteContext
 
 # ── Helpers ──
 

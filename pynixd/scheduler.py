@@ -44,9 +44,9 @@ if TYPE_CHECKING:
         BuildDerivationRequest,
         BuildDerivationResponse,
     )
+    from .serde.aliases import StorePathSet
+    from .serde.ids import BuildId, RequestId, StoreId
     from .store import DaemonStore
-    from .types.aliases import StorePathSet
-    from .types.ids import BuildId, RequestId, StoreId
 
 log = structlog.get_logger(__name__)
 
@@ -451,9 +451,7 @@ class Scheduler:
             self.trigger()
         except (BackendError, InfrastructureError) as e:
             log.warning("build_failed_retryable", build_id=build.build_id, error=str(e))
-            await build.post_log_and_fanout(
-                LogNext(text=f"pynixd: build failed on {store.store_id}, retrying: {e}\n")
-            )
+            await build.post_log_and_fanout(LogNext(text=f"pynixd: build failed on {store.store_id}, retrying: {e}\n"))
             build.reset_for_retry(store.store_id)
             self.trigger()
         except Exception:

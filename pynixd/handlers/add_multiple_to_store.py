@@ -11,13 +11,13 @@ from ..serde.add_multiple_to_store import (
     AddMultipleToStoreRequest,
     AddMultipleToStoreResponse,
 )
+from ..serde.context import ReadContext, WriteContext
 from ..serde.valid_path_info import ValidPathInfo
-from ..types.context import ReadContext, WriteContext
 from ..wire import FramedReader, FramedWriter, NixReader, NixWriter
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..types import RequestContext
+    from ..serde.context import RequestContext
 
 logger = structlog.get_logger(__name__)
 

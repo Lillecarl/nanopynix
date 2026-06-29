@@ -36,12 +36,12 @@ from .serde import (
 from .serde import (
     StorePath as SerdeStorePath,
 )
+from .serde.auth import Role
+from .serde.context import ReadContext, WriteContext
+from .serde.context import RequestContext as RequestContext
+from .serde.ids import StoreId
+from .serde.protocol import OptTrusted, Verbosity
 from .serde.wire_ops import WIRE_REGISTRY, WireResponse
-from .types import RequestContext as RequestContext
-from .types.auth import Role
-from .types.context import ReadContext, WriteContext
-from .types.ids import StoreId
-from .types.protocol import OptTrusted, Verbosity
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping

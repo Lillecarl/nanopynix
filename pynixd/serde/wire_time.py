@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from .wire_message import WireModel
 
 if TYPE_CHECKING:
-    from ..types.context import ReadContext, WriteContext
+    from .context import ReadContext, WriteContext
 
 
 class Time(WireModel):

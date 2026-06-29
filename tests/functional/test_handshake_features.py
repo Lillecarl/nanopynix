@@ -15,8 +15,8 @@ if TYPE_CHECKING:
 
 from pynixd import Server
 from pynixd.config import SSHSubprocessStoreSpec
+from pynixd.serde.ids import StoreId
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
-from pynixd.types.ids import StoreId
 from tests.conftest import (
     NIX_BIN,
     STORE_PREFIX,

@@ -21,10 +21,10 @@ from .reverse_client import ReverseInitiator
 from .reverse_server import start_reverse_acceptor
 from .scheduler import Scheduler
 from .serde import PynixdCollectGarbageRequest
+from .serde.ids import StoreId
 from .serde.protocol import PynixdGCAction
 from .ssh_server import start_ssh_server
 from .store import DaemonStore, LocalDBStore, LocalStore
-from .types.ids import StoreId
 from .unix_server import start_unix_server
 
 if TYPE_CHECKING:

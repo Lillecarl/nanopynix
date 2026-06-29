@@ -13,9 +13,9 @@ from pynixd import Server
 from pynixd.config import SSHSubprocessStoreSpec
 from pynixd.serde import IsValidPathRequest
 from pynixd.serde import StorePath as SerdeStorePath
+from pynixd.serde.ids import StoreId
 from pynixd.store import LocalSocketStore, SSHSubprocessStore
 from pynixd.store_path import StorePath
-from pynixd.types.ids import StoreId
 from tests.conftest import (
     CLIENT_BIN,
     NIX_BIN,

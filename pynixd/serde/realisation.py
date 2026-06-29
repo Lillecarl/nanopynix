@@ -9,7 +9,7 @@ from .store_path import StorePath  # noqa: TC001
 from .wire_message import WireField, WireModel
 
 if TYPE_CHECKING:
-    from ..types.context import ReadContext, WriteContext
+    from .context import ReadContext, WriteContext
 
 
 class Realisation(WireModel):

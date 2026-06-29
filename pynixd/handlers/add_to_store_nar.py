@@ -10,12 +10,12 @@ from ..serde.add_to_store_nar import (
     AddToStoreNarRequest,
     AddToStoreNarResponse,
 )
-from ..types.context import ReadContext, WriteContext
+from ..serde.context import ReadContext, WriteContext
 from ..wire import forward_framed
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..types import RequestContext
+    from ..serde.context import RequestContext
 
 logger = structlog.get_logger(__name__)
 

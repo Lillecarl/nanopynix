@@ -40,10 +40,10 @@ from .constants import (
 from .constants import (
     proto_str as proto_str,
 )
+from .serde.context import ReadContext
 from .serde.logs import LogMessage
 from .serde.logs import drain as drain_log_stream
 from .serde.logs import read_stream as read_log_stream
-from .types.context import ReadContext
 
 if TYPE_CHECKING:
     import asyncio

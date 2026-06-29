@@ -15,7 +15,7 @@ from pydantic_settings import (
 )
 
 from .nix_config import NixConfig
-from .types.ids import StoreId
+from .serde.ids import StoreId
 
 
 class ScheduleMode(StrEnum):

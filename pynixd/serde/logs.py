@@ -23,13 +23,13 @@ from ..constants import (
     STDERR_STOP_ACTIVITY,
 )
 from ..exceptions import BackendError
-from ..types.protocol import FieldType
+from .protocol import FieldType
 from .wire_message import WireField, WireModel
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from ..types.context import ReadContext, WriteContext
+    from .context import ReadContext, WriteContext
 
 
 # ── Helper: nested trace element ────────────────────────────────────

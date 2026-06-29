@@ -12,7 +12,7 @@ from .logs import WireLogs
 from .wire_message import WireField, WireModel
 
 if TYPE_CHECKING:
-    from ..types.context import ReadContext, WriteContext
+    from .context import ReadContext, WriteContext
 
 WIRE_REGISTRY: dict[int, type[WireRequest]] = {}
 

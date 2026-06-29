@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from pynixd.constants import PROTOCOL_VERSION
-from pynixd.types.context import ReadContext, WriteContext
+from pynixd.serde.context import ReadContext, WriteContext
 from pynixd.wire import BytesReader, BytesWriter
 
 

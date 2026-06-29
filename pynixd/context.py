@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .types.ids import StoreId
+from .serde.ids import StoreId
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

@@ -25,7 +25,7 @@ from pynixd.store_path import DrvOutput, StorePath
 from tests.test_features import TestFeatures as F
 
 if TYPE_CHECKING:
-    from pynixd.types.aliases import OutputMap
+    from pynixd.serde.aliases import OutputMap
 
 NIX_BIN = os.environ.get("NIX_BIN", "nix")
 _PROBES_NIX = Path(__file__).parent.parent.parent / "tests" / "nix" / "drv-probes.nix"

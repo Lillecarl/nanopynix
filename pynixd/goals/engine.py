@@ -21,8 +21,8 @@ if TYPE_CHECKING:
     from ..connection import ClientConn
     from ..context import PynixdContext
     from ..derived_path import DerivedPath
+    from ..serde.ids import BuildId
     from ..store_path import StorePath
-    from ..types.ids import BuildId
 
 
 def _derivation_fingerprint(request: BuildDerivationRequest) -> str:

@@ -22,10 +22,10 @@ if TYPE_CHECKING:
     from ..config import StoreSpecBase
     from ..connection import ClientConn, Connection
     from ..drv_parser import Derivation
+    from ..serde.ids import StoreId
     from ..serde.wire_ops import WireRequest
     from ..signing import SecretKey
     from ..store_path import StorePath
-    from ..types.ids import StoreId
 
 
 log = structlog.get_logger(__name__)

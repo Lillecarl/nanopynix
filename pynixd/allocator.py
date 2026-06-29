@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
     from .build_queue import QueuedBuild
     from .config import PynixdSettings
+    from .serde.ids import StoreId
     from .store import DaemonStore
-    from .types.ids import StoreId
 
 log = structlog.get_logger(__name__)
 

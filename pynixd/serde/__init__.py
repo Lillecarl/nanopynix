@@ -16,6 +16,7 @@ from .add_to_store import AddToStoreRequest as AddToStoreRequest
 from .add_to_store import AddToStoreResponse as AddToStoreResponse
 from .add_to_store_nar import AddToStoreNarRequest as AddToStoreNarRequest
 from .add_to_store_nar import AddToStoreNarResponse as AddToStoreNarResponse
+from .auth import Role as Role
 from .basic_derivation import BasicDerivation as BasicDerivation
 from .build_derivation import BuildDerivationRequest as BuildDerivationRequest
 from .build_derivation import BuildDerivationResponse as BuildDerivationResponse
@@ -30,6 +31,9 @@ from .build_result import BuiltOutput as BuiltOutput
 from .collect_garbage import CollectGarbageRequest as CollectGarbageRequest
 from .collect_garbage import CollectGarbageResponse as CollectGarbageResponse
 from .content_address import ContentAddress as ContentAddress
+from .context import ReadContext as ReadContext
+from .context import RequestContext as RequestContext
+from .context import WriteContext as WriteContext
 from .derivation_output import DerivationOutput as DerivationOutput
 from .derivation_output import OutputKind as OutputKind
 from .derived_path import DerivedPath as DerivedPath
@@ -39,6 +43,9 @@ from .ensure_path import EnsurePathResponse as EnsurePathResponse
 from .find_roots import FindRootsEntry as FindRootsEntry
 from .find_roots import FindRootsRequest as FindRootsRequest
 from .find_roots import FindRootsResponse as FindRootsResponse
+from .ids import BuildId as BuildId
+from .ids import RequestId as RequestId
+from .ids import StoreId as StoreId
 from .is_valid_path import IsValidPathRequest as IsValidPathRequest
 from .is_valid_path import IsValidPathResponse as IsValidPathResponse
 from .keyed_build_result import KeyedBuildResult as KeyedBuildResult
@@ -61,8 +68,13 @@ from .probe_features import ProbeFeaturesRequest as ProbeFeaturesRequest
 from .probe_features import ProbeFeaturesResponse as ProbeFeaturesResponse
 from .probe_systems import ProbeSystemsRequest as ProbeSystemsRequest
 from .probe_systems import ProbeSystemsResponse as ProbeSystemsResponse
+from .protocol import ActivityType as ActivityType
+from .protocol import FieldType as FieldType
+from .protocol import FileIngestionMethod as FileIngestionMethod
 from .protocol import GCAction as GCAction
+from .protocol import OptTrusted as OptTrusted
 from .protocol import PynixdGCAction as PynixdGCAction
+from .protocol import ResultType as ResultType
 from .protocol import Verbosity as Verbosity
 from .pynixd_collect_garbage import PynixdCollectGarbageRequest as PynixdCollectGarbageRequest
 from .pynixd_collect_garbage import PynixdCollectGarbageResponse as PynixdCollectGarbageResponse

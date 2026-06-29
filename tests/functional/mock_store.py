@@ -22,6 +22,7 @@ from pynixd.serde import (
     StorePath as SerdeStorePath,
 )
 from pynixd.serde.content_address import ContentAddress
+from pynixd.serde.ids import StoreId
 from pynixd.serde.nar_hash import NARHash
 from pynixd.serde.path_info import UnkeyedValidPathInfo
 from pynixd.serde.query_all_valid_paths import QueryAllValidPathsRequest as SerdeQueryAllValidPathsRequest
@@ -31,7 +32,6 @@ from pynixd.serde.wire_message import WireModel
 from pynixd.serde.wire_time import Time
 from pynixd.store.daemon import DaemonStore
 from pynixd.store_path import StorePath
-from pynixd.types.ids import StoreId
 
 if TYPE_CHECKING:
     from pynixd.connection import ClientConn, Connection

@@ -15,7 +15,7 @@ import structlog
 
 from .config import ScheduleMode
 from .proxy import DaemonProxy
-from .types.auth import Role
+from .serde.auth import Role
 from .wire import UnixNixReader, UnixNixWriter
 
 if TYPE_CHECKING:

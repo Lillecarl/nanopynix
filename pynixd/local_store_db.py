@@ -31,7 +31,7 @@ from .store_path import StorePath
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from .types.aliases import StorePathSet
+    from .serde.aliases import StorePathSet
 
 log = structlog.get_logger(__name__)
 

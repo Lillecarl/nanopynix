@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pynixd import Server
 from pynixd.config import LocalSocketStoreSpec, PynixdSettings
-from pynixd.types.ids import StoreId
+from pynixd.serde.ids import StoreId
 
 
 async def test_start_stop(tmp_path):

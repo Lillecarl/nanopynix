@@ -8,13 +8,13 @@ import structlog
 
 from ..serde import AddToStoreRequest
 from ..serde.add_to_store import AddToStoreResponse as SerdeAddToStoreResponse
+from ..serde.context import ReadContext, WriteContext
 from ..serde.sign_path_info import SignPathInfoRequest as SerdeSignPathInfoRequest
-from ..types.context import ReadContext, WriteContext
 from ..wire import forward_framed
 from ._base import Handler
 
 if TYPE_CHECKING:
-    from ..types import RequestContext
+    from ..serde.context import RequestContext
 
 logger = structlog.get_logger(__name__)
 

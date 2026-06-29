@@ -17,9 +17,9 @@ from ..exceptions import BackendError
 from ..monitor import ResourceGate, ResourceMonitor
 from ..serde import BasicDerivation, BuildDerivationRequest, BuildMode, BuildResultStatus, DerivationOutput
 from ..serde import StorePath as SerdeStorePath
+from ..serde.context import WriteContext
 from ..serde.wire_ops import WireRequest
 from ..system_features import KNOWN_FEATURES, PROBE_SYSTEMS
-from ..types.context import WriteContext
 from ..utils import random_nix32_hash
 from .base import Store
 from .pool import ConnectionPool

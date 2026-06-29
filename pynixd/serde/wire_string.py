@@ -9,7 +9,7 @@ from pydantic import ConfigDict, model_serializer, model_validator
 from .wire_message import WireModel, _find_reader
 
 if TYPE_CHECKING:
-    from ..types.context import ReadContext, WriteContext
+    from .context import ReadContext, WriteContext
 
 
 class WireString(WireModel):

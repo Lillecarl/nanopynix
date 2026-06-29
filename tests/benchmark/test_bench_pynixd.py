@@ -12,8 +12,8 @@ import structlog
 
 from pynixd.config import LocalSocketStoreSpec
 from pynixd.serde import IsValidPathRequest, QueryAllValidPathsRequest, QueryPathInfoRequest
+from pynixd.serde.ids import StoreId
 from pynixd.store import LocalSocketStore, Store
-from pynixd.types.ids import StoreId
 from tests.conftest import CLIENT_BIN, run_subproc
 
 if TYPE_CHECKING:
