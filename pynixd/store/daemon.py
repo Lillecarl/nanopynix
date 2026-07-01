@@ -808,3 +808,41 @@ class DaemonStore(Store):
             return None
 
         return parse_drv(node.contents.decode())
+
+
+for _op, _method_name in {
+    6: "query_referrers",
+    7: "add_to_store",
+    9: "build_paths",
+    10: "ensure_path",
+    11: "add_temp_root",
+    12: "add_indirect_root",
+    14: "find_roots",
+    19: "set_options",
+    20: "collect_garbage",
+    23: "query_all_valid_paths",
+    32: "query_substitutable_paths",
+    33: "query_valid_derivers",
+    34: "optimise_store",
+    35: "verify_store",
+    36: "build_derivation",
+    37: "add_signatures",
+    39: "add_to_store_nar",
+    40: "query_missing",
+    41: "query_derivation_output_map",
+    42: "register_drv_output",
+    43: "query_realisation",
+    44: "add_multiple_to_store",
+    45: "add_build_log",
+    46: "build_paths_with_results",
+    47: "add_perm_root",
+    101: "pynixd_collect_garbage",
+    103: "query_path_infos",
+    104: "query_closure",
+    105: "query_closure_with_info",
+    106: "query_derivation_output_map_batch",
+    107: "sign_path_info",
+    108: "probe_systems",
+    109: "probe_features",
+}.items():
+    DaemonStore._register_executor(_op, _method_name)

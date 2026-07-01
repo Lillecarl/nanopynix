@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .goals import GoalEngine
     from .local_store_db import LocalStoreDB
     from .scheduler import Scheduler
-    from .store.daemon import DaemonStore
+    from .store.base import Store
     from .store.local_daemon import LocalStore
 
 
@@ -29,7 +29,7 @@ class PynixdContext:
     """
 
     settings: PynixdSettings
-    _stores: dict[StoreId, DaemonStore]
+    _stores: dict[StoreId, Store]
     db: LocalStoreDB | None = None
     scheduler: Scheduler | None = None
     goal_engine: GoalEngine | None = None
@@ -40,6 +40,6 @@ class PynixdContext:
         return self._stores[StoreId("local")]  # type: ignore[return-value]
 
     @property
-    def stores(self) -> Mapping[StoreId, DaemonStore]:
+    def stores(self) -> Mapping[StoreId, Store]:
         """Read-only view of all connected stores (including local)."""
         return self._stores

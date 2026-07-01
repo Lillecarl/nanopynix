@@ -10,7 +10,6 @@ from ..serde import BuildPathsWithResultsRequest, BuildPathsWithResultsResponse,
 from ..serde import DerivedPath as SerdeDerivedPath
 from .ensure import EnsureDerivedPathGoal
 from .goal import ExecutionGoal
-from .substitute import substituter_urls_for
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
@@ -28,10 +27,10 @@ class BuildPathsWithResultsGoal(ExecutionGoal[BuildPathsWithResultsResponse]):
         ExecutionGoal.__init__(self, self.engine)
 
     async def _run(self) -> BuildPathsWithResultsResponse:
-        substituter_urls = substituter_urls_for()
+        substituter_ids = self.engine.substituter_ids()
         for serde_path in sorted(self.request.derived_paths, key=str):
             path = DerivedPath(str(serde_path))
-            goal = await self.engine.get_ensure_derived_path_goal(path, self.request.build_mode, substituter_urls)
+            goal = await self.engine.get_ensure_derived_path_goal(path, self.request.build_mode, substituter_ids)
             await goal.subscribe(self.client)
             self._root_goals.append((SerdeDerivedPath(value=str(path)), goal))
 

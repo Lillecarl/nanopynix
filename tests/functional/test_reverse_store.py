@@ -15,7 +15,7 @@ from pynixd.config import (
     ReverseInitiatorSettings,
 )
 from pynixd.serde.ids import StoreId
-from pynixd.store import LocalSocketStore
+from pynixd.store import DaemonStore, LocalSocketStore
 from tests.conftest import STORE_PREFIX, make_test_spec, rmtree_robust
 from tests.test_features import TestFeatures as F
 
@@ -83,6 +83,7 @@ async def test_reverse_store_registration(tmp_path: Path) -> None:
 
             store = controller.stores[store_id]
             assert store.store_id == store_id
+            assert isinstance(store, DaemonStore)
             assert store.systems == {"x86_64-linux"}
 
         finally:

@@ -1,0 +1,396 @@
+"""HTTP binary cache store implementation."""
+
+from __future__ import annotations
+
+import bz2
+import lzma
+import re
+import zlib
+from collections import deque
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urljoin
+
+import aiohttp
+import anyio
+import structlog
+import zstandard as zstd
+
+from ..exceptions import OpNotImplementedError
+from ..serde import (
+    IsValidPathRequest,
+    IsValidPathResponse,
+    NarFromPathResponse,
+    QueryPathFromHashPartRequest,
+    QueryPathFromHashPartResponse,
+    QueryPathInfoRequest,
+    QueryPathInfoResponse,
+    QueryValidPathsRequest,
+    QueryValidPathsResponse,
+)
+from ..serde import StorePath as SerdeStorePath
+from ..serde.valid_path_info import ValidPathInfo
+from ..serde.wire_ops import WireRequest
+from ..store_path import StorePath
+from .base import Store
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from ..config import HTTPBinaryCacheSpec
+    from ..connection import ClientConn, Connection
+    from ..drv_parser import Derivation
+
+log = structlog.get_logger(__name__)
+
+_NARINFO_KEY_RE = re.compile(r"^([A-Za-z]+):\s*(.*)$")
+_HTTP_CHUNK_SIZE = 1024 * 256
+
+
+@dataclass(frozen=True)
+class HTTPNarInfo:
+    path: StorePath
+    url: str
+    compression: str
+    file_hash: str
+    file_size: int
+    valid_path_info: ValidPathInfo
+
+    @property
+    def references(self) -> set[StorePath]:
+        return {StorePath(str(path)) for path in self.valid_path_info.info.references}
+
+
+class HTTPBinaryCacheStore(Store):
+    """Read-only Store backed by the Nix HTTP binary cache protocol."""
+
+    def __init__(self, spec: HTTPBinaryCacheSpec) -> None:
+        super().__init__(spec)
+        self.url = _normalise_base_url(spec.url)
+        self.max_concurrent = spec.max_concurrent
+        self.max_fail_ratio = spec.max_fail_ratio
+        self.health_window = spec.health_window
+        self.cache_info: dict[str, str] = {}
+        self._session: aiohttp.ClientSession | None = None
+        self._semaphore: Any = None
+        self._recent_results: deque[bool] = deque(maxlen=spec.health_window)
+
+    async def start(self, sync_paths: bool = True) -> None:
+        if self._started:
+            return
+        self._session = aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(limit=100, force_close=False),
+            timeout=aiohttp.ClientTimeout(total=30),
+        )
+        self.cache_info = await self._load_cache_info()
+        concurrency = self.max_concurrent
+        if concurrency is None:
+            concurrency = 100
+        self._semaphore = anyio.Semaphore(concurrency)
+        self._started = True
+
+    async def close(self) -> None:
+        if self._session is not None:
+            await self._session.close()
+            self._session = None
+        self._started = False
+
+    async def create_conn(self) -> Connection:
+        raise OpNotImplementedError("HTTPBinaryCacheStore does not use daemon wire connections")
+
+    async def call(
+        self,
+        request: WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        raise_on_error: bool = False,
+        skip_probe: bool = False,
+    ) -> Any:
+        raise OpNotImplementedError(f"HTTPBinaryCacheStore cannot call {type(request).__name__}")
+
+    async def execute(
+        self,
+        request: WireRequest,
+        client: ClientConn | None = None,
+        suppress_last: bool = False,
+        skip_probe: bool = False,
+    ) -> Any:
+        if isinstance(request, IsValidPathRequest):
+            return await self.is_valid_path(request, client=client, suppress_last=suppress_last)
+        if isinstance(request, QueryPathInfoRequest):
+            return await self.query_path_info(request, client=client, suppress_last=suppress_last)
+        if isinstance(request, QueryPathFromHashPartRequest):
+            return await self.query_path_from_hash_part(request, client=client, suppress_last=suppress_last)
+        if isinstance(request, QueryValidPathsRequest):
+            return await self.query_valid_paths(request, client=client, suppress_last=suppress_last)
+        raise OpNotImplementedError(f"HTTPBinaryCacheStore does not support {type(request).__name__}")
+
+    async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        return None
+
+    @property
+    def is_healthy(self) -> bool:
+        if not self._recent_results:
+            return True
+        failures = sum(1 for result in self._recent_results if not result)
+        return failures / len(self._recent_results) <= self.max_fail_ratio
+
+    async def is_valid_path(
+        self, request: IsValidPathRequest, client: Any = None, suppress_last: bool = False
+    ) -> IsValidPathResponse:
+        narinfo = await self.get_narinfo(StorePath(str(request.path)))
+        return IsValidPathResponse(valid=narinfo is not None)
+
+    async def query_path_info(
+        self, request: QueryPathInfoRequest, client: Any = None, suppress_last: bool = False
+    ) -> QueryPathInfoResponse:
+        cached = self.get_path_info(request.path)
+        if cached is not None:
+            return QueryPathInfoResponse(valid=True, info=cached.info)
+
+        narinfo = await self.get_narinfo(StorePath(str(request.path)))
+        if narinfo is None:
+            return QueryPathInfoResponse(valid=False)
+        self.add_path_info(narinfo.valid_path_info)
+        return QueryPathInfoResponse(valid=True, info=narinfo.valid_path_info.info)
+
+    async def query_path_from_hash_part(
+        self, request: QueryPathFromHashPartRequest, client: Any = None, suppress_last: bool = False
+    ) -> QueryPathFromHashPartResponse | None:
+        narinfo = await self.get_narinfo_by_hash_part(request.path)
+        if narinfo is None:
+            return None
+        return QueryPathFromHashPartResponse(value=SerdeStorePath(path=str(narinfo.path)))
+
+    async def query_valid_paths(
+        self, request: QueryValidPathsRequest, client: Any = None, suppress_last: bool = False
+    ) -> QueryValidPathsResponse:
+        valid: set[SerdeStorePath] = set()
+        for path in sorted(request.paths, key=str):
+            if await self.get_narinfo(StorePath(str(path))) is not None:
+                valid.add(path)
+        return QueryValidPathsResponse(paths=valid)
+
+    async def nar_from_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> NarFromPathResponse:
+        raise OpNotImplementedError("HTTPBinaryCacheStore streams NARs through stream_nar()")
+
+    async def get_narinfo(self, path: StorePath) -> HTTPNarInfo | None:
+        cached = self.get_path_info(path)
+        hash_part = path.hash_part()
+        if cached is not None:
+            raw = await self._get_narinfo_raw(hash_part)
+            if raw is None:
+                return None
+            return _parse_narinfo(raw, expected_path=path)
+        return await self.get_narinfo_by_hash_part(hash_part, expected_path=path)
+
+    async def get_narinfo_by_hash_part(
+        self, hash_part: str, expected_path: StorePath | None = None
+    ) -> HTTPNarInfo | None:
+        raw = await self._get_narinfo_raw(hash_part)
+        if raw is None:
+            return None
+        return _parse_narinfo(raw, expected_path=expected_path)
+
+    async def stream_nar(self, narinfo: HTTPNarInfo) -> AsyncIterator[bytes]:
+        session = self._require_session()
+        nar_url = urljoin(self.url, narinfo.url)
+        async with session.get(
+            nar_url,
+            raise_for_status=False,
+            timeout=aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60),
+        ) as response:
+            if response.status != 200:
+                raise RuntimeError(f"HTTP cache returned {response.status} for {nar_url}")
+            decompressor = _decompressor(narinfo.compression)
+            async for chunk in response.content.iter_chunked(_HTTP_CHUNK_SIZE):
+                for out in decompressor.decompress(chunk):
+                    if out:
+                        yield out
+            for out in decompressor.finish():
+                if out:
+                    yield out
+
+    async def _load_cache_info(self) -> dict[str, str]:
+        try:
+            session = self._require_session()
+            async with session.get(urljoin(self.url, "nix-cache-info"), raise_for_status=False) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"HTTP cache returned {response.status}")
+                text = await response.text()
+        except (TimeoutError, aiohttp.ClientError, OSError, RuntimeError):
+            log.warning("http_cache_info_fetch_failed", store_id=self.store_id, url=self.url, exc_info=True)
+            return {"WantMassQuery": "0", "Priority": str(int(self.priority)), "StoreDir": "/nix/store"}
+
+        result: dict[str, str] = {}
+        for line in text.splitlines():
+            if ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            result[key.strip()] = value.strip()
+        result.setdefault("WantMassQuery", "0")
+        result.setdefault("Priority", str(int(self.priority)))
+        result.setdefault("StoreDir", "/nix/store")
+        return result
+
+    async def _get_narinfo_raw(self, hash_part: str) -> str | None:
+        session = self._require_session()
+        url = urljoin(self.url, f"{hash_part}.narinfo")
+        async with self._semaphore:
+            try:
+                async with session.get(url, raise_for_status=False, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status == 404:
+                        return None
+                    if response.status != 200:
+                        log.debug("http_cache_narinfo_status", store_id=self.store_id, url=url, status=response.status)
+                        self._record_result(False)
+                        return None
+                    text = await response.text()
+            except (TimeoutError, aiohttp.ClientError, OSError):
+                log.debug("http_cache_narinfo_failed", store_id=self.store_id, url=url, exc_info=True)
+                self._record_result(False)
+                return None
+
+        self._record_result(True)
+        return text
+
+    def _record_result(self, success: bool) -> None:
+        self._recent_results.append(success)
+
+    def _require_session(self) -> aiohttp.ClientSession:
+        if self._session is None:
+            raise RuntimeError("HTTPBinaryCacheStore is not started")
+        return self._session
+
+
+class _PassthroughDecompressor:
+    def decompress(self, chunk: bytes) -> list[bytes]:
+        return [chunk]
+
+    def finish(self) -> list[bytes]:
+        return []
+
+
+class _ZlibDecompressor:
+    def __init__(self) -> None:
+        self._decompressor = zlib.decompressobj()
+
+    def decompress(self, chunk: bytes) -> list[bytes]:
+        return [self._decompressor.decompress(chunk)]
+
+    def finish(self) -> list[bytes]:
+        return [self._decompressor.flush()]
+
+
+class _GzipDecompressor:
+    def __init__(self) -> None:
+        self._decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+
+    def decompress(self, chunk: bytes) -> list[bytes]:
+        return [self._decompressor.decompress(chunk)]
+
+    def finish(self) -> list[bytes]:
+        return [self._decompressor.flush()]
+
+
+class _Bzip2Decompressor:
+    def __init__(self) -> None:
+        self._decompressor = bz2.BZ2Decompressor()
+
+    def decompress(self, chunk: bytes) -> list[bytes]:
+        return [self._decompressor.decompress(chunk)]
+
+    def finish(self) -> list[bytes]:
+        return []
+
+
+class _XzDecompressor:
+    def __init__(self) -> None:
+        self._decompressor = lzma.LZMADecompressor()
+
+    def decompress(self, chunk: bytes) -> list[bytes]:
+        return [self._decompressor.decompress(chunk)]
+
+    def finish(self) -> list[bytes]:
+        return []
+
+
+class _ZstdDecompressor:
+    def __init__(self) -> None:
+        self._decompressor = zstd.ZstdDecompressor().decompressobj()
+
+    def decompress(self, chunk: bytes) -> list[bytes]:
+        return [self._decompressor.decompress(chunk)]
+
+    def finish(self) -> list[bytes]:
+        return [self._decompressor.flush()]
+
+
+def _decompressor(compression: str):
+    match compression:
+        case "" | "none":
+            return _PassthroughDecompressor()
+        case "bzip2":
+            return _Bzip2Decompressor()
+        case "gzip":
+            return _GzipDecompressor()
+        case "xz":
+            return _XzDecompressor()
+        case "zlib":
+            return _ZlibDecompressor()
+        case "zstd":
+            return _ZstdDecompressor()
+        case _:
+            raise RuntimeError(f"unsupported NAR compression: {compression}")
+
+
+def _parse_narinfo(text: str, expected_path: StorePath | None) -> HTTPNarInfo | None:
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        match = _NARINFO_KEY_RE.match(line)
+        if match is None:
+            continue
+        key = match.group(1)
+        if key == "Sig":
+            continue
+        fields[key] = match.group(2)
+
+    path_raw = fields.get("StorePath")
+    url = fields.get("URL")
+    if not path_raw or not url:
+        return None
+
+    path = StorePath(path_raw)
+    if expected_path is not None and path != expected_path:
+        return None
+
+    valid_path_info = ValidPathInfo.from_narinfo(text)
+    if not str(valid_path_info.path):
+        return None
+
+    return HTTPNarInfo(
+        path=path,
+        url=url,
+        compression=fields.get("Compression", "none"),
+        file_hash=fields.get("FileHash", ""),
+        file_size=_parse_int(fields.get("FileSize")),
+        valid_path_info=valid_path_info,
+    )
+
+
+def _parse_int(raw: str | None) -> int:
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+def _normalise_base_url(url: str) -> str:
+    stripped = url.strip()
+    if not stripped:
+        raise ValueError("HTTP binary cache URL must not be empty")
+    if not stripped.endswith("/"):
+        return f"{stripped}/"
+    return stripped

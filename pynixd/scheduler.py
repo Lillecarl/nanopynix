@@ -30,7 +30,7 @@ from .build_queue import BuildQueue, QueuedBuild
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .serde import LogNext, QueryValidPathsRequest
 from .serde import StorePath as SerdeStorePath
-from .store import LocalDBStore
+from .store import DaemonStore, LocalDBStore
 from .store.transfer import stream_paths_store_to_store
 from .store_path import StorePath
 
@@ -46,7 +46,6 @@ if TYPE_CHECKING:
     )
     from .serde.aliases import StorePathSet
     from .serde.ids import BuildId, RequestId, StoreId
-    from .store import DaemonStore
 
 log = structlog.get_logger(__name__)
 
@@ -64,13 +63,17 @@ class Scheduler:
         self._dynamic_feature_matrix: dict[str, set[str]] = {}
 
         self.ranker = TelemetryStoreRanker(ctx.settings)
-        self.allocator = BuildAllocator(self.ctx.stores, self.local_store, self.ranker)
+        self.allocator = BuildAllocator(self.stores, self.local_store, self.ranker)
         self.trigger_event = anyio.Event()
         self.running = False
 
     @property
     def stores(self) -> Mapping[StoreId, DaemonStore]:
-        return self.ctx.stores
+        return {
+            store_id: store
+            for store_id, store in self.ctx.stores.items()
+            if isinstance(store, DaemonStore) and not store.no_schedule
+        }
 
     @property
     def dynamic_feature_matrix(self) -> dict[str, set[str]]:
@@ -123,7 +126,7 @@ class Scheduler:
     async def drain_store(self, store_id: StoreId, drain_timeout: float = 300.0) -> None:
         """Gracefully drain and stop using a store for new builds."""
         store = self.ctx.stores.get(store_id)
-        if not store:
+        if not isinstance(store, DaemonStore):
             return
 
         log.info(

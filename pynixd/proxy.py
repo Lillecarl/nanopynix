@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from .context import PynixdContext
     from .scheduler import Scheduler
     from .serde.wire_ops import WireRequest
-    from .store import DaemonStore, LocalStore
+    from .store import DaemonStore, LocalStore, Store
     from .wire import NixReader, NixWriter
 
 log = structlog.get_logger(__name__)
@@ -108,7 +108,7 @@ class DaemonProxy:
         return self.scheduler.trigger if self.scheduler else None
 
     @property
-    def stores(self) -> Mapping[StoreId, DaemonStore]:
+    def stores(self) -> Mapping[StoreId, Store]:
         return self.ctx.stores
 
     @property
@@ -357,7 +357,10 @@ class DaemonProxy:
         store_id = self.ctx.output_locations.get(path)
         if store_id is None:
             return None
-        return self.ctx._stores.get(store_id)
+        store = self.ctx._stores.get(store_id)
+        if not isinstance(store, DaemonStore):
+            return None
+        return store
 
     async def dispatch(self, op_num: int) -> WireResponse | None:
         """Route an operation to its request type's handle method."""

@@ -33,7 +33,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
     engine: GoalEngine
     derived_path: DerivedPath
     build_mode: int
-    substituter_urls: tuple[str, ...]
+    substituter_ids: tuple[str, ...]
     _subscribers: list[ClientConn] = field(default_factory=list)
     _build_goal: BuildDerivationGoal | None = None
 
@@ -76,7 +76,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
         outer_goal = await self.engine.get_ensure_derived_path_goal(
             self.derived_path.outer,
             self.build_mode,
-            self.substituter_urls,
+            self.substituter_ids,
         )
         await outer_goal.subscribe_many(self._subscribers)
         outer_result = await self.run_child(outer_goal)
@@ -92,7 +92,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
             return outer_result
 
         wrapped = self.derived_path.wrap(inner_drv)
-        remainder_goal = await self.engine.get_ensure_derived_path_goal(wrapped, self.build_mode, self.substituter_urls)
+        remainder_goal = await self.engine.get_ensure_derived_path_goal(wrapped, self.build_mode, self.substituter_ids)
         await remainder_goal.subscribe_many(self._subscribers)
         result = await self.run_child(remainder_goal)
 
@@ -186,7 +186,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
         for input_drv_path, node in parsed.dynamic_input_drvs.items():
             for child_dp in _child_map_to_derived_paths(StorePath(input_drv_path), node):
                 child_goals.append(
-                    await self.engine.get_ensure_derived_path_goal(child_dp, self.build_mode, self.substituter_urls)
+                    await self.engine.get_ensure_derived_path_goal(child_dp, self.build_mode, self.substituter_ids)
                 )
 
         if not child_goals:
@@ -223,7 +223,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
             chain=(),
             outputs=OutputsNames(frozenset({output_name})),
         )
-        return await self.engine.get_ensure_derived_path_goal(dp, self.build_mode, self.substituter_urls)
+        return await self.engine.get_ensure_derived_path_goal(dp, self.build_mode, self.substituter_ids)
 
     async def _try_substitute_known_outputs(self, output_paths: Mapping[str, StorePath | None]) -> GoalResult | None:
         selected = {name: path for name, path in output_paths.items() if path is not None}
@@ -258,7 +258,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
         return merged
 
     async def _try_substitute_path(self, path: StorePath) -> GoalResult | None:
-        substitute_goal = await self.engine.get_substitute_path_goal(path, self.substituter_urls)
+        substitute_goal = await self.engine.get_substitute_path_goal(path, self.substituter_ids)
         attempt = await self.run_child(substitute_goal)
         if not attempt.found:
             return None

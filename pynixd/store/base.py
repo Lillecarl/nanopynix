@@ -51,6 +51,9 @@ class Store(ABC):
         if spec.store_id is None:
             raise RuntimeError("store_id must be set on the spec before Store construction")
         self.store_id: StoreId = spec.store_id
+        self.priority = spec.priority
+        self.no_schedule = spec.no_schedule
+        self._feature_matrix: dict[str, set[str]] | None = spec._effective_feature_matrix()
         self._signing_keys: dict[str, SecretKey] = {}
         self.path_info_cache = cast(
             TTLCache[str, ValidPathInfo, float],
@@ -60,6 +63,20 @@ class Store(ABC):
             ),
         )
         self._started: bool = False
+
+    @property
+    def feature_matrix(self) -> dict[str, set[str]]:
+        if self._feature_matrix is not None:
+            return self._feature_matrix
+        return {}
+
+    @property
+    def is_healthy(self) -> bool:
+        return True
+
+    @property
+    def in_flight(self) -> int:
+        return 0
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
@@ -163,72 +180,12 @@ class Store(ABC):
 
         return decorator
 
-    # ── Operation executors (abstract — subclasses MUST override) ───
+    # ── Common read operations ──────────────────────────────────────
 
     @executor(op=1)
     @abstractmethod
     async def is_valid_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         """IsValidPath (op 1)."""
-        raise NotImplementedError
-
-    @executor(op=6)
-    @abstractmethod
-    async def query_referrers(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QueryReferrers (op 6)."""
-        raise NotImplementedError
-
-    @executor(op=7)
-    @abstractmethod
-    async def add_to_store(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """AddToStore (op 7)."""
-        raise NotImplementedError
-
-    @executor(op=9)
-    @abstractmethod
-    async def build_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """BuildPaths (op 9)."""
-        raise NotImplementedError
-
-    @executor(op=10)
-    @abstractmethod
-    async def ensure_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """EnsurePath (op 10)."""
-        raise NotImplementedError
-
-    @executor(op=11)
-    @abstractmethod
-    async def add_temp_root(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """AddTempRoot (op 11)."""
-        raise NotImplementedError
-
-    @executor(op=12)
-    @abstractmethod
-    async def add_indirect_root(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """AddIndirectRoot (op 12)."""
-        raise NotImplementedError
-
-    @executor(op=14)
-    @abstractmethod
-    async def find_roots(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """FindRoots (op 14)."""
-        raise NotImplementedError
-
-    @executor(op=19)
-    @abstractmethod
-    async def set_options(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """SetOptions (op 19)."""
-        raise NotImplementedError
-
-    @executor(op=20)
-    @abstractmethod
-    async def collect_garbage(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """CollectGarbage (op 20)."""
-        raise NotImplementedError
-
-    @executor(op=23)
-    @abstractmethod
-    async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QueryAllValidPaths (op 23)."""
         raise NotImplementedError
 
     @executor(op=26)
@@ -249,152 +206,10 @@ class Store(ABC):
         """QueryValidPaths (op 31)."""
         raise NotImplementedError
 
-    @executor(op=32)
-    @abstractmethod
-    async def query_substitutable_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QuerySubstitutablePaths (op 32)."""
-        raise NotImplementedError
-
-    @executor(op=33)
-    @abstractmethod
-    async def query_valid_derivers(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QueryValidDerivers (op 33)."""
-        raise NotImplementedError
-
-    @executor(op=34)
-    @abstractmethod
-    async def optimise_store(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """OptimiseStore (op 34)."""
-        raise NotImplementedError
-
-    @executor(op=35)
-    @abstractmethod
-    async def verify_store(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """VerifyStore (op 35)."""
-        raise NotImplementedError
-
-    @executor(op=36)
-    @abstractmethod
-    async def build_derivation(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """BuildDerivation (op 36)."""
-        raise NotImplementedError
-
-    @executor(op=37)
-    @abstractmethod
-    async def add_signatures(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """AddSignatures (op 37)."""
-        raise NotImplementedError
-
     @executor(op=38)
     @abstractmethod
     async def nar_from_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
         """NarFromPath (op 38)."""
-        raise NotImplementedError
-
-    @executor(op=39)
-    @abstractmethod
-    async def add_to_store_nar(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """AddToStoreNar (op 39)."""
-        raise NotImplementedError
-
-    @executor(op=40)
-    @abstractmethod
-    async def query_missing(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QueryMissing (op 40)."""
-        raise NotImplementedError
-
-    @executor(op=41)
-    @abstractmethod
-    async def query_derivation_output_map(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QueryDerivationOutputMap (op 41)."""
-        raise NotImplementedError
-
-    @executor(op=42)
-    @abstractmethod
-    async def register_drv_output(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """RegisterDrvOutput (op 42)."""
-        raise NotImplementedError
-
-    @executor(op=43)
-    @abstractmethod
-    async def query_realisation(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QueryRealisation (op 43)."""
-        raise NotImplementedError
-
-    @executor(op=44)
-    @abstractmethod
-    async def add_multiple_to_store(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """AddMultipleToStore (op 44)."""
-        raise NotImplementedError
-
-    @executor(op=45)
-    @abstractmethod
-    async def add_build_log(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """AddBuildLog (op 45)."""
-        raise NotImplementedError
-
-    @executor(op=46)
-    @abstractmethod
-    async def build_paths_with_results(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """BuildPathsWithResults (op 46)."""
-        raise NotImplementedError
-
-    @executor(op=47)
-    @abstractmethod
-    async def add_perm_root(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """AddPermRoot (op 47)."""
-        raise NotImplementedError
-
-    # ── Custom/pynixd extension operations ───────────────────────────
-
-    @executor(op=101)
-    @abstractmethod
-    async def pynixd_collect_garbage(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """PynixdCollectGarbage (op 101)."""
-        raise NotImplementedError
-
-    @executor(op=103)
-    @abstractmethod
-    async def query_path_infos(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QueryPathInfos (op 103)."""
-        raise NotImplementedError
-
-    @executor(op=104)
-    @abstractmethod
-    async def query_closure(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QueryClosure (op 104)."""
-        raise NotImplementedError
-
-    @executor(op=105)
-    @abstractmethod
-    async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """QueryClosureWithInfo (op 105)."""
-        raise NotImplementedError
-
-    @executor(op=106)
-    @abstractmethod
-    async def query_derivation_output_map_batch(
-        self, request: Any, client: Any = None, suppress_last: bool = False
-    ) -> Any:
-        """QueryDerivationOutputMapBatch (op 106)."""
-        raise NotImplementedError
-
-    @executor(op=107)
-    @abstractmethod
-    async def sign_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """SignPathInfo (op 107)."""
-        raise NotImplementedError
-
-    @executor(op=108)
-    @abstractmethod
-    async def probe_systems(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """ProbeSystems (op 108)."""
-        raise NotImplementedError
-
-    @executor(op=109)
-    @abstractmethod
-    async def probe_features(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
-        """ProbeFeatures (op 109)."""
         raise NotImplementedError
 
 

@@ -27,6 +27,8 @@ class ScheduleMode(StrEnum):
 if TYPE_CHECKING:
     from .store import (
         DaemonStore,
+        ExternalUnixStore,
+        HTTPBinaryCacheStore,
         LocalDBStore,
         LocalStore,
         SSHSocketStore,
@@ -132,6 +134,23 @@ class LocalSocketStoreSpec(StoreSpecBase):
         return LocalStore(spec)
 
 
+class ExternalUnixStoreSpec(StoreSpecBase):
+    type: Literal["external-unix"] = "external-unix"
+    store_path: Path = Path("/")
+    socket_path: Path = Path("/nix/var/nix/daemon-socket/socket")
+    monitor: bool = False
+    scheduleable: bool = False
+    no_schedule: bool = True
+    gc_enabled: bool = False
+
+    def to_store(self, store_id: str) -> ExternalUnixStore:
+        from .store import ExternalUnixStore
+
+        return ExternalUnixStore(
+            self.model_copy(update={"store_id": StoreId(store_id)}),
+        )
+
+
 class ReverseStoreSpec(StoreSpecBase):
     """Configuration for a reverse store (builder connects to controller).
 
@@ -216,8 +235,31 @@ class SSHSocketStoreSpec(StoreSpecBase):
         )
 
 
+class HTTPBinaryCacheSpec(StoreSpecBase):
+    type: Literal["http-binary-cache"] = "http-binary-cache"
+    url: str
+    max_concurrent: int | None = None
+    max_fail_ratio: float = 0.5
+    health_window: int = 10
+    scheduleable: bool = False
+    no_schedule: bool = True
+    gc_enabled: bool = False
+
+    def to_store(self, store_id: str) -> HTTPBinaryCacheStore:
+        from .store import HTTPBinaryCacheStore
+
+        return HTTPBinaryCacheStore(
+            self.model_copy(update={"store_id": StoreId(store_id)}),
+        )
+
+
 StoreSpec = Annotated[
-    LocalSocketStoreSpec | SSHSubprocessStoreSpec | SSHSocketStoreSpec | ReverseStoreSpec,
+    LocalSocketStoreSpec
+    | ExternalUnixStoreSpec
+    | SSHSubprocessStoreSpec
+    | SSHSocketStoreSpec
+    | ReverseStoreSpec
+    | HTTPBinaryCacheSpec,
     Field(discriminator="type"),
 ]
 
@@ -318,11 +360,11 @@ class PynixdSettings(BaseSettings):
 
         return (init_settings, env_settings, _ConfigFileSource(settings_cls))
 
-    def to_stores(self) -> dict[StoreId, DaemonStore]:
+    def to_stores(self) -> dict[StoreId, Store]:
         """Convert all store specs to live Store instances."""
         from .store import LocalStore
 
-        stores: dict[StoreId, DaemonStore] = {}
+        stores: dict[StoreId, Store] = {}
         for key, spec in self.stores.items():
             spec.settings = self
             store = spec.to_store(store_id=key)

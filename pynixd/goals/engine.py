@@ -18,10 +18,13 @@ from .results import result_succeeded
 from .substitute import SubstitutePathGoal, substituter_fingerprint
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from ..connection import ClientConn
     from ..context import PynixdContext
     from ..derived_path import DerivedPath
     from ..serde.ids import BuildId
+    from ..store import Store
     from ..store_path import StorePath
 
 
@@ -67,13 +70,13 @@ class GoalEngine:
         self,
         path: DerivedPath,
         build_mode: int,
-        substituter_urls: tuple[str, ...],
+        substituter_ids: tuple[str, ...],
     ) -> EnsureDerivedPathGoal:
-        key = EnsureDerivedPathKey(str(path), substituter_fingerprint(substituter_urls))
+        key = EnsureDerivedPathKey(str(path), substituter_fingerprint(substituter_ids))
         async with self._lock:
             goal = self._goals.get(key)
             if goal is None:
-                goal = EnsureDerivedPathGoal(self, path, build_mode, substituter_urls)
+                goal = EnsureDerivedPathGoal(self, path, build_mode, substituter_ids)
                 self._goals[key] = goal
             if not isinstance(goal, EnsureDerivedPathGoal):
                 raise RuntimeError(f"goal key collision for {key}")
@@ -93,14 +96,30 @@ class GoalEngine:
     async def get_substitute_path_goal(
         self,
         path: StorePath,
-        substituter_urls: tuple[str, ...],
+        substituter_ids: tuple[str, ...],
     ) -> SubstitutePathGoal:
-        key = SubstitutePathKey(str(path), substituter_fingerprint(substituter_urls))
+        key = SubstitutePathKey(str(path), substituter_fingerprint(substituter_ids))
         async with self._lock:
             goal = self._goals.get(key)
             if goal is None:
-                goal = SubstitutePathGoal(self, path, substituter_urls)
+                goal = SubstitutePathGoal(self, path, substituter_ids)
                 self._goals[key] = goal
             if not isinstance(goal, SubstitutePathGoal):
                 raise RuntimeError(f"goal key collision for {key}")
             return goal
+
+    def substituter_ids(self) -> tuple[str, ...]:
+        return tuple(
+            str(store_id)
+            for store_id, store in self.ctx.stores.items()
+            if str(store_id) != "local" and store.no_schedule
+        )
+
+    def substituter_stores(self) -> Iterable[Store]:
+        local_id = "local"
+        ids = set(self.substituter_ids())
+        return (
+            store
+            for store_id, store in sorted(self.ctx.stores.items(), key=lambda item: str(item[0]))
+            if str(store_id) != local_id and str(store_id) in ids and store.is_healthy
+        )

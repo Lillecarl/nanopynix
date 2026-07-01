@@ -170,7 +170,7 @@ async def cleanup_extra_stores(pynixd_server: Server | tuple | None):
 
     for sid in extra_ids:
         store = actual_server.stores[sid]
-        store_path = store.store_path
+        store_path = getattr(store, "store_path", None)
         await actual_server.remove_store(sid)
         if store_path and str(store_path).startswith(str(SESSION_STORE_PREFIX)):
             await asyncio.to_thread(rmtree_robust, store_path)

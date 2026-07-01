@@ -8,12 +8,13 @@ import os
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlsplit
 
 import anyio
 import structlog
 
 from . import wire
-from .config import LocalSocketStoreSpec, PynixdSettings
+from .config import ExternalUnixStoreSpec, HTTPBinaryCacheSpec, LocalSocketStoreSpec, PynixdSettings
 from .context import PynixdContext
 from .http_server import PynixdHttpServer
 from .nix_config import merge_builder_frontend
@@ -24,7 +25,7 @@ from .serde import PynixdCollectGarbageRequest
 from .serde.ids import StoreId
 from .serde.protocol import PynixdGCAction
 from .ssh_server import start_ssh_server
-from .store import DaemonStore, LocalDBStore, LocalStore
+from .store import DaemonStore, ExternalUnixStore, HTTPBinaryCacheStore, LocalDBStore, LocalStore, Store
 from .unix_server import start_unix_server
 
 if TYPE_CHECKING:
@@ -41,6 +42,59 @@ class NixImplementation(Enum):
     LIX = auto()
 
 
+def _default_http_substituter_urls(local_store: Store) -> list[str]:
+    urls: list[str] = []
+    nix_config = getattr(local_store, "nix_config", None)
+    for url in getattr(nix_config, "substituters", None) or []:
+        if url.startswith(("http://", "https://")):
+            urls.append(url)
+    urls.append("https://cache.nixos.org/")
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for url in urls:
+        key = url.rstrip("/")
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(url)
+    return result
+
+
+def _default_unix_substituters(local_store: Store) -> list[tuple[Path, Path]]:
+    urls: list[tuple[Path, Path]] = []
+    nix_config = getattr(local_store, "nix_config", None)
+    for url in getattr(nix_config, "substituters", None) or []:
+        split = urlsplit(url)
+        if split.scheme != "unix":
+            continue
+        socket_path = Path(split.path)
+        roots = parse_qs(split.query).get("root")
+        store_path = Path(roots[0]) if roots else Path("/")
+        urls.append((socket_path, store_path))
+
+    seen: set[tuple[Path, Path]] = set()
+    result: list[tuple[Path, Path]] = []
+    for item in urls:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
+def _http_store_id(url: str) -> str:
+    split = urlsplit(url)
+    host = split.netloc or split.path
+    return f"http-{host.rstrip('/').replace(':', '-')}"
+
+
+def _unix_store_id(socket_path: Path, store_path: Path) -> str:
+    payload = f"{socket_path}:{store_path}"
+    safe = payload.strip("/").replace("/", "-").replace(":", "-")
+    return f"unix-{safe}"[:120]
+
+
 class Server:
     """Programmatic pynixd server instance.
 
@@ -50,7 +104,7 @@ class Server:
 
     def __init__(
         self,
-        stores: dict[StoreId, DaemonStore] | None = None,
+        stores: dict[StoreId, Store] | None = None,
         settings: PynixdSettings | None = None,
         **kwargs: Any,
     ) -> None:
@@ -67,6 +121,35 @@ class Server:
         local_store = stores[StoreId("local")]
         if isinstance(local_store, LocalStore):
             self._configure_builder_frontend(local_store, settings.unix_path)
+
+        existing_http_urls = {
+            store.url.rstrip("/") for store in stores.values() if isinstance(store, HTTPBinaryCacheStore)
+        }
+        for url in _default_http_substituter_urls(local_store):
+            if url.rstrip("/") in existing_http_urls:
+                continue
+            store_id = StoreId(_http_store_id(url))
+            cache_spec = HTTPBinaryCacheSpec(
+                store_id=store_id,
+                url=url,
+            )
+            stores[store_id] = cache_spec.to_store(str(store_id))
+            existing_http_urls.add(url.rstrip("/"))
+
+        existing_unix = {
+            (store.socket_path, store.store_path) for store in stores.values() if isinstance(store, ExternalUnixStore)
+        }
+        for socket_path, store_path in _default_unix_substituters(local_store):
+            if (socket_path, store_path) in existing_unix:
+                continue
+            store_id = StoreId(_unix_store_id(socket_path, store_path))
+            unix_spec = ExternalUnixStoreSpec(
+                store_id=store_id,
+                socket_path=socket_path,
+                store_path=store_path,
+            )
+            stores[store_id] = unix_spec.to_store(str(store_id))
+            existing_unix.add((socket_path, store_path))
 
         self.ctx = PynixdContext(
             settings=settings,
@@ -132,7 +215,7 @@ class Server:
         return self.ctx.local_store
 
     @property
-    def stores(self) -> Mapping[StoreId, DaemonStore]:
+    def stores(self) -> Mapping[StoreId, Store]:
         return self.ctx.stores
 
     @property
@@ -143,7 +226,7 @@ class Server:
     def scheduler(self) -> Scheduler | None:
         return self.ctx.scheduler
 
-    async def add_store(self, store: DaemonStore, dynamic: bool = False) -> None:
+    async def add_store(self, store: Store, dynamic: bool = False) -> None:
         """Add a store to the server.
 
         If dynamic=True, the store's feature_matrix is also registered in
@@ -154,10 +237,11 @@ class Server:
         captured_dynamic = dynamic
 
         async def _on_store_reconnect() -> None:
-            if self.scheduler:
+            if self.scheduler and isinstance(store, DaemonStore) and not store.no_schedule:
                 self.scheduler.on_store_added(store, dynamic=captured_dynamic)
 
-        store._on_reconnect = _on_store_reconnect
+        if isinstance(store, DaemonStore) and not store.no_schedule:
+            store._on_reconnect = _on_store_reconnect
 
         try:
             await store.start()
@@ -174,7 +258,7 @@ class Server:
         # Server is the primary owner and mutator of the stores collection
         self.ctx._stores[store.store_id] = store
 
-        if self.scheduler:
+        if self.scheduler and isinstance(store, DaemonStore) and not store.no_schedule:
             self.scheduler.on_store_added(store, dynamic=dynamic)
 
     async def remove_store(self, store_id: StoreId, drain_timeout: float = 300.0) -> None:
