@@ -1,32 +1,42 @@
 {
   inputs = {
+    flake-compatish.url = "github:lillecarl/flake-compatish";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    flake-compatish = {
-      url = "github:lillecarl/flake-compatish";
-      flake = false;
-    };
   };
   outputs =
     inputs:
     let
-      mapper = (
-        inputs.nixpkgs.lib.genAttrs [
-          "x86_64-linux"
-          "aarch64-linux"
-          "aarch64-darwin"
-        ]
+      eachSys = (
+        inputs.nixpkgs.lib.genAttrs (
+          # system tuplets built by NixOS Hydra
+          builtins.fromJSON (builtins.readFile "${inputs.nixpkgs}/ci/supportedSystems.json")
+        )
       );
+      eachPkgs = eachSys (system: import inputs.nixpkgs { inherit system; });
+      eachDefNix = eachSys (system: import ./. { pkgs = eachPkgs.${system}; });
     in
     {
-      packages = mapper (
+      packages = eachSys (
         system:
         let
-          pkgs = import inputs.nixpkgs { inherit system; };
+          defNix = eachDefNix.${system};
         in
         {
-          default = (import ./. { inherit pkgs; }).package;
+          default = defNix.package;
+          pynixd = defNix.package;
+          libpynixd = defNix.library;
         }
       );
+      devShells = eachSys (
+        system:
+        let
+          defNix = eachDefNix.${system};
+        in
+        {
+          default = defNix.shell;
+        }
+      );
+      legacyPackages = eachSys (system: eachPkgs.${system});
       nixosModules.default = ./nix/nixos;
     };
 }

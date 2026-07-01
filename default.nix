@@ -11,77 +11,30 @@
             source = ./.;
             overrides = {
               self = ./.;
+              # use nixpkgs from NIX_PATH if set, else flake. Show notice to user
+              nixpkgs =
+                let
+                  result = builtins.tryEval <nixpkgs>;
+                in
+                if result.success then
+                  builtins.warn "using nixpkgs from NIX_PATH" result.value
+                else
+                  builtins.warn "using nixpkgs from flake.lock" null;
             };
           }
         ).inputs;
-
-      nixPath = builtins.tryEval (import <nixpkgs> { });
-      nixInputs = import inputs.nixpkgs { };
     in
-    if nixPath.success then nixPath.value else nixInputs,
+    import inputs.nixpkgs { },
 }:
 let
   inherit (pkgs) lib;
 
-  python = pkgs.python3;
-
-  commonAttrs = {
-    pname = "pynixd";
-    version = "0.1.0";
-    pyproject = true;
-
-    impurity = builtins.currentTime; # don't remove this, just comment it in or out
-
-    src = lib.cleanSource ./.;
-
-    build-system = [
-      python.pkgs.hatchling
-    ];
-
-    dependencies = [
-      # python.pkgs.asyncssh
-      (python.pkgs.asyncssh.overrideAttrs {
-        src = pkgs.fetchFromGitHub {
-          # type = "github";
-          repo = "asyncssh";
-          owner = "ronf";
-          rev = "v2.23.1";
-          hash = "sha256-6x/Ww25G9MmVIdUJjpPgzNAza0Qx7VArQN6BgPHsIc4=";
-        };
-        doCheck = false;
-        doInstallCheck = false;
-      })
-      python.pkgs.structlog
-      # python.pkgs.rich
-      python.pkgs.aiohttp
-      python.pkgs.pyinstrument
-      python.pkgs.aiosqlite
-      python.pkgs.environs
-      python.pkgs.pynacl
-      python.pkgs.passlib
-      python.pkgs.cachetools
-      python.pkgs.zstandard
-      python.pkgs.lz4
-      python.pkgs.brotli
-      python.pkgs.pydantic
-      python.pkgs.pydantic-settings
-      python.pkgs.prometheus-client
-      python.pkgs.anyio
-      python.pkgs.uvloop
-    ];
-
-    nativeCheckInputs = [
-      python.pkgs.pytest
-    ];
-
-    meta = {
-      description = "Python Nix daemon protocol proxy over SSH";
-      mainProgram = "pynixd";
-    };
+  package = pkgs.python3Packages.callPackage ./nix/pynixd.nix {
+    pythonBuilder = pkgs.python3Packages.buildPythonApplication;
   };
-
-  package = python.pkgs.buildPythonApplication commonAttrs;
-  library = python.pkgs.buildPythonPackage commonAttrs;
+  library = pkgs.python3Packages.callPackage ./nix/pynixd.nix {
+    pythonBuilder = pkgs.python3Packages.buildPythonPackage;
+  };
 
   mkTests =
     {
@@ -91,7 +44,7 @@ let
     pkgs.writeShellApplication {
       inherit name;
       runtimeInputs = [
-        (python.withPackages (ps: [
+        (pkgs.python3.withPackages (ps: [
           library
           ps.pytest
           ps.pyinstrument
@@ -110,7 +63,7 @@ let
   };
   lint =
     let
-      pyinstance = python.withPackages (
+      pyinstance = pkgs.python3.withPackages (
         ps:
         [ library ]
         ++ library.dependencies
@@ -147,6 +100,7 @@ package
     pkgs
     ;
 
+  shell = pkgs.callPackage ./nix/shell.nix { pynixd = package; };
   nixosModule = import ./nix/nixos/default.nix;
 
   tests = {
@@ -156,7 +110,6 @@ package
     pytest = pkgs.callPackage ./tests/derivations/pytest {
       pynixd-lib = library;
       src = lib.cleanSource ./.;
-
     };
   };
 }
