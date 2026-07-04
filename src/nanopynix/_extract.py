@@ -6,6 +6,8 @@ returns a ``dict`` ready for ``SomeModel.model_validate(...)``.
 
 from __future__ import annotations
 
+import nanopynix_flake
+
 
 def store_path(sp, /) -> dict:
     """Extract a L1 StorePath to a dict."""
@@ -17,7 +19,11 @@ def store_path(sp, /) -> dict:
 
 
 def store_path_str(s: str, /) -> dict:
-    """Convert a raw StorePath string (``<hash>-<name>``) to a dict."""
+    """Parse a raw StorePath string (``<store-dir>/<hash>-<name>``) to a dict.
+
+    The hash part is always the segment before the first ``-`` — Nix hash
+    encodings (base32) never contain ``-``, so ``str.index`` is reliable here.
+    """
     hyphen = s.index("-")
     return {
         "to_string": s,
@@ -81,7 +87,6 @@ def locked_input(li_dict: dict, /) -> dict:
 
     if "ref" in li_dict:
         ref_str = str(li_dict["ref"])
-        import nanopynix_flake
         fr = nanopynix_flake.parse_flake_ref(ref_str)
         result["attrs"] = flake_ref_attrs(fr)
     else:
