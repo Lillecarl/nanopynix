@@ -242,3 +242,45 @@ class TestLogEvent:
         ev = LogEvent(action="msg")
         assert ev.request_id == 0
         assert ev.args == []
+
+    def test_with_result_type(self):
+        ev = LogEvent(request_id=5, action="result", args=[1, 107], result_type=107)
+        assert ev.request_id == 5
+        assert ev.action == "result"
+        assert ev.result_type == 107
+
+
+class TestResultType:
+    def test_values_match_nix(self):
+        from nanopynix.models import ResultType
+
+        assert ResultType.file_linked == 100
+        assert ResultType.build_log_line == 101
+        assert ResultType.untrusted_path == 102
+        assert ResultType.corrupted_path == 103
+        assert ResultType.set_phase == 104
+        assert ResultType.progress == 105
+        assert ResultType.set_expected == 106
+        assert ResultType.post_build_log_line == 107
+        assert ResultType.fetch_status == 108
+
+    def test_is_int_enum(self):
+        from nanopynix.models import ResultType
+
+        assert isinstance(ResultType.corrupted_path, int)
+        assert isinstance(ResultType.corrupted_path, ResultType)
+
+
+class TestStorePathEdge:
+    def test_is_derivation_drv_extension(self):
+        sp = StorePath(hash_part="a" * 32, name="foo.drv", to_string="a" * 32 + "-foo.drv")
+        assert sp.is_derivation is True
+
+    def test_is_derivation_drv_in_middle(self):
+        """Only names ending with .drv are derivations."""
+        sp = StorePath(hash_part="a" * 32, name="foo.drv.bar", to_string="a" * 32 + "-foo.drv.bar")
+        assert sp.is_derivation is False
+
+    def test_is_derivation_no_drv(self):
+        sp = StorePath(hash_part="a" * 32, name="bash-5.2", to_string="a" * 32 + "-bash-5.2")
+        assert sp.is_derivation is False
