@@ -13,9 +13,13 @@ if TYPE_CHECKING:
 # ════════════════════════════════════════════════════════════════════
 
 class ValueProxy:
-    """Proxy for a Nix Value exported on a remote worker."""
+    """Proxy for a Nix Value exported on a remote worker.
 
-    __slots__ = ("_worker", "_handle", "_type", "_timeout")
+    Lifetime is tied to the ``EvalSession`` that created it — all RPC
+    methods raise ``RuntimeError`` after the session exits.
+    """
+
+    __slots__ = ("_worker", "_handle", "_type", "_timeout", "_active")
 
     def __init__(
         self,
@@ -23,11 +27,18 @@ class ValueProxy:
         handle: int,
         typ: str,
         timeout: float | None = None,
+        _active: list[bool] | None = None,
     ) -> None:
         self._worker = worker
         self._handle = handle
         self._type = typ
         self._timeout = timeout
+        self._active = _active  # shared with EvalSession; None = never expires
+
+    def _check_active(self) -> None:
+        """Raise if the owning session has exited."""
+        if self._active is not None and not self._active[0]:
+            raise RuntimeError("ValueProxy is invalid — the EvalSession has been closed")
 
     @property
     def handle(self) -> int:
@@ -38,38 +49,45 @@ class ValueProxy:
         return self._type
 
     async def force(self, *, timeout: float | None = None):
+        self._check_active()
         return await self._worker.send_recv(
             "eval", "force", [self._handle], timeout=self._resolve_timeout(timeout),
         )
 
     async def attr(self, name: str, *, timeout: float | None = None) -> ValueProxy:
+        self._check_active()
         result = await self._worker.send_recv(
             "eval", "attr", [self._handle, name], timeout=self._resolve_timeout(timeout),
         )
-        return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout)
+        return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
 
     async def list_get(self, idx: int, *, timeout: float | None = None) -> ValueProxy:
+        self._check_active()
         result = await self._worker.send_recv(
             "eval", "list_get", [self._handle, idx], timeout=self._resolve_timeout(timeout),
         )
-        return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout)
+        return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
 
     async def list_length(self, *, timeout: float | None = None) -> int:
+        self._check_active()
         return await self._worker.send_recv(
             "eval", "list_length", [self._handle], timeout=self._resolve_timeout(timeout),
         )
 
     async def attr_names(self, *, timeout: float | None = None) -> list[str]:
+        self._check_active()
         return await self._worker.send_recv(
             "eval", "attr_names", [self._handle], timeout=self._resolve_timeout(timeout),
         )
 
     async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
+        self._check_active()
         return await self._worker.send_recv(
             "eval", "has_attr", [self._handle, name], timeout=self._resolve_timeout(timeout),
         )
 
     async def release(self, *, timeout: float | None = None) -> None:
+        self._check_active()
         await self._worker.send_recv(
             "eval", "release", [self._handle], timeout=self._resolve_timeout(timeout),
         )
@@ -81,20 +99,27 @@ class ValueProxy:
 
 
 class EvalSession:
-    """Holds a worker exclusively for the duration of an eval session."""
+    """Holds a worker exclusively for the duration of an eval session.
 
-    __slots__ = ("_pool", "_rw", "_timeout")
+    All ``ValueProxy`` instances created through this session become
+    invalid after ``__aexit__`` — their RPC methods raise ``RuntimeError``.
+    """
+
+    __slots__ = ("_pool", "_rw", "_timeout", "_active")
 
     def __init__(self, pool: WorkerPool, timeout: float | None = None) -> None:
         self._pool = pool
         self._rw: ReservedWorker | None = None
         self._timeout = timeout
+        self._active: list[bool] = [False]  # shared with all ValueProxy instances
 
     async def __aenter__(self) -> EvalSession:
         self._rw = await self._pool.reserve()
+        self._active[0] = True
         return self
 
     async def __aexit__(self, *args: object) -> None:
+        self._active[0] = False
         if self._rw is not None:
             await self._rw.send_recv("eval", "release_all", [], timeout=self._timeout)
             await self._rw.release()
@@ -102,11 +127,11 @@ class EvalSession:
 
     async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         result = await self._rw.send_recv("eval", "eval_file", [path], timeout=self._resolve_timeout(timeout))
-        return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout)
+        return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
 
     async def eval_string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
         result = await self._rw.send_recv("eval", "eval_string", [expr, path], timeout=self._resolve_timeout(timeout))
-        return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout)
+        return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
 
     def _resolve_timeout(self, override: float | None) -> float | None:
         if override is not None:
