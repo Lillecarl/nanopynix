@@ -154,11 +154,12 @@ class _WorkerRef:
                 continue
             if kind == "ok":
                 return payload
-            # Structured error dict from worker: {error_type, msg, traceback, ...}
+            # Structured error dict from worker: {error_type, msg, traceback, info, ...}
             raise from_response(
                 error_type=payload.get("error_type", "Unknown"),
                 msg=payload.get("msg", "unknown"),
                 raw=payload.get("traceback", ""),
+                info=payload.get("info"),
             )
 
     async def close(self) -> None:

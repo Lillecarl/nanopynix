@@ -281,10 +281,11 @@ Client raises:
 - ``from_response()`` factory called by ``_pool.py``.
 
 **Remaining for full ErrorInfo extraction**: The ``ErrorInfo`` struct
-fields (``level``, ``traces``, ``suggestions``) are not yet serialized —
-the C++ nanobind bindings register type names but don't expose
-``.info()`` / ``.traces()`` methods on the Python side.  This requires
-binding the ``BaseError`` / ``ErrorInfo`` types with nanobind accessors.
+fields (``level``, ``traces``, ``suggestions``) are not yet serialized.
+``NixError.info`` is an optional ``dict`` field, currently always ``None``.
+To populate it, the worker's RPC dispatch must catch ``nix::Error`` at the
+C++ level (before nanobind converts it to a Python exception).  This requires
+either a full C++ dispatch table or a nanobind-level interceptor.
 
 ### 🟡 Design issues
 
