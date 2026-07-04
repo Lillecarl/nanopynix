@@ -24,7 +24,10 @@ def store_path_str(s: str, /) -> dict:
     The hash part is always the segment before the first ``-`` — Nix hash
     encodings (base32) never contain ``-``, so ``str.index`` is reliable here.
     """
-    hyphen = s.index("-")
+    try:
+        hyphen = s.index("-")
+    except ValueError:
+        raise ValueError(f"Invalid store path: no '-' separator in '{s}'") from None
     return {
         "to_string": s,
         "hash_part": s[:hyphen],

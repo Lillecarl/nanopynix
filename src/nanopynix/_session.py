@@ -127,11 +127,17 @@ class EvalSession:
                 await self._rw.release()
                 self._rw = None
 
+    def _check_rw(self) -> None:
+        if self._rw is None:
+            raise RuntimeError("EvalSession not entered — use 'async with nix.eval() as session:'")
+
     async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
+        self._check_rw()
         result = await self._rw.send_recv("eval", "eval_file", [path], timeout=self._resolve_timeout(timeout))
         return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
 
     async def eval_string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
+        self._check_rw()
         result = await self._rw.send_recv("eval", "eval_string", [expr, path], timeout=self._resolve_timeout(timeout))
         return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
 

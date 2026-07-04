@@ -259,7 +259,7 @@ class WorkerPool:
             await self._spawn()
 
     async def close(self) -> None:
-        for w in self._workers:
+        for w in list(self._workers):
             await w.close()
         self._workers.clear()
         while not self._free.empty():
@@ -308,6 +308,10 @@ class WorkerPool:
         })
         ready = await loop.run_in_executor(None, resp_parent_recv.recv)
         if ready.get("type") != "ready":
+            proc.kill()
+            proc.join(timeout=2)
+            req_parent_send.close()
+            resp_parent_recv.close()
             raise RuntimeError(f"Worker {wid} init failed: {ready}")
 
         worker = _WorkerRef(proc, req_parent_send, resp_parent_recv, timeout=self._rpc_timeout)
