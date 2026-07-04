@@ -8,6 +8,7 @@ sharing.  Communication via ``multiprocessing.Pipe`` (pickled dicts).
 from __future__ import annotations
 
 import asyncio
+import itertools
 import multiprocessing as _mp
 import time
 import traceback
@@ -21,6 +22,7 @@ from nanopynix.exceptions import from_response
 
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
+_id_counter = itertools.count()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -39,7 +41,7 @@ class _WorkerRef:
     """Handle to a live subprocess worker communicating via mp.Pipe."""
 
     __slots__ = (
-        "_proc", "_req_conn", "_resp_conn", "req_id_base", "_next_id",
+        "_proc", "_req_conn", "_resp_conn",
         "_responses", "_events", "_done", "_dead", "_timeout", "_last_used",
         "_last_activity", "_read_task",
     )
@@ -49,14 +51,11 @@ class _WorkerRef:
         proc: _mp.Process,
         req_conn,
         resp_conn,
-        req_id_base: int,
         timeout: float = _RPC_TIMEOUT,
     ) -> None:
         self._proc = proc
         self._req_conn = req_conn
         self._resp_conn = resp_conn
-        self.req_id_base = req_id_base
-        self._next_id = 0
         self._responses: asyncio.Queue = asyncio.Queue()
         self._events: asyncio.Queue = asyncio.Queue()
         self._done = False
@@ -71,9 +70,7 @@ class _WorkerRef:
         return self._dead.is_set() or not self._proc.is_alive()
 
     def next_id(self) -> int:
-        rid = self.req_id_base | self._next_id
-        self._next_id += 1
-        return rid
+        return next(_id_counter)
 
     async def _read_responses(self) -> None:
         """Background task: drain the response pipe into asyncio queues."""
@@ -277,8 +274,7 @@ class WorkerPool:
         if ready.get("type") != "ready":
             raise RuntimeError(f"Worker {wid} init failed: {ready}")
 
-        req_id_base = wid << 48
-        worker = _WorkerRef(proc, req_parent_send, resp_parent_recv, req_id_base, timeout=self._rpc_timeout)
+        worker = _WorkerRef(proc, req_parent_send, resp_parent_recv, timeout=self._rpc_timeout)
 
         worker._read_task = asyncio.ensure_future(worker._read_responses())
         self._relay_tasks.append(asyncio.ensure_future(self._relay_events(worker)))
