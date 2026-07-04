@@ -333,6 +333,14 @@ class WorkerPool:
         worker = await self._acquire()
         return ReservedWorker(self, worker)
 
+    async def call(self, module: str, fn: str, args: list, *, timeout: float | None = None) -> dict:
+        """Send an RPC call on any free worker and return the response.
+
+        This is the general-purpose entry point for all RPC operations.
+        Acquires a worker, sends the call, releases the worker.
+        """
+        return await self._send_recv(module, fn, args, timeout=timeout)
+
     async def _send_recv(self, module: str, fn: str, args: list, timeout: float | None = None) -> dict:
         rw = await self.reserve()
         try:
@@ -364,71 +372,3 @@ class WorkerPool:
             if event is None:
                 break
             yield event
-
-    # ── Store methods ──────────────────────────────────────────
-
-    async def store_get_uri(self) -> str:
-        return await self._send_recv("store", "get_uri", [])
-
-    async def store_get_store_dir(self) -> str:
-        return await self._send_recv("store", "get_store_dir", [])
-
-    async def store_is_valid_path(self, path_str: str) -> bool:
-        return await self._send_recv("store", "is_valid_path", [path_str])
-
-    async def store_parse_store_path(self, path_str: str) -> dict:
-        return await self._send_recv("store", "parse_store_path", [path_str])
-
-    async def store_query_path_info(self, path_str: str) -> dict:
-        return await self._send_recv("store", "query_path_info", [path_str])
-
-    async def store_query_path_from_hash_part(self, hash_part: str) -> dict:
-        return await self._send_recv("store", "query_path_from_hash_part", [hash_part])
-
-    async def store_compute_fs_closure(
-        self, path_str: str, flip: bool = False,
-        include_outputs: bool = False, include_derivers: bool = False,
-    ) -> list[dict]:
-        return await self._send_recv("store", "compute_fs_closure",
-            [path_str, flip, include_outputs, include_derivers])
-
-    async def store_query_missing(self, paths: list[str]) -> dict:
-        return await self._send_recv("store", "query_missing", [paths])
-
-    async def store_query_derivation_outputs(self, path_str: str) -> list[dict]:
-        return await self._send_recv("store", "query_derivation_outputs", [path_str])
-
-    async def store_query_valid_derivers(self, path_str: str) -> list[dict]:
-        return await self._send_recv("store", "query_valid_derivers", [path_str])
-
-    async def store_query_all_valid_paths(self) -> list[dict]:
-        return await self._send_recv("store", "query_all_valid_paths", [])
-
-    async def store_query_referrers(self, path_str: str) -> list[dict]:
-        return await self._send_recv("store", "query_referrers", [path_str])
-
-    async def store_query_substitutable_paths(self, paths: list[str]) -> list[dict]:
-        return await self._send_recv("store", "query_substitutable_paths", [paths])
-
-    async def store_build_paths_with_results(self, paths: list[str]) -> list[dict]:
-        return await self._send_recv("store", "build_paths_with_results", [paths])
-
-    async def store_read_derivation(self, drv_path: str) -> dict:
-        return await self._send_recv("store", "read_derivation", [drv_path])
-
-    async def store_build_derivation(self, drv_path: str, build_mode: int) -> dict:
-        return await self._send_recv("store", "build_derivation", [drv_path, build_mode])
-
-    async def store_follow_links_to_store_path(self, path_str: str) -> dict:
-        return await self._send_recv("store", "follow_links_to_store_path", [path_str])
-
-    async def store_add_temp_root(self, path_str: str) -> None:
-        await self._send_recv("store", "add_temp_root", [path_str])
-
-    # ── Fetchers ───────────────────────────────────────────────
-
-    async def fetchers_input_from_url(self, url: str) -> dict:
-        return await self._send_recv("fetchers", "input_from_url", [url])
-
-    async def fetchers_input_from_attrs(self, attrs: dict[str, str]) -> dict:
-        return await self._send_recv("fetchers", "input_from_attrs", [list(attrs.items())])
