@@ -411,7 +411,24 @@ static void py_primop_bridge(
     try {
         result = it->second.func(*py_args);
     } catch (nb::python_error &) {
-        state.error<nix::EvalError>("Python primop '%s' raised an exception", name).debugThrow();
+        // Preserve the Python error detail instead of masking it
+        PyObject *ptype = nullptr, *pvalue = nullptr, *ptraceback = nullptr;
+        PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+        std::string detail = "<unknown Python exception>";
+        if (pvalue) {
+            nb::object py_val = nb::steal(pvalue);
+            nb::str py_str = nb::str(py_val);
+            detail = nb::cast<std::string>(py_str);
+        } else if (ptype) {
+            nb::object py_type = nb::steal(ptype);
+            nb::str py_str = nb::str(py_type);
+            detail = nb::cast<std::string>(py_str);
+        }
+        Py_XDECREF(ptype);
+        Py_XDECREF(pvalue);
+        Py_XDECREF(ptraceback);
+        state.error<nix::EvalError>(
+            "Python primop '%s' raised: %s", name, detail).debugThrow();
     }
 
     // Convert result to nix::Value
