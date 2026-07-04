@@ -59,7 +59,8 @@ Protocol:
 → {"type":"close"}
 ```
 
-Worker ID in high bits of request ID (`wid << 48 | seq`).
+Worker ID in high bits of request ID (``wid << 48 | seq``).  P11 fixed:
+now uses ``itertools.count()`` — monotonic, no bit-packing, no wrap.
 
 ### GC-safe handle management
 
@@ -347,21 +348,18 @@ Loses all IDE completion.  Would benefit from a `Protocol` (same as P3).
 - `locked_input` does inline `import nanopynix_flake` (circular-dep hack).
 - Mix of positional-only (`/`) and regular params across functions.
 
-**P10 — Background tasks not tracked or cancelled**
+**P10 — Background tasks not tracked or cancelled**  ✅ DONE
 
-``WorkerPool._spawn()`` creates ``_read_responses`` and ``_relay_events``
-via ``asyncio.ensure_future()`` but stores no ``Task`` handles.  On
-``close()`` these continue running until the pipes close.
+Fix: ``_read_responses`` puts ``None`` sentinel into ``_events`` on exit,
+unblocking ``_relay_events``.  Task handles stored in ``_WorkerRef._read_task``
+and ``WorkerPool._relay_tasks``.  Both ``close()`` methods await their tasks
+after the worker process exits — no dangling tasks in asyncio strict mode.
 
-Fix: store task handles and cancel them on close.
+**P11 — Response ID overflow**  ✅ DONE
 
-**P11 — Response ID overflow**
-
-`req_id = wid << 48 | seq` — the low 48 bits come from `_next_id`
-which is unbounded.  After 2^48 calls to one worker, IDs wrap.
-
-Fix: use a monotonic global counter with no bit-packing (the `wid` is
-already known from which `_WorkerRef` you're talking to).
+``req_id`` now uses ``itertools.count()`` — monotonic, no bit-packing
+(``wid`` was already known from which ``_WorkerRef``).  Removed
+``req_id_base`` / ``_next_id`` from ``_WorkerRef`` completely.
 
 ---
 
