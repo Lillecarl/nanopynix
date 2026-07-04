@@ -176,7 +176,7 @@ Nix signals errors through five paths.  Two are resolved; three remain.
 | ``STDERR_ERROR`` (daemon) | Nix daemon client converts to C++ exception → path above | ✅ Indirectly |
 | ``logEI`` (ErrorInfo) | PyLogger now emits ``("error", lvlError, text)`` — distinguishable | ✅ Fixed |
 | ``result`` callback | ``resultType`` carries ``resCorruptedPath`` etc. — logged but not acted on | ❌ **Gap** |
-| Worker stderr | Goes to parent stderr unfiltered; Nix errors like ``error: …`` are never captured | ❌ **Gap** |
+| Worker stderr | Goes to parent stderr unfiltered; Nix errors like ``error: …`` are never captured | ⬜ |
 
 **logEI**: Changed from ``"msg"`` to ``"error"`` action in ``nix_util.cpp``.
 Consumers can filter ``LogEvent.action == "error"``.  A future
@@ -194,9 +194,10 @@ redundant classification when the C++ type is not specific enough.
 never surfaced as exceptions.  At minimum, consumers should be able to
 filter for ``resCorruptedPath`` / ``resUntrustedPath``.
 
-**Worker stderr**: The subprocess writes tracebacks and Nix diagnostics
-to stderr, which inherits the parent's fd.  Should be captured via a
-pipe and relayed as ``stderr`` events in the log stream.
+**Worker stderr**: Not captured — Nix's "stderr" terminology refers to
+``nix::Logger`` log events (which already flow through the RPC pipe as
+``action:"msg"`` / ``action:"error"`` events).  Actual subprocess stderr
+inherits the parent fd 2; worker↔master IPC uses only stdin/stdout.
 
 ### Structured error mapping — Nix → Python exceptions
 
