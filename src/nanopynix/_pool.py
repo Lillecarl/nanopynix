@@ -246,6 +246,7 @@ class WorkerPool:
         self._free: asyncio.Queue[_WorkerRef] = asyncio.Queue()
         self._log_events: asyncio.Queue = asyncio.Queue()
         self._relay_tasks: list[asyncio.Task] = []
+        self._log_done: asyncio.Event = asyncio.Event()
         self._worker_id_counter = 0
 
     @property
@@ -269,6 +270,8 @@ class WorkerPool:
             except (asyncio.TimeoutError, Exception):
                 task.cancel()
         self._relay_tasks.clear()
+        self._log_done.set()
+        self._log_events.put_nowait(None)  # unblock log_stream() if waiting
 
     async def _spawn(self) -> _WorkerRef:
         wid = self._worker_id_counter
@@ -367,7 +370,7 @@ class WorkerPool:
         await self._free.put(worker)
 
     async def log_stream(self):
-        while True:
+        while not self._log_done.is_set():
             event = await self._log_events.get()
             if event is None:
                 break
