@@ -301,20 +301,13 @@ Both ``_send_recv`` (internally) and ``EvalSession`` use the same
 ``reserve() → send_recv → release()`` path.  ``_acquire``/``_release``
 stay private — only called by ``reserve()`` and ``ReservedWorker.release()``.
 
-**P5 — `ValueProxy` holds a raw `_WorkerRef`**
+**P5 — `ValueProxy` holds a raw `_WorkerRef`**  ✅ DONE
 
-```python
-class ValueProxy:
-    def __init__(self, worker: _WorkerRef, handle: int, typ: str): ...
-```
-
-If the worker dies between creating the proxy and calling `.force()`,
-the proxy holds a dead reference.  `ValueProxy.release()` sends an RPC —
-it could be called after `EvalSession.__aexit__` releases the worker.
-
-Fix: tie ValueProxy lifetime to the session.  After `__aexit__`, all
-proxies should be invalid.  Optionally, track proxies on the session
-and prevent use after close.
+Fixed: ``EvalSession`` owns a shared ``_active: [bool]`` flag.  All
+``ValueProxy`` instances receive a reference to it.  ``__aexit__`` sets
+``_active[0] = False``; every RPC method checks ``_check_active()`` first.
+Use-after-close raises ``RuntimeError``.  ``handle`` / ``type_name``
+properties remain accessible (they're cached).
 
 **P6 — `LogEvent` model exists but is never used**  ✅ DONE
 
