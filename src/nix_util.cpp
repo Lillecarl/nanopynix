@@ -5,6 +5,7 @@
 
 #include <nix/store/globals.hh>
 #include <nix/util/configuration.hh>
+#include <nix/util/error.hh>
 #include <nix/util/experimental-features.hh>
 #include <nix/util/logging.hh>
 
@@ -89,7 +90,7 @@ public:
     void logEI(const nix::ErrorInfo & ei) override {
         if (ei.level > nix::verbosity) return;
         nb::gil_scoped_acquire gil;
-        _cb(nb::int_(_req_id), "msg", int(ei.level), std::string(ei.msg.str()));
+        _cb(nb::int_(_req_id), "error", int(ei.level), std::string(ei.msg.str()));
     }
 
     void warn(const std::string & msg) override {
@@ -192,4 +193,16 @@ NB_MODULE(nanopynix_util, m) {
           "4=Talkative, 5=Chatty, 6=Debug, 7=Vomit.");
     m.def("get_verbosity", &get_verbosity,
           "Get the current Nix log verbosity level.");
+
+    // ── Exception bindings ──────────────────────────────────────
+    // Register specific Nix C++ exceptions as Python types.
+    // nb::exception catches strictly by C++ type, so subclasses
+    // must be registered BEFORE their base (nix::Error is NOT
+    // registered to avoid shadowing more specific translators).
+    nb::exception<nix::SysError> py_sys_err(m, "SysError", PyExc_RuntimeError);
+    nb::exception<nix::UsageError> py_usage_err(m, "UsageError", PyExc_RuntimeError);
+    nb::exception<nix::UnimplementedError> py_unimpl_err(m, "UnimplementedError", PyExc_RuntimeError);
+    (void) py_sys_err;
+    (void) py_usage_err;
+    (void) py_unimpl_err;
 }

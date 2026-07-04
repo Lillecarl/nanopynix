@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from nanopynix import Nix
+from nanopynix import Nix, NixError, StoreError, WorkerDied
 
 pytestmark = pytest.mark.asyncio
 
@@ -75,6 +75,52 @@ async def test_concurrent_log_stream():
 
         # We might or might not get events depending on verbosity
         # Just verify the mechanism doesn't crash
+
+
+# ── Error handling & resilience ──────────────────────────────────────
+
+
+async def test_error_propagation():
+    """Worker errors are classified and raised as typed NixError subclasses."""
+    async with Nix(max_workers=1) as nix:
+        with pytest.raises(StoreError, match="is not valid"):
+            await nix.store.query_path_info(
+                "/nix/store/00000000000000000000000000000000-nonexistent-1.0"
+            )
+
+
+async def test_worker_death_detection():
+    """Killing a worker raises WorkerDied on the next call."""
+    async with Nix(max_workers=1) as nix:
+        # First call works normally
+        uri = await nix.store.get_uri()
+        assert isinstance(uri, str)
+
+        # Kill the subprocess
+        workers = nix._pool._workers
+        assert len(workers) == 1
+        workers[0]._proc.kill()
+        workers[0]._proc.join(timeout=2)
+
+        # Give the background reader a moment to notice
+        await asyncio.sleep(0.2)
+
+        # Next call should raise WorkerDied
+        with pytest.raises(WorkerDied):
+            await nix.store.get_uri()
+
+
+async def test_idle_timeout_resets_with_activity():
+    """A very short idle timeout still works when calls complete quickly."""
+    nix = Nix(max_workers=1, rpc_timeout=0.5)
+    await nix.open()
+    try:
+        # Multiple fast calls — each resets the idle timer
+        for _ in range(3):
+            uri = await nix.store.get_uri()
+            assert isinstance(uri, str)
+    finally:
+        await nix.close()
 
 
 async def _collect(nix, events):

@@ -1,6 +1,20 @@
 """nanopynix — nanobind-based Python bindings for Nix."""
 
 # ── L2 facades (primary API) ────────────────────────────────────────
+from nanopynix.exceptions import (
+    AssertionError_,
+    EvalError,
+    InfiniteRecursionError,
+    MissingArgumentError,
+    NixError,
+    ParseError,
+    RestrictedPathError,
+    StoreError,
+    ThrownError,
+    TypeError_,
+    UndefinedVarError,
+    UsageError,
+)
 from nanopynix.logging import LogCollector
 from nanopynix.models import (
     BuildResult,
@@ -41,14 +55,26 @@ __all__ = [
     # L2
     "BuildMode",
     "BuildResult",
+    "AssertionError_",
+    "EvalError",
     "EvalSession",
     "FlakeRef",
+    "InfiniteRecursionError",
     "Input",
     "LockedFlake",
     "LockedInput",
     "LogEvent",
+    "MissingArgumentError",
     "MissingInfo",
     "LogCollector",
+    "NixError",
+    "ParseError",
+    "RestrictedPathError",
+    "StoreError",
+    "ThrownError",
+    "TypeError_",
+    "UndefinedVarError",
+    "UsageError",
     "ValueProxy",
     "WorkerDied",
     "PathInfo",

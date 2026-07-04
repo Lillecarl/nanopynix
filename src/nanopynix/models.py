@@ -100,5 +100,5 @@ class LogEvent(BaseModel):
     """
 
     request_id: int = Field(default=0, description="RPC request ID for multiplexing")
-    action: str = Field(description="'msg', 'warn', 'start', 'stop', or 'result'")
+    action: str = Field(description="'msg', 'warn', 'error', 'start', 'stop', or 'result'")
     args: list = Field(default_factory=list, description="Action-specific arguments")

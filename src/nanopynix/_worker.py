@@ -103,7 +103,9 @@ def main(req_conn, resp_conn) -> None:
             response = {
                 "type": "error",
                 "id": req_id,
-                "msg": f"{type(exc).__name__}: {exc}",
+                "error_type": type(exc).__qualname__,
+                "msg": str(exc),
+                "traceback": traceback.format_exc(),
             }
             traceback.print_exc(file=sys.stderr)
         finally:

@@ -17,6 +17,8 @@ try:
 except RuntimeError:
     pass  # already set by outer process (e.g. pytest)
 
+from nanopynix.exceptions import from_response
+
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
 
@@ -39,6 +41,7 @@ class _WorkerRef:
     __slots__ = (
         "_proc", "_req_conn", "_resp_conn", "req_id_base", "_next_id",
         "_responses", "_events", "_done", "_dead", "_timeout", "_last_used",
+        "_last_activity",
     )
 
     def __init__(
@@ -60,6 +63,7 @@ class _WorkerRef:
         self._dead: asyncio.Event = asyncio.Event()
         self._timeout = timeout
         self._last_used = time.monotonic()
+        self._last_activity = time.monotonic()
 
     @property
     def is_dead(self) -> bool:
@@ -76,11 +80,12 @@ class _WorkerRef:
         try:
             while not self._done:
                 msg = await loop.run_in_executor(None, self._resp_conn.recv)
+                self._last_activity = time.monotonic()
                 t = msg.get("type")
                 if t == "result":
                     await self._responses.put(("ok", msg.get("id"), msg.get("value", {})))
                 elif t == "error":
-                    await self._responses.put(("err", msg.get("id"), msg.get("msg", "unknown")))
+                    await self._responses.put(("err", msg.get("id"), msg))
                 elif t == "event":
                     await self._events.put(msg)
         except (EOFError, OSError, BrokenPipeError):
@@ -93,9 +98,13 @@ class _WorkerRef:
     async def send_recv(self, module: str, fn: str, args: list, timeout: float | None = None) -> dict:
         """Send a call and wait for the matching response.
 
+        The timeout is an *idle* timeout: it resets whenever the worker
+        sends any message (log event, response, etc.), so long-running
+        operations like builds don't time out while the worker is active.
+
         Raises:
             WorkerDied: the worker process died.
-            TimeoutError: the call exceeded *timeout*.
+            TimeoutError: *timeout* seconds elapsed with no activity from the worker.
             RuntimeError: the worker returned an error.
         """
         if self.is_dead:
@@ -105,6 +114,7 @@ class _WorkerRef:
         req_id = self.next_id()
         loop = asyncio.get_running_loop()
 
+        # Phase 1: send the request (fixed timeout — send should be fast)
         async with asyncio.timeout(t):
             await loop.run_in_executor(None, self._req_conn.send, {
                 "type": "call",
@@ -114,23 +124,46 @@ class _WorkerRef:
                 "args": args,
             })
 
-            while True:
-                get_task = asyncio.ensure_future(self._responses.get())
-                dead_task = asyncio.ensure_future(self._dead.wait())
-                done, pending = await asyncio.wait(
-                    [get_task, dead_task], return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in pending:
-                    task.cancel()
-                if dead_task in done:
-                    raise WorkerDied("Worker process died")
+        # Phase 2: wait for response with idle timeout that resets on activity
+        last_seen = self._last_activity
+        while True:
+            remaining = t - (time.monotonic() - last_seen)
+            if remaining <= 0:
+                raise TimeoutError(f"Call timed out — no worker activity for {t}s")
 
-                kind, rid, payload = get_task.result()
-                if rid != req_id:
-                    continue
-                if kind == "ok":
-                    return payload
-                raise RuntimeError(f"Worker error: {payload}")
+            # Poll with short timeout so we can check for activity frequently
+            try:
+                async with asyncio.timeout(min(remaining, 1.0)):
+                    get_task = asyncio.ensure_future(self._responses.get())
+                    dead_task = asyncio.ensure_future(self._dead.wait())
+                    done, pending = await asyncio.wait(
+                        [get_task, dead_task], return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for task in pending:
+                        task.cancel()
+            except asyncio.TimeoutError:
+                # No response arrived within the poll window —
+                # check if the worker sent anything (event, etc.)
+                if self._last_activity > last_seen:
+                    last_seen = self._last_activity
+                continue
+
+            if dead_task in done:
+                raise WorkerDied("Worker process died")
+
+            kind, rid, payload = get_task.result()
+            if rid != req_id:
+                # Response for a different request — worker is alive, reset
+                last_seen = self._last_activity
+                continue
+            if kind == "ok":
+                return payload
+            # Structured error dict from worker: {error_type, msg, traceback, ...}
+            raise from_response(
+                error_type=payload.get("error_type", "Unknown"),
+                msg=payload.get("msg", "unknown"),
+                raw=payload.get("traceback", ""),
+            )
 
     async def close(self) -> None:
         self._done = True

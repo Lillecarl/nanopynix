@@ -6,6 +6,7 @@
 #include <nanobind/stl/shared_ptr.h>
 
 #include <nix/expr/eval.hh>
+#include <nix/expr/eval-error.hh>
 #include <nix/expr/eval-gc.hh>
 #include <nix/expr/value.hh>
 #include <nix/expr/attr-set.hh>
@@ -526,4 +527,19 @@ NB_MODULE(nanopynix_expr, m) {
 
     bind_value(m);
     bind_eval_state(m);
+
+    // ── Exception bindings (LIFO: last registered tried first.
+    // Register base classes FIRST so specific subclasses are tried before them)
+    nb::exception<nix::EvalError> py_eval_err(m, "EvalError", PyExc_RuntimeError);
+    nb::exception<nix::ParseError> py_parse_err(m, "ParseError", PyExc_RuntimeError);
+    nb::exception<nix::TypeError> py_type_err(m, "TypeError", PyExc_RuntimeError);
+    nb::exception<nix::UndefinedVarError> py_undef_err(m, "UndefinedVarError", PyExc_RuntimeError);
+    nb::exception<nix::AssertionError> py_assert_err(m, "AssertionError", PyExc_RuntimeError);
+    nb::exception<nix::ThrownError> py_thrown_err(m, "ThrownError", PyExc_RuntimeError);
+    (void) py_eval_err;
+    (void) py_parse_err;
+    (void) py_type_err;
+    (void) py_undef_err;
+    (void) py_assert_err;
+    (void) py_thrown_err;
 }
