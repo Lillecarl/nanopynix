@@ -151,3 +151,29 @@ async def test_request_id_in_events():
     finally:
         nanopynix_util.remove_logger()
         await c.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sync_drain():
+    """drain() returns pending events without blocking — used by worker subprocess."""
+    c = LogCollector()
+    c.callback(1, "msg", 3, "hello")
+    c.callback(2, "msg", 3, "world")
+
+    events = c.drain()
+    assert len(events) == 2
+    assert events[0] == (1, "msg", 3, "hello")
+    assert events[1] == (2, "msg", 3, "world")
+
+    # Second drain should be empty (events already consumed)
+    assert c.drain() == []
+
+    c.close()
+
+
+@pytest.mark.asyncio
+async def test_drain_empty():
+    """drain() returns empty list when no events pending."""
+    c = LogCollector()
+    assert c.drain() == []
+    c.close()
