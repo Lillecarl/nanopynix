@@ -156,43 +156,37 @@ Fixed: ``LogCollector`` uses ``janus.Queue`` (sync_q for C++ callback from
 any GIL thread, async_q for the event loop).  The ``asyncio.Queue``
 instances in ``_pool.py`` are safe — accessed only from event-loop tasks.
 
-**P2 — No timeout on `_WorkerRef.send_recv`**
+**P2 — No timeout on `_WorkerRef.send_recv`**  ✅ DONE
 
-The worker death path is partially handled: ``_read_responses`` sets
-``_dead`` on pipe errors, and ``send_recv`` races ``dead_task`` against
-``_responses.get()``.  Worker hangs are caught by the outer
-``asyncio.timeout(t)`` (300s default).
-
-**Actual deadlock:** ``req_conn.send()`` on line 107 runs via
-``run_in_executor`` *before* the ``asyncio.timeout`` block.  If the
-worker process is alive but not reading its input pipe (e.g. stuck in
-a long Nix operation that doesn't drain the request pipe), the send
-blocks the thread-pool thread forever.  The timeout is never reached.
-
-Fix: move ``req_conn.send()`` inside the ``asyncio.timeout`` block so
-a hung worker triggers ``TimeoutError`` instead of a permanent hang.
-Also wrap ``close()``'s send in a timeout.
+Fixed: ``req_conn.send()`` moved inside the ``asyncio.timeout`` block.
+Timeout is now an *idle* timeout — resets whenever the worker emits any
+pipe message (log event, result, etc.).  Long builds survive because
+Nix's log activity keeps the deadline fresh.  ``close()`` send also
+has a 2s timeout.  Tests added: worker death (``WorkerDied``), idle
+timeout (0.5s survives 3 calls).
 
 ### Nix error signaling — logEI, STDERR_ERROR, result
 
-Nix signals errors through three paths.  Two need work.
+Nix signals errors through five paths.  Two are resolved; three remain.
 
 | Path | Mechanism | Status |
 |------|-----------|--------|
-| C++ exception | ``_worker.py`` ``except Exception`` → ``{"type":"error"}`` → ``RuntimeError`` | ✅ Works |
+| C++ exception | ``_worker.py`` ``except Exception`` → ``{"type":"error"}`` → typed ``NixError`` subclass | ✅ Typed now |
 | ``STDERR_ERROR`` (daemon) | Nix daemon client converts to C++ exception → path above | ✅ Indirectly |
-| ``logEI`` (ErrorInfo) | PyLogger emits ``("msg", lvlError, text)`` — indistinguishable from info | ❌ **Gap** |
+| ``logEI`` (ErrorInfo) | PyLogger now emits ``("error", lvlError, text)`` — distinguishable | ✅ Fixed |
 | ``result`` callback | ``resultType`` carries ``resCorruptedPath`` etc. — logged but not acted on | ❌ **Gap** |
 | Worker stderr | Goes to parent stderr unfiltered; Nix errors like ``error: …`` are never captured | ❌ **Gap** |
 
-**logEI gap**: When Nix encounters evaluation or build errors, it calls
-``Logger::logEI(ErrorInfo)``.  Our ``PyLogger`` converts this to a
-``"msg"`` event with ``lvlError`` (0) — it looks like any other message.
-The RPC call succeeds, and the caller never knows an error was logged.
+**logEI**: Changed from ``"msg"`` to ``"error"`` action in ``nix_util.cpp``.
+Consumers can filter ``LogEvent.action == "error"``.  A future
+``LogEvent.is_error`` computed field could also check ``action == "warn"``.
 
-Fix: emit ``"error"`` action instead of ``"msg"`` for ``logEI``, so the
-Python side can distinguish errors from info messages.  Consider also
-adding ``is_error`` / ``level`` to the ``LogEvent`` model.
+**C++ typed exceptions**: 12 Nix exception types are registered via
+``nb::exception`` in ``nix_expr.cpp``, ``nix_store.cpp``, ``nix_util.cpp``.
+Nanobind now preserves the C++ type name (e.g. ``"TypeError"``) as
+``type(exc).__name__`` instead of ``"RuntimeError"``.  The ``_classify()``
+function in ``exceptions.py`` additionally parses the error message for
+redundant classification when the C++ type is not specific enough.
 
 **result gap**: The ``result`` callback carries ``nix::ResultType`` (e.g.
 ``resCorruptedPath = 103``).  These are passed through as log events but
@@ -202,6 +196,93 @@ filter for ``resCorruptedPath`` / ``resUntrustedPath``.
 **Worker stderr**: The subprocess writes tracebacks and Nix diagnostics
 to stderr, which inherits the parent's fd.  Should be captured via a
 pipe and relayed as ``stderr`` events in the log stream.
+
+### Structured error mapping — Nix → Python exceptions
+
+**Nix error hierarchy** (simplified):
+
+```
+std::exception
+ └─ BaseError             ← don't catch (includes Interrupted)
+     ├─ Error              ← main base
+     │   ├─ UsageError, UnimplementedError
+     │   ├─ SystemError → SysError (errno) / WinError
+     │   ├─ InvalidPath, Unsupported, SubstituteGone, BadStorePath, ...
+     │   ├─ EvalBaseError
+     │   │   ├─ EvalError
+     │   │   │   ├─ AssertionError → ThrownError
+     │   │   │   ├─ Abort, TypeError, UndefinedVarError
+     │   │   │   ├─ MissingArgumentError, InfiniteRecursionError
+     │   │   │   └─ InvalidPathError (carries StorePath)
+     │   │   ├─ StackOverflowError, IFDError, RecoverableEvalError
+     │   └─ ParseError, FormatError, BadURL, BadHash, ...
+     └─ Interrupted        ← SIGINT
+```
+
+**ErrorInfo** — every Nix error carries:
+
+```
+level: int       # lvlError=0, lvlWarn=1, ..., lvlVomit=7
+msg: str         # formatted message (without "error: " prefix)
+status: int      # exit status (default 1)
+traces: list     # stack traces with Pos + HintFmt
+suggestions: list# "did you mean...?"
+isFromExpr: bool # true for throw/abort/builtins.warn
+```
+
+**Current**: worker catches ``Exception`` → sends ``{"type":"error",
+"msg":"TypeError: something"}`` → client raises ``RuntimeError("Worker
+error: TypeError: something")``.  Error type, traces, suggestions are all
+lost.
+
+**Target**: structured error response → typed Python exceptions:
+
+```
+Worker error response:
+  {"type":"error", "id":42,
+   "error_type":"TypeError", "msg":"value is a string, not an integer",
+   "info":{"level":0, "status":1, "is_from_expr":false,
+           "traces":[{"hint":"while evaluating ..."}],
+           "suggestions":["did you mean ...?"]}}
+
+Client raises:
+  nanopynix.exceptions.TypeError(msg, info=..., traces=...)
+```
+
+**Implementation status**:
+
+**✅ Phase A — structured error response** (``_worker.py`` + ``_pool.py``)
+
+- ``_worker.py`` error response now includes ``error_type``, ``msg``, and
+  ``traceback`` fields instead of a flat ``msg`` string.
+- ``_pool.py`` ``send_recv`` raises ``from_response(...)`` which constructs
+  the right ``NixError`` subclass.
+- ``logEI`` in ``nix_util.cpp`` changed from ``"msg"`` to ``"error"``
+  action — errors in the log stream are now distinguishable.
+- C++ exception types (``EvalError``, ``ParseError``, ``TypeError``,
+  ``UndefinedVarError``, ``AssertionError``, ``ThrownError``,
+  ``InvalidPath``, ``Unsupported``, ``BadStorePath``, ``SysError``,
+  ``UsageError``, ``UnimplementedError``) are registered via
+  ``nb::exception`` so nanobind preserves the C++ type name as
+  ``type(exc).__name__`` instead of ``"RuntimeError"``.
+
+**✅ Phase B — typed Python exceptions** (``exceptions.py``)
+
+- 12-class hierarchy: ``NixError`` → ``StoreError``, ``EvalError``,
+  ``ParseError``, ``UsageError``.  ``EvalError`` subclasses:
+  ``TypeError_``, ``AssertionError_``, ``UndefinedVarError``,
+  ``ThrownError``, ``InfiniteRecursionError``, ``RestrictedPathError``,
+  ``MissingArgumentError``.
+- ``_classify()`` uses 20 regex patterns (ordered most-specific-first) to
+  parse the Nix error message and determine the right Python class.  Falls
+  back gracefully to the C++ type name from the worker.
+- ``from_response()`` factory called by ``_pool.py``.
+
+**Remaining for full ErrorInfo extraction**: The ``ErrorInfo`` struct
+fields (``level``, ``traces``, ``suggestions``) are not yet serialized —
+the C++ nanobind bindings register type names but don't expose
+``.info()`` / ``.traces()`` methods on the Python side.  This requires
+binding the ``BaseError`` / ``ErrorInfo`` types with nanobind accessors.
 
 ### 🟡 Design issues
 

@@ -18,6 +18,7 @@
 #include <nix/util/hash.hh>
 #include <nix/util/serialise.hh>
 #include <nix/util/file-descriptor.hh>
+#include <nix/util/error.hh>
 
 #include "py_store_impl.hh"
 
@@ -467,4 +468,12 @@ NB_MODULE(nanopynix_store, m) {
     bind_missing_info(m);
     bind_store(m);
     bind_build_result(m);
+
+    // ── Exception bindings ──────────────────────────────────────
+    nb::exception<nix::InvalidPath> py_invalid_path(m, "InvalidPath", PyExc_RuntimeError);
+    nb::exception<nix::Unsupported> py_unsupported(m, "Unsupported", PyExc_RuntimeError);
+    nb::exception<nix::BadStorePath> py_bad_sp(m, "BadStorePath", PyExc_RuntimeError);
+    (void) py_invalid_path;
+    (void) py_unsupported;
+    (void) py_bad_sp;
 }
