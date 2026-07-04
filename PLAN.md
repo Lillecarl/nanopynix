@@ -375,7 +375,6 @@ src/
     nix_flake.cpp      — FlakeRef, LockedFlake (+ to_attrs)
     nix_main.cpp       — init_nix, init_plugins
     py_eval.hh         — PyEvalState struct
-    py_store.hh        — PyStoreHelper (unused?)
     py_store_impl.cpp  — register_python_store
     py_store_impl.hh   — header
 tests/
