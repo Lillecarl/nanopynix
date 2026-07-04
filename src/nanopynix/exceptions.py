@@ -31,12 +31,14 @@ class NixError(RuntimeError):
         error_type: the classified Nix error kind (e.g. ``"TypeError"``).
         msg: the error message string from Nix.
         raw: the full traceback string from the worker subprocess.
+        info: ErrorInfo dict (traces, suggestions, level, etc.) or None.
     """
 
-    def __init__(self, error_type: str, msg: str, *, raw: str = "") -> None:
+    def __init__(self, error_type: str, msg: str, *, raw: str = "", info: dict | None = None) -> None:
         self.error_type = error_type
         self.msg = msg
         self.raw = raw
+        self.info = info
         super().__init__(f"[{error_type}] {msg}")
 
     def __repr__(self) -> str:
@@ -143,13 +145,13 @@ def _classify(msg: str, fallback_type: str) -> tuple[type[NixError], str]:
     return NixError, fallback_type
 
 
-def from_response(error_type: str, msg: str, *, raw: str = "") -> NixError:
+def from_response(error_type: str, msg: str, *, raw: str = "", info: dict | None = None) -> NixError:
     """Factory: create the right NixError subclass from a worker error response.
 
     Called by ``_pool.py`` when it receives an ``{"type":"error",...}`` response.
     """
     cls, classified_type = _classify(msg, error_type)
-    return cls(classified_type, msg, raw=raw)
+    return cls(classified_type, msg, raw=raw, info=info)
 
 
 __all__ = [
