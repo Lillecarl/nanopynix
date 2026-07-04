@@ -175,7 +175,7 @@ Nix signals errors through five paths.  Two are resolved; three remain.
 | C++ exception | ``_worker.py`` ``except Exception`` → ``{"type":"error"}`` → typed ``NixError`` subclass | ✅ Typed now |
 | ``STDERR_ERROR`` (daemon) | Nix daemon client converts to C++ exception → path above | ✅ Indirectly |
 | ``logEI`` (ErrorInfo) | PyLogger now emits ``("error", lvlError, text)`` — distinguishable | ✅ Fixed |
-| ``result`` callback | ``resultType`` carries ``resCorruptedPath`` etc. — logged but not acted on | ❌ **Gap** |
+| ``result`` callback | ``resultType`` carries ``resCorruptedPath`` etc. — logged but not acted on | ✅ **Fixed** |
 | Worker stderr | Goes to parent stderr unfiltered; Nix errors like ``error: …`` are never captured | ⬜ |
 
 **logEI**: Changed from ``"msg"`` to ``"error"`` action in ``nix_util.cpp``.
@@ -189,10 +189,10 @@ Nanobind now preserves the C++ type name (e.g. ``"TypeError"``) as
 function in ``exceptions.py`` additionally parses the error message for
 redundant classification when the C++ type is not specific enough.
 
-**result gap**: The ``result`` callback carries ``nix::ResultType`` (e.g.
-``resCorruptedPath = 103``).  These are passed through as log events but
-never surfaced as exceptions.  At minimum, consumers should be able to
-filter for ``resCorruptedPath`` / ``resUntrustedPath``.
+**result gap**: Fixed — ``ResultType`` IntEnum in ``models.py`` (values
+100-108 matching ``nix::ResultType``).  ``Nix.log_stream()`` populates
+``LogEvent.result_type`` when ``action == 'result'``, so consumers can
+filter: ``if event.result_type == ResultType.corrupted_path: ...``.
 
 **Worker stderr**: Not captured — Nix's "stderr" terminology refers to
 ``nix::Logger`` log events (which already flow through the RPC pipe as
@@ -288,14 +288,11 @@ binding the ``BaseError`` / ``ErrorInfo`` types with nanobind accessors.
 
 ### 🟡 Design issues
 
-**P3 — No backend Protocol or ABC**
+**P3 — No backend Protocol or ABC**  ⬜ Moot
 
 ``Store`` delegates to ``WorkerPool`` (the only backend).  There is no
-``Protocol`` or ABC so alternative backends (in-process, mock) have no
-contract to implement.  ``Store._imp`` is typed ``Any``.
-
-Fix: define a ``StoreBackend`` Protocol that ``WorkerPool`` satisfies.
-This also fixes P8.
+``Protocol`` or ABC but one isn't needed — ``Store._pool`` is typed as
+``WorkerPool`` directly (see P8).
 
 **P4 — `EvalSession` pierces the `WorkerPool` abstraction**
 
@@ -333,21 +330,16 @@ from ``__init__.py``.
 
 Both are imported from ``_session`` and listed in ``__all__``.
 
-**P8 — `Store._imp` typed as `Any`**
+**P8 — `Store._imp` typed as `Any`**  ✅ DONE
 
-```python
-@dataclass
-class Store:
-    _imp: Any  # WorkerPool
-```
+Fixed: ``Store._pool: WorkerPool`` (renamed from ``_imp``).  No Protocol
+needed — there is only one backend.
 
-Loses all IDE completion.  Would benefit from a `Protocol` (same as P3).
+**P9 — `_extract.py` cleanup**  ✅ DONE
 
-**P9 — `_extract.py` inconsistencies**
-
-- `store_path_str` splits on first `-` (fragile if Nix hash format changes).
-- `locked_input` does inline `import nanopynix_flake` (circular-dep hack).
-- Mix of positional-only (`/`) and regular params across functions.
+Fixed: inline ``import nanopynix_flake`` hoisted to top (no circular dep
+— it's a C++ extension module).  ``store_path_str`` split-on-``-``
+documented as reliable (Nix base32 hashes never contain ``-``).
 
 **P10 — Background tasks not tracked or cancelled**  ✅ DONE
 
