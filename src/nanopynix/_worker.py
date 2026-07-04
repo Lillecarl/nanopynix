@@ -13,14 +13,16 @@ import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
 
-from nanopynix._extract import (
-    build_result,
-    missing_info,
-    path_info,
-    store_path,
-    store_path_str,
-)
 from nanopynix.logging import LogCollector
+
+
+def _sp_to_dict(sp) -> dict:
+    """Convert a C++ StorePath to a dict for JSON serialisation."""
+    return {
+        "to_string": sp.to_string(),
+        "hash_part": sp.hash_part(),
+        "name": sp.name(),
+    }
 
 
 def main(req_conn, resp_conn) -> None:
@@ -73,7 +75,7 @@ def main(req_conn, resp_conn) -> None:
 
     # ── Dispatch table ──────────────────────────────────────────
     DISPATCH = {
-        "store": _store_dispatch(store),
+        "store": _store_dispatch(store, eval_store),
         "eval": _eval_dispatch(store),
     }
 
@@ -120,7 +122,7 @@ def main(req_conn, resp_conn) -> None:
 
 # ── Dispatch helpers ────────────────────────────────────────────────
 
-def _store_dispatch(store):
+def _store_dispatch(store, eval_store):
     """Return dispatch dict for store operations."""
 
     def _parse_sp(args):
@@ -134,61 +136,56 @@ def _store_dispatch(store):
         "get_uri": lambda _: store.get_uri(),
         "get_store_dir": lambda _: store.get_store_dir(),
         "is_valid_path": lambda args: store.is_valid_path(_parse_sp(args)),
-        "parse_store_path": lambda args: store_path(_parse_sp(args)),
-        "query_path_info": lambda args: path_info(store.query_path_info(_parse_sp(args))),
-        "query_path_from_hash_part": lambda args: store_path(
-            store.query_path_from_hash_part(args[0])
+        # parse_store_path returns a C++ StorePath — convert to dict
+        "parse_store_path": lambda args: _sp_to_dict(_parse_sp(args)),
+        # query_path_info now returns nb::dict directly
+        "query_path_info": lambda args: dict(store.query_path_info(_parse_sp(args))),
+        "query_path_from_hash_part": lambda args: (
+            _sp_to_dict(sp) if (sp := store.query_path_from_hash_part(args[0])) is not None else None
         ),
-        "compute_fs_closure": lambda args: [
-            store_path_str(s)
-            for s in store.compute_fs_closure(
+        # compute_fs_closure now returns list of dicts
+        "compute_fs_closure": lambda args: list(
+            store.compute_fs_closure(
                 _parse_sp(args),
                 args[1] if len(args) > 1 else False,
                 args[2] if len(args) > 2 else False,
                 args[3] if len(args) > 3 else False,
             )
-        ],
-        "query_missing": lambda args: missing_info(
+        ),
+        # query_missing returns nb::dict directly
+        "query_missing": lambda args: dict(
             store.query_missing([_parse_sp([p]) for p in args[0]])
         ),
-        "query_derivation_outputs": lambda args: [
-            store_path_str(s)
-            for s in store.query_derivation_outputs(_parse_sp(args))
-        ],
-        "query_valid_derivers": lambda args: [
-            store_path_str(s)
-            for s in store.query_valid_derivers(_parse_sp(args))
-        ],
-        "query_all_valid_paths": lambda _: [
-            store_path_str(s) for s in store.query_all_valid_paths()
-        ],
-        "query_referrers": lambda args: [
-            store_path_str(s)
-            for s in store.query_referrers(_parse_sp(args))
-        ],
-        "query_substitutable_paths": lambda args: [
-            store_path_str(s)
-            for s in store.query_substitutable_paths(
+        # derivation outputs / valid derivers return list of dicts
+        "query_derivation_outputs": lambda args: list(
+            store.query_derivation_outputs(_parse_sp(args))
+        ),
+        "query_valid_derivers": lambda args: list(
+            store.query_valid_derivers(_parse_sp(args))
+        ),
+        "query_all_valid_paths": lambda _: list(store.query_all_valid_paths()),
+        "query_referrers": lambda args: list(store.query_referrers(_parse_sp(args))),
+        "query_substitutable_paths": lambda args: list(
+            store.query_substitutable_paths(
                 [_parse_sp([p]) for p in args[0]]
             )
-        ],
-        "build_paths_with_results": lambda args: [
-            build_result(r)
-            for r in store.build_paths_with_results(
+        ),
+        # build_paths_with_results returns list of dicts
+        "build_paths_with_results": lambda args: list(
+            store.build_paths_with_results(
                 [_parse_sp([p]) for p in args[0]],
                 eval_store,
             )
-        ],
-        "read_derivation": lambda args: dict(
-            store.read_derivation(_parse_sp(args))
         ),
-        "build_derivation": lambda args: build_result(
+        "read_derivation": lambda args: dict(store.read_derivation(_parse_sp(args))),
+        # build_derivation returns nb::dict directly
+        "build_derivation": lambda args: dict(
             store.build_derivation(
                 _parse_sp(args),
                 nanopynix_store.BuildMode(args[1]) if len(args) > 1 else nanopynix_store.BuildMode.Normal,
             )
         ),
-        "follow_links_to_store_path": lambda args: store_path(
+        "follow_links_to_store_path": lambda args: _sp_to_dict(
             store.follow_links_to_store_path(args[0])
         ),
         "add_temp_root": lambda args: store.add_temp_root(_parse_sp(args)),

@@ -1,7 +1,8 @@
 """Convert L1 nanobind objects to plain dicts for Pydantic model validation.
 
-Every function accepts a nanobind object (or L1-exposed Python value) and
-returns a ``dict`` ready for ``SomeModel.model_validate(...)``.
+After the 2026-07-05 C++ boundary refactor, most L1 types (PathInfo,
+BuildResult, MissingInfo) return nb::dict directly.  Only StorePath and
+Input/FlakeRef/LockedFlake still need explicit extraction.
 """
 
 from __future__ import annotations
@@ -32,44 +33,6 @@ def store_path_str(s: str, /) -> dict:
         "to_string": s,
         "hash_part": s[:hyphen],
         "name": s[hyphen + 1:],
-    }
-
-
-def path_info(pi, /) -> dict:
-    """Extract a L1 PathInfo to a dict."""
-    refs = [store_path_str(s) if isinstance(s, str) else store_path(s)
-            for s in pi.references]
-    drv = pi.deriver
-    return {
-        "path": store_path(pi.path),
-        "nar_hash": pi.nar_hash,
-        "nar_size": int(pi.nar_size),
-        "registration_time": int(pi.registration_time) if pi.registration_time is not None else None,
-        "deriver": store_path(drv) if drv is not None else None,
-        "references": refs,
-        "ca": pi.ca if pi.ca else None,
-        "ultimate": bool(pi.ultimate),
-    }
-
-
-def build_result(br, /) -> dict:
-    """Extract a L1 BuildResult to a dict."""
-    return {
-        "drv_path": br.drv_path,
-        "success": bool(br.success),
-        "status": br.status,
-        "error_msg": br.error_msg,
-    }
-
-
-def missing_info(mi, /) -> dict:
-    """Extract a L1 MissingInfo to a dict."""
-    return {
-        "will_build": [store_path_str(s) for s in mi.will_build],
-        "will_substitute": [store_path_str(s) for s in mi.will_substitute],
-        "unknown": [store_path_str(s) for s in mi.unknown],
-        "download_size": int(mi.download_size),
-        "nar_size": int(mi.nar_size),
     }
 
 

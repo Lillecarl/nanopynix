@@ -72,15 +72,15 @@ class TestStore:
         sp = nanopynix_store.StorePath(bash_basename)
         results = store.build_paths_with_results([sp])
         assert len(results) == 1
-        assert results[0].success
-        assert results[0].status == "already-valid"
+        assert results[0]["success"]
+        assert results[0]["status"] == "already-valid"
 
     def test_build_paths_with_results_bogus(self, store):
         sp = nanopynix_store.StorePath("00000000000000000000000000000000-bogus")
         results = store.build_paths_with_results([sp])
         assert len(results) == 1
-        assert not results[0].success
-        assert results[0].status != "already-valid"
+        assert not results[0]["success"]
+        assert results[0]["status"] != "already-valid"
 
     def test_query_path_info(self, store):
         import os
@@ -89,12 +89,13 @@ class TestStore:
         bash_basename = bash.split("/nix/store/")[1].split("/")[0]
         sp = nanopynix_store.StorePath(bash_basename)
         info = store.query_path_info(sp)
-        assert info.path == sp
-        assert info.nar_size > 0
-        assert isinstance(info.nar_hash, str)
-        assert len(info.nar_hash) > 0
-        refs = info.references
+        assert isinstance(info["nar_hash"], str)
+        assert len(info["nar_hash"]) > 0
+        refs = info["references"]
         assert isinstance(refs, list)
+        # path is a dict with to_string/hash_part/name
+        assert info["path"]["to_string"] == bash_basename
+        assert info["nar_size"] > 0
 
     def test_query_path_from_hash_part(self, store):
         import os
@@ -153,9 +154,8 @@ class TestBuildResult:
         sp = nanopynix_store.StorePath(bash_basename)
         results = store.build_paths_with_results([sp])
         r = results[0]
-        assert r.success
-        rrepr = repr(r)
-        assert "success=True" in rrepr
+        assert r["success"]
+        assert r["drv_path"]  # non-empty string
 
 
 class TestPathInfo:
@@ -166,7 +166,8 @@ class TestPathInfo:
         bash_basename = bash.split("/nix/store/")[1].split("/")[0]
         sp = nanopynix_store.StorePath(bash_basename)
         info = store.query_path_info(sp)
-        assert "PathInfo" in repr(info)
+        assert isinstance(info, dict)
+        assert "nar_hash" in info
 
     def test_registration_time(self, store):
         import os
@@ -175,7 +176,7 @@ class TestPathInfo:
         bash_basename = bash.split("/nix/store/")[1].split("/")[0]
         sp = nanopynix_store.StorePath(bash_basename)
         info = store.query_path_info(sp)
-        rt = info.registration_time
+        rt = info["registration_time"]
         if rt is not None:
             assert rt > 0
 
@@ -187,8 +188,8 @@ class TestPathInfo:
         sp = nanopynix_store.StorePath(bash_basename)
         info = store.query_path_info(sp)
         # deriver may be None for non-derivation outputs
-        deriver = info.deriver
-        assert deriver is None or isinstance(deriver, nanopynix_store.StorePath)
+        deriver = info["deriver"]
+        assert deriver is None or isinstance(deriver, dict)
 
 
 class TestOpenStore:
