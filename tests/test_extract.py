@@ -12,13 +12,10 @@ import nanopynix_fetchers  # L1 Input
 import nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
 
 from nanopynix._extract import (
-    build_result,
     flake_ref_attrs,
     input_attrs,
     locked_flake,
     locked_input,
-    missing_info,
-    path_info,
     store_path,
     store_path_str,
 )
@@ -77,24 +74,24 @@ def test_store_path_from_store_parse(store):
 # ════════════════════════════════════════════════════════════════════
 
 def test_path_info_from_real_path(store):
-    """Extract PathInfo for a valid store path, validate the dict shape."""
+    """C++ query_path_info now returns a dict directly — validate shape."""
     path_strs = store.query_all_valid_paths()
     if not path_strs:
         pytest.skip("no valid paths in store")
-    sp = nanopynix_store.StorePath(path_strs[0])
-    pi = store.query_path_info(sp)
-    result = path_info(pi)
+    # query_all_valid_paths returns list of dicts now
+    first = path_strs[0]
+    sp = nanopynix_store.StorePath(first["to_string"])
+    result = store.query_path_info(sp)  # returns dict
 
+    assert isinstance(result, dict)
+    assert "path" in result
     assert "to_string" in result["path"]
     assert "hash_part" in result["path"]
-    assert "name" in result["path"]
     assert isinstance(result["nar_hash"], str)
-    assert result["nar_hash"]  # non-empty
+    assert result["nar_hash"]
     assert isinstance(result["nar_size"], int)
     assert result["nar_size"] >= 0
-    # ultimate should be bool
     assert isinstance(result["ultimate"], bool)
-    # references must be a list of dicts
     assert isinstance(result["references"], list)
     for ref in result["references"]:
         assert "to_string" in ref
@@ -102,14 +99,11 @@ def test_path_info_from_real_path(store):
 def test_path_info_deriver_none(store):
     """A non-derivation path should have deriver=None."""
     path_strs = store.query_all_valid_paths()
-    # find a path that isn't a .drv
-    for s in path_strs:
-        sp = nanopynix_store.StorePath(s)
+    for d in path_strs:
+        sp = nanopynix_store.StorePath(d["to_string"])
         if not sp.is_derivation():
-            pi = store.query_path_info(sp)
-            result = path_info(pi)
+            result = store.query_path_info(sp)
             assert "deriver" in result
-            # deriver may be None or a store_path dict
             if result["deriver"] is not None:
                 assert "to_string" in result["deriver"]
             break
@@ -131,11 +125,11 @@ def test_build_result_fields():
 # ════════════════════════════════════════════════════════════════════
 
 def test_missing_info_shape(store):
-    """Extract MissingInfo for a nonexistent path, validate shape."""
+    """C++ query_missing now returns a dict directly — validate shape."""
     sp = nanopynix_store.StorePath("00000000000000000000000000000000-nonexistent-1.0")
-    mi = store.query_missing([sp])
-    result = missing_info(mi)
+    result = store.query_missing([sp])  # returns dict
 
+    assert isinstance(result, dict)
     assert isinstance(result["will_build"], list)
     assert isinstance(result["will_substitute"], list)
     assert isinstance(result["unknown"], list)

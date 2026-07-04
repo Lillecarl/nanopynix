@@ -25,41 +25,29 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-// Typed return types for stub generation
-using StorePathList = nb::typed<nb::list, nix::StorePath>;
-
 // =========================================================================
-// StorePath
+// Helpers — convert Nix types to nb::dict for Pydantic validation
 // =========================================================================
 
-static void bind_store_path(nb::module_ &m) {
-    nb::class_<nix::StorePath>(m, "StorePath")
-        .def(nb::init<const std::string &>(), "path"_a,
-             "Parse a store path from its basename (e.g. '<hash>-<name>')")
-        .def("to_string", [](const nix::StorePath &sp) { return std::string(sp.to_string()); })
-        .def("name", [](const nix::StorePath &sp) { return std::string(sp.name()); })
-        .def("hash_part", [](const nix::StorePath &sp) { return std::string(sp.hashPart()); })
-        .def("is_derivation", &nix::StorePath::isDerivation)
-        .def("__str__", [](const nix::StorePath &sp) { return std::string(sp.to_string()); })
-        .def("__repr__", [](const nix::StorePath &sp) {
-            return "StorePath('" + std::string(sp.to_string()) + "')";
-        })
-        .def("__eq__", [](const nix::StorePath &a, const nix::StorePath &b) { return a == b; })
-        .def("__hash__", [](const nix::StorePath &sp) {
-            return std::hash<std::string_view>{}(sp.to_string());
-        });
+static nb::dict store_path_to_dict(const std::string &to_string) {
+    // "<hash>-<name>" — hash is base32, never contains '-'
+    auto hyphen = to_string.find('-');
+    nb::dict d;
+    d["to_string"] = to_string;
+    d["hash_part"] = to_string.substr(0, hyphen);
+    d["name"] = to_string.substr(hyphen + 1);
+    return d;
 }
 
-// =========================================================================
-// BuildResult
-// =========================================================================
+static nb::dict store_path_to_dict(const nix::StorePath &sp) {
+    return store_path_to_dict(std::string(sp.to_string()));
+}
 
-struct PyBuildResult {
-    std::string drv_path;
-    bool success;
-    std::string status;
-    std::string error_msg;
-};
+static nb::list store_paths_to_dict_list(const nix::StorePathSet &paths) {
+    nb::list result;
+    for (auto &p : paths) result.append(store_path_to_dict(p));
+    return result;
+}
 
 static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
@@ -91,32 +79,85 @@ static std::string build_failure_status_str(nix::BuildResult::Failure::Status s)
     return "unknown";
 }
 
-static PyBuildResult build_result_from_kbr(const nix::KeyedBuildResult &kbr,
-                                           const nix::StoreDirConfig &store) {
-    PyBuildResult r;
-    r.drv_path = kbr.path.to_string(store);
-    if (auto *success = kbr.tryGetSuccess()) {
-        r.success = true;
-        r.status = build_success_status_str(success->status);
-    } else if (auto *failure = kbr.tryGetFailure()) {
-        r.success = false;
-        r.status = build_failure_status_str(failure->status);
-        r.error_msg = failure->msg();
-    }
-    return r;
+static nb::dict build_result_to_dict(const std::string &drv_path, bool success,
+                                      const std::string &status, const std::string &error_msg) {
+    nb::dict d;
+    d["drv_path"] = drv_path;
+    d["success"] = success;
+    d["status"] = status;
+    d["error_msg"] = error_msg;
+    return d;
 }
 
-static PyBuildResult build_result_from_br(const nix::BuildResult &br) {
-    PyBuildResult r;
-    if (auto *success = br.tryGetSuccess()) {
-        r.success = true;
-        r.status = build_success_status_str(success->status);
-    } else if (auto *failure = br.tryGetFailure()) {
-        r.success = false;
-        r.status = build_failure_status_str(failure->status);
-        r.error_msg = failure->msg();
-    }
-    return r;
+static nb::dict build_result_from_kbr(const nix::KeyedBuildResult &kbr,
+                                       const nix::StoreDirConfig &store) {
+    auto path = kbr.path.to_string(store);
+    if (auto *success = kbr.tryGetSuccess())
+        return build_result_to_dict(path, true, build_success_status_str(success->status), "");
+    if (auto *failure = kbr.tryGetFailure())
+        return build_result_to_dict(path, false, build_failure_status_str(failure->status), failure->msg());
+    return build_result_to_dict(path, false, "unknown", "");
+}
+
+static nb::dict build_result_from_br(const nix::BuildResult &br) {
+    if (auto *success = br.tryGetSuccess())
+        return build_result_to_dict("", true, build_success_status_str(success->status), "");
+    if (auto *failure = br.tryGetFailure())
+        return build_result_to_dict("", false, build_failure_status_str(failure->status), failure->msg());
+    return build_result_to_dict("", false, "unknown", "");
+}
+
+static nb::dict path_info_to_dict(const nix::ValidPathInfo &info) {
+    nb::dict d;
+    d["path"] = store_path_to_dict(info.path);
+
+    // references — list of store path dicts
+    nb::list refs;
+    for (auto &r : info.references) refs.append(store_path_to_dict(r));
+    d["references"] = refs;
+
+    d["nar_hash"] = info.narHash.to_string(nix::HashFormat::SRI, true);
+    d["nar_size"] = nb::int_(info.narSize);
+
+    if (info.registrationTime)
+        d["registration_time"] = nb::int_(info.registrationTime);
+    else
+        d["registration_time"] = nb::none();
+
+    if (info.deriver)
+        d["deriver"] = store_path_to_dict(*info.deriver);
+    else
+        d["deriver"] = nb::none();
+
+    if (info.ca)
+        d["ca"] = nix::renderContentAddress(*info.ca);
+    else
+        d["ca"] = nb::none();
+
+    d["ultimate"] = info.ultimate;
+    return d;
+}
+
+// =========================================================================
+// StorePath
+// =========================================================================
+
+static void bind_store_path(nb::module_ &m) {
+    nb::class_<nix::StorePath>(m, "StorePath")
+        .def(nb::init<const std::string &>(), "path"_a,
+             "Parse a store path from its basename (e.g. '<hash>-<name>')")
+        .def("to_string", [](const nix::StorePath &sp) { return std::string(sp.to_string()); })
+        .def("name", [](const nix::StorePath &sp) { return std::string(sp.name()); })
+        .def("hash_part", [](const nix::StorePath &sp) { return std::string(sp.hashPart()); })
+        .def("is_derivation", &nix::StorePath::isDerivation)
+        .def("__str__", [](const nix::StorePath &sp) { return std::string(sp.to_string()); })
+        .def("__repr__", [](const nix::StorePath &sp) {
+            return "StorePath('" + std::string(sp.to_string()) + "')";
+        })
+        .def("__eq__", [](const nix::StorePath &a, const nix::StorePath &b) { return a == b; })
+        .def("__hash__", [](const nix::StorePath &sp) {
+            return std::hash<std::string_view>{}(sp.to_string());
+        });
 }
 
 // =========================================================================
@@ -142,115 +183,60 @@ static void process_connection(std::shared_ptr<nix::Store> store, int fd, bool t
 
 // --- PathInfo ---
 
-struct PyPathInfo {
-    std::shared_ptr<const nix::ValidPathInfo> info;
-
-    PyPathInfo(std::shared_ptr<const nix::ValidPathInfo> i) : info(std::move(i)) {}
-
-    nix::StorePath path() const { return info->path; }
-    std::string nar_hash() const { return info->narHash.to_string(nix::HashFormat::SRI, true); }
-    uint64_t nar_size() const { return info->narSize; }
-    std::optional<uint64_t> registration_time() const {
-        if (info->registrationTime) return info->registrationTime;
-        return std::nullopt;
-    }
-    std::optional<nix::StorePath> deriver() const {
-        if (info->deriver) return *info->deriver;
-        return std::nullopt;
-    }
-    StorePathList references() const {
-        nb::list refs;
-        for (auto &r : info->references)
-            refs.append(nb::str(std::string(r.to_string()).c_str()));
-        return refs;
-    }
-    std::optional<std::string> ca() const {
-        if (info->ca) return nix::renderContentAddress(*info->ca);
-        return std::nullopt;
-    }
-    bool ultimate() const { return info->ultimate; }
-};
-
-static PyPathInfo query_path_info(nix::Store &s, const nix::StorePath &path) {
+static nb::dict query_path_info(nix::Store &s, const nix::StorePath &path) {
     auto info = s.queryPathInfo(path);
-    return PyPathInfo(info.get_ptr());
+    return path_info_to_dict(*info);
 }
 
-// --- Closures (needs conversion) ---
+// --- Closures ---
 
-static StorePathList compute_fs_closure(nix::Store &s, const nix::StorePath &path,
+static nb::list compute_fs_closure(nix::Store &s, const nix::StorePath &path,
                                     bool flip, bool include_outputs, bool include_derivers) {
     nix::StorePathSet out;
     s.computeFSClosure(path, out, flip, include_outputs, include_derivers);
-    nb::list result;
-    for (auto &p : out) result.append(nb::str(std::string(p.to_string()).c_str()));
-    return result;
+    return store_paths_to_dict_list(out);
 }
 
 // --- MissingInfo ---
 
-struct PyMissingInfo {
-    StorePathList willBuild;
-    StorePathList willSubstitute;
-    StorePathList unknown;
-    uint64_t downloadSize;
-    uint64_t narSize;
-};
-
-static PyMissingInfo query_missing(nix::Store &s, const std::vector<nix::StorePath> &paths) {
+static nb::dict query_missing(nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(nix::DerivedPath{nix::DerivedPath::Opaque{p}});
     auto m = s.queryMissing(dps);
-    PyMissingInfo result;
-    auto fill = [](auto &set) {
-        nb::list l;
-        for (auto &p : set) l.append(nb::str(std::string(p.to_string()).c_str()));
-        return l;
-    };
-    result.willBuild = fill(m.willBuild);
-    result.willSubstitute = fill(m.willSubstitute);
-    result.unknown = fill(m.unknown);
-    result.downloadSize = m.downloadSize;
-    result.narSize = m.narSize;
-    return result;
+    nb::dict d;
+    d["will_build"] = store_paths_to_dict_list(m.willBuild);
+    d["will_substitute"] = store_paths_to_dict_list(m.willSubstitute);
+    d["unknown"] = store_paths_to_dict_list(m.unknown);
+    d["download_size"] = nb::int_(m.downloadSize);
+    d["nar_size"] = nb::int_(m.narSize);
+    return d;
 }
 
-// --- Collective queries (need conversion) ---
+// --- Collective queries ---
 
-template<typename F>
-static StorePathList collect_store_paths(F &&f) {
-    nb::list result;
-    for (auto &p : f()) result.append(nb::str(std::string(p.to_string()).c_str()));
-    return result;
+static nb::list query_derivation_outputs(nix::Store &s, const nix::StorePath &path) {
+    return store_paths_to_dict_list(s.queryDerivationOutputs(path));
 }
-
-static StorePathList query_derivation_outputs(nix::Store &s, const nix::StorePath &path) {
-    return collect_store_paths([&]{ return s.queryDerivationOutputs(path); });
+static nb::list query_valid_derivers(nix::Store &s, const nix::StorePath &path) {
+    return store_paths_to_dict_list(s.queryValidDerivers(path));
 }
-static StorePathList query_valid_derivers(nix::Store &s, const nix::StorePath &path) {
-    return collect_store_paths([&]{ return s.queryValidDerivers(path); });
+static nb::list query_all_valid_paths(nix::Store &s) {
+    return store_paths_to_dict_list(s.queryAllValidPaths());
 }
-static StorePathList query_all_valid_paths(nix::Store &s) {
-    return collect_store_paths([&]{ return s.queryAllValidPaths(); });
-}
-static StorePathList query_referrers(nix::Store &s, const nix::StorePath &path) {
+static nb::list query_referrers(nix::Store &s, const nix::StorePath &path) {
     nix::StorePathSet refs;
     s.queryReferrers(path, refs);
-    nb::list result;
-    for (auto &p : refs) result.append(nb::str(std::string(p.to_string()).c_str()));
-    return result;
+    return store_paths_to_dict_list(refs);
 }
-static StorePathList query_substitutable_paths(nix::Store &s, const std::vector<nix::StorePath> &paths) {
+static nb::list query_substitutable_paths(nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::StorePathSet ps(paths.begin(), paths.end());
     auto subs = s.querySubstitutablePaths(ps);
-    nb::list result;
-    for (auto &p : subs) result.append(nb::str(std::string(p.to_string()).c_str()));
-    return result;
+    return store_paths_to_dict_list(subs);
 }
 
-// --- Build (needs DerivedPath conversion) ---
+// --- Build ---
 
-static std::vector<PyBuildResult> build_paths_with_results(
+static nb::list build_paths_with_results(
         nix::Store &s, const std::vector<nix::StorePath> &paths,
         std::shared_ptr<nix::Store> evalStore = nullptr) {
     nix::DerivedPaths dps;
@@ -258,8 +244,8 @@ static std::vector<PyBuildResult> build_paths_with_results(
     auto results = evalStore
         ? s.buildPathsWithResults(dps, nix::bmNormal, evalStore)
         : s.buildPathsWithResults(dps);
-    std::vector<PyBuildResult> out;
-    for (auto &kbr : results) out.push_back(build_result_from_kbr(kbr, s));
+    nb::list out;
+    for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
     return out;
 }
 
@@ -360,8 +346,8 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
     return d;
 }
 
-static PyBuildResult build_derivation(nix::Store &s, const nix::StorePath &drvPath,
-                                       nix::BuildMode buildMode) {
+static nb::dict build_derivation(nix::Store &s, const nix::StorePath &drvPath,
+                                  nix::BuildMode buildMode) {
     auto drv = s.readDerivation(drvPath);
     auto result = s.buildDerivation(drvPath,
         static_cast<const nix::BasicDerivation &>(drv), buildMode);
@@ -369,32 +355,8 @@ static PyBuildResult build_derivation(nix::Store &s, const nix::StorePath &drvPa
 }
 
 // =========================================================================
-// Bindings
+// Store bindings
 // =========================================================================
-
-static void bind_path_info(nb::module_ &m) {
-    nb::class_<PyPathInfo>(m, "PathInfo")
-        .def_prop_ro("path", &PyPathInfo::path)
-        .def_prop_ro("nar_hash", &PyPathInfo::nar_hash)
-        .def_prop_ro("nar_size", &PyPathInfo::nar_size)
-        .def_prop_ro("registration_time", &PyPathInfo::registration_time)
-        .def_prop_ro("deriver", &PyPathInfo::deriver)
-        .def_prop_ro("references", &PyPathInfo::references)
-        .def_prop_ro("ca", &PyPathInfo::ca)
-        .def_prop_ro("ultimate", &PyPathInfo::ultimate)
-        .def("__repr__", [](const PyPathInfo &p) {
-            return "PathInfo('" + std::string(p.info->path.to_string()) + "')";
-        });
-}
-
-static void bind_missing_info(nb::module_ &m) {
-    nb::class_<PyMissingInfo>(m, "MissingInfo")
-        .def_prop_ro("will_build", [](const PyMissingInfo &i) { return i.willBuild; })
-        .def_prop_ro("will_substitute", [](const PyMissingInfo &i) { return i.willSubstitute; })
-        .def_prop_ro("unknown", [](const PyMissingInfo &i) { return i.unknown; })
-        .def_prop_ro("download_size", [](const PyMissingInfo &i) { return i.downloadSize; })
-        .def_prop_ro("nar_size", [](const PyMissingInfo &i) { return i.narSize; });
-}
 
 static void bind_store(nb::module_ &m) {
     nb::class_<nix::Store>(m, "Store")
@@ -431,19 +393,6 @@ static void bind_store(nb::module_ &m) {
         .def("add_temp_root", [](nix::Store &s, const nix::StorePath &p) { s.addTempRoot(p); }, "path"_a);
 }
 
-static void bind_build_result(nb::module_ &m) {
-    nb::class_<PyBuildResult>(m, "BuildResult")
-        .def_ro("drv_path", &PyBuildResult::drv_path)
-        .def_ro("success", &PyBuildResult::success)
-        .def_ro("status", &PyBuildResult::status)
-        .def_ro("error_msg", &PyBuildResult::error_msg)
-        .def("__repr__", [](const PyBuildResult &r) -> std::string {
-            if (r.success)
-                return "BuildResult(success=True, status='" + r.status + "')";
-            return "BuildResult(success=False, status='" + r.status + "', error='" + r.error_msg + "')";
-        });
-}
-
 // =========================================================================
 
 NB_MODULE(nanopynix_store, m) {
@@ -464,10 +413,7 @@ NB_MODULE(nanopynix_store, m) {
           "Register a Python-backed store implementation.");
 
     bind_store_path(m);
-    bind_path_info(m);
-    bind_missing_info(m);
     bind_store(m);
-    bind_build_result(m);
 
     // ── Exception bindings ──────────────────────────────────────
     nb::exception<nix::InvalidPath> py_invalid_path(m, "InvalidPath", PyExc_RuntimeError);
