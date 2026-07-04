@@ -13,10 +13,7 @@ import multiprocessing as _mp
 import time
 import traceback
 
-try:
-    _mp.set_start_method("forkserver")
-except RuntimeError:
-    pass  # already set by outer process (e.g. pytest)
+_mp_ctx = _mp.get_context("forkserver")
 
 from nanopynix.exceptions import from_response
 
@@ -48,7 +45,7 @@ class _WorkerRef:
 
     def __init__(
         self,
-        proc: _mp.Process,
+        proc: _mp_ctx.Process,
         req_conn,
         resp_conn,
         timeout: float = _RPC_TIMEOUT,
@@ -244,13 +241,13 @@ class WorkerPool:
         self._worker_id_counter += 1
 
         # Req pipe: parent → child.  conn2 is the send end.
-        req_child_recv, req_parent_send = _mp.Pipe(duplex=False)
+        req_child_recv, req_parent_send = _mp_ctx.Pipe(duplex=False)
         # Resp pipe: child → parent.  conn2 is the send end.
-        resp_parent_recv, resp_child_send = _mp.Pipe(duplex=False)
+        resp_parent_recv, resp_child_send = _mp_ctx.Pipe(duplex=False)
 
         import nanopynix._worker as _worker_module
 
-        proc = _mp.Process(
+        proc = _mp_ctx.Process(
             target=_worker_module.main,
             args=(req_child_recv, resp_child_send),
             daemon=True,
