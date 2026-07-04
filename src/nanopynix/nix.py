@@ -15,6 +15,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 from nanopynix._pool import WorkerPool
@@ -55,7 +56,12 @@ class Nix:
 
     async def close(self) -> None:
         """Shut down all workers."""
-        await self._pool.close()
+        try:
+            async with asyncio.timeout(60):
+                await self._pool.close()
+        except TimeoutError:
+            import sys
+            print("nanopynix: timed out closing worker pool", file=sys.stderr)
 
     async def __aenter__(self) -> Nix:
         await self.open()

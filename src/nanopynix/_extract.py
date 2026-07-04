@@ -90,8 +90,13 @@ def locked_input(li_dict: dict, /) -> dict:
 
     if "ref" in li_dict:
         ref_str = str(li_dict["ref"])
-        fr = nanopynix_flake.parse_flake_ref(ref_str)
-        result["attrs"] = flake_ref_attrs(fr)
+        try:
+            fr = nanopynix_flake.parse_flake_ref(ref_str)
+        except Exception:
+            # Malformed ref — return as raw string attrs
+            result["attrs"] = {"ref": ref_str}
+        else:
+            result["attrs"] = flake_ref_attrs(fr)
     else:
         result["attrs"] = None
 

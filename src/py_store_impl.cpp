@@ -1,5 +1,7 @@
 #include "py_store_impl.hh"
 
+#include <cstdio>
+
 #include <nix/store/path-info.hh>
 #include <nix/store/realisation.hh>
 #include <nix/util/hash.hh>
@@ -62,7 +64,9 @@ void PyStoreImpl::queryPathInfoUncached(
             callback(info);
             return;
         }
-    } catch (std::exception &) {}
+    } catch (std::exception &e) {
+        fprintf(stderr, "nanopynix: Python query_path_info failed: %s; falling back to underlying store\n", e.what());
+    }
     if (underlying) {
         auto info = underlying->queryPathInfo(path);
         // Convert to shared_ptr for callback

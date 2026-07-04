@@ -14,6 +14,8 @@ from pydantic import TypeAdapter
 
 from nanopynix.models import BuildResult, MissingInfo, PathInfo, StorePath
 
+import nanopynix_store  # BuildMode enum
+
 if TYPE_CHECKING:
     from nanopynix._pool import WorkerPool
 
@@ -132,10 +134,12 @@ class Store:
         return await self._pool.call("store", "read_derivation", [s])
 
     async def build_derivation(
-        self, drv_path: StorePath | str, build_mode: int = 0,
+        self, drv_path: StorePath | str,
+        build_mode: nanopynix_store.BuildMode | int = nanopynix_store.BuildMode.Normal,
     ) -> BuildResult:
         s = drv_path.to_string if isinstance(drv_path, StorePath) else drv_path
-        data = await self._pool.call("store", "build_derivation", [s, build_mode])
+        mode = int(build_mode)
+        data = await self._pool.call("store", "build_derivation", [s, mode])
         return BuildResult.model_validate(data)
 
     # ── GC ────────────────────────────────────────────────────────
