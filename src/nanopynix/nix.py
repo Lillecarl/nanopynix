@@ -70,6 +70,8 @@ class Nix:
         Each event is a validated ``LogEvent`` model.
         """
         async for raw in self._pool.log_stream():
+            if raw is None:
+                continue  # worker close sentinel
             # Wire format uses "id"; model uses "request_id"
             # result events carry a ResultType int in args[1]
             data: dict = {
