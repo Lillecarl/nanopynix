@@ -102,6 +102,8 @@ _CLASSIFIERS: list[tuple[re.Pattern, type[NixError], str]] = [
     (re.compile(r"assertion .+ failed"),    AssertionError_,        "AssertionError"),
     (re.compile(r"access to (absolute path|URI).+forbidden"), RestrictedPathError, "RestrictedPathError"),
     (re.compile(r"threw.*(?:while|error)"), ThrownError,           "ThrownError"),
+    (re.compile(r"function .+ called without required argument"), MissingArgumentError, "MissingArgumentError"),
+    (re.compile(r"invalid value.*expected"),   UsageError, "UsageError"),
     (re.compile(r"expected (?:a |an )"),    TypeError_,            "TypeError"),
     (re.compile(r"cannot coerce .+ to a"),  TypeError_,            "TypeError"),
     (re.compile(r"cannot add .+ to"),       TypeError_,            "TypeError"),
@@ -109,7 +111,6 @@ _CLASSIFIERS: list[tuple[re.Pattern, type[NixError], str]] = [
     (re.compile(r"but found"),              TypeError_,            "TypeError"),
     (re.compile(r"builtin .+ not found"),   EvalError,             "EvalError"),
     (re.compile(r"attribute .+ missing"),   EvalError,             "EvalError"),
-    (re.compile(r"function .+ called without required argument"), MissingArgumentError, "MissingArgumentError"),
     (re.compile(r"integer overflow"),       EvalError,             "EvalError"),
     (re.compile(r"doesn't represent an absolute path"), EvalError, "EvalError"),
     # ── Parse errors ─────────────────────────────────────────────
@@ -122,7 +123,6 @@ _CLASSIFIERS: list[tuple[re.Pattern, type[NixError], str]] = [
     (re.compile(r"lacks a signature"),         StoreError, "StoreError"),
     (re.compile(r"is not a valid derivation"), StoreError, "StoreError"),
     # ── Usage errors ─────────────────────────────────────────────
-    (re.compile(r"invalid value.*expected"),   UsageError, "UsageError"),
     (re.compile(r"setting .+ is a path and paths cannot be empty"), UsageError, "UsageError"),
     # ── System errors ────────────────────────────────────────────
     (re.compile(r"error \(ignored\)"), NixError, "Error"),  # swallowed by ignoreException
