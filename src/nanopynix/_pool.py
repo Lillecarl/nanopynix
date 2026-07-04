@@ -247,9 +247,11 @@ class WorkerPool:
 
         import nanopynix._worker as _worker_module
 
+        args = [req_child_recv, resp_child_send]
+
         proc = _mp_ctx.Process(
             target=_worker_module.main,
-            args=(req_child_recv, resp_child_send),
+            args=tuple(args),
             daemon=True,
         )
         proc.start()
