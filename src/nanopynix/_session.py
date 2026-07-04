@@ -121,9 +121,11 @@ class EvalSession:
     async def __aexit__(self, *args: object) -> None:
         self._active[0] = False
         if self._rw is not None:
-            await self._rw.send_recv("eval", "release_all", [], timeout=self._timeout)
-            await self._rw.release()
-            self._rw = None
+            try:
+                await self._rw.send_recv("eval", "release_all", [], timeout=self._timeout)
+            finally:
+                await self._rw.release()
+                self._rw = None
 
     async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         result = await self._rw.send_recv("eval", "eval_file", [path], timeout=self._resolve_timeout(timeout))
