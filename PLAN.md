@@ -294,14 +294,12 @@ binding the ``BaseError`` / ``ErrorInfo`` types with nanobind accessors.
 ``Protocol`` or ABC but one isn't needed — ``Store._pool`` is typed as
 ``WorkerPool`` directly (see P8).
 
-**P4 — `EvalSession` pierces the `WorkerPool` abstraction**
+**P4 — `EvalSession` pierces the `WorkerPool` abstraction**  ✅ DONE
 
-Store calls go through `pool._send_recv()` (acquire→call→release).
-Eval calls go through `pool._acquire()` / `pool._release()` (private
-methods) + direct `worker.send_recv()`.  Two dispatch patterns.
-
-Fix: add a proper `pool.reserve()` → `ReservedWorker` context manager that
-both `_send_recv` (internally) and `EvalSession` use.
+Fixed: ``WorkerPool.reserve()`` → ``ReservedWorker`` (public API).
+Both ``_send_recv`` (internally) and ``EvalSession`` use the same
+``reserve() → send_recv → release()`` path.  ``_acquire``/``_release``
+stay private — only called by ``reserve()`` and ``ReservedWorker.release()``.
 
 **P5 — `ValueProxy` holds a raw `_WorkerRef`**
 

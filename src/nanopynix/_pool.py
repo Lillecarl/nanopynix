@@ -184,6 +184,39 @@ class _WorkerRef:
 
 
 # ════════════════════════════════════════════════════════════════════
+# ReservedWorker — public token for an exclusive worker lease
+# ════════════════════════════════════════════════════════════════════
+
+class ReservedWorker:
+    """Exclusive lease on a pool worker, obtained via ``WorkerPool.reserve()``.
+
+    Delegates ``send_recv`` to the underlying ``_WorkerRef`` and returns
+    the worker to the pool on ``release()``.
+    """
+
+    __slots__ = ("_pool", "worker", "_released")
+
+    def __init__(self, pool: WorkerPool, worker: _WorkerRef) -> None:
+        self._pool = pool
+        self.worker = worker
+        self._released = False
+
+    async def send_recv(
+        self, module: str, fn: str, args: list, timeout: float | None = None,
+    ) -> dict:
+        """Send an RPC call on the reserved worker and await the response."""
+        if self._released:
+            raise RuntimeError("ReservedWorker has been released")
+        return await self.worker.send_recv(module, fn, args, timeout=timeout)
+
+    async def release(self) -> None:
+        """Return the worker to the pool.  Idempotent — safe to call twice."""
+        if not self._released:
+            self._released = True
+            await self._pool._release(self.worker)
+
+
+# ════════════════════════════════════════════════════════════════════
 # WorkerPool
 # ════════════════════════════════════════════════════════════════════
 
@@ -289,12 +322,22 @@ class WorkerPool:
                 break  # _read_responses exited
             await self._log_events.put(msg)
 
-    async def _send_recv(self, module: str, fn: str, args: list, timeout: float | None = None) -> dict:
+    async def reserve(self) -> ReservedWorker:
+        """Acquire an exclusive worker lease from the pool.
+
+        Returns a ``ReservedWorker`` that must be released via ``.release()``.
+        Used internally by ``_send_recv`` (single-call acquire→release) and
+        externally by ``EvalSession`` (multi-call exclusive lease).
+        """
         worker = await self._acquire()
+        return ReservedWorker(self, worker)
+
+    async def _send_recv(self, module: str, fn: str, args: list, timeout: float | None = None) -> dict:
+        rw = await self.reserve()
         try:
-            return await worker.send_recv(module, fn, args, timeout=timeout)
+            return await rw.send_recv(module, fn, args, timeout=timeout)
         finally:
-            await self._release(worker)
+            await rw.release()
 
     async def _acquire(self) -> _WorkerRef:
         while True:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from nanopynix._pool import WorkerPool, _WorkerRef
+    from nanopynix._pool import ReservedWorker, WorkerPool, _WorkerRef
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -83,30 +83,30 @@ class ValueProxy:
 class EvalSession:
     """Holds a worker exclusively for the duration of an eval session."""
 
-    __slots__ = ("_pool", "_worker", "_timeout")
+    __slots__ = ("_pool", "_rw", "_timeout")
 
     def __init__(self, pool: WorkerPool, timeout: float | None = None) -> None:
         self._pool = pool
-        self._worker: _WorkerRef | None = None
+        self._rw: ReservedWorker | None = None
         self._timeout = timeout
 
     async def __aenter__(self) -> EvalSession:
-        self._worker = await self._pool._acquire()
+        self._rw = await self._pool.reserve()
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        if self._worker is not None:
-            await self._worker.send_recv("eval", "release_all", [], timeout=self._timeout)
-            await self._pool._release(self._worker)
-            self._worker = None
+        if self._rw is not None:
+            await self._rw.send_recv("eval", "release_all", [], timeout=self._timeout)
+            await self._rw.release()
+            self._rw = None
 
     async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
-        result = await self._worker.send_recv("eval", "eval_file", [path], timeout=self._resolve_timeout(timeout))
-        return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout)
+        result = await self._rw.send_recv("eval", "eval_file", [path], timeout=self._resolve_timeout(timeout))
+        return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout)
 
     async def eval_string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
-        result = await self._worker.send_recv("eval", "eval_string", [expr, path], timeout=self._resolve_timeout(timeout))
-        return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout)
+        result = await self._rw.send_recv("eval", "eval_string", [expr, path], timeout=self._resolve_timeout(timeout))
+        return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout)
 
     def _resolve_timeout(self, override: float | None) -> float | None:
         if override is not None:
