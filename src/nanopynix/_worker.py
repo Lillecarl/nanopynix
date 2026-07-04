@@ -207,6 +207,14 @@ def _get_es(store):
     return _es
 
 
+def _reset_es():
+    """Release all handles and destroy the EvalState for a fresh session."""
+    global _es
+    if _es is not None:
+        _es.release_all_exported()
+        _es = None
+
+
 def _eval_dispatch(store):
     """Return dispatch dict for eval operations."""
 
@@ -229,5 +237,5 @@ def _eval_dispatch(store):
         "has_attr":    lambda a: _get_es(store).value_from_handle(a[0]).has_attr(a[1]),
         "type_name":   lambda a: _get_es(store).value_from_handle(a[0]).type_name(),
         "release":     lambda a: _get_es(store).release_exported(a[0]),
-        "release_all": lambda _: _get_es(store).release_all_exported(),
+        "release_all": lambda _: _reset_es(),
     }
