@@ -25,6 +25,7 @@ from nanopynix.models import (
     LogEvent,
     MissingInfo,
     PathInfo,
+    ResultType,
     StorePath,
 )
 from nanopynix.nix import Nix
@@ -78,6 +79,7 @@ __all__ = [
     "ValueProxy",
     "WorkerDied",
     "PathInfo",
+    "ResultType",
     "Store",
     "StorePath",
     "log_stream",

@@ -71,11 +71,15 @@ class Nix:
         """
         async for raw in self._pool.log_stream():
             # Wire format uses "id"; model uses "request_id"
-            yield LogEvent.model_validate({
+            # result events carry a ResultType int in args[1]
+            data: dict = {
                 "request_id": raw["id"],
                 "action": raw["action"],
                 "args": raw["args"],
-            })
+            }
+            if raw["action"] == "result" and len(raw["args"]) > 1:
+                data["result_type"] = raw["args"][1]
+            yield LogEvent.model_validate(data)
 
     def eval(self) -> EvalSession:
         """Acquire a worker exclusively for an eval session.

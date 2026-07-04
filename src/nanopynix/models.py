@@ -7,6 +7,8 @@ facade boundary via ``FlakeRef::fromAttrs(attrs).to_string()`` and
 
 from __future__ import annotations
 
+from enum import IntEnum
+
 from pydantic import BaseModel, computed_field, Field
 
 
@@ -102,3 +104,26 @@ class LogEvent(BaseModel):
     request_id: int = Field(default=0, description="RPC request ID for multiplexing")
     action: str = Field(description="'msg', 'warn', 'error', 'start', 'stop', or 'result'")
     args: list = Field(default_factory=list, description="Action-specific arguments")
+    result_type: ResultType | None = Field(
+        default=None,
+        description="ResultType when action='result' (None for other actions)",
+    )
+
+
+class ResultType(IntEnum):
+    """Nix ``ResultType`` enum — activity build/check result types.
+
+    Values match ``nix::ResultType`` from ``<nix/util/logging.hh>``.
+    These appear as ``LogEvent.action == 'result'`` with the type in
+    ``LogEvent.result_type``.
+    """
+
+    file_linked = 100
+    build_log_line = 101
+    untrusted_path = 102
+    corrupted_path = 103
+    set_phase = 104
+    progress = 105
+    set_expected = 106
+    post_build_log_line = 107
+    fetch_status = 108
