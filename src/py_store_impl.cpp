@@ -12,14 +12,6 @@ static bool py_has_method(nb::object obj, const char *method) {
     return nb::hasattr(obj, method) && nb::isinstance<nb::callable>(obj.attr(method));
 }
 
-/// If Python has the method, call it. Otherwise delegate to underlying store.
-#define TRY_PYTHON_OR_UNDERLYING(py, method, args, underlying_call) \
-    do { \
-        nb::gil_scoped_acquire gil; \
-        if (py_has_method(py, #method)) return; \
-    } while(0); \
-    underlying_call;
-
 // =========================================================================
 // PyStoreImpl
 // =========================================================================
