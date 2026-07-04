@@ -41,7 +41,7 @@ class _WorkerRef:
     __slots__ = (
         "_proc", "_req_conn", "_resp_conn", "req_id_base", "_next_id",
         "_responses", "_events", "_done", "_dead", "_timeout", "_last_used",
-        "_last_activity",
+        "_last_activity", "_read_task",
     )
 
     def __init__(
@@ -64,6 +64,7 @@ class _WorkerRef:
         self._timeout = timeout
         self._last_used = time.monotonic()
         self._last_activity = time.monotonic()
+        self._read_task: asyncio.Task | None = None
 
     @property
     def is_dead(self) -> bool:
@@ -94,6 +95,7 @@ class _WorkerRef:
             traceback.print_exc()
         finally:
             self._dead.set()
+            self._events.put_nowait(None)  # unblock _relay_events
 
     async def send_recv(self, module: str, fn: str, args: list, timeout: float | None = None) -> dict:
         """Send a call and wait for the matching response.
@@ -180,6 +182,11 @@ class _WorkerRef:
         if self._proc.is_alive():
             self._proc.kill()
             self._proc.join()
+        if self._read_task is not None:
+            try:
+                await asyncio.wait_for(self._read_task, timeout=5.0)
+            except (asyncio.TimeoutError, Exception):
+                self._read_task.cancel()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -210,6 +217,7 @@ class WorkerPool:
         self._workers: list[_WorkerRef] = []
         self._free: asyncio.Queue[_WorkerRef] = asyncio.Queue()
         self._log_events: asyncio.Queue = asyncio.Queue()
+        self._relay_tasks: list[asyncio.Task] = []
         self._worker_id_counter = 0
 
     @property
@@ -227,6 +235,12 @@ class WorkerPool:
         self._workers.clear()
         while not self._free.empty():
             self._free.get_nowait()
+        for task in self._relay_tasks:
+            try:
+                await asyncio.wait_for(task, timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                task.cancel()
+        self._relay_tasks.clear()
 
     async def _spawn(self) -> _WorkerRef:
         wid = self._worker_id_counter
@@ -266,8 +280,8 @@ class WorkerPool:
         req_id_base = wid << 48
         worker = _WorkerRef(proc, req_parent_send, resp_parent_recv, req_id_base, timeout=self._rpc_timeout)
 
-        asyncio.ensure_future(worker._read_responses())
-        asyncio.ensure_future(self._relay_events(worker))
+        worker._read_task = asyncio.ensure_future(worker._read_responses())
+        self._relay_tasks.append(asyncio.ensure_future(self._relay_events(worker)))
 
         self._workers.append(worker)
         await self._free.put(worker)
@@ -276,6 +290,8 @@ class WorkerPool:
     async def _relay_events(self, worker: _WorkerRef) -> None:
         while True:
             msg = await worker._events.get()
+            if msg is None:
+                break  # _read_responses exited
             await self._log_events.put(msg)
 
     async def _send_recv(self, module: str, fn: str, args: list, timeout: float | None = None) -> dict:
