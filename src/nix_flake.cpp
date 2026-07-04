@@ -5,15 +5,14 @@
 #include <nanobind/stl/map.h>
 #include <nanobind/typing.h>
 
-#include <variant>
-#include <type_traits>
-
 #include <nix/flake/flake.hh>
 #include <nix/flake/flakeref.hh>
 #include <nix/flake/lockfile.hh>
 #include <nix/flake/settings.hh>
 #include <nix/fetchers/fetchers.hh>
 #include <nix/store/store-api.hh>
+
+#include "attrs_util.hh"
 
 #include "py_eval.hh"
 
@@ -32,20 +31,7 @@ struct PyFlakeRef {
     std::string to_string() const { return ref.to_string(); }
 
     nb::dict to_attrs() const {
-        auto attrs = ref.toAttrs();
-        nb::dict d;
-        for (auto &[k, v] : attrs) {
-            std::visit([&](auto &&val) {
-                using T = std::decay_t<decltype(val)>;
-                if constexpr (std::is_same_v<T, std::string>)
-                    d[nb::str(k.c_str())] = nb::str(val.c_str());
-                else if constexpr (std::is_same_v<T, uint64_t>)
-                    d[nb::str(k.c_str())] = nb::int_(val);
-                else if constexpr (std::is_same_v<T, nix::Explicit<bool>>)
-                    d[nb::str(k.c_str())] = nb::bool_(val.t);
-            }, v);
-        }
-        return d;
+        return attrs_to_nb_dict(ref.toAttrs());
     }
 };
 

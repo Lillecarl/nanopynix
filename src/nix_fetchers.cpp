@@ -4,14 +4,13 @@
 #include <nanobind/stl/map.h>
 #include <nanobind/typing.h>
 
-#include <variant>
-#include <type_traits>
-
 #include <nix/fetchers/fetchers.hh>
 #include <nix/fetchers/fetch-settings.hh>
 #include <nix/fetchers/fetch-to-store.hh>
 #include <nix/fetchers/attrs.hh>
 #include <nix/store/store-api.hh>
+
+#include "attrs_util.hh"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -29,20 +28,7 @@ struct PyInput {
     std::string to_url_string() const { return input.toURLString(); }
 
     nb::typed<nb::dict, nb::str> to_attrs() const {
-        auto attrs = input.toAttrs();
-        nb::dict d;
-        for (auto &[k, v] : attrs) {
-            std::visit([&](auto &&val) {
-                using T = std::decay_t<decltype(val)>;
-                if constexpr (std::is_same_v<T, std::string>)
-                    d[nb::str(k.c_str())] = nb::str(val.c_str());
-                else if constexpr (std::is_same_v<T, uint64_t>)
-                    d[nb::str(k.c_str())] = nb::int_(val);
-                else if constexpr (std::is_same_v<T, nix::Explicit<bool>>)
-                    d[nb::str(k.c_str())] = nb::bool_(val.t);
-            }, v);
-        }
-        return d;
+        return attrs_to_nb_dict(input.toAttrs());
     }
 
     std::optional<std::string> get_fingerprint(nix::Store &store) const {
