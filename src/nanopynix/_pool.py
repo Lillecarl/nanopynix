@@ -259,8 +259,15 @@ class WorkerPool:
             await self._spawn()
 
     async def close(self) -> None:
-        for w in list(self._workers):
-            await w.close()
+        # Close all workers concurrently — one stuck worker shouldn't block others
+        results = await asyncio.gather(
+            *(w.close() for w in self._workers),
+            return_exceptions=True,
+        )
+        for r in results:
+            if isinstance(r, Exception):
+                import traceback
+                traceback.print_exception(type(r), r, r.__traceback__)
         self._workers.clear()
         while not self._free.empty():
             self._free.get_nowait()
