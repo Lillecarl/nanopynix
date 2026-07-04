@@ -359,7 +359,6 @@ after the worker process exits — no dangling tasks in asyncio strict mode.
 src/
     nanopynix/
         __init__.py    — L2 re-exports + L1 escape hatch
-        _async.py      — AsyncStore, AsyncEvalState (in-process path)
         _extract.py    — L1→dict converters
         _pool.py       — WorkerPool + _WorkerRef
         _session.py    — EvalSession + ValueProxy

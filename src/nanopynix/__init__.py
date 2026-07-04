@@ -82,7 +82,6 @@ __all__ = [
     "ResultType",
     "Store",
     "StorePath",
-    "log_stream",
     # L1
     "EvalState",
     "Value",

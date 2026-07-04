@@ -72,7 +72,7 @@ buildPythonPackage {
 
   postInstall = ''
     _site="$out/${python.sitePackages}"
-    for mod in nanopynix_util nanopynix_store nanopynix_expr nanopynix_fetchers nanopynix_flake; do
+    for mod in nanopynix_util nanopynix_store nanopynix_expr nanopynix_fetchers nanopynix_flake nanopynix_main; do
       _pat=""
       if [ -f "src/$mod.pat" ]; then
         _pat="-p src/$mod.pat"
