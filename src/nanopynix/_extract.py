@@ -104,8 +104,9 @@ def locked_input(li_dict: dict, /) -> dict:
 def locked_flake(lf, /) -> dict:
     """Extract a L1 LockedFlake to a dict."""
     inputs = {}
-    for k in lf.inputs:
-        inputs[str(k)] = locked_input(lf.inputs[k])
+    lf_inputs = lf.inputs()
+    for k in lf_inputs:
+        inputs[str(k)] = locked_input(lf_inputs[k])
     return {
         "description": lf.description() if callable(lf.description) else str(lf.description),
         "inputs": inputs,
