@@ -1,6 +1,17 @@
 """Tests for nanopynix_store (StorePath, Store, BuildResult, PathInfo)."""
 
+import os
+
+import pytest
+
 import nanopynix_store
+
+
+def _bash_sp():
+    """Return a StorePath for the system bash binary.  Requires NixOS."""
+    bash = os.readlink("/run/current-system/sw/bin/bash")
+    bash_basename = bash.split("/nix/store/")[1].split("/")[0]
+    return nanopynix_store.StorePath(bash_basename)
 
 
 class TestStorePath:
@@ -47,13 +58,7 @@ class TestStore:
         assert len(uri) > 0
 
     def test_is_valid_path_valid(self, store):
-        """Check that a real store path from bash is valid."""
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        # Extract the store path basename
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         assert store.is_valid_path(sp)
 
     def test_is_valid_path_invalid(self, store):
@@ -65,11 +70,7 @@ class TestStore:
         assert sp.name() == "bogus"
 
     def test_build_paths_with_results_already_valid(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         results = store.build_paths_with_results([sp])
         assert len(results) == 1
         assert results[0]["success"]
@@ -83,43 +84,30 @@ class TestStore:
         assert results[0]["status"] != "already-valid"
 
     def test_query_path_info(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         info = store.query_path_info(sp)
         assert isinstance(info["nar_hash"], str)
         assert len(info["nar_hash"]) > 0
         refs = info["references"]
         assert isinstance(refs, list)
         # path is a dict with to_string/hash_part/name
-        assert info["path"]["to_string"] == bash_basename
+        assert info["path"]["to_string"] == sp.to_string()
         assert info["nar_size"] > 0
 
     def test_query_path_from_hash_part(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        hash_part = bash_basename.split("-")[0]
-        sp = store.query_path_from_hash_part(hash_part)
-        assert sp is not None
+        sp = _bash_sp()
+        hash_part = sp.hash_part()
+        result = store.query_path_from_hash_part(hash_part)
+        assert result is not None
 
     def test_compute_fs_closure(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         closure = store.compute_fs_closure(sp)
         assert isinstance(closure, list)
         assert len(closure) > 0
 
     def test_query_derivation_outputs(self, store):
-        # bash is not a derivation, this returns empty or errors depending on store impl.
-        # Skip the invalid-path test; query_derivation_outputs only works on drv paths.
-        pass
+        pytest.skip("requires a real .drv path — bash is not a derivation")
 
     def test_query_all_valid_paths(self, store):
         paths = store.query_all_valid_paths()
@@ -127,31 +115,19 @@ class TestStore:
         assert len(paths) > 0
 
     def test_query_referrers(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         referrers = store.query_referrers(sp)
         assert isinstance(referrers, list)
 
     def test_add_temp_root(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         store.add_temp_root(sp)
         # Should not raise
 
 
 class TestBuildResult:
     def test_success_repr(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         results = store.build_paths_with_results([sp])
         r = results[0]
         assert r["success"]
@@ -160,32 +136,20 @@ class TestBuildResult:
 
 class TestPathInfo:
     def test_repr(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         info = store.query_path_info(sp)
         assert isinstance(info, dict)
         assert "nar_hash" in info
 
     def test_registration_time(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         info = store.query_path_info(sp)
         rt = info["registration_time"]
         if rt is not None:
             assert rt > 0
 
     def test_deriver(self, store):
-        import os
-
-        bash = os.readlink("/run/current-system/sw/bin/bash")
-        bash_basename = bash.split("/nix/store/")[1].split("/")[0]
-        sp = nanopynix_store.StorePath(bash_basename)
+        sp = _bash_sp()
         info = store.query_path_info(sp)
         # deriver may be None for non-derivation outputs
         deriver = info["deriver"]
