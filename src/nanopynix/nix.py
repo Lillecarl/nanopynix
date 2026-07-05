@@ -48,12 +48,14 @@ class Session:
         *,
         store_uri: str = "auto",
         eval_store_uri: str | None = None,
+        nix_conf: str | None = "/etc/nix/nix.conf",
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
     ) -> None:
         self._manager = _WorkerManager(
             store_uri=store_uri,
             eval_store_uri=eval_store_uri,
+            nix_conf=nix_conf,
             settings=settings,
             experimental_features=experimental_features,
         )

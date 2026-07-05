@@ -209,7 +209,10 @@ class TestBuild:
         assert result[0].success is True
 
     async def test_read_derivation(self, store, pool):
-        pool.call.return_value = {"name": "foo", "outputs": {}, "inputSrcs": [], "inputDrvs": []}
+        pool.call.return_value = {
+            "name": "foo", "platform": "x86_64-linux", "builder": "/bin/sh",
+            "args": [], "env": [], "outputs": {}, "inputSrcs": [], "inputDrvs": [],
+        }
         result = await store.read_derivation("/nix/store/aaa-foo.drv")
         assert isinstance(result, dict)
         assert result["name"] == "foo"
