@@ -231,6 +231,7 @@ def _eval_dispatch(store):
         "eval_file":   lambda a: _export(_get_es(store).eval_file(a[0])),
         "eval_string": lambda a: _export(_get_es(store).eval_string(a[0], a[1] if len(a) > 1 else "<string>")),
         "force":       lambda a: _force_handle(a[0]),
+        "force_deep":  lambda a: _get_es(store).value_from_handle(a[0]).to_python(),
         "attr":        lambda a: _export(_get_es(store).value_from_handle(a[0]).attr_get(a[1])),
         "list_get":    lambda a: _export(_get_es(store).value_from_handle(a[0]).list_get(a[1])),
         "list_length": lambda a: _get_es(store).value_from_handle(a[0]).list_length(),

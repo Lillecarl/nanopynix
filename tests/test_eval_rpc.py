@@ -10,7 +10,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_eval_file_simple(tmp_path):
-    """eval_file returns a ValueProxy, force() resolves to Python dict."""
+    """eval_file returns a ValueProxy, force_deep() resolves to Python dict."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; b = \"hello\"; c = true; }")
 
@@ -18,7 +18,7 @@ async def test_eval_file_simple(tmp_path):
         async with nix.eval() as session:
             root = await session.eval_file(str(nix_file))
             assert root.type_name == "attrs"
-            result = await root.force()
+            result = await root.force_deep()
             assert result == {"a": 1, "b": "hello", "c": True}
 
 
@@ -86,15 +86,15 @@ async def test_eval_has_attr(tmp_path):
 
 
 async def test_eval_force_does_not_consume(tmp_path):
-    """force() does NOT release the handle — we can force again."""
+    """force_deep() does NOT release the handle — we can force again."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; }")
 
     async with Nix() as nix:
         async with nix.eval() as session:
             root = await session.eval_file(str(nix_file))
-            r1 = await root.force()
-            r2 = await root.force()
+            r1 = await root.force_deep()
+            r2 = await root.force_deep()
             assert r1 == r2 == {"a": 1}
 
 
