@@ -31,7 +31,7 @@ from nanopynix.models import (
 )
 from nanopynix.nix import Nix, Session
 from nanopynix._pool import WorkerDied
-from nanopynix._session import EvalSession, ValueProxy
+from nanopynix._session import EvalSession, ValueAttrs, ValueList, ValueProxy
 from nanopynix.store import StoreHandle
 
 # ── L1 bindings (re-exported for power users) ───────────────────────
@@ -79,6 +79,8 @@ __all__ = [
     "TypeError_",
     "UndefinedVarError",
     "UsageError",
+    "ValueAttrs",
+    "ValueList",
     "ValueProxy",
     "WorkerDied",
     "PathInfo",

@@ -21,9 +21,7 @@ class ValueProxy:
     Lifetime is tied to the ``EvalSession`` that created it — all RPC
     methods raise ``RuntimeError`` after the session exits.
 
-    Supports ``async with`` for early release: the handle is freed
-    immediately on ``__aexit__``, telling the subprocess to release
-    the C++ value so the Boehm GC can collect it.
+    Supports ``async with`` for early release.
     """
 
     __slots__ = ("_worker", "_handle", "_type", "_timeout", "_active", "_released")
@@ -40,7 +38,7 @@ class ValueProxy:
         self._handle = handle
         self._type = typ
         self._timeout = timeout
-        self._active = _active  # shared with EvalSession; None = never expires
+        self._active = _active
         self._released = False
 
     async def __aenter__(self) -> ValueProxy:
@@ -50,7 +48,6 @@ class ValueProxy:
         await self.release()
 
     def _check_active(self) -> None:
-        """Raise if the owning session has exited."""
         if self._active is not None and not self._active[0]:
             raise RuntimeError("ValueProxy is invalid — the EvalSession has been closed")
         if self._released:
@@ -64,11 +61,30 @@ class ValueProxy:
     def type_name(self) -> str:
         return self._type
 
-    async def force(self, *, timeout: float | None = None):
+    # ── force ──────────────────────────────────────────────────────
+
+    async def force(self, *, timeout: float | None = None) -> ValueAttrs | ValueList | int | str | bool:
+        """Evaluate to WHNF.  Compound types return lazy wrappers."""
         self._check_active()
+        if self._type == "attrs":
+            keys = await self.attr_names(timeout=timeout)
+            return ValueAttrs(self._worker, self._handle, keys, timeout=self._timeout, _active=self._active)
+        if self._type == "list":
+            length = await self.list_length(timeout=timeout)
+            return ValueList(self._worker, self._handle, length, timeout=self._timeout, _active=self._active)
+        # scalar — delegate to worker
         return await self._worker.send_recv(
             "eval", "force", [self._handle], timeout=self._resolve_timeout(timeout),
         )
+
+    async def force_deep(self, *, timeout: float | None = None):
+        """Recursive force — returns plain Python dict/list/scalar."""
+        self._check_active()
+        return await self._worker.send_recv(
+            "eval", "force_deep", [self._handle], timeout=self._resolve_timeout(timeout),
+        )
+
+    # ── navigation ─────────────────────────────────────────────────
 
     async def attr(self, name: str, *, timeout: float | None = None) -> ValueProxy:
         self._check_active()
@@ -102,6 +118,25 @@ class ValueProxy:
             "eval", "has_attr", [self._handle, name], timeout=self._resolve_timeout(timeout),
         )
 
+    async def call(self, *args, timeout: float | None = None) -> ValueProxy:
+        self._check_active()
+        result = await self._worker.send_recv(
+            "eval", "call", [self._handle, list(args)], timeout=self._resolve_timeout(timeout),
+        )
+        return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+
+    # ── type helpers ───────────────────────────────────────────────
+
+    def is_int(self) -> bool:      return self._type == "int"
+    def is_string(self) -> bool:   return self._type == "string"
+    def is_bool(self) -> bool:     return self._type == "bool"
+    def is_attrs(self) -> bool:    return self._type == "attrs"
+    def is_list(self) -> bool:     return self._type == "list"
+    def is_null(self) -> bool:     return self._type == "null"
+    def is_function(self) -> bool: return self._type == "function"
+
+    # ── release ────────────────────────────────────────────────────
+
     async def release(self, *, timeout: float | None = None) -> None:
         self._check_active()
         await self._worker.send_recv(
@@ -110,22 +145,139 @@ class ValueProxy:
         self._released = True
 
     def _resolve_timeout(self, override: float | None) -> float | None:
-        if override is not None:
-            return override
-        return self._timeout
+        return override if override is not None else self._timeout
 
+
+# ════════════════════════════════════════════════════════════════════
+# ValueAttrs — lazy attrset (keys accessible, values lazy)
+# ════════════════════════════════════════════════════════════════════
+
+class ValueAttrs:
+    """Attrset forced to WHNF — keys are available, values are still lazy.
+
+    ``__getitem__`` returns a ``ValueProxy``.  ``__aenter__``/``__aexit__``
+    support early release of the underlying handle.
+    """
+
+    __slots__ = ("_worker", "_handle", "_keys", "_timeout", "_active", "_released")
+
+    def __init__(self, worker, handle, keys, timeout=None, _active=None):
+        self._worker = worker
+        self._handle = handle
+        self._keys = keys
+        self._timeout = timeout
+        self._active = _active
+        self._released = False
+
+    async def __aenter__(self) -> ValueAttrs:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.release()
+
+    def _check_active(self):
+        if self._active is not None and not self._active[0]:
+            raise RuntimeError("ValueAttrs is invalid — the EvalSession has been closed")
+        if self._released:
+            raise RuntimeError("ValueAttrs has been released")
+
+    def keys(self) -> list[str]:
+        return list(self._keys)
+
+    def __getitem__(self, name: str) -> ValueProxy:
+        """Return a lazy proxy — no RPC yet."""
+        self._check_active()
+        return ValueProxy(self._worker, self._handle, "thunk", timeout=self._timeout, _active=self._active)
+
+    async def force(self, name: str, *, timeout=None):
+        """Force a single attribute and return its value."""
+        self._check_active()
+        result = await self._worker.send_recv(
+            "eval", "attr", [self._handle, name],
+            timeout=timeout if timeout is not None else self._timeout,
+        )
+        proxy = ValueProxy(self._worker, result["handle"], result["type"],
+                           timeout=self._timeout, _active=self._active)
+        return await proxy.force()
+
+    async def release(self):
+        self._check_active()
+        await self._worker.send_recv(
+            "eval", "release", [self._handle],
+            timeout=self._timeout,
+        )
+        self._released = True
+
+
+# ════════════════════════════════════════════════════════════════════
+# ValueList — lazy list (length accessible, elements lazy)
+# ════════════════════════════════════════════════════════════════════
+
+class ValueList:
+    """List forced to WHNF — length is available, elements are still lazy.
+
+    ``__getitem__`` returns a ``ValueProxy``.  ``__aenter__``/``__aexit__``
+    support early release of the underlying handle.
+    """
+
+    __slots__ = ("_worker", "_handle", "_length", "_timeout", "_active", "_released")
+
+    def __init__(self, worker, handle, length, timeout=None, _active=None):
+        self._worker = worker
+        self._handle = handle
+        self._length = length
+        self._timeout = timeout
+        self._active = _active
+        self._released = False
+
+    async def __aenter__(self) -> ValueList:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.release()
+
+    def _check_active(self):
+        if self._active is not None and not self._active[0]:
+            raise RuntimeError("ValueList is invalid — the EvalSession has been closed")
+        if self._released:
+            raise RuntimeError("ValueList has been released")
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __getitem__(self, idx: int) -> ValueProxy:
+        self._check_active()
+        return ValueProxy(self._worker, self._handle, "thunk", timeout=self._timeout, _active=self._active)
+
+    async def force(self, idx: int, *, timeout=None):
+        """Force a single element and return its value."""
+        self._check_active()
+        result = await self._worker.send_recv(
+            "eval", "list_get", [self._handle, idx],
+            timeout=timeout if timeout is not None else self._timeout,
+        )
+        proxy = ValueProxy(self._worker, result["handle"], result["type"],
+                           timeout=self._timeout, _active=self._active)
+        return await proxy.force()
+
+    async def release(self):
+        self._check_active()
+        await self._worker.send_recv(
+            "eval", "release", [self._handle],
+            timeout=self._timeout,
+        )
+        self._released = True
+
+
+# ════════════════════════════════════════════════════════════════════
+# EvalSession
+# ════════════════════════════════════════════════════════════════════
 
 class EvalSession:
     """Holds the worker exclusively for the duration of an eval session.
 
     All ``ValueProxy`` instances created through this session become
     invalid after ``__aexit__`` — their RPC methods raise ``RuntimeError``.
-
-    Usage::
-
-        async with session.eval(store=store) as eval_:
-            root = await eval_.file("default.nix")
-            name = await root.attr("name").force()
     """
 
     __slots__ = ("_manager", "_rw", "_timeout", "_active")
@@ -134,7 +286,7 @@ class EvalSession:
         self._manager = manager
         self._rw: ReservedWorker | None = None
         self._timeout = timeout
-        self._active: list[bool] = [False]  # shared with all ValueProxy instances
+        self._active: list[bool] = [False]
 
     async def __aenter__(self) -> EvalSession:
         self._rw = await self._manager.reserve()
@@ -154,8 +306,6 @@ class EvalSession:
         if self._rw is None:
             raise RuntimeError("EvalSession not entered — use 'async with session.eval() as eval_:'")
 
-    # ── eval methods (new names) ─────────────────────────────────────
-
     async def file(self, path: str, *, timeout: float | None = None,
                    capture: bool = False) -> ValueProxy | Capture[ValueProxy]:
         self._check_rw()
@@ -170,15 +320,11 @@ class EvalSession:
         vp = ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
         return Capture(vp) if capture else vp
 
-    # ── backward-compat aliases ──────────────────────────────────────
-
+    # backward compat
     async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         return await self.file(path, timeout=timeout)
-
     async def eval_string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
         return await self.string(expr, path=path, timeout=timeout)
 
     def _resolve_timeout(self, override: float | None) -> float | None:
-        if override is not None:
-            return override
-        return self._timeout
+        return override if override is not None else self._timeout
