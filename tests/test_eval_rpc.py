@@ -143,13 +143,10 @@ async def test_eval_nested_navigation(tmp_path):
             assert await c.force() == 99
 
 
-async def test_eval_concurrent_sessions():
+async def test_eval_concurrent_sessions(tmp_path):
     """Two concurrent eval sessions on different workers."""
-    import tempfile
-    import os
-
-    f1 = os.path.join(tempfile.mkdtemp(), "a.nix")
-    f2 = os.path.join(tempfile.mkdtemp(), "b.nix")
+    f1 = tmp_path / "a.nix"
+    f2 = tmp_path / "b.nix"
     with open(f1, "w") as f:
         f.write("{ val = 10; }")
     with open(f2, "w") as f:
@@ -162,5 +159,5 @@ async def test_eval_concurrent_sessions():
                 v = await root.attr("val")
                 return await v.force()
 
-        results = await asyncio.gather(eval_one(f1), eval_one(f2))
+        results = await asyncio.gather(eval_one(str(f1)), eval_one(str(f2)))
         assert results == [10, 20]
