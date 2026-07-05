@@ -32,7 +32,7 @@ from nanopynix.models import (
 from nanopynix.nix import Nix, Session
 from nanopynix._pool import WorkerDied
 from nanopynix._session import EvalSession, ValueProxy
-from nanopynix.store import Store
+from nanopynix.store import StoreHandle
 
 # ── L1 bindings (re-exported for power users) ───────────────────────
 from nanopynix_expr import EvalState, Value, eval_file, init_libexpr, register_primop
@@ -85,6 +85,7 @@ __all__ = [
     "ResultType",
     "Session",
     "Store",
+    "StoreHandle",
     "StorePath",
     # L1
     "EvalState",

@@ -8,7 +8,8 @@ Usage::
 
     async with Session(store_uri="daemon",
                        experimental_features=["flakes"]) as session:
-        info = await session.store.query_path_info("/nix/store/...")
+        async with session.store() as store:
+            info = await store.query_path_info("/nix/store/...")
         async for event in session.log_stream():
             ...
 """
@@ -17,12 +18,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections.abc import AsyncIterator
 
 from nanopynix._pool import _WorkerManager
 from nanopynix._session import EvalSession
 from nanopynix.models import LogEvent
-from nanopynix.store import Store
+from nanopynix.store import StoreHandle
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +57,25 @@ class Session:
             settings=settings,
             experimental_features=experimental_features,
         )
-        self.store: Store | None = None
+        self._session_id = uuid.uuid4().hex
+
+    def store(self, uri: str = "daemon") -> StoreHandle:
+        """Create a StoreHandle for store operations.
+
+        Usage::
+
+            async with session.store() as store:
+                info = await store.query_path_info(sp)
+                drv = await store.build_derivation(sp, mode)
+
+        The handle carries this session's ID — passing it to
+        ``Eval`` from a different session raises ``ValueError``.
+        """
+        return StoreHandle(self._manager, uri, self._session_id)
 
     async def open(self) -> None:
-        """Spawn worker and initialize the store facade."""
+        """Spawn the worker subprocess."""
         await self._manager.open()
-        self.store = Store(self._manager)
 
     async def close(self) -> None:
         """Shut down the worker."""

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 import pytest
 
 from nanopynix.models import BuildResult, MissingInfo, PathInfo, StorePath
-from nanopynix.store import Store
+from nanopynix.store import StoreHandle as Store
 
 pytestmark = pytest.mark.asyncio
 
@@ -23,7 +23,9 @@ def pool():
 
 @pytest.fixture
 def store(pool):
-    return Store(pool)
+    s = Store(pool, "mock", "mock-session-id")
+    s._active = True  # bypass async open() for mock tests
+    return s
 
 
 # ════════════════════════════════════════════════════════════════════
