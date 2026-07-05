@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from nanopynix.models import (
     BuildResult,
+    Derivation,
     FlakeRef,
     Input,
     LockedFlake,
@@ -284,3 +285,17 @@ class TestStorePathEdge:
     def test_is_derivation_no_drv(self):
         sp = StorePath(hash_part="a" * 32, name="bash-5.2", to_string="a" * 32 + "-bash-5.2")
         assert sp.is_derivation is False
+
+
+def test_derivation_mutable_defaults_isolated():
+    """Two Derivation instances do not share mutable defaults (D2 fix)."""
+    d1 = Derivation(name="a", system="x86_64-linux", builder="/bin/sh")
+    d2 = Derivation(name="b", system="x86_64-linux", builder="/bin/sh")
+
+    d1.args.append("--flag")
+    d1.env["VAR"] = "val"
+    d1.input_srcs.append("/nix/store/aaa")
+
+    assert d2.args == []
+    assert d2.env == {}
+    assert d2.input_srcs == []

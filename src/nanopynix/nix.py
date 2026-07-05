@@ -102,10 +102,10 @@ class Session:
         async for raw in self._manager.log_stream():
             if raw is None:
                 continue  # worker close sentinel
-            # Wire format uses "id"; model uses "request_id"
+            # Worker emits "request_id"; tolerate legacy "id" for compatibility
             # result events carry a ResultType int in args[1]
             data: dict = {
-                "request_id": raw["id"],
+                "request_id": raw.get("request_id", raw.get("id", 0)),
                 "action": raw["action"],
                 "args": raw["args"],
             }

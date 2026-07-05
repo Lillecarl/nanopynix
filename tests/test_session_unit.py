@@ -6,11 +6,12 @@ No Nix daemon needed — exercises error paths and edge cases.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanopynix._session import EvalSession, ValueProxy
+from nanopynix._session import EvalSession, ValueProxy, _ChildProxy
+from nanopynix.models import LogEvent
 
 pytestmark = pytest.mark.asyncio
 
@@ -122,7 +123,7 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.eval_string("42", timeout=5.0)
-        rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=5.0)
+        rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=5.0, capture=False)
 
     async def test_timeout_falls_back_to_session_default(self):
         pool = _mock_pool()
@@ -133,7 +134,7 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.eval_string("42")  # no override
-        rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=10.0)
+        rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=10.0, capture=False)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -233,6 +234,98 @@ class TestValueProxyLifecycle:
 
 
 # ════════════════════════════════════════════════════════════════════
+# _ChildProxy — lazy child resolution (C2 fix)
+# ════════════════════════════════════════════════════════════════════
+
+class TestChildProxy:
+    """Verify _ChildProxy resolves via attr/list_get, not parent force."""
+
+    def _worker(self):
+        w = MagicMock()
+        w._send_recv = AsyncMock()
+        return w
+
+    async def test_attrs_getitem_force_calls_attr(self):
+        """attrs[\"x\"].force() calls eval.attr with parent handle and name."""
+        w = self._worker()
+        w._send_recv.side_effect = [
+            {"handle": 5, "type": "int"},  # _resolve
+            99,                              # force
+        ]
+        cp = _ChildProxy(w, parent_handle=1, selector="name")
+
+        result = await cp.force()
+
+        assert w._send_recv.await_count == 2
+        assert w._send_recv.await_args_list[0] == (("eval", "attr", [1, "name"]), {"timeout": None})
+        assert w._send_recv.await_args_list[1] == (("eval", "force", [5]), {"timeout": None})
+        assert result == 99
+
+    async def test_list_getitem_force_calls_list_get(self):
+        """lst[0].force() calls eval.list_get with parent handle and index."""
+        w = self._worker()
+        w._send_recv.side_effect = [
+            {"handle": 3, "type": "int"},  # _resolve: list_get
+            42,                              # force: returns int
+        ]
+        cp = _ChildProxy(w, parent_handle=1, selector=0)
+
+        result = await cp.force()
+
+        assert w._send_recv.await_count == 2
+        assert w._send_recv.await_args_list[0] == (("eval", "list_get", [1, 0]), {"timeout": None})
+        assert w._send_recv.await_args_list[1] == (("eval", "force", [3]), {"timeout": None})
+        assert result == 42
+
+    async def test_no_rpc_until_force(self):
+        """No RPC is made until .force() is called on the child proxy."""
+        w = self._worker()
+        cp = _ChildProxy(w, parent_handle=1, selector="name")
+        w._send_recv.assert_not_called()
+        # accessing a property doesn't trigger RPC either
+        assert cp._parent_handle == 1
+        w._send_recv.assert_not_called()
+
+    async def test_child_proxy_force_deep(self):
+        """force_deep resolves child then deep-forces it."""
+        w = self._worker()
+        w._send_recv.side_effect = [
+            {"handle": 5, "type": "attrs"},  # _resolve
+            {"a": 1, "b": 2},                 # force_deep
+        ]
+        cp = _ChildProxy(w, parent_handle=1, selector="name")
+
+        result = await cp.force_deep()
+
+        assert w._send_recv.await_count == 2
+        assert w._send_recv.await_args_list[0] == (("eval", "attr", [1, "name"]), {"timeout": None})
+        assert w._send_recv.await_args_list[1] == (("eval", "force_deep", [5]), {"timeout": None})
+        assert result == {"a": 1, "b": 2}
+
+    async def test_child_proxy_inactive_raises(self):
+        """Child proxy raises after session close."""
+        w = self._worker()
+        active = [False]
+        cp = _ChildProxy(w, parent_handle=1, selector="name", _active=active)
+
+        with pytest.raises(RuntimeError, match="EvalSession has been closed"):
+            await cp.force()
+
+    async def test_child_proxy_timeout_override(self):
+        """Timeout override is passed through to resolve and force."""
+        w = self._worker()
+        w._send_recv.side_effect = [
+            {"handle": 5, "type": "int"},
+            42,
+        ]
+        cp = _ChildProxy(w, parent_handle=1, selector="name", timeout=30.0)
+
+        await cp.force(timeout=10.0)
+
+        assert w._send_recv.await_args_list[0] == (("eval", "attr", [1, "name"]), {"timeout": 10.0})
+
+
+# ════════════════════════════════════════════════════════════════════
 # ReservedWorker
 # ════════════════════════════════════════════════════════════════════
 
@@ -261,3 +354,97 @@ class TestReservedWorker:
 
         with pytest.raises(RuntimeError, match="has been released"):
             await rw.send_recv("store", "get_uri", [])
+
+
+# ════════════════════════════════════════════════════════════════════
+# log_stream request-id handling (C1 fix)
+# ════════════════════════════════════════════════════════════════════
+
+class TestLogStreamRequestId:
+    """Verify Session.log_stream() correctly maps worker wire format to LogEvent."""
+
+    @staticmethod
+    def _events_to_log_stream(events: list):
+        """Return an async generator that yields the given events."""
+        async def _gen():
+            for e in events:
+                yield e
+        return _gen()
+
+    async def test_worker_request_id_mapped_correctly(self):
+        """Worker emits ``request_id`` — log_stream produces valid LogEvent."""
+        from nanopynix.nix import Session
+
+        session = Session.__new__(Session)
+        manager = MagicMock()
+        manager.log_stream = MagicMock(return_value=self._events_to_log_stream([
+            {"request_id": 42, "action": "msg", "args": [3, "hello from nix"]},
+            {"request_id": 7, "action": "start", "args": [0, "building"]},
+            {"request_id": 7, "action": "result", "args": [0, 100]},
+        ]))
+        session._manager = manager
+
+        events = [e async for e in session.log_stream()]
+
+        assert len(events) == 3
+        for e in events:
+            assert isinstance(e, LogEvent)
+
+        assert events[0].request_id == 42
+        assert events[0].action == "msg"
+        assert events[0].args == [3, "hello from nix"]
+        assert events[0].result_type is None
+
+        assert events[1].request_id == 7
+        assert events[1].action == "start"
+
+        assert events[2].request_id == 7
+        assert events[2].action == "result"
+        assert events[2].result_type == 100
+
+    async def test_legacy_id_key_fallback(self):
+        """Legacy ``id`` key is still accepted as fallback."""
+        from nanopynix.nix import Session
+
+        session = Session.__new__(Session)
+        manager = MagicMock()
+        manager.log_stream = MagicMock(return_value=self._events_to_log_stream([
+            {"id": 99, "action": "msg", "args": [3, "legacy"]},
+        ]))
+        session._manager = manager
+
+        events = [e async for e in session.log_stream()]
+        assert len(events) == 1
+        assert events[0].request_id == 99
+        assert events[0].action == "msg"
+
+    async def test_missing_both_keys_defaults_zero(self):
+        """Missing both keys defaults to request_id=0."""
+        from nanopynix.nix import Session
+
+        session = Session.__new__(Session)
+        manager = MagicMock()
+        manager.log_stream = MagicMock(return_value=self._events_to_log_stream([
+            {"action": "msg", "args": [3, "no id"]},
+        ]))
+        session._manager = manager
+
+        events = [e async for e in session.log_stream()]
+        assert len(events) == 1
+        assert events[0].request_id == 0
+
+    async def test_none_sentinel_skipped(self):
+        """None sentinel from log_stream is skipped."""
+        from nanopynix.nix import Session
+
+        session = Session.__new__(Session)
+        manager = MagicMock()
+        manager.log_stream = MagicMock(return_value=self._events_to_log_stream([
+            None,
+            {"request_id": 1, "action": "msg", "args": [3, "after sentinel"]},
+        ]))
+        session._manager = manager
+
+        events = [e async for e in session.log_stream()]
+        assert len(events) == 1
+        assert events[0].request_id == 1

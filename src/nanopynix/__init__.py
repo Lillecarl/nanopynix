@@ -1,6 +1,24 @@
 """nanopynix — nanobind-based Python bindings for Nix."""
 
-# ── L2 facades (primary API) ────────────────────────────────────────
+from nanopynix_expr import EvalState, Value, eval_file, init_libexpr, register_primop
+from nanopynix_fetchers import input_from_attrs, input_from_url
+from nanopynix_flake import get_flake, lock_flake, parse_flake_ref
+from nanopynix_main import init_nix, init_plugins
+from nanopynix_store import BuildMode, open_store
+from nanopynix_util import (
+    enable_experimental_feature,
+    get_setting,
+    get_verbosity,
+    init_libstore,
+    install_logger,
+    list_settings,
+    remove_logger,
+    set_setting,
+    set_verbosity,
+)
+
+from nanopynix._pool import WorkerDied
+from nanopynix._session import EvalSession, ValueAttrs, ValueList, ValueProxy
 from nanopynix.exceptions import (
     AssertionError_,
     EvalError,
@@ -32,70 +50,52 @@ from nanopynix.models import (
     StorePath,
 )
 from nanopynix.nix import Nix, Session
-from nanopynix._pool import WorkerDied
-from nanopynix._session import EvalSession, ValueAttrs, ValueList, ValueProxy
 from nanopynix.store import StoreHandle
 
-# ── L1 bindings (re-exported for power users) ───────────────────────
-from nanopynix_expr import EvalState, Value, eval_file, init_libexpr, register_primop
-from nanopynix_fetchers import Input as _L1Input, input_from_attrs, input_from_url
-from nanopynix_flake import FlakeRef as _L1FlakeRef, LockedFlake as _L1LockedFlake
-from nanopynix_flake import get_flake, lock_flake, parse_flake_ref
-from nanopynix_main import init_nix, init_plugins
-from nanopynix_store import BuildMode, Store as _L1Store, open_store
-from nanopynix_util import (
-    enable_experimental_feature,
-    get_setting,
-    get_verbosity,
-    init_libstore,
-    install_logger,
-    list_settings,
-    remove_logger,
-    set_setting,
-    set_verbosity,
-)
+# Backward-compatible alias for StoreHandle
+Store = StoreHandle
 
 __all__ = [
     # L2
+    "AssertionError_",
     "BuildMode",
     "BuildResult",
     "Capture",
     "Derivation",
     "DerivationOutputs",
-    "AssertionError_",
     "EvalError",
     "EvalSession",
+    # L1
+    "EvalState",
     "FlakeRef",
     "InfiniteRecursionError",
     "Input",
     "LockedFlake",
     "LockedInput",
+    "LogCollector",
     "LogEvent",
     "MissingArgumentError",
     "MissingInfo",
-    "LogCollector",
     "Nix",
     "NixError",
     "ParseError",
+    "PathInfo",
     "RestrictedPathError",
+    "ResultType",
+    "Session",
+    "Store",
     "StoreError",
+    "StoreHandle",
+    "StorePath",
     "ThrownError",
     "TypeError_",
     "UndefinedVarError",
     "UsageError",
+    "Value",
     "ValueAttrs",
     "ValueList",
     "ValueProxy",
     "WorkerDied",
-    "PathInfo",
-    "ResultType",
-    "Session",
-    "Store",
-    "StoreHandle",
-    "StorePath",
-    # L1
-    "EvalState",
-    "Value",
     "enable_experimental_feature",
     "eval_file",
     "get_flake",

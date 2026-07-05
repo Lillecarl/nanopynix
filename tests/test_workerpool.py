@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from nanopynix import Nix, NixError, StoreError, WorkerDied
+from nanopynix import LogEvent, Nix, NixError, StoreError, WorkerDied
 
 pytestmark = pytest.mark.asyncio
 
@@ -57,9 +57,14 @@ async def test_four_workers_concurrent_path_info():
 
 
 async def test_concurrent_log_stream():
-    """log_stream yields events from the worker."""
+    """log_stream can be iterated concurrently with store operations.
+
+    Does not assert event count — Nix store operations are quiet at
+    default verbosity.  The request-id mapping is tested in
+    ``tests/test_session_unit.py::TestLogStreamRequestId``.
+    """
     async with Nix() as nix:
-        events = []
+        events: list[LogEvent] = []
         bg_task = asyncio.ensure_future(_collect(nix, events))
 
         async with nix.store() as store:

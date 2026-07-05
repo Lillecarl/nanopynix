@@ -97,8 +97,8 @@ class LockedFlake(BaseModel):
 class LogEvent(BaseModel):
     """A single log event from Nix's internal logger.
 
-    Wire-format ``id`` field is mapped to ``request_id`` during validation
-    in ``Nix.log_stream()``.
+    Worker emits ``request_id`` in the wire format; ``Nix.log_stream()``
+    passes it through as the model's ``request_id`` field.
     """
 
     request_id: int = Field(default=0, description="RPC request ID for multiplexing")
@@ -153,8 +153,8 @@ class Capture(Generic[T]):
 
 class DerivationOutputs(BaseModel):
     """Output spec for a derivation input."""
-    outputs: list[str] = []
-    dynamic_outputs: dict[str, str] = {}
+    outputs: list[str] = Field(default_factory=list)
+    dynamic_outputs: dict[str, str] = Field(default_factory=dict)
 
 
 class Derivation(BaseModel):
@@ -162,7 +162,7 @@ class Derivation(BaseModel):
     name: str
     system: str
     builder: str
-    args: list[str] = []
-    env: dict[str, str] = {}
-    input_drvs: dict[str, DerivationOutputs] = {}  # StorePath string → outputs
-    input_srcs: list[str] = []  # StorePath strings
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    input_drvs: dict[str, DerivationOutputs] = Field(default_factory=dict)  # StorePath string → outputs
+    input_srcs: list[str] = Field(default_factory=list)  # StorePath strings
