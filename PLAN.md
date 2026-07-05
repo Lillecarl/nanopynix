@@ -139,22 +139,26 @@ Fix: replace with `asyncio.wait_for` over combined future + watchdog task.
 
 ### 🟡 Medium — concrete fixes, no design required
 
-**B1. StorePath→str coercion duplicated 11x** — extract `_to_store_path_str()` helper
-**B2. `_try_send` silently discards log events** — use bounded buffer with backpressure
-**B3. Duplicated `_to_dict` in `_worker.py` and `_extract.py`** — unify
-**B4. `__aexit__` swallows `release_all` errors** — log before finally
-**B5. `read_derivation` returns raw dict** — define Derivation model
-**B6. `next_id` instance method on module counter** — make `@staticmethod`
-**B7. Redundant `@property` on `is_derivation`** — remove
-**B8. Duplicated default `"<string>"` path** — extract constant
-**B9. `import os` inside 10+ test methods** — move to module level
-**B10. Dead test `test_query_derivation_outputs`** — implement or delete
-**B11. 10x repeated bash StorePath fixture** — extract `@pytest.fixture`
-**B12. `add_temp_root` GC root leak in tests** — remove root after test
-**B13. `mkdtemp()` leaked temp dirs** — use `tmp_path` fixture
-**B14. Stderr print for close timeout** — use `logging.warning`
-**B15. Unbounded janus.Queue** — set maxsize default
-**B16. QueueShutDown exception is Python 3.13-only** — verify/fix
+**B1. StorePath→str coercion duplicated 11x** ✅ — `_to_str()`/`_to_strs()` helpers
+**B2. `_try_send` silently discards log events** — deferred (needs design discussion)
+**B3. Duplicated `_to_dict` in `_worker.py` and `_extract.py`** ✅ — import from _extract
+**B4. `__aexit__` swallows `release_all` errors** ✅ — logging.warning
+**B5. `read_derivation` returns raw dict** — deferred (needs Derivation model, sizable)
+**B6. `next_id` instance method on module counter** ✅ — @staticmethod
+**B7. Redundant `@property` on `is_derivation`** ✅ — removed
+**B8. Duplicated default `"<string>"` path** ✅ — _DEFAULT_EVAL_PATH constant
+**B9. `import os` inside 10+ test methods** ✅ — module level
+**B10. Dead test `test_query_derivation_outputs`** ✅ — pytest.skip with reason
+**B11. 10x repeated bash StorePath fixture** ✅ — _bash_sp() helper
+**B12. `add_temp_root` GC root leak in tests** — skipped (no remove_temp_root in API, bash is permanent)
+**B13. `mkdtemp()` leaked temp dirs** ✅ — tmp_path fixture
+**B14. Stderr print for close timeout** ✅ — logging.warning
+**B15. Unbounded janus.Queue** ✅ — maxsize=10_000
+**B16. QueueShutDown exception is Python 3.13-only** — non-issue (project requires ≥3.13)
+
+Also completed beyond the scan list:
+- **send_recv race window** ✅ — get_nowait() check before TimeoutError
+- **`_acquire` stalls on close** ✅ — background task for stale worker close
 
 ### 🟢 Deferred from previous audits (still open)
 
