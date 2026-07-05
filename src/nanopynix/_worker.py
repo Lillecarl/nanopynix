@@ -25,6 +25,18 @@ def _sp_to_dict(sp) -> dict:
     }
 
 
+def _try_send(conn, msg):
+    """Non-blocking send — returns True if sent, False if would block."""
+    import select
+
+    fd = conn.fileno()
+    r, w, x = select.select([], [fd], [], 0)
+    if w:
+        conn.send(msg)
+        return True
+    return False
+
+
 def main(req_conn, resp_conn) -> None:
     """Bootstrap Nix, then enter the RPC loop."""
     # ── Logger ──────────────────────────────────────────────────
@@ -36,7 +48,7 @@ def main(req_conn, resp_conn) -> None:
             if event is None:
                 continue
             req_id, action, *args = event
-            resp_conn.send({
+            _try_send(resp_conn, {
                 "type": "event",
                 "id": req_id,
                 "action": action,

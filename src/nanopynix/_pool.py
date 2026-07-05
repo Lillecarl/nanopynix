@@ -177,6 +177,15 @@ class _WorkerRef:
         if self._proc.is_alive():
             self._proc.kill()
             self._proc.join()
+        # Close pipes to unblock any executor thread blocked on recv()
+        try:
+            self._req_conn.close()
+        except Exception:
+            pass
+        try:
+            self._resp_conn.close()
+        except Exception:
+            pass
         if self._read_task is not None:
             try:
                 await asyncio.wait_for(self._read_task, timeout=5.0)
