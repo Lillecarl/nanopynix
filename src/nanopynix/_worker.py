@@ -1,11 +1,14 @@
-"""Subprocess worker — runs Nix in isolation via multiprocessing Pipes.
+"""Subprocess worker — Nix execution over stdin/stdout JSON-RPC 2.0.
 
-Spawned by ``WorkerPool`` with the ``forkserver`` start method.
-Receives calls on ``req_conn``, sends results and log events on ``resp_conn``.
+Spawned by ``Session._WorkerManager`` via ``asyncio.create_subprocess_exec``.
+Reads JSON-RPC requests from stdin, writes responses and log-event
+notifications to stdout.  One line per message (compact JSON, no embedded
+newlines).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import traceback
@@ -18,20 +21,37 @@ from nanopynix._extract import store_path as _sp_to_dict
 from nanopynix.logging import LogCollector
 
 
-def _try_send(conn, msg):
-    """Non-blocking send — returns True if sent, False if would block."""
-    import select
+# ── Wire format ────────────────────────────────────────────────────────
 
-    fd = conn.fileno()
-    r, w, x = select.select([], [fd], [], 0)
-    if w:
-        conn.send(msg)
-        return True
-    return False
+def _send(msg: dict) -> None:
+    """Write a JSON-RPC message as a single line to stdout and flush."""
+    sys.stdout.write(json.dumps(msg, separators=(",", ":")))
+    sys.stdout.write("\n")
+    sys.stdout.flush()
 
 
-def main(req_conn, resp_conn) -> None:
-    """Bootstrap Nix, then enter the RPC loop."""
+def _error(req_id, code: int, message: str, data=None) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "error": {"code": code, "message": message, "data": data},
+        "id": req_id,
+    }
+
+
+def _result(req_id, value) -> dict:
+    return {"jsonrpc": "2.0", "result": value, "id": req_id}
+
+
+def _notification(method: str, params: dict) -> dict:
+    return {"jsonrpc": "2.0", "method": method, "params": params}
+
+
+# ── Main ───────────────────────────────────────────────────────────────
+
+
+def main() -> None:
+    """Bootstrap Nix, then enter the JSON-RPC loop."""
+
     # ── Logger ──────────────────────────────────────────────────
     collector = LogCollector()
     nanopynix_util.install_logger(collector.callback)
@@ -41,31 +61,44 @@ def main(req_conn, resp_conn) -> None:
             if event is None:
                 continue
             req_id, action, *args = event
-            _try_send(resp_conn, {
-                "type": "event",
-                "id": req_id,
+            _send(_notification("log", {
+                "request_id": req_id,
                 "action": action,
                 "args": list(args),
-            })
+            }))
 
     # ── Init ────────────────────────────────────────────────────
-    init_msg = req_conn.recv()
-    if init_msg.get("type") != "init":
-        sys.stderr.write(f"worker: expected init message, got {init_msg}\n")
+    # First message from parent is the init request (JSON-RPC)
+    line = sys.stdin.readline()
+    if not line:
         return
+    init_msg = json.loads(line)
 
-    store_uri = init_msg.get("store_uri", "auto")
-    eval_store_uri = init_msg.get("eval_store_uri", store_uri)
-    nix_conf = init_msg.get("nix_conf")
-    settings = init_msg.get("settings", {})
-    features = init_msg.get("experimental_features", [])
+    store_uri = "auto"
+    eval_store_uri = "auto"
+    nix_conf = None
+    settings = {}
+    features: list[str] = []
+
+    if init_msg.get("method") == "init":
+        p = init_msg.get("params", {})
+        store_uri = p.get("store_uri", store_uri)
+        eval_store_uri = p.get("eval_store_uri", store_uri)
+        nix_conf = p.get("nix_conf")
+        settings = p.get("settings", {})
+        features = p.get("experimental_features", [])
+        req_id = init_msg.get("id")
+    else:
+        sys.stderr.write(f"worker: expected init, got {init_msg}\n")
+        return
 
     # Apply config file path before init
     if nix_conf is not None:
         os.environ["NIX_USER_CONF_FILES"] = nix_conf
-    # Apply inline settings as NIX_CONFIG env var (overrides conf file)
     if settings:
-        os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
+        os.environ["NIX_CONFIG"] = "\n".join(
+            f"{k} = {v}" for k, v in settings.items()
+        )
 
     for k, v in settings.items():
         nanopynix_util.set_setting(k, v)
@@ -84,56 +117,61 @@ def main(req_conn, resp_conn) -> None:
     if eval_store_uri != store_uri:
         eval_store = nanopynix_store.open_store(eval_store_uri)
 
-    resp_conn.send({"type": "ready"})
-
-    # ── Dispatch table ──────────────────────────────────────────
-    DISPATCH = {
+    dispatch = {
         "store": _store_dispatch(store, eval_store),
         "eval": _eval_dispatch(store),
     }
 
+    _send(_result(req_id, "ok"))
+
     # ── RPC loop ────────────────────────────────────────────────
-    while True:
-        msg = req_conn.recv()
-        msg_type = msg.get("type")
+    for line in sys.stdin:
+        msg = json.loads(line)
+        method = msg.get("method", "")
+        rid = msg.get("id")
+        params = msg.get("params", [])
 
-        if msg_type == "close":
-            break
-
-        if msg_type != "call":
-            sys.stderr.write(f"worker: unexpected message type: {msg_type}\n")
+        parts = method.split(".", 1)
+        if len(parts) != 2:
+            _send(_error(rid, -32601, f"Invalid method: {method}"))
             continue
 
-        req_id = msg["id"]
-        module = msg["module"]
-        fn = msg["fn"]
-        args = msg.get("args", [])
+        ns, fn = parts
+        ns_dispatch = dispatch.get(ns)
+        if ns_dispatch is None:
+            _send(_error(rid, -32601, f"Unknown namespace: {ns}"))
+            continue
 
-        nanopynix_util.set_logger_request_id(req_id)
+        handler = ns_dispatch.get(fn)
+        if handler is None:
+            _send(_error(rid, -32601, f"Unknown method: {method}"))
+            continue
+
+        nanopynix_util.set_logger_request_id(rid)
         try:
-            handler = DISPATCH[module][fn]
-            value = handler(args)
-            response = {"type": "result", "id": req_id, "value": value}
+            value = handler(params)
+            response = _result(rid, value)
         except Exception as exc:
-            response = {
-                "type": "error",
-                "id": req_id,
-                "error_type": type(exc).__qualname__,
-                "msg": str(exc),
-                "traceback": traceback.format_exc(),
-            }
+            response = _error(
+                rid, -32000, str(exc),
+                {
+                    "error_type": type(exc).__qualname__,
+                    "traceback": traceback.format_exc(),
+                },
+            )
             traceback.print_exc(file=sys.stderr)
         finally:
             nanopynix_util.set_logger_request_id(0)
             _emit_events()
 
-        resp_conn.send(response)
+        _send(response)
 
     nanopynix_util.remove_logger()
     collector.close()
 
 
-# ── Dispatch helpers ────────────────────────────────────────────────
+# ── Store dispatch ─────────────────────────────────────────────────────
+
 
 def _store_dispatch(store, eval_store):
     """Return dispatch dict for store operations."""
@@ -142,70 +180,63 @@ def _store_dispatch(store, eval_store):
         path = args[0]
         if not path.startswith("/"):
             path = f"{store.get_store_dir()}/{path}"
-        sp = store.parse_store_path(path)
-        return sp
+        return store.parse_store_path(path)
 
     return {
         "get_uri": lambda _: store.get_uri(),
         "get_store_dir": lambda _: store.get_store_dir(),
-        "is_valid_path": lambda args: store.is_valid_path(_parse_sp(args)),
-        # parse_store_path returns a C++ StorePath — convert to dict
-        "parse_store_path": lambda args: _sp_to_dict(_parse_sp(args)),
-        # query_path_info now returns nb::dict directly
-        "query_path_info": lambda args: dict(store.query_path_info(_parse_sp(args))),
-        "query_path_from_hash_part": lambda args: (
-            _sp_to_dict(sp) if (sp := store.query_path_from_hash_part(args[0])) is not None else None
+        "is_valid_path": lambda a: store.is_valid_path(_parse_sp(a)),
+        "parse_store_path": lambda a: _sp_to_dict(_parse_sp(a)),
+        "query_path_info": lambda a: dict(store.query_path_info(_parse_sp(a))),
+        "query_path_from_hash_part": lambda a: (
+            _sp_to_dict(sp) if (sp := store.query_path_from_hash_part(a[0])) is not None else None
         ),
-        # compute_fs_closure now returns list of dicts
-        "compute_fs_closure": lambda args: list(
+        "compute_fs_closure": lambda a: list(
             store.compute_fs_closure(
-                _parse_sp(args),
-                args[1] if len(args) > 1 else False,
-                args[2] if len(args) > 2 else False,
-                args[3] if len(args) > 3 else False,
+                _parse_sp(a),
+                a[1] if len(a) > 1 else False,
+                a[2] if len(a) > 2 else False,
+                a[3] if len(a) > 3 else False,
             )
         ),
-        # query_missing returns nb::dict directly
-        "query_missing": lambda args: dict(
-            store.query_missing([_parse_sp([p]) for p in args[0]])
+        "query_missing": lambda a: dict(
+            store.query_missing([_parse_sp([p]) for p in a[0]])
         ),
-        # derivation outputs / valid derivers return list of dicts
-        "query_derivation_outputs": lambda args: list(
-            store.query_derivation_outputs(_parse_sp(args))
+        "query_derivation_outputs": lambda a: list(
+            store.query_derivation_outputs(_parse_sp(a))
         ),
-        "query_valid_derivers": lambda args: list(
-            store.query_valid_derivers(_parse_sp(args))
+        "query_valid_derivers": lambda a: list(
+            store.query_valid_derivers(_parse_sp(a))
         ),
         "query_all_valid_paths": lambda _: list(store.query_all_valid_paths()),
-        "query_referrers": lambda args: list(store.query_referrers(_parse_sp(args))),
-        "query_substitutable_paths": lambda args: list(
+        "query_referrers": lambda a: list(store.query_referrers(_parse_sp(a))),
+        "query_substitutable_paths": lambda a: list(
             store.query_substitutable_paths(
-                [_parse_sp([p]) for p in args[0]]
+                [_parse_sp([p]) for p in a[0]]
             )
         ),
-        # build_paths_with_results returns list of dicts
-        "build_paths_with_results": lambda args: list(
+        "build_paths_with_results": lambda a: list(
             store.build_paths_with_results(
-                [_parse_sp([p]) for p in args[0]],
+                [_parse_sp([p]) for p in a[0]],
                 eval_store,
             )
         ),
-        "read_derivation": lambda args: dict(store.read_derivation(_parse_sp(args))),
-        # build_derivation returns nb::dict directly
-        "build_derivation": lambda args: dict(
+        "read_derivation": lambda a: dict(store.read_derivation(_parse_sp(a))),
+        "build_derivation": lambda a: dict(
             store.build_derivation(
-                _parse_sp(args),
-                nanopynix_store.BuildMode(args[1]) if len(args) > 1 else nanopynix_store.BuildMode.Normal,
+                _parse_sp(a),
+                nanopynix_store.BuildMode(a[1]) if len(a) > 1 else nanopynix_store.BuildMode.Normal,
             )
         ),
-        "follow_links_to_store_path": lambda args: _sp_to_dict(
-            store.follow_links_to_store_path(args[0])
+        "follow_links_to_store_path": lambda a: _sp_to_dict(
+            store.follow_links_to_store_path(a[0])
         ),
-        "add_temp_root": lambda args: store.add_temp_root(_parse_sp(args)),
+        "add_temp_root": lambda a: store.add_temp_root(_parse_sp(a)),
     }
 
 
-# ── Eval dispatch ────────────────────────────────────────────────────
+# ── Eval dispatch ──────────────────────────────────────────────────────
+
 
 _es: "nanopynix_expr.EvalState | None" = None
 
@@ -250,3 +281,7 @@ def _eval_dispatch(store):
         "release":     lambda a: _get_es(store).release_exported(a[0]),
         "release_all": lambda _: _reset_es(),
     }
+
+
+if __name__ == "__main__":
+    main()

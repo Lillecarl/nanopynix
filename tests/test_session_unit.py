@@ -27,12 +27,10 @@ def _mock_pool():
     return pool
 
 def _mock_reserved_worker():
-    """Return a mock ReservedWorker with a mock _WorkerRef."""
+    """Return a mock ReservedWorker that delegates send_recv."""
     rw = MagicMock()
     rw.send_recv = AsyncMock()
     rw.release = AsyncMock()
-    rw.worker = MagicMock()
-    rw.worker.send_recv = AsyncMock()
     return rw
 
 
