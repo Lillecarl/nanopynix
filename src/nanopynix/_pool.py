@@ -66,7 +66,8 @@ class _WorkerRef:
     def is_dead(self) -> bool:
         return self._dead.is_set() or not self._proc.is_alive()
 
-    def next_id(self) -> int:
+    @staticmethod
+    def next_id() -> int:
         return next(_id_counter)
 
     async def _read_responses(self) -> None:

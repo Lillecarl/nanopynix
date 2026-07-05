@@ -13,16 +13,8 @@ import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
 
+from nanopynix._extract import store_path as _sp_to_dict
 from nanopynix.logging import LogCollector
-
-
-def _sp_to_dict(sp) -> dict:
-    """Convert a C++ StorePath to a dict for JSON serialisation."""
-    return {
-        "to_string": sp.to_string(),
-        "hash_part": sp.hash_part(),
-        "name": sp.name(),
-    }
 
 
 def _try_send(conn, msg):
