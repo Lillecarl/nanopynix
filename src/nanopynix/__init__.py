@@ -18,6 +18,7 @@ from nanopynix.exceptions import (
 from nanopynix.logging import LogCollector
 from nanopynix.models import (
     BuildResult,
+    Capture,
     FlakeRef,
     Input,
     LockedFlake,
@@ -56,6 +57,7 @@ __all__ = [
     # L2
     "BuildMode",
     "BuildResult",
+    "Capture",
     "AssertionError_",
     "EvalError",
     "EvalSession",

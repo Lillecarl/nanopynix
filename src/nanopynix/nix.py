@@ -96,6 +96,21 @@ class Session:
                 data["result_type"] = raw["args"][1]
             yield LogEvent.model_validate(data)
 
+    def subscribe(self, callback):
+        """Subscribe a callback to live log events.
+
+        The callback receives raw event dicts from the worker
+        (``{\"id\": ..., \"action\": ..., \"args\": [...]}``).
+        Returns a handle — call ``.unsubscribe()`` to stop.
+
+        Usage::
+
+            sub = session.subscribe(lambda e: print(e[\"action\"]))
+            ...
+            sub.unsubscribe()
+        """
+        return self._manager.subscribe(callback)
+
     def eval(self) -> EvalSession:
         """Acquire the worker exclusively for an eval session.
 
