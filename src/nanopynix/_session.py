@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from nanopynix.models import Capture
 
 if TYPE_CHECKING:
-    from nanopynix._pool import ReservedWorker, _WorkerManager, _WorkerRef
+    from nanopynix._pool import ReservedWorker, _WorkerManager
     from nanopynix.store import StoreHandle
 
 
@@ -28,7 +28,7 @@ class ValueProxy:
 
     def __init__(
         self,
-        worker: _WorkerRef,
+        worker: _WorkerManager,
         handle: int,
         typ: str,
         timeout: float | None = None,
@@ -73,14 +73,14 @@ class ValueProxy:
             length = await self.list_length(timeout=timeout)
             return ValueList(self._worker, self._handle, length, timeout=self._timeout, _active=self._active)
         # scalar — delegate to worker
-        return await self._worker.send_recv(
+        return await self._worker._send_recv(
             "eval", "force", [self._handle], timeout=self._resolve_timeout(timeout),
         )
 
     async def force_deep(self, *, timeout: float | None = None):
         """Recursive force — returns plain Python dict/list/scalar."""
         self._check_active()
-        return await self._worker.send_recv(
+        return await self._worker._send_recv(
             "eval", "force_deep", [self._handle], timeout=self._resolve_timeout(timeout),
         )
 
@@ -88,39 +88,39 @@ class ValueProxy:
 
     async def attr(self, name: str, *, timeout: float | None = None) -> ValueProxy:
         self._check_active()
-        result = await self._worker.send_recv(
+        result = await self._worker._send_recv(
             "eval", "attr", [self._handle, name], timeout=self._resolve_timeout(timeout),
         )
         return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
 
     async def list_get(self, idx: int, *, timeout: float | None = None) -> ValueProxy:
         self._check_active()
-        result = await self._worker.send_recv(
+        result = await self._worker._send_recv(
             "eval", "list_get", [self._handle, idx], timeout=self._resolve_timeout(timeout),
         )
         return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
 
     async def list_length(self, *, timeout: float | None = None) -> int:
         self._check_active()
-        return await self._worker.send_recv(
+        return await self._worker._send_recv(
             "eval", "list_length", [self._handle], timeout=self._resolve_timeout(timeout),
         )
 
     async def attr_names(self, *, timeout: float | None = None) -> list[str]:
         self._check_active()
-        return await self._worker.send_recv(
+        return await self._worker._send_recv(
             "eval", "attr_names", [self._handle], timeout=self._resolve_timeout(timeout),
         )
 
     async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         self._check_active()
-        return await self._worker.send_recv(
+        return await self._worker._send_recv(
             "eval", "has_attr", [self._handle, name], timeout=self._resolve_timeout(timeout),
         )
 
     async def call(self, *args, timeout: float | None = None) -> ValueProxy:
         self._check_active()
-        result = await self._worker.send_recv(
+        result = await self._worker._send_recv(
             "eval", "call", [self._handle, list(args)], timeout=self._resolve_timeout(timeout),
         )
         return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
@@ -139,7 +139,7 @@ class ValueProxy:
 
     async def release(self, *, timeout: float | None = None) -> None:
         self._check_active()
-        await self._worker.send_recv(
+        await self._worker._send_recv(
             "eval", "release", [self._handle], timeout=self._resolve_timeout(timeout),
         )
         self._released = True
@@ -192,7 +192,7 @@ class ValueAttrs:
     async def force(self, name: str, *, timeout=None):
         """Force a single attribute and return its value."""
         self._check_active()
-        result = await self._worker.send_recv(
+        result = await self._worker._send_recv(
             "eval", "attr", [self._handle, name],
             timeout=timeout if timeout is not None else self._timeout,
         )
@@ -202,7 +202,7 @@ class ValueAttrs:
 
     async def release(self):
         self._check_active()
-        await self._worker.send_recv(
+        await self._worker._send_recv(
             "eval", "release", [self._handle],
             timeout=self._timeout,
         )
@@ -252,7 +252,7 @@ class ValueList:
     async def force(self, idx: int, *, timeout=None):
         """Force a single element and return its value."""
         self._check_active()
-        result = await self._worker.send_recv(
+        result = await self._worker._send_recv(
             "eval", "list_get", [self._handle, idx],
             timeout=timeout if timeout is not None else self._timeout,
         )
@@ -262,7 +262,7 @@ class ValueList:
 
     async def release(self):
         self._check_active()
-        await self._worker.send_recv(
+        await self._worker._send_recv(
             "eval", "release", [self._handle],
             timeout=self._timeout,
         )
@@ -310,14 +310,14 @@ class EvalSession:
                    capture: bool = False) -> ValueProxy | Capture[ValueProxy]:
         self._check_rw()
         result = await self._rw.send_recv("eval", "eval_file", [path], timeout=self._resolve_timeout(timeout))
-        vp = ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+        vp = ValueProxy(self._rw._manager, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
         return Capture(vp) if capture else vp
 
     async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None,
                      capture: bool = False) -> ValueProxy | Capture[ValueProxy]:
         self._check_rw()
         result = await self._rw.send_recv("eval", "eval_string", [expr, path], timeout=self._resolve_timeout(timeout))
-        vp = ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+        vp = ValueProxy(self._rw._manager, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
         return Capture(vp) if capture else vp
 
     # backward compat

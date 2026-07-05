@@ -1,25 +1,24 @@
-"""Subprocess worker — Nix execution backend via multiprocessing.
+"""Subprocess worker — Nix execution backend via asyncio subprocess.
 
 A single subprocess runs an independent Nix process with its own Store,
-logger, and globals.  Uses the ``forkserver`` start method for COW
-memory sharing.  Communication via ``multiprocessing.Pipe`` (pickled dicts).
+logger, and globals.  Communication is JSON-RPC 2.0 over stdin/stdout
+(newline-delimited compact JSON).  Transport is ``StreamReader``/``StreamWriter`` —
+the same abstraction asyncssh uses, making remote transport a future option.
 
 Only one call is in-flight at a time — the worker is single-threaded.
-``_WorkerManager.call()`` acquires the worker, sends a call, and releases
-it.  ``_WorkerManager.reserve()`` acquires the worker exclusively for
-the duration of an ``EvalSession``.
+``_WorkerManager.call()`` acquires the lock, writes the request, and
+waits for the response.  ``_WorkerManager.reserve()`` holds the lock
+for the duration of an ``EvalSession``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
-import multiprocessing as _mp
+import sys
 import time
-import traceback
-
-_mp_ctx = _mp.get_context("forkserver")
 
 from nanopynix.exceptions import from_response
 
@@ -28,6 +27,8 @@ logger = logging.getLogger(__name__)
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
 _id_counter = itertools.count()
+
+_SEPARATORS = (",", ":")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -39,231 +40,20 @@ class WorkerDied(RuntimeError):
 
 
 # ════════════════════════════════════════════════════════════════════
-# _WorkerRef — handle to the subprocess worker
-# ════════════════════════════════════════════════════════════════════
-
-class _WorkerRef:
-    """Handle to a live subprocess worker communicating via mp.Pipe."""
-
-    __slots__ = (
-        "_proc", "_req_conn", "_resp_conn",
-        "_responses", "_events", "_done", "_dead",
-        "_last_activity", "_read_task",
-    )
-
-    def __init__(
-        self,
-        proc: _mp_ctx.Process,
-        req_conn,
-        resp_conn,
-    ) -> None:
-        self._proc = proc
-        self._req_conn = req_conn
-        self._resp_conn = resp_conn
-        self._responses: asyncio.Queue = asyncio.Queue()
-        self._events: asyncio.Queue = asyncio.Queue()
-        self._done = False
-        self._dead: asyncio.Event = asyncio.Event()
-        self._last_activity = time.monotonic()
-        self._read_task: asyncio.Task | None = None
-
-    @property
-    def is_dead(self) -> bool:
-        return self._dead.is_set() or not self._proc.is_alive()
-
-    @staticmethod
-    def next_id() -> int:
-        return next(_id_counter)
-
-    async def _read_responses(self) -> None:
-        """Background task: drain the response pipe into asyncio queues."""
-        loop = asyncio.get_running_loop()
-        try:
-            while not self._done:
-                msg = await loop.run_in_executor(None, self._resp_conn.recv)
-                self._last_activity = time.monotonic()
-                t = msg.get("type")
-                if t == "result":
-                    await self._responses.put(("ok", msg.get("id"), msg.get("value", {})))
-                elif t == "error":
-                    await self._responses.put(("err", msg.get("id"), msg))
-                elif t == "event":
-                    await self._events.put(msg)
-        except (EOFError, OSError, BrokenPipeError):
-            pass
-        except Exception:
-            traceback.print_exc()
-        finally:
-            self._dead.set()
-            self._events.put_nowait(None)  # unblock relay
-
-    async def send_recv(self, module: str, fn: str, args: list, timeout: float | None = None) -> dict:
-        """Send a call and wait for the matching response.
-
-        The timeout is an *idle* timeout: it resets whenever the worker
-        sends any message (log event, response, etc.), so long-running
-        operations like builds don't time out while the worker is active.
-
-        Raises:
-            WorkerDied: the worker process died.
-            TimeoutError: *timeout* seconds elapsed with no activity from the worker.
-            RuntimeError: the worker returned an error.
-        """
-        if self.is_dead:
-            raise WorkerDied("Worker is dead")
-
-        t = _RPC_TIMEOUT if timeout is None else timeout
-        req_id = self.next_id()
-        loop = asyncio.get_running_loop()
-
-        # Phase 1: send the request (fixed timeout — send should be fast)
-        async with asyncio.timeout(t):
-            await loop.run_in_executor(None, self._req_conn.send, {
-                "type": "call",
-                "id": req_id,
-                "module": module,
-                "fn": fn,
-                "args": args,
-            })
-
-        # Phase 2: wait for response with idle timeout that resets on activity
-        last_seen = self._last_activity
-        while True:
-            remaining = t - (time.monotonic() - last_seen)
-            if remaining <= 0:
-                # Check for a response that arrived during the race window
-                try:
-                    kind, rid, payload = self._responses.get_nowait()
-                except asyncio.QueueEmpty:
-                    raise TimeoutError(f"Call timed out — no worker activity for {t}s")
-                # Got a late response — process it
-                if rid == req_id:
-                    if kind == "ok":
-                        return payload
-                    raise from_response(
-                        error_type=payload.get("error_type", "Unknown"),
-                        msg=payload.get("msg", "unknown"),
-                        raw=payload.get("traceback", ""),
-                        info=payload.get("info"),
-                    )
-                # Response for a different request — reset and continue
-                last_seen = self._last_activity
-                continue
-
-            try:
-                async with asyncio.timeout(min(remaining, 1.0)):
-                    get_task = asyncio.ensure_future(self._responses.get())
-                    dead_task = asyncio.ensure_future(self._dead.wait())
-                    done, pending = await asyncio.wait(
-                        [get_task, dead_task], return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    for task in pending:
-                        task.cancel()
-            except asyncio.TimeoutError:
-                # No response arrived within the poll window —
-                # check if the worker sent anything (event, etc.)
-                if self._last_activity > last_seen:
-                    last_seen = self._last_activity
-                continue
-
-            if dead_task in done:
-                raise WorkerDied("Worker process died")
-
-            kind, rid, payload = get_task.result()
-            if rid != req_id:
-                # Response for a different request — worker is alive, reset
-                last_seen = self._last_activity
-                continue
-            if kind == "ok":
-                return payload
-            # Structured error dict from worker
-            raise from_response(
-                error_type=payload.get("error_type", "Unknown"),
-                msg=payload.get("msg", "unknown"),
-                raw=payload.get("traceback", ""),
-                info=payload.get("info"),
-            )
-
-    async def close(self) -> None:
-        self._done = True
-        try:
-            loop = asyncio.get_running_loop()
-            async with asyncio.timeout(2.0):
-                await loop.run_in_executor(None, self._req_conn.send, {"type": "close"})
-        except (TimeoutError, Exception):
-            pass
-        try:
-            self._proc.join(timeout=2)
-        except Exception:
-            pass
-        if self._proc.is_alive():
-            self._proc.kill()
-            self._proc.join()
-        # Close pipes to unblock any executor thread blocked on recv()
-        try:
-            self._req_conn.close()
-        except Exception:
-            pass
-        try:
-            self._resp_conn.close()
-        except Exception:
-            pass
-        if self._read_task is not None:
-            try:
-                await asyncio.wait_for(self._read_task, timeout=5.0)
-            except (asyncio.TimeoutError, Exception):
-                self._read_task.cancel()
-
-
-# ════════════════════════════════════════════════════════════════════
-# ReservedWorker — public token for an exclusive worker lease
-# ════════════════════════════════════════════════════════════════════
-
-class ReservedWorker:
-    """Exclusive lease on the session worker, obtained via ``_WorkerManager.reserve()``.
-
-    Delegates ``send_recv`` to the underlying ``_WorkerRef`` and
-    releases the worker back to the manager on ``release()``.
-    """
-
-    __slots__ = ("_manager", "worker", "_released")
-
-    def __init__(self, manager: _WorkerManager, worker: _WorkerRef) -> None:
-        self._manager = manager
-        self.worker = worker
-        self._released = False
-
-    async def send_recv(
-        self, module: str, fn: str, args: list, timeout: float | None = None,
-    ) -> dict:
-        """Send an RPC call on the reserved worker and await the response."""
-        if self._released:
-            raise RuntimeError("ReservedWorker has been released")
-        return await self.worker.send_recv(module, fn, args, timeout=timeout)
-
-    async def release(self) -> None:
-        """Return the worker to the manager.  Idempotent — safe to call twice."""
-        if not self._released:
-            self._released = True
-            self._manager._release()
-
-
-# ════════════════════════════════════════════════════════════════════
-# _WorkerManager — single-worker lifecycle
+# _LogBus + _Subscription
 # ════════════════════════════════════════════════════════════════════
 
 class _LogBus:
-    """Thread-safe subscriber list for worker log events.
+    """Subscriber list for worker log events.
 
     Zero subscribers → events are discarded (no buffering, no overhead).
-    Callbacks are called synchronously from the relay task — keep them fast.
+    Callbacks are called synchronously from the read loop — keep them fast.
     """
 
     def __init__(self) -> None:
-        self._subscribers: list = []  # list of callbacks
+        self._subscribers: list = []
 
     def subscribe(self, callback) -> _Subscription:
-        """Register a callback.  Returns a handle for unsubscribe."""
         self._subscribers.append(callback)
         return _Subscription(self, callback)
 
@@ -274,14 +64,13 @@ class _LogBus:
             pass
 
     def emit(self, event: object) -> None:
-        """Deliver an event to all subscribers.  No-op if none."""
         if not self._subscribers:
             return
         for cb in self._subscribers:
             try:
                 cb(event)
             except Exception:
-                pass  # one bad subscriber shouldn't break others
+                pass
 
 
 class _Subscription:
@@ -294,9 +83,44 @@ class _Subscription:
         self._callback = callback
 
     def unsubscribe(self) -> None:
-        """Remove this subscriber from the bus.  Idempotent."""
         self._bus._unsubscribe(self)
 
+
+# ════════════════════════════════════════════════════════════════════
+# ReservedWorker — public token for an exclusive worker lease
+# ════════════════════════════════════════════════════════════════════
+
+class ReservedWorker:
+    """Exclusive lease on the session worker, obtained via ``_WorkerManager.reserve()``.
+
+    Delegates ``send_recv`` to the underlying manager and
+    releases the worker back on ``release()``.
+    """
+
+    __slots__ = ("_manager", "_released")
+
+    def __init__(self, manager: _WorkerManager) -> None:
+        self._manager = manager
+        self._released = False
+
+    async def send_recv(
+        self, module: str, fn: str, args: list, timeout: float | None = None,
+    ) -> dict:
+        """Send an RPC call on the reserved worker and await the response."""
+        if self._released:
+            raise RuntimeError("ReservedWorker has been released")
+        return await self._manager._send_recv(module, fn, args, timeout=timeout)
+
+    async def release(self) -> None:
+        """Return the worker to the manager.  Idempotent — safe to call twice."""
+        if not self._released:
+            self._released = True
+            self._manager._release()
+
+
+# ════════════════════════════════════════════════════════════════════
+# _WorkerManager — single-worker lifecycle
+# ════════════════════════════════════════════════════════════════════
 
 class _WorkerManager:
     """Manages a single subprocess worker with an independent Nix Store.
@@ -304,7 +128,7 @@ class _WorkerManager:
     Provides:
     - ``call()`` — acquire→send→release for individual RPC calls (used by Store).
     - ``reserve()`` — exclusive worker lease (used by EvalSession).
-    - ``log_stream()`` — async iterator over log events from the worker.
+    - ``subscribe()`` / ``log_stream()`` — log event access.
     """
 
     def __init__(
@@ -321,110 +145,236 @@ class _WorkerManager:
         self._nix_conf = nix_conf
         self._settings = settings or {}
         self._features = experimental_features or []
-        self._worker: _WorkerRef | None = None
+        self._proc: asyncio.subprocess.Process | None = None
+        self._reader: asyncio.StreamReader | None = None
+        self._writer: asyncio.StreamWriter | None = None
+        self._pending: dict[int, asyncio.Future] = {}
         self._available: asyncio.Lock = asyncio.Lock()
         self._log_bus: _LogBus = _LogBus()
-        self._relay_task: asyncio.Task | None = None
+        self._read_task: asyncio.Task | None = None
+        self._stderr_task: asyncio.Task | None = None
+        self._last_activity: float = time.monotonic()
         self._log_done: asyncio.Event = asyncio.Event()
+
+    # ── lifecycle ──────────────────────────────────────────────────
 
     async def open(self) -> None:
         """Spawn the worker subprocess."""
-        self._worker = await self._spawn()
-
-    async def close(self) -> None:
-        """Shut down the worker."""
-        if self._worker is not None:
-            await self._worker.close()
-            self._worker = None
-        if self._relay_task is not None:
-            try:
-                await asyncio.wait_for(self._relay_task, timeout=2.0)
-            except (asyncio.TimeoutError, Exception):
-                self._relay_task.cancel()
-        self._log_done.set()
-        self._log_bus.emit(None)  # unblock log_stream() if waiting
-
-    async def _spawn(self) -> _WorkerRef:
-        req_child_recv, req_parent_send = _mp_ctx.Pipe(duplex=False)
-        resp_parent_recv, resp_child_send = _mp_ctx.Pipe(duplex=False)
-
-        import nanopynix._worker as _worker_module
-
-        proc = _mp_ctx.Process(
-            target=_worker_module.main,
-            args=(req_child_recv, resp_child_send),
-            daemon=True,
+        self._proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "nanopynix._worker",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        proc.start()
+        self._reader = self._proc.stdout
+        self._writer = self._proc.stdin
 
-        # Parent closes child ends
-        req_child_recv.close()
-        resp_child_send.close()
+        # Kick off the read loop
+        self._read_task = asyncio.ensure_future(self._read_loop())
+        # Also read stderr in background for debugging
+        self._stderr_task = asyncio.ensure_future(self._read_stderr())
 
-        # Init handshake
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, req_parent_send.send, {
-            "type": "init",
+        # Init handshake — send init as first JSON-RPC call
+        result = await self._send_recv("init", "", {
             "store_uri": self._store_uri,
             "eval_store_uri": self._eval_store_uri,
             "nix_conf": self._nix_conf,
             "settings": self._settings,
             "experimental_features": self._features,
         })
-        ready = await loop.run_in_executor(None, resp_parent_recv.recv)
-        if ready.get("type") != "ready":
-            proc.kill()
-            proc.join(timeout=2)
-            req_parent_send.close()
-            resp_parent_recv.close()
-            raise RuntimeError(f"Worker init failed: {ready}")
+        if result != "ok":
+            raise RuntimeError(f"Worker init failed: {result}")
 
-        worker = _WorkerRef(proc, req_parent_send, resp_parent_recv)
-        worker._read_task = asyncio.ensure_future(worker._read_responses())
-        self._relay_task = asyncio.ensure_future(self._relay_events(worker))
-        return worker
+    async def close(self) -> None:
+        """Shut down the worker."""
+        if self._writer is not None:
+            try:
+                # Send a JSON-RPC notification that signals shutdown
+                self._write_line({"jsonrpc": "2.0", "method": "shutdown"})
+            except Exception:
+                pass
 
-    async def _relay_events(self, worker: _WorkerRef) -> None:
+        if self._proc is not None:
+            try:
+                self._proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(self._proc.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                self._proc.kill()
+                await self._proc.wait()
+
+        if self._read_task is not None:
+            try:
+                await asyncio.wait_for(self._read_task, timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                self._read_task.cancel()
+        if self._stderr_task is not None:
+            try:
+                await asyncio.wait_for(self._stderr_task, timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                self._stderr_task.cancel()
+
+        self._log_done.set()
+        self._log_bus.emit(None)
+
+    # ── read loop ──────────────────────────────────────────────────
+
+    async def _read_stderr(self) -> None:
+        """Read worker stderr for debugging."""
+        assert self._proc is not None and self._proc.stderr is not None
         while True:
-            msg = await worker._events.get()
-            if msg is None:
-                break  # _read_responses exited
-            self._log_bus.emit(msg)
+            line = await self._proc.stderr.readline()
+            if not line:
+                break
+            logger.warning("worker stderr: %s", line.decode(errors="replace").rstrip())
 
-    # ── public API ─────────────────────────────────────────────────
+    async def _read_loop(self) -> None:
+        """Read all messages from worker stdout, route to futures or log bus."""
+        assert self._reader is not None
+        try:
+            while True:
+                line = await self._reader.readline()
+                if not line:
+                    break  # EOF — worker exited
+                self._last_activity = time.monotonic()
 
-    async def call(self, module: str, fn: str, args: list, *, timeout: float | None = None) -> dict:
+                msg = json.loads(line)
+                rid = msg.get("id")
+
+                if rid is not None:
+                    # Response (has "id") — deliver to the waiting future
+                    fut = self._pending.pop(rid, None)
+                    if fut is not None and not fut.done():
+                        fut.set_result(msg)
+                elif "method" in msg and "id" not in msg:
+                    # Notification — deliver to log bus
+                    self._log_bus.emit(msg.get("params", msg))
+                # else: invalid, ignore
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        finally:
+            # Wake all pending futures
+            for fut in self._pending.values():
+                if not fut.done():
+                    fut.set_exception(WorkerDied("Worker process died"))
+            self._pending.clear()
+
+    # ── send helpers ───────────────────────────────────────────────
+
+    def _write_line(self, msg: dict) -> None:
+        """Write a JSON-RPC message as a line to the worker's stdin."""
+        assert self._writer is not None
+        data = json.dumps(msg, separators=_SEPARATORS).encode() + b"\n"
+        self._writer.write(data)
+
+    # ── RPC ────────────────────────────────────────────────────────
+
+    async def _send_recv(
+        self, module: str, fn: str, args: list | dict,
+        timeout: float | None = None,
+    ) -> dict:
+        """Send a call and wait for the matching response.
+
+        The timeout is an *idle* timeout: it resets whenever the worker
+        sends any message (log events, etc.), so long-running operations
+        don't time out while the worker is active.
+
+        Raises:
+            WorkerDied: the worker process died.
+            TimeoutError: *timeout* seconds elapsed with no activity.
+            NixError subclass: the worker returned an error.
+        """
+        if self._proc is None or self._proc.returncode is not None:
+            raise WorkerDied("Worker is dead")
+
+        t = _RPC_TIMEOUT if timeout is None else timeout
+        req_id = next(_id_counter)
+
+        # Create the response future
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._pending[req_id] = fut
+
+        # Build and write the request
+        method = f"{module}.{fn}" if fn else module
+        self._write_line({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": args,
+            "id": req_id,
+        })
+        await self._writer.drain()
+
+        # Wait for response with idle timeout
+        last_seen = self._last_activity = time.monotonic()
+        while True:
+            remaining = t - (time.monotonic() - last_seen)
+            if remaining <= 0:
+                self._pending.pop(req_id, None)
+                # Check for a late-arriving response
+                if fut.done():
+                    break  # race — it arrived
+                raise TimeoutError(
+                    f"Call timed out — no worker activity for {t}s"
+                )
+
+            try:
+                async with asyncio.timeout(min(remaining, 1.0)):
+                    msg = await fut
+                    break
+            except asyncio.TimeoutError:
+                if self._last_activity > last_seen:
+                    last_seen = self._last_activity
+                continue
+
+        # Cleanup
+        self._pending.pop(req_id, None)
+
+        # Decode response
+        if "result" in msg:
+            return msg["result"]
+        if "error" in msg:
+            err = msg["error"]
+            data = err.get("data", {})
+            raise from_response(
+                error_type=data.get("error_type", "Unknown"),
+                msg=err.get("message", "unknown"),
+                raw=data.get("traceback", ""),
+                info=data.get("info"),
+            )
+        raise WorkerDied(f"Unexpected response: {msg}")
+
+    async def call(
+        self, module: str, fn: str, args: list,
+        *, timeout: float | None = None,
+    ) -> dict:
         """Send an RPC call on the worker and return the response.
 
         Acquires the worker lock — only one call in-flight at a time.
-        Concurrent callers queue up on the lock.
         """
-        if self._worker is None:
+        if self._proc is None:
             raise WorkerDied("Worker not started")
         async with self._available:
-            return await self._worker.send_recv(module, fn, args, timeout=timeout)
+            return await self._send_recv(module, fn, args, timeout=timeout)
 
     async def reserve(self) -> ReservedWorker:
-        """Acquire an exclusive worker lease.
-
-        Returns a ``ReservedWorker`` that must be released via ``.release()``.
-        Blocks until the worker is available.
-        """
-        if self._worker is None:
+        """Acquire an exclusive worker lease for an EvalSession."""
+        if self._proc is None:
             raise WorkerDied("Worker not started")
         await self._available.acquire()
-        return ReservedWorker(self, self._worker)
+        return ReservedWorker(self)
 
     def _release(self) -> None:
-        """Release the worker back to the manager (called by ReservedWorker.release())."""
+        """Release the worker lock (called by ReservedWorker.release())."""
         self._available.release()
 
-    async def log_stream(self):
-        """Async iterator over log events.
+    # ── log access ─────────────────────────────────────────────────
 
-        Internally subscribes to the log bus with a private queue.
-        Unsubscribes automatically when iteration ends.
-        """
+    async def log_stream(self):
+        """Async iterator over log events."""
         q: asyncio.Queue = asyncio.Queue()
 
         def _on_event(event: object) -> None:
@@ -443,9 +393,7 @@ class _WorkerManager:
     def subscribe(self, callback) -> _Subscription:
         """Subscribe a callback to all log events.
 
-        The callback receives raw event dicts from the worker
-        (``{\"type\": \"event\", \"id\": req_id, \"action\": ..., \"args\": [...]}``).
-
+        Callback receives dict: ``{"request_id": N, "action": ..., "args": [...]}``.
         Returns a ``_Subscription`` — call ``.unsubscribe()`` to stop.
         """
         return self._log_bus.subscribe(callback)
