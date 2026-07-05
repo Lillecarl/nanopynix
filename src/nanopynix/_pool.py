@@ -252,6 +252,52 @@ class ReservedWorker:
 # _WorkerManager — single-worker lifecycle
 # ════════════════════════════════════════════════════════════════════
 
+class _LogBus:
+    """Thread-safe subscriber list for worker log events.
+
+    Zero subscribers → events are discarded (no buffering, no overhead).
+    Callbacks are called synchronously from the relay task — keep them fast.
+    """
+
+    def __init__(self) -> None:
+        self._subscribers: list = []  # list of callbacks
+
+    def subscribe(self, callback) -> _Subscription:
+        """Register a callback.  Returns a handle for unsubscribe."""
+        self._subscribers.append(callback)
+        return _Subscription(self, callback)
+
+    def _unsubscribe(self, sub: _Subscription) -> None:
+        try:
+            self._subscribers.remove(sub._callback)
+        except ValueError:
+            pass
+
+    def emit(self, event: object) -> None:
+        """Deliver an event to all subscribers.  No-op if none."""
+        if not self._subscribers:
+            return
+        for cb in self._subscribers:
+            try:
+                cb(event)
+            except Exception:
+                pass  # one bad subscriber shouldn't break others
+
+
+class _Subscription:
+    """Handle returned by ``_LogBus.subscribe()``."""
+
+    __slots__ = ("_bus", "_callback")
+
+    def __init__(self, bus: _LogBus, callback) -> None:
+        self._bus = bus
+        self._callback = callback
+
+    def unsubscribe(self) -> None:
+        """Remove this subscriber from the bus.  Idempotent."""
+        self._bus._unsubscribe(self)
+
+
 class _WorkerManager:
     """Manages a single subprocess worker with an independent Nix Store.
 
@@ -274,15 +320,14 @@ class _WorkerManager:
         self._settings = settings or {}
         self._features = experimental_features or []
         self._worker: _WorkerRef | None = None
-        self._available: asyncio.Event = asyncio.Event()
-        self._log_events: asyncio.Queue = asyncio.Queue()
+        self._available: asyncio.Lock = asyncio.Lock()
+        self._log_bus: _LogBus = _LogBus()
         self._relay_task: asyncio.Task | None = None
         self._log_done: asyncio.Event = asyncio.Event()
 
     async def open(self) -> None:
         """Spawn the worker subprocess."""
         self._worker = await self._spawn()
-        self._available.set()
 
     async def close(self) -> None:
         """Shut down the worker."""
@@ -295,7 +340,7 @@ class _WorkerManager:
             except (asyncio.TimeoutError, Exception):
                 self._relay_task.cancel()
         self._log_done.set()
-        self._log_events.put_nowait(None)  # unblock log_stream() if waiting
+        self._log_bus.emit(None)  # unblock log_stream() if waiting
 
     async def _spawn(self) -> _WorkerRef:
         req_child_recv, req_parent_send = _mp_ctx.Pipe(duplex=False)
@@ -341,24 +386,20 @@ class _WorkerManager:
             msg = await worker._events.get()
             if msg is None:
                 break  # _read_responses exited
-            await self._log_events.put(msg)
+            self._log_bus.emit(msg)
 
     # ── public API ─────────────────────────────────────────────────
 
     async def call(self, module: str, fn: str, args: list, *, timeout: float | None = None) -> dict:
         """Send an RPC call on the worker and return the response.
 
-        Waits for the worker to be available (not reserved by an EvalSession).
-        Only one call is in-flight at a time — concurrent callers queue up.
+        Acquires the worker lock — only one call in-flight at a time.
+        Concurrent callers queue up on the lock.
         """
         if self._worker is None:
             raise WorkerDied("Worker not started")
-        await self._available.wait()
-        self._available.clear()
-        try:
+        async with self._available:
             return await self._worker.send_recv(module, fn, args, timeout=timeout)
-        finally:
-            self._available.set()
 
     async def reserve(self) -> ReservedWorker:
         """Acquire an exclusive worker lease.
@@ -368,17 +409,40 @@ class _WorkerManager:
         """
         if self._worker is None:
             raise WorkerDied("Worker not started")
-        await self._available.wait()
-        self._available.clear()
+        await self._available.acquire()
         return ReservedWorker(self, self._worker)
 
     def _release(self) -> None:
         """Release the worker back to the manager (called by ReservedWorker.release())."""
-        self._available.set()
+        self._available.release()
 
     async def log_stream(self):
-        while not self._log_done.is_set():
-            event = await self._log_events.get()
-            if event is None:
-                break
-            yield event
+        """Async iterator over log events.
+
+        Internally subscribes to the log bus with a private queue.
+        Unsubscribes automatically when iteration ends.
+        """
+        q: asyncio.Queue = asyncio.Queue()
+
+        def _on_event(event: object) -> None:
+            q.put_nowait(event)
+
+        sub = self._log_bus.subscribe(_on_event)
+        try:
+            while True:
+                event = await q.get()
+                if event is None:
+                    break
+                yield event
+        finally:
+            sub.unsubscribe()
+
+    def subscribe(self, callback) -> _Subscription:
+        """Subscribe a callback to all log events.
+
+        The callback receives raw event dicts from the worker
+        (``{\"type\": \"event\", \"id\": req_id, \"action\": ..., \"args\": [...]}``).
+
+        Returns a ``_Subscription`` — call ``.unsubscribe()`` to stop.
+        """
+        return self._log_bus.subscribe(callback)
