@@ -19,6 +19,8 @@ from nanopynix.logging import LogCollector
 from nanopynix.models import (
     BuildResult,
     Capture,
+    Derivation,
+    DerivationOutputs,
     FlakeRef,
     Input,
     LockedFlake,
@@ -58,6 +60,8 @@ __all__ = [
     "BuildMode",
     "BuildResult",
     "Capture",
+    "Derivation",
+    "DerivationOutputs",
     "AssertionError_",
     "EvalError",
     "EvalSession",

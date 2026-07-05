@@ -6,6 +6,7 @@ Receives calls on ``req_conn``, sends results and log events on ``resp_conn``.
 
 from __future__ import annotations
 
+import os
 import sys
 import traceback
 
@@ -55,8 +56,16 @@ def main(req_conn, resp_conn) -> None:
 
     store_uri = init_msg.get("store_uri", "auto")
     eval_store_uri = init_msg.get("eval_store_uri", store_uri)
+    nix_conf = init_msg.get("nix_conf")
     settings = init_msg.get("settings", {})
     features = init_msg.get("experimental_features", [])
+
+    # Apply config file path before init
+    if nix_conf is not None:
+        os.environ["NIX_USER_CONF_FILES"] = nix_conf
+    # Apply inline settings as NIX_CONFIG env var (overrides conf file)
+    if settings:
+        os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
 
     for k, v in settings.items():
         nanopynix_util.set_setting(k, v)

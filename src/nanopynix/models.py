@@ -147,3 +147,22 @@ class Capture(Generic[T]):
 
     value: T
     logs: list[LogEvent] | None = None
+
+
+# ── Derivation ───────────────────────────────────────────────────────
+
+class DerivationOutputs(BaseModel):
+    """Output spec for a derivation input."""
+    outputs: list[str] = []
+    dynamic_outputs: dict[str, str] = {}
+
+
+class Derivation(BaseModel):
+    """C++ ``nix::Derivation`` data — not the richer ``nix derivation show`` JSON."""
+    name: str
+    system: str
+    builder: str
+    args: list[str] = []
+    env: dict[str, str] = {}
+    input_drvs: dict[str, DerivationOutputs] = {}  # StorePath string → outputs
+    input_srcs: list[str] = []  # StorePath strings

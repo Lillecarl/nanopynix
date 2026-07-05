@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
-from nanopynix.models import BuildResult, Capture, MissingInfo, PathInfo, StorePath
+from nanopynix.models import BuildResult, Capture, Derivation, MissingInfo, PathInfo, StorePath
 
 import nanopynix_store  # BuildMode enum
 
