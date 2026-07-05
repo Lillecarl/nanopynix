@@ -1,14 +1,20 @@
-"""Subprocess worker pool — Nix execution backend via multiprocessing.
+"""Subprocess worker — Nix execution backend via multiprocessing.
 
-Each subprocess is an independent Nix process with its own Store, logger,
-and globals.  Workers use the ``forkserver`` start method for COW memory
-sharing.  Communication via ``multiprocessing.Pipe`` (pickled dicts).
+A single subprocess runs an independent Nix process with its own Store,
+logger, and globals.  Uses the ``forkserver`` start method for COW
+memory sharing.  Communication via ``multiprocessing.Pipe`` (pickled dicts).
+
+Only one call is in-flight at a time — the worker is single-threaded.
+``_WorkerManager.call()`` acquires the worker, sends a call, and releases
+it.  ``_WorkerManager.reserve()`` acquires the worker exclusively for
+the duration of an ``EvalSession``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import itertools
+import logging
 import multiprocessing as _mp
 import time
 import traceback
@@ -16,6 +22,8 @@ import traceback
 _mp_ctx = _mp.get_context("forkserver")
 
 from nanopynix.exceptions import from_response
+
+logger = logging.getLogger(__name__)
 
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
@@ -27,11 +35,11 @@ _id_counter = itertools.count()
 # ════════════════════════════════════════════════════════════════════
 
 class WorkerDied(RuntimeError):
-    """Raised when a subprocess worker dies unexpectedly."""
+    """Raised when the subprocess worker dies unexpectedly."""
 
 
 # ════════════════════════════════════════════════════════════════════
-# _WorkerRef — handle to a single subprocess worker
+# _WorkerRef — handle to the subprocess worker
 # ════════════════════════════════════════════════════════════════════
 
 class _WorkerRef:
@@ -39,7 +47,7 @@ class _WorkerRef:
 
     __slots__ = (
         "_proc", "_req_conn", "_resp_conn",
-        "_responses", "_events", "_done", "_dead", "_timeout", "_last_used",
+        "_responses", "_events", "_done", "_dead",
         "_last_activity", "_read_task",
     )
 
@@ -48,7 +56,6 @@ class _WorkerRef:
         proc: _mp_ctx.Process,
         req_conn,
         resp_conn,
-        timeout: float = _RPC_TIMEOUT,
     ) -> None:
         self._proc = proc
         self._req_conn = req_conn
@@ -57,8 +64,6 @@ class _WorkerRef:
         self._events: asyncio.Queue = asyncio.Queue()
         self._done = False
         self._dead: asyncio.Event = asyncio.Event()
-        self._timeout = timeout
-        self._last_used = time.monotonic()
         self._last_activity = time.monotonic()
         self._read_task: asyncio.Task | None = None
 
@@ -90,7 +95,7 @@ class _WorkerRef:
             traceback.print_exc()
         finally:
             self._dead.set()
-            self._events.put_nowait(None)  # unblock _relay_events
+            self._events.put_nowait(None)  # unblock relay
 
     async def send_recv(self, module: str, fn: str, args: list, timeout: float | None = None) -> dict:
         """Send a call and wait for the matching response.
@@ -107,7 +112,7 @@ class _WorkerRef:
         if self.is_dead:
             raise WorkerDied("Worker is dead")
 
-        t = self._timeout if timeout is None else timeout
+        t = _RPC_TIMEOUT if timeout is None else timeout
         req_id = self.next_id()
         loop = asyncio.get_running_loop()
 
@@ -171,7 +176,7 @@ class _WorkerRef:
                 continue
             if kind == "ok":
                 return payload
-            # Structured error dict from worker: {error_type, msg, traceback, info, ...}
+            # Structured error dict from worker
             raise from_response(
                 error_type=payload.get("error_type", "Unknown"),
                 msg=payload.get("msg", "unknown"),
@@ -215,16 +220,16 @@ class _WorkerRef:
 # ════════════════════════════════════════════════════════════════════
 
 class ReservedWorker:
-    """Exclusive lease on a pool worker, obtained via ``WorkerPool.reserve()``.
+    """Exclusive lease on the session worker, obtained via ``_WorkerManager.reserve()``.
 
-    Delegates ``send_recv`` to the underlying ``_WorkerRef`` and returns
-    the worker to the pool on ``release()``.
+    Delegates ``send_recv`` to the underlying ``_WorkerRef`` and
+    releases the worker back to the manager on ``release()``.
     """
 
-    __slots__ = ("_pool", "worker", "_released")
+    __slots__ = ("_manager", "worker", "_released")
 
-    def __init__(self, pool: WorkerPool, worker: _WorkerRef) -> None:
-        self._pool = pool
+    def __init__(self, manager: _WorkerManager, worker: _WorkerRef) -> None:
+        self._manager = manager
         self.worker = worker
         self._released = False
 
@@ -237,91 +242,70 @@ class ReservedWorker:
         return await self.worker.send_recv(module, fn, args, timeout=timeout)
 
     async def release(self) -> None:
-        """Return the worker to the pool.  Idempotent — safe to call twice."""
+        """Return the worker to the manager.  Idempotent — safe to call twice."""
         if not self._released:
             self._released = True
-            await self._pool._release(self.worker)
+            self._manager._release()
 
 
 # ════════════════════════════════════════════════════════════════════
-# WorkerPool
+# _WorkerManager — single-worker lifecycle
 # ════════════════════════════════════════════════════════════════════
 
-class WorkerPool:
-    """Pool of subprocess workers, each with an independent Nix Store."""
+class _WorkerManager:
+    """Manages a single subprocess worker with an independent Nix Store.
+
+    Provides:
+    - ``call()`` — acquire→send→release for individual RPC calls (used by Store).
+    - ``reserve()`` — exclusive worker lease (used by EvalSession).
+    - ``log_stream()`` — async iterator over log events from the worker.
+    """
 
     def __init__(
         self,
-        max_workers: int = 4,
         *,
         store_uri: str = "auto",
         eval_store_uri: str | None = None,
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
-        rpc_timeout: float = _RPC_TIMEOUT,
-        idle_timeout: float | None = None,
     ) -> None:
-        self._max_workers = max_workers
         self._store_uri = store_uri
         self._eval_store_uri = eval_store_uri or store_uri
         self._settings = settings or {}
         self._features = experimental_features or []
-        self._rpc_timeout = rpc_timeout
-        self._idle_timeout = idle_timeout
-        self._workers: list[_WorkerRef] = []
-        self._free: asyncio.Queue[_WorkerRef] = asyncio.Queue()
+        self._worker: _WorkerRef | None = None
+        self._available: asyncio.Event = asyncio.Event()
         self._log_events: asyncio.Queue = asyncio.Queue()
-        self._relay_tasks: list[asyncio.Task] = []
+        self._relay_task: asyncio.Task | None = None
         self._log_done: asyncio.Event = asyncio.Event()
-        self._worker_id_counter = 0
-
-    @property
-    def rpc_timeout(self) -> float:
-        return self._rpc_timeout
 
     async def open(self) -> None:
-        """Spawn initial workers."""
-        for _ in range(self._max_workers):
-            await self._spawn()
+        """Spawn the worker subprocess."""
+        self._worker = await self._spawn()
+        self._available.set()
 
     async def close(self) -> None:
-        # Close all workers concurrently — one stuck worker shouldn't block others
-        results = await asyncio.gather(
-            *(w.close() for w in self._workers),
-            return_exceptions=True,
-        )
-        for r in results:
-            if isinstance(r, Exception):
-                import traceback
-                traceback.print_exception(type(r), r, r.__traceback__)
-        self._workers.clear()
-        while not self._free.empty():
-            self._free.get_nowait()
-        for task in self._relay_tasks:
+        """Shut down the worker."""
+        if self._worker is not None:
+            await self._worker.close()
+            self._worker = None
+        if self._relay_task is not None:
             try:
-                await asyncio.wait_for(task, timeout=2.0)
+                await asyncio.wait_for(self._relay_task, timeout=2.0)
             except (asyncio.TimeoutError, Exception):
-                task.cancel()
-        self._relay_tasks.clear()
+                self._relay_task.cancel()
         self._log_done.set()
         self._log_events.put_nowait(None)  # unblock log_stream() if waiting
 
     async def _spawn(self) -> _WorkerRef:
-        wid = self._worker_id_counter
-        self._worker_id_counter += 1
-
-        # Req pipe: parent → child.  conn2 is the send end.
         req_child_recv, req_parent_send = _mp_ctx.Pipe(duplex=False)
-        # Resp pipe: child → parent.  conn2 is the send end.
         resp_parent_recv, resp_child_send = _mp_ctx.Pipe(duplex=False)
 
         import nanopynix._worker as _worker_module
 
-        args = [req_child_recv, resp_child_send]
-
         proc = _mp_ctx.Process(
             target=_worker_module.main,
-            args=tuple(args),
+            args=(req_child_recv, resp_child_send),
             daemon=True,
         )
         proc.start()
@@ -345,15 +329,11 @@ class WorkerPool:
             proc.join(timeout=2)
             req_parent_send.close()
             resp_parent_recv.close()
-            raise RuntimeError(f"Worker {wid} init failed: {ready}")
+            raise RuntimeError(f"Worker init failed: {ready}")
 
-        worker = _WorkerRef(proc, req_parent_send, resp_parent_recv, timeout=self._rpc_timeout)
-
+        worker = _WorkerRef(proc, req_parent_send, resp_parent_recv)
         worker._read_task = asyncio.ensure_future(worker._read_responses())
-        self._relay_tasks.append(asyncio.ensure_future(self._relay_events(worker)))
-
-        self._workers.append(worker)
-        await self._free.put(worker)
+        self._relay_task = asyncio.ensure_future(self._relay_events(worker))
         return worker
 
     async def _relay_events(self, worker: _WorkerRef) -> None:
@@ -363,58 +343,38 @@ class WorkerPool:
                 break  # _read_responses exited
             await self._log_events.put(msg)
 
-    async def reserve(self) -> ReservedWorker:
-        """Acquire an exclusive worker lease from the pool.
-
-        Returns a ``ReservedWorker`` that must be released via ``.release()``.
-        Used internally by ``_send_recv`` (single-call acquire→release) and
-        externally by ``EvalSession`` (multi-call exclusive lease).
-        """
-        worker = await self._acquire()
-        return ReservedWorker(self, worker)
+    # ── public API ─────────────────────────────────────────────────
 
     async def call(self, module: str, fn: str, args: list, *, timeout: float | None = None) -> dict:
-        """Send an RPC call on any free worker and return the response.
+        """Send an RPC call on the worker and return the response.
 
-        This is the general-purpose entry point for all RPC operations.
-        Acquires a worker, sends the call, releases the worker.
+        Waits for the worker to be available (not reserved by an EvalSession).
+        Only one call is in-flight at a time — concurrent callers queue up.
         """
-        return await self._send_recv(module, fn, args, timeout=timeout)
-
-    async def _send_recv(self, module: str, fn: str, args: list, timeout: float | None = None) -> dict:
-        rw = await self.reserve()
+        if self._worker is None:
+            raise WorkerDied("Worker not started")
+        await self._available.wait()
+        self._available.clear()
         try:
-            return await rw.send_recv(module, fn, args, timeout=timeout)
+            return await self._worker.send_recv(module, fn, args, timeout=timeout)
         finally:
-            await rw.release()
+            self._available.set()
 
-    async def _acquire(self) -> _WorkerRef:
-        while True:
-            worker = await self._free.get()
-            idle = time.monotonic() - worker._last_used
-            if self._idle_timeout is not None and idle > self._idle_timeout:
-                # Close stale worker in background — don't block callers
-                asyncio.ensure_future(self._close_stale(worker))
-                try:
-                    return await self._spawn()
-                except Exception:
-                    continue
-            return worker
+    async def reserve(self) -> ReservedWorker:
+        """Acquire an exclusive worker lease.
 
-    async def _close_stale(self, worker: _WorkerRef) -> None:
-        """Close and remove a stale worker without blocking _acquire."""
-        try:
-            await worker.close()
-        except Exception:
-            pass
-        try:
-            self._workers.remove(worker)
-        except ValueError:
-            pass  # already removed
+        Returns a ``ReservedWorker`` that must be released via ``.release()``.
+        Blocks until the worker is available.
+        """
+        if self._worker is None:
+            raise WorkerDied("Worker not started")
+        await self._available.wait()
+        self._available.clear()
+        return ReservedWorker(self, self._worker)
 
-    async def _release(self, worker: _WorkerRef) -> None:
-        worker._last_used = time.monotonic()
-        await self._free.put(worker)
+    def _release(self) -> None:
+        """Release the worker back to the manager (called by ReservedWorker.release())."""
+        self._available.set()
 
     async def log_stream(self):
         while not self._log_done.is_set():
