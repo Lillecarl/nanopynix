@@ -104,8 +104,64 @@ tests/
 - Store.build_derivation int→BuildMode → enum accepted
 - locked_input parse_flake_ref crash → try/except guard
 
-### Deferred
-- C++ boundary refactor — return `nb::dict` instead of `nb::class_`
+---
+## 2026-07-05 code smell scan — architectural notes
+
+### 🔴 Architecture — needs design discussion before fixing
+
+**A1. `evalRef()` shared_ptr with no-op deleter** (`src/py_eval.hh:21-26`)
+Creates `shared_ptr<PyEvalState>` that aliases another object's lifetime. If original
+is destroyed first, `PyValue.evalState()` returns dangling reference. `noop_deleter`
+silences sanitizers. Fix: actual `shared_from_this` or store `ref<EvalState>`
+separately from `PyEvalState`.
+
+**A2. WorkerPool uses default ThreadPoolExecutor** (`src/nanopynix/_pool.py:76-77`)
+`loop.run_in_executor(None, self._resp_conn.recv)` uses global default pool. 4 workers
+= 4 permanent thread-blockers. `send` calls also use same pool — under load the
+pool saturates and **deadlocks the event loop**. Fix: dedicate `ThreadPoolExecutor`
+per WorkerPool.
+
+**A3. String regex error classification** (`src/nanopynix/exceptions.py:96-129`)
+Classifies Nix errors by parsing human-readable error strings. These are not a
+stable API — they change across Nix/Lix versions. 20 overlapping patterns with
+order-dependent matching. Fix: push structured error enums to C++ boundary, or
+version-negotiate regex tables, or log warnings on unclassified errors.
+
+**A4. Duplicate Nix→Python conversion** (`src/nix_expr.cpp:244-290,305-338`)
+Two near-identical `to_python`/`value_to_python_arg` functions. Both do shallow
+`*v = *attr.value` copy (unsound for GC-managed Values). One converts nested attrs
+differently. Fix: single parameterized converter with deep-copy semantics.
+
+**A5. 70-line send_recv with manual timeout polling** (`src/nanopynix/_pool.py:94-163`)
+Hand-rolled poll loop with `asyncio.ensure_future` in hot loop, fire-and-forget
+`task.cancel()`, and race window between timeout expiry and `_last_activity` check.
+Fix: replace with `asyncio.wait_for` over combined future + watchdog task.
+
+### 🟡 Medium — concrete fixes, no design required
+
+**B1. StorePath→str coercion duplicated 11x** — extract `_to_store_path_str()` helper
+**B2. `_try_send` silently discards log events** — use bounded buffer with backpressure
+**B3. Duplicated `_to_dict` in `_worker.py` and `_extract.py`** — unify
+**B4. `__aexit__` swallows `release_all` errors** — log before finally
+**B5. `read_derivation` returns raw dict** — define Derivation model
+**B6. `next_id` instance method on module counter** — make `@staticmethod`
+**B7. Redundant `@property` on `is_derivation`** — remove
+**B8. Duplicated default `"<string>"` path** — extract constant
+**B9. `import os` inside 10+ test methods** — move to module level
+**B10. Dead test `test_query_derivation_outputs`** — implement or delete
+**B11. 10x repeated bash StorePath fixture** — extract `@pytest.fixture`
+**B12. `add_temp_root` GC root leak in tests** — remove root after test
+**B13. `mkdtemp()` leaked temp dirs** — use `tmp_path` fixture
+**B14. Stderr print for close timeout** — use `logging.warning`
+**B15. Unbounded janus.Queue** — set maxsize default
+**B16. QueueShutDown exception is Python 3.13-only** — verify/fix
+
+### 🟢 Deferred from previous audits (still open)
+
 - Full ErrorInfo serialization (traces, suggestions from `nix::ErrorInfo`)
 - GC bindings (collectGarbage, deletePath)
 - `nix.conf` path support in Nix/WorkerPool
+- Fetchers/flake C++ wrappers → dicts (same pattern as store refactor done)
+
+---
+## Current state (2026-07-05)

@@ -23,6 +23,16 @@ _StorePathList = TypeAdapter(list[StorePath])
 _BuildResultList = TypeAdapter(list[BuildResult])
 
 
+def _to_str(path: StorePath | str) -> str:
+    """Coerce a StorePath or str to a store-path string."""
+    return path.to_string if isinstance(path, StorePath) else path
+
+
+def _to_strs(paths: list[StorePath | str]) -> list[str]:
+    """Coerce a list of StorePath|str to a list of store-path strings."""
+    return [p.to_string if isinstance(p, StorePath) else p for p in paths]
+
+
 @dataclass
 class Store:
     """Async wrapper around a Nix store.
@@ -47,7 +57,7 @@ class Store:
         return StorePath.model_validate(data)
 
     async def is_valid_path(self, path: StorePath | str) -> bool:
-        s = path.to_string if isinstance(path, StorePath) else path
+        s = _to_str(path)
         return await self._pool.call("store", "is_valid_path", [s])
 
     async def follow_links_to_store_path(self, path: str) -> StorePath:
@@ -57,7 +67,7 @@ class Store:
     # ── Path info ─────────────────────────────────────────────────
 
     async def query_path_info(self, path: StorePath | str) -> PathInfo:
-        s = path.to_string if isinstance(path, StorePath) else path
+        s = _to_str(path)
         data = await self._pool.call("store", "query_path_info", [s])
         return PathInfo.model_validate(data)
 
@@ -74,27 +84,25 @@ class Store:
         include_outputs: bool = False,
         include_derivers: bool = False,
     ) -> list[StorePath]:
-        s = path.to_string if isinstance(path, StorePath) else path
+        s = _to_str(path)
         data = await self._pool.call("store", "compute_fs_closure",
             [s, flip, include_outputs, include_derivers])
         return _StorePathList.validate_python(data)
 
     async def query_missing(self, paths: list[StorePath | str]) -> MissingInfo:
-        strs = [
-            p.to_string if isinstance(p, StorePath) else p for p in paths
-        ]
+        strs = _to_strs(paths)
         data = await self._pool.call("store", "query_missing", [strs])
         return MissingInfo.model_validate(data)
 
     # ── Derivations ───────────────────────────────────────────────
 
     async def query_derivation_outputs(self, path: StorePath | str) -> list[StorePath]:
-        s = path.to_string if isinstance(path, StorePath) else path
+        s = _to_str(path)
         data = await self._pool.call("store", "query_derivation_outputs", [s])
         return _StorePathList.validate_python(data)
 
     async def query_valid_derivers(self, path: StorePath | str) -> list[StorePath]:
-        s = path.to_string if isinstance(path, StorePath) else path
+        s = _to_str(path)
         data = await self._pool.call("store", "query_valid_derivers", [s])
         return _StorePathList.validate_python(data)
 
@@ -105,14 +113,12 @@ class Store:
         return _StorePathList.validate_python(data)
 
     async def query_referrers(self, path: StorePath | str) -> list[StorePath]:
-        s = path.to_string if isinstance(path, StorePath) else path
+        s = _to_str(path)
         data = await self._pool.call("store", "query_referrers", [s])
         return _StorePathList.validate_python(data)
 
     async def query_substitutable_paths(self, paths: list[StorePath | str]) -> list[StorePath]:
-        strs = [
-            p.to_string if isinstance(p, StorePath) else p for p in paths
-        ]
+        strs = _to_strs(paths)
         data = await self._pool.call("store", "query_substitutable_paths", [strs])
         return _StorePathList.validate_python(data)
 
@@ -121,23 +127,21 @@ class Store:
     async def build_paths_with_results(
         self, paths: list[StorePath | str],
     ) -> list[BuildResult]:
-        strs = [
-            p.to_string if isinstance(p, StorePath) else p for p in paths
-        ]
+        strs = _to_strs(paths)
         data = await self._pool.call("store", "build_paths_with_results", [strs])
         return _BuildResultList.validate_python(data)
 
     async def read_derivation(
         self, drv_path: StorePath | str,
     ) -> dict:
-        s = drv_path.to_string if isinstance(drv_path, StorePath) else drv_path
+        s = _to_str(drv_path)
         return await self._pool.call("store", "read_derivation", [s])
 
     async def build_derivation(
         self, drv_path: StorePath | str,
         build_mode: nanopynix_store.BuildMode | int = nanopynix_store.BuildMode.Normal,
     ) -> BuildResult:
-        s = drv_path.to_string if isinstance(drv_path, StorePath) else drv_path
+        s = _to_str(drv_path)
         mode = int(build_mode)
         data = await self._pool.call("store", "build_derivation", [s, mode])
         return BuildResult.model_validate(data)
@@ -145,5 +149,5 @@ class Store:
     # ── GC ────────────────────────────────────────────────────────
 
     async def add_temp_root(self, path: StorePath | str) -> None:
-        s = path.to_string if isinstance(path, StorePath) else path
+        s = _to_str(path)
         await self._pool.call("store", "add_temp_root", [s])
