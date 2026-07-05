@@ -28,7 +28,7 @@ from nanopynix.models import (
     ResultType,
     StorePath,
 )
-from nanopynix.nix import Nix
+from nanopynix.nix import Nix, Session
 from nanopynix._pool import WorkerDied
 from nanopynix._session import EvalSession, ValueProxy
 from nanopynix.store import Store
@@ -68,6 +68,7 @@ __all__ = [
     "MissingArgumentError",
     "MissingInfo",
     "LogCollector",
+    "Nix",
     "NixError",
     "ParseError",
     "RestrictedPathError",
@@ -80,6 +81,7 @@ __all__ = [
     "WorkerDied",
     "PathInfo",
     "ResultType",
+    "Session",
     "Store",
     "StorePath",
     # L1

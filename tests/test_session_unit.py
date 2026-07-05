@@ -240,28 +240,27 @@ class TestValueProxyLifecycle:
 
 class TestReservedWorker:
     async def test_release_idempotent(self):
-        from nanopynix._pool import ReservedWorker, WorkerPool
+        from nanopynix._pool import ReservedWorker, _WorkerManager
 
-        pool = MagicMock(spec=WorkerPool)
-        pool._release = AsyncMock()
+        manager = MagicMock(spec=_WorkerManager)
+        manager._release = MagicMock()
         worker = MagicMock()
 
-        rw = ReservedWorker(pool, worker)
+        rw = ReservedWorker(manager, worker)
         await rw.release()
-        pool._release.assert_awaited_once_with(worker)
+        manager._release.assert_called_once()
 
         # Second release should be a no-op
         await rw.release()
-        pool._release.assert_awaited_once()  # still only once
+        manager._release.assert_called_once()  # still only once
 
     async def test_send_recv_after_release_raises(self):
-        from nanopynix._pool import ReservedWorker, WorkerPool
+        from nanopynix._pool import ReservedWorker, _WorkerManager
 
-        pool = MagicMock(spec=WorkerPool)
-        pool._release = AsyncMock()
+        manager = MagicMock(spec=_WorkerManager)
         worker = MagicMock()
 
-        rw = ReservedWorker(pool, worker)
+        rw = ReservedWorker(manager, worker)
         await rw.release()
 
         with pytest.raises(RuntimeError, match="has been released"):

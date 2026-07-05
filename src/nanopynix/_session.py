@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from nanopynix._pool import ReservedWorker, WorkerPool, _WorkerRef
+    from nanopynix._pool import ReservedWorker, _WorkerManager, _WorkerRef
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 # ════════════════════════════════════════════════════════════════════
 
 class ValueProxy:
-    """Proxy for a Nix Value exported on a remote worker.
+    """Proxy for a Nix Value exported on the remote worker.
 
     Lifetime is tied to the ``EvalSession`` that created it — all RPC
     methods raise ``RuntimeError`` after the session exits.
@@ -99,22 +99,22 @@ class ValueProxy:
 
 
 class EvalSession:
-    """Holds a worker exclusively for the duration of an eval session.
+    """Holds the worker exclusively for the duration of an eval session.
 
     All ``ValueProxy`` instances created through this session become
     invalid after ``__aexit__`` — their RPC methods raise ``RuntimeError``.
     """
 
-    __slots__ = ("_pool", "_rw", "_timeout", "_active")
+    __slots__ = ("_manager", "_rw", "_timeout", "_active")
 
-    def __init__(self, pool: WorkerPool, timeout: float | None = None) -> None:
-        self._pool = pool
+    def __init__(self, manager: _WorkerManager, timeout: float | None = None) -> None:
+        self._manager = manager
         self._rw: ReservedWorker | None = None
         self._timeout = timeout
         self._active: list[bool] = [False]  # shared with all ValueProxy instances
 
     async def __aenter__(self) -> EvalSession:
-        self._rw = await self._pool.reserve()
+        self._rw = await self._manager.reserve()
         self._active[0] = True
         return self
 

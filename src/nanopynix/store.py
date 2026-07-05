@@ -17,7 +17,7 @@ from nanopynix.models import BuildResult, MissingInfo, PathInfo, StorePath
 import nanopynix_store  # BuildMode enum
 
 if TYPE_CHECKING:
-    from nanopynix._pool import WorkerPool
+    from nanopynix._pool import _WorkerManager
 
 _StorePathList = TypeAdapter(list[StorePath])
 _BuildResultList = TypeAdapter(list[BuildResult])
@@ -40,7 +40,7 @@ class Store:
     Create via ``Nix(store_uri=...).open()``, not directly.
     """
 
-    _pool: WorkerPool
+    _pool: _WorkerManager
 
     # ── Identity ──────────────────────────────────────────────────
 
