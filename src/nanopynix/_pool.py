@@ -165,6 +165,7 @@ class _WorkerManager:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=2**63,  # effectively unlimited — OOM is fine, silent truncation is not
         )
         self._reader = self._proc.stdout
         self._writer = self._proc.stdin
@@ -254,8 +255,8 @@ class _WorkerManager:
                 # else: invalid, ignore
         except asyncio.CancelledError:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Worker read loop error: %s", exc)
         finally:
             # Wake all pending futures
             for fut in self._pending.values():
