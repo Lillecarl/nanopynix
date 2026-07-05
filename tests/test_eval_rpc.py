@@ -108,8 +108,9 @@ async def test_eval_session_cleanup(tmp_path):
             root = await session.eval_file(str(nix_file))
             await root.force()
         # Session closed — worker is available for store calls
-        uri = await nix.store.get_uri()
-        assert isinstance(uri, str)
+        async with nix.store() as store:
+            uri = await store.get_uri()
+            assert isinstance(uri, str)
 
 
 async def test_eval_thunk(tmp_path):
