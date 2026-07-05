@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
-from nanopynix.models import BuildResult, Capture, Derivation, MissingInfo, PathInfo, StorePath
+from nanopynix.models import BuildResult, Capture, Derivation, LogEvent, MissingInfo, PathInfo, StorePath
 
 import nanopynix_store  # BuildMode enum
 
@@ -31,6 +31,30 @@ def _to_str(path: StorePath | str) -> str:
 def _to_strs(paths: list[StorePath | str]) -> list[str]:
     """Coerce a list of StorePath|str to a list of store-path strings."""
     return [p.to_string if isinstance(p, StorePath) else p for p in paths]
+
+
+def _raw_to_log_event(raw: dict) -> LogEvent:
+    """Convert a raw worker log-event dict to a ``LogEvent`` model."""
+    data: dict = {
+        "request_id": raw.get("request_id", raw.get("id", 0)),
+        "action": raw["action"],
+        "args": raw["args"],
+    }
+    if raw.get("action") == "result" and len(raw.get("args", [])) > 1:
+        data["result_type"] = raw["args"][1]
+    return LogEvent.model_validate(data)
+
+
+def _maybe_capture(result, capture_flag: bool):
+    """If *capture_flag* is True, *result* is ``(value, raw_events)``.
+
+    Returns ``Capture(value, logs=[...])`` or the plain value.
+    """
+    if capture_flag:
+        value, raw_events = result
+        logs = [_raw_to_log_event(e) for e in raw_events]
+        return Capture(value=value, logs=logs)
+    return result
 
 
 class StoreHandle:
@@ -79,48 +103,48 @@ class StoreHandle:
 
     async def get_uri(self, *, capture: bool = False) -> Capture[str] | str:
         self._check_active()
-        result = await self._pool.call("store", "get_uri", [])
-        return Capture(result) if capture else result
+        result = await self._pool.call("store", "get_uri", [], capture=capture)
+        return _maybe_capture(result, capture)
 
     async def get_store_dir(self, *, capture: bool = False) -> Capture[str] | str:
         self._check_active()
-        result = await self._pool.call("store", "get_store_dir", [])
-        return Capture(result) if capture else result
+        result = await self._pool.call("store", "get_store_dir", [], capture=capture)
+        return _maybe_capture(result, capture)
 
     # ── StorePath parsing ─────────────────────────────────────────
 
     async def parse_store_path(self, path: str, *, capture: bool = False) -> Capture[StorePath] | StorePath:
         self._check_active()
-        data = await self._pool.call("store", "parse_store_path", [path])
+        data = await self._pool.call("store", "parse_store_path", [path], capture=capture)
         result = StorePath.model_validate(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     async def is_valid_path(self, path: StorePath | str, *, capture: bool = False) -> Capture[bool] | bool:
         self._check_active()
         s = _to_str(path)
-        result = await self._pool.call("store", "is_valid_path", [s])
-        return Capture(result) if capture else result
+        result = await self._pool.call("store", "is_valid_path", [s], capture=capture)
+        return _maybe_capture(result, capture)
 
     async def follow_links_to_store_path(self, path: str, *, capture: bool = False) -> Capture[StorePath] | StorePath:
         self._check_active()
-        data = await self._pool.call("store", "follow_links_to_store_path", [path])
+        data = await self._pool.call("store", "follow_links_to_store_path", [path], capture=capture)
         result = StorePath.model_validate(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     # ── Path info ─────────────────────────────────────────────────
 
     async def query_path_info(self, path: StorePath | str, *, capture: bool = False) -> Capture[PathInfo] | PathInfo:
         self._check_active()
         s = _to_str(path)
-        data = await self._pool.call("store", "query_path_info", [s])
+        data = await self._pool.call("store", "query_path_info", [s], capture=capture)
         result = PathInfo.model_validate(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     async def query_path_from_hash_part(self, hash_part: str, *, capture: bool = False) -> Capture[StorePath] | StorePath:
         self._check_active()
-        data = await self._pool.call("store", "query_path_from_hash_part", [hash_part])
+        data = await self._pool.call("store", "query_path_from_hash_part", [hash_part], capture=capture)
         result = StorePath.model_validate(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     # ── Closures ──────────────────────────────────────────────────
 
@@ -136,54 +160,54 @@ class StoreHandle:
         self._check_active()
         s = _to_str(path)
         data = await self._pool.call("store", "compute_fs_closure",
-            [s, flip, include_outputs, include_derivers])
+            [s, flip, include_outputs, include_derivers], capture=capture)
         result = _StorePathList.validate_python(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     async def query_missing(self, paths: list[StorePath | str], *, capture: bool = False) -> Capture[MissingInfo] | MissingInfo:
         self._check_active()
         strs = _to_strs(paths)
-        data = await self._pool.call("store", "query_missing", [strs])
+        data = await self._pool.call("store", "query_missing", [strs], capture=capture)
         result = MissingInfo.model_validate(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     # ── Derivations ───────────────────────────────────────────────
 
     async def query_derivation_outputs(self, path: StorePath | str, *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        data = await self._pool.call("store", "query_derivation_outputs", [s])
+        data = await self._pool.call("store", "query_derivation_outputs", [s], capture=capture)
         result = _StorePathList.validate_python(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     async def query_valid_derivers(self, path: StorePath | str, *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        data = await self._pool.call("store", "query_valid_derivers", [s])
+        data = await self._pool.call("store", "query_valid_derivers", [s], capture=capture)
         result = _StorePathList.validate_python(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     # ── Bulk queries ──────────────────────────────────────────────
 
     async def query_all_valid_paths(self, *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
-        data = await self._pool.call("store", "query_all_valid_paths", [])
+        data = await self._pool.call("store", "query_all_valid_paths", [], capture=capture)
         result = _StorePathList.validate_python(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     async def query_referrers(self, path: StorePath | str, *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        data = await self._pool.call("store", "query_referrers", [s])
+        data = await self._pool.call("store", "query_referrers", [s], capture=capture)
         result = _StorePathList.validate_python(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     async def query_substitutable_paths(self, paths: list[StorePath | str], *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
         strs = _to_strs(paths)
-        data = await self._pool.call("store", "query_substitutable_paths", [strs])
+        data = await self._pool.call("store", "query_substitutable_paths", [strs], capture=capture)
         result = _StorePathList.validate_python(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     # ── Build ─────────────────────────────────────────────────────
 
@@ -193,9 +217,9 @@ class StoreHandle:
     ) -> Capture[list[BuildResult]] | list[BuildResult]:
         self._check_active()
         strs = _to_strs(paths)
-        data = await self._pool.call("store", "build_paths_with_results", [strs])
+        data = await self._pool.call("store", "build_paths_with_results", [strs], capture=capture)
         result = _BuildResultList.validate_python(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     async def read_derivation(
         self, drv_path: StorePath | str,
@@ -203,8 +227,8 @@ class StoreHandle:
     ) -> Capture[dict] | dict:
         self._check_active()
         s = _to_str(drv_path)
-        result = await self._pool.call("store", "read_derivation", [s])
-        return Capture(result) if capture else result
+        result = await self._pool.call("store", "read_derivation", [s], capture=capture)
+        return _maybe_capture(result, capture)
 
     async def build_derivation(
         self, drv_path: StorePath | str,
@@ -214,17 +238,17 @@ class StoreHandle:
         self._check_active()
         s = _to_str(drv_path)
         mode = int(build_mode)
-        data = await self._pool.call("store", "build_derivation", [s, mode])
+        data = await self._pool.call("store", "build_derivation", [s, mode], capture=capture)
         result = BuildResult.model_validate(data)
-        return Capture(result) if capture else result
+        return _maybe_capture(result, capture)
 
     # ── GC ────────────────────────────────────────────────────────
 
     async def add_temp_root(self, path: StorePath | str, *, capture: bool = False) -> Capture[None] | None:
         self._check_active()
         s = _to_str(path)
-        await self._pool.call("store", "add_temp_root", [s])
-        return Capture(None) if capture else None
+        result = await self._pool.call("store", "add_temp_root", [s], capture=capture)
+        return _maybe_capture(result, capture)
 
 
 # Backward-compatible alias

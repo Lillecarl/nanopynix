@@ -149,6 +149,61 @@ class ValueProxy:
 
 
 # ════════════════════════════════════════════════════════════════════
+# _ChildProxy — lazy proxy for attrset attributes / list elements
+# ════════════════════════════════════════════════════════════════════
+
+class _ChildProxy:
+    """Lazy proxy returned by ``ValueAttrs[name]`` and ``ValueList[idx]``.
+
+    Stores the parent handle and a *selector* (attribute name or list
+    index).  The RPC to resolve the child only fires on ``await .force()``
+    or ``await .force_deep()``.
+    """
+
+    __slots__ = ("_worker", "_parent_handle", "_selector", "_timeout", "_active")
+
+    def __init__(self, worker, parent_handle: int, selector: str | int,
+                 timeout: float | None = None, _active: list[bool] | None = None):
+        self._worker = worker
+        self._parent_handle = parent_handle
+        self._selector = selector
+        self._timeout = timeout
+        self._active = _active
+
+    def _check_active(self) -> None:
+        if self._active is not None and not self._active[0]:
+            raise RuntimeError("Child proxy is invalid — the EvalSession has been closed")
+
+    def _resolve_timeout(self, override: float | None) -> float | None:
+        return override if override is not None else self._timeout
+
+    async def _resolve(self, *, timeout: float | None = None) -> ValueProxy:
+        """Resolve the child handle on the worker — returns a real ValueProxy."""
+        self._check_active()
+        t = self._resolve_timeout(timeout)
+        if isinstance(self._selector, str):
+            result = await self._worker._send_recv(
+                "eval", "attr", [self._parent_handle, self._selector], timeout=t,
+            )
+        else:
+            result = await self._worker._send_recv(
+                "eval", "list_get", [self._parent_handle, self._selector], timeout=t,
+            )
+        return ValueProxy(self._worker, result["handle"], result["type"],
+                          timeout=self._timeout, _active=self._active)
+
+    async def force(self, *, timeout: float | None = None):
+        """Resolve the child and force to WHNF."""
+        vp = await self._resolve(timeout=timeout)
+        return await vp.force(timeout=timeout)
+
+    async def force_deep(self, *, timeout: float | None = None):
+        """Resolve the child and recursively force."""
+        vp = await self._resolve(timeout=timeout)
+        return await vp.force_deep(timeout=timeout)
+
+
+# ════════════════════════════════════════════════════════════════════
 # ValueAttrs — lazy attrset (keys accessible, values lazy)
 # ════════════════════════════════════════════════════════════════════
 
@@ -184,10 +239,10 @@ class ValueAttrs:
     def keys(self) -> list[str]:
         return list(self._keys)
 
-    def __getitem__(self, name: str) -> ValueProxy:
-        """Return a lazy proxy — no RPC yet."""
+    def __getitem__(self, name: str) -> _ChildProxy:
+        """Return a lazy child proxy — the RPC fires on ``await .force()``."""
         self._check_active()
-        return ValueProxy(self._worker, self._handle, "thunk", timeout=self._timeout, _active=self._active)
+        return _ChildProxy(self._worker, self._handle, name, timeout=self._timeout, _active=self._active)
 
     async def force(self, name: str, *, timeout=None):
         """Force a single attribute and return its value."""
@@ -245,9 +300,9 @@ class ValueList:
     def __len__(self) -> int:
         return self._length
 
-    def __getitem__(self, idx: int) -> ValueProxy:
+    def __getitem__(self, idx: int) -> _ChildProxy:
         self._check_active()
-        return ValueProxy(self._worker, self._handle, "thunk", timeout=self._timeout, _active=self._active)
+        return _ChildProxy(self._worker, self._handle, idx, timeout=self._timeout, _active=self._active)
 
     async def force(self, idx: int, *, timeout=None):
         """Force a single element and return its value."""
@@ -309,16 +364,32 @@ class EvalSession:
     async def file(self, path: str, *, timeout: float | None = None,
                    capture: bool = False) -> ValueProxy | Capture[ValueProxy]:
         self._check_rw()
-        result = await self._rw.send_recv("eval", "eval_file", [path], timeout=self._resolve_timeout(timeout))
-        vp = ValueProxy(self._rw._manager, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
-        return Capture(vp) if capture else vp
+        result = await self._rw.send_recv("eval", "eval_file", [path],
+                                          timeout=self._resolve_timeout(timeout), capture=capture)
+        if capture:
+            value, raw_events = result
+        else:
+            value = result
+        vp = ValueProxy(self._rw._manager, value["handle"], value["type"], timeout=self._timeout, _active=self._active)
+        if capture:
+            from nanopynix.store import _raw_to_log_event
+            return Capture(value=vp, logs=[_raw_to_log_event(e) for e in raw_events])
+        return vp
 
     async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None,
                      capture: bool = False) -> ValueProxy | Capture[ValueProxy]:
         self._check_rw()
-        result = await self._rw.send_recv("eval", "eval_string", [expr, path], timeout=self._resolve_timeout(timeout))
-        vp = ValueProxy(self._rw._manager, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
-        return Capture(vp) if capture else vp
+        result = await self._rw.send_recv("eval", "eval_string", [expr, path],
+                                          timeout=self._resolve_timeout(timeout), capture=capture)
+        if capture:
+            value, raw_events = result
+        else:
+            value = result
+        vp = ValueProxy(self._rw._manager, value["handle"], value["type"], timeout=self._timeout, _active=self._active)
+        if capture:
+            from nanopynix.store import _raw_to_log_event
+            return Capture(value=vp, logs=[_raw_to_log_event(e) for e in raw_events])
+        return vp
 
     # backward compat
     async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:

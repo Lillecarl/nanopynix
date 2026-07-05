@@ -37,13 +37,13 @@ class TestIdentity:
         pool.call.return_value = "daemon"
         result = await store.get_uri()
         assert result == "daemon"
-        pool.call.assert_awaited_with("store", "get_uri", [])
+        pool.call.assert_awaited_with("store", "get_uri", [], capture=False)
 
     async def test_get_store_dir(self, store, pool):
         pool.call.return_value = "/nix/store"
         result = await store.get_store_dir()
         assert result == "/nix/store"
-        pool.call.assert_awaited_with("store", "get_store_dir", [])
+        pool.call.assert_awaited_with("store", "get_store_dir", [], capture=False)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -61,14 +61,14 @@ class TestStorePathCoercion:
         pool.call.return_value = True
         result = await store.is_valid_path("/nix/store/aaa-bbb")
         assert result is True
-        pool.call.assert_awaited_with("store", "is_valid_path", ["/nix/store/aaa-bbb"])
+        pool.call.assert_awaited_with("store", "is_valid_path", ["/nix/store/aaa-bbb"], capture=False)
 
     async def test_is_valid_path_accepts_storepath(self, store, pool):
         pool.call.return_value = True
         sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
         result = await store.is_valid_path(sp)
         assert result is True
-        pool.call.assert_awaited_with("store", "is_valid_path", ["a" * 32 + "-foo"])
+        pool.call.assert_awaited_with("store", "is_valid_path", ["a" * 32 + "-foo"], capture=False)
 
     async def test_follow_links_returns_storepath(self, store, pool):
         pool.call.return_value = {"to_string": "aaa-bbb", "hash_part": "aaa", "name": "bbb"}
@@ -95,7 +95,7 @@ class TestPathInfo:
         result = await store.query_path_info("/nix/store/aaa-foo")
         assert isinstance(result, PathInfo)
         assert result.nar_size == 1234
-        pool.call.assert_awaited_with("store", "query_path_info", ["/nix/store/aaa-foo"])
+        pool.call.assert_awaited_with("store", "query_path_info", ["/nix/store/aaa-foo"], capture=False)
 
     async def test_query_path_info_storepath(self, store, pool):
         pool.call.return_value = {
@@ -110,7 +110,7 @@ class TestPathInfo:
         }
         sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
         result = await store.query_path_info(sp)
-        pool.call.assert_awaited_with("store", "query_path_info", ["a" * 32 + "-foo"])
+        pool.call.assert_awaited_with("store", "query_path_info", ["a" * 32 + "-foo"], capture=False)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -128,7 +128,7 @@ class TestClosures:
         assert all(isinstance(sp, StorePath) for sp in result)
         pool.call.assert_awaited_with(
             "store", "compute_fs_closure",
-            ["/nix/store/aaa-foo", True, False, False],
+            ["/nix/store/aaa-foo", True, False, False], capture=False,
         )
 
     async def test_query_missing_coerces_list(self, store, pool):
@@ -144,7 +144,7 @@ class TestClosures:
         assert isinstance(result, MissingInfo)
         pool.call.assert_awaited_with(
             "store", "query_missing",
-            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]],
+            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]], capture=False,
         )
 
 
@@ -190,7 +190,7 @@ class TestBulk:
         assert result == []
         pool.call.assert_awaited_with(
             "store", "query_substitutable_paths",
-            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]],
+            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]], capture=False,
         )
 
 
@@ -226,4 +226,14 @@ class TestGC:
     async def test_add_temp_root(self, store, pool):
         pool.call.return_value = None
         await store.add_temp_root("/nix/store/aaa-foo")
-        pool.call.assert_awaited_with("store", "add_temp_root", ["/nix/store/aaa-foo"])
+        pool.call.assert_awaited_with("store", "add_temp_root", ["/nix/store/aaa-foo"], capture=False)
+
+
+# ════════════════════════════════════════════════════════════════════
+# Package exports (C3 fix)
+# ════════════════════════════════════════════════════════════════════
+
+async def test_store_alias_is_bound():
+    """nanopynix.Store is a backward-compatible alias for StoreHandle."""
+    import nanopynix
+    assert nanopynix.Store is nanopynix.StoreHandle

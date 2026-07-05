@@ -19,6 +19,7 @@ import json
 import logging
 import sys
 import time
+from typing import Any, Literal, overload
 
 from nanopynix.exceptions import from_response
 
@@ -105,11 +106,15 @@ class ReservedWorker:
 
     async def send_recv(
         self, module: str, fn: str, args: list, timeout: float | None = None,
-    ) -> dict:
-        """Send an RPC call on the reserved worker and await the response."""
+        capture: bool = False,
+    ):
+        """Send an RPC call on the reserved worker and await the response.
+
+        When *capture* is True, returns ``(result, captured_events)``.
+        """
         if self._released:
             raise RuntimeError("ReservedWorker has been released")
-        return await self._manager._send_recv(module, fn, args, timeout=timeout)
+        return await self._manager._send_recv(module, fn, args, timeout=timeout, capture=capture)
 
     async def release(self) -> None:
         """Return the worker to the manager.  Idempotent — safe to call twice."""
@@ -277,12 +282,18 @@ class _WorkerManager:
     async def _send_recv(
         self, module: str, fn: str, args: list | dict,
         timeout: float | None = None,
-    ) -> dict:
+        capture: bool = False,
+    ):
         """Send a call and wait for the matching response.
 
         The timeout is an *idle* timeout: it resets whenever the worker
         sends any message (log events, etc.), so long-running operations
         don't time out while the worker is active.
+
+        When *capture* is True, returns ``(result, captured_events)``
+        where *captured_events* is a list of raw log-event dicts whose
+        ``request_id`` matches this call.  When *capture* is False
+        (default), returns only the result value.
 
         Raises:
             WorkerDied: the worker process died.
@@ -295,71 +306,92 @@ class _WorkerManager:
         t = _RPC_TIMEOUT if timeout is None else timeout
         req_id = next(_id_counter)
 
-        # Create the response future
-        fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._pending[req_id] = fut
+        # ── capture setup ──────────────────────────────────────────
+        captured: list[dict] = []
+        _sub = None
+        if capture:
+            def _filter(event: object) -> None:
+                if isinstance(event, dict) and event.get("request_id") == req_id:
+                    captured.append(event)
+            _sub = self._log_bus.subscribe(_filter)
 
-        # Build and write the request
-        method = f"{module}.{fn}" if fn else module
-        self._write_line({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": args,
-            "id": req_id,
-        })
-        await self._writer.drain()
+        try:
+            # Create the response future
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
+            self._pending[req_id] = fut
 
-        # Wait for response with idle timeout
-        last_seen = self._last_activity = time.monotonic()
-        while True:
-            remaining = t - (time.monotonic() - last_seen)
-            if remaining <= 0:
-                self._pending.pop(req_id, None)
-                # Check for a late-arriving response
-                if fut.done():
-                    break  # race — it arrived
-                raise TimeoutError(
-                    f"Call timed out — no worker activity for {t}s"
+            # Build and write the request
+            method = f"{module}.{fn}" if fn else module
+            self._write_line({
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": args,
+                "id": req_id,
+            })
+            await self._writer.drain()
+
+            # Wait for response with idle timeout
+            last_seen = self._last_activity = time.monotonic()
+            while True:
+                remaining = t - (time.monotonic() - last_seen)
+                if remaining <= 0:
+                    self._pending.pop(req_id, None)
+                    # Check for a late-arriving response
+                    if fut.done():
+                        break  # race — it arrived
+                    raise TimeoutError(
+                        f"Call timed out — no worker activity for {t}s"
+                    )
+
+                try:
+                    async with asyncio.timeout(min(remaining, 1.0)):
+                        msg = await fut
+                        break
+                except asyncio.TimeoutError:
+                    if self._last_activity > last_seen:
+                        last_seen = self._last_activity
+                    continue
+
+            # Cleanup
+            self._pending.pop(req_id, None)
+
+            # Decode response
+            if "result" in msg:
+                result = msg["result"]
+            elif "error" in msg:
+                err = msg["error"]
+                data = err.get("data", {})
+                raise from_response(
+                    error_type=data.get("error_type", "Unknown"),
+                    msg=err.get("message", "unknown"),
+                    raw=data.get("traceback", ""),
+                    info=data.get("info"),
                 )
+            else:
+                raise WorkerDied(f"Unexpected response: {msg}")
 
-            try:
-                async with asyncio.timeout(min(remaining, 1.0)):
-                    msg = await fut
-                    break
-            except asyncio.TimeoutError:
-                if self._last_activity > last_seen:
-                    last_seen = self._last_activity
-                continue
-
-        # Cleanup
-        self._pending.pop(req_id, None)
-
-        # Decode response
-        if "result" in msg:
-            return msg["result"]
-        if "error" in msg:
-            err = msg["error"]
-            data = err.get("data", {})
-            raise from_response(
-                error_type=data.get("error_type", "Unknown"),
-                msg=err.get("message", "unknown"),
-                raw=data.get("traceback", ""),
-                info=data.get("info"),
-            )
-        raise WorkerDied(f"Unexpected response: {msg}")
+            if capture:
+                return result, captured
+            return result
+        finally:
+            if _sub is not None:
+                _sub.unsubscribe()
 
     async def call(
         self, module: str, fn: str, args: list,
         *, timeout: float | None = None,
-    ) -> dict:
+        capture: bool = False,
+    ):
         """Send an RPC call on the worker and return the response.
 
         Acquires the worker lock — only one call in-flight at a time.
+
+        When *capture* is True, returns ``(result, captured_events)``.
         """
         if self._proc is None:
             raise WorkerDied("Worker not started")
         async with self._available:
-            return await self._send_recv(module, fn, args, timeout=timeout)
+            return await self._send_recv(module, fn, args, timeout=timeout, capture=capture)
 
     async def reserve(self) -> ReservedWorker:
         """Acquire an exclusive worker lease for an EvalSession."""
