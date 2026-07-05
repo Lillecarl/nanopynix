@@ -143,7 +143,7 @@ class TestEvalSessionLifecycle:
 class TestValueProxyLifecycle:
     def _worker(self):
         w = MagicMock()
-        w.send_recv = AsyncMock()
+        w._send_recv = AsyncMock()
         return w
 
     def test_handle_and_type_are_cached(self):
@@ -154,15 +154,15 @@ class TestValueProxyLifecycle:
 
     async def test_force_delegates_to_worker(self):
         w = self._worker()
-        w.send_recv.return_value = 99
+        w._send_recv.return_value = 99
         vp = ValueProxy(w, 1, "int")
         result = await vp.force()
         assert result == 99
-        w.send_recv.assert_awaited_with("eval", "force", [1], timeout=None)
+        w._send_recv.assert_awaited_with("eval", "force", [1], timeout=None)
 
     async def test_attr_returns_new_proxy(self):
         w = self._worker()
-        w.send_recv.return_value = {"handle": 5, "type": "string"}
+        w._send_recv.return_value = {"handle": 5, "type": "string"}
         vp = ValueProxy(w, 1, "attrs")
         child = await vp.attr("name")
         assert isinstance(child, ValueProxy)
@@ -171,35 +171,35 @@ class TestValueProxyLifecycle:
 
     async def test_list_get_returns_new_proxy(self):
         w = self._worker()
-        w.send_recv.return_value = {"handle": 3, "type": "int"}
+        w._send_recv.return_value = {"handle": 3, "type": "int"}
         vp = ValueProxy(w, 1, "list")
         child = await vp.list_get(0)
         assert child.handle == 3
 
     async def test_list_length(self):
         w = self._worker()
-        w.send_recv.return_value = 3
+        w._send_recv.return_value = 3
         vp = ValueProxy(w, 1, "list")
         assert await vp.list_length() == 3
 
     async def test_attr_names(self):
         w = self._worker()
-        w.send_recv.return_value = ["a", "b", "c"]
+        w._send_recv.return_value = ["a", "b", "c"]
         vp = ValueProxy(w, 1, "attrs")
         assert await vp.attr_names() == ["a", "b", "c"]
 
     async def test_has_attr(self):
         w = self._worker()
-        w.send_recv.return_value = True
+        w._send_recv.return_value = True
         vp = ValueProxy(w, 1, "attrs")
         assert await vp.has_attr("foo") is True
 
     async def test_release(self):
         w = self._worker()
-        w.send_recv.return_value = None
+        w._send_recv.return_value = None
         vp = ValueProxy(w, 1, "int")
         await vp.release()
-        w.send_recv.assert_awaited_with("eval", "release", [1], timeout=None)
+        w._send_recv.assert_awaited_with("eval", "release", [1], timeout=None)
 
     async def test_raises_after_session_close(self):
         w = self._worker()
@@ -207,7 +207,7 @@ class TestValueProxyLifecycle:
         vp = ValueProxy(w, 1, "int", _active=active)
 
         # Active — works
-        w.send_recv.return_value = 42
+        w._send_recv.return_value = 42
         assert await vp.force() == 42
 
         # Session closed
@@ -218,7 +218,7 @@ class TestValueProxyLifecycle:
     async def test_check_active_only_when_flag_provided(self):
         """_active=None means never expires (backwards compat)."""
         w = self._worker()
-        w.send_recv.return_value = 42
+        w._send_recv.return_value = 42
         vp = ValueProxy(w, 1, "int")  # no _active
         assert await vp.force() == 42  # should not raise
 
@@ -242,9 +242,8 @@ class TestReservedWorker:
 
         manager = MagicMock(spec=_WorkerManager)
         manager._release = MagicMock()
-        worker = MagicMock()
 
-        rw = ReservedWorker(manager, worker)
+        rw = ReservedWorker(manager)
         await rw.release()
         manager._release.assert_called_once()
 
@@ -256,9 +255,8 @@ class TestReservedWorker:
         from nanopynix._pool import ReservedWorker, _WorkerManager
 
         manager = MagicMock(spec=_WorkerManager)
-        worker = MagicMock()
 
-        rw = ReservedWorker(manager, worker)
+        rw = ReservedWorker(manager)
         await rw.release()
 
         with pytest.raises(RuntimeError, match="has been released"):

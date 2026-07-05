@@ -96,17 +96,16 @@ async def test_worker_death_detection():
             uri = await store.get_uri()
             assert isinstance(uri, str)
 
-        # Kill the subprocess
-        worker = nix._manager._worker
-        assert worker is not None
-        worker._proc.kill()
-        worker._proc.join(timeout=2)
+            # Kill the subprocess
+            proc = nix._manager._proc
+            assert proc is not None
+            proc.kill()
+            await proc.wait()
 
-        # Give the background reader a moment to notice
-        await asyncio.sleep(0.2)
+            # Give the background reader a moment to notice
+            await asyncio.sleep(0.2)
 
-        # Next call should raise WorkerDied — need a fresh store handle
-        async with nix.store() as store:
+            # Next call should raise WorkerDied
             with pytest.raises(WorkerDied):
                 await store.get_uri()
 
