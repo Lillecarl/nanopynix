@@ -126,9 +126,25 @@ class _WorkerRef:
         while True:
             remaining = t - (time.monotonic() - last_seen)
             if remaining <= 0:
-                raise TimeoutError(f"Call timed out — no worker activity for {t}s")
+                # Check for a response that arrived during the race window
+                try:
+                    kind, rid, payload = self._responses.get_nowait()
+                except asyncio.QueueEmpty:
+                    raise TimeoutError(f"Call timed out — no worker activity for {t}s")
+                # Got a late response — process it
+                if rid == req_id:
+                    if kind == "ok":
+                        return payload
+                    raise from_response(
+                        error_type=payload.get("error_type", "Unknown"),
+                        msg=payload.get("msg", "unknown"),
+                        raw=payload.get("traceback", ""),
+                        info=payload.get("info"),
+                    )
+                # Response for a different request — reset and continue
+                last_seen = self._last_activity
+                continue
 
-            # Poll with short timeout so we can check for activity frequently
             try:
                 async with asyncio.timeout(min(remaining, 1.0)):
                     get_task = asyncio.ensure_future(self._responses.get())
@@ -377,14 +393,24 @@ class WorkerPool:
             worker = await self._free.get()
             idle = time.monotonic() - worker._last_used
             if self._idle_timeout is not None and idle > self._idle_timeout:
-                await worker.close()
-                self._workers.remove(worker)
+                # Close stale worker in background — don't block callers
+                asyncio.ensure_future(self._close_stale(worker))
                 try:
-                    new = await self._spawn()
+                    return await self._spawn()
                 except Exception:
                     continue
-                return new
             return worker
+
+    async def _close_stale(self, worker: _WorkerRef) -> None:
+        """Close and remove a stale worker without blocking _acquire."""
+        try:
+            await worker.close()
+        except Exception:
+            pass
+        try:
+            self._workers.remove(worker)
+        except ValueError:
+            pass  # already removed
 
     async def _release(self, worker: _WorkerRef) -> None:
         worker._last_used = time.monotonic()
