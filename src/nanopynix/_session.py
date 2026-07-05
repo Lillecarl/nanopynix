@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from nanopynix.models import Capture
+
 if TYPE_CHECKING:
     from nanopynix._pool import ReservedWorker, _WorkerManager, _WorkerRef
+    from nanopynix.store import StoreHandle
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -17,9 +20,13 @@ class ValueProxy:
 
     Lifetime is tied to the ``EvalSession`` that created it — all RPC
     methods raise ``RuntimeError`` after the session exits.
+
+    Supports ``async with`` for early release: the handle is freed
+    immediately on ``__aexit__``, telling the subprocess to release
+    the C++ value so the Boehm GC can collect it.
     """
 
-    __slots__ = ("_worker", "_handle", "_type", "_timeout", "_active")
+    __slots__ = ("_worker", "_handle", "_type", "_timeout", "_active", "_released")
 
     def __init__(
         self,
@@ -34,11 +41,20 @@ class ValueProxy:
         self._type = typ
         self._timeout = timeout
         self._active = _active  # shared with EvalSession; None = never expires
+        self._released = False
+
+    async def __aenter__(self) -> ValueProxy:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.release()
 
     def _check_active(self) -> None:
         """Raise if the owning session has exited."""
         if self._active is not None and not self._active[0]:
             raise RuntimeError("ValueProxy is invalid — the EvalSession has been closed")
+        if self._released:
+            raise RuntimeError("ValueProxy has been released")
 
     @property
     def handle(self) -> int:
@@ -91,6 +107,7 @@ class ValueProxy:
         await self._worker.send_recv(
             "eval", "release", [self._handle], timeout=self._resolve_timeout(timeout),
         )
+        self._released = True
 
     def _resolve_timeout(self, override: float | None) -> float | None:
         if override is not None:
@@ -103,6 +120,12 @@ class EvalSession:
 
     All ``ValueProxy`` instances created through this session become
     invalid after ``__aexit__`` — their RPC methods raise ``RuntimeError``.
+
+    Usage::
+
+        async with session.eval(store=store) as eval_:
+            root = await eval_.file("default.nix")
+            name = await root.attr("name").force()
     """
 
     __slots__ = ("_manager", "_rw", "_timeout", "_active")
@@ -129,17 +152,31 @@ class EvalSession:
 
     def _check_rw(self) -> None:
         if self._rw is None:
-            raise RuntimeError("EvalSession not entered — use 'async with nix.eval() as session:'")
+            raise RuntimeError("EvalSession not entered — use 'async with session.eval() as eval_:'")
 
-    async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
+    # ── eval methods (new names) ─────────────────────────────────────
+
+    async def file(self, path: str, *, timeout: float | None = None,
+                   capture: bool = False) -> ValueProxy | Capture[ValueProxy]:
         self._check_rw()
         result = await self._rw.send_recv("eval", "eval_file", [path], timeout=self._resolve_timeout(timeout))
-        return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+        vp = ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+        return Capture(vp) if capture else vp
 
-    async def eval_string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
+    async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None,
+                     capture: bool = False) -> ValueProxy | Capture[ValueProxy]:
         self._check_rw()
         result = await self._rw.send_recv("eval", "eval_string", [expr, path], timeout=self._resolve_timeout(timeout))
-        return ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+        vp = ValueProxy(self._rw.worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+        return Capture(vp) if capture else vp
+
+    # ── backward-compat aliases ──────────────────────────────────────
+
+    async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
+        return await self.file(path, timeout=timeout)
+
+    async def eval_string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
+        return await self.string(expr, path=path, timeout=timeout)
 
     def _resolve_timeout(self, override: float | None) -> float | None:
         if override is not None:
