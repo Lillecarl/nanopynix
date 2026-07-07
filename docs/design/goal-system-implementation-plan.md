@@ -251,21 +251,23 @@ store streaming needs the selected source's `nar_size`.
 - `Commit`: separate commit.
 - `Notes`: `SubstitutePathGoal` now delegates source selection and import
   deduplication to `Scheduler.substitution_queue` while keeping reference
-  walking in the goal graph. Remaining work: focused BuildPaths behavior tests,
-  subscriber cancellation, and broader result handling.
+  walking in the goal graph. `tests/functional/test_simple.py::test_store`
+  passed after this handoff. Remaining work: explicit substitution-before-build
+  coverage, subscriber cancellation, and broader result handling.
 
 ### T10 - Rework QueryMissing Through Read-Only GoalRun
 
-- `Status`: todo
+- `Status`: in-progress
 - `Owner`: primary
 - `Can delegate`: no
 - `Depends on`: T03, T07
 - `Validation`: focused functional tests for `will_build`, `will_substitute`,
   `unknown`, cached negative substitution, and first-positive size reporting.
 - `Commit`: separate commit.
-- `Notes`: QueryMissing now dispatches through a read-only goal entrypoint. It
-  still needs full dependency walking, `will_substitute`, cached negative
-  substitution behavior, and first-positive size reporting.
+- `Notes`: QueryMissing now dispatches through a read-only goal entrypoint and
+  uses `SubstitutionQueue.can_substitute` for missing opaque paths, reporting
+  `will_substitute` and first-positive size metadata. It still needs full
+  dependency walking for derivation outputs and broader functional coverage.
 
 ### T11 - Review Result Model
 

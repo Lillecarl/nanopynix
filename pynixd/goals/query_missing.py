@@ -10,6 +10,8 @@ import structlog
 from ..derived_path import DerivedPath
 from ..serde import IsValidPathRequest, QueryMissingRequest, QueryMissingResponse
 from ..serde import StorePath as SerdeStorePath
+from ..store_path import StorePath
+from ..substitution_queue import SubstitutionAvailability
 from .goal import ExecutionGoal
 
 if TYPE_CHECKING:
@@ -35,7 +37,10 @@ class QueryMissingPlanGoal(ExecutionGoal[QueryMissingResponse]):
 
     async def _run(self) -> QueryMissingResponse:
         will_build: set[SerdeStorePath] = set()
+        will_substitute: set[SerdeStorePath] = set()
         unknown: set[SerdeStorePath] = set()
+        download_size = 0
+        nar_size = 0
 
         for wire_path in self.request.derived_paths:
             derived_path = DerivedPath(wire_path.value)
@@ -48,18 +53,31 @@ class QueryMissingPlanGoal(ExecutionGoal[QueryMissingResponse]):
                 IsValidPathRequest(path=SerdeStorePath(path=str(base_path)))
             )
             if not response.valid:
-                unknown.add(SerdeStorePath(path=str(base_path)))
+                availability = await self._can_substitute(base_path)
+                if availability.available:
+                    will_substitute.add(SerdeStorePath(path=str(base_path)))
+                    download_size += availability.download_size or 0
+                    nar_size += availability.nar_size or 0
+                else:
+                    unknown.add(SerdeStorePath(path=str(base_path)))
 
         log.debug(
             "query_missing_goal_plan",
             requested=len(self.request.derived_paths),
             will_build=len(will_build),
+            will_substitute=len(will_substitute),
             unknown=len(unknown),
         )
         return QueryMissingResponse(
             will_build=will_build,
-            will_substitute=set(),
+            will_substitute=will_substitute,
             unknown=unknown,
-            download_size=0,
-            nar_size=0,
+            download_size=download_size,
+            nar_size=nar_size,
         )
+
+    async def _can_substitute(self, path: StorePath) -> SubstitutionAvailability:
+        scheduler = self.engine.ctx.scheduler
+        if scheduler is None:
+            return SubstitutionAvailability.unavailable()
+        return await scheduler.substitution_queue.can_substitute(path)
