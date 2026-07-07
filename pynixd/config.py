@@ -14,10 +14,8 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from .nix_config import NixConfig
 from .serde.ids import StoreId
-
-if TYPE_CHECKING:
-    from .nix_config import NixConfig
 
 
 class ScheduleMode(StrEnum):
@@ -390,3 +388,8 @@ class PynixdSettings(BaseSettings):
             stores[StoreId("local")] = LocalStore(spec)
 
         return stores
+
+
+StoreSpecBase.model_rebuild()
+LocalSocketStoreSpec.model_rebuild()
+PynixdSettings.model_rebuild()

@@ -257,7 +257,7 @@ store streaming needs the selected source's `nar_size`.
 
 ### T10 - Rework QueryMissing Through Read-Only GoalRun
 
-- `Status`: in-progress
+- `Status`: done
 - `Owner`: primary
 - `Can delegate`: no
 - `Depends on`: T03, T07
@@ -268,20 +268,26 @@ store streaming needs the selected source's `nar_size`.
   parses flat `.drv` files, classifies known requested outputs by local validity
   and substitution availability, reports `will_substitute` with first-positive
   size metadata, and conservatively places dynamic/nested/deferred derivations in
-  `will_build`. Broader functional coverage remains pending.
+  `will_build`. `tests/unit/test_query_missing_goal.py` and
+  `tests/functional/test_queries.py::test_query_missing` pass.
 
 ### T11 - Review Result Model
 
-- `Status`: todo
+- `Status`: done
 - `Owner`: primary
 - `Can delegate`: no
 - `Depends on`: T03, T09, T10
 - `Validation`: type checks and focused tests around dynamic path rewrites,
   resolved outputs, produced paths, and wire response conversion.
 - `Commit`: batch with T09 or T10 only if the diff is small; otherwise separate.
-- `Notes`: Current result objects mix daemon `BuildResult`, resolved outputs,
-  produced paths, and dynamic rewrite maps. Consider a clearer internal traversal
-  result that is converted at the root to daemon wire responses.
+- `Notes`: QueryMissing uses its own read-only plan result, so the mutating
+  `GoalResult` shape remains scoped to build/substitution goals for now.
+  Parent goals now copy child results before adding dynamic rewrite mappings or
+  output-name aliases, avoiding request-local dedup aliasing. Focused pyright,
+  goal result unit tests, substitution queue unit tests, QueryMissing unit tests,
+  and `tests/functional/test_queries.py::test_query_missing` pass. This slice
+  also fixed Pydantic forward-reference rebuilding for `PynixdSettings` and
+  `LocalSocketStoreSpec`, which blocked adjacent settings-backed tests.
 
 ### T12 - Dynamic And Nested Derivation Review
 

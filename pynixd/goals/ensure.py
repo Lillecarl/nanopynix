@@ -96,10 +96,9 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
         await remainder_goal.subscribe_many(self._subscribers)
         result = await self.run_child(remainder_goal)
 
-        for output_name, output_path in result.resolved_outputs.items():
-            result.dynamic_paths[(self.derived_path.base_store_path(), output_name)] = output_path
-        result.produced_paths.add(inner_drv)
-        return result
+        nested_result = result.with_dynamic_outputs(self.derived_path.base_store_path())
+        nested_result.produced_paths.add(inner_drv)
+        return nested_result
 
     async def _ensure_flat_derivation(self) -> GoalResult:
         drv_path = SerdeStorePath(path=self.derived_path.drv_path)
@@ -125,9 +124,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
         substituted = await self._try_substitute_known_outputs(early_outputs)
         if substituted is not None:
             log.debug("ensure_derivation_substituted", drv_path=str(drv_path), outputs=sorted(selected_outputs))
-            for output_name, output_path in substituted.resolved_outputs.items():
-                substituted.dynamic_paths[(self.derived_path.base_store_path(), output_name)] = output_path
-            return substituted
+            return substituted.with_dynamic_outputs(self.derived_path.base_store_path())
 
         child_results = await self._realise_input_derivations(parsed)
 
@@ -151,9 +148,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
         substituted = await self._try_substitute_known_outputs(basic.output_paths())
         if substituted is not None:
             log.debug("ensure_derivation_substituted", drv_path=str(drv_path), outputs=sorted(selected_outputs))
-            for output_name, output_path in substituted.resolved_outputs.items():
-                substituted.dynamic_paths[(self.derived_path.base_store_path(), output_name)] = output_path
-            return substituted
+            return substituted.with_dynamic_outputs(self.derived_path.base_store_path())
 
         request = BuildDerivationRequest(
             drv_path=drv_path,
@@ -168,9 +163,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
         for client in subscribers:
             await build_goal.subscribe(client)
         result = await self.run_child(build_goal)
-        for output_name, output_path in result.resolved_outputs.items():
-            result.dynamic_paths[(self.derived_path.base_store_path(), output_name)] = output_path
-        return result
+        return result.with_dynamic_outputs(self.derived_path.base_store_path())
 
     async def _realise_input_derivations(self, parsed) -> list[GoalResult]:
         child_goals: list[EnsureDerivedPathGoal] = []
@@ -253,9 +246,7 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
                 return None
             if not result_succeeded(substituted.result):
                 return substituted
-            substituted.resolved_outputs = {output_name: path}
-            substituted.produced_paths.add(path)
-            results[output_name] = substituted
+            results[output_name] = substituted.with_single_output(output_name, path)
 
         merged = goal_success()
         for output_name, result in results.items():
