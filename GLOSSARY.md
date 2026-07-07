@@ -70,3 +70,24 @@ A per-store multiplier (`priority`, default `1.0`) applied to the telemetry scor
   priority = 2.0;  # preferred
 }
 ```
+
+### Goal System
+A request-scoped dependency walker for daemon operations that need to traverse derivations and store paths. `BuildPaths` and `BuildPathsWithResults` use mutating goals that may substitute or build; `QueryMissing` uses a read-only planning goal that may inspect local validity and substitution availability but must not import or build paths.
+
+### GoalRun / GoalEngine
+The current implementation creates a fresh `GoalEngine` per daemon request, which acts as the request-local goal run. It deduplicates active goals within that request only. Completed goal results are not cached globally; later requests discover current truth from the local store, substitution caches, and scheduler queues.
+
+### Mutating Ensure Goal
+`EnsureDerivedPathGoal` is the mutating coordinator for making a `DerivedPath` available locally. It may substitute paths, schedule builds through the global scheduler, resolve deferred outputs, and walk nested dynamic derivation chains.
+
+### Read-Only Planning Goal
+`QueryMissingPlanGoal` is the read-only counterpart used by `QueryMissing`. It classifies requested paths into `will_build`, `will_substitute`, and `unknown` without changing the local store. It may refresh substitution availability caches because those are scheduler-side query metadata, not local store realisation.
+
+### Scheduler Work Lane
+A typed side-effect lane owned by the singleton scheduler. Build work lives in the build lane (`BuildQueue`, builder assignment, subscribers, and `.drv` deduplication). Substitution work lives in the substitution lane (`SubstitutionQueue`, availability caches, health logs, background probes, and import deduplication).
+
+### SubstitutionQueue
+The scheduler-owned substitution lane. It exposes `can_substitute(path)` for fast availability checks, `get_substituter(path)` for selecting the highest-priority healthy source, and `substitute(path)` for deduplicated path imports into the local store.
+
+### Client-Bound Build Subscription
+A build log subscription tied to an active client request. Client-bound subscriptions are reference-counted per build. If the last such subscriber is explicitly removed before completion, the queued build is cancelled; internal no-client scheduler users are not cancelled by this rule.

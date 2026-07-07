@@ -327,7 +327,7 @@ store streaming needs the selected source's `nar_size`.
 
 ### T14 - Documentation And Glossary Update
 
-- `Status`: todo
+- `Status`: done
 - `Owner`: subagent-ok
 - `Can delegate`: yes
 - `Depends on`: major architecture choices implemented or stable
@@ -335,7 +335,9 @@ store streaming needs the selected source's `nar_size`.
 - `Commit`: batch with the final implementation commit or separate docs commit.
 - `Notes`: Update `GLOSSARY.md` for terms such as `GoalRun`,
   `SubstitutionQueue`, read-only planning goal, mutating ensure goal, and
-  scheduler work lane.
+  scheduler work lane. Added entries for the request-local goal system,
+  mutating/read-only goals, scheduler work lanes, `SubstitutionQueue`, and
+  client-bound build subscriptions.
 
 ### T15 - Final Validation
 
