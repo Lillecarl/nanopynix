@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <nanobind/nanobind.h>
+
 #include <nix/expr/eval.hh>
 #include <nix/expr/eval-settings.hh>
 #include <nix/expr/value.hh>
@@ -48,6 +50,9 @@ struct PyEvalState {
 
     /// Look up and wrap in a PyValue (Python-safe).
     PyValue value_from_handle(int64_t handle);
+
+    /// Convert a JSON-compatible Python object into a Nix Value.
+    PyValue value_from_python(nanobind::object obj);
 
     /// Release a handle.
     void release_exported(int64_t handle);

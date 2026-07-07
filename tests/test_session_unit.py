@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanopynix._session import EvalSession, ValueProxy, _ChildProxy
+from nanopynix._session import EvalSession, ValueProxy
 from nanopynix.models import LogEvent
 
 pytestmark = pytest.mark.asyncio
@@ -49,6 +49,19 @@ class TestEvalSessionLifecycle:
         result = await session.__aenter__()
         assert result is session
         pool.reserve.assert_awaited_once()
+
+    async def test_open_close_manual_lifecycle(self):
+        pool = _mock_pool()
+        rw = _mock_reserved_worker()
+        rw.send_recv.return_value = None
+        pool.reserve.return_value = rw
+
+        session = EvalSession(pool)
+        await session.open()
+        await session.close()
+
+        pool.reserve.assert_awaited_once()
+        rw.release.assert_awaited_once()
 
     async def test_exit_releases_worker(self):
         pool = _mock_pool()
@@ -163,18 +176,31 @@ class TestValueProxyLifecycle:
 
     async def test_attr_returns_new_proxy(self):
         w = self._worker()
-        w._send_recv.return_value = {"handle": 5, "type": "string"}
         vp = ValueProxy(w, 1, "attrs")
-        child = await vp.attr("name")
+        child = vp.attr("name")
         assert isinstance(child, ValueProxy)
+        assert child.type_name == "unknown"
+        w._send_recv.assert_not_awaited()
+
+        w._send_recv.side_effect = [
+            {"handle": 5, "type": "string"},
+            "hello",
+        ]
+        assert await child.force() == "hello"
         assert child.handle == 5
         assert child.type_name == "string"
 
     async def test_list_get_returns_new_proxy(self):
         w = self._worker()
-        w._send_recv.return_value = {"handle": 3, "type": "int"}
         vp = ValueProxy(w, 1, "list")
-        child = await vp.list_get(0)
+        child = vp.list_get(0)
+        w._send_recv.assert_not_awaited()
+
+        w._send_recv.side_effect = [
+            {"handle": 3, "type": "int"},
+            "int",
+        ]
+        assert await child.type() == "int"
         assert child.handle == 3
 
     async def test_list_length(self):
@@ -194,6 +220,14 @@ class TestValueProxyLifecycle:
         w._send_recv.return_value = True
         vp = ValueProxy(w, 1, "attrs")
         assert await vp.has_attr("foo") is True
+
+    async def test_type_delegates_to_worker(self):
+        w = self._worker()
+        w._send_recv.return_value = "attrs"
+        vp = ValueProxy(w, 1, "thunk")
+        assert await vp.type() == "attrs"
+        assert vp.type_name == "attrs"
+        w._send_recv.assert_awaited_with("eval", "type_name", [1], timeout=None)
 
     async def test_release(self):
         w = self._worker()
@@ -234,11 +268,11 @@ class TestValueProxyLifecycle:
 
 
 # ════════════════════════════════════════════════════════════════════
-# _ChildProxy — lazy child resolution (C2 fix)
+# ValueProxy lazy child resolution
 # ════════════════════════════════════════════════════════════════════
 
-class TestChildProxy:
-    """Verify _ChildProxy resolves via attr/list_get, not parent force."""
+class TestLazyChildProxy:
+    """Verify child proxies resolve via attr/list_get, not parent force."""
 
     def _worker(self):
         w = MagicMock()
@@ -252,7 +286,7 @@ class TestChildProxy:
             {"handle": 5, "type": "int"},  # _resolve
             99,                              # force
         ]
-        cp = _ChildProxy(w, parent_handle=1, selector="name")
+        cp = ValueProxy.child(w, 1, "name")
 
         result = await cp.force()
 
@@ -268,7 +302,7 @@ class TestChildProxy:
             {"handle": 3, "type": "int"},  # _resolve: list_get
             42,                              # force: returns int
         ]
-        cp = _ChildProxy(w, parent_handle=1, selector=0)
+        cp = ValueProxy.child(w, 1, 0)
 
         result = await cp.force()
 
@@ -280,10 +314,11 @@ class TestChildProxy:
     async def test_no_rpc_until_force(self):
         """No RPC is made until .force() is called on the child proxy."""
         w = self._worker()
-        cp = _ChildProxy(w, parent_handle=1, selector="name")
+        cp = ValueProxy.child(w, 1, "name")
         w._send_recv.assert_not_called()
         # accessing a property doesn't trigger RPC either
-        assert cp._parent_handle == 1
+        with pytest.raises(RuntimeError, match="not been resolved"):
+            _ = cp.handle
         w._send_recv.assert_not_called()
 
     async def test_child_proxy_force_deep(self):
@@ -293,7 +328,7 @@ class TestChildProxy:
             {"handle": 5, "type": "attrs"},  # _resolve
             {"a": 1, "b": 2},                 # force_deep
         ]
-        cp = _ChildProxy(w, parent_handle=1, selector="name")
+        cp = ValueProxy.child(w, 1, "name")
 
         result = await cp.force_deep()
 
@@ -306,7 +341,7 @@ class TestChildProxy:
         """Child proxy raises after session close."""
         w = self._worker()
         active = [False]
-        cp = _ChildProxy(w, parent_handle=1, selector="name", _active=active)
+        cp = ValueProxy.child(w, 1, "name", _active=active)
 
         with pytest.raises(RuntimeError, match="EvalSession has been closed"):
             await cp.force()
@@ -318,7 +353,7 @@ class TestChildProxy:
             {"handle": 5, "type": "int"},
             42,
         ]
-        cp = _ChildProxy(w, parent_handle=1, selector="name", timeout=30.0)
+        cp = ValueProxy.child(w, 1, "name", timeout=30.0)
 
         await cp.force(timeout=10.0)
 

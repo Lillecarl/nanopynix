@@ -202,6 +202,7 @@ class _WorkerManager:
 
         if self._proc is not None:
             try:
+                assert self._proc.stdin is not None
                 self._proc.stdin.close()
             except Exception:
                 pass
@@ -328,10 +329,12 @@ class _WorkerManager:
                 "params": args,
                 "id": req_id,
             })
+            assert self._writer is not None
             await self._writer.drain()
 
             # Wait for response with idle timeout
             last_seen = self._last_activity = time.monotonic()
+            msg: dict[str, Any] | None = None
             while True:
                 remaining = t - (time.monotonic() - last_seen)
                 if remaining <= 0:
@@ -354,6 +357,8 @@ class _WorkerManager:
 
             # Cleanup
             self._pending.pop(req_id, None)
+            if msg is None:
+                raise WorkerDied("No response received")
 
             # Decode response
             if "result" in msg:

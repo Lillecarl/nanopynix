@@ -341,12 +341,12 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v) {
 static void python_to_value(nix::EvalState &state, nb::object obj, nix::Value &v) {
     if (obj.is_none()) {
         v.mkNull();
+    } else if (nb::isinstance<nb::bool_>(obj)) {
+        v.mkBool(nb::cast<bool>(obj));
     } else if (nb::isinstance<nb::int_>(obj)) {
         v.mkInt(nix::NixInt{nb::cast<int64_t>(obj)});
     } else if (nb::isinstance<nb::float_>(obj)) {
         v.mkFloat(nb::cast<double>(obj));
-    } else if (nb::isinstance<nb::bool_>(obj)) {
-        v.mkBool(nb::cast<bool>(obj));
     } else if (nb::isinstance<nb::list>(obj)) {
         auto pyList = nb::cast<nb::list>(obj);
         auto builder = state.buildList(pyList.size());
@@ -371,6 +371,12 @@ static void python_to_value(nix::EvalState &state, nb::object obj, nix::Value &v
         auto s = nb::cast<std::string>(nb::str(obj));
         v.mkString(s, state.mem);
     }
+}
+
+PyValue PyEvalState::value_from_python(nb::object obj) {
+    auto *v = state->allocValue();
+    python_to_value(*state, obj, *v);
+    return PyValue(v, evalRef());
 }
 
 // Holder for a registered Python primop callback.
@@ -520,6 +526,7 @@ static void bind_eval_state(nb::module_ &m) {
         .def("release_all_exported", &PyEvalState::release_all_exported,
              "Release all exported handles.")
         .def("value_from_handle", &PyEvalState::value_from_handle, "handle"_a)
+        .def("value_from_python", &PyEvalState::value_from_python, "obj"_a)
         .def("_export_pyvalue", [](PyEvalState &es, PyValue &pyv) {
             return es.export_value(pyv.value);
         }, "pyv"_a);

@@ -1,6 +1,7 @@
-# API Design — nanopynix v2
+# API — nanopynix v2
 
-*Status: ~90% settled.  One round of chunking remains, then implementation.*
+*Status: implemented incrementally.  This document is the intended public API;
+some raw nanobind bindings still exist for low-level tests and migration work.*
 
 ## Principles
 
@@ -62,6 +63,9 @@ async with nanopynix.Session(
 ) as session:
 ```
 
+Advanced store selection is still available through `store_uri` and
+`eval_store_uri`.  `settings=` is accepted as a temporary alias for `config=`.
+
 ### Log bus
 
 ```python
@@ -93,13 +97,15 @@ async with session.store(uri: str = "daemon") as store:
 StoreHandle carries `_session_id` (uuid).  `session.eval(store)` checks
 equality at runtime → `ValueError` if mismatched.
 
-Every method: `capture: bool = False` → `Capture[Model]`.
+Every method accepts `capture: bool = False`.  With `capture=False` it returns
+the plain value.  With `capture=True` it returns `Capture[value]` with matching
+worker log events.
 
 | Group | Methods |
 |-------|---------|
 | Identity | `get_uri() → Capture[str]`, `get_store_dir() → Capture[str]` |
 | StorePath | `parse_store_path(s) → Capture[StorePath]`, `is_valid_path(sp) → Capture[bool]`, `follow_links_to_store_path(s) → Capture[StorePath]` |
-| Path info | `query_path_info(sp) → Capture[PathInfo]`, `query_path_from_hash_part(h) → Capture[StorePath]` |
+| Path info | `query_path_info(sp) → PathInfo`, `query_path_from_hash_part(h) → StorePath \| None` |
 | Closures | `compute_fs_closure(sp, *, flip, include_outputs, include_derivers) → Capture[list[StorePath]]`, `query_missing(paths) → Capture[MissingInfo]` |
 | Derivations | `query_derivation_outputs(sp) → Capture[list[StorePath]]`, `query_valid_derivers(sp) → Capture[list[StorePath]]`, `read_derivation(drv) → Capture[Derivation]`, `build_derivation(drv, mode) → Capture[BuildResult]` |
 | Bulk | `query_all_valid_paths()`, `query_referrers(sp)`, `query_substitutable_paths(paths)` — all `Capture[list[StorePath]]` |
@@ -121,19 +127,19 @@ async with session.eval(store: StoreHandle) as eval_:
 eval_.file(path, *, timeout=None, capture=False)     → Capture[ValueProxy]
 eval_.string(expr, *, path="<string>",                → Capture[ValueProxy]
              timeout=None, capture=False)
-eval_.lock_flake(ref, *, timeout=None, capture=False) → Capture[LockedFlake]
-eval_.get_flake(ref, *, timeout=None, capture=False)  → Capture[LockedFlake]
+eval_.lock_flake(ref, *, timeout=None, capture=False) → LockedFlake
+eval_.get_flake(ref, *, timeout=None, capture=False)  → FlakeRef
 ```
 
 ### ValueProxy — lazy, all access is async
 
 | Method | Returns | Notes |
 |--------|---------|-------|
-| `.attr(name)` | `ValueProxy` | lazy, no RPC |
+| `.attr(name)` | `ValueProxy` | lazy, no RPC until forced/queried |
 | `.force()` | `ValueAttrs \| ValueList \| scalar` | WHNF — outer constructor only |
 | `.force_deep()` | `dict \| list \| scalar` | recursive (forceValueDeep) |
 | `.call(*args)` | `ValueProxy` | |
-| `.type()` | `str` | `"int"`, `"string"`, `"attrs"`, `"list"`, … |
+| `.type()` | `str` | async; forces to WHNF and returns `"int"`, `"string"`, `"attrs"`, `"list"`, … |
 | `.is_*()` | `bool` | `is_int`, `is_string`, `is_attrs`, `is_list`, `is_null`, `is_function`, `is_bool` |
 
 ### Handle lifetime & early release

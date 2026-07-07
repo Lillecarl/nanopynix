@@ -9,7 +9,20 @@ from __future__ import annotations
 
 from enum import IntEnum
 
-from pydantic import BaseModel, computed_field, Field
+from pydantic import AliasChoices, BaseModel, computed_field, Field, field_validator, model_validator
+
+
+def _parse_store_path_string(value: str) -> dict[str, str]:
+    basename = value.rstrip("/").rsplit("/", 1)[-1]
+    try:
+        hyphen = basename.index("-")
+    except ValueError:
+        raise ValueError(f"Invalid store path: no '-' separator in '{value}'") from None
+    return {
+        "hash_part": basename[:hyphen],
+        "name": basename[hyphen + 1:],
+        "to_string": basename,
+    }
 
 
 class StorePath(BaseModel):
@@ -18,6 +31,20 @@ class StorePath(BaseModel):
     hash_part: str = Field(description="The 32-character hash portion")
     name: str = Field(description="The name portion (e.g. 'bash-5.2')")
     to_string: str = Field(description="Full basename: '<hash>-<name>'")
+
+    def __init__(self, value: str | None = None, **data) -> None:
+        if value is not None:
+            if data:
+                raise TypeError("StorePath accepts either a path string or explicit fields, not both")
+            data = _parse_store_path_string(value)
+        super().__init__(**data)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_string(cls, value):
+        if isinstance(value, str):
+            return _parse_store_path_string(value)
+        return value
 
     @computed_field
     @property
@@ -160,9 +187,39 @@ class DerivationOutputs(BaseModel):
 class Derivation(BaseModel):
     """C++ ``nix::Derivation`` data — not the richer ``nix derivation show`` JSON."""
     name: str
-    system: str
+    system: str = Field(validation_alias=AliasChoices("system", "platform"))
     builder: str
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
-    input_drvs: dict[str, DerivationOutputs] = Field(default_factory=dict)  # StorePath string → outputs
-    input_srcs: list[str] = Field(default_factory=list)  # StorePath strings
+    input_drvs: dict[str, DerivationOutputs] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("input_drvs", "inputDrvs"),
+    )  # StorePath string → outputs
+    input_srcs: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("input_srcs", "inputSrcs"),
+    )  # StorePath strings
+
+    @field_validator("env", mode="before")
+    @classmethod
+    def _env_from_nix_pairs(cls, value):
+        if isinstance(value, list):
+            return dict(value)
+        return value
+
+    @field_validator("input_drvs", mode="before")
+    @classmethod
+    def _input_drvs_from_nix_list(cls, value):
+        if not isinstance(value, list):
+            return value
+        result = {}
+        for entry in value:
+            children = dict(entry.get("children", {}))
+            result[str(entry["path"])] = {
+                "outputs": list(entry.get("outputs", [])),
+                "dynamic_outputs": {
+                    str(k): ",".join(str(o) for o in v)
+                    for k, v in children.items()
+                },
+            }
+        return result
