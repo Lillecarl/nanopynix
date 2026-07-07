@@ -52,11 +52,11 @@ class GoalEngine:
         self._goals: dict[Any, Goal[Any]] = {}
         self.substitution_import_limiter = anyio.Semaphore(4)
 
-    async def subscribe_build(self, build_id: BuildId, client: ClientConn) -> None:
+    async def subscribe_build(self, build_id: BuildId, client: ClientConn) -> bool:
         scheduler = self.ctx.scheduler
         if scheduler is None:
-            return
-        await scheduler.queue.subscribe(build_id, client, cancel_on_unsubscribe=True)
+            return False
+        return await scheduler.queue.subscribe(build_id, client, cancel_on_unsubscribe=True)
 
     async def unsubscribe_build(self, build_id: BuildId, client: ClientConn) -> None:
         scheduler = self.ctx.scheduler

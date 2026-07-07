@@ -27,7 +27,9 @@ class BuildDerivationGoal(ExecutionGoal[GoalResult]):
     engine: GoalEngine
     request: BuildDerivationRequest
     _subscribers: list[ClientConn] = field(default_factory=list)
+    _active_subscribers: list[ClientConn] = field(default_factory=list)
     _build_id: BuildId | None = None
+    _finished: bool = False
 
     def __post_init__(self) -> None:
         ExecutionGoal.__init__(self, self.engine)
@@ -36,11 +38,27 @@ class BuildDerivationGoal(ExecutionGoal[GoalResult]):
         if client is None:
             return
         async with self._lock:
+            if self._finished:
+                return
             build_id = self._build_id
             if build_id is None:
                 self._subscribers.append(client)
                 return
-        await self.engine.subscribe_build(build_id, client)
+        await self._subscribe_active(build_id, client)
+
+    async def _subscribe_active(self, build_id: BuildId, client: ClientConn) -> None:
+        if not await self.engine.subscribe_build(build_id, client):
+            return
+
+        should_unsubscribe = False
+        async with self._lock:
+            if self._finished or self._build_id != build_id:
+                should_unsubscribe = True
+            else:
+                self._active_subscribers.append(client)
+
+        if should_unsubscribe:
+            await self.engine.unsubscribe_build(build_id, client)
 
     async def _run(self) -> GoalResult:
         if self.engine.ctx.scheduler is None:
@@ -56,12 +74,16 @@ class BuildDerivationGoal(ExecutionGoal[GoalResult]):
             self._subscribers.clear()
 
         for client in subscribers:
-            await self.engine.subscribe_build(build_id, client)
+            await self._subscribe_active(build_id, client)
 
         try:
             response = await future
         finally:
-            for client in subscribers:
+            async with self._lock:
+                self._finished = True
+                active_subscribers = list(self._active_subscribers)
+                self._active_subscribers.clear()
+            for client in active_subscribers:
                 await self.engine.unsubscribe_build(build_id, client)
 
         resolved: dict[str, StorePath] = {}
