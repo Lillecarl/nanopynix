@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import anyio
 
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 U = TypeVar("U")
+_MISSING = object()
 
 
 class Goal[T]:
@@ -50,7 +51,7 @@ class ExecutionGoal(Goal[T]):
     """A fan-out goal that waits for child goals in parallel."""
 
     async def run_children(self, children: Sequence[Goal[U]]) -> list[U]:
-        results: list[U | None] = [None] * len(children)
+        results: list[U | object] = [_MISSING] * len(children)
 
         async def run_one(index: int, child: Goal[U]) -> None:
             results[index] = await child.result()
@@ -59,4 +60,9 @@ class ExecutionGoal(Goal[T]):
             for index, child in enumerate(children):
                 tg.create_task(run_one(index, child))
 
-        return [result for result in results if result is not None]
+        collected: list[U] = []
+        for result in results:
+            if result is _MISSING:
+                raise RuntimeError("goal child did not record a result")
+            collected.append(cast("U", result))
+        return collected
