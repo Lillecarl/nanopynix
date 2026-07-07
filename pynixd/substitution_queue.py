@@ -13,9 +13,12 @@ import structlog
 from cachetools import TTLCache
 
 from .exceptions import OpNotImplementedError
-from .serde import QueryPathInfoRequest
+from .serde import AddToStoreNarRequest, NarFromPathRequest, QueryPathInfoRequest
 from .serde import StorePath as SerdeStorePath
+from .serde.context import ReadContext, WriteContext
 from .serde.valid_path_info import ValidPathInfo
+from .store import DaemonStore, HTTPBinaryCacheStore
+from .store.http_binary_cache import HTTPNarInfo
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -27,6 +30,7 @@ if TYPE_CHECKING:
     from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
+_NAR_CHUNK_SIZE = 1024 * 256
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,25 @@ class SubstitutionAvailability:
             return cls.unavailable()
         nar_size = result.path_info.info.nar_size
         return cls(available=True, nar_size=nar_size, download_size=nar_size)
+
+
+@dataclass(frozen=True)
+class SubstitutionCandidate:
+    """Selected substituter source for one path."""
+
+    store: Store
+    path_info: ValidPathInfo
+    http_narinfo: HTTPNarInfo | None = None
+
+
+@dataclass(frozen=True)
+class SubstitutionImportResult:
+    """Result of importing one path into the local store."""
+
+    substituted: bool
+    path: StorePath
+    candidate: SubstitutionCandidate | None = None
+    error: str = ""
 
 
 class SubstitutionHealthLog:
@@ -100,6 +123,7 @@ class SubstitutionQueue:
         )
         self.health: dict[StoreId, SubstitutionHealthLog] = {}
         self._probe_tasks: set[asyncio.Task[None]] = set()
+        self._active_imports: dict[StorePath, asyncio.Task[SubstitutionImportResult]] = {}
 
     async def close(self) -> None:
         for task in self._probe_tasks:
@@ -149,6 +173,29 @@ class SubstitutionQueue:
             return SubstitutionAvailability.from_query_result(first_positive)
         return SubstitutionAvailability.unavailable()
 
+    async def get_substituter(self, path: StorePath) -> SubstitutionCandidate | None:
+        stores = list(self.substituter_stores())
+        if not stores:
+            return None
+
+        stale_stores = [store for store in stores if not self._has_cached_result(path, store.store_id)]
+        if stale_stores:
+            await self._query_stores_for_selection(path, stale_stores)
+
+        return self._best_candidate_from_cache(path, stores)
+
+    async def substitute(self, path: StorePath) -> SubstitutionImportResult:
+        existing = self._active_imports.get(path)
+        if existing is not None:
+            return await existing
+
+        task = asyncio.create_task(self._substitute_uncached(path))
+        self._active_imports[path] = task
+        try:
+            return await task
+        finally:
+            self._active_imports.pop(path, None)
+
     def record_query_result(self, path: StorePath, result: SubstitutionQueryResult) -> None:
         cache = self.positive if result.found else self.negative
         per_store = cache.setdefault(path, {})
@@ -190,6 +237,88 @@ class SubstitutionQueue:
 
         path_info = ValidPathInfo(path=SerdeStorePath(path=str(path)), info=response.info)
         return SubstitutionQueryResult(store_id=store.store_id, path_info=path_info, query_succeeded=True)
+
+    async def _query_stores_for_selection(self, path: StorePath, stores: list[Store]) -> None:
+        healthy_stores = [store for store in stores if self.should_wait_for(store.store_id)]
+        background_stores = [store for store in stores if store not in healthy_stores]
+
+        async def query_and_record(store: Store) -> None:
+            self.record_query_result(path, await self._query_store(path, store))
+
+        async with asyncio.TaskGroup() as tg:
+            for store in healthy_stores:
+                tg.create_task(query_and_record(store))
+
+        for store in background_stores:
+            self._track_probe_task(asyncio.create_task(query_and_record(store)))
+
+    async def _substitute_uncached(self, path: StorePath) -> SubstitutionImportResult:
+        candidate = await self.get_substituter(path)
+        if candidate is None:
+            return SubstitutionImportResult(substituted=False, path=path, error=f"no substituter has path: {path}")
+
+        try:
+            await self._import_nar(path, candidate)
+        except Exception as exc:
+            log.warning("substitution_import_failed", store_id=candidate.store.store_id, path=str(path), exc_info=True)
+            return SubstitutionImportResult(substituted=False, path=path, candidate=candidate, error=str(exc))
+        return SubstitutionImportResult(substituted=True, path=path, candidate=candidate)
+
+    async def _import_nar(self, path: StorePath, candidate: SubstitutionCandidate) -> None:
+        async with self.ctx.local_store.transfer_conn() as conn:
+            request = AddToStoreNarRequest(
+                info=candidate.path_info,
+                repair=0,
+                dont_check_sigs=1,
+            )
+            await request.to_writer(WriteContext.from_conn(conn))
+            await conn.w.drain()
+
+            framed = conn.w.framed()
+            if isinstance(candidate.store, HTTPBinaryCacheStore):
+                http_narinfo = candidate.http_narinfo
+                if http_narinfo is None:
+                    http_narinfo = await candidate.store.get_narinfo(path)
+                if http_narinfo is None:
+                    raise RuntimeError(f"substituter lost path while streaming: {path}")
+                async for chunk in candidate.store.stream_nar(http_narinfo):
+                    framed.write(chunk)
+                    await conn.w.drain()
+            elif isinstance(candidate.store, DaemonStore):
+                await self._stream_from_daemon(path, candidate, framed, conn)
+            else:
+                raise RuntimeError(f"store {candidate.store.store_id} cannot stream NARs")
+
+            await framed.finalize()
+            await request.response_type.from_reader(ReadContext.from_conn(conn))
+
+    async def _stream_from_daemon(self, path: StorePath, candidate: SubstitutionCandidate, framed: Any, destination_conn: Any) -> None:
+        if not isinstance(candidate.store, DaemonStore):
+            raise RuntimeError(f"store {candidate.store.store_id} cannot stream NARs")
+        async with candidate.store.transfer_conn() as source_conn:
+            await NarFromPathRequest(path=SerdeStorePath(path=str(path))).to_writer(
+                WriteContext.from_conn(source_conn)
+            )
+            await source_conn.w.drain()
+            await source_conn.r.drain_stderr()
+
+            remaining = candidate.path_info.info.nar_size
+            while remaining > 0:
+                chunk = await source_conn.r.readexactly(min(remaining, _NAR_CHUNK_SIZE))
+                framed.write(chunk)
+                await destination_conn.w.drain()
+                remaining -= len(chunk)
+
+    def _best_candidate_from_cache(self, path: StorePath, stores: list[Store]) -> SubstitutionCandidate | None:
+        positive = self.positive.get(path, {})
+        candidates = [
+            SubstitutionCandidate(store=store, path_info=result.path_info)
+            for store in stores
+            if (result := positive.get(store.store_id)) is not None and result.path_info is not None
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda candidate: candidate.store.priority)
 
     def _cached_positive(self, path: StorePath) -> SubstitutionQueryResult | None:
         for result in self.positive.get(path, {}).values():

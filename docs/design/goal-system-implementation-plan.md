@@ -227,7 +227,7 @@ store streaming needs the selected source's `nar_size`.
 
 ### T08 - Implement `get_substituter(path)` And `substitute(path)`
 
-- `Status`: todo
+- `Status`: done
 - `Owner`: primary
 - `Can delegate`: partial
 - `Depends on`: T07
@@ -235,10 +235,10 @@ store streaming needs the selected source's `nar_size`.
   imports deduplicate by path, selected source path info is used for daemon
   streaming, and successful import makes later goals stop at local validity.
 - `Commit`: separate commit.
-- `Notes`: `get_substituter` should block on healthy substituters, respect
-  global default and per-store query timeouts, and choose the highest-priority
-  positive candidate. Started substitutions may finish even if the requesting
-  client disconnects.
+- `Notes`: `get_substituter` now blocks on healthy substituters, uses cached
+  positives where available, and chooses the highest-priority positive
+  candidate. `substitute` deduplicates active imports by path and lets started
+  imports finish. Per-store timeout overrides are still pending.
 
 ### T09 - Wire BuildPaths And BuildPathsWithResults Through Mutating GoalRun
 

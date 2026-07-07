@@ -26,11 +26,20 @@ if TYPE_CHECKING:
 class FakeSubstituter:
     no_schedule = True
 
-    def __init__(self, store_id: str, *, valid: bool, delay: float = 0.0, nar_size: int = 10) -> None:
+    def __init__(
+        self,
+        store_id: str,
+        *,
+        valid: bool,
+        delay: float = 0.0,
+        nar_size: int = 10,
+        priority: float = 1.0,
+    ) -> None:
         self.store_id = StoreId(store_id)
         self.valid = valid
         self.delay = delay
         self.nar_size = nar_size
+        self.priority = priority
         self.queries = 0
 
     async def execute(self, request: WireRequest, **kwargs: Any) -> QueryPathInfoResponse:
@@ -135,3 +144,60 @@ async def test_can_substitute_does_not_wait_for_unhealthy_slow_store() -> None:
     assert not availability.available
     assert fast_missing.queries == 1
     assert slow_hit.queries == 1
+
+
+@pytest.mark.anyio
+async def test_get_substituter_selects_highest_priority_positive_store() -> None:
+    path = StorePath("/nix/store/00000000000000000000000000000000-example")
+    low_priority = FakeSubstituter("low-priority", valid=True, priority=50)
+    high_priority = FakeSubstituter("high-priority", valid=True, priority=10)
+    ctx = cast(
+        "PynixdContext",
+        SimpleNamespace(
+            settings=PynixdSettings(),
+            stores={
+                StoreId("local"): SimpleNamespace(no_schedule=False),
+                low_priority.store_id: low_priority,
+                high_priority.store_id: high_priority,
+            },
+        ),
+    )
+    queue = SubstitutionQueue(ctx)
+
+    candidate = await queue.get_substituter(path)
+
+    assert candidate is not None
+    assert candidate.store is high_priority
+
+
+@pytest.mark.anyio
+async def test_substitute_deduplicates_active_imports(monkeypatch: pytest.MonkeyPatch) -> None:
+    path = StorePath("/nix/store/00000000000000000000000000000000-example")
+    store = FakeSubstituter("cache", valid=True)
+    ctx = cast(
+        "PynixdContext",
+        SimpleNamespace(
+            settings=PynixdSettings(),
+            stores={
+                StoreId("local"): SimpleNamespace(no_schedule=False),
+                store.store_id: store,
+            },
+        ),
+    )
+    queue = SubstitutionQueue(ctx)
+    imports = 0
+
+    async def fake_import(path_arg: StorePath, candidate) -> None:
+        nonlocal imports
+        del path_arg, candidate
+        imports += 1
+        await asyncio.sleep(0.01)
+
+    monkeypatch.setattr(queue, "_import_nar", fake_import)
+
+    first, second = await asyncio.gather(queue.substitute(path), queue.substitute(path))
+
+    assert first.substituted
+    assert second.substituted
+    assert imports == 1
+    assert store.queries == 1
