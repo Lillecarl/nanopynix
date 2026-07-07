@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from nanopynix import LogEvent, Nix, NixError, StoreError, WorkerDied
+from nanopynix import LogEvent, Nix, NixError, StoreError, WorkerBusy, WorkerDied
 
 pytestmark = pytest.mark.asyncio
 
@@ -28,30 +28,13 @@ async def test_two_workers_sequential():
                 assert isinstance(uri, str)
 
 
-async def test_two_workers_concurrent():
-    """Concurrent calls on a single worker — sequential under the hood."""
+async def test_worker_busy_while_eval_session_holds_worker():
+    """The single worker does not silently queue behind an eval session."""
     async with Nix() as nix:
         async with nix.store() as store:
-            results = await asyncio.gather(
-                store.get_uri(),
-                store.get_store_dir(),
-                store.get_uri(),
-                store.get_store_dir(),
-            )
-    assert results[0] == results[2]  # same URI
-    assert results[1] == results[3] == "/nix/store"
-
-
-async def test_four_workers_concurrent_path_info():
-    """Concurrent query_path_info — single worker, sequential RPC."""
-    async with Nix() as nix:
-        async with nix.store() as store:
-            paths = await store.query_all_valid_paths()
-            if len(paths) >= 4:
-                results = await asyncio.gather(*[store.query_path_info(p) for p in paths[:4]])
-                assert len(results) == 4
-                for r in results:
-                    assert r.nar_size >= 0
+            async with nix.eval(store):
+                with pytest.raises(WorkerBusy):
+                    await store.get_uri()
 
 
 async def test_concurrent_log_stream():

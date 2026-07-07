@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanopynix import NixError
+from nanopynix._pool import _ActiveCall, _WorkerManager
 from nanopynix._session import EvalSession, ValueProxy
 from nanopynix.models import LogEvent
 
@@ -151,6 +153,32 @@ class TestEvalSessionLifecycle:
         await session.__aenter__()
         await session.eval_string("42")  # no override
         rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=10.0, capture=False)
+
+
+class TestWorkerManagerActiveCall:
+    async def test_fatal_log_event_fails_active_call(self):
+        manager = _WorkerManager()
+        fut = asyncio.get_running_loop().create_future()
+        manager._active_call = _ActiveCall(req_id=7, future=fut)
+
+        manager._fail_active_call_from_event(
+            {"request_id": 7, "action": "error", "args": [0, "attribute 'x' missing"]}
+        )
+
+        assert fut.done()
+        with pytest.raises(NixError, match="attribute 'x' missing"):
+            fut.result()
+
+    async def test_non_error_log_event_does_not_fail_active_call(self):
+        manager = _WorkerManager()
+        fut = asyncio.get_running_loop().create_future()
+        manager._active_call = _ActiveCall(req_id=7, future=fut)
+
+        manager._fail_active_call_from_event(
+            {"request_id": 7, "action": "warn", "args": ["still running"]}
+        )
+
+        assert not fut.done()
 
 
 # ════════════════════════════════════════════════════════════════════
