@@ -242,7 +242,7 @@ store streaming needs the selected source's `nar_size`.
 
 ### T09 - Wire BuildPaths And BuildPathsWithResults Through Mutating GoalRun
 
-- `Status`: in-progress
+- `Status`: done
 - `Owner`: primary
 - `Can delegate`: no
 - `Depends on`: T03, T04, T08
@@ -264,10 +264,11 @@ store streaming needs the selected source's `nar_size`.
 - `Validation`: focused functional tests for `will_build`, `will_substitute`,
   `unknown`, cached negative substitution, and first-positive size reporting.
 - `Commit`: separate commit.
-- `Notes`: QueryMissing now dispatches through a read-only goal entrypoint and
-  uses `SubstitutionQueue.can_substitute` for missing opaque paths, reporting
-  `will_substitute` and first-positive size metadata. It still needs full
-  dependency walking for derivation outputs and broader functional coverage.
+- `Notes`: QueryMissing now dispatches through a read-only goal entrypoint,
+  parses flat `.drv` files, classifies known requested outputs by local validity
+  and substitution availability, reports `will_substitute` with first-positive
+  size metadata, and conservatively places dynamic/nested/deferred derivations in
+  `will_build`. Broader functional coverage remains pending.
 
 ### T11 - Review Result Model
 
