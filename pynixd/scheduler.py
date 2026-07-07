@@ -222,6 +222,7 @@ class Scheduler:
 
     async def close(self) -> None:
         """Alias for stop() for consistency."""
+        await self.substitution_queue.close()
         await self.stop()
 
     async def schedule(self) -> None:

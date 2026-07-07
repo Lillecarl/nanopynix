@@ -159,7 +159,7 @@ store streaming needs the selected source's `nar_size`.
 
 ### T03 - Split Read-Only Planning From Mutating Ensure
 
-- `Status`: in-progress
+- `Status`: done
 - `Owner`: primary
 - `Can delegate`: no
 - `Depends on`: T01
@@ -197,7 +197,7 @@ store streaming needs the selected source's `nar_size`.
 
 ### T06 - Implement Substitution Availability Cache And Health Logs
 
-- `Status`: in-progress
+- `Status`: done
 - `Owner`: subagent-ok
 - `Can delegate`: yes
 - `Depends on`: T05
@@ -208,12 +208,12 @@ store streaming needs the selected source's `nar_size`.
   `positive: TTLCache[StorePath, dict[StoreId, Result]]` and
   `negative: TTLCache[StorePath, dict[StoreId, Result]]` shape. Global TTL,
   cache-size, health-window, and query-timeout defaults live in
-  `PynixdSettings`. Per-store timeout overrides and real store-query accounting
-  still need to be wired into probing.
+  `PynixdSettings`. Store-query success and failure are now recorded by
+  `can_substitute`; per-store timeout overrides are still pending.
 
 ### T07 - Implement `can_substitute(path)`
 
-- `Status`: todo
+- `Status`: done
 - `Owner`: primary
 - `Can delegate`: partial
 - `Depends on`: T05, T06
@@ -221,10 +221,9 @@ store streaming needs the selected source's `nar_size`.
   only healthy stores block negative responses, all stores are still queried,
   and tasks remain strongly referenced until completion.
 - `Commit`: separate commit if non-trivial.
-- `Notes`: Use Store APIs that return path info, not `is_valid_path`.
-  `can_substitute` should return availability and optional size metadata for
-  `QueryMissing`; it should not expose selected-source internals unless later
-  required.
+- `Notes`: `can_substitute` now queries path info through Store APIs, returns
+  first-positive availability and size metadata, waits only for healthy stores,
+  and keeps background probe tasks strongly referenced until completion.
 
 ### T08 - Implement `get_substituter(path)` And `substitute(path)`
 
