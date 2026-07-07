@@ -24,6 +24,7 @@ from typing import Any
 # Exception hierarchy
 # ════════════════════════════════════════════════════════════════════
 
+
 class NixError(RuntimeError):
     """Base for all Nix-originated errors from RPC calls.
 
@@ -97,30 +98,30 @@ class UsageError(NixError):
 # Ordered: more specific patterns first.
 _CLASSIFIERS: list[tuple[re.Pattern, type[NixError], str]] = [
     # ── Eval errors ──────────────────────────────────────────────
-    (re.compile(r"undefined variable"),    UndefinedVarError,      "UndefinedVarError"),
-    (re.compile(r"infinite recursion"),     InfiniteRecursionError, "InfiniteRecursionError"),
-    (re.compile(r"assertion .+ failed"),    AssertionError_,        "AssertionError"),
+    (re.compile(r"undefined variable"), UndefinedVarError, "UndefinedVarError"),
+    (re.compile(r"infinite recursion"), InfiniteRecursionError, "InfiniteRecursionError"),
+    (re.compile(r"assertion .+ failed"), AssertionError_, "AssertionError"),
     (re.compile(r"access to (absolute path|URI).+forbidden"), RestrictedPathError, "RestrictedPathError"),
-    (re.compile(r"threw.*(?:while|error)"), ThrownError,           "ThrownError"),
+    (re.compile(r"threw.*(?:while|error)"), ThrownError, "ThrownError"),
     (re.compile(r"function .+ called without required argument"), MissingArgumentError, "MissingArgumentError"),
-    (re.compile(r"invalid value.*expected"),   UsageError, "UsageError"),
-    (re.compile(r"expected (?:a |an )"),    TypeError_,            "TypeError"),
-    (re.compile(r"cannot coerce .+ to a"),  TypeError_,            "TypeError"),
-    (re.compile(r"cannot add .+ to"),       TypeError_,            "TypeError"),
-    (re.compile(r"cannot compare"),         TypeError_,            "TypeError"),
-    (re.compile(r"but found"),              TypeError_,            "TypeError"),
-    (re.compile(r"builtin .+ not found"),   EvalError,             "EvalError"),
-    (re.compile(r"attribute .+ missing"),   EvalError,             "EvalError"),
-    (re.compile(r"integer overflow"),       EvalError,             "EvalError"),
+    (re.compile(r"invalid value.*expected"), UsageError, "UsageError"),
+    (re.compile(r"expected (?:a |an )"), TypeError_, "TypeError"),
+    (re.compile(r"cannot coerce .+ to a"), TypeError_, "TypeError"),
+    (re.compile(r"cannot add .+ to"), TypeError_, "TypeError"),
+    (re.compile(r"cannot compare"), TypeError_, "TypeError"),
+    (re.compile(r"but found"), TypeError_, "TypeError"),
+    (re.compile(r"builtin .+ not found"), EvalError, "EvalError"),
+    (re.compile(r"attribute .+ missing"), EvalError, "EvalError"),
+    (re.compile(r"integer overflow"), EvalError, "EvalError"),
     (re.compile(r"doesn't represent an absolute path"), EvalError, "EvalError"),
     # ── Parse errors ─────────────────────────────────────────────
     (re.compile(r"syntax error|parse error|unexpected (?:token|EOF)"), ParseError, "ParseError"),
     # ── Store errors ─────────────────────────────────────────────
-    (re.compile(r"path .+ is not valid"),      StoreError, "StoreError"),
+    (re.compile(r"path .+ is not valid"), StoreError, "StoreError"),
     (re.compile(r"path .+ is not in the Nix store"), StoreError, "StoreError"),
-    (re.compile(r"hash mismatch"),             StoreError, "StoreError"),
-    (re.compile(r"does not exist"),            StoreError, "StoreError"),
-    (re.compile(r"lacks a signature"),         StoreError, "StoreError"),
+    (re.compile(r"hash mismatch"), StoreError, "StoreError"),
+    (re.compile(r"does not exist"), StoreError, "StoreError"),
+    (re.compile(r"lacks a signature"), StoreError, "StoreError"),
     (re.compile(r"is not a valid derivation"), StoreError, "StoreError"),
     # ── Usage errors ─────────────────────────────────────────────
     (re.compile(r"setting .+ is a path and paths cannot be empty"), UsageError, "UsageError"),
@@ -155,9 +156,17 @@ def from_response(error_type: str, msg: str, *, raw: str = "", info: dict | None
 
 
 __all__ = [
-    "NixError", "StoreError", "EvalError",
-    "TypeError_", "AssertionError_", "UndefinedVarError",
-    "ThrownError", "InfiniteRecursionError", "RestrictedPathError",
-    "MissingArgumentError", "ParseError", "UsageError",
+    "NixError",
+    "StoreError",
+    "EvalError",
+    "TypeError_",
+    "AssertionError_",
+    "UndefinedVarError",
+    "ThrownError",
+    "InfiniteRecursionError",
+    "RestrictedPathError",
+    "MissingArgumentError",
+    "ParseError",
+    "UsageError",
     "from_response",
 ]

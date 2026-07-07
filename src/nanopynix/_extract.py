@@ -32,7 +32,7 @@ def store_path_str(s: str, /) -> dict:
     return {
         "to_string": s,
         "hash_part": s[:hyphen],
-        "name": s[hyphen + 1:],
+        "name": s[hyphen + 1 :],
     }
 
 

@@ -6,8 +6,7 @@ logger, and configuration.
 
 Usage::
 
-    async with Session(store_uri="daemon",
-                       experimental_features=["flakes"]) as session:
+    async with Session(store_uri="daemon", experimental_features=["flakes"]) as session:
         async with session.store() as store:
             info = await store.query_path_info("/nix/store/...")
         async for event in session.log_stream():

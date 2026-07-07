@@ -76,50 +76,17 @@ def compute_fs_closure(
     edges: list[Callable[[str], set[str]]] = []
 
     if flip_direction:
-        edges.append(
-            lambda path: {
-                r
-                for (r,) in db.execute(_q_backward_refs_excl_self(), (path, path))
-            }
-        )
+        edges.append(lambda path: {r for (r,) in db.execute(_q_backward_refs_excl_self(), (path, path))})
         if include_outputs:
-            edges.append(
-                lambda path: {
-                    r for (r,) in db.execute(_q_deriv_derivers(), (path,))
-                }
-            )
+            edges.append(lambda path: {r for (r,) in db.execute(_q_deriv_derivers(), (path,))})
         if include_derivers:
-            edges.append(
-                lambda path: {
-                    r
-                    for (r,) in db.execute(_q_deriv_outputs(), (path,))
-                    if r is not None
-                }
-            )
+            edges.append(lambda path: {r for (r,) in db.execute(_q_deriv_outputs(), (path,)) if r is not None})
     else:
-        edges.append(
-            lambda path: {
-                r
-                for (r,) in db.execute(_q_forward_refs(), (path,))
-                if r != path
-            }
-        )
+        edges.append(lambda path: {r for (r,) in db.execute(_q_forward_refs(), (path,)) if r != path})
         if include_outputs:
-            edges.append(
-                lambda path: {
-                    r
-                    for (r,) in db.execute(_q_deriv_outputs(), (path,))
-                    if r is not None
-                }
-            )
+            edges.append(lambda path: {r for (r,) in db.execute(_q_deriv_outputs(), (path,)) if r is not None})
         if include_derivers:
-            edges.append(
-                lambda path: {
-                    r
-                    for (r,) in db.execute(_q_has_deriver(), (path,))
-                    if r is not None
-                }
-            )
+            edges.append(lambda path: {r for (r,) in db.execute(_q_has_deriver(), (path,)) if r is not None})
 
     # ── BFS traversal ────────────────────────────────────────────
 

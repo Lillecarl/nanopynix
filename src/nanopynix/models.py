@@ -20,7 +20,7 @@ def _parse_store_path_string(value: str) -> dict[str, str]:
         raise ValueError(f"Invalid store path: no '-' separator in '{value}'") from None
     return {
         "hash_part": basename[:hyphen],
-        "name": basename[hyphen + 1:],
+        "name": basename[hyphen + 1 :],
         "to_string": basename,
     }
 
@@ -170,6 +170,7 @@ from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
+
 @dataclass
 class Capture(Generic[T]):
     """Wrapper for operation results with optional log capture.
@@ -185,14 +186,17 @@ class Capture(Generic[T]):
 
 # ── Derivation ───────────────────────────────────────────────────────
 
+
 class DerivationOutputs(BaseModel):
     """Output spec for a derivation input."""
+
     outputs: list[str] = Field(default_factory=list)
     dynamic_outputs: dict[str, str] = Field(default_factory=dict)
 
 
 class Derivation(BaseModel):
     """C++ ``nix::Derivation`` data — not the richer ``nix derivation show`` JSON."""
+
     name: str
     system: str = Field(validation_alias=AliasChoices("system", "platform"))
     builder: str
@@ -224,9 +228,6 @@ class Derivation(BaseModel):
             children = dict(entry.get("children", {}))
             result[str(entry["path"])] = {
                 "outputs": list(entry.get("outputs", [])),
-                "dynamic_outputs": {
-                    str(k): ",".join(str(o) for o in v)
-                    for k, v in children.items()
-                },
+                "dynamic_outputs": {str(k): ",".join(str(o) for o in v) for k, v in children.items()},
             }
         return result

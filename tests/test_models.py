@@ -19,6 +19,7 @@ from nanopynix.models import (
 
 # ── StorePath ────────────────────────────────────────────────────────
 
+
 class TestStorePath:
     def test_basic(self):
         sp = StorePath(
@@ -43,11 +44,13 @@ class TestStorePath:
             StorePath(hash_part="abc")
 
     def test_validate_dict(self):
-        sp = StorePath.model_validate({
-            "hash_part": "abc123def456",
-            "name": "bash-5.2",
-            "to_string": "abc123def456-bash-5.2",
-        })
+        sp = StorePath.model_validate(
+            {
+                "hash_part": "abc123def456",
+                "name": "bash-5.2",
+                "to_string": "abc123def456-bash-5.2",
+            }
+        )
         assert sp.name == "bash-5.2"
         assert not sp.is_derivation
 
@@ -59,6 +62,7 @@ class TestStorePath:
 
 
 # ── PathInfo ─────────────────────────────────────────────────────────
+
 
 class TestPathInfo:
     def test_full(self):
@@ -88,16 +92,19 @@ class TestPathInfo:
         assert not pi.ultimate
 
     def test_validate_dict_minimal(self):
-        pi = PathInfo.model_validate({
-            "path": {"hash_part": "a", "name": "p", "to_string": "a-p"},
-            "nar_hash": "sha256:abc",
-            "nar_size": 0,
-        })
+        pi = PathInfo.model_validate(
+            {
+                "path": {"hash_part": "a", "name": "p", "to_string": "a-p"},
+                "nar_hash": "sha256:abc",
+                "nar_size": 0,
+            }
+        )
         assert isinstance(pi.path, StorePath)
         assert pi.nar_size == 0
 
 
 # ── BuildResult ──────────────────────────────────────────────────────
+
 
 class TestBuildResult:
     def test_success(self):
@@ -116,15 +123,18 @@ class TestBuildResult:
         assert br.error_msg == "compilation failed"
 
     def test_validate_dict(self):
-        br = BuildResult.model_validate({
-            "drv_path": "/nix/store/x.drv",
-            "success": False,
-            "status": "timed-out",
-        })
+        br = BuildResult.model_validate(
+            {
+                "drv_path": "/nix/store/x.drv",
+                "success": False,
+                "status": "timed-out",
+            }
+        )
         assert br.success is False
 
 
 # ── MissingInfo ──────────────────────────────────────────────────────
+
 
 class TestMissingInfo:
     def test_defaults(self):
@@ -135,6 +145,7 @@ class TestMissingInfo:
 
 
 # ── Input ────────────────────────────────────────────────────────────
+
 
 class TestInput:
     def test_github(self):
@@ -152,12 +163,18 @@ class TestInput:
 
 # ── FlakeRef ─────────────────────────────────────────────────────────
 
+
 class TestFlakeRef:
     def test_with_subdir(self):
-        fr = FlakeRef(attrs={
-            "type": "github", "owner": "NixOS", "repo": "nixpkgs",
-            "ref": "nixos-24.11", "dir": "lib",
-        })
+        fr = FlakeRef(
+            attrs={
+                "type": "github",
+                "owner": "NixOS",
+                "repo": "nixpkgs",
+                "ref": "nixos-24.11",
+                "dir": "lib",
+            }
+        )
         assert fr.attrs["dir"] == "lib"
 
     def test_basic(self):
@@ -170,6 +187,7 @@ class TestFlakeRef:
 
 
 # ── LockedInput / LockedFlake ────────────────────────────────────────
+
 
 class TestLockedInput:
     def test_with_direct_ref(self):
@@ -218,20 +236,23 @@ class TestLockedFlake:
         assert lf.inputs["utils"].is_flake is False
 
     def test_validate_dict_nested(self):
-        lf = LockedFlake.model_validate({
-            "description": "hello",
-            "inputs": {
-                "nixpkgs": {
-                    "attrs": {"type": "github", "owner": "NixOS", "repo": "nixpkgs", "rev": "abc"},
-                    "is_flake": True,
+        lf = LockedFlake.model_validate(
+            {
+                "description": "hello",
+                "inputs": {
+                    "nixpkgs": {
+                        "attrs": {"type": "github", "owner": "NixOS", "repo": "nixpkgs", "rev": "abc"},
+                        "is_flake": True,
+                    },
                 },
-            },
-        })
+            }
+        )
         assert isinstance(lf.inputs["nixpkgs"], LockedInput)
         assert lf.inputs["nixpkgs"].attrs["rev"] == "abc"
 
 
 # ── LogEvent ─────────────────────────────────────────────────────────
+
 
 class TestLogEvent:
     def test_msg_event(self):
@@ -308,20 +329,22 @@ def test_derivation_mutable_defaults_isolated():
 
 
 def test_derivation_accepts_nix_field_aliases():
-    drv = Derivation.model_validate({
-        "name": "foo",
-        "platform": "x86_64-linux",
-        "builder": "/bin/sh",
-        "env": [["A", "1"]],
-        "inputSrcs": ["/nix/store/src"],
-        "inputDrvs": [
-            {
-                "path": "/nix/store/input.drv",
-                "outputs": ["out"],
-                "children": {"dev": ["out"]},
-            }
-        ],
-    })
+    drv = Derivation.model_validate(
+        {
+            "name": "foo",
+            "platform": "x86_64-linux",
+            "builder": "/bin/sh",
+            "env": [["A", "1"]],
+            "inputSrcs": ["/nix/store/src"],
+            "inputDrvs": [
+                {
+                    "path": "/nix/store/input.drv",
+                    "outputs": ["out"],
+                    "children": {"dev": ["out"]},
+                }
+            ],
+        }
+    )
 
     assert drv.system == "x86_64-linux"
     assert drv.env == {"A": "1"}

@@ -20,12 +20,14 @@ pytestmark = pytest.mark.asyncio
 # Helpers
 # ════════════════════════════════════════════════════════════════════
 
+
 def _mock_pool():
     """Return a mock WorkerPool that supports reserve()."""
     pool = MagicMock()
     pool.reserve = AsyncMock()
     pool.rpc_timeout = 300.0
     return pool
+
 
 def _mock_reserved_worker():
     """Return a mock ReservedWorker that delegates send_recv."""
@@ -38,6 +40,7 @@ def _mock_reserved_worker():
 # ════════════════════════════════════════════════════════════════════
 # EvalSession lifecycle
 # ════════════════════════════════════════════════════════════════════
+
 
 class TestEvalSessionLifecycle:
     async def test_enter_reserves_worker(self):
@@ -153,6 +156,7 @@ class TestEvalSessionLifecycle:
 # ════════════════════════════════════════════════════════════════════
 # ValueProxy lifecycle
 # ════════════════════════════════════════════════════════════════════
+
 
 class TestValueProxyLifecycle:
     def _worker(self):
@@ -271,6 +275,7 @@ class TestValueProxyLifecycle:
 # ValueProxy lazy child resolution
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestLazyChildProxy:
     """Verify child proxies resolve via attr/list_get, not parent force."""
 
@@ -284,7 +289,7 @@ class TestLazyChildProxy:
         w = self._worker()
         w._send_recv.side_effect = [
             {"handle": 5, "type": "int"},  # _resolve
-            99,                              # force
+            99,  # force
         ]
         cp = ValueProxy.child(w, 1, "name")
 
@@ -300,7 +305,7 @@ class TestLazyChildProxy:
         w = self._worker()
         w._send_recv.side_effect = [
             {"handle": 3, "type": "int"},  # _resolve: list_get
-            42,                              # force: returns int
+            42,  # force: returns int
         ]
         cp = ValueProxy.child(w, 1, 0)
 
@@ -326,7 +331,7 @@ class TestLazyChildProxy:
         w = self._worker()
         w._send_recv.side_effect = [
             {"handle": 5, "type": "attrs"},  # _resolve
-            {"a": 1, "b": 2},                 # force_deep
+            {"a": 1, "b": 2},  # force_deep
         ]
         cp = ValueProxy.child(w, 1, "name")
 
@@ -364,6 +369,7 @@ class TestLazyChildProxy:
 # ReservedWorker
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestReservedWorker:
     async def test_release_idempotent(self):
         from nanopynix._pool import ReservedWorker, _WorkerManager
@@ -395,15 +401,18 @@ class TestReservedWorker:
 # log_stream request-id handling (C1 fix)
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestLogStreamRequestId:
     """Verify Session.log_stream() correctly maps worker wire format to LogEvent."""
 
     @staticmethod
     def _events_to_log_stream(events: list):
         """Return an async generator that yields the given events."""
+
         async def _gen():
             for e in events:
                 yield e
+
         return _gen()
 
     async def test_worker_request_id_mapped_correctly(self):
@@ -412,11 +421,15 @@ class TestLogStreamRequestId:
 
         session = Session.__new__(Session)
         manager = MagicMock()
-        manager.log_stream = MagicMock(return_value=self._events_to_log_stream([
-            {"request_id": 42, "action": "msg", "args": [3, "hello from nix"]},
-            {"request_id": 7, "action": "start", "args": [0, "building"]},
-            {"request_id": 7, "action": "result", "args": [0, 100]},
-        ]))
+        manager.log_stream = MagicMock(
+            return_value=self._events_to_log_stream(
+                [
+                    {"request_id": 42, "action": "msg", "args": [3, "hello from nix"]},
+                    {"request_id": 7, "action": "start", "args": [0, "building"]},
+                    {"request_id": 7, "action": "result", "args": [0, 100]},
+                ]
+            )
+        )
         session._manager = manager
 
         events = [e async for e in session.log_stream()]
@@ -443,9 +456,13 @@ class TestLogStreamRequestId:
 
         session = Session.__new__(Session)
         manager = MagicMock()
-        manager.log_stream = MagicMock(return_value=self._events_to_log_stream([
-            {"id": 99, "action": "msg", "args": [3, "legacy"]},
-        ]))
+        manager.log_stream = MagicMock(
+            return_value=self._events_to_log_stream(
+                [
+                    {"id": 99, "action": "msg", "args": [3, "legacy"]},
+                ]
+            )
+        )
         session._manager = manager
 
         events = [e async for e in session.log_stream()]
@@ -459,9 +476,13 @@ class TestLogStreamRequestId:
 
         session = Session.__new__(Session)
         manager = MagicMock()
-        manager.log_stream = MagicMock(return_value=self._events_to_log_stream([
-            {"action": "msg", "args": [3, "no id"]},
-        ]))
+        manager.log_stream = MagicMock(
+            return_value=self._events_to_log_stream(
+                [
+                    {"action": "msg", "args": [3, "no id"]},
+                ]
+            )
+        )
         session._manager = manager
 
         events = [e async for e in session.log_stream()]
@@ -474,10 +495,14 @@ class TestLogStreamRequestId:
 
         session = Session.__new__(Session)
         manager = MagicMock()
-        manager.log_stream = MagicMock(return_value=self._events_to_log_stream([
-            None,
-            {"request_id": 1, "action": "msg", "args": [3, "after sentinel"]},
-        ]))
+        manager.log_stream = MagicMock(
+            return_value=self._events_to_log_stream(
+                [
+                    None,
+                    {"request_id": 1, "action": "msg", "args": [3, "after sentinel"]},
+                ]
+            )
+        )
         session._manager = manager
 
         events = [e async for e in session.log_stream()]
