@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -53,14 +54,9 @@ class QueryMissingPlanGoal(ExecutionGoal[QueryMissingResponse]):
     async def _run(self) -> QueryMissingResponse:
         plan = QueryMissingPlan(will_build=set(), will_substitute=set(), unknown=set())
 
-        for wire_path in self.request.derived_paths:
-            derived_path = DerivedPath(wire_path.value)
-            base_path = derived_path.base_store_path()
-            if base_path.is_derivation():
-                await self._classify_derivation(derived_path, plan)
-                continue
-
-            await self._classify_opaque_path(base_path, plan)
+        async with asyncio.TaskGroup() as tg:
+            for wire_path in self.request.derived_paths:
+                tg.create_task(self._classify_wire_path(wire_path.value, plan))
 
         log.debug(
             "query_missing_goal_plan",
@@ -76,6 +72,15 @@ class QueryMissingPlanGoal(ExecutionGoal[QueryMissingResponse]):
             download_size=plan.download_size,
             nar_size=plan.nar_size,
         )
+
+    async def _classify_wire_path(self, wire_path: str, plan: QueryMissingPlan) -> None:
+        derived_path = DerivedPath(wire_path)
+        base_path = derived_path.base_store_path()
+        if base_path.is_derivation():
+            await self._classify_derivation(derived_path, plan)
+            return
+
+        await self._classify_opaque_path(base_path, plan)
 
     async def _classify_derivation(self, derived_path: DerivedPath, plan: QueryMissingPlan) -> None:
         drv_path = derived_path.base_store_path()

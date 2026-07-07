@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
 import pytest
 
 from pynixd.drv_parser import Derivation, DrvOutput
@@ -42,9 +44,34 @@ class FakeSubstitutionQueue:
         return self.substitutable.get(str(path), SubstitutionAvailability.unavailable())
 
 
+class BlockingSubstitutionQueue:
+    def __init__(self, blocked_path: str, releasing_path: str) -> None:
+        self.blocked_path = blocked_path
+        self.releasing_path = releasing_path
+        self.releasing_path_queried = asyncio.Event()
+        self.queries: list[str] = []
+
+    async def can_substitute(self, path: StorePath) -> SubstitutionAvailability:
+        path_str = str(path)
+        self.queries.append(path_str)
+        if path_str == self.releasing_path:
+            self.releasing_path_queried.set()
+        if path_str == self.blocked_path:
+            await self.releasing_path_queried.wait()
+        return SubstitutionAvailability.unavailable()
+
+
 def _derived_path_set(path: str) -> set[SerdeDerivedPath]:
     derived_path: Any = SerdeDerivedPath(value=path)
     return cast("set[SerdeDerivedPath]", {derived_path})
+
+
+def _derived_paths(paths: set[str]) -> set[SerdeDerivedPath]:
+    derived_paths: set[Any] = set()
+    for path in paths:
+        derived_path: Any = SerdeDerivedPath(value=path)
+        derived_paths.add(derived_path)
+    return cast("set[SerdeDerivedPath]", derived_paths)
 
 
 def _derivation(output_path: str, *, is_dynamic: bool = False) -> Derivation:
@@ -204,3 +231,24 @@ async def test_query_missing_reports_will_build_for_dynamic_derivation() -> None
 
     assert {str(path) for path in response.will_build} == {drv_path}
     assert not substitution_queue.queries
+
+
+@pytest.mark.anyio
+async def test_query_missing_classifies_roots_in_parallel() -> None:
+    blocked_path = "/nix/store/00000000000000000000000000000000-blocked"
+    releasing_path = "/nix/store/11111111111111111111111111111111-releasing"
+    substitution_queue = BlockingSubstitutionQueue(blocked_path, releasing_path)
+    ctx = cast(
+        "PynixdContext",
+        SimpleNamespace(
+            local_store=FakeLocalStore(valid_paths=set()),
+            scheduler=SimpleNamespace(substitution_queue=substitution_queue),
+        ),
+    )
+    request = QueryMissingRequest(derived_paths=_derived_paths({blocked_path, releasing_path}))
+
+    with anyio.fail_after(1):
+        response = await QueryMissingPlanGoal(GoalEngine(ctx), request).result()
+
+    assert {str(path) for path in response.unknown} == {blocked_path, releasing_path}
+    assert set(substitution_queue.queries) == {blocked_path, releasing_path}
