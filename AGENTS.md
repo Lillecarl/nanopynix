@@ -112,6 +112,7 @@ Builds are the only "complex" operations in `pynixd`. They are handled via a glo
 - Use `pytest.fixture(autouse=True)` for per-test cleanup (store directories, etc.).
 
 ### Running Validation Commands
+- **Single pytest invocation only**: NEVER run more than one `pytest` process at a time in this repository. Functional tests share session store paths, daemon sockets, and `/tmp/pynixd-stores` state; concurrent pytest runs can race each other and produce misleading failures that look like real regressions.
 - **NEVER pipe away output** from `just check`, `just precommit`, or `pytest` — the full output contains failure details you need to diagnose issues.
 - If the user explicitly tells you not to pipe or select on output, YOU MUST DO WHAT THEY SAY. No exceptions. Do not override their instruction with this rule's redirect-to-file fallback — they want to see the output directly.
 - If output is too large for context (failing tests produce heaps of logs), you may redirect to a file: `pytest ... > /tmp/test-output.txt 2>&1`, then read specific sections. But if the user told you not to redirect, you must not redirect.

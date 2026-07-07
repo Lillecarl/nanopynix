@@ -291,14 +291,19 @@ store streaming needs the selected source's `nar_size`.
 
 ### T12 - Dynamic And Nested Derivation Review
 
-- `Status`: todo
+- `Status`: done
 - `Owner`: primary
 - `Can delegate`: no
 - `Depends on`: T09, T10, T11
 - `Validation`: focused dynamic-derivation tests and existing CA operation tests.
 - `Commit`: separate commit if behavior changes.
-- `Notes`: Confirm serial execution where one output discovers the next `.drv`,
-  and parallel execution where dependency outputs are independent.
+- `Notes`: Reviewed the mutating nested/dynamic path. Direct nested trampoline
+  builds execute serially through `_ensure_nested`, where each produced `.drv`
+  becomes the next `DerivedPath` root. Dynamic wrapper dependencies fan out from
+  `dynamic_input_drvs` into child goals, then feed their `dynamic_paths` into
+  `resolve_dynamic_derivation`. No behavior change was needed in this slice.
+  `tests/functional/test_ca_ops.py::test_dynamic_drv_trampoline` and
+  `tests/functional/test_ca_ops.py::test_dynamic_drv_wrapper_via_pynixd` pass.
 
 ### T13 - Build Subscriber Cancellation Policy
 
