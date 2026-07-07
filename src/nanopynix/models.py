@@ -121,6 +121,13 @@ class LockedFlake(BaseModel):
     inputs: dict[str, LockedInput] = Field(default_factory=dict, description="Locked inputs, keyed by id")
 
 
+class ValueHandle(BaseModel):
+    """Opaque eval value handle exported by the worker."""
+
+    handle: int
+    type: str
+
+
 class LogEvent(BaseModel):
     """A single log event from Nix's internal logger.
 

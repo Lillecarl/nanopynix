@@ -48,6 +48,7 @@ from nanopynix.models import (
     PathInfo,
     ResultType,
     StorePath,
+    ValueHandle,
 )
 from nanopynix.nix import Nix, Session
 from nanopynix.store import StoreHandle
@@ -93,6 +94,7 @@ __all__ = [
     "UsageError",
     "Value",
     "ValueAttrs",
+    "ValueHandle",
     "ValueList",
     "ValueProxy",
     "WorkerDied",

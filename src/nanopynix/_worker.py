@@ -12,7 +12,9 @@ import json
 import os
 import sys
 import traceback
-from typing import Any, cast
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, Generic, TypeVar, cast
 
 import nanopynix_expr
 import nanopynix_fetchers
@@ -21,6 +23,7 @@ import nanopynix_store
 import nanopynix_util
 from pydantic import TypeAdapter
 
+import nanopynix._protocol as rpc
 from nanopynix._extract import (
     flake_ref_attrs as _flake_ref_attrs,
     input_attrs as _input_attrs,
@@ -28,10 +31,10 @@ from nanopynix._extract import (
     store_path as _sp_to_dict,
 )
 from nanopynix.logging import LogCollector
-from nanopynix.models import BuildResult, Derivation, FlakeRef, Input, LockedFlake, MissingInfo, PathInfo, StorePath
+from nanopynix.models import FlakeRef, Input, StorePath, ValueHandle
 
 _StorePathList = TypeAdapter(list[StorePath])
-_BuildResultList = TypeAdapter(list[BuildResult])
+ReqT = TypeVar("ReqT", bound=rpc.WorkerRequest[Any])
 
 
 # ── Wire format ────────────────────────────────────────────────────────
@@ -57,6 +60,29 @@ def _result(req_id, value) -> dict:
 
 def _notification(method: str, params: dict) -> dict:
     return {"jsonrpc": "2.0", "method": method, "params": params}
+
+
+# ── Endpoint registry ─────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Endpoint(Generic[ReqT]):
+    """Worker RPC endpoint bound to a typed request model."""
+
+    request: type[ReqT]
+    handler: Callable[[ReqT], Any]
+
+    @property
+    def name(self) -> str:
+        return self.request.method
+
+    def __call__(self, args: list[Any]) -> Any:
+        request = self.request.from_args(args)
+        return self.request.dump_response(self.handler(request))
+
+
+def _dispatch(endpoints: list[Endpoint[Any]]) -> dict[str, Endpoint[Any]]:
+    return {endpoint.name: endpoint for endpoint in endpoints}
 
 
 # ── Main ───────────────────────────────────────────────────────────────
@@ -189,8 +215,7 @@ def main() -> None:
 def _store_dispatch(store, eval_store):
     """Return dispatch dict for store operations."""
 
-    def _parse_sp(args):
-        path = args[0]
+    def _parse_sp(path: str):
         if not path.startswith("/"):
             path = f"{store.get_store_dir()}/{path}"
         return store.parse_store_path(path)
@@ -202,60 +227,111 @@ def _store_dispatch(store, eval_store):
         ])
         return _StorePathList.dump_python(paths_model, mode="json")
 
-    return {
-        "get_uri": lambda _: store.get_uri(),
-        "get_store_dir": lambda _: store.get_store_dir(),
-        "is_valid_path": lambda a: store.is_valid_path(_parse_sp(a)),
-        "parse_store_path": lambda a: StorePath.model_validate(_sp_to_dict(_parse_sp(a))).model_dump(mode="json"),
-        "query_path_info": lambda a: PathInfo.model_validate(dict(store.query_path_info(_parse_sp(a)))).model_dump(mode="json"),
-        "query_path_from_hash_part": lambda a: (
-            StorePath.model_validate(_sp_to_dict(sp)).model_dump(mode="json")
-            if (sp := store.query_path_from_hash_part(a[0])) is not None else None
-        ),
-        "compute_fs_closure": lambda a: _store_path_list(
+    def _fetcher_attrs(attrs: Mapping[str, str | int | bool]) -> dict[str, str]:
+        return {key: str(value).lower() if isinstance(value, bool) else str(value) for key, value in attrs.items()}
+
+    def get_uri(_: rpc.GetUri) -> str:
+        return store.get_uri()
+
+    def get_store_dir(_: rpc.GetStoreDir) -> str:
+        return store.get_store_dir()
+
+    def is_valid_path(req: rpc.IsValidPath) -> bool:
+        return store.is_valid_path(_parse_sp(req.path))
+
+    def parse_store_path(req: rpc.ParseStorePath):
+        return _sp_to_dict(_parse_sp(req.path))
+
+    def query_path_info(req: rpc.QueryPathInfo):
+        return dict(store.query_path_info(_parse_sp(req.path)))
+
+    def query_path_from_hash_part(req: rpc.QueryPathFromHashPart):
+        sp = store.query_path_from_hash_part(req.hash_part)
+        return _sp_to_dict(sp) if sp is not None else None
+
+    def compute_fs_closure(req: rpc.ComputeFsClosure):
+        return _store_path_list(
             store.compute_fs_closure(
-                _parse_sp(a),
-                a[1] if len(a) > 1 else False,
-                a[2] if len(a) > 2 else False,
-                a[3] if len(a) > 3 else False,
+                _parse_sp(req.path),
+                req.flip_direction,
+                req.include_outputs,
+                req.include_derivers,
             )
-        ),
-        "query_missing": lambda a: MissingInfo.model_validate(dict(
-            store.query_missing([_parse_sp([p]) for p in a[0]])
-        )).model_dump(mode="json"),
-        "query_derivation_outputs": lambda a: _store_path_list(
-            store.query_derivation_outputs(_parse_sp(a))
-        ),
-        "query_valid_derivers": lambda a: _store_path_list(
-            store.query_valid_derivers(_parse_sp(a))
-        ),
-        "query_all_valid_paths": lambda _: _store_path_list(store.query_all_valid_paths()),
-        "query_referrers": lambda a: _store_path_list(store.query_referrers(_parse_sp(a))),
-        "query_substitutable_paths": lambda a: _store_path_list(
+        )
+
+    def query_missing(req: rpc.QueryMissing):
+        return dict(store.query_missing([_parse_sp(path) for path in req.paths]))
+
+    def query_derivation_outputs(req: rpc.QueryDerivationOutputs):
+        return _store_path_list(store.query_derivation_outputs(_parse_sp(req.path)))
+
+    def query_valid_derivers(req: rpc.QueryValidDerivers):
+        return _store_path_list(store.query_valid_derivers(_parse_sp(req.path)))
+
+    def query_all_valid_paths(_: rpc.QueryAllValidPaths):
+        return _store_path_list(store.query_all_valid_paths())
+
+    def query_referrers(req: rpc.QueryReferrers):
+        return _store_path_list(store.query_referrers(_parse_sp(req.path)))
+
+    def query_substitutable_paths(req: rpc.QuerySubstitutablePaths):
+        return _store_path_list(
             store.query_substitutable_paths(
-                [_parse_sp([p]) for p in a[0]]
+                [_parse_sp(path) for path in req.paths]
             )
-        ),
-        "build_paths_with_results": lambda a: _BuildResultList.dump_python(_BuildResultList.validate_python(list(
+        )
+
+    def build_paths_with_results(req: rpc.BuildPathsWithResults):
+        return list(
             store.build_paths_with_results(
-                [_parse_sp([p]) for p in a[0]],
+                [_parse_sp(path) for path in req.paths],
                 eval_store,
             )
-        )), mode="json"),
-        "read_derivation": lambda a: Derivation.model_validate(dict(store.read_derivation(_parse_sp(a)))).model_dump(mode="json"),
-        "build_derivation": lambda a: BuildResult.model_validate(
-            store.build_derivation(
-                _parse_sp(a),
-                nanopynix_store.BuildMode(a[1]) if len(a) > 1 else nanopynix_store.BuildMode.Normal,
-            )
-        ).model_dump(mode="json"),
-        "follow_links_to_store_path": lambda a: StorePath.model_validate(_sp_to_dict(
-            store.follow_links_to_store_path(a[0])
-        )).model_dump(mode="json"),
-        "add_temp_root": lambda a: store.add_temp_root(_parse_sp(a)),
-        "fetch_from_url": lambda a: Input(attrs=_input_attrs(nanopynix_fetchers.input_from_url(a[0]))).model_dump(mode="json"),
-        "fetch_from_attrs": lambda a: Input(attrs=_input_attrs(nanopynix_fetchers.input_from_attrs(a[0]))).model_dump(mode="json"),
-    }
+        )
+
+    def read_derivation(req: rpc.ReadDerivation):
+        return dict(store.read_derivation(_parse_sp(req.path)))
+
+    def build_derivation(req: rpc.BuildDerivation):
+        return store.build_derivation(
+            _parse_sp(req.path),
+            nanopynix_store.BuildMode(req.build_mode),
+        )
+
+    def follow_links_to_store_path(req: rpc.FollowLinksToStorePath):
+        return _sp_to_dict(store.follow_links_to_store_path(req.path))
+
+    def add_temp_root(req: rpc.AddTempRoot):
+        return store.add_temp_root(_parse_sp(req.path))
+
+    def fetch_from_url(req: rpc.FetchFromUrl) -> Input:
+        return Input(attrs=_input_attrs(nanopynix_fetchers.input_from_url(req.url)))
+
+    def fetch_from_attrs(req: rpc.FetchFromAttrs) -> Input:
+        return Input(attrs=_input_attrs(nanopynix_fetchers.input_from_attrs(_fetcher_attrs(req.attrs))))
+
+    return _dispatch([
+        Endpoint(rpc.GetUri, get_uri),
+        Endpoint(rpc.GetStoreDir, get_store_dir),
+        Endpoint(rpc.IsValidPath, is_valid_path),
+        Endpoint(rpc.ParseStorePath, parse_store_path),
+        Endpoint(rpc.QueryPathInfo, query_path_info),
+        Endpoint(rpc.QueryPathFromHashPart, query_path_from_hash_part),
+        Endpoint(rpc.ComputeFsClosure, compute_fs_closure),
+        Endpoint(rpc.QueryMissing, query_missing),
+        Endpoint(rpc.QueryDerivationOutputs, query_derivation_outputs),
+        Endpoint(rpc.QueryValidDerivers, query_valid_derivers),
+        Endpoint(rpc.QueryAllValidPaths, query_all_valid_paths),
+        Endpoint(rpc.QueryReferrers, query_referrers),
+        Endpoint(rpc.QuerySubstitutablePaths, query_substitutable_paths),
+        Endpoint(rpc.BuildPathsWithResults, build_paths_with_results),
+        Endpoint(rpc.ReadDerivation, read_derivation),
+        Endpoint(rpc.BuildDerivation, build_derivation),
+        Endpoint(rpc.FollowLinksToStorePath, follow_links_to_store_path),
+        Endpoint(rpc.AddTempRoot, add_temp_root),
+        Endpoint(rpc.FetchFromUrl, fetch_from_url),
+        Endpoint(rpc.FetchFromAttrs, fetch_from_attrs),
+    ])
 
 
 # ── Eval dispatch ──────────────────────────────────────────────────────
@@ -282,18 +358,18 @@ def _reset_es():
 def _eval_dispatch(store):
     """Return dispatch dict for eval operations."""
 
-    def _force_handle(h):
-        return _get_es(store).value_from_handle(h).to_python()
+    def _force_handle(handle: int):
+        return _get_es(store).value_from_handle(handle).to_python()
 
-    def _type_name(h):
-        value = _get_es(store).value_from_handle(h)
+    def _type_name(handle: int):
+        value = _get_es(store).value_from_handle(handle)
         value.force()
         return value.type_name()
 
     def _export(pyv):
         es = _get_es(store)
         h = cast(Any, es)._export_pyvalue(pyv)
-        return {"handle": h, "type": pyv.type_name()}
+        return ValueHandle(handle=h, type=pyv.type_name()).model_dump(mode="json")
 
     def _flake_ref(ref):
         if isinstance(ref, str):
@@ -301,36 +377,71 @@ def _eval_dispatch(store):
         msg = "flake references over RPC must currently be strings"
         raise TypeError(msg)
 
-    def _call(args):
+    def call(req: rpc.Call):
         es = _get_es(store)
-        fn = es.value_from_handle(args[0])
+        fn = es.value_from_handle(req.handle)
         result = fn
-        for arg in args[1]:
+        for arg in req.args:
             py_arg = es.value_from_python(arg)
             result = result.call(py_arg)
         return _export(result)
 
-    return {
-        "eval_file":   lambda a: _export(_get_es(store).eval_file(a[0])),
-        "eval_string": lambda a: _export(_get_es(store).eval_string(a[0], a[1] if len(a) > 1 else "<string>")),
-        "force":       lambda a: _force_handle(a[0]),
-        "force_deep":  lambda a: _get_es(store).value_from_handle(a[0]).to_python(),
-        "attr":        lambda a: _export(_get_es(store).value_from_handle(a[0]).attr_get(a[1])),
-        "list_get":    lambda a: _export(_get_es(store).value_from_handle(a[0]).list_get(a[1])),
-        "list_length": lambda a: _get_es(store).value_from_handle(a[0]).list_length(),
-        "attr_names":  lambda a: _get_es(store).value_from_handle(a[0]).attr_names(),
-        "has_attr":    lambda a: _get_es(store).value_from_handle(a[0]).has_attr(a[1]),
-        "type_name":   lambda a: _type_name(a[0]),
-        "call":        _call,
-        "lock_flake":  lambda a: LockedFlake.model_validate(
-            _locked_flake(nanopynix_flake.lock_flake(_get_es(store), _flake_ref(a[0])))
-        ).model_dump(mode="json"),
-        "get_flake":   lambda a: FlakeRef(
-            attrs=_flake_ref_attrs(nanopynix_flake.get_flake(_get_es(store), _flake_ref(a[0])))
-        ).model_dump(mode="json"),
-        "release":     lambda a: _get_es(store).release_exported(a[0]),
-        "release_all": lambda _: _reset_es(),
-    }
+    def eval_file(req: rpc.EvalFile):
+        return _export(_get_es(store).eval_file(req.path))
+
+    def eval_string(req: rpc.EvalString):
+        return _export(_get_es(store).eval_string(req.expr, req.source_name))
+
+    def force(req: rpc.Force):
+        return _force_handle(req.handle)
+
+    def force_deep(req: rpc.ForceDeep):
+        return _get_es(store).value_from_handle(req.handle).to_python()
+
+    def attr(req: rpc.Attr):
+        return _export(_get_es(store).value_from_handle(req.handle).attr_get(req.name))
+
+    def list_get(req: rpc.ListGet):
+        return _export(_get_es(store).value_from_handle(req.handle).list_get(req.index))
+
+    def list_length(req: rpc.ListLength):
+        return _get_es(store).value_from_handle(req.handle).list_length()
+
+    def attr_names(req: rpc.AttrNames):
+        return _get_es(store).value_from_handle(req.handle).attr_names()
+
+    def has_attr(req: rpc.HasAttr):
+        return _get_es(store).value_from_handle(req.handle).has_attr(req.name)
+
+    def type_name(req: rpc.TypeName):
+        return _type_name(req.handle)
+
+    def lock_flake(req: rpc.LockFlake):
+        return _locked_flake(nanopynix_flake.lock_flake(_get_es(store), _flake_ref(req.ref)))
+
+    def get_flake(req: rpc.GetFlake) -> FlakeRef:
+        return FlakeRef(attrs=_flake_ref_attrs(nanopynix_flake.get_flake(_get_es(store), _flake_ref(req.ref))))
+
+    def release(req: rpc.Release):
+        return _get_es(store).release_exported(req.handle)
+
+    return _dispatch([
+        Endpoint(rpc.EvalFile, eval_file),
+        Endpoint(rpc.EvalString, eval_string),
+        Endpoint(rpc.Force, force),
+        Endpoint(rpc.ForceDeep, force_deep),
+        Endpoint(rpc.Attr, attr),
+        Endpoint(rpc.ListGet, list_get),
+        Endpoint(rpc.ListLength, list_length),
+        Endpoint(rpc.AttrNames, attr_names),
+        Endpoint(rpc.HasAttr, has_attr),
+        Endpoint(rpc.TypeName, type_name),
+        Endpoint(rpc.Call, call),
+        Endpoint(rpc.LockFlake, lock_flake),
+        Endpoint(rpc.GetFlake, get_flake),
+        Endpoint(rpc.Release, release),
+        Endpoint(rpc.ReleaseAll, lambda _: _reset_es()),
+    ])
 
 
 if __name__ == "__main__":
