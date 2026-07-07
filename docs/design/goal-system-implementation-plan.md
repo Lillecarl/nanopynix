@@ -311,7 +311,7 @@ store streaming needs the selected source's `nar_size`.
 
 ### T13 - Build Subscriber Cancellation Policy
 
-- `Status`: in-progress
+- `Status`: done
 - `Owner`: subagent-ok
 - `Can delegate`: yes, after primary defines expected behavior
 - `Depends on`: T04, T09
@@ -324,10 +324,9 @@ store streaming needs the selected source's `nar_size`.
   unsubscribe cleanup from direct and goal-driven build entrypoints, and
   zero-subscriber cancellation for pending and active queued builds. Focused
   pyright and the two new cancellation tests in
-  `tests/functional/test_build_log_pubsub.py` pass. Remaining review: whether
-  pynixd can cheaply detect silent client disconnects while an operation is
-  blocked waiting for a build future, rather than only when the operation task is
-  cancelled or a write fails.
+  `tests/functional/test_build_log_pubsub.py` pass. Passive/silent disconnect
+  detection while an operation is blocked waiting for a build future is
+  deliberately deferred. It is not part of the current goal-system focus.
 
 ### T14 - Documentation And Glossary Update
 
