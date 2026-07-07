@@ -420,12 +420,7 @@ class BuildQueue:
             if build is None:
                 return False
             removed = await build.remove_subscriber(client)
-            if (
-                removed
-                and build.cancel_when_unsubscribed
-                and not build.subscribers
-                and not build.is_done
-            ):
+            if removed and build.cancel_when_unsubscribed and not build.subscribers and not build.is_done:
                 self._cancel_locked(build, "pynixd: build cancelled because all clients disconnected")
             return removed
 

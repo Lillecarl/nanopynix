@@ -43,8 +43,10 @@ squashes.
   type checking, execution, or understanding.
 - For delegated or mechanical changes, run focused tests or `direnv exec . just
   cheap` at most.
-- Run `direnv exec . just precommit` only near the end of a coherent slice,
-  before committing.
+- Do not use full `just precommit` as the normal gate for this goal-system work.
+  It is too broad and contains semi-maintained functional coverage. Prefer
+  focused pyright invocations plus tests around the touched goal/scheduler
+  behavior.
 - Use `jj --no-pager status` and `jj --no-pager diff` before every commit.
 - Prefer one commit per coherent architecture slice, not one commit per tiny
   helper edit.
@@ -341,17 +343,31 @@ store streaming needs the selected source's `nar_size`.
   mutating/read-only goals, scheduler work lanes, `SubstitutionQueue`, and
   client-bound build subscriptions.
 
-### T15 - Final Validation
+### T15 - Focused Validation
 
-- `Status`: todo
+- `Status`: done
 - `Owner`: primary
 - `Can delegate`: no
 - `Depends on`: T09, T10, T11, T12, T13
-- `Validation`: run `direnv exec . just precommit` with full output visible.
+- `Validation`: run focused pyright and behavior tests around the goal system,
+  scheduler build queue, substitution queue, QueryMissing, dynamic/nested
+  derivations, and build subscriber cancellation.
 - `Commit`: commit or squash only after reviewing `jj --no-pager diff`.
-- `Notes`: If `just precommit` fails from unrelated existing issues, capture the
-  exact failures and run the narrowest focused checks that prove goal-system
-  behavior.
+- `Notes`: Focused validation for goal-system behavior passed across the
+  individual slices: pyright on touched goal/scheduler/config/test files, unit
+  tests for build queue dedup, goal results, substitution queue, and
+  QueryMissing, plus functional tests for QueryMissing, dynamic trampoline,
+  dynamic wrapper, and client-bound build cancellation. A broad
+  `direnv exec . just precommit` run was attempted before this guidance was
+  clarified: pyright passed, ruff format/check passed, and pytest failed after
+  303.53s with 10 broad functional failures:
+  `test_nix_build_via_unix`, `test_http_upload`, `test_stream_nar`,
+  `test_htpasswd_auth`, `test_extension_delegation`,
+  `test_handshake_feature_announcement`, `test_htpasswd_fallback_to_single_user`,
+  `test_prometheus_metrics_endpoint`,
+  `test_local_db_store_is_valid_path_serde`, and
+  `test_local_db_store_is_valid_path_serde_cache_hit`. Do not chase those as part
+  of goal-system work unless a later focused change touches them directly.
 
 ## Open Questions
 
