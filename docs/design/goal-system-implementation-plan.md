@@ -242,15 +242,17 @@ store streaming needs the selected source's `nar_size`.
 
 ### T09 - Wire BuildPaths And BuildPathsWithResults Through Mutating GoalRun
 
-- `Status`: todo
+- `Status`: in-progress
 - `Owner`: primary
 - `Can delegate`: no
 - `Depends on`: T03, T04, T08
 - `Validation`: focused functional tests for simple build, cached local output,
   substitution before build, and multiple roots with continue-on-error behavior.
 - `Commit`: separate commit.
-- `Notes`: Request-local traversal should unsubscribe from active builds when a
-  client disconnects. Scheduler decides whether zero subscribers cancel a build.
+- `Notes`: `SubstitutePathGoal` now delegates source selection and import
+  deduplication to `Scheduler.substitution_queue` while keeping reference
+  walking in the goal graph. Remaining work: focused BuildPaths behavior tests,
+  subscriber cancellation, and broader result handling.
 
 ### T10 - Rework QueryMissing Through Read-Only GoalRun
 
