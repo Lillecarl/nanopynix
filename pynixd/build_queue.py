@@ -115,6 +115,8 @@ class QueuedBuild:
 
         # Client connections subscribed to this build's stderr stream.
         self.subscribers: list[ClientConn] = []
+        self._subscriber_refs: dict[ClientConn, int] = {}
+        self.cancel_when_unsubscribed = False
 
         # Guards add_subscriber replay vs post_log_bytes fanout so that a
         # joining client never misses bytes that arrive during catch-up.
@@ -193,13 +195,13 @@ class QueuedBuild:
         await msg.to_writer(WriteContext(writer=self._log_writer, version=wire.PROTOCOL_VERSION))
         return self._log_writer.get_bytes()[before:]
 
-    async def _send_raw_safe(self, sub: ClientConn, raw: bytes) -> None:
+    async def _send_raw_safe(self, sub: ClientConn, raw: bytes) -> ClientConn | None:
         """Send raw bytes to a subscriber, removing it on failure."""
         try:
             await sub.send_raw(raw)
+            return None
         except (OSError, BrokenPipeError, ConnectionResetError):
-            async with self._sub_lock:
-                self.subscribers.remove(sub)
+            return sub
 
     async def post_log_bytes(self, raw: bytes) -> None:
         """Fan out raw log bytes to all subscribers via TaskGroup.
@@ -209,18 +211,22 @@ class QueuedBuild:
         if not self.subscribers or not raw:
             return
         async with self._sub_lock:
-            if not self.subscribers:
-                return
-            async with anyio.create_task_group() as tg:
-                for sub in self.subscribers:
-                    tg.start_soon(self._send_raw_safe, sub, raw)
+            subscribers = list(self.subscribers)
+        if not subscribers:
+            return
+        failed: list[ClientConn] = []
+        async with anyio.create_task_group() as tg:
+            for sub in subscribers:
+                tg.start_soon(_send_and_record_failed, self, sub, raw, failed)
+        for sub in failed:
+            await self.remove_subscriber(sub)
 
     async def post_log_and_fanout(self, msg: LogMessage) -> None:
         """Store a log entry and fan out to all subscribers."""
         raw = await self.post_log(msg)
         await self.post_log_bytes(raw)
 
-    async def add_subscriber(self, client: ClientConn) -> None:
+    async def add_subscriber(self, client: ClientConn, *, cancel_on_unsubscribe: bool = False) -> None:
         """Register a client to receive this build's logs.
 
         Replays the full logged history so far, then the client
@@ -228,13 +234,44 @@ class QueuedBuild:
         If replay fails (broken connection), the subscriber is not added.
         """
         async with self._sub_lock:
+            if cancel_on_unsubscribe:
+                self.cancel_when_unsubscribed = True
             if self._log_writer.tell():
                 try:
                     await client.send_raw(self._log_writer.get_bytes())
                 except (OSError, BrokenPipeError, ConnectionResetError):
                     log.debug("subscriber_replay_failed", build_id=self.build_id)
                     return
-            self.subscribers.append(client)
+            if client not in self._subscriber_refs:
+                self.subscribers.append(client)
+            self._subscriber_refs[client] = self._subscriber_refs.get(client, 0) + 1
+
+    async def remove_subscriber(self, client: ClientConn) -> bool:
+        """Remove one subscription reference for a client.
+
+        Returns True when a reference was removed.
+        """
+        async with self._sub_lock:
+            count = self._subscriber_refs.get(client)
+            if count is None:
+                return False
+            if count > 1:
+                self._subscriber_refs[client] = count - 1
+                return True
+            del self._subscriber_refs[client]
+            self.subscribers.remove(client)
+            return True
+
+
+async def _send_and_record_failed(
+    build: QueuedBuild,
+    client: ClientConn,
+    raw: bytes,
+    failed: list[ClientConn],
+) -> None:
+    failed_client = await build._send_raw_safe(client, raw)
+    if failed_client is not None:
+        failed.append(failed_client)
 
 
 class BuildQueue:
@@ -364,7 +401,7 @@ class BuildQueue:
             metrics.QUEUE_SIZE.labels(status="pending").inc()
             return build.build_id, future
 
-    async def subscribe(self, build_id: BuildId, client: ClientConn) -> bool:
+    async def subscribe(self, build_id: BuildId, client: ClientConn, *, cancel_on_unsubscribe: bool = False) -> bool:
         """Subscribe a client to a build's log stream.
 
         Returns True if the build was found and subscriber added.
@@ -373,8 +410,24 @@ class BuildQueue:
             build = self._by_id.get(build_id)
             if build is None:
                 return False
-            await build.add_subscriber(client)
+            await build.add_subscriber(client, cancel_on_unsubscribe=cancel_on_unsubscribe)
             return True
+
+    async def unsubscribe(self, build_id: BuildId, client: ClientConn) -> bool:
+        """Remove a client subscription and cancel abandoned client-bound builds."""
+        async with self.lock:
+            build = self._by_id.get(build_id)
+            if build is None:
+                return False
+            removed = await build.remove_subscriber(client)
+            if (
+                removed
+                and build.cancel_when_unsubscribed
+                and not build.subscribers
+                and not build.is_done
+            ):
+                self._cancel_locked(build, "pynixd: build cancelled because all clients disconnected")
+            return removed
 
     async def get_pending(self) -> list[QueuedBuild]:
         """Get all non-done builds sorted by ID."""
@@ -393,9 +446,10 @@ class BuildQueue:
         async with self.lock:
             for b in self._queue:
                 if b.build_id == build_id:
+                    if b.future.done():
+                        return
                     b.finished_at = time.monotonic()
-                    if not b.future.done():
-                        b.future.set_result(response)
+                    b.future.set_result(response)
                     log.info("build_completed", build_id=build_id)
 
                     metrics.QUEUE_SIZE.labels(status="building").dec()
@@ -413,6 +467,8 @@ class BuildQueue:
         async with self.lock:
             for b in self._queue:
                 if b.build_id == build_id:
+                    if b.future.done():
+                        return
                     b.finished_at = time.monotonic()
                     response = BuildDerivationResponse(
                         result=BuildResult(
@@ -425,8 +481,7 @@ class BuildQueue:
                             built_outputs={},
                         ),
                     )
-                    if not b.future.done():
-                        b.future.set_result(response)
+                    b.future.set_result(response)
                     log.info("build_failed", build_id=build_id, error_msg=error_msg)
 
                     if b.is_building:
@@ -438,6 +493,33 @@ class BuildQueue:
 
                     return
         raise ValueError(f"Build {build_id} not found")
+
+    def _cancel_locked(self, build: QueuedBuild, error_msg: str) -> None:
+        """Cancel a queued build while ``self.lock`` is held."""
+        build.finished_at = time.monotonic()
+        if build.build_task is not None and not build.build_task.done():
+            build.build_task.cancel()
+        response = BuildDerivationResponse(
+            result=BuildResult(
+                status=BuildResultStatus.MISC_FAILURE,
+                error_msg=error_msg,
+                times_built=0,
+                is_non_deterministic=0,
+                start_time=0,
+                stop_time=0,
+                built_outputs={},
+            ),
+        )
+        if not build.future.done():
+            build.future.set_result(response)
+        log.info("build_cancelled_no_subscribers", build_id=build.build_id)
+
+        if build.is_building:
+            metrics.QUEUE_SIZE.labels(status="building").dec()
+        else:
+            metrics.QUEUE_SIZE.labels(status="pending").dec()
+        metrics.QUEUE_SIZE.labels(status="done").inc()
+        metrics.BUILDS_COMPLETED.labels(status="failure").inc()
 
     async def prune_request(self, request_id: RequestId) -> None:
         """Remove completed builds from the queue if no other request references them.

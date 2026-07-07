@@ -1,9 +1,11 @@
 """Tests for the build log pub/sub system (QueuedBuild subscribers + byte buffer replay)."""
 
 import asyncio
+import contextlib
 
 import pytest
 
+from pynixd.build_queue import BuildQueue
 from pynixd.config import PynixdSettings
 from pynixd.connection import ClientConn
 from pynixd.context import PynixdContext
@@ -181,3 +183,72 @@ async def test_build_log_pubsub_late_subscriber_gets_full_history():
 
     # Now both should still be identical (both got "done\n").
     assert buf1.get_bytes() == buf2.get_bytes()
+
+
+async def test_client_bound_build_cancels_after_last_unsubscribe():
+    queue = BuildQueue()
+    drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
+    request = BuildDerivationRequest(
+        drv_path=serde_path(drv_path),
+        derivation=BasicDerivation(platform="x86_64-linux", builder=""),
+        build_mode=BuildMode.NORMAL,
+    )
+    build_id, future = await queue.enqueue(request)
+    client = ClientConn(BytesWriter("client"))
+
+    assert await queue.subscribe(build_id, client, cancel_on_unsubscribe=True)
+    assert await queue.subscribe(build_id, client, cancel_on_unsubscribe=True)
+
+    assert await queue.unsubscribe(build_id, client)
+    assert not future.done()
+
+    assert await queue.unsubscribe(build_id, client)
+    assert future.done()
+    assert future.result().result.status == BuildResultStatus.MISC_FAILURE
+    assert "all clients disconnected" in future.result().result.error_msg
+
+
+async def test_client_bound_active_build_task_cancels_after_last_unsubscribe():
+    local_store = MockStore("local", feature_matrix={"x86_64-linux": set()})
+    remote = MockStore("remote", feature_matrix={"x86_64-linux": set()})
+    ctx = PynixdContext(
+        settings=PynixdSettings(),
+        _stores={StoreId("local"): local_store, StoreId("remote"): remote},
+    )
+    scheduler = Scheduler(ctx)
+    build_resp = BuildDerivationResponse(result=BuildResult(status=BuildResultStatus.BUILT))
+    remote.responses[BuildDerivationRequest] = build_resp
+    local_store.responses[BuildDerivationRequest] = build_resp
+
+    drv_path = StorePath("/nix/store/00000000000000000000000000000001-test.drv")
+    remote.block_build(drv_path)
+    request = BuildDerivationRequest(
+        drv_path=serde_path(drv_path),
+        derivation=BasicDerivation(platform="x86_64-linux", builder=""),
+        build_mode=BuildMode.NORMAL,
+    )
+    build_id, future = await scheduler.build_derivation(request)
+    client = ClientConn(BytesWriter("client"))
+    assert await scheduler.queue.subscribe(build_id, client, cancel_on_unsubscribe=True)
+
+    await scheduler.schedule()
+    build = scheduler.queue.by_id[build_id]
+    for _ in range(20):
+        if build.is_building:
+            break
+        await asyncio.sleep(0.01)
+
+    build_task = build.build_task
+    assert build_task is not None
+    assert await scheduler.queue.unsubscribe(build_id, client)
+
+    for _ in range(20):
+        if build_task.done():
+            break
+        await asyncio.sleep(0.01)
+
+    assert build_task.done()
+    assert future.done()
+    assert future.result().result.status == BuildResultStatus.MISC_FAILURE
+    with contextlib.suppress(asyncio.CancelledError):
+        await build_task

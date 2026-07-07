@@ -58,7 +58,12 @@ class BuildDerivationGoal(ExecutionGoal[GoalResult]):
         for client in subscribers:
             await self.engine.subscribe_build(build_id, client)
 
-        response = await future
+        try:
+            response = await future
+        finally:
+            for client in subscribers:
+                await self.engine.unsubscribe_build(build_id, client)
+
         resolved: dict[str, StorePath] = {}
         produced: set[StorePath] = set()
 

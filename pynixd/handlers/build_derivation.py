@@ -39,14 +39,23 @@ class BuildDerivationHandler(Handler):
             raise RuntimeError("BuildDerivation requires a configured scheduler")
 
         build_id, future = await ctx.proxy.scheduler.build_derivation(self_req)
+        subscribed = False
         if ctx.proxy.client is not None:
-            await ctx.proxy.scheduler.queue.subscribe(build_id, ctx.proxy.client)
+            subscribed = await ctx.proxy.scheduler.queue.subscribe(
+                build_id,
+                ctx.proxy.client,
+                cancel_on_unsubscribe=True,
+            )
         logger.info(
             "build_derivation_enqueued",
             build_id=build_id,
             drv_path=self_req.drv_path,
             required_count=len(self_req.derivation.input_srcs),
         )
-        response = await future
-        logger.debug("responded_op")
-        return response
+        try:
+            response = await future
+            logger.debug("responded_op")
+            return response
+        finally:
+            if subscribed and ctx.proxy.client is not None:
+                await ctx.proxy.scheduler.queue.unsubscribe(build_id, ctx.proxy.client)

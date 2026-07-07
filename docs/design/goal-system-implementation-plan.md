@@ -307,7 +307,7 @@ store streaming needs the selected source's `nar_size`.
 
 ### T13 - Build Subscriber Cancellation Policy
 
-- `Status`: todo
+- `Status`: in-progress
 - `Owner`: subagent-ok
 - `Can delegate`: yes, after primary defines expected behavior
 - `Depends on`: T04, T09
@@ -316,6 +316,14 @@ store streaming needs the selected source's `nar_size`.
 - `Commit`: separate commit.
 - `Notes`: Builds should continue while there are active subscribers. If all
   clients disconnect, cancellation is preferred when architecturally feasible.
+  First slice adds client-bound subscription reference counting, explicit
+  unsubscribe cleanup from direct and goal-driven build entrypoints, and
+  zero-subscriber cancellation for pending and active queued builds. Focused
+  pyright and the two new cancellation tests in
+  `tests/functional/test_build_log_pubsub.py` pass. Remaining review: whether
+  pynixd can cheaply detect silent client disconnects while an operation is
+  blocked waiting for a build future, rather than only when the operation task is
+  cancelled or a write fails.
 
 ### T14 - Documentation And Glossary Update
 

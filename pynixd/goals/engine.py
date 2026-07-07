@@ -56,7 +56,13 @@ class GoalEngine:
         scheduler = self.ctx.scheduler
         if scheduler is None:
             return
-        await scheduler.queue.subscribe(build_id, client)
+        await scheduler.queue.subscribe(build_id, client, cancel_on_unsubscribe=True)
+
+    async def unsubscribe_build(self, build_id: BuildId, client: ClientConn) -> None:
+        scheduler = self.ctx.scheduler
+        if scheduler is None:
+            return
+        await scheduler.queue.unsubscribe(build_id, client)
 
     async def build_paths(self, request: BuildPathsRequest, client: ClientConn | None = None) -> BuildPathsResponse:
         _require_normal_build_mode(request.build_mode)
