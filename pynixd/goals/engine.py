@@ -1,4 +1,4 @@
-"""Goal registry and daemon request entrypoints."""
+"""Request-local goal registry and daemon request entrypoints."""
 
 from __future__ import annotations
 
@@ -8,11 +8,20 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 
-from ..serde import BuildDerivationRequest, BuildPathsRequest, BuildPathsResponse, BuildPathsWithResultsRequest
+from ..serde import (
+    BuildDerivationRequest,
+    BuildMode,
+    BuildPathsRequest,
+    BuildPathsResponse,
+    BuildPathsWithResultsRequest,
+    QueryMissingRequest,
+    QueryMissingResponse,
+)
 from .build_derivation import BuildDerivationGoal
 from .ensure import EnsureDerivedPathGoal
 from .goal import Goal
 from .keys import BuildDerivationKey, EnsureDerivedPathKey, SubstitutePathKey
+from .query_missing import QueryMissingPlanGoal
 from .requests import BuildPathsWithResultsGoal
 from .results import result_succeeded
 from .substitute import SubstitutePathGoal, substituter_fingerprint
@@ -35,7 +44,7 @@ def _derivation_fingerprint(request: BuildDerivationRequest) -> str:
 
 
 class GoalEngine:
-    """Global active-goal registry and request entrypoint."""
+    """Request-local active-goal registry and request entrypoint."""
 
     def __init__(self, ctx: PynixdContext) -> None:
         self.ctx = ctx
@@ -50,6 +59,7 @@ class GoalEngine:
         await scheduler.queue.subscribe(build_id, client)
 
     async def build_paths(self, request: BuildPathsRequest, client: ClientConn | None = None) -> BuildPathsResponse:
+        _require_normal_build_mode(request.build_mode)
         response = await self.build_paths_with_results(
             BuildPathsWithResultsRequest(
                 derived_paths=request.derived_paths,
@@ -64,7 +74,11 @@ class GoalEngine:
         request: BuildPathsWithResultsRequest,
         client: ClientConn | None = None,
     ):
+        _require_normal_build_mode(request.build_mode)
         return await BuildPathsWithResultsGoal(self, request, client).result()
+
+    async def query_missing(self, request: QueryMissingRequest) -> QueryMissingResponse:
+        return await QueryMissingPlanGoal(self, request).result()
 
     async def get_ensure_derived_path_goal(
         self,
@@ -123,3 +137,15 @@ class GoalEngine:
             for store_id, store in sorted(self.ctx.stores.items(), key=lambda item: str(item[0]))
             if str(store_id) != local_id and str(store_id) in ids and store.is_healthy
         )
+
+
+def _require_normal_build_mode(build_mode: int) -> None:
+    if build_mode == BuildMode.NORMAL:
+        return
+    try:
+        name = BuildMode(build_mode).name
+    except ValueError:
+        name = f"unknown({build_mode})"
+    raise RuntimeError(
+        f"pynixd goal system only supports BuildMode.NORMAL for now; got {name}"
+    )

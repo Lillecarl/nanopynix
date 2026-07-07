@@ -12,6 +12,7 @@ from .goal import GoalHolder as GoalHolder
 from .keys import BuildDerivationKey as BuildDerivationKey
 from .keys import EnsureDerivedPathKey as EnsureDerivedPathKey
 from .keys import SubstitutePathKey as SubstitutePathKey
+from .query_missing import QueryMissingPlanGoal as QueryMissingPlanGoal
 from .requests import BuildPathsWithResultsGoal as BuildPathsWithResultsGoal
 from .substitute import SubstitutePathGoal as SubstitutePathGoal
 
@@ -26,6 +27,7 @@ __all__ = [
     "Goal",
     "GoalEngine",
     "GoalHolder",
+    "QueryMissingPlanGoal",
     "SubstitutePathKey",
     "SubstitutePathGoal",
 ]

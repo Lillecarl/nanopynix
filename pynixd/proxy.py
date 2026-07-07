@@ -16,7 +16,6 @@ import structlog
 from . import wire
 from .config import ScheduleMode
 from .connection import ClientConn
-from .derived_path import DerivedPath as DomainDerivedPath
 from .exceptions import OpNotImplementedError
 from .goals import GoalEngine
 from .handlers._base import HANDLER_REGISTRY
@@ -28,13 +27,9 @@ from .serde import (
     IsValidPathResponse,
     LogError,
     QueryMissingRequest,
-    QueryMissingResponse,
     QueryPathInfoRequest,
     QueryValidPathsRequest,
     QueryValidPathsResponse,
-)
-from .serde import (
-    StorePath as SerdeStorePath,
 )
 from .serde.auth import Role
 from .serde.context import ReadContext, WriteContext
@@ -99,9 +94,7 @@ class DaemonProxy:
 
     @property
     def goal_engine(self) -> GoalEngine:
-        if self.ctx.goal_engine is None:
-            self.ctx.goal_engine = GoalEngine(self.ctx)
-        return self.ctx.goal_engine
+        return GoalEngine(self.ctx)
 
     @property
     def scheduler_trigger(self) -> Callable[[], None] | None:
@@ -258,7 +251,7 @@ class DaemonProxy:
         if isinstance(request, BuildPathsRequest):
             return await self.goal_engine.build_paths(request, client=self.client)
         if isinstance(request, QueryMissingRequest):
-            return await self._query_missing_for_goals(request)
+            return await self.goal_engine.query_missing(request)
 
         local_resp: WireResponse | None = None
         try:
@@ -323,35 +316,6 @@ class DaemonProxy:
             return QueryValidPathsResponse(paths=paths)
 
         return None
-
-    async def _query_missing_for_goals(self, request: QueryMissingRequest) -> QueryMissingResponse:
-        will_build: set[SerdeStorePath] = set()
-        unknown: set[SerdeStorePath] = set()
-
-        for wire_path in request.derived_paths:
-            derived_path = DomainDerivedPath(wire_path.value)
-            base_path = derived_path.base_store_path()
-            if base_path.is_derivation():
-                will_build.add(SerdeStorePath(path=str(base_path)))
-                continue
-
-            response = await self.local_store.execute(IsValidPathRequest(path=SerdeStorePath(path=str(base_path))))
-            if not response.valid:
-                unknown.add(SerdeStorePath(path=str(base_path)))
-
-        log.debug(
-            "query_missing_goal_plan",
-            requested=len(request.derived_paths),
-            will_build=len(will_build),
-            unknown=len(unknown),
-        )
-        return QueryMissingResponse(
-            will_build=will_build,
-            will_substitute=set(),
-            unknown=unknown,
-            download_size=0,
-            nar_size=0,
-        )
 
     def store_for_output_path(self, path: str) -> DaemonStore | None:
         store_id = self.ctx.output_locations.get(path)

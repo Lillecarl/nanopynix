@@ -33,6 +33,7 @@ from .serde import StorePath as SerdeStorePath
 from .store import DaemonStore, LocalDBStore
 from .store.transfer import stream_paths_store_to_store
 from .store_path import StorePath
+from .substitution_queue import SubstitutionQueue
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -59,6 +60,7 @@ class Scheduler:
     ) -> None:
         self.ctx = ctx
         self.queue = BuildQueue()
+        self.substitution_queue = SubstitutionQueue(ctx)
         self.local_store = ctx.local_store
         self._dynamic_feature_matrix: dict[str, set[str]] = {}
 

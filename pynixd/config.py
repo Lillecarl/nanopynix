@@ -334,6 +334,15 @@ class PynixdSettings(BaseSettings):
     schedule_mode: ScheduleMode = ScheduleMode.auto
     ranking: StoreRankingSettings = Field(default_factory=StoreRankingSettings)
 
+    # Substitution scheduling
+    substitution_cache_maxsize: int = 100_000
+    substitution_positive_ttl: float = 300.0
+    substitution_negative_ttl: float = 15.0
+    substitution_health_window: int = 64
+    substitution_health_min_fill_ratio: float = 0.10
+    substitution_health_min_success_ratio: float = 0.50
+    substitution_query_timeout: float = 2.0
+
     # Resource Monitoring
     psi_cpu_threshold: float = 15.0  # % pressure (some)
     psi_mem_threshold: float = 10.0  # % pressure (some)
