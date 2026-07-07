@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix._rpc import reserved_call
-from nanopynix.models import Capture
+from nanopynix.models import Capture, ValueHandle
 
 if TYPE_CHECKING:
     from nanopynix._pool import ReservedWorker, _WorkerManager
@@ -120,9 +120,9 @@ class ValueProxy:
             result = await self._worker._send_recv(
                 "eval", "list_get", [self._parent_handle, self._selector], timeout=t,
             )
-        result = cast(dict[str, Any], result)
-        self._handle = result["handle"]
-        self._type = result["type"]
+        handle = ValueHandle.model_validate(result)
+        self._handle = handle.handle
+        self._type = handle.type
         self._parent_proxy = None
         self._parent_handle = None
         self._selector = None
@@ -184,10 +184,10 @@ class ValueProxy:
 
     async def call(self, *args, timeout: float | None = None) -> ValueProxy:
         await self._ensure_resolved(timeout=timeout)
-        result = cast(dict[str, Any], await self._worker._send_recv(
+        result = ValueHandle.model_validate(await self._worker._send_recv(
             "eval", "call", [self.handle, list(args)], timeout=self._resolve_timeout(timeout),
         ))
-        return ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+        return ValueProxy(self._worker, result.handle, result.type, timeout=self._timeout, _active=self._active)
 
     async def type(self, *, timeout: float | None = None) -> str:
         await self._ensure_resolved(timeout=timeout)
@@ -406,8 +406,8 @@ class EvalSession:
         rw = self._reserved_worker()
 
         def adapter(value: Any) -> ValueProxy:
-            value = cast(dict[str, Any], value)
-            return ValueProxy(rw._manager, value["handle"], value["type"], timeout=self._timeout, _active=self._active)
+            handle = ValueHandle.model_validate(value)
+            return ValueProxy(rw._manager, handle.handle, handle.type, timeout=self._timeout, _active=self._active)
 
         return await reserved_call(
             rw,
@@ -425,8 +425,8 @@ class EvalSession:
         rw = self._reserved_worker()
 
         def adapter(value: Any) -> ValueProxy:
-            value = cast(dict[str, Any], value)
-            return ValueProxy(rw._manager, value["handle"], value["type"], timeout=self._timeout, _active=self._active)
+            handle = ValueHandle.model_validate(value)
+            return ValueProxy(rw._manager, handle.handle, handle.type, timeout=self._timeout, _active=self._active)
 
         return await reserved_call(
             rw,
