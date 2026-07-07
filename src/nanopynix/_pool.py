@@ -19,6 +19,7 @@ import json
 import logging
 import sys
 import time
+from dataclasses import dataclass
 from typing import Any, Literal, overload
 
 from nanopynix.exceptions import from_response
@@ -39,6 +40,16 @@ _SEPARATORS = (",", ":")
 
 class WorkerDied(RuntimeError):
     """Raised when the subprocess worker dies unexpectedly."""
+
+
+class WorkerBusy(RuntimeError):
+    """Raised when the single worker is already handling another operation."""
+
+
+@dataclass
+class _ActiveCall:
+    req_id: int
+    future: asyncio.Future
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -168,6 +179,7 @@ class _WorkerManager:
         self._stderr_task: asyncio.Task | None = None
         self._last_activity: float = time.monotonic()
         self._log_done: asyncio.Event = asyncio.Event()
+        self._active_call: _ActiveCall | None = None
 
     # ── lifecycle ──────────────────────────────────────────────────
 
@@ -271,7 +283,9 @@ class _WorkerManager:
                         fut.set_result(msg)
                 elif "method" in msg and "id" not in msg:
                     # Notification — deliver to log bus
-                    self._log_bus.emit(msg.get("params", msg))
+                    event = msg.get("params", msg)
+                    self._fail_active_call_from_event(event)
+                    self._log_bus.emit(event)
                 # else: invalid, ignore
         except asyncio.CancelledError:
             raise
@@ -283,6 +297,7 @@ class _WorkerManager:
                 if not fut.done():
                     fut.set_exception(WorkerDied("Worker process died"))
             self._pending.clear()
+            self._active_call = None
 
     # ── send helpers ───────────────────────────────────────────────
 
@@ -291,6 +306,34 @@ class _WorkerManager:
         assert self._writer is not None
         data = json.dumps(msg, separators=_SEPARATORS).encode() + b"\n"
         self._writer.write(data)
+
+    def _fail_active_call_from_event(self, event: object) -> None:
+        if not isinstance(event, dict) or event.get("action") != "error":
+            return
+        active = self._active_call
+        if active is None or active.future.done():
+            return
+        args = event.get("args", [])
+        msg = str(args[-1]) if args else "Nix operation failed"
+        active.future.set_exception(from_response("Error", msg, info={"log_event": event}))
+
+    async def _wait_until_idle(self, timeout: float | None) -> None:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while self._active_call is not None:
+            active = self._active_call
+            if timeout is None:
+                raise WorkerBusy("worker is busy")
+            remaining = deadline - time.monotonic() if deadline is not None else timeout
+            if remaining <= 0:
+                raise WorkerBusy(f"worker is busy after waiting {timeout}s")
+            try:
+                await asyncio.wait_for(asyncio.shield(active.future), timeout=remaining)
+            except asyncio.TimeoutError as exc:
+                raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
+            except Exception:
+                # The previous call failed; let its owner clear the active slot.
+                pass
+            await asyncio.sleep(0)
 
     # ── RPC ────────────────────────────────────────────────────────
 
@@ -322,6 +365,7 @@ class _WorkerManager:
             raise WorkerDied("Worker is dead")
 
         t = _RPC_TIMEOUT if timeout is None else timeout
+        await self._wait_until_idle(timeout)
         req_id = next(_id_counter)
 
         # ── capture setup ──────────────────────────────────────────
@@ -339,6 +383,7 @@ class _WorkerManager:
             # Create the response future
             fut: asyncio.Future = asyncio.get_running_loop().create_future()
             self._pending[req_id] = fut
+            self._active_call = _ActiveCall(req_id=req_id, future=fut)
 
             # Build and write the request
             method = f"{module}.{fn}" if fn else module
@@ -400,6 +445,8 @@ class _WorkerManager:
         finally:
             if _sub is not None:
                 _sub.unsubscribe()
+            if self._active_call is not None and self._active_call.req_id == req_id:
+                self._active_call = None
 
     async def call(
         self,
@@ -418,14 +465,34 @@ class _WorkerManager:
         """
         if self._proc is None:
             raise WorkerDied("Worker not started")
+        if self._available.locked():
+            if timeout is None:
+                raise WorkerBusy("worker is busy")
+            try:
+                await asyncio.wait_for(self._available.acquire(), timeout=timeout)
+            except asyncio.TimeoutError as exc:
+                raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
+            try:
+                return await self._send_recv(module, fn, args, timeout=timeout, capture=capture)
+            finally:
+                self._available.release()
+
         async with self._available:
             return await self._send_recv(module, fn, args, timeout=timeout, capture=capture)
 
-    async def reserve(self) -> ReservedWorker:
+    async def reserve(self, timeout: float | None = None) -> ReservedWorker:
         """Acquire an exclusive worker lease for an EvalSession."""
         if self._proc is None:
             raise WorkerDied("Worker not started")
-        await self._available.acquire()
+        if self._available.locked():
+            if timeout is None:
+                raise WorkerBusy("worker is busy")
+            try:
+                await asyncio.wait_for(self._available.acquire(), timeout=timeout)
+            except asyncio.TimeoutError as exc:
+                raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
+        else:
+            await self._available.acquire()
         return ReservedWorker(self)
 
     def _release(self) -> None:

@@ -451,7 +451,7 @@ class EvalSession:
     async def open(self) -> None:
         if self._rw is not None:
             return
-        self._rw = await self._manager.reserve()
+        self._rw = await self._manager.reserve(timeout=self._timeout)
         self._active[0] = True
 
     async def close(self) -> None:

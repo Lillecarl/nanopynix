@@ -17,7 +17,7 @@ from nanopynix_util import (
     set_verbosity,
 )
 
-from nanopynix._pool import WorkerDied
+from nanopynix._pool import WorkerBusy, WorkerDied
 from nanopynix._session import EvalSession, ValueAttrs, ValueList, ValueProxy
 from nanopynix.exceptions import (
     AssertionError_,
@@ -97,6 +97,7 @@ __all__ = [
     "ValueHandle",
     "ValueList",
     "ValueProxy",
+    "WorkerBusy",
     "WorkerDied",
     "enable_experimental_feature",
     "eval_file",
