@@ -14,8 +14,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 import structlog
 from cachetools import TTLCache
 
-from ..serde.valid_path_info import ValidPathInfo
-
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
@@ -23,6 +21,7 @@ if TYPE_CHECKING:
     from ..connection import ClientConn, Connection
     from ..drv_parser import Derivation
     from ..serde.ids import StoreId
+    from ..serde.valid_path_info import ValidPathInfo
     from ..serde.wire_ops import WireRequest
     from ..signing import SecretKey
     from ..store_path import StorePath
@@ -56,7 +55,7 @@ class Store(ABC):
         self._feature_matrix: dict[str, set[str]] | None = spec._effective_feature_matrix()
         self._signing_keys: dict[str, SecretKey] = {}
         self.path_info_cache = cast(
-            TTLCache[str, ValidPathInfo, float],
+            "TTLCache[str, ValidPathInfo, float]",
             TTLCache(
                 maxsize=10000,
                 ttl=300,

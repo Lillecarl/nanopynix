@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 import anyio
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .engine import GoalEngine
 
 
@@ -16,7 +17,7 @@ T = TypeVar("T")
 U = TypeVar("U")
 
 
-class Goal(Generic[T]):
+class Goal[T]:
     """A deduped async computation shared by multiple request waiters."""
 
     def __init__(self, engine: GoalEngine) -> None:
@@ -42,10 +43,7 @@ class GoalHolder(Goal[T]):
         return await child.result()
 
     async def run_children(self, children: Sequence[Goal[U]]) -> list[U]:
-        results: list[U] = []
-        for child in children:
-            results.append(await child.result())
-        return results
+        return [await child.result() for child in children]
 
 
 class ExecutionGoal(Goal[T]):

@@ -19,7 +19,6 @@ from ..serde import (
 )
 from .build_derivation import BuildDerivationGoal
 from .ensure import EnsureDerivedPathGoal
-from .goal import Goal
 from .keys import BuildDerivationKey, EnsureDerivedPathKey, SubstitutePathKey
 from .query_missing import QueryMissingPlanGoal
 from .requests import BuildPathsWithResultsGoal
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
     from ..serde.ids import BuildId
     from ..store import Store
     from ..store_path import StorePath
+    from .goal import Goal
 
 
 def _derivation_fingerprint(request: BuildDerivationRequest) -> str:
@@ -93,7 +93,7 @@ class GoalEngine:
                 goal = EnsureDerivedPathGoal(self, path, build_mode, substituter_ids)
                 self._goals[key] = goal
             if not isinstance(goal, EnsureDerivedPathGoal):
-                raise RuntimeError(f"goal key collision for {key}")
+                raise TypeError(f"goal key collision for {key}")
             return goal
 
     async def get_build_derivation_goal(self, request: BuildDerivationRequest) -> BuildDerivationGoal:
@@ -104,7 +104,7 @@ class GoalEngine:
                 goal = BuildDerivationGoal(self, request)
                 self._goals[key] = goal
             if not isinstance(goal, BuildDerivationGoal):
-                raise RuntimeError(f"goal key collision for {key}")
+                raise TypeError(f"goal key collision for {key}")
             return goal
 
     async def get_substitute_path_goal(
@@ -119,7 +119,7 @@ class GoalEngine:
                 goal = SubstitutePathGoal(self, path, substituter_ids)
                 self._goals[key] = goal
             if not isinstance(goal, SubstitutePathGoal):
-                raise RuntimeError(f"goal key collision for {key}")
+                raise TypeError(f"goal key collision for {key}")
             return goal
 
     def substituter_ids(self) -> tuple[str, ...]:
@@ -146,6 +146,4 @@ def _require_normal_build_mode(build_mode: int) -> None:
         name = BuildMode(build_mode).name
     except ValueError:
         name = f"unknown({build_mode})"
-    raise RuntimeError(
-        f"pynixd goal system only supports BuildMode.NORMAL for now; got {name}"
-    )
+    raise RuntimeError(f"pynixd goal system only supports BuildMode.NORMAL for now; got {name}")

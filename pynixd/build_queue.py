@@ -14,7 +14,6 @@ from . import metrics, wire
 from .serde import BuildDerivationResponse, BuildMode, BuildResult, BuildResultStatus
 from .serde.context import WriteContext
 from .serde.ids import BuildId, RequestId, StoreId
-from .serde.logs import LogMessage
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -22,6 +21,7 @@ if TYPE_CHECKING:
     from .connection import ClientConn
     from .derived_path import DerivedPath
     from .serde import BuildDerivationRequest, Realisation
+    from .serde.logs import LogMessage
 log = structlog.get_logger(__name__)
 
 MAX_STORE_RETRIES = 3

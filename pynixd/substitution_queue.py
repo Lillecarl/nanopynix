@@ -18,7 +18,6 @@ from .serde import StorePath as SerdeStorePath
 from .serde.context import ReadContext, WriteContext
 from .serde.valid_path_info import ValidPathInfo
 from .store import DaemonStore, HTTPBinaryCacheStore
-from .store.http_binary_cache import HTTPNarInfo
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -27,6 +26,7 @@ if TYPE_CHECKING:
     from .context import PynixdContext
     from .serde.ids import StoreId
     from .store import Store
+    from .store.http_binary_cache import HTTPNarInfo
     from .store_path import StorePath
 
 log = structlog.get_logger(__name__)
@@ -287,18 +287,18 @@ class SubstitutionQueue:
             elif isinstance(candidate.store, DaemonStore):
                 await self._stream_from_daemon(path, candidate, framed, conn)
             else:
-                raise RuntimeError(f"store {candidate.store.store_id} cannot stream NARs")
+                raise TypeError(f"store {candidate.store.store_id} cannot stream NARs")
 
             await framed.finalize()
             await request.response_type.from_reader(ReadContext.from_conn(conn))
 
-    async def _stream_from_daemon(self, path: StorePath, candidate: SubstitutionCandidate, framed: Any, destination_conn: Any) -> None:
+    async def _stream_from_daemon(
+        self, path: StorePath, candidate: SubstitutionCandidate, framed: Any, destination_conn: Any
+    ) -> None:
         if not isinstance(candidate.store, DaemonStore):
-            raise RuntimeError(f"store {candidate.store.store_id} cannot stream NARs")
+            raise TypeError(f"store {candidate.store.store_id} cannot stream NARs")
         async with candidate.store.transfer_conn() as source_conn:
-            await NarFromPathRequest(path=SerdeStorePath(path=str(path))).to_writer(
-                WriteContext.from_conn(source_conn)
-            )
+            await NarFromPathRequest(path=SerdeStorePath(path=str(path))).to_writer(WriteContext.from_conn(source_conn))
             await source_conn.w.drain()
             await source_conn.r.drain_stderr()
 

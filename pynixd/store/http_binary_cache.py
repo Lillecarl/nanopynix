@@ -30,7 +30,6 @@ from ..serde import (
 )
 from ..serde import StorePath as SerdeStorePath
 from ..serde.valid_path_info import ValidPathInfo
-from ..serde.wire_ops import WireRequest
 from ..store_path import StorePath
 from .base import Store
 
@@ -40,6 +39,7 @@ if TYPE_CHECKING:
     from ..config import HTTPBinaryCacheSpec
     from ..connection import ClientConn, Connection
     from ..drv_parser import Derivation
+    from ..serde.wire_ops import WireRequest
 
 log = structlog.get_logger(__name__)
 
@@ -212,11 +212,14 @@ class HTTPBinaryCacheStore(Store):
                     yield out
 
     async def _load_cache_info(self) -> dict[str, str]:
+        def _check_response(status: int) -> None:
+            if status != 200:
+                raise RuntimeError(f"HTTP cache returned {status}")
+
         try:
             session = self._require_session()
             async with session.get(urljoin(self.url, "nix-cache-info"), raise_for_status=False) as response:
-                if response.status != 200:
-                    raise RuntimeError(f"HTTP cache returned {response.status}")
+                _check_response(response.status)
                 text = await response.text()
         except (TimeoutError, aiohttp.ClientError, OSError, RuntimeError):
             log.warning("http_cache_info_fetch_failed", store_id=self.store_id, url=self.url, exc_info=True)

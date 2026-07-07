@@ -31,12 +31,12 @@ from pynixd.serde.valid_path_info import ValidPathInfo
 from pynixd.serde.wire_message import WireModel
 from pynixd.serde.wire_time import Time
 from pynixd.store.daemon import DaemonStore
-from pynixd.store_path import StorePath
 
 if TYPE_CHECKING:
     from pynixd.connection import ClientConn, Connection
     from pynixd.drv_parser import Derivation
     from pynixd.serde.wire_ops import WireRequest
+    from pynixd.store_path import StorePath
     from pynixd.wire import NixReader, NixWriter
 
 

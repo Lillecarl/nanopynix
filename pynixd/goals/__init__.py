@@ -17,17 +17,17 @@ from .requests import BuildPathsWithResultsGoal as BuildPathsWithResultsGoal
 from .substitute import SubstitutePathGoal as SubstitutePathGoal
 
 __all__ = [
-    "BuildDerivationKey",
     "BuildDerivationGoal",
+    "BuildDerivationKey",
     "BuildPathsWithResultsGoal",
     "DependencyGroupGoal",
-    "EnsureDerivedPathKey",
     "EnsureDerivedPathGoal",
+    "EnsureDerivedPathKey",
     "ExecutionGoal",
     "Goal",
     "GoalEngine",
     "GoalHolder",
     "QueryMissingPlanGoal",
-    "SubstitutePathKey",
     "SubstitutePathGoal",
+    "SubstitutePathKey",
 ]

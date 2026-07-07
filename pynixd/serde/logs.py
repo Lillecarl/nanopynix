@@ -141,7 +141,7 @@ async def read_stream(ctx: ReadContext) -> AsyncIterator[LogMessage]:
             continue
 
         unknown_streak = 0
-        msg = cast(LogMessage, await parser.from_reader(ctx))
+        msg = cast("LogMessage", await parser.from_reader(ctx))
         yield msg
         if isinstance(msg, LogError):
             return

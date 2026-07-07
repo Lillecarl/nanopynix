@@ -616,7 +616,7 @@ class Scheduler:
     async def _wait_for_local_paths(
         self,
         paths: StorePathSet,
-        timeout: float = 2.0,
+        delay: float = 2.0,
     ) -> StorePathSet:
         """Wait briefly for the frontend daemon's own output import."""
         if not paths:
@@ -629,7 +629,7 @@ class Scheduler:
             )
             return set()
 
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + delay
         while True:
             try:
                 resp = await self.local_store.query_valid_paths(
@@ -668,49 +668,48 @@ class Scheduler:
                 await to_thread.run_sync(self._copy_store_path, src, dst)
 
         paths_json = json.dumps([str(path) for path in paths])
-        async with store.db.acquire_conn() as src_db:
-            async with self.local_store.db.acquire_conn() as dst_db:
-                rows_cursor = await src_db.execute(
-                    """
+        async with store.db.acquire_conn() as src_db, self.local_store.db.acquire_conn() as dst_db:
+            rows_cursor = await src_db.execute(
+                """
                     SELECT path, hash, registrationTime, narSize, deriver, ultimate, sigs, ca
                     FROM ValidPaths
                     WHERE path IN (SELECT value FROM json_each(?))
                     """,
-                    (paths_json,),
-                )
-                rows = await rows_cursor.fetchall()
-                for row in rows:
-                    await dst_db.execute(
-                        """
+                (paths_json,),
+            )
+            rows = await rows_cursor.fetchall()
+            for row in rows:
+                await dst_db.execute(
+                    """
                         INSERT OR IGNORE INTO ValidPaths
                             (path, hash, registrationTime, narSize, deriver, ultimate, sigs, ca)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        row,
-                    )
+                    row,
+                )
 
-                refs_cursor = await src_db.execute(
-                    """
+            refs_cursor = await src_db.execute(
+                """
                     SELECT referrer.path, reference.path
                     FROM Refs r
                     JOIN ValidPaths referrer ON r.referrer = referrer.id
                     JOIN ValidPaths reference ON r.reference = reference.id
                     WHERE referrer.path IN (SELECT value FROM json_each(?))
                     """,
-                    (paths_json,),
-                )
-                refs = await refs_cursor.fetchall()
-                for referrer, reference in refs:
-                    await dst_db.execute(
-                        """
+                (paths_json,),
+            )
+            refs = await refs_cursor.fetchall()
+            for referrer, reference in refs:
+                await dst_db.execute(
+                    """
                         INSERT OR IGNORE INTO Refs (referrer, reference)
                         SELECT referrer.id, reference.id
                         FROM ValidPaths referrer, ValidPaths reference
                         WHERE referrer.path = ? AND reference.path = ?
                         """,
-                        (referrer, reference),
-                    )
-                await dst_db.commit()
+                    (referrer, reference),
+                )
+            await dst_db.commit()
 
         log.info("direct_output_import_complete", count=len(paths), store_id=store.store_id)
 

@@ -7,7 +7,7 @@ from enum import IntEnum
 from ..constants import proto
 from ..store_path import StorePath
 from .opt_microseconds import OptMicroseconds
-from .realisation import Realisation  # noqa: TC001
+from .realisation import Realisation
 from .wire_message import WireField, WireModel
 
 

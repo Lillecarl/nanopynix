@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .content_address import ContentAddress  # noqa: TC001
+from .content_address import ContentAddress
 
 if TYPE_CHECKING:
     from .valid_path_info import ValidPathInfo
-from .nar_hash import NARHash  # noqa: TC001
-from .signature import Signature  # noqa: TC001
-from .store_path import StorePath  # noqa: TC001
+from .nar_hash import NARHash
+from .signature import Signature
+from .store_path import StorePath
 from .wire_message import WireField, WireModel
-from .wire_time import Time  # noqa: TC001
+from .wire_time import Time
 
 
 class UnkeyedValidPathInfo(WireModel):

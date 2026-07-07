@@ -7,16 +7,16 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+from pynixd.drv_parser import Derivation, DrvOutput
 from pynixd.goals.engine import GoalEngine
 from pynixd.goals.query_missing import QueryMissingPlanGoal
-from pynixd.drv_parser import Derivation, DrvOutput
-from pynixd.serde import IsValidPathResponse, QueryMissingRequest
 from pynixd.serde import DerivedPath as SerdeDerivedPath
-from pynixd.store_path import StorePath
+from pynixd.serde import IsValidPathResponse, QueryMissingRequest
 from pynixd.substitution_queue import SubstitutionAvailability
 
 if TYPE_CHECKING:
     from pynixd.context import PynixdContext
+    from pynixd.store_path import StorePath
 
 
 class FakeLocalStore:

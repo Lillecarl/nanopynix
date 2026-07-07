@@ -25,12 +25,12 @@ from . import wire
 from .exceptions import InfrastructureError
 from .protocol import get_extension_features
 from .serde.context import ReadContext, WriteContext
-from .serde.wire_message import WireModel
 
 if TYPE_CHECKING:
     from pathlib import Path
     from types import TracebackType
 
+    from .serde.wire_message import WireModel
     from .serde.wire_ops import WireRequest
     from .wire import (
         NixReader,

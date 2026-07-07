@@ -10,12 +10,12 @@ import structlog
 
 from ..serde import BuildResultStatus, IsValidPathRequest
 from ..serde import StorePath as SerdeStorePath
-from ..serde.valid_path_info import ValidPathInfo
 from ..store_path import StorePath
 from .goal import ExecutionGoal
 from .results import GoalResult, goal_failure, goal_success
 
 if TYPE_CHECKING:
+    from ..serde.valid_path_info import ValidPathInfo
     from .engine import GoalEngine
 
 log = structlog.get_logger(__name__)

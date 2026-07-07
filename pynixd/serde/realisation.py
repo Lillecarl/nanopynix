@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from pydantic import ConfigDict
 
 from .drv_output import DrvOutput
-from .store_path import StorePath  # noqa: TC001
+from .store_path import StorePath
 from .wire_message import WireField, WireModel
 
 if TYPE_CHECKING:

@@ -7,7 +7,6 @@ import functools
 import json
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 import structlog
@@ -15,9 +14,6 @@ import structlog
 from tests._conftest.constants import _covered_features_key, _log_dir_key
 from tests._conftest.subsumption import _sort_by_subsumption
 from tests.test_features import TestFeatures
-
-if TYPE_CHECKING:
-    pass
 
 log = structlog.get_logger(__name__)
 

@@ -14,8 +14,10 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-from .nix_config import NixConfig
 from .serde.ids import StoreId
+
+if TYPE_CHECKING:
+    from .nix_config import NixConfig
 
 
 class ScheduleMode(StrEnum):

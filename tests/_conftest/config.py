@@ -11,7 +11,6 @@ from environs import env
 from pynixd import Server
 from pynixd.config import LocalSocketStoreSpec
 from pynixd.instance import NixImplementation
-from pynixd.nix_config import NixConfig
 from pynixd.serde.ids import StoreId
 from pynixd.store.local_db import LocalDBStore
 from tests._conftest.constants import (
@@ -26,6 +25,8 @@ from tests._conftest.nix_config import for_test_store
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from pathlib import Path
+
+    from pynixd.nix_config import NixConfig
 
 
 log = structlog.get_logger(__name__)

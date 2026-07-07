@@ -7,9 +7,9 @@ from typing import Any
 from .content_address import ContentAddress
 from .context import WriteContext
 from .nar_hash import NARHash
-from .path_info import UnkeyedValidPathInfo  # noqa: TC001
+from .path_info import UnkeyedValidPathInfo
 from .signature import Signature
-from .store_path import StorePath  # noqa: TC001
+from .store_path import StorePath
 from .wire_message import WireModel
 from .wire_time import Time
 

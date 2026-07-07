@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from .build_result import BuildResult  # noqa: TC001
-from .derived_path import DerivedPath  # noqa: TC001
+from .build_result import BuildResult
+from .derived_path import DerivedPath
 from .wire_message import WireModel
 
 

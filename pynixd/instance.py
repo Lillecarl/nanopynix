@@ -43,11 +43,8 @@ class NixImplementation(Enum):
 
 
 def _default_http_substituter_urls(local_store: Store) -> list[str]:
-    urls: list[str] = []
     nix_config = getattr(local_store, "nix_config", None)
-    for url in getattr(nix_config, "substituters", None) or []:
-        if url.startswith(("http://", "https://")):
-            urls.append(url)
+    urls = [url for url in getattr(nix_config, "substituters", None) or [] if url.startswith(("http://", "https://"))]
     urls.append("https://cache.nixos.org/")
 
     seen: set[str] = set()

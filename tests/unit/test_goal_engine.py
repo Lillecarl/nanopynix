@@ -14,5 +14,5 @@ def test_require_normal_build_mode_accepts_normal() -> None:
 
 @pytest.mark.parametrize("build_mode", [BuildMode.CHECK, BuildMode.REPAIR, 99])
 def test_require_normal_build_mode_rejects_unsupported_modes(build_mode: int) -> None:
-    with pytest.raises(RuntimeError, match="only supports BuildMode.NORMAL"):
+    with pytest.raises(RuntimeError, match=r"only supports BuildMode.NORMAL"):
         _require_normal_build_mode(build_mode)

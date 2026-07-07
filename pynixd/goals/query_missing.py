@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 import structlog
 
 from ..derived_path import DerivedPath
-from ..drv_parser import Derivation
 from ..serde import IsValidPathRequest, QueryMissingRequest, QueryMissingResponse
 from ..serde import StorePath as SerdeStorePath
-from ..store_path import StorePath
 from ..substitution_queue import SubstitutionAvailability
 from .goal import ExecutionGoal
 
 if TYPE_CHECKING:
+    from ..drv_parser import Derivation
+    from ..store_path import StorePath
     from .engine import GoalEngine
 
 log = structlog.get_logger(__name__)

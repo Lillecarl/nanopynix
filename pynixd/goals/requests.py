@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING
 from ..derived_path import DerivedPath
 from ..serde import BuildPathsWithResultsRequest, BuildPathsWithResultsResponse, KeyedBuildResult
 from ..serde import DerivedPath as SerdeDerivedPath
-from .ensure import EnsureDerivedPathGoal
 from .goal import ExecutionGoal
 
 if TYPE_CHECKING:
     from ..connection import ClientConn
     from .engine import GoalEngine
+    from .ensure import EnsureDerivedPathGoal
 
 
 @dataclass

@@ -45,8 +45,10 @@ if TYPE_CHECKING:
     from .context import PynixdContext
     from .scheduler import Scheduler
     from .serde.wire_ops import WireRequest
-    from .store import DaemonStore, LocalStore, Store
+    from .store import LocalStore, Store
     from .wire import NixReader, NixWriter
+
+from .store import DaemonStore as DaemonStore
 
 log = structlog.get_logger(__name__)
 

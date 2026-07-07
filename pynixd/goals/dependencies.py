@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -10,6 +9,8 @@ from .goal import ExecutionGoal, Goal
 from .results import GoalResult
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .engine import GoalEngine
 
 

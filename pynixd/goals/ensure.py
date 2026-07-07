@@ -13,7 +13,6 @@ from ..drv_parser import ChildMapNode, to_basic_derivation
 from ..serde import BuildDerivationRequest, BuildResultStatus, IsValidPathRequest
 from ..serde import StorePath as SerdeStorePath
 from ..store_path import StorePath
-from .build_derivation import BuildDerivationGoal
 from .dependencies import DependencyGroupGoal
 from .goal import GoalHolder
 from .resolution import resolve_derivation, resolve_dynamic_derivation
@@ -23,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from ..connection import ClientConn
+    from .build_derivation import BuildDerivationGoal
     from .engine import GoalEngine
 
 log = structlog.get_logger(__name__)
@@ -179,15 +179,21 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
                 StorePath(input_drv_path),
                 output_names,
             )
-            for output_name in output_names:
-                if output_name in needed_outputs:
-                    child_goals.append(await self._child_goal(StorePath(input_drv_path), output_name))
+            child_goals.extend(
+                [
+                    await self._child_goal(StorePath(input_drv_path), output_name)
+                    for output_name in output_names
+                    if output_name in needed_outputs
+                ]
+            )
 
-        for input_drv_path, node in parsed.dynamic_input_drvs.items():
-            for child_dp in _child_map_to_derived_paths(StorePath(input_drv_path), node):
-                child_goals.append(
-                    await self.engine.get_ensure_derived_path_goal(child_dp, self.build_mode, self.substituter_ids)
-                )
+        child_goals.extend(
+            [
+                await self.engine.get_ensure_derived_path_goal(child_dp, self.build_mode, self.substituter_ids)
+                for input_drv_path, node in parsed.dynamic_input_drvs.items()
+                for child_dp in _child_map_to_derived_paths(StorePath(input_drv_path), node)
+            ]
+        )
 
         if not child_goals:
             return []
@@ -275,14 +281,16 @@ def _child_map_to_derived_paths(drv_path: StorePath, node: ChildMapNode) -> list
     def walk(current: ChildMapNode, chain: tuple[str, ...]) -> None:
         for child_name, child_node in current.children.items():
             walk(child_node, (*chain, child_name))
-        for output_name in current.outputs:
-            results.append(
+        results.extend(
+            [
                 DerivedPath._from_components(
                     drv_path=drv_path,
                     chain=chain,
                     outputs=OutputsNames(frozenset({output_name})),
                 )
-            )
+                for output_name in current.outputs
+            ]
+        )
 
     walk(node, ())
     return results
