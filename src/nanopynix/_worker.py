@@ -39,6 +39,7 @@ ReqT = TypeVar("ReqT", bound=rpc.WorkerRequest[Any])
 
 # ── Wire format ────────────────────────────────────────────────────────
 
+
 def _send(msg: dict) -> None:
     """Write a JSON-RPC message as a single line to stdout and flush."""
     sys.stdout.write(json.dumps(msg, separators=(",", ":")))
@@ -100,11 +101,16 @@ def main() -> None:
             if event is None:
                 continue
             req_id, action, *args = event
-            _send(_notification("log", {
-                "request_id": req_id,
-                "action": action,
-                "args": list(args),
-            }))
+            _send(
+                _notification(
+                    "log",
+                    {
+                        "request_id": req_id,
+                        "action": action,
+                        "args": list(args),
+                    },
+                )
+            )
 
     # ── Init ────────────────────────────────────────────────────
     # First message from parent is the init request (JSON-RPC)
@@ -135,9 +141,7 @@ def main() -> None:
     if nix_conf is not None:
         os.environ["NIX_USER_CONF_FILES"] = nix_conf
     if settings:
-        os.environ["NIX_CONFIG"] = "\n".join(
-            f"{k} = {v}" for k, v in settings.items()
-        )
+        os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
 
     for k, v in settings.items():
         nanopynix_util.set_setting(k, v)
@@ -192,7 +196,9 @@ def main() -> None:
             response = _result(rid, value)
         except Exception as exc:
             response = _error(
-                rid, -32000, str(exc),
+                rid,
+                -32000,
+                str(exc),
                 {
                     "error_type": type(exc).__qualname__,
                     "traceback": traceback.format_exc(),
@@ -221,10 +227,7 @@ def _store_dispatch(store, eval_store):
         return store.parse_store_path(path)
 
     def _store_path_list(paths):
-        paths_model = _StorePathList.validate_python([
-            p if isinstance(p, dict) else _sp_to_dict(p)
-            for p in paths
-        ])
+        paths_model = _StorePathList.validate_python([p if isinstance(p, dict) else _sp_to_dict(p) for p in paths])
         return _StorePathList.dump_python(paths_model, mode="json")
 
     def _fetcher_attrs(attrs: Mapping[str, str | int | bool]) -> dict[str, str]:
@@ -275,11 +278,7 @@ def _store_dispatch(store, eval_store):
         return _store_path_list(store.query_referrers(_parse_sp(req.path)))
 
     def query_substitutable_paths(req: rpc.QuerySubstitutablePaths):
-        return _store_path_list(
-            store.query_substitutable_paths(
-                [_parse_sp(path) for path in req.paths]
-            )
-        )
+        return _store_path_list(store.query_substitutable_paths([_parse_sp(path) for path in req.paths]))
 
     def build_paths_with_results(req: rpc.BuildPathsWithResults):
         return list(
@@ -310,28 +309,30 @@ def _store_dispatch(store, eval_store):
     def fetch_from_attrs(req: rpc.FetchFromAttrs) -> Input:
         return Input(attrs=_input_attrs(nanopynix_fetchers.input_from_attrs(_fetcher_attrs(req.attrs))))
 
-    return _dispatch([
-        Endpoint(rpc.GetUri, get_uri),
-        Endpoint(rpc.GetStoreDir, get_store_dir),
-        Endpoint(rpc.IsValidPath, is_valid_path),
-        Endpoint(rpc.ParseStorePath, parse_store_path),
-        Endpoint(rpc.QueryPathInfo, query_path_info),
-        Endpoint(rpc.QueryPathFromHashPart, query_path_from_hash_part),
-        Endpoint(rpc.ComputeFsClosure, compute_fs_closure),
-        Endpoint(rpc.QueryMissing, query_missing),
-        Endpoint(rpc.QueryDerivationOutputs, query_derivation_outputs),
-        Endpoint(rpc.QueryValidDerivers, query_valid_derivers),
-        Endpoint(rpc.QueryAllValidPaths, query_all_valid_paths),
-        Endpoint(rpc.QueryReferrers, query_referrers),
-        Endpoint(rpc.QuerySubstitutablePaths, query_substitutable_paths),
-        Endpoint(rpc.BuildPathsWithResults, build_paths_with_results),
-        Endpoint(rpc.ReadDerivation, read_derivation),
-        Endpoint(rpc.BuildDerivation, build_derivation),
-        Endpoint(rpc.FollowLinksToStorePath, follow_links_to_store_path),
-        Endpoint(rpc.AddTempRoot, add_temp_root),
-        Endpoint(rpc.FetchFromUrl, fetch_from_url),
-        Endpoint(rpc.FetchFromAttrs, fetch_from_attrs),
-    ])
+    return _dispatch(
+        [
+            Endpoint(rpc.GetUri, get_uri),
+            Endpoint(rpc.GetStoreDir, get_store_dir),
+            Endpoint(rpc.IsValidPath, is_valid_path),
+            Endpoint(rpc.ParseStorePath, parse_store_path),
+            Endpoint(rpc.QueryPathInfo, query_path_info),
+            Endpoint(rpc.QueryPathFromHashPart, query_path_from_hash_part),
+            Endpoint(rpc.ComputeFsClosure, compute_fs_closure),
+            Endpoint(rpc.QueryMissing, query_missing),
+            Endpoint(rpc.QueryDerivationOutputs, query_derivation_outputs),
+            Endpoint(rpc.QueryValidDerivers, query_valid_derivers),
+            Endpoint(rpc.QueryAllValidPaths, query_all_valid_paths),
+            Endpoint(rpc.QueryReferrers, query_referrers),
+            Endpoint(rpc.QuerySubstitutablePaths, query_substitutable_paths),
+            Endpoint(rpc.BuildPathsWithResults, build_paths_with_results),
+            Endpoint(rpc.ReadDerivation, read_derivation),
+            Endpoint(rpc.BuildDerivation, build_derivation),
+            Endpoint(rpc.FollowLinksToStorePath, follow_links_to_store_path),
+            Endpoint(rpc.AddTempRoot, add_temp_root),
+            Endpoint(rpc.FetchFromUrl, fetch_from_url),
+            Endpoint(rpc.FetchFromAttrs, fetch_from_attrs),
+        ]
+    )
 
 
 # ── Eval dispatch ──────────────────────────────────────────────────────
@@ -425,23 +426,25 @@ def _eval_dispatch(store):
     def release(req: rpc.Release):
         return _get_es(store).release_exported(req.handle)
 
-    return _dispatch([
-        Endpoint(rpc.EvalFile, eval_file),
-        Endpoint(rpc.EvalString, eval_string),
-        Endpoint(rpc.Force, force),
-        Endpoint(rpc.ForceDeep, force_deep),
-        Endpoint(rpc.Attr, attr),
-        Endpoint(rpc.ListGet, list_get),
-        Endpoint(rpc.ListLength, list_length),
-        Endpoint(rpc.AttrNames, attr_names),
-        Endpoint(rpc.HasAttr, has_attr),
-        Endpoint(rpc.TypeName, type_name),
-        Endpoint(rpc.Call, call),
-        Endpoint(rpc.LockFlake, lock_flake),
-        Endpoint(rpc.GetFlake, get_flake),
-        Endpoint(rpc.Release, release),
-        Endpoint(rpc.ReleaseAll, lambda _: _reset_es()),
-    ])
+    return _dispatch(
+        [
+            Endpoint(rpc.EvalFile, eval_file),
+            Endpoint(rpc.EvalString, eval_string),
+            Endpoint(rpc.Force, force),
+            Endpoint(rpc.ForceDeep, force_deep),
+            Endpoint(rpc.Attr, attr),
+            Endpoint(rpc.ListGet, list_get),
+            Endpoint(rpc.ListLength, list_length),
+            Endpoint(rpc.AttrNames, attr_names),
+            Endpoint(rpc.HasAttr, has_attr),
+            Endpoint(rpc.TypeName, type_name),
+            Endpoint(rpc.Call, call),
+            Endpoint(rpc.LockFlake, lock_flake),
+            Endpoint(rpc.GetFlake, get_flake),
+            Endpoint(rpc.Release, release),
+            Endpoint(rpc.ReleaseAll, lambda _: _reset_es()),
+        ]
+    )
 
 
 if __name__ == "__main__":

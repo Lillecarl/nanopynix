@@ -48,9 +48,7 @@ async def test_four_workers_concurrent_path_info():
         async with nix.store() as store:
             paths = await store.query_all_valid_paths()
             if len(paths) >= 4:
-                results = await asyncio.gather(*[
-                    store.query_path_info(p) for p in paths[:4]
-                ])
+                results = await asyncio.gather(*[store.query_path_info(p) for p in paths[:4]])
                 assert len(results) == 4
                 for r in results:
                     assert r.nar_size >= 0
@@ -88,9 +86,7 @@ async def test_error_propagation():
     async with Nix() as nix:
         async with nix.store() as store:
             with pytest.raises(StoreError, match="is not valid"):
-                await store.query_path_info(
-                    "/nix/store/00000000000000000000000000000000-nonexistent-1.0"
-                )
+                await store.query_path_info("/nix/store/00000000000000000000000000000000-nonexistent-1.0")
 
 
 async def test_worker_death_detection():

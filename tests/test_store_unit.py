@@ -21,6 +21,7 @@ def pool():
     p.call = AsyncMock()
     return p
 
+
 @pytest.fixture
 def store(pool):
     s = Store(pool, "mock", "mock-session-id")
@@ -31,6 +32,7 @@ def store(pool):
 # ════════════════════════════════════════════════════════════════════
 # Identity / simple pass-through
 # ════════════════════════════════════════════════════════════════════
+
 
 class TestIdentity:
     async def test_get_uri(self, store, pool):
@@ -49,6 +51,7 @@ class TestIdentity:
 # ════════════════════════════════════════════════════════════════════
 # StorePath parsing — coercion from StorePath or str
 # ════════════════════════════════════════════════════════════════════
+
 
 class TestStorePathCoercion:
     async def test_parse_store_path_returns_model(self, store, pool):
@@ -79,6 +82,7 @@ class TestStorePathCoercion:
 # ════════════════════════════════════════════════════════════════════
 # Path info
 # ════════════════════════════════════════════════════════════════════
+
 
 class TestPathInfo:
     async def test_query_path_info_str(self, store, pool):
@@ -117,6 +121,7 @@ class TestPathInfo:
 # Closures
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestClosures:
     async def test_compute_fs_closure(self, store, pool):
         pool.call.return_value = [
@@ -127,8 +132,10 @@ class TestClosures:
         assert len(result) == 2
         assert all(isinstance(sp, StorePath) for sp in result)
         pool.call.assert_awaited_with(
-            "store", "compute_fs_closure",
-            ["/nix/store/aaa-foo", True, False, False], capture=False,
+            "store",
+            "compute_fs_closure",
+            ["/nix/store/aaa-foo", True, False, False],
+            capture=False,
         )
 
     async def test_query_missing_coerces_list(self, store, pool):
@@ -143,14 +150,17 @@ class TestClosures:
         result = await store.query_missing([sp, "/nix/store/bbb-bar"])
         assert isinstance(result, MissingInfo)
         pool.call.assert_awaited_with(
-            "store", "query_missing",
-            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]], capture=False,
+            "store",
+            "query_missing",
+            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]],
+            capture=False,
         )
 
 
 # ════════════════════════════════════════════════════════════════════
 # Derivations
 # ════════════════════════════════════════════════════════════════════
+
 
 class TestDerivations:
     async def test_query_derivation_outputs_str(self, store, pool):
@@ -172,6 +182,7 @@ class TestDerivations:
 # Bulk queries
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestBulk:
     async def test_query_all_valid_paths(self, store, pool):
         pool.call.return_value = []
@@ -189,14 +200,17 @@ class TestBulk:
         result = await store.query_substitutable_paths([sp, "/nix/store/bbb-bar"])
         assert result == []
         pool.call.assert_awaited_with(
-            "store", "query_substitutable_paths",
-            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]], capture=False,
+            "store",
+            "query_substitutable_paths",
+            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]],
+            capture=False,
         )
 
 
 # ════════════════════════════════════════════════════════════════════
 # Build
 # ════════════════════════════════════════════════════════════════════
+
 
 class TestBuild:
     async def test_build_paths_with_results(self, store, pool):
@@ -210,8 +224,14 @@ class TestBuild:
 
     async def test_read_derivation(self, store, pool):
         pool.call.return_value = {
-            "name": "foo", "platform": "x86_64-linux", "builder": "/bin/sh",
-            "args": [], "env": [], "outputs": {}, "inputSrcs": [], "inputDrvs": [],
+            "name": "foo",
+            "platform": "x86_64-linux",
+            "builder": "/bin/sh",
+            "args": [],
+            "env": [],
+            "outputs": {},
+            "inputSrcs": [],
+            "inputDrvs": [],
         }
         result = await store.read_derivation("/nix/store/aaa-foo.drv")
         assert isinstance(result, Derivation)
@@ -222,6 +242,7 @@ class TestBuild:
 # ════════════════════════════════════════════════════════════════════
 # GC
 # ════════════════════════════════════════════════════════════════════
+
 
 class TestGC:
     async def test_add_temp_root(self, store, pool):
@@ -234,7 +255,9 @@ class TestGC:
 # Package exports (C3 fix)
 # ════════════════════════════════════════════════════════════════════
 
+
 async def test_store_alias_is_bound():
     """nanopynix.Store is a backward-compatible alias for StoreHandle."""
     import nanopynix
+
     assert nanopynix.Store is nanopynix.StoreHandle

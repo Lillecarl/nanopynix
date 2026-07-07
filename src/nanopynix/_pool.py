@@ -36,6 +36,7 @@ _SEPARATORS = (",", ":")
 # Exceptions
 # ════════════════════════════════════════════════════════════════════
 
+
 class WorkerDied(RuntimeError):
     """Raised when the subprocess worker dies unexpectedly."""
 
@@ -43,6 +44,7 @@ class WorkerDied(RuntimeError):
 # ════════════════════════════════════════════════════════════════════
 # _LogBus + _Subscription
 # ════════════════════════════════════════════════════════════════════
+
 
 class _LogBus:
     """Subscriber list for worker log events.
@@ -91,6 +93,7 @@ class _Subscription:
 # ReservedWorker — public token for an exclusive worker lease
 # ════════════════════════════════════════════════════════════════════
 
+
 class ReservedWorker:
     """Exclusive lease on the session worker, obtained via ``_WorkerManager.reserve()``.
 
@@ -105,7 +108,11 @@ class ReservedWorker:
         self._released = False
 
     async def send_recv(
-        self, module: str, fn: str, args: list, timeout: float | None = None,
+        self,
+        module: str,
+        fn: str,
+        args: list,
+        timeout: float | None = None,
         capture: bool = False,
     ):
         """Send an RPC call on the reserved worker and await the response.
@@ -126,6 +133,7 @@ class ReservedWorker:
 # ════════════════════════════════════════════════════════════════════
 # _WorkerManager — single-worker lifecycle
 # ════════════════════════════════════════════════════════════════════
+
 
 class _WorkerManager:
     """Manages a single subprocess worker with an independent Nix Store.
@@ -166,7 +174,9 @@ class _WorkerManager:
     async def open(self) -> None:
         """Spawn the worker subprocess."""
         self._proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "nanopynix._worker",
+            sys.executable,
+            "-m",
+            "nanopynix._worker",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -181,13 +191,17 @@ class _WorkerManager:
         self._stderr_task = asyncio.ensure_future(self._read_stderr())
 
         # Init handshake — send init as first JSON-RPC call
-        result = await self._send_recv("init", "", {
-            "store_uri": self._store_uri,
-            "eval_store_uri": self._eval_store_uri,
-            "nix_conf": self._nix_conf,
-            "settings": self._settings,
-            "experimental_features": self._features,
-        })
+        result = await self._send_recv(
+            "init",
+            "",
+            {
+                "store_uri": self._store_uri,
+                "eval_store_uri": self._eval_store_uri,
+                "nix_conf": self._nix_conf,
+                "settings": self._settings,
+                "experimental_features": self._features,
+            },
+        )
         if result != "ok":
             raise RuntimeError(f"Worker init failed: {result}")
 
@@ -281,7 +295,10 @@ class _WorkerManager:
     # ── RPC ────────────────────────────────────────────────────────
 
     async def _send_recv(
-        self, module: str, fn: str, args: list | dict,
+        self,
+        module: str,
+        fn: str,
+        args: list | dict,
         timeout: float | None = None,
         capture: bool = False,
     ):
@@ -311,9 +328,11 @@ class _WorkerManager:
         captured: list[dict] = []
         _sub = None
         if capture:
+
             def _filter(event: object) -> None:
                 if isinstance(event, dict) and event.get("request_id") == req_id:
                     captured.append(event)
+
             _sub = self._log_bus.subscribe(_filter)
 
         try:
@@ -323,12 +342,14 @@ class _WorkerManager:
 
             # Build and write the request
             method = f"{module}.{fn}" if fn else module
-            self._write_line({
-                "jsonrpc": "2.0",
-                "method": method,
-                "params": args,
-                "id": req_id,
-            })
+            self._write_line(
+                {
+                    "jsonrpc": "2.0",
+                    "method": method,
+                    "params": args,
+                    "id": req_id,
+                }
+            )
             assert self._writer is not None
             await self._writer.drain()
 
@@ -342,9 +363,7 @@ class _WorkerManager:
                     # Check for a late-arriving response
                     if fut.done():
                         break  # race — it arrived
-                    raise TimeoutError(
-                        f"Call timed out — no worker activity for {t}s"
-                    )
+                    raise TimeoutError(f"Call timed out — no worker activity for {t}s")
 
                 try:
                     async with asyncio.timeout(min(remaining, 1.0)):
@@ -383,8 +402,12 @@ class _WorkerManager:
                 _sub.unsubscribe()
 
     async def call(
-        self, module: str, fn: str, args: list,
-        *, timeout: float | None = None,
+        self,
+        module: str,
+        fn: str,
+        args: list,
+        *,
+        timeout: float | None = None,
         capture: bool = False,
     ):
         """Send an RPC call on the worker and return the response.

@@ -99,7 +99,9 @@ class StoreHandle:
 
     async def parse_store_path(self, path: str, *, capture: bool = False) -> Capture[StorePath] | StorePath:
         self._check_active()
-        return await manager_call(self._pool, "store", "parse_store_path", [path], _model_adapter(StorePath), capture=capture)
+        return await manager_call(
+            self._pool, "store", "parse_store_path", [path], _model_adapter(StorePath), capture=capture
+        )
 
     async def is_valid_path(self, path: StorePath | str, *, capture: bool = False) -> Capture[bool] | bool:
         self._check_active()
@@ -108,19 +110,27 @@ class StoreHandle:
 
     async def follow_links_to_store_path(self, path: str, *, capture: bool = False) -> Capture[StorePath] | StorePath:
         self._check_active()
-        return await manager_call(self._pool, "store", "follow_links_to_store_path", [path], _model_adapter(StorePath), capture=capture)
+        return await manager_call(
+            self._pool, "store", "follow_links_to_store_path", [path], _model_adapter(StorePath), capture=capture
+        )
 
     # ── Path info ─────────────────────────────────────────────────
 
     async def query_path_info(self, path: StorePath | str, *, capture: bool = False) -> Capture[PathInfo] | PathInfo:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(self._pool, "store", "query_path_info", [s], _model_adapter(PathInfo), capture=capture)
+        return await manager_call(
+            self._pool, "store", "query_path_info", [s], _model_adapter(PathInfo), capture=capture
+        )
 
-    async def query_path_from_hash_part(self, hash_part: str, *, capture: bool = False) -> Capture[StorePath | None] | StorePath | None:
+    async def query_path_from_hash_part(
+        self, hash_part: str, *, capture: bool = False
+    ) -> Capture[StorePath | None] | StorePath | None:
         self._check_active()
+
         def adapt(value):
             return None if value is None else StorePath.model_validate(value)
+
         return await manager_call(self._pool, "store", "query_path_from_hash_part", [hash_part], adapt, capture=capture)
 
     # ── Closures ──────────────────────────────────────────────────
@@ -145,66 +155,100 @@ class StoreHandle:
             capture=capture,
         )
 
-    async def query_missing(self, paths: list[StorePath | str], *, capture: bool = False) -> Capture[MissingInfo] | MissingInfo:
+    async def query_missing(
+        self, paths: list[StorePath | str], *, capture: bool = False
+    ) -> Capture[MissingInfo] | MissingInfo:
         self._check_active()
         strs = _to_strs(paths)
-        return await manager_call(self._pool, "store", "query_missing", [strs], _model_adapter(MissingInfo), capture=capture)
+        return await manager_call(
+            self._pool, "store", "query_missing", [strs], _model_adapter(MissingInfo), capture=capture
+        )
 
     # ── Derivations ───────────────────────────────────────────────
 
-    async def query_derivation_outputs(self, path: StorePath | str, *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
+    async def query_derivation_outputs(
+        self, path: StorePath | str, *, capture: bool = False
+    ) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(self._pool, "store", "query_derivation_outputs", [s], _StorePathList.validate_python, capture=capture)
+        return await manager_call(
+            self._pool, "store", "query_derivation_outputs", [s], _StorePathList.validate_python, capture=capture
+        )
 
-    async def query_valid_derivers(self, path: StorePath | str, *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
+    async def query_valid_derivers(
+        self, path: StorePath | str, *, capture: bool = False
+    ) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(self._pool, "store", "query_valid_derivers", [s], _StorePathList.validate_python, capture=capture)
+        return await manager_call(
+            self._pool, "store", "query_valid_derivers", [s], _StorePathList.validate_python, capture=capture
+        )
 
     # ── Bulk queries ──────────────────────────────────────────────
 
     async def query_all_valid_paths(self, *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
-        return await manager_call(self._pool, "store", "query_all_valid_paths", [], _StorePathList.validate_python, capture=capture)
+        return await manager_call(
+            self._pool, "store", "query_all_valid_paths", [], _StorePathList.validate_python, capture=capture
+        )
 
-    async def query_referrers(self, path: StorePath | str, *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
+    async def query_referrers(
+        self, path: StorePath | str, *, capture: bool = False
+    ) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(self._pool, "store", "query_referrers", [s], _StorePathList.validate_python, capture=capture)
+        return await manager_call(
+            self._pool, "store", "query_referrers", [s], _StorePathList.validate_python, capture=capture
+        )
 
-    async def query_substitutable_paths(self, paths: list[StorePath | str], *, capture: bool = False) -> Capture[list[StorePath]] | list[StorePath]:
+    async def query_substitutable_paths(
+        self, paths: list[StorePath | str], *, capture: bool = False
+    ) -> Capture[list[StorePath]] | list[StorePath]:
         self._check_active()
         strs = _to_strs(paths)
-        return await manager_call(self._pool, "store", "query_substitutable_paths", [strs], _StorePathList.validate_python, capture=capture)
+        return await manager_call(
+            self._pool, "store", "query_substitutable_paths", [strs], _StorePathList.validate_python, capture=capture
+        )
 
     # ── Build ─────────────────────────────────────────────────────
 
     async def build_paths_with_results(
-        self, paths: list[StorePath | str],
-        *, capture: bool = False,
+        self,
+        paths: list[StorePath | str],
+        *,
+        capture: bool = False,
     ) -> Capture[list[BuildResult]] | list[BuildResult]:
         self._check_active()
         strs = _to_strs(paths)
-        return await manager_call(self._pool, "store", "build_paths_with_results", [strs], _BuildResultList.validate_python, capture=capture)
+        return await manager_call(
+            self._pool, "store", "build_paths_with_results", [strs], _BuildResultList.validate_python, capture=capture
+        )
 
     async def read_derivation(
-        self, drv_path: StorePath | str,
-        *, capture: bool = False,
+        self,
+        drv_path: StorePath | str,
+        *,
+        capture: bool = False,
     ) -> Capture[Derivation] | Derivation:
         self._check_active()
         s = _to_str(drv_path)
-        return await manager_call(self._pool, "store", "read_derivation", [s], _model_adapter(Derivation), capture=capture)
+        return await manager_call(
+            self._pool, "store", "read_derivation", [s], _model_adapter(Derivation), capture=capture
+        )
 
     async def build_derivation(
-        self, drv_path: StorePath | str,
+        self,
+        drv_path: StorePath | str,
         build_mode: nanopynix_store.BuildMode | int = nanopynix_store.BuildMode.Normal,
-        *, capture: bool = False,
+        *,
+        capture: bool = False,
     ) -> Capture[BuildResult] | BuildResult:
         self._check_active()
         s = _to_str(drv_path)
         mode = int(cast(Any, build_mode))
-        return await manager_call(self._pool, "store", "build_derivation", [s, mode], _model_adapter(BuildResult), capture=capture)
+        return await manager_call(
+            self._pool, "store", "build_derivation", [s, mode], _model_adapter(BuildResult), capture=capture
+        )
 
     # ── GC ────────────────────────────────────────────────────────
 
@@ -219,9 +263,13 @@ class StoreHandle:
         self._check_active()
         return await manager_call(self._pool, "store", "fetch_from_url", [url], _model_adapter(Input), capture=capture)
 
-    async def fetch_from_attrs(self, attrs: dict[str, str | int | bool], *, capture: bool = False) -> Capture[Input] | Input:
+    async def fetch_from_attrs(
+        self, attrs: dict[str, str | int | bool], *, capture: bool = False
+    ) -> Capture[Input] | Input:
         self._check_active()
-        return await manager_call(self._pool, "store", "fetch_from_attrs", [attrs], _model_adapter(Input), capture=capture)
+        return await manager_call(
+            self._pool, "store", "fetch_from_attrs", [attrs], _model_adapter(Input), capture=capture
+        )
 
 
 # Backward-compatible alias

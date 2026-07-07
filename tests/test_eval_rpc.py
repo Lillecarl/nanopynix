@@ -12,7 +12,7 @@ pytestmark = pytest.mark.asyncio
 async def test_eval_file_simple(tmp_path):
     """eval_file returns a ValueProxy, force_deep() resolves to Python dict."""
     nix_file = tmp_path / "test.nix"
-    nix_file.write_text("{ a = 1; b = \"hello\"; c = true; }")
+    nix_file.write_text('{ a = 1; b = "hello"; c = true; }')
 
     async with Session() as nix:
         async with nix.eval() as session:
@@ -25,7 +25,7 @@ async def test_eval_file_simple(tmp_path):
 async def test_eval_attr_navigation(tmp_path):
     """Navigate into an attrset via .attr(), then force."""
     nix_file = tmp_path / "test.nix"
-    nix_file.write_text("{ inner = { x = 42; y = \"hi\"; }; }")
+    nix_file.write_text('{ inner = { x = 42; y = "hi"; }; }')
 
     async with Session() as nix:
         async with nix.eval() as session:
