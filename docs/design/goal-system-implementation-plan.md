@@ -172,7 +172,7 @@ store streaming needs the selected source's `nar_size`.
 
 ### T04 - Move Build Dedup Boundary To Scheduler Only
 
-- `Status`: todo
+- `Status`: done
 - `Owner`: subagent-ok
 - `Can delegate`: yes
 - `Depends on`: T01
@@ -180,7 +180,9 @@ store streaming needs the selected source's `nar_size`.
   `BuildMode.NORMAL`.
 - `Commit`: can batch with T03 if small, otherwise separate.
 - `Notes`: The request-local goal run may create many build requests, but active
-  build dedup belongs in the singleton scheduler/build queue.
+  build dedup belongs in the singleton scheduler/build queue. `BuildQueue`
+  deduplicates active builds by `.drv` path; `tests/unit/test_build_queue.py`
+  covers the chosen boundary.
 
 ### T05 - Add SubstitutionQueue Skeleton Under Scheduler
 
