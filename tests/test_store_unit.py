@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
-from nanopynix.models import BuildResult, MissingInfo, PathInfo, StorePath
+from nanopynix.models import BuildResult, Derivation, MissingInfo, PathInfo, StorePath
 from nanopynix.store import StoreHandle as Store
 
 pytestmark = pytest.mark.asyncio
@@ -214,8 +214,9 @@ class TestBuild:
             "args": [], "env": [], "outputs": {}, "inputSrcs": [], "inputDrvs": [],
         }
         result = await store.read_derivation("/nix/store/aaa-foo.drv")
-        assert isinstance(result, dict)
-        assert result["name"] == "foo"
+        assert isinstance(result, Derivation)
+        assert result.name == "foo"
+        assert result.system == "x86_64-linux"
 
 
 # ════════════════════════════════════════════════════════════════════

@@ -12,13 +12,26 @@ import json
 import os
 import sys
 import traceback
+from typing import Any, cast
 
 import nanopynix_expr
+import nanopynix_fetchers
+import nanopynix_flake
 import nanopynix_store
 import nanopynix_util
+from pydantic import TypeAdapter
 
-from nanopynix._extract import store_path as _sp_to_dict
+from nanopynix._extract import (
+    flake_ref_attrs as _flake_ref_attrs,
+    input_attrs as _input_attrs,
+    locked_flake as _locked_flake,
+    store_path as _sp_to_dict,
+)
 from nanopynix.logging import LogCollector
+from nanopynix.models import BuildResult, Derivation, FlakeRef, Input, LockedFlake, MissingInfo, PathInfo, StorePath
+
+_StorePathList = TypeAdapter(list[StorePath])
+_BuildResultList = TypeAdapter(list[BuildResult])
 
 
 # ── Wire format ────────────────────────────────────────────────────────
@@ -182,16 +195,24 @@ def _store_dispatch(store, eval_store):
             path = f"{store.get_store_dir()}/{path}"
         return store.parse_store_path(path)
 
+    def _store_path_list(paths):
+        paths_model = _StorePathList.validate_python([
+            p if isinstance(p, dict) else _sp_to_dict(p)
+            for p in paths
+        ])
+        return _StorePathList.dump_python(paths_model, mode="json")
+
     return {
         "get_uri": lambda _: store.get_uri(),
         "get_store_dir": lambda _: store.get_store_dir(),
         "is_valid_path": lambda a: store.is_valid_path(_parse_sp(a)),
-        "parse_store_path": lambda a: _sp_to_dict(_parse_sp(a)),
-        "query_path_info": lambda a: dict(store.query_path_info(_parse_sp(a))),
+        "parse_store_path": lambda a: StorePath.model_validate(_sp_to_dict(_parse_sp(a))).model_dump(mode="json"),
+        "query_path_info": lambda a: PathInfo.model_validate(dict(store.query_path_info(_parse_sp(a)))).model_dump(mode="json"),
         "query_path_from_hash_part": lambda a: (
-            _sp_to_dict(sp) if (sp := store.query_path_from_hash_part(a[0])) is not None else None
+            StorePath.model_validate(_sp_to_dict(sp)).model_dump(mode="json")
+            if (sp := store.query_path_from_hash_part(a[0])) is not None else None
         ),
-        "compute_fs_closure": lambda a: list(
+        "compute_fs_closure": lambda a: _store_path_list(
             store.compute_fs_closure(
                 _parse_sp(a),
                 a[1] if len(a) > 1 else False,
@@ -199,39 +220,41 @@ def _store_dispatch(store, eval_store):
                 a[3] if len(a) > 3 else False,
             )
         ),
-        "query_missing": lambda a: dict(
+        "query_missing": lambda a: MissingInfo.model_validate(dict(
             store.query_missing([_parse_sp([p]) for p in a[0]])
-        ),
-        "query_derivation_outputs": lambda a: list(
+        )).model_dump(mode="json"),
+        "query_derivation_outputs": lambda a: _store_path_list(
             store.query_derivation_outputs(_parse_sp(a))
         ),
-        "query_valid_derivers": lambda a: list(
+        "query_valid_derivers": lambda a: _store_path_list(
             store.query_valid_derivers(_parse_sp(a))
         ),
-        "query_all_valid_paths": lambda _: list(store.query_all_valid_paths()),
-        "query_referrers": lambda a: list(store.query_referrers(_parse_sp(a))),
-        "query_substitutable_paths": lambda a: list(
+        "query_all_valid_paths": lambda _: _store_path_list(store.query_all_valid_paths()),
+        "query_referrers": lambda a: _store_path_list(store.query_referrers(_parse_sp(a))),
+        "query_substitutable_paths": lambda a: _store_path_list(
             store.query_substitutable_paths(
                 [_parse_sp([p]) for p in a[0]]
             )
         ),
-        "build_paths_with_results": lambda a: list(
+        "build_paths_with_results": lambda a: _BuildResultList.dump_python(_BuildResultList.validate_python(list(
             store.build_paths_with_results(
                 [_parse_sp([p]) for p in a[0]],
                 eval_store,
             )
-        ),
-        "read_derivation": lambda a: dict(store.read_derivation(_parse_sp(a))),
-        "build_derivation": lambda a: dict(
+        )), mode="json"),
+        "read_derivation": lambda a: Derivation.model_validate(dict(store.read_derivation(_parse_sp(a)))).model_dump(mode="json"),
+        "build_derivation": lambda a: BuildResult.model_validate(
             store.build_derivation(
                 _parse_sp(a),
                 nanopynix_store.BuildMode(a[1]) if len(a) > 1 else nanopynix_store.BuildMode.Normal,
             )
-        ),
-        "follow_links_to_store_path": lambda a: _sp_to_dict(
+        ).model_dump(mode="json"),
+        "follow_links_to_store_path": lambda a: StorePath.model_validate(_sp_to_dict(
             store.follow_links_to_store_path(a[0])
-        ),
+        )).model_dump(mode="json"),
         "add_temp_root": lambda a: store.add_temp_root(_parse_sp(a)),
+        "fetch_from_url": lambda a: Input(attrs=_input_attrs(nanopynix_fetchers.input_from_url(a[0]))).model_dump(mode="json"),
+        "fetch_from_attrs": lambda a: Input(attrs=_input_attrs(nanopynix_fetchers.input_from_attrs(a[0]))).model_dump(mode="json"),
     }
 
 
@@ -262,10 +285,30 @@ def _eval_dispatch(store):
     def _force_handle(h):
         return _get_es(store).value_from_handle(h).to_python()
 
+    def _type_name(h):
+        value = _get_es(store).value_from_handle(h)
+        value.force()
+        return value.type_name()
+
     def _export(pyv):
         es = _get_es(store)
-        h = es._export_pyvalue(pyv)
+        h = cast(Any, es)._export_pyvalue(pyv)
         return {"handle": h, "type": pyv.type_name()}
+
+    def _flake_ref(ref):
+        if isinstance(ref, str):
+            return nanopynix_flake.parse_flake_ref(ref)
+        msg = "flake references over RPC must currently be strings"
+        raise TypeError(msg)
+
+    def _call(args):
+        es = _get_es(store)
+        fn = es.value_from_handle(args[0])
+        result = fn
+        for arg in args[1]:
+            py_arg = es.value_from_python(arg)
+            result = result.call(py_arg)
+        return _export(result)
 
     return {
         "eval_file":   lambda a: _export(_get_es(store).eval_file(a[0])),
@@ -277,7 +320,14 @@ def _eval_dispatch(store):
         "list_length": lambda a: _get_es(store).value_from_handle(a[0]).list_length(),
         "attr_names":  lambda a: _get_es(store).value_from_handle(a[0]).attr_names(),
         "has_attr":    lambda a: _get_es(store).value_from_handle(a[0]).has_attr(a[1]),
-        "type_name":   lambda a: _get_es(store).value_from_handle(a[0]).type_name(),
+        "type_name":   lambda a: _type_name(a[0]),
+        "call":        _call,
+        "lock_flake":  lambda a: LockedFlake.model_validate(
+            _locked_flake(nanopynix_flake.lock_flake(_get_es(store), _flake_ref(a[0])))
+        ).model_dump(mode="json"),
+        "get_flake":   lambda a: FlakeRef(
+            attrs=_flake_ref_attrs(nanopynix_flake.get_flake(_get_es(store), _flake_ref(a[0])))
+        ).model_dump(mode="json"),
         "release":     lambda a: _get_es(store).release_exported(a[0]),
         "release_all": lambda _: _reset_es(),
     }

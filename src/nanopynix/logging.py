@@ -17,7 +17,7 @@ import janus
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    type LogCallback = Callable[[int, str, object, ...], None]
+    type LogCallback = Callable[..., None]
 
 
 class LogCollector:

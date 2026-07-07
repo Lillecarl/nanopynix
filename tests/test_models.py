@@ -51,6 +51,12 @@ class TestStorePath:
         assert sp.name == "bash-5.2"
         assert not sp.is_derivation
 
+    def test_construct_from_string(self):
+        sp = StorePath("abc123def456-bash-5.2")
+        assert sp.hash_part == "abc123def456"
+        assert sp.name == "bash-5.2"
+        assert sp.to_string == "abc123def456-bash-5.2"
+
 
 # ── PathInfo ─────────────────────────────────────────────────────────
 
@@ -299,3 +305,26 @@ def test_derivation_mutable_defaults_isolated():
     assert d2.args == []
     assert d2.env == {}
     assert d2.input_srcs == []
+
+
+def test_derivation_accepts_nix_field_aliases():
+    drv = Derivation.model_validate({
+        "name": "foo",
+        "platform": "x86_64-linux",
+        "builder": "/bin/sh",
+        "env": [["A", "1"]],
+        "inputSrcs": ["/nix/store/src"],
+        "inputDrvs": [
+            {
+                "path": "/nix/store/input.drv",
+                "outputs": ["out"],
+                "children": {"dev": ["out"]},
+            }
+        ],
+    })
+
+    assert drv.system == "x86_64-linux"
+    assert drv.env == {"A": "1"}
+    assert drv.input_srcs == ["/nix/store/src"]
+    assert drv.input_drvs["/nix/store/input.drv"].outputs == ["out"]
+    assert drv.input_drvs["/nix/store/input.drv"].dynamic_outputs == {"dev": "out"}
