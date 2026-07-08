@@ -262,7 +262,7 @@ class TestValueProxyLifecycle:
         w._send_recv.assert_awaited_once_with(
             "eval",
             "call",
-            [1, [{"kind": "json", "value": {"name": "demo"}}]],
+            [1, [{"kind": "attrs", "attrs": {"name": {"kind": "scalar", "value": "demo"}}}]],
             timeout=None,
         )
 
@@ -282,7 +282,7 @@ class TestValueProxyLifecycle:
             (
                 "eval",
                 "call",
-                [1, [{"kind": "json", "value": {"name": "demo"}}]],
+                [1, [{"kind": "attrs", "attrs": {"name": {"kind": "scalar", "value": "demo"}}}]],
             ),
             {"timeout": None},
         )
@@ -315,6 +315,39 @@ class TestValueProxyLifecycle:
             timeout=None,
         )
 
+    async def test_call_nested_value_proxy_arg_uses_remote_handle(self):
+        w = self._worker()
+        w._send_recv.return_value = {"handle": 3, "type": "int"}
+        owner = self._owner()
+        fn = ValueProxy(w, 1, "function", _owner=owner)
+        arg = ValueProxy(w, 2, "attrs", _owner=owner)
+
+        result = await fn({"items": [arg, 1]})
+
+        assert result.handle == 3
+        w._send_recv.assert_awaited_once_with(
+            "eval",
+            "call",
+            [
+                1,
+                [
+                    {
+                        "kind": "attrs",
+                        "attrs": {
+                            "items": {
+                                "kind": "list",
+                                "items": [
+                                    {"kind": "remote_value", "handle": 2},
+                                    {"kind": "scalar", "value": 1},
+                                ],
+                            }
+                        },
+                    }
+                ],
+            ],
+            timeout=None,
+        )
+
     async def test_call_foreign_value_proxy_raises_typed_error(self):
         w = self._worker()
         fn = ValueProxy(w, 1, "function", _owner=self._owner())
@@ -322,6 +355,16 @@ class TestValueProxyLifecycle:
 
         with pytest.raises(ForeignValueError, match="another EvalSession"):
             await fn(arg)
+
+        w._send_recv.assert_not_awaited()
+
+    async def test_call_nested_foreign_value_proxy_raises_typed_error(self):
+        w = self._worker()
+        fn = ValueProxy(w, 1, "function", _owner=self._owner())
+        arg = ValueProxy(w, 2, "attrs", _owner=self._owner())
+
+        with pytest.raises(ForeignValueError, match="another EvalSession"):
+            await fn({"arg": [arg]})
 
         w._send_recv.assert_not_awaited()
 

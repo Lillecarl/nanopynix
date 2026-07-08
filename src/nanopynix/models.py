@@ -180,11 +180,25 @@ class DeepAttrs(BaseModel):
 type DeepValueWire = DeepScalar | DeepList | DeepAttrs | RemoteValueRef
 
 
-class JsonCallArg(BaseModel):
-    """Copied JSON-compatible value supplied to a Nix function call."""
+class ScalarCallArg(BaseModel):
+    """Copied JSON scalar supplied to a Nix function call."""
 
-    kind: Literal["json"] = "json"
-    value: JsonValue
+    kind: Literal["scalar"] = "scalar"
+    value: JsonScalar
+
+
+class ListCallArg(BaseModel):
+    """Copied list supplied to a Nix function call, with remote value leaves allowed."""
+
+    kind: Literal["list"] = "list"
+    items: list[CallArgWire]
+
+
+class AttrsCallArg(BaseModel):
+    """Copied attrset supplied to a Nix function call, with remote value leaves allowed."""
+
+    kind: Literal["attrs"] = "attrs"
+    attrs: dict[str, CallArgWire]
 
 
 class RemoteCallArg(BaseModel):
@@ -194,7 +208,7 @@ class RemoteCallArg(BaseModel):
     handle: int
 
 
-type CallArgWire = JsonCallArg | RemoteCallArg
+type CallArgWire = ScalarCallArg | ListCallArg | AttrsCallArg | RemoteCallArg
 
 
 class PrimOpSpec(BaseModel):

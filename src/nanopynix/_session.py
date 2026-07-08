@@ -14,7 +14,18 @@ from nanopynix.exceptions import (
     WrongNixTypeError,
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedFlake, NixType
-from nanopynix.models import DeepAttrs, DeepList, DeepScalar, DeepValueWire, JsonCallArg, RemoteCallArg, RemoteValueRef
+from nanopynix.models import (
+    AttrsCallArg,
+    CallArgWire,
+    DeepAttrs,
+    DeepList,
+    DeepScalar,
+    DeepValueWire,
+    ListCallArg,
+    RemoteCallArg,
+    RemoteValueRef,
+    ScalarCallArg,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -52,7 +63,7 @@ class _EvalOwner:
     active: _ActiveFlag | None = None
 
 
-type NixArg = ValueProxy | JsonValue
+type NixArg = ValueProxy | JsonScalar | list[NixArg] | dict[str, NixArg]
 type NixValue = ValueProxy | ValueAttrs | ValueList | JsonValue
 type NixDeepValue = ValueProxy | JsonScalar | list[NixDeepValue] | dict[str, NixDeepValue]
 
@@ -187,13 +198,21 @@ class ValueProxy:
             return {key: self._decode_deep_value(item) for key, item in value.attrs.items()}
         raise TypeError(f"unsupported force_deep RPC value: {value!r}")
 
-    async def _encode_call_arg(self, value: NixArg, *, timeout: float | None) -> JsonCallArg | RemoteCallArg:
+    async def _encode_call_arg(self, value: NixArg, *, timeout: float | None) -> CallArgWire:
         if isinstance(value, ValueProxy):
             if value._owner.token is not self._owner.token:
                 raise ForeignValueError("cannot pass a ValueProxy from another EvalSession")
             await value._ensure_resolved(timeout=timeout)
             return RemoteCallArg(handle=value.handle)
-        return JsonCallArg(value=value)
+        if isinstance(value, list):
+            return ListCallArg(items=[await self._encode_call_arg(item, timeout=timeout) for item in value])
+        if isinstance(value, dict):
+            attrs = {
+                key: await self._encode_call_arg(item, timeout=timeout)
+                for key, item in value.items()
+            }
+            return AttrsCallArg(attrs=attrs)
+        return ScalarCallArg(value=value)
 
     # ── force ──────────────────────────────────────────────────────
 

@@ -342,7 +342,17 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v) {
 
 // Set the content of a nix::Value from a Python object, recursively.
 static void python_to_value(nix::EvalState &state, nb::object obj, nix::Value &v) {
-    if (obj.is_none()) {
+    if (nb::isinstance<PyValue>(obj)) {
+        auto pyv = nb::cast<PyValue>(obj);
+        if (!pyv.value) {
+            v.mkNull();
+        } else if (pyv.eval && pyv.eval->state.get() != &state) {
+            state.error<nix::TypeError>(
+                "cannot copy a PyValue from another EvalState").debugThrow();
+        } else {
+            v = *pyv.value;
+        }
+    } else if (obj.is_none()) {
         v.mkNull();
     } else if (nb::isinstance<nb::bool_>(obj)) {
         v.mkBool(nb::cast<bool>(obj));
