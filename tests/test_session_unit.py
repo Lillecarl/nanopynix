@@ -126,7 +126,7 @@ class TestEvalSessionLifecycle:
         root = await session.file("/some/path.nix")
         assert isinstance(root, ValueProxy)
         assert root.handle == 1
-        assert root.type_name == "attrs"
+        assert root.nix_type == NixType.ATTRS
 
     async def test_string_after_enter(self):
         pool = _mock_pool()
@@ -137,7 +137,7 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool)
         await session.__aenter__()
         root = await session.string("42 + 1")
-        assert root.type_name == "int"
+        assert root.nix_type == NixType.INT
 
     async def test_timeout_override(self):
         pool = _mock_pool()
@@ -209,7 +209,7 @@ class TestValueProxyLifecycle:
         w = self._worker()
         vp = ValueProxy(w, 42, "int")
         assert vp.handle == 42
-        assert vp.type_name == "int"
+        assert vp.nix_type == NixType.INT
 
     async def test_force_delegates_to_worker(self):
         w = self._worker()
@@ -219,17 +219,43 @@ class TestValueProxyLifecycle:
         assert result == 99
         w._send_recv.assert_awaited_with("eval", "force", [1], timeout=None)
 
+    async def test_force_as_uses_cached_type(self):
+        w = self._worker()
+        w._send_recv.return_value = 99
+        vp = ValueProxy(w, 1, "int")
+
+        result = await vp.force_as(NixType.INT)
+
+        assert result == 99
+        w._send_recv.assert_awaited_once_with("eval", "force", [1], timeout=None)
+
     async def test_call_json_arg_uses_explicit_wire_arg(self):
         w = self._worker()
-        w._send_recv.side_effect = [
-            "function",
-            {"handle": 3, "type": "int"},
-        ]
+        w._send_recv.return_value = {"handle": 3, "type": "int"}
         vp = ValueProxy(w, 1, "function")
 
         result = await vp({"name": "demo"})
 
         assert result.handle == 3
+        w._send_recv.assert_awaited_once_with(
+            "eval",
+            "call",
+            [1, [{"kind": "json", "value": {"name": "demo"}}]],
+            timeout=None,
+        )
+
+    async def test_call_unknown_type_resolves_type_before_call(self):
+        w = self._worker()
+        w._send_recv.side_effect = [
+            "function",
+            {"handle": 3, "type": "int"},
+        ]
+        vp = ValueProxy(w, 1, "unknown")
+
+        result = await vp({"name": "demo"})
+
+        assert result.handle == 3
+        assert w._send_recv.await_args_list[0] == (("eval", "type_name", [1]), {"timeout": None})
         assert w._send_recv.await_args_list[1] == (
             (
                 "eval",
@@ -241,23 +267,18 @@ class TestValueProxyLifecycle:
 
     async def test_call_value_proxy_arg_uses_remote_handle(self):
         w = self._worker()
-        w._send_recv.side_effect = [
-            "function",
-            {"handle": 3, "type": "int"},
-        ]
+        w._send_recv.return_value = {"handle": 3, "type": "int"}
         fn = ValueProxy(w, 1, "function")
         arg = ValueProxy(w, 2, "attrs")
 
         result = await fn(arg)
 
         assert result.handle == 3
-        assert w._send_recv.await_args_list[1] == (
-            (
-                "eval",
-                "call",
-                [1, [{"kind": "remote_value", "handle": 2}]],
-            ),
-            {"timeout": None},
+        w._send_recv.assert_awaited_once_with(
+            "eval",
+            "call",
+            [1, [{"kind": "remote_value", "handle": 2}]],
+            timeout=None,
         )
 
     async def test_attr_returns_new_proxy(self):
@@ -265,7 +286,7 @@ class TestValueProxyLifecycle:
         vp = ValueProxy(w, 1, "attrs")
         child = vp.attr("name")
         assert isinstance(child, ValueProxy)
-        assert child.type_name == "unknown"
+        assert child.nix_type == NixType.UNKNOWN
         w._send_recv.assert_not_awaited()
 
         w._send_recv.side_effect = [
@@ -274,7 +295,7 @@ class TestValueProxyLifecycle:
         ]
         assert await child.force() == "hello"
         assert child.handle == 5
-        assert child.type_name == "string"
+        assert child.nix_type == NixType.STRING
 
     async def test_list_get_returns_new_proxy(self):
         w = self._worker()
@@ -307,13 +328,20 @@ class TestValueProxyLifecycle:
         vp = ValueProxy(w, 1, "attrs")
         assert await vp.has_attr("foo") is True
 
-    async def test_get_type_delegates_to_worker(self):
+    async def test_get_type_delegates_to_worker_for_thunk(self):
         w = self._worker()
         w._send_recv.return_value = "attrs"
         vp = ValueProxy(w, 1, "thunk")
         assert await vp.get_type() == NixType.ATTRS
-        assert vp.type_name == "attrs"
+        assert vp.nix_type == NixType.ATTRS
         w._send_recv.assert_awaited_with("eval", "type_name", [1], timeout=None)
+
+    async def test_get_type_uses_cached_concrete_type(self):
+        w = self._worker()
+        vp = ValueProxy(w, 1, "attrs")
+
+        assert await vp.get_type() == NixType.ATTRS
+        w._send_recv.assert_not_awaited()
 
     async def test_release(self):
         w = self._worker()
@@ -350,7 +378,7 @@ class TestValueProxyLifecycle:
         vp = ValueProxy(w, 42, "attrs", _active=active)
         active[0] = False
         assert vp.handle == 42
-        assert vp.type_name == "attrs"
+        assert vp.nix_type == NixType.ATTRS
 
 
 # ════════════════════════════════════════════════════════════════════
