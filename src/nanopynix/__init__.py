@@ -50,7 +50,7 @@ from nanopynix.models import (
     StorePath,
     ValueHandle,
 )
-from nanopynix.nix import Nix, Session
+from nanopynix.nix import LogCapture, Nix, Session
 from nanopynix.primops import from_yaml, to_yaml, yaml_primops
 from nanopynix.store import StoreHandle
 
@@ -74,6 +74,7 @@ __all__ = [
     "LockedFlake",
     "LockedInput",
     "LogCollector",
+    "LogCapture",
     "LogEvent",
     "MissingArgumentError",
     "MissingInfo",
