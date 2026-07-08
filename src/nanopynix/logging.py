@@ -9,13 +9,12 @@ for the worker subprocess and an async interface for the Nix manager client.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 import janus
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncIterator, Callable
 
     type LogCallback = Callable[..., None]
 

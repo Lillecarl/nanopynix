@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import nanopynix_store  # BuildMode enum
+
 from nanopynix import _protocol as rpc
 from nanopynix.models import BuildResult, Derivation, Input, MissingInfo, PathInfo, StorePath
-
-import nanopynix_store  # BuildMode enum
 
 if TYPE_CHECKING:
     from nanopynix._pool import _WorkerManager
@@ -45,7 +45,7 @@ class StoreHandle:
             print(info.nar_hash)
     """
 
-    __slots__ = ("_pool", "_uri", "_session_id", "_active")
+    __slots__ = ("_active", "_pool", "_session_id", "_uri")
 
     def __init__(self, pool: _WorkerManager, uri: str, session_id: str) -> None:
         self._pool = pool

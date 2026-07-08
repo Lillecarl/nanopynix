@@ -18,13 +18,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nanopynix._pool import _WorkerManager
 from nanopynix._session import EvalSession
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.store import StoreHandle
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Mapping, Sequence
 
 logger = logging.getLogger(__name__)
 
