@@ -8,6 +8,7 @@ facade boundary via ``FlakeRef::fromAttrs(attrs).to_string()`` and
 from __future__ import annotations
 
 from enum import IntEnum, StrEnum
+from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field, computed_field, field_validator, model_validator
 
@@ -146,6 +147,54 @@ class ValueHandle(BaseModel):
 
     handle: int
     type: NixType
+
+
+class RemoteValueRef(BaseModel):
+    """Wire reference to a Nix value exported by the worker."""
+
+    kind: Literal["remote_value"] = "remote_value"
+    value: ValueHandle
+
+
+class DeepScalar(BaseModel):
+    """Wire node for a scalar result from recursive forcing."""
+
+    kind: Literal["scalar"] = "scalar"
+    value: JsonScalar
+
+
+class DeepList(BaseModel):
+    """Wire node for a recursively forced Nix list."""
+
+    kind: Literal["list"] = "list"
+    items: list[DeepValueWire]
+
+
+class DeepAttrs(BaseModel):
+    """Wire node for a recursively forced Nix attrset."""
+
+    kind: Literal["attrs"] = "attrs"
+    attrs: dict[str, DeepValueWire]
+
+
+type DeepValueWire = DeepScalar | DeepList | DeepAttrs | RemoteValueRef
+
+
+class JsonCallArg(BaseModel):
+    """Copied JSON-compatible value supplied to a Nix function call."""
+
+    kind: Literal["json"] = "json"
+    value: JsonValue
+
+
+class RemoteCallArg(BaseModel):
+    """Existing same-session Nix value supplied to a Nix function call."""
+
+    kind: Literal["remote_value"] = "remote_value"
+    handle: int
+
+
+type CallArgWire = JsonCallArg | RemoteCallArg
 
 
 class PrimOpSpec(BaseModel):

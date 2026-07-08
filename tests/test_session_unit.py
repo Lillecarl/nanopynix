@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanopynix import _protocol as rpc
-from nanopynix import NixError
+from nanopynix import NixError, NixType
 from nanopynix._pool import _ActiveCall, _WorkerManager
 from nanopynix._session import EvalSession, ValueProxy
 from nanopynix.models import LogEvent
@@ -103,19 +103,19 @@ class TestEvalSessionLifecycle:
 
         rw.release.assert_awaited_once()
 
-    async def test_eval_file_before_enter_raises(self):
+    async def test_file_before_enter_raises(self):
         pool = _mock_pool()
         session = EvalSession(pool)
         with pytest.raises(RuntimeError, match="not entered"):
-            await session.eval_file("/some/path.nix")
+            await session.file("/some/path.nix")
 
-    async def test_eval_string_before_enter_raises(self):
+    async def test_string_before_enter_raises(self):
         pool = _mock_pool()
         session = EvalSession(pool)
         with pytest.raises(RuntimeError, match="not entered"):
-            await session.eval_string("42")
+            await session.string("42")
 
-    async def test_eval_file_after_enter(self):
+    async def test_file_after_enter(self):
         pool = _mock_pool()
         rw = _mock_reserved_worker()
         rw.send_recv.return_value = {"handle": 1, "type": "attrs"}
@@ -123,12 +123,12 @@ class TestEvalSessionLifecycle:
 
         session = EvalSession(pool)
         await session.__aenter__()
-        root = await session.eval_file("/some/path.nix")
+        root = await session.file("/some/path.nix")
         assert isinstance(root, ValueProxy)
         assert root.handle == 1
         assert root.type_name == "attrs"
 
-    async def test_eval_string_after_enter(self):
+    async def test_string_after_enter(self):
         pool = _mock_pool()
         rw = _mock_reserved_worker()
         rw.send_recv.return_value = {"handle": 2, "type": "int"}
@@ -136,7 +136,7 @@ class TestEvalSessionLifecycle:
 
         session = EvalSession(pool)
         await session.__aenter__()
-        root = await session.eval_string("42 + 1")
+        root = await session.string("42 + 1")
         assert root.type_name == "int"
 
     async def test_timeout_override(self):
@@ -147,7 +147,7 @@ class TestEvalSessionLifecycle:
 
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
-        await session.eval_string("42", timeout=5.0)
+        await session.string("42", timeout=5.0)
         rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=5.0)
 
     async def test_timeout_falls_back_to_session_default(self):
@@ -158,7 +158,7 @@ class TestEvalSessionLifecycle:
 
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
-        await session.eval_string("42")  # no override
+        await session.string("42")  # no override
         rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=10.0)
 
 
@@ -219,6 +219,47 @@ class TestValueProxyLifecycle:
         assert result == 99
         w._send_recv.assert_awaited_with("eval", "force", [1], timeout=None)
 
+    async def test_call_json_arg_uses_explicit_wire_arg(self):
+        w = self._worker()
+        w._send_recv.side_effect = [
+            "function",
+            {"handle": 3, "type": "int"},
+        ]
+        vp = ValueProxy(w, 1, "function")
+
+        result = await vp({"name": "demo"})
+
+        assert result.handle == 3
+        assert w._send_recv.await_args_list[1] == (
+            (
+                "eval",
+                "call",
+                [1, [{"kind": "json", "value": {"name": "demo"}}]],
+            ),
+            {"timeout": None},
+        )
+
+    async def test_call_value_proxy_arg_uses_remote_handle(self):
+        w = self._worker()
+        w._send_recv.side_effect = [
+            "function",
+            {"handle": 3, "type": "int"},
+        ]
+        fn = ValueProxy(w, 1, "function")
+        arg = ValueProxy(w, 2, "attrs")
+
+        result = await fn(arg)
+
+        assert result.handle == 3
+        assert w._send_recv.await_args_list[1] == (
+            (
+                "eval",
+                "call",
+                [1, [{"kind": "remote_value", "handle": 2}]],
+            ),
+            {"timeout": None},
+        )
+
     async def test_attr_returns_new_proxy(self):
         w = self._worker()
         vp = ValueProxy(w, 1, "attrs")
@@ -245,7 +286,7 @@ class TestValueProxyLifecycle:
             {"handle": 3, "type": "int"},
             "int",
         ]
-        assert await child.type() == "int"
+        assert await child.get_type() == NixType.INT
         assert child.handle == 3
 
     async def test_list_length(self):
@@ -266,11 +307,11 @@ class TestValueProxyLifecycle:
         vp = ValueProxy(w, 1, "attrs")
         assert await vp.has_attr("foo") is True
 
-    async def test_type_delegates_to_worker(self):
+    async def test_get_type_delegates_to_worker(self):
         w = self._worker()
         w._send_recv.return_value = "attrs"
         vp = ValueProxy(w, 1, "thunk")
-        assert await vp.type() == "attrs"
+        assert await vp.get_type() == NixType.ATTRS
         assert vp.type_name == "attrs"
         w._send_recv.assert_awaited_with("eval", "type_name", [1], timeout=None)
 
@@ -378,7 +419,13 @@ class TestLazyChildProxy:
         w = self._worker()
         w._send_recv.side_effect = [
             {"handle": 5, "type": "attrs"},  # _resolve
-            {"a": 1, "b": 2},  # force_deep
+            {
+                "kind": "attrs",
+                "attrs": {
+                    "a": {"kind": "scalar", "value": 1},
+                    "b": {"kind": "scalar", "value": 2},
+                },
+            },  # force_deep
         ]
         cp = ValueProxy.child(w, 1, "name")
 

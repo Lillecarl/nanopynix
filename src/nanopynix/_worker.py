@@ -37,7 +37,19 @@ from nanopynix._extract import (
     store_path as _sp_to_dict,
 )
 from nanopynix.logging import LogCollector
-from nanopynix.models import FlakeRef, Input, PrimOpSpec, StorePath, ValueHandle
+from nanopynix.models import (
+    DeepAttrs,
+    DeepList,
+    DeepScalar,
+    FlakeRef,
+    Input,
+    JsonCallArg,
+    PrimOpSpec,
+    RemoteCallArg,
+    RemoteValueRef,
+    StorePath,
+    ValueHandle,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -407,20 +419,20 @@ def _reset_es():
 def _eval_dispatch(store):
     """Return dispatch dict for eval operations."""
 
-    def _remote_value(pyv) -> dict[str, dict[str, object]]:
-        return {"__nanopynix_value__": _export(pyv)}
+    def _remote_value(pyv) -> RemoteValueRef:
+        return RemoteValueRef(value=ValueHandle.model_validate(_export(pyv)))
 
     def _deep_value(pyv):
         pyv.force()
         typ = pyv.type_name()
         if typ == "attrs":
-            return {name: _deep_value(pyv.attr_get(name)) for name in pyv.attr_names()}
+            return DeepAttrs(attrs={name: _deep_value(pyv.attr_get(name)) for name in pyv.attr_names()})
         if typ == "list":
-            return [_deep_value(pyv.list_get(idx)) for idx in range(pyv.list_length())]
+            return DeepList(items=[_deep_value(pyv.list_get(idx)) for idx in range(pyv.list_length())])
         if typ == "function":
             return _remote_value(pyv)
         if typ in {"null", "int", "float", "bool", "string", "path"}:
-            return pyv.to_python()
+            return DeepScalar(value=pyv.to_python())
         msg = f"cannot forceDeep unsupported Nix value type '{typ}' over RPC"
         raise TypeError(msg)
 
@@ -452,7 +464,12 @@ def _eval_dispatch(store):
         fn = es.value_from_handle(req.handle)
         result = fn
         for arg in req.args:
-            py_arg = es.value_from_python(arg)
+            if isinstance(arg, RemoteCallArg):
+                py_arg = es.value_from_handle(arg.handle)
+            elif isinstance(arg, JsonCallArg):
+                py_arg = es.value_from_python(arg.value)
+            else:
+                raise TypeError(f"unsupported call argument: {arg!r}")
             result = result.call(py_arg)
         return _export(result)
 
