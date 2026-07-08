@@ -15,6 +15,8 @@ from pydantic_core import PydanticUndefined
 
 from nanopynix.models import (
     BuildResult,
+    CallArgWire,
+    DeepValueWire,
     Derivation,
     FlakeRef,
     Input,
@@ -23,6 +25,7 @@ from nanopynix.models import (
     MissingInfo,
     NixType,
     PathInfo,
+    RemoteValueRef,
     StorePath,
     ValueHandle,
 )
@@ -91,7 +94,7 @@ class WorkerRequest[T](BaseModel):
             if pos is None:
                 continue
             values.append((pos, getattr(self, name)))
-        return [value for _, value in sorted(values, key=lambda item: item[0])]
+        return [TypeAdapter(Any).dump_python(value, mode="json") for _, value in sorted(values, key=lambda item: item[0])]
 
     @classmethod
     def from_args(cls, args: list[Any]) -> Self:
@@ -139,6 +142,9 @@ def _rpc_pos(field: FieldInfo) -> int | None:
 _StorePathList = TypeAdapter(list[StorePath])
 _BuildResultList = TypeAdapter(list[BuildResult])
 _StringList = TypeAdapter(list[str])
+_DeepValueWire = TypeAdapter(DeepValueWire)
+
+type ForceValueWire = JsonValue | RemoteValueRef
 
 
 class StoreRequest(WorkerRequest[T]):
@@ -271,13 +277,15 @@ class EvalString(EvalRequest[ValueHandle]):
     source_name: str = RpcArg(1, "<string>")
 
 
-class Force(EvalRequest[Any]):
+class Force(EvalRequest[ForceValueWire]):
     method: ClassVar[str] = "force"
+    response_adapter: ClassVar[ResponseAdapter] = _adapter_dump(TypeAdapter(ForceValueWire))
     handle: int = RpcArg(0)
 
 
-class ForceDeep(EvalRequest[Any]):
+class ForceDeep(EvalRequest[DeepValueWire]):
     method: ClassVar[str] = "force_deep"
+    response_adapter: ClassVar[ResponseAdapter] = _adapter_dump(_DeepValueWire)
     handle: int = RpcArg(0)
 
 
@@ -318,7 +326,7 @@ class TypeName(EvalRequest[NixType]):
 class Call(EvalRequest[ValueHandle]):
     method: ClassVar[str] = "call"
     handle: int = RpcArg(0)
-    args: list[JsonValue] = RpcArg(1)
+    args: list[CallArgWire] = RpcArg(1)
 
 
 class LockFlake(EvalRequest[LockedFlake]):

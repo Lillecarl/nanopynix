@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 from nanopynix import _protocol as rpc
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedFlake, NixType
+from nanopynix.models import DeepAttrs, DeepList, DeepScalar, DeepValueWire, JsonCallArg, RemoteCallArg, RemoteValueRef
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -36,10 +37,9 @@ class _LazyValue:
 
 type _ValueState = _ResolvedValue | _LazyValue
 type _ActiveFlag = list[bool]
-type NixValue = ValueProxy | ValueAttrs | ValueList | JsonScalar
+type NixArg = ValueProxy | JsonValue
+type NixValue = ValueProxy | ValueAttrs | ValueList | JsonValue
 type NixDeepValue = ValueProxy | JsonScalar | list[NixDeepValue] | dict[str, NixDeepValue]
-
-_REMOTE_VALUE_KEY = "__nanopynix_value__"
 
 
 def _parse_nix_type(value: NixType | str | None) -> NixType | None:
@@ -146,17 +146,33 @@ class ValueProxy:
             handle = await self._worker.request(rpc.ListGet(handle=parent_handle, index=lazy.selector), timeout=t)
         self._state = _ResolvedValue(handle=handle.handle, type_name=handle.type)
 
-    def _decode_remote_value(self, value: object) -> NixDeepValue:
-        if isinstance(value, dict) and set(value) == {_REMOTE_VALUE_KEY}:
-            handle = rpc.ValueHandle.model_validate(value[_REMOTE_VALUE_KEY])
-            return ValueProxy(self._worker, handle.handle, handle.type, timeout=self._timeout, _active=self._active)
-        if isinstance(value, list):
-            return [self._decode_remote_value(item) for item in value]
-        if isinstance(value, dict):
-            return {str(key): self._decode_remote_value(item) for key, item in value.items()}
-        if value is None or isinstance(value, str | int | float | bool):
-            return value
+    def _decode_remote_ref(self, ref: RemoteValueRef) -> ValueProxy:
+        handle = ref.value
+        return ValueProxy(self._worker, handle.handle, handle.type, timeout=self._timeout, _active=self._active)
+
+    def _decode_force_value(self, value: rpc.ForceValueWire) -> JsonValue | ValueProxy:
+        if isinstance(value, RemoteValueRef):
+            return self._decode_remote_ref(value)
+        return value
+
+    def _decode_deep_value(self, value: DeepValueWire) -> NixDeepValue:
+        if isinstance(value, RemoteValueRef):
+            return self._decode_remote_ref(value)
+        if isinstance(value, DeepScalar):
+            return value.value
+        if isinstance(value, DeepList):
+            return [self._decode_deep_value(item) for item in value.items]
+        if isinstance(value, DeepAttrs):
+            return {key: self._decode_deep_value(item) for key, item in value.attrs.items()}
         raise TypeError(f"unsupported force_deep RPC value: {value!r}")
+
+    async def _encode_call_arg(self, value: NixArg, *, timeout: float | None) -> JsonCallArg | RemoteCallArg:
+        if isinstance(value, ValueProxy):
+            if value._worker is not self._worker:
+                raise ValueError("cannot pass a ValueProxy from another EvalSession")
+            await value._ensure_resolved(timeout=timeout)
+            return RemoteCallArg(handle=value.handle)
+        return JsonCallArg(value=value)
 
     # ── force ──────────────────────────────────────────────────────
 
@@ -187,7 +203,8 @@ class ValueProxy:
         if typ == NixType.FUNCTION:
             return self
         # scalar — delegate to worker
-        return await self._worker.request(rpc.Force(handle=self.handle), timeout=self._resolve_timeout(timeout))
+        result = await self._worker.request(rpc.Force(handle=self.handle), timeout=self._resolve_timeout(timeout))
+        return self._decode_force_value(result)
 
     @overload
     async def force_as(self, typ: Literal[NixType.INT], *, timeout: float | None = None) -> int: ...
@@ -217,7 +234,7 @@ class ValueProxy:
         """Recursive Nix force. Functions remain remote callable ValueProxy objects."""
         await self._ensure_resolved(timeout=timeout)
         result = await self._worker.request(rpc.ForceDeep(handle=self.handle), timeout=self._resolve_timeout(timeout))
-        return self._decode_remote_value(result)
+        return self._decode_deep_value(result)
 
     # ── navigation ─────────────────────────────────────────────────
 
@@ -248,18 +265,20 @@ class ValueProxy:
             timeout=self._resolve_timeout(timeout),
         )
 
-    async def call(self, *args: JsonValue, timeout: float | None = None) -> ValueProxy:
+    async def call(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
         await self._ensure_resolved(timeout=timeout)
         actual = await self.get_type(timeout=timeout)
         if actual != NixType.FUNCTION:
             raise TypeError(f"Nix value is {actual.value}, expected function")
+        t = self._resolve_timeout(timeout)
+        call_args = [await self._encode_call_arg(arg, timeout=timeout) for arg in args]
         result = await self._worker.request(
-            rpc.Call(handle=self.handle, args=list(args)),
-            timeout=self._resolve_timeout(timeout),
+            rpc.Call(handle=self.handle, args=call_args),
+            timeout=t,
         )
         return ValueProxy(self._worker, result.handle, result.type, timeout=self._timeout, _active=self._active)
 
-    async def __call__(self, *args: JsonValue, timeout: float | None = None) -> ValueProxy:
+    async def __call__(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
         return await self.call(*args, timeout=timeout)
 
     async def get_type(self, *, timeout: float | None = None) -> NixType:
@@ -267,32 +286,6 @@ class ValueProxy:
         type_name = await self._worker.request(rpc.TypeName(handle=self.handle), timeout=self._resolve_timeout(timeout))
         self._state = _ResolvedValue(handle=self.handle, type_name=type_name)
         return type_name
-
-    async def type(self, *, timeout: float | None = None) -> NixType:
-        return await self.get_type(timeout=timeout)
-
-    # ── type helpers ───────────────────────────────────────────────
-
-    def is_int(self) -> bool:
-        return self._state.type_name == NixType.INT
-
-    def is_string(self) -> bool:
-        return self._state.type_name == NixType.STRING
-
-    def is_bool(self) -> bool:
-        return self._state.type_name == NixType.BOOL
-
-    def is_attrs(self) -> bool:
-        return self._state.type_name == NixType.ATTRS
-
-    def is_list(self) -> bool:
-        return self._state.type_name == NixType.LIST
-
-    def is_null(self) -> bool:
-        return self._state.type_name == NixType.NULL
-
-    def is_function(self) -> bool:
-        return self._state.type_name == NixType.FUNCTION
 
     # ── release ────────────────────────────────────────────────────
 
@@ -535,13 +528,6 @@ class EvalSession:
         self._check_rw()
         rw = self._reserved_worker()
         return await rw.request(rpc.GetFlake(ref=ref), timeout=self._resolve_timeout(timeout))
-
-    # backward compat
-    async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
-        return await self.file(path, timeout=timeout)
-
-    async def eval_string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
-        return await self.string(expr, path=path, timeout=timeout)
 
     def _resolve_timeout(self, override: float | None) -> float | None:
         return override if override is not None else self._timeout
