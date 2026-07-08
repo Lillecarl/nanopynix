@@ -25,14 +25,14 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class _ResolvedValue:
     handle: int
-    type_name: NixType | None
+    nix_type: NixType | None
 
 
 @dataclass(frozen=True)
 class _LazyValue:
     parent: ValueProxy | int
     selector: str | int
-    type_name: NixType | None = None
+    nix_type: NixType | None = None
 
 
 type _ValueState = _ResolvedValue | _LazyValue
@@ -78,7 +78,7 @@ class ValueProxy:
         if _state is not None:
             self._state = _state
         elif handle is not None:
-            self._state = _ResolvedValue(handle=handle, type_name=_parse_nix_type(typ))
+            self._state = _ResolvedValue(handle=handle, nix_type=_parse_nix_type(typ))
         else:
             raise ValueError("ValueProxy requires either a handle or explicit state")
         self._timeout = timeout
@@ -122,12 +122,8 @@ class ValueProxy:
         return self._state.handle
 
     @property
-    def type_name(self) -> str:
-        return self.nix_type.value
-
-    @property
     def nix_type(self) -> NixType:
-        return self._state.type_name or NixType.UNKNOWN
+        return self._state.nix_type or NixType.UNKNOWN
 
     async def _ensure_resolved(self, *, timeout: float | None = None) -> None:
         self._check_active()
@@ -144,7 +140,16 @@ class ValueProxy:
             handle = await self._worker.request(rpc.Attr(handle=parent_handle, name=lazy.selector), timeout=t)
         else:
             handle = await self._worker.request(rpc.ListGet(handle=parent_handle, index=lazy.selector), timeout=t)
-        self._state = _ResolvedValue(handle=handle.handle, type_name=handle.type)
+        self._state = _ResolvedValue(handle=handle.handle, nix_type=handle.type)
+
+    async def _ensure_type(self, *, timeout: float | None = None) -> NixType:
+        await self._ensure_resolved(timeout=timeout)
+        cached = self._state.nix_type
+        if cached not in (None, NixType.THUNK, NixType.UNKNOWN):
+            return cached
+        type_name = await self._worker.request(rpc.TypeName(handle=self.handle), timeout=self._resolve_timeout(timeout))
+        self._state = _ResolvedValue(handle=self.handle, nix_type=type_name)
+        return type_name
 
     def _decode_remote_ref(self, ref: RemoteValueRef) -> ValueProxy:
         handle = ref.value
@@ -178,10 +183,7 @@ class ValueProxy:
 
     async def force(self, *, timeout: float | None = None) -> NixValue:
         """Evaluate to WHNF.  Compound types return lazy wrappers."""
-        await self._ensure_resolved(timeout=timeout)
-        typ = self._state.type_name
-        if typ in (None, NixType.THUNK, NixType.UNKNOWN):
-            typ = await self.get_type(timeout=timeout)
+        typ = await self._ensure_type(timeout=timeout)
         if typ == NixType.ATTRS:
             keys = await self.attr_names(timeout=timeout)
             return ValueAttrs(
@@ -225,7 +227,7 @@ class ValueProxy:
     @overload
     async def force_as(self, typ: Literal[NixType.FUNCTION], *, timeout: float | None = None) -> ValueProxy: ...
     async def force_as(self, typ: NixType, *, timeout: float | None = None) -> NixValue:
-        actual = await self.get_type(timeout=timeout)
+        actual = await self._ensure_type(timeout=timeout)
         if actual != typ:
             raise TypeError(f"Nix value is {actual.value}, expected {typ.value}")
         return await self.force(timeout=timeout)
@@ -267,7 +269,7 @@ class ValueProxy:
 
     async def call(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
         await self._ensure_resolved(timeout=timeout)
-        actual = await self.get_type(timeout=timeout)
+        actual = await self._ensure_type(timeout=timeout)
         if actual != NixType.FUNCTION:
             raise TypeError(f"Nix value is {actual.value}, expected function")
         t = self._resolve_timeout(timeout)
@@ -282,10 +284,7 @@ class ValueProxy:
         return await self.call(*args, timeout=timeout)
 
     async def get_type(self, *, timeout: float | None = None) -> NixType:
-        await self._ensure_resolved(timeout=timeout)
-        type_name = await self._worker.request(rpc.TypeName(handle=self.handle), timeout=self._resolve_timeout(timeout))
-        self._state = _ResolvedValue(handle=self.handle, type_name=type_name)
-        return type_name
+        return await self._ensure_type(timeout=timeout)
 
     # ── release ────────────────────────────────────────────────────
 

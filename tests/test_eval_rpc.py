@@ -17,7 +17,7 @@ async def test_eval_file_simple(tmp_path):
     async with Session() as nix:
         async with nix.eval() as session:
             root = await session.file(str(nix_file))
-            assert root.type_name == "attrs"
+            assert root.nix_type == NixType.ATTRS
             result = await root.force_deep()
             assert result == {"a": 1, "b": "hello", "c": True}
 
@@ -45,7 +45,7 @@ async def test_eval_list(tmp_path):
     async with Session() as nix:
         async with nix.eval() as session:
             root = await session.file(str(nix_file))
-            assert root.type_name == "list"
+            assert root.nix_type == NixType.LIST
             assert await root.list_length() == 3
             first = root.list_get(0)
             assert await first.get_type() == NixType.INT
@@ -57,7 +57,7 @@ async def test_eval_string(tmp_path):
     async with Session() as nix:
         async with nix.eval() as session:
             root = await session.string("42 + 1")
-            assert root.type_name == "int"
+            assert root.nix_type == NixType.INT
             assert await root.force() == 43
 
 
@@ -121,7 +121,7 @@ async def test_eval_thunk(tmp_path):
     async with Session() as nix:
         async with nix.eval() as session:
             root = await session.file(str(nix_file))
-            assert root.type_name == "attrs"
+            assert root.nix_type == NixType.ATTRS
             x = root.attr("x")
             result = await x.force()
             assert result == 3
