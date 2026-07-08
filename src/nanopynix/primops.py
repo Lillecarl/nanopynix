@@ -2,22 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any
+from pydantic import TypeAdapter
 
-from nanopynix.models import PrimOpSpec
+from nanopynix.models import JsonValue, PrimOpSpec
+
+_JsonValue = TypeAdapter(JsonValue)
 
 
-def from_yaml(source: str) -> Any:
+def from_yaml(source: str) -> JsonValue:
     """Parse YAML into JSON-like Python values for conversion to Nix."""
     import yaml
 
-    return yaml.safe_load(source)
+    return _JsonValue.validate_python(yaml.safe_load(source))
 
 
-def to_yaml(value: Any) -> str:
+def to_yaml(value: JsonValue) -> str:
     """Render JSON-like Nix/Python values as YAML."""
     import yaml
 
+    value = _JsonValue.validate_python(value)
     return yaml.safe_dump(value, sort_keys=False)
 
 
