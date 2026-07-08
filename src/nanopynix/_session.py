@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix._rpc import reserved_call
-from nanopynix.models import Capture, ValueHandle
+from nanopynix.models import ValueHandle
 
 if TYPE_CHECKING:
     from nanopynix._pool import ReservedWorker, _WorkerManager
@@ -472,9 +472,7 @@ class EvalSession:
         assert self._rw is not None
         return self._rw
 
-    async def file(
-        self, path: str, *, timeout: float | None = None, capture: bool = False
-    ) -> ValueProxy | Capture[ValueProxy]:
+    async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         self._check_rw()
         rw = self._reserved_worker()
 
@@ -489,12 +487,11 @@ class EvalSession:
             [path],
             adapter,
             timeout=self._resolve_timeout(timeout),
-            capture=capture,
         )
 
     async def string(
-        self, expr: str, path: str = "<string>", *, timeout: float | None = None, capture: bool = False
-    ) -> ValueProxy | Capture[ValueProxy]:
+        self, expr: str, path: str = "<string>", *, timeout: float | None = None
+    ) -> ValueProxy:
         self._check_rw()
         rw = self._reserved_worker()
 
@@ -509,12 +506,11 @@ class EvalSession:
             [expr, path],
             adapter,
             timeout=self._resolve_timeout(timeout),
-            capture=capture,
         )
 
     async def lock_flake(
-        self, ref: str | dict, *, timeout: float | None = None, capture: bool = False
-    ) -> Capture | object:
+        self, ref: str | dict, *, timeout: float | None = None
+    ):
         self._check_rw()
         rw = self._reserved_worker()
         from nanopynix.models import LockedFlake
@@ -526,12 +522,11 @@ class EvalSession:
             [ref],
             LockedFlake.model_validate,
             timeout=self._resolve_timeout(timeout),
-            capture=capture,
         )
 
     async def get_flake(
-        self, ref: str | dict, *, timeout: float | None = None, capture: bool = False
-    ) -> Capture | object:
+        self, ref: str | dict, *, timeout: float | None = None
+    ):
         self._check_rw()
         rw = self._reserved_worker()
         from nanopynix.models import FlakeRef
@@ -543,7 +538,6 @@ class EvalSession:
             [ref],
             FlakeRef.model_validate,
             timeout=self._resolve_timeout(timeout),
-            capture=capture,
         )
 
     # backward compat

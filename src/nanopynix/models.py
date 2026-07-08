@@ -163,27 +163,6 @@ class ResultType(IntEnum):
     fetch_status = 108
 
 
-# ── Operation result wrapper ─────────────────────────────────────────
-
-from dataclasses import dataclass
-from typing import Generic, TypeVar
-
-T = TypeVar("T")
-
-
-@dataclass
-class Capture(Generic[T]):
-    """Wrapper for operation results with optional log capture.
-
-    When ``capture=True`` on any operation, the return value is
-    ``Capture(value=..., logs=[LogEvent, ...])``.  When ``capture=False``
-    (the default), ``logs`` is ``None``.
-    """
-
-    value: T
-    logs: list[LogEvent] | None = None
-
-
 # ── Derivation ───────────────────────────────────────────────────────
 
 

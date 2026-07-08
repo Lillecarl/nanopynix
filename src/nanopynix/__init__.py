@@ -36,7 +36,6 @@ from nanopynix.exceptions import (
 from nanopynix.logging import LogCollector
 from nanopynix.models import (
     BuildResult,
-    Capture,
     Derivation,
     DerivationOutputs,
     FlakeRef,
@@ -61,7 +60,6 @@ __all__ = [
     "AssertionError_",
     "BuildMode",
     "BuildResult",
-    "Capture",
     "Derivation",
     "DerivationOutputs",
     "EvalError",

@@ -141,7 +141,7 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.eval_string("42", timeout=5.0)
-        rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=5.0, capture=False)
+        rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=5.0)
 
     async def test_timeout_falls_back_to_session_default(self):
         pool = _mock_pool()
@@ -152,7 +152,7 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.eval_string("42")  # no override
-        rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=10.0, capture=False)
+        rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=10.0)
 
 
 class TestWorkerManagerActiveCall:
