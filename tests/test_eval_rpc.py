@@ -161,6 +161,16 @@ async def test_eval_call_function_with_value_proxy_arg():
             assert await result.force_as(NixType.INT) == 42
 
 
+async def test_eval_call_function_with_nested_value_proxy_arg():
+    """ValueProxy.call can pass same-session Nix values inside copied containers."""
+    async with Session() as nix:
+        async with nix.eval() as session:
+            fn = await session.string("x: (builtins.elemAt x.items 0).value + builtins.elemAt x.items 1")
+            arg = await session.string('{ value = 40; ignored = abort "not forced"; }')
+            result = await fn({"items": [arg, 2]})
+            assert await result.force_as(NixType.INT) == 42
+
+
 async def test_eval_callable_function_proxy():
     """ValueProxy is directly callable when it contains a Nix function."""
     async with Session() as nix:

@@ -38,15 +38,17 @@ from nanopynix._extract import (
 )
 from nanopynix.logging import LogCollector
 from nanopynix.models import (
+    AttrsCallArg,
     DeepAttrs,
     DeepList,
     DeepScalar,
     FlakeRef,
     Input,
-    JsonCallArg,
+    ListCallArg,
     PrimOpSpec,
     RemoteCallArg,
     RemoteValueRef,
+    ScalarCallArg,
     StorePath,
     ValueHandle,
 )
@@ -462,15 +464,21 @@ def _eval_dispatch(store):
     def call(req: rpc.Call):
         es = _get_es(store)
         fn = es.value_from_handle(req.handle)
+
+        def _call_arg_to_python(arg: rpc.CallArgWire):
+            if isinstance(arg, RemoteCallArg):
+                return es.value_from_handle(arg.handle)
+            if isinstance(arg, ScalarCallArg):
+                return arg.value
+            if isinstance(arg, ListCallArg):
+                return [_call_arg_to_python(item) for item in arg.items]
+            if isinstance(arg, AttrsCallArg):
+                return {key: _call_arg_to_python(item) for key, item in arg.attrs.items()}
+            raise TypeError(f"unsupported call argument: {arg!r}")
+
         result = fn
         for arg in req.args:
-            if isinstance(arg, RemoteCallArg):
-                py_arg = es.value_from_handle(arg.handle)
-            elif isinstance(arg, JsonCallArg):
-                py_arg = es.value_from_python(arg.value)
-            else:
-                raise TypeError(f"unsupported call argument: {arg!r}")
-            result = result.call(py_arg)
+            result = result.call(es.value_from_python(_call_arg_to_python(arg)))
         return _export(result)
 
     def eval_file(req: rpc.EvalFile):
