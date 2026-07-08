@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 from nanopynix import _protocol as rpc
 from nanopynix.exceptions import (
     EvalSessionClosedError,
     ForeignValueError,
+    NixCoercionError,
     UnresolvedValueError,
     ValueReleasedError,
     WrongNixTypeError,
@@ -247,6 +249,92 @@ class ValueProxy:
         if actual != typ:
             raise WrongNixTypeError(expected=typ, actual=actual)
         return await self.force(timeout=timeout)
+
+    async def try_int(self, *, timeout: float | None = None) -> int:
+        return await self.force_as(NixType.INT, timeout=timeout)
+
+    async def try_float(self, *, timeout: float | None = None) -> float:
+        return await self.force_as(NixType.FLOAT, timeout=timeout)
+
+    async def try_bool(self, *, timeout: float | None = None) -> bool:
+        return await self.force_as(NixType.BOOL, timeout=timeout)
+
+    async def try_str(self, *, timeout: float | None = None) -> str:
+        return await self.force_as(NixType.STRING, timeout=timeout)
+
+    async def try_path(self, *, timeout: float | None = None) -> str:
+        return await self.force_as(NixType.PATH, timeout=timeout)
+
+    async def try_null(self, *, timeout: float | None = None) -> None:
+        return await self.force_as(NixType.NULL, timeout=timeout)
+
+    async def try_attrs(self, *, timeout: float | None = None) -> ValueAttrs:
+        return await self.force_as(NixType.ATTRS, timeout=timeout)
+
+    async def try_list(self, *, timeout: float | None = None) -> ValueList:
+        return await self.force_as(NixType.LIST, timeout=timeout)
+
+    async def try_function(self, *, timeout: float | None = None) -> ValueProxy:
+        return await self.force_as(NixType.FUNCTION, timeout=timeout)
+
+    async def coerce_str(self, *, timeout: float | None = None) -> str:
+        value = await self.force(timeout=timeout)
+        if isinstance(value, str):
+            return value
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, int | float):
+            return str(value)
+        if value is None:
+            return "null"
+        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.value} to string")
+
+    async def coerce_int(self, *, timeout: float | None = None) -> int:
+        value = await self.force(timeout=timeout)
+        if isinstance(value, bool):
+            raise NixCoercionError("cannot coerce Nix bool to int")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            if value.is_integer():
+                return int(value)
+            raise NixCoercionError(f"cannot coerce non-integral float {value!r} to int")
+        if isinstance(value, str):
+            text = value.strip()
+            if text and text.lstrip("+-").isdigit():
+                return int(text, 10)
+            raise NixCoercionError(f"cannot coerce string {value!r} to int")
+        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.value} to int")
+
+    async def coerce_float(self, *, timeout: float | None = None) -> float:
+        value = await self.force(timeout=timeout)
+        if isinstance(value, bool):
+            raise NixCoercionError("cannot coerce Nix bool to float")
+        if isinstance(value, int | float):
+            result = float(value)
+        elif isinstance(value, str):
+            try:
+                result = float(value.strip())
+            except ValueError as exc:
+                raise NixCoercionError(f"cannot coerce string {value!r} to float") from exc
+        else:
+            raise NixCoercionError(f"cannot coerce Nix {self.nix_type.value} to float")
+        if not isfinite(result):
+            raise NixCoercionError(f"cannot coerce non-finite value {value!r} to float")
+        return result
+
+    async def coerce_bool(self, *, timeout: float | None = None) -> bool:
+        value = await self.force(timeout=timeout)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text == "true":
+                return True
+            if text == "false":
+                return False
+            raise NixCoercionError(f"cannot coerce string {value!r} to bool")
+        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.value} to bool")
 
     async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
         """Recursive Nix force. Functions remain remote callable ValueProxy objects."""
