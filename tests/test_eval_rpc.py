@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from nanopynix import NixType, Session, ValueProxy, WrongNixTypeError, yaml_primops
+from nanopynix import NixCoercionError, NixType, Session, ValueProxy, WrongNixTypeError, yaml_primops
 
 pytestmark = pytest.mark.asyncio
 
@@ -187,6 +187,27 @@ async def test_eval_call_non_function_raises():
             value = await session.string("42")
             with pytest.raises(WrongNixTypeError, match="expected function"):
                 await value(1)
+
+
+async def test_eval_try_and_coerce_helpers():
+    """Strict try_* checks remote type; coerce_* applies explicit scalar conversions."""
+    async with Session() as nix:
+        async with nix.eval() as session:
+            number = await session.string("42")
+            text_number = await session.string('"42"')
+            text_bad = await session.string('"forty-two"')
+            attrs = await session.string("{ x = 1; }")
+
+            assert await number.try_int() == 42
+            with pytest.raises(WrongNixTypeError):
+                await text_number.try_int()
+
+            assert await text_number.coerce_int() == 42
+            assert await number.coerce_str() == "42"
+            with pytest.raises(NixCoercionError):
+                await text_bad.coerce_int()
+            with pytest.raises(NixCoercionError):
+                await attrs.coerce_str()
 
 
 async def test_force_deep_preserves_nested_functions():

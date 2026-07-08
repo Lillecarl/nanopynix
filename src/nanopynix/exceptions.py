@@ -119,6 +119,10 @@ class ForeignValueError(EvalProxyError, ValueError):
     """A value proxy from another eval session was used where a local value is required."""
 
 
+class NixCoercionError(EvalProxyError, ValueError):
+    """A forced Nix value could not be converted by a lenient proxy coercion."""
+
+
 # ════════════════════════════════════════════════════════════════════
 # Classification — string-based, matches Nix error message patterns
 # ════════════════════════════════════════════════════════════════════
@@ -192,6 +196,7 @@ __all__ = [
     "ForeignValueError",
     "InfiniteRecursionError",
     "MissingArgumentError",
+    "NixCoercionError",
     "NixError",
     "ParseError",
     "RestrictedPathError",
