@@ -20,7 +20,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, Literal, overload
+from typing import Any
 
 from nanopynix.exceptions import from_response
 
@@ -124,15 +124,11 @@ class ReservedWorker:
         fn: str,
         args: list,
         timeout: float | None = None,
-        capture: bool = False,
     ):
-        """Send an RPC call on the reserved worker and await the response.
-
-        When *capture* is True, returns ``(result, captured_events)``.
-        """
+        """Send an RPC call on the reserved worker and await the response."""
         if self._released:
             raise RuntimeError("ReservedWorker has been released")
-        return await self._manager._send_recv(module, fn, args, timeout=timeout, capture=capture)
+        return await self._manager._send_recv(module, fn, args, timeout=timeout)
 
     async def release(self) -> None:
         """Return the worker to the manager.  Idempotent — safe to call twice."""
@@ -343,18 +339,12 @@ class _WorkerManager:
         fn: str,
         args: list | dict,
         timeout: float | None = None,
-        capture: bool = False,
     ):
         """Send a call and wait for the matching response.
 
         The timeout is an *idle* timeout: it resets whenever the worker
         sends any message (log events, etc.), so long-running operations
         don't time out while the worker is active.
-
-        When *capture* is True, returns ``(result, captured_events)``
-        where *captured_events* is a list of raw log-event dicts whose
-        ``request_id`` matches this call.  When *capture* is False
-        (default), returns only the result value.
 
         Raises:
             WorkerDied: the worker process died.
@@ -367,17 +357,6 @@ class _WorkerManager:
         t = _RPC_TIMEOUT if timeout is None else timeout
         await self._wait_until_idle(timeout)
         req_id = next(_id_counter)
-
-        # ── capture setup ──────────────────────────────────────────
-        captured: list[dict] = []
-        _sub = None
-        if capture:
-
-            def _filter(event: object) -> None:
-                if isinstance(event, dict) and event.get("request_id") == req_id:
-                    captured.append(event)
-
-            _sub = self._log_bus.subscribe(_filter)
 
         try:
             # Create the response future
@@ -439,12 +418,8 @@ class _WorkerManager:
             else:
                 raise WorkerDied(f"Unexpected response: {msg}")
 
-            if capture:
-                return result, captured
             return result
         finally:
-            if _sub is not None:
-                _sub.unsubscribe()
             if self._active_call is not None and self._active_call.req_id == req_id:
                 self._active_call = None
 
@@ -455,13 +430,10 @@ class _WorkerManager:
         args: list,
         *,
         timeout: float | None = None,
-        capture: bool = False,
     ):
         """Send an RPC call on the worker and return the response.
 
         Acquires the worker lock — only one call in-flight at a time.
-
-        When *capture* is True, returns ``(result, captured_events)``.
         """
         if self._proc is None:
             raise WorkerDied("Worker not started")
@@ -473,12 +445,12 @@ class _WorkerManager:
             except asyncio.TimeoutError as exc:
                 raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
             try:
-                return await self._send_recv(module, fn, args, timeout=timeout, capture=capture)
+                return await self._send_recv(module, fn, args, timeout=timeout)
             finally:
                 self._available.release()
 
         async with self._available:
-            return await self._send_recv(module, fn, args, timeout=timeout, capture=capture)
+            return await self._send_recv(module, fn, args, timeout=timeout)
 
     async def reserve(self, timeout: float | None = None) -> ReservedWorker:
         """Acquire an exclusive worker lease for an EvalSession."""

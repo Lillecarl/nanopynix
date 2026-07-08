@@ -39,13 +39,13 @@ class TestIdentity:
         pool.call.return_value = "daemon"
         result = await store.get_uri()
         assert result == "daemon"
-        pool.call.assert_awaited_with("store", "get_uri", [], capture=False)
+        pool.call.assert_awaited_with("store", "get_uri", [])
 
     async def test_get_store_dir(self, store, pool):
         pool.call.return_value = "/nix/store"
         result = await store.get_store_dir()
         assert result == "/nix/store"
-        pool.call.assert_awaited_with("store", "get_store_dir", [], capture=False)
+        pool.call.assert_awaited_with("store", "get_store_dir", [])
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -64,14 +64,14 @@ class TestStorePathCoercion:
         pool.call.return_value = True
         result = await store.is_valid_path("/nix/store/aaa-bbb")
         assert result is True
-        pool.call.assert_awaited_with("store", "is_valid_path", ["/nix/store/aaa-bbb"], capture=False)
+        pool.call.assert_awaited_with("store", "is_valid_path", ["/nix/store/aaa-bbb"])
 
     async def test_is_valid_path_accepts_storepath(self, store, pool):
         pool.call.return_value = True
         sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
         result = await store.is_valid_path(sp)
         assert result is True
-        pool.call.assert_awaited_with("store", "is_valid_path", ["a" * 32 + "-foo"], capture=False)
+        pool.call.assert_awaited_with("store", "is_valid_path", ["a" * 32 + "-foo"])
 
     async def test_follow_links_returns_storepath(self, store, pool):
         pool.call.return_value = {"to_string": "aaa-bbb", "hash_part": "aaa", "name": "bbb"}
@@ -99,7 +99,7 @@ class TestPathInfo:
         result = await store.query_path_info("/nix/store/aaa-foo")
         assert isinstance(result, PathInfo)
         assert result.nar_size == 1234
-        pool.call.assert_awaited_with("store", "query_path_info", ["/nix/store/aaa-foo"], capture=False)
+        pool.call.assert_awaited_with("store", "query_path_info", ["/nix/store/aaa-foo"])
 
     async def test_query_path_info_storepath(self, store, pool):
         pool.call.return_value = {
@@ -114,7 +114,7 @@ class TestPathInfo:
         }
         sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
         result = await store.query_path_info(sp)
-        pool.call.assert_awaited_with("store", "query_path_info", ["a" * 32 + "-foo"], capture=False)
+        pool.call.assert_awaited_with("store", "query_path_info", ["a" * 32 + "-foo"])
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -135,7 +135,6 @@ class TestClosures:
             "store",
             "compute_fs_closure",
             ["/nix/store/aaa-foo", True, False, False],
-            capture=False,
         )
 
     async def test_query_missing_coerces_list(self, store, pool):
@@ -153,7 +152,6 @@ class TestClosures:
             "store",
             "query_missing",
             [["a" * 32 + "-foo", "/nix/store/bbb-bar"]],
-            capture=False,
         )
 
 
@@ -203,7 +201,6 @@ class TestBulk:
             "store",
             "query_substitutable_paths",
             [["a" * 32 + "-foo", "/nix/store/bbb-bar"]],
-            capture=False,
         )
 
 
@@ -248,7 +245,7 @@ class TestGC:
     async def test_add_temp_root(self, store, pool):
         pool.call.return_value = None
         await store.add_temp_root("/nix/store/aaa-foo")
-        pool.call.assert_awaited_with("store", "add_temp_root", ["/nix/store/aaa-foo"], capture=False)
+        pool.call.assert_awaited_with("store", "add_temp_root", ["/nix/store/aaa-foo"])
 
 
 # ════════════════════════════════════════════════════════════════════
