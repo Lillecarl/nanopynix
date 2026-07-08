@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import re
 
+from nanopynix.models import NixType
+
 # ════════════════════════════════════════════════════════════════════
 # Exception hierarchy
 # ════════════════════════════════════════════════════════════════════
@@ -88,6 +90,35 @@ class UsageError(NixError):
     """Invalid usage or configuration."""
 
 
+class EvalProxyError(RuntimeError):
+    """Base for master-side eval proxy misuse errors."""
+
+
+class EvalSessionClosedError(EvalProxyError):
+    """A proxy or eval session was used after its owning session closed."""
+
+
+class ValueReleasedError(EvalProxyError):
+    """A proxy wrapper was used after its remote value handle was released."""
+
+
+class UnresolvedValueError(EvalProxyError):
+    """A lazy child proxy was inspected before it had a remote handle."""
+
+
+class WrongNixTypeError(EvalProxyError, TypeError):
+    """A Nix value had a different type than the operation requires."""
+
+    def __init__(self, *, expected: NixType | str, actual: NixType | str) -> None:
+        self.expected = expected.value if isinstance(expected, NixType) else expected
+        self.actual = actual.value if isinstance(actual, NixType) else actual
+        super().__init__(f"Nix value is {self.actual}, expected {self.expected}")
+
+
+class ForeignValueError(EvalProxyError, ValueError):
+    """A value proxy from another eval session was used where a local value is required."""
+
+
 # ════════════════════════════════════════════════════════════════════
 # Classification — string-based, matches Nix error message patterns
 # ════════════════════════════════════════════════════════════════════
@@ -156,6 +187,9 @@ def from_response(error_type: str, msg: str, *, raw: str = "", info: dict | None
 __all__ = [
     "AssertionError_",
     "EvalError",
+    "EvalProxyError",
+    "EvalSessionClosedError",
+    "ForeignValueError",
     "InfiniteRecursionError",
     "MissingArgumentError",
     "NixError",
@@ -165,6 +199,9 @@ __all__ = [
     "ThrownError",
     "TypeError_",
     "UndefinedVarError",
+    "UnresolvedValueError",
     "UsageError",
+    "ValueReleasedError",
+    "WrongNixTypeError",
     "from_response",
 ]

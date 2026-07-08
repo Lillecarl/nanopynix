@@ -1,5 +1,8 @@
 """Shared fixtures for nanopynix tests."""
 
+import atexit
+from typing import Protocol, cast
+
 import pytest
 
 import nanopynix
@@ -69,8 +72,9 @@ def _enable_flakes():
 def _cleanup_primops():
     """Clear C++ primop registry at process exit to avoid segfault
     when nb::object destructors fire after Python finalization."""
-    import atexit
-
     import nanopynix_expr
 
-    atexit.register(nanopynix_expr._cleanup_primop_registry)
+    class _PrimopRegistryModule(Protocol):
+        def _cleanup_primop_registry(self) -> None: ...
+
+    atexit.register(cast("_PrimopRegistryModule", nanopynix_expr)._cleanup_primop_registry)

@@ -1,6 +1,8 @@
 """Tests for the PyLogger log streaming with LogCollector."""
 
 import asyncio
+from collections.abc import Callable
+from typing import Protocol, cast
 
 import pytest
 
@@ -9,6 +11,13 @@ import nanopynix_util
 from nanopynix import LogCollector
 
 pytestmark = pytest.mark.asyncio
+
+
+class _LogTestModule(Protocol):
+    def _log_test(self, msg: str) -> None: ...
+
+
+_log_test: Callable[[str], None] = cast("_LogTestModule", nanopynix_util)._log_test
 
 
 async def _collect(collector, count, timeout=2.0):
@@ -30,9 +39,9 @@ async def test_log_stream_basic():
     nanopynix_util.install_logger(c.callback)
 
     try:
-        nanopynix_util._log_test("hello from nix")
-        nanopynix_util._log_test("second message")
-        nanopynix_util._log_test("third message")
+        _log_test("hello from nix")
+        _log_test("second message")
+        _log_test("third message")
 
         events = await _collect(c, 3)
 
@@ -54,7 +63,7 @@ async def test_log_stream_actions():
     c = LogCollector()
     nanopynix_util.install_logger(c.callback)
 
-    nanopynix_util._log_test("action test")
+    _log_test("action test")
 
     stream = c.stream()
     event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
@@ -71,7 +80,7 @@ async def test_log_stream_remove_logger_stops():
     c = LogCollector()
     nanopynix_util.install_logger(c.callback)
 
-    nanopynix_util._log_test("before remove")
+    _log_test("before remove")
     stream = c.stream()
     event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
     assert event[3] == "before remove"
@@ -88,8 +97,8 @@ async def test_log_stream_shutdown_clean():
     c = LogCollector()
     nanopynix_util.install_logger(c.callback)
 
-    nanopynix_util._log_test("msg1")
-    nanopynix_util._log_test("msg2")
+    _log_test("msg1")
+    _log_test("msg2")
 
     nanopynix_util.remove_logger()
 
@@ -111,7 +120,7 @@ async def test_verbosity_filters_low_levels():
     try:
         nanopynix_util.set_verbosity(0)  # lvlError
 
-        nanopynix_util._log_test("should be dropped")
+        _log_test("should be dropped")
 
         nanopynix_util.remove_logger()
         nanopynix_util.set_verbosity(old)
@@ -136,7 +145,7 @@ async def test_request_id_in_events():
 
     try:
         nanopynix_util.set_logger_request_id(42)
-        nanopynix_util._log_test("tagged")
+        _log_test("tagged")
         nanopynix_util.set_logger_request_id(0)
 
         stream = c.stream()
@@ -145,7 +154,7 @@ async def test_request_id_in_events():
         assert event[3] == "tagged"
 
         # Unset should produce req_id=0
-        nanopynix_util._log_test("untagged")
+        _log_test("untagged")
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
         assert event[0] == 0
     finally:

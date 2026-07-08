@@ -7,6 +7,7 @@ a ``_session_id`` that ``Eval`` checks at runtime.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import nanopynix_store  # BuildMode enum
@@ -23,7 +24,7 @@ def _to_str(path: StorePath | str) -> str:
     return path.to_string if isinstance(path, StorePath) else path
 
 
-def _to_strs(paths: list[StorePath | str]) -> list[str]:
+def _to_strs(paths: Sequence[StorePath | str]) -> list[str]:
     """Coerce a list of StorePath|str to a list of store-path strings."""
     return [p.to_string if isinstance(p, StorePath) else p for p in paths]
 
@@ -169,7 +170,7 @@ class StoreHandle:
         return await self._pool.request(rpc.QueryReferrers(path=s))
 
     async def query_substitutable_paths(
-        self, paths: list[StorePath | str]
+        self, paths: Sequence[StorePath | str]
     ) -> list[StorePath]:
         self._check_active()
         strs = _to_strs(paths)
@@ -179,7 +180,7 @@ class StoreHandle:
 
     async def build_paths_with_results(
         self,
-        paths: list[StorePath | str],
+        paths: Sequence[StorePath | str],
     ) -> list[BuildResult]:
         self._check_active()
         strs = _to_strs(paths)
