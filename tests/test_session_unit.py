@@ -536,3 +536,38 @@ class TestLogStreamRequestId:
         events = [e async for e in session.log_stream()]
         assert len(events) == 1
         assert events[0].request_id == 1
+
+
+class TestLogCapture:
+    async def test_capture_records_typed_events(self):
+        from nanopynix._pool import _WorkerManager
+        from nanopynix.nix import Session
+
+        session = Session.__new__(Session)
+        manager = _WorkerManager()
+        session._manager = manager
+
+        async with session.capture_logs() as logs:
+            manager._log_bus.emit({"request_id": 4, "action": "msg", "args": [3, "hello"]})
+            manager._log_bus.emit({"request_id": 4, "action": "result", "args": [1, 100]})
+
+        assert [event.action for event in logs.events] == ["msg", "result"]
+        assert logs.events[0].request_id == 4
+        assert logs.events[0].args == [3, "hello"]
+        assert logs.events[1].result_type == 100
+
+    async def test_capture_unsubscribes_on_exit(self):
+        from nanopynix._pool import _WorkerManager
+        from nanopynix.nix import Session
+
+        session = Session.__new__(Session)
+        manager = _WorkerManager()
+        session._manager = manager
+
+        async with session.capture_logs() as logs:
+            manager._log_bus.emit({"request_id": 1, "action": "msg", "args": ["inside"]})
+
+        manager._log_bus.emit({"request_id": 1, "action": "msg", "args": ["outside"]})
+
+        assert len(logs.events) == 1
+        assert logs.events[0].args == ["inside"]

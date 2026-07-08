@@ -19,6 +19,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 from nanopynix._pool import _WorkerManager
 from nanopynix._session import EvalSession
@@ -26,6 +27,41 @@ from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.store import StoreHandle
 
 logger = logging.getLogger(__name__)
+
+
+def _raw_log_event(raw: dict[str, Any]) -> LogEvent:
+    data: dict[str, Any] = {
+        "request_id": raw.get("request_id", raw.get("id", 0)),
+        "action": raw["action"],
+        "args": raw["args"],
+    }
+    if raw["action"] == "result" and len(raw["args"]) > 1:
+        data["result_type"] = raw["args"][1]
+    return LogEvent.model_validate(data)
+
+
+class LogCapture:
+    """Async context manager that records log events while active."""
+
+    def __init__(self, manager: _WorkerManager) -> None:
+        self._manager = manager
+        self._sub = None
+        self.events: list[LogEvent] = []
+
+    async def __aenter__(self) -> LogCapture:
+        def _append(raw: object) -> None:
+            if raw is None:
+                return
+            if isinstance(raw, dict):
+                self.events.append(_raw_log_event(raw))
+
+        self._sub = self._manager.subscribe(_append)
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        if self._sub is not None:
+            self._sub.unsubscribe()
+            self._sub = None
 
 
 class Session:
@@ -106,16 +142,11 @@ class Session:
         async for raw in self._manager.log_stream():
             if raw is None:
                 continue  # worker close sentinel
-            # Worker emits "request_id"; tolerate legacy "id" for compatibility
-            # result events carry a ResultType int in args[1]
-            data: dict = {
-                "request_id": raw.get("request_id", raw.get("id", 0)),
-                "action": raw["action"],
-                "args": raw["args"],
-            }
-            if raw["action"] == "result" and len(raw["args"]) > 1:
-                data["result_type"] = raw["args"][1]
-            yield LogEvent.model_validate(data)
+            yield _raw_log_event(raw)
+
+    def capture_logs(self) -> LogCapture:
+        """Record typed log events during an async context block."""
+        return LogCapture(self._manager)
 
     def subscribe(self, callback):
         """Subscribe a callback to live log events.
