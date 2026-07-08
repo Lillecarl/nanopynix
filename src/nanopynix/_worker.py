@@ -402,8 +402,29 @@ def _reset_es():
 def _eval_dispatch(store):
     """Return dispatch dict for eval operations."""
 
+    def _remote_value(pyv) -> dict[str, dict[str, object]]:
+        return {"__nanopynix_value__": _export(pyv)}
+
+    def _deep_value(pyv):
+        pyv.force()
+        typ = pyv.type_name()
+        if typ == "attrs":
+            return {name: _deep_value(pyv.attr_get(name)) for name in pyv.attr_names()}
+        if typ == "list":
+            return [_deep_value(pyv.list_get(idx)) for idx in range(pyv.list_length())]
+        if typ == "function":
+            return _remote_value(pyv)
+        if typ in {"null", "int", "float", "bool", "string", "path"}:
+            return pyv.to_python()
+        msg = f"cannot forceDeep unsupported Nix value type '{typ}' over RPC"
+        raise TypeError(msg)
+
     def _force_handle(handle: int):
-        return _get_es(store).value_from_handle(handle).to_python()
+        value = _get_es(store).value_from_handle(handle)
+        value.force()
+        if value.type_name() == "function":
+            return _remote_value(value)
+        return value.to_python()
 
     def _type_name(handle: int):
         value = _get_es(store).value_from_handle(handle)
@@ -440,7 +461,9 @@ def _eval_dispatch(store):
         return _force_handle(req.handle)
 
     def force_deep(req: rpc.ForceDeep):
-        return _get_es(store).value_from_handle(req.handle).to_python()
+        value = _get_es(store).value_from_handle(req.handle)
+        value.force_deep()
+        return _deep_value(value)
 
     def attr(req: rpc.Attr):
         return _export(_get_es(store).value_from_handle(req.handle).attr_get(req.name))
