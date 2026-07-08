@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix._rpc import reserved_call
@@ -17,6 +19,24 @@ if TYPE_CHECKING:
 # ════════════════════════════════════════════════════════════════════
 
 
+@dataclass(frozen=True)
+class _ResolvedValue:
+    handle: int
+    type_name: str | None
+
+
+@dataclass(frozen=True)
+class _LazyValue:
+    parent: ValueProxy | int
+    selector: str | int
+    type_name: str | None = None
+
+
+type _ValueState = _ResolvedValue | _LazyValue
+type _ActiveFlag = list[bool]
+type NixValue = ValueAttrs | ValueList | int | str | bool | None
+
+
 class ValueProxy:
     """Proxy for a Nix Value exported on the remote worker.
 
@@ -28,14 +48,10 @@ class ValueProxy:
 
     __slots__ = (
         "_worker",
-        "_handle",
-        "_type",
+        "_state",
         "_timeout",
         "_active",
         "_released",
-        "_parent_proxy",
-        "_parent_handle",
-        "_selector",
     )
 
     def __init__(
@@ -44,20 +60,19 @@ class ValueProxy:
         handle: int | None,
         typ: str | None,
         timeout: float | None = None,
-        _active: list[bool] | None = None,
-        _parent_proxy: ValueProxy | None = None,
-        _parent_handle: int | None = None,
-        _selector: str | int | None = None,
+        _active: _ActiveFlag | None = None,
+        _state: _ValueState | None = None,
     ) -> None:
         self._worker = worker
-        self._handle = handle
-        self._type = typ
+        if _state is not None:
+            self._state = _state
+        elif handle is not None:
+            self._state = _ResolvedValue(handle=handle, type_name=typ)
+        else:
+            raise ValueError("ValueProxy requires either a handle or explicit state")
         self._timeout = timeout
         self._active = _active
         self._released = False
-        self._parent_proxy = _parent_proxy
-        self._parent_handle = _parent_handle
-        self._selector = _selector
 
     @classmethod
     def child(
@@ -66,19 +81,15 @@ class ValueProxy:
         parent: ValueProxy | int,
         selector: str | int,
         timeout: float | None = None,
-        _active: list[bool] | None = None,
+        _active: _ActiveFlag | None = None,
     ) -> ValueProxy:
-        parent_proxy = parent if isinstance(parent, ValueProxy) else None
-        parent_handle = parent if isinstance(parent, int) else None
         return cls(
             worker,
             None,
             None,
             timeout=timeout,
             _active=_active,
-            _parent_proxy=parent_proxy,
-            _parent_handle=parent_handle,
-            _selector=selector,
+            _state=_LazyValue(parent=parent, selector=selector),
         )
 
     async def __aenter__(self) -> ValueProxy:
@@ -95,61 +106,71 @@ class ValueProxy:
 
     @property
     def handle(self) -> int:
-        if self._handle is None:
+        if not isinstance(self._state, _ResolvedValue):
             raise RuntimeError("ValueProxy has not been resolved yet")
-        return self._handle
+        return self._state.handle
 
     @property
     def type_name(self) -> str:
-        return self._type or "unknown"
+        return self._state.type_name or "unknown"
 
     async def _ensure_resolved(self, *, timeout: float | None = None) -> None:
         self._check_active()
-        if self._handle is not None:
+        if isinstance(self._state, _ResolvedValue):
             return
-        if self._parent_handle is None and self._parent_proxy is not None:
-            await self._parent_proxy._ensure_resolved(timeout=timeout)
-            self._parent_handle = self._parent_proxy.handle
-        if self._parent_handle is None or self._selector is None:
-            raise RuntimeError("ValueProxy has no handle or selector")
+        lazy = self._state
+        if isinstance(lazy.parent, ValueProxy):
+            await lazy.parent._ensure_resolved(timeout=timeout)
+            parent_handle = lazy.parent.handle
+        else:
+            parent_handle = lazy.parent
         t = self._resolve_timeout(timeout)
-        if isinstance(self._selector, str):
+        if isinstance(lazy.selector, str):
             result = await self._worker._send_recv(
                 "eval",
                 "attr",
-                [self._parent_handle, self._selector],
+                [parent_handle, lazy.selector],
                 timeout=t,
             )
         else:
             result = await self._worker._send_recv(
                 "eval",
                 "list_get",
-                [self._parent_handle, self._selector],
+                [parent_handle, lazy.selector],
                 timeout=t,
             )
         handle = ValueHandle.model_validate(result)
-        self._handle = handle.handle
-        self._type = handle.type
-        self._parent_proxy = None
-        self._parent_handle = None
-        self._selector = None
+        self._state = _ResolvedValue(handle=handle.handle, type_name=handle.type)
 
     # ── force ──────────────────────────────────────────────────────
 
-    async def force(self, *, timeout: float | None = None) -> ValueAttrs | ValueList | int | str | bool:
+    async def force(self, *, timeout: float | None = None) -> NixValue:
         """Evaluate to WHNF.  Compound types return lazy wrappers."""
         await self._ensure_resolved(timeout=timeout)
-        if self._type in (None, "thunk", "unknown"):
-            self._type = await self.type(timeout=timeout)
-        if self._type == "attrs":
+        typ = self._state.type_name
+        if typ in (None, "thunk", "unknown"):
+            typ = await self.type(timeout=timeout)
+        if typ == "attrs":
             keys = await self.attr_names(timeout=timeout)
-            return ValueAttrs(self._worker, self.handle, keys, timeout=self._timeout, _active=self._active)
-        if self._type == "list":
+            return ValueAttrs(
+                self._worker,
+                self.handle,
+                keys,
+                timeout=self._timeout,
+                _active=self._active,
+            )
+        if typ == "list":
             length = await self.list_length(timeout=timeout)
-            return ValueList(self._worker, self.handle, length, timeout=self._timeout, _active=self._active)
+            return ValueList(
+                self._worker,
+                self.handle,
+                length,
+                timeout=self._timeout,
+                _active=self._active,
+            )
         # scalar — delegate to worker
         return cast(
-            ValueAttrs | ValueList | int | str | bool,
+            NixValue,
             await self._worker._send_recv(
                 "eval",
                 "force",
@@ -158,7 +179,7 @@ class ValueProxy:
             ),
         )
 
-    async def force_deep(self, *, timeout: float | None = None):
+    async def force_deep(self, *, timeout: float | None = None) -> object:
         """Recursive force — returns plain Python dict/list/scalar."""
         await self._ensure_resolved(timeout=timeout)
         return await self._worker._send_recv(
@@ -172,14 +193,14 @@ class ValueProxy:
 
     def attr(self, name: str, *, timeout: float | None = None) -> ValueProxy:
         self._check_active()
-        parent: ValueProxy | int = self if self._handle is None else self.handle
+        parent: ValueProxy | int = self if isinstance(self._state, _LazyValue) else self.handle
         return ValueProxy.child(
             self._worker, parent, name, timeout=self._resolve_timeout(timeout), _active=self._active
         )
 
     def list_get(self, idx: int, *, timeout: float | None = None) -> ValueProxy:
         self._check_active()
-        parent: ValueProxy | int = self if self._handle is None else self.handle
+        parent: ValueProxy | int = self if isinstance(self._state, _LazyValue) else self.handle
         return ValueProxy.child(self._worker, parent, idx, timeout=self._resolve_timeout(timeout), _active=self._active)
 
     async def list_length(self, *, timeout: float | None = None) -> int:
@@ -218,7 +239,7 @@ class ValueProxy:
             ),
         )
 
-    async def call(self, *args, timeout: float | None = None) -> ValueProxy:
+    async def call(self, *args: object, timeout: float | None = None) -> ValueProxy:
         await self._ensure_resolved(timeout=timeout)
         result = ValueHandle.model_validate(
             await self._worker._send_recv(
@@ -232,7 +253,7 @@ class ValueProxy:
 
     async def type(self, *, timeout: float | None = None) -> str:
         await self._ensure_resolved(timeout=timeout)
-        self._type = cast(
+        type_name = cast(
             str,
             await self._worker._send_recv(
                 "eval",
@@ -241,35 +262,36 @@ class ValueProxy:
                 timeout=self._resolve_timeout(timeout),
             ),
         )
-        return self._type
+        self._state = _ResolvedValue(handle=self.handle, type_name=type_name)
+        return type_name
 
     # ── type helpers ───────────────────────────────────────────────
 
     def is_int(self) -> bool:
-        return self._type == "int"
+        return self._state.type_name == "int"
 
     def is_string(self) -> bool:
-        return self._type == "string"
+        return self._state.type_name == "string"
 
     def is_bool(self) -> bool:
-        return self._type == "bool"
+        return self._state.type_name == "bool"
 
     def is_attrs(self) -> bool:
-        return self._type == "attrs"
+        return self._state.type_name == "attrs"
 
     def is_list(self) -> bool:
-        return self._type == "list"
+        return self._state.type_name == "list"
 
     def is_null(self) -> bool:
-        return self._type == "null"
+        return self._state.type_name == "null"
 
     def is_function(self) -> bool:
-        return self._type == "function"
+        return self._state.type_name == "function"
 
     # ── release ────────────────────────────────────────────────────
 
     async def release(self, *, timeout: float | None = None) -> None:
-        if self._handle is None:
+        if not isinstance(self._state, _ResolvedValue):
             self._released = True
             return
         self._check_active()
@@ -306,7 +328,14 @@ class ValueAttrs:
 
     __slots__ = ("_worker", "_handle", "_keys", "_timeout", "_active", "_released")
 
-    def __init__(self, worker, handle, keys, timeout=None, _active=None):
+    def __init__(
+        self,
+        worker: _WorkerManager,
+        handle: int,
+        keys: Sequence[str],
+        timeout: float | None = None,
+        _active: _ActiveFlag | None = None,
+    ) -> None:
         self._worker = worker
         self._handle = handle
         self._keys = keys
@@ -320,7 +349,7 @@ class ValueAttrs:
     async def __aexit__(self, *args: object) -> None:
         await self.release()
 
-    def _check_active(self):
+    def _check_active(self) -> None:
         if self._active is not None and not self._active[0]:
             raise RuntimeError("ValueAttrs is invalid — the EvalSession has been closed")
         if self._released:
@@ -334,19 +363,27 @@ class ValueAttrs:
         self._check_active()
         return ValueProxy.child(self._worker, self._handle, name, timeout=self._timeout, _active=self._active)
 
-    async def force(self, name: str, *, timeout=None):
+    async def force(self, name: str, *, timeout: float | None = None) -> NixValue:
         """Force a single attribute and return its value."""
         self._check_active()
-        result = await self._worker._send_recv(
-            "eval",
-            "attr",
-            [self._handle, name],
-            timeout=timeout if timeout is not None else self._timeout,
+        result = ValueHandle.model_validate(
+            await self._worker._send_recv(
+                "eval",
+                "attr",
+                [self._handle, name],
+                timeout=timeout if timeout is not None else self._timeout,
+            )
         )
-        proxy = ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+        proxy = ValueProxy(
+            self._worker,
+            result.handle,
+            result.type,
+            timeout=self._timeout,
+            _active=self._active,
+        )
         return await proxy.force()
 
-    async def release(self):
+    async def release(self) -> None:
         self._check_active()
         await self._worker._send_recv(
             "eval",
@@ -371,7 +408,14 @@ class ValueList:
 
     __slots__ = ("_worker", "_handle", "_length", "_timeout", "_active", "_released")
 
-    def __init__(self, worker, handle, length, timeout=None, _active=None):
+    def __init__(
+        self,
+        worker: _WorkerManager,
+        handle: int,
+        length: int,
+        timeout: float | None = None,
+        _active: _ActiveFlag | None = None,
+    ) -> None:
         self._worker = worker
         self._handle = handle
         self._length = length
@@ -385,7 +429,7 @@ class ValueList:
     async def __aexit__(self, *args: object) -> None:
         await self.release()
 
-    def _check_active(self):
+    def _check_active(self) -> None:
         if self._active is not None and not self._active[0]:
             raise RuntimeError("ValueList is invalid — the EvalSession has been closed")
         if self._released:
@@ -398,19 +442,27 @@ class ValueList:
         self._check_active()
         return ValueProxy.child(self._worker, self._handle, idx, timeout=self._timeout, _active=self._active)
 
-    async def force(self, idx: int, *, timeout=None):
+    async def force(self, idx: int, *, timeout: float | None = None) -> NixValue:
         """Force a single element and return its value."""
         self._check_active()
-        result = await self._worker._send_recv(
-            "eval",
-            "list_get",
-            [self._handle, idx],
-            timeout=timeout if timeout is not None else self._timeout,
+        result = ValueHandle.model_validate(
+            await self._worker._send_recv(
+                "eval",
+                "list_get",
+                [self._handle, idx],
+                timeout=timeout if timeout is not None else self._timeout,
+            )
         )
-        proxy = ValueProxy(self._worker, result["handle"], result["type"], timeout=self._timeout, _active=self._active)
+        proxy = ValueProxy(
+            self._worker,
+            result.handle,
+            result.type,
+            timeout=self._timeout,
+            _active=self._active,
+        )
         return await proxy.force()
 
-    async def release(self):
+    async def release(self) -> None:
         self._check_active()
         await self._worker._send_recv(
             "eval",
@@ -542,10 +594,10 @@ class EvalSession:
 
     # backward compat
     async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
-        return cast(ValueProxy, await self.file(path, timeout=timeout))
+        return await self.file(path, timeout=timeout)
 
     async def eval_string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
-        return cast(ValueProxy, await self.string(expr, path=path, timeout=timeout))
+        return await self.string(expr, path=path, timeout=timeout)
 
     def _resolve_timeout(self, override: float | None) -> float | None:
         return override if override is not None else self._timeout
