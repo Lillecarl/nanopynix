@@ -21,7 +21,7 @@ from nanopynix import (
     WrongNixTypeError,
 )
 from nanopynix._pool import _ActiveCall, _WorkerManager
-from nanopynix._session import EvalSession, ValueProxy
+from nanopynix._session import EvalSession, ValueProxy, _EvalOwner
 from nanopynix.models import LogEvent
 
 pytestmark = pytest.mark.asyncio
@@ -213,6 +213,9 @@ class TestValueProxyLifecycle:
         w.request = AsyncMock(side_effect=request)
         return w
 
+    def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
+        return _EvalOwner(object(), active)
+
     def test_handle_and_type_are_cached(self):
         w = self._worker()
         vp = ValueProxy(w, 42, "int")
@@ -298,8 +301,9 @@ class TestValueProxyLifecycle:
     async def test_call_value_proxy_arg_uses_remote_handle(self):
         w = self._worker()
         w._send_recv.return_value = {"handle": 3, "type": "int"}
-        fn = ValueProxy(w, 1, "function")
-        arg = ValueProxy(w, 2, "attrs")
+        owner = self._owner()
+        fn = ValueProxy(w, 1, "function", _owner=owner)
+        arg = ValueProxy(w, 2, "attrs", _owner=owner)
 
         result = await fn(arg)
 
@@ -313,9 +317,8 @@ class TestValueProxyLifecycle:
 
     async def test_call_foreign_value_proxy_raises_typed_error(self):
         w = self._worker()
-        other = self._worker()
-        fn = ValueProxy(w, 1, "function")
-        arg = ValueProxy(other, 2, "attrs")
+        fn = ValueProxy(w, 1, "function", _owner=self._owner())
+        arg = ValueProxy(w, 2, "attrs", _owner=self._owner())
 
         with pytest.raises(ForeignValueError, match="another EvalSession"):
             await fn(arg)
@@ -394,7 +397,7 @@ class TestValueProxyLifecycle:
     async def test_raises_after_session_close(self):
         w = self._worker()
         active = [True]
-        vp = ValueProxy(w, 1, "int", _active=active)
+        vp = ValueProxy(w, 1, "int", _owner=self._owner(active))
 
         # Active — works
         w._send_recv.return_value = 42
@@ -414,18 +417,18 @@ class TestValueProxyLifecycle:
         with pytest.raises(ValueReleasedError, match="has been released"):
             await vp.force()
 
-    async def test_check_active_only_when_flag_provided(self):
-        """_active=None means never expires (backwards compat)."""
+    async def test_check_active_only_when_owner_has_flag(self):
+        """An owner without an active flag never expires."""
         w = self._worker()
         w._send_recv.return_value = 42
-        vp = ValueProxy(w, 1, "int")  # no _active
+        vp = ValueProxy(w, 1, "int")
         assert await vp.force() == 42  # should not raise
 
     async def test_handle_still_accessible_after_close(self):
         """Cached properties are available even after session close."""
         w = self._worker()
         active = [True]
-        vp = ValueProxy(w, 42, "attrs", _active=active)
+        vp = ValueProxy(w, 42, "attrs", _owner=self._owner(active))
         active[0] = False
         assert vp.handle == 42
         assert vp.nix_type == NixType.ATTRS
@@ -449,6 +452,9 @@ class TestLazyChildProxy:
 
         w.request = AsyncMock(side_effect=request)
         return w
+
+    def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
+        return _EvalOwner(object(), active)
 
     async def test_attrs_getitem_force_calls_attr(self):
         """attrs[\"x\"].force() calls eval.attr with parent handle and name."""
@@ -518,7 +524,7 @@ class TestLazyChildProxy:
         """Child proxy raises after session close."""
         w = self._worker()
         active = [False]
-        cp = ValueProxy.child(w, 1, "name", _active=active)
+        cp = ValueProxy.child(w, 1, "name", _owner=self._owner(active))
 
         with pytest.raises(EvalSessionClosedError, match="EvalSession has been closed"):
             await cp.force()
