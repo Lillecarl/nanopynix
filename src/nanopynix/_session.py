@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from nanopynix import _protocol as rpc
-from nanopynix.models import FlakeRef, LockedFlake
+from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedFlake, NixType
 
 if TYPE_CHECKING:
     from nanopynix._pool import ReservedWorker, _WorkerManager
@@ -24,19 +24,28 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class _ResolvedValue:
     handle: int
-    type_name: str | None
+    type_name: NixType | None
 
 
 @dataclass(frozen=True)
 class _LazyValue:
     parent: ValueProxy | int
     selector: str | int
-    type_name: str | None = None
+    type_name: NixType | None = None
 
 
 type _ValueState = _ResolvedValue | _LazyValue
 type _ActiveFlag = list[bool]
-type NixValue = ValueAttrs | ValueList | int | str | bool | None
+type NixValue = ValueProxy | ValueAttrs | ValueList | JsonScalar
+type NixDeepValue = ValueProxy | JsonScalar | list[NixDeepValue] | dict[str, NixDeepValue]
+
+_REMOTE_VALUE_KEY = "__nanopynix_value__"
+
+
+def _parse_nix_type(value: NixType | str | None) -> NixType | None:
+    if value is None:
+        return None
+    return value if isinstance(value, NixType) else NixType(value)
 
 
 class ValueProxy:
@@ -60,7 +69,7 @@ class ValueProxy:
         self,
         worker: _EvalWorker,
         handle: int | None,
-        typ: str | None,
+        typ: NixType | str | None,
         timeout: float | None = None,
         _active: _ActiveFlag | None = None,
         _state: _ValueState | None = None,
@@ -69,7 +78,7 @@ class ValueProxy:
         if _state is not None:
             self._state = _state
         elif handle is not None:
-            self._state = _ResolvedValue(handle=handle, type_name=typ)
+            self._state = _ResolvedValue(handle=handle, type_name=_parse_nix_type(typ))
         else:
             raise ValueError("ValueProxy requires either a handle or explicit state")
         self._timeout = timeout
@@ -114,7 +123,11 @@ class ValueProxy:
 
     @property
     def type_name(self) -> str:
-        return self._state.type_name or "unknown"
+        return self.nix_type.value
+
+    @property
+    def nix_type(self) -> NixType:
+        return self._state.type_name or NixType.UNKNOWN
 
     async def _ensure_resolved(self, *, timeout: float | None = None) -> None:
         self._check_active()
@@ -133,15 +146,27 @@ class ValueProxy:
             handle = await self._worker.request(rpc.ListGet(handle=parent_handle, index=lazy.selector), timeout=t)
         self._state = _ResolvedValue(handle=handle.handle, type_name=handle.type)
 
+    def _decode_remote_value(self, value: object) -> NixDeepValue:
+        if isinstance(value, dict) and set(value) == {_REMOTE_VALUE_KEY}:
+            handle = rpc.ValueHandle.model_validate(value[_REMOTE_VALUE_KEY])
+            return ValueProxy(self._worker, handle.handle, handle.type, timeout=self._timeout, _active=self._active)
+        if isinstance(value, list):
+            return [self._decode_remote_value(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): self._decode_remote_value(item) for key, item in value.items()}
+        if value is None or isinstance(value, str | int | float | bool):
+            return value
+        raise TypeError(f"unsupported force_deep RPC value: {value!r}")
+
     # ── force ──────────────────────────────────────────────────────
 
     async def force(self, *, timeout: float | None = None) -> NixValue:
         """Evaluate to WHNF.  Compound types return lazy wrappers."""
         await self._ensure_resolved(timeout=timeout)
         typ = self._state.type_name
-        if typ in (None, "thunk", "unknown"):
-            typ = await self.type(timeout=timeout)
-        if typ == "attrs":
+        if typ in (None, NixType.THUNK, NixType.UNKNOWN):
+            typ = await self.get_type(timeout=timeout)
+        if typ == NixType.ATTRS:
             keys = await self.attr_names(timeout=timeout)
             return ValueAttrs(
                 self._worker,
@@ -150,7 +175,7 @@ class ValueProxy:
                 timeout=self._timeout,
                 _active=self._active,
             )
-        if typ == "list":
+        if typ == NixType.LIST:
             length = await self.list_length(timeout=timeout)
             return ValueList(
                 self._worker,
@@ -159,13 +184,40 @@ class ValueProxy:
                 timeout=self._timeout,
                 _active=self._active,
             )
+        if typ == NixType.FUNCTION:
+            return self
         # scalar — delegate to worker
         return await self._worker.request(rpc.Force(handle=self.handle), timeout=self._resolve_timeout(timeout))
 
-    async def force_deep(self, *, timeout: float | None = None) -> object:
-        """Recursive force — returns plain Python dict/list/scalar."""
+    @overload
+    async def force_as(self, typ: Literal[NixType.INT], *, timeout: float | None = None) -> int: ...
+    @overload
+    async def force_as(self, typ: Literal[NixType.FLOAT], *, timeout: float | None = None) -> float: ...
+    @overload
+    async def force_as(self, typ: Literal[NixType.BOOL], *, timeout: float | None = None) -> bool: ...
+    @overload
+    async def force_as(self, typ: Literal[NixType.STRING], *, timeout: float | None = None) -> str: ...
+    @overload
+    async def force_as(self, typ: Literal[NixType.PATH], *, timeout: float | None = None) -> str: ...
+    @overload
+    async def force_as(self, typ: Literal[NixType.NULL], *, timeout: float | None = None) -> None: ...
+    @overload
+    async def force_as(self, typ: Literal[NixType.ATTRS], *, timeout: float | None = None) -> ValueAttrs: ...
+    @overload
+    async def force_as(self, typ: Literal[NixType.LIST], *, timeout: float | None = None) -> ValueList: ...
+    @overload
+    async def force_as(self, typ: Literal[NixType.FUNCTION], *, timeout: float | None = None) -> ValueProxy: ...
+    async def force_as(self, typ: NixType, *, timeout: float | None = None) -> NixValue:
+        actual = await self.get_type(timeout=timeout)
+        if actual != typ:
+            raise TypeError(f"Nix value is {actual.value}, expected {typ.value}")
+        return await self.force(timeout=timeout)
+
+    async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
+        """Recursive Nix force. Functions remain remote callable ValueProxy objects."""
         await self._ensure_resolved(timeout=timeout)
-        return await self._worker.request(rpc.ForceDeep(handle=self.handle), timeout=self._resolve_timeout(timeout))
+        result = await self._worker.request(rpc.ForceDeep(handle=self.handle), timeout=self._resolve_timeout(timeout))
+        return self._decode_remote_value(result)
 
     # ── navigation ─────────────────────────────────────────────────
 
@@ -196,42 +248,51 @@ class ValueProxy:
             timeout=self._resolve_timeout(timeout),
         )
 
-    async def call(self, *args: object, timeout: float | None = None) -> ValueProxy:
+    async def call(self, *args: JsonValue, timeout: float | None = None) -> ValueProxy:
         await self._ensure_resolved(timeout=timeout)
+        actual = await self.get_type(timeout=timeout)
+        if actual != NixType.FUNCTION:
+            raise TypeError(f"Nix value is {actual.value}, expected function")
         result = await self._worker.request(
             rpc.Call(handle=self.handle, args=list(args)),
             timeout=self._resolve_timeout(timeout),
         )
         return ValueProxy(self._worker, result.handle, result.type, timeout=self._timeout, _active=self._active)
 
-    async def type(self, *, timeout: float | None = None) -> str:
+    async def __call__(self, *args: JsonValue, timeout: float | None = None) -> ValueProxy:
+        return await self.call(*args, timeout=timeout)
+
+    async def get_type(self, *, timeout: float | None = None) -> NixType:
         await self._ensure_resolved(timeout=timeout)
         type_name = await self._worker.request(rpc.TypeName(handle=self.handle), timeout=self._resolve_timeout(timeout))
         self._state = _ResolvedValue(handle=self.handle, type_name=type_name)
         return type_name
 
+    async def type(self, *, timeout: float | None = None) -> NixType:
+        return await self.get_type(timeout=timeout)
+
     # ── type helpers ───────────────────────────────────────────────
 
     def is_int(self) -> bool:
-        return self._state.type_name == "int"
+        return self._state.type_name == NixType.INT
 
     def is_string(self) -> bool:
-        return self._state.type_name == "string"
+        return self._state.type_name == NixType.STRING
 
     def is_bool(self) -> bool:
-        return self._state.type_name == "bool"
+        return self._state.type_name == NixType.BOOL
 
     def is_attrs(self) -> bool:
-        return self._state.type_name == "attrs"
+        return self._state.type_name == NixType.ATTRS
 
     def is_list(self) -> bool:
-        return self._state.type_name == "list"
+        return self._state.type_name == NixType.LIST
 
     def is_null(self) -> bool:
-        return self._state.type_name == "null"
+        return self._state.type_name == NixType.NULL
 
     def is_function(self) -> bool:
-        return self._state.type_name == "function"
+        return self._state.type_name == NixType.FUNCTION
 
     # ── release ────────────────────────────────────────────────────
 

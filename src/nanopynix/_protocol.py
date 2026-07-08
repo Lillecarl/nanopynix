@@ -19,8 +19,10 @@ from nanopynix.models import (
     Derivation,
     FlakeRef,
     Input,
+    JsonValue,
     LockedFlake,
     MissingInfo,
+    NixType,
     PathInfo,
     StorePath,
     ValueHandle,
@@ -306,7 +308,7 @@ class HasAttr(EvalRequest[bool]):
     name: str = RpcArg(1)
 
 
-class TypeName(EvalRequest[str]):
+class TypeName(EvalRequest[NixType]):
     method: ClassVar[str] = "type_name"
     handle: int = RpcArg(0)
 
@@ -314,7 +316,7 @@ class TypeName(EvalRequest[str]):
 class Call(EvalRequest[ValueHandle]):
     method: ClassVar[str] = "call"
     handle: int = RpcArg(0)
-    args: list[Any] = RpcArg(1)
+    args: list[JsonValue] = RpcArg(1)
 
 
 class LockFlake(EvalRequest[LockedFlake]):

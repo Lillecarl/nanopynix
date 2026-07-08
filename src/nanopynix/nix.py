@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
 from nanopynix._pool import _WorkerManager
@@ -87,7 +87,7 @@ class Session:
         config: dict[str, str] | None = None,
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
-        primops: list[PrimOpSpec | dict] | None = None,
+        primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
     ) -> None:
         if config is not None and settings is not None:
             raise TypeError("Use either config= or settings=, not both")

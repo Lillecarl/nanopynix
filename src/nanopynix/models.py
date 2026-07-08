@@ -7,12 +7,29 @@ facade boundary via ``FlakeRef::fromAttrs(attrs).to_string()`` and
 
 from __future__ import annotations
 
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 
 from pydantic import AliasChoices, BaseModel, computed_field, Field, field_validator, model_validator
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+
+
+class NixType(StrEnum):
+    """Nix value types exposed by eval RPC."""
+
+    THUNK = "thunk"
+    INT = "int"
+    FLOAT = "float"
+    BOOL = "bool"
+    STRING = "string"
+    PATH = "path"
+    NULL = "null"
+    ATTRS = "attrs"
+    LIST = "list"
+    FUNCTION = "function"
+    EXTERNAL = "external"
+    UNKNOWN = "unknown"
 
 
 def _parse_store_path_string(value: str) -> dict[str, str]:
@@ -128,7 +145,7 @@ class ValueHandle(BaseModel):
     """Opaque eval value handle exported by the worker."""
 
     handle: int
-    type: str
+    type: NixType
 
 
 class PrimOpSpec(BaseModel):

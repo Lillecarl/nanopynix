@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from nanopynix import Session, yaml_primops
+from nanopynix import NixType, Session, ValueProxy, yaml_primops
 
 pytestmark = pytest.mark.asyncio
 
@@ -31,10 +31,10 @@ async def test_eval_attr_navigation(tmp_path):
         async with nix.eval() as session:
             root = await session.eval_file(str(nix_file))
             inner = root.attr("inner")
-            assert await inner.type() == "attrs"
+            assert await inner.get_type() == NixType.ATTRS
             x = inner.attr("x")
-            assert await x.type() == "int"
-            assert await x.force() == 42
+            assert await x.get_type() == NixType.INT
+            assert await x.force_as(NixType.INT) == 42
 
 
 async def test_eval_list(tmp_path):
@@ -48,7 +48,7 @@ async def test_eval_list(tmp_path):
             assert root.type_name == "list"
             assert await root.list_length() == 3
             first = root.list_get(0)
-            assert await first.type() == "int"
+            assert await first.type() == NixType.INT
             assert await first.force() == 1
 
 
@@ -146,8 +146,50 @@ async def test_eval_call_function():
     async with Session() as nix:
         async with nix.eval() as session:
             fn = await session.eval_string("x: x + 1")
+            assert await fn.force_as(NixType.FUNCTION) is fn
             result = await fn.call(41)
             assert await result.force() == 42
+
+
+async def test_eval_callable_function_proxy():
+    """ValueProxy is directly callable when it contains a Nix function."""
+    async with Session() as nix:
+        async with nix.eval() as session:
+            fn = await session.eval_string("x: x.name")
+            result = await fn({"name": "demo"})
+            assert await result.force_as(NixType.STRING) == "demo"
+
+
+async def test_eval_call_non_function_raises():
+    """Calling a non-function checks the remote type before issuing call RPC."""
+    async with Session() as nix:
+        async with nix.eval() as session:
+            value = await session.eval_string("42")
+            with pytest.raises(TypeError, match="expected function"):
+                await value(1)
+
+
+async def test_force_deep_preserves_nested_functions():
+    """force_deep recursively forces data but leaves functions callable."""
+    async with Session() as nix:
+        async with nix.eval() as session:
+            root = await session.eval_string("{ x = 1; f = y: y + 2; nested.g = z: z.name; }")
+            result = await root.force_deep()
+
+            assert isinstance(result, dict)
+            assert result["x"] == 1
+            f = result["f"]
+            nested = result["nested"]
+            assert isinstance(f, ValueProxy)
+            assert isinstance(nested, dict)
+            g = nested["g"]
+            assert isinstance(g, ValueProxy)
+
+            f_result = await f(40)
+            assert await f_result.force_as(NixType.INT) == 42
+
+            g_result = await g({"name": "deep"})
+            assert await g_result.force_as(NixType.STRING) == "deep"
 
 
 async def test_worker_yaml_primops():
@@ -166,7 +208,7 @@ async def test_worker_yaml_primops():
             rendered = await session.eval_string(
                 'builtins.toYAML { apiVersion = "v1"; kind = "ConfigMap"; metadata.name = "demo"; }'
             )
-            text = await rendered.force()
+            text = await rendered.force_as(NixType.STRING)
             assert "apiVersion: v1" in text
             assert "kind: ConfigMap" in text
             assert "name: demo" in text
