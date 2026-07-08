@@ -172,6 +172,14 @@ async def test_worker_yaml_primops():
             assert "name: demo" in text
 
 
+async def test_worker_to_yaml_rejects_functions():
+    """toYAML is JSON-compatible data only; nested functions must not stringify."""
+    async with Session(primops=yaml_primops()) as nix:
+        async with nix.eval() as session:
+            with pytest.raises(Exception, match="non JSON-compatible|Python primop"):
+                await session.eval_string("builtins.toYAML { f = x: x; }")
+
+
 async def test_eval_concurrent_sessions(tmp_path):
     """Two concurrent eval sessions — each in its own Session."""
     f1 = tmp_path / "a.nix"

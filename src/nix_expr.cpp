@@ -333,7 +333,10 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v) {
             }
             return dict;
         }
-        default: return nb::str(("<nix:" + std::string(showType(v->type())) + ">").c_str());
+        default:
+            state.error<nix::TypeError>(
+                "Python primop argument contains non JSON-compatible Nix value of type '%s'",
+                showType(v->type())).debugThrow();
     }
 }
 
@@ -347,6 +350,9 @@ static void python_to_value(nix::EvalState &state, nb::object obj, nix::Value &v
         v.mkInt(nix::NixInt{nb::cast<int64_t>(obj)});
     } else if (nb::isinstance<nb::float_>(obj)) {
         v.mkFloat(nb::cast<double>(obj));
+    } else if (nb::isinstance<nb::str>(obj)) {
+        auto s = nb::cast<std::string>(obj);
+        v.mkString(s, state.mem);
     } else if (nb::isinstance<nb::list>(obj)) {
         auto pyList = nb::cast<nb::list>(obj);
         auto builder = state.buildList(pyList.size());
@@ -368,8 +374,8 @@ static void python_to_value(nix::EvalState &state, nb::object obj, nix::Value &v
         }
         v.mkAttrs(bindings);
     } else {
-        auto s = nb::cast<std::string>(nb::str(obj));
-        v.mkString(s, state.mem);
+        state.error<nix::TypeError>(
+            "Python primop returned a non JSON-compatible Python value").debugThrow();
     }
 }
 

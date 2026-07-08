@@ -11,6 +11,9 @@ from enum import IntEnum
 
 from pydantic import AliasChoices, BaseModel, computed_field, Field, field_validator, model_validator
 
+type JsonScalar = str | int | float | bool | None
+type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+
 
 def _parse_store_path_string(value: str) -> dict[str, str]:
     basename = value.rstrip("/").rsplit("/", 1)[-1]
