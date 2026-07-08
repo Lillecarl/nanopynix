@@ -7,21 +7,15 @@ a ``_session_id`` that ``Eval`` checks at runtime.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, TypeAdapter
-
-from nanopynix._rpc import identity, manager_call
+from nanopynix import _protocol as rpc
 from nanopynix.models import BuildResult, Derivation, Input, MissingInfo, PathInfo, StorePath
 
 import nanopynix_store  # BuildMode enum
 
 if TYPE_CHECKING:
     from nanopynix._pool import _WorkerManager
-
-_StorePathList = TypeAdapter(list[StorePath])
-_BuildResultList = TypeAdapter(list[BuildResult])
-M = TypeVar("M", bound=BaseModel)
 
 
 def _to_str(path: StorePath | str) -> str:
@@ -34,8 +28,8 @@ def _to_strs(paths: list[StorePath | str]) -> list[str]:
     return [p.to_string if isinstance(p, StorePath) else p for p in paths]
 
 
-def _model_adapter(model: type[M]) -> Callable[[Any], M]:
-    return model.model_validate
+def _build_mode_value(build_mode: nanopynix_store.BuildMode | int) -> int:
+    return build_mode if isinstance(build_mode, int) else build_mode.value
 
 
 class StoreHandle:
@@ -84,49 +78,39 @@ class StoreHandle:
 
     async def get_uri(self) -> str:
         self._check_active()
-        return await manager_call(self._pool, "store", "get_uri", [], str)
+        return await self._pool.request(rpc.GetUri())
 
     async def get_store_dir(self) -> str:
         self._check_active()
-        return await manager_call(self._pool, "store", "get_store_dir", [], str)
+        return await self._pool.request(rpc.GetStoreDir())
 
     # ── StorePath parsing ─────────────────────────────────────────
 
     async def parse_store_path(self, path: str) -> StorePath:
         self._check_active()
-        return await manager_call(
-            self._pool, "store", "parse_store_path", [path], _model_adapter(StorePath)
-        )
+        return await self._pool.request(rpc.ParseStorePath(path=path))
 
     async def is_valid_path(self, path: StorePath | str) -> bool:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(self._pool, "store", "is_valid_path", [s], bool)
+        return await self._pool.request(rpc.IsValidPath(path=s))
 
     async def follow_links_to_store_path(self, path: str) -> StorePath:
         self._check_active()
-        return await manager_call(
-            self._pool, "store", "follow_links_to_store_path", [path], _model_adapter(StorePath)
-        )
+        return await self._pool.request(rpc.FollowLinksToStorePath(path=path))
 
     # ── Path info ─────────────────────────────────────────────────
 
     async def query_path_info(self, path: StorePath | str) -> PathInfo:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(
-            self._pool, "store", "query_path_info", [s], _model_adapter(PathInfo)
-        )
+        return await self._pool.request(rpc.QueryPathInfo(path=s))
 
     async def query_path_from_hash_part(
         self, hash_part: str
     ) -> StorePath | None:
         self._check_active()
-
-        def adapt(value):
-            return None if value is None else StorePath.model_validate(value)
-
-        return await manager_call(self._pool, "store", "query_path_from_hash_part", [hash_part], adapt)
+        return await self._pool.request(rpc.QueryPathFromHashPart(hash_part=hash_part))
 
     # ── Closures ──────────────────────────────────────────────────
 
@@ -139,12 +123,13 @@ class StoreHandle:
     ) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(
-            self._pool,
-            "store",
-            "compute_fs_closure",
-            [s, flip, include_outputs, include_derivers],
-            _StorePathList.validate_python,
+        return await self._pool.request(
+            rpc.ComputeFsClosure(
+                path=s,
+                flip_direction=flip,
+                include_outputs=include_outputs,
+                include_derivers=include_derivers,
+            )
         )
 
     async def query_missing(
@@ -152,9 +137,7 @@ class StoreHandle:
     ) -> MissingInfo:
         self._check_active()
         strs = _to_strs(paths)
-        return await manager_call(
-            self._pool, "store", "query_missing", [strs], _model_adapter(MissingInfo)
-        )
+        return await self._pool.request(rpc.QueryMissing(paths=strs))
 
     # ── Derivations ───────────────────────────────────────────────
 
@@ -163,44 +146,34 @@ class StoreHandle:
     ) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(
-            self._pool, "store", "query_derivation_outputs", [s], _StorePathList.validate_python
-        )
+        return await self._pool.request(rpc.QueryDerivationOutputs(path=s))
 
     async def query_valid_derivers(
         self, path: StorePath | str
     ) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(
-            self._pool, "store", "query_valid_derivers", [s], _StorePathList.validate_python
-        )
+        return await self._pool.request(rpc.QueryValidDerivers(path=s))
 
     # ── Bulk queries ──────────────────────────────────────────────
 
     async def query_all_valid_paths(self) -> list[StorePath]:
         self._check_active()
-        return await manager_call(
-            self._pool, "store", "query_all_valid_paths", [], _StorePathList.validate_python
-        )
+        return await self._pool.request(rpc.QueryAllValidPaths())
 
     async def query_referrers(
         self, path: StorePath | str
     ) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(
-            self._pool, "store", "query_referrers", [s], _StorePathList.validate_python
-        )
+        return await self._pool.request(rpc.QueryReferrers(path=s))
 
     async def query_substitutable_paths(
         self, paths: list[StorePath | str]
     ) -> list[StorePath]:
         self._check_active()
         strs = _to_strs(paths)
-        return await manager_call(
-            self._pool, "store", "query_substitutable_paths", [strs], _StorePathList.validate_python
-        )
+        return await self._pool.request(rpc.QuerySubstitutablePaths(paths=strs))
 
     # ── Build ─────────────────────────────────────────────────────
 
@@ -210,9 +183,7 @@ class StoreHandle:
     ) -> list[BuildResult]:
         self._check_active()
         strs = _to_strs(paths)
-        return await manager_call(
-            self._pool, "store", "build_paths_with_results", [strs], _BuildResultList.validate_python
-        )
+        return await self._pool.request(rpc.BuildPathsWithResults(paths=strs))
 
     async def read_derivation(
         self,
@@ -220,9 +191,7 @@ class StoreHandle:
     ) -> Derivation:
         self._check_active()
         s = _to_str(drv_path)
-        return await manager_call(
-            self._pool, "store", "read_derivation", [s], _model_adapter(Derivation)
-        )
+        return await self._pool.request(rpc.ReadDerivation(path=s))
 
     async def build_derivation(
         self,
@@ -231,31 +200,27 @@ class StoreHandle:
     ) -> BuildResult:
         self._check_active()
         s = _to_str(drv_path)
-        mode = int(cast(Any, build_mode))
-        return await manager_call(
-            self._pool, "store", "build_derivation", [s, mode], _model_adapter(BuildResult)
-        )
+        mode = _build_mode_value(build_mode)
+        return await self._pool.request(rpc.BuildDerivation(path=s, build_mode=mode))
 
     # ── GC ────────────────────────────────────────────────────────
 
     async def add_temp_root(self, path: StorePath | str) -> None:
         self._check_active()
         s = _to_str(path)
-        return await manager_call(self._pool, "store", "add_temp_root", [s], identity)
+        return await self._pool.request(rpc.AddTempRoot(path=s))
 
     # ── Fetchers ──────────────────────────────────────────────────
 
     async def fetch_from_url(self, url: str) -> Input:
         self._check_active()
-        return await manager_call(self._pool, "store", "fetch_from_url", [url], _model_adapter(Input))
+        return await self._pool.request(rpc.FetchFromUrl(url=url))
 
     async def fetch_from_attrs(
         self, attrs: dict[str, str | int | bool]
     ) -> Input:
         self._check_active()
-        return await manager_call(
-            self._pool, "store", "fetch_from_attrs", [attrs], _model_adapter(Input)
-        )
+        return await self._pool.request(rpc.FetchFromAttrs(attrs=attrs))
 
 
 # Backward-compatible alias

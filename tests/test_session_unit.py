@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanopynix import _protocol as rpc
 from nanopynix import NixError
 from nanopynix._pool import _ActiveCall, _WorkerManager
 from nanopynix._session import EvalSession, ValueProxy
@@ -36,6 +37,12 @@ def _mock_reserved_worker():
     rw = MagicMock()
     rw.send_recv = AsyncMock()
     rw.release = AsyncMock()
+
+    async def request(req: rpc.WorkerRequest, timeout=None):
+        result = await rw.send_recv(req.namespace, req.method, req.to_args(), timeout=timeout)
+        return type(req).parse_response(result)
+
+    rw.request = AsyncMock(side_effect=request)
     return rw
 
 
@@ -190,6 +197,12 @@ class TestValueProxyLifecycle:
     def _worker(self):
         w = MagicMock()
         w._send_recv = AsyncMock()
+
+        async def request(req: rpc.WorkerRequest, timeout=None):
+            result = await w._send_recv(req.namespace, req.method, req.to_args(), timeout=timeout)
+            return type(req).parse_response(result)
+
+        w.request = AsyncMock(side_effect=request)
         return w
 
     def test_handle_and_type_are_cached(self):
@@ -310,6 +323,12 @@ class TestLazyChildProxy:
     def _worker(self):
         w = MagicMock()
         w._send_recv = AsyncMock()
+
+        async def request(req: rpc.WorkerRequest, timeout=None):
+            result = await w._send_recv(req.namespace, req.method, req.to_args(), timeout=timeout)
+            return type(req).parse_response(result)
+
+        w.request = AsyncMock(side_effect=request)
         return w
 
     async def test_attrs_getitem_force_calls_attr(self):

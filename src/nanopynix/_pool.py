@@ -20,12 +20,14 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
+from nanopynix import _protocol as rpc
 from nanopynix.exceptions import from_response
 from nanopynix.models import PrimOpSpec
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
@@ -125,11 +127,23 @@ class ReservedWorker:
         fn: str,
         args: list,
         timeout: float | None = None,
-    ):
+    ) -> Any:
         """Send an RPC call on the reserved worker and await the response."""
         if self._released:
             raise RuntimeError("ReservedWorker has been released")
         return await self._manager._send_recv(module, fn, args, timeout=timeout)
+
+    async def request(self, request: rpc.WorkerRequest[T], timeout: float | None = None) -> T:
+        """Send a typed RPC request on the reserved worker."""
+        if self._released:
+            raise RuntimeError("ReservedWorker has been released")
+        result = await self._manager._send_recv(
+            request.namespace,
+            request.method,
+            request.to_args(),
+            timeout=timeout,
+        )
+        return type(request).parse_response(result)
 
     async def release(self) -> None:
         """Return the worker to the manager.  Idempotent — safe to call twice."""
@@ -343,7 +357,7 @@ class _WorkerManager:
         fn: str,
         args: list | dict,
         timeout: float | None = None,
-    ):
+    ) -> Any:
         """Send a call and wait for the matching response.
 
         The timeout is an *idle* timeout: it resets whenever the worker
@@ -434,7 +448,7 @@ class _WorkerManager:
         args: list,
         *,
         timeout: float | None = None,
-    ):
+    ) -> Any:
         """Send an RPC call on the worker and return the response.
 
         Acquires the worker lock — only one call in-flight at a time.
@@ -455,6 +469,16 @@ class _WorkerManager:
 
         async with self._available:
             return await self._send_recv(module, fn, args, timeout=timeout)
+
+    async def request(self, request: rpc.WorkerRequest[T], *, timeout: float | None = None) -> T:
+        """Send a typed RPC request on the worker."""
+        result = await self.call(
+            request.namespace,
+            request.method,
+            request.to_args(),
+            timeout=timeout,
+        )
+        return type(request).parse_response(result)
 
     async def reserve(self, timeout: float | None = None) -> ReservedWorker:
         """Acquire an exclusive worker lease for an EvalSession."""

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
+from nanopynix import _protocol as rpc
 from nanopynix.models import BuildResult, Derivation, MissingInfo, PathInfo, StorePath
 from nanopynix.store import StoreHandle as Store
 
@@ -19,6 +20,15 @@ pytestmark = pytest.mark.asyncio
 def pool():
     p = MagicMock()
     p.call = AsyncMock()
+
+    async def request(req: rpc.WorkerRequest, timeout=None):
+        if timeout is None:
+            result = await p.call(req.namespace, req.method, req.to_args())
+        else:
+            result = await p.call(req.namespace, req.method, req.to_args(), timeout=timeout)
+        return type(req).parse_response(result)
+
+    p.request = AsyncMock(side_effect=request)
     return p
 
 

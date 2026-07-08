@@ -27,6 +27,7 @@ from nanopynix.models import (
 )
 
 T = TypeVar("T")
+_TypeVarType = type(T)
 
 ResponseAdapter = Callable[[Any], Any]
 
@@ -66,14 +67,27 @@ class WorkerRequest(BaseModel, Generic[T]):
     namespace: ClassVar[str]
     method: ClassVar[str]
     response_adapter: ClassVar[ResponseAdapter] = _identity
+    response_type_adapter: ClassVar[TypeAdapter[Any]] = TypeAdapter(Any)
     _registry: ClassVar[dict[tuple[str, str], type[WorkerRequest[Any]]]] = {}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        response_type = _response_type_arg(cls)
+        if response_type is not None:
+            cls.response_type_adapter = TypeAdapter(response_type)
         namespace = getattr(cls, "namespace", None)
         method = getattr(cls, "method", None)
         if namespace is not None and method is not None:
             cls._registry[(namespace, method)] = cls
+
+    def to_args(self) -> list[Any]:
+        values: list[tuple[int, Any]] = []
+        for name, field in type(self).model_fields.items():
+            pos = _rpc_pos(field)
+            if pos is None:
+                continue
+            values.append((pos, getattr(self, name)))
+        return [value for _, value in sorted(values, key=lambda item: item[0])]
 
     @classmethod
     def from_args(cls, args: list[Any]) -> Self:
@@ -89,6 +103,25 @@ class WorkerRequest(BaseModel, Generic[T]):
     @classmethod
     def dump_response(cls, value: Any) -> Any:
         return cls.response_adapter(value)
+
+    @classmethod
+    def parse_response(cls, value: Any) -> T:
+        return cls.response_type_adapter.validate_python(value)
+
+
+def _response_type_arg(cls: type[object]) -> object | None:
+    for base in cls.__mro__:
+        metadata = getattr(base, "__pydantic_generic_metadata__", None)
+        if not isinstance(metadata, dict):
+            continue
+        args = metadata.get("args", ())
+        if len(args) != 1:
+            continue
+        response_type = args[0]
+        if isinstance(response_type, _TypeVarType):
+            continue
+        return response_type
+    return None
 
 
 def _rpc_pos(field: FieldInfo) -> int | None:
@@ -287,13 +320,13 @@ class Call(EvalRequest[ValueHandle]):
 class LockFlake(EvalRequest[LockedFlake]):
     method: ClassVar[str] = "lock_flake"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(LockedFlake)
-    ref: str = RpcArg(0)
+    ref: str | dict[str, Any] = RpcArg(0)
 
 
 class GetFlake(EvalRequest[FlakeRef]):
     method: ClassVar[str] = "get_flake"
     response_adapter: ClassVar[ResponseAdapter] = _already_model_dump
-    ref: str = RpcArg(0)
+    ref: str | dict[str, Any] = RpcArg(0)
 
 
 class Release(EvalRequest[None]):
