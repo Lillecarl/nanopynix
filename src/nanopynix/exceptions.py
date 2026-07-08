@@ -17,8 +17,6 @@ Usage::
 from __future__ import annotations
 
 import re
-from typing import Any
-
 
 # ════════════════════════════════════════════════════════════════════
 # Exception hierarchy
@@ -156,17 +154,17 @@ def from_response(error_type: str, msg: str, *, raw: str = "", info: dict | None
 
 
 __all__ = [
-    "NixError",
-    "StoreError",
-    "EvalError",
-    "TypeError_",
     "AssertionError_",
-    "UndefinedVarError",
-    "ThrownError",
+    "EvalError",
     "InfiniteRecursionError",
-    "RestrictedPathError",
     "MissingArgumentError",
+    "NixError",
     "ParseError",
+    "RestrictedPathError",
+    "StoreError",
+    "ThrownError",
+    "TypeError_",
+    "UndefinedVarError",
     "UsageError",
     "from_response",
 ]

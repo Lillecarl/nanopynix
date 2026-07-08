@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, overload
 
@@ -10,8 +9,9 @@ from nanopynix import _protocol as rpc
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedFlake, NixType
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from nanopynix._pool import ReservedWorker, _WorkerManager
-    from nanopynix.store import StoreHandle
 
     type _EvalWorker = ReservedWorker | _WorkerManager
 
@@ -58,11 +58,11 @@ class ValueProxy:
     """
 
     __slots__ = (
-        "_worker",
-        "_state",
-        "_timeout",
         "_active",
         "_released",
+        "_state",
+        "_timeout",
+        "_worker",
     )
 
     def __init__(
@@ -327,7 +327,7 @@ class ValueAttrs:
     support early release of the underlying handle.
     """
 
-    __slots__ = ("_worker", "_handle", "_keys", "_timeout", "_active", "_released")
+    __slots__ = ("_active", "_handle", "_keys", "_released", "_timeout", "_worker")
 
     def __init__(
         self,
@@ -398,7 +398,7 @@ class ValueList:
     support early release of the underlying handle.
     """
 
-    __slots__ = ("_worker", "_handle", "_length", "_timeout", "_active", "_released")
+    __slots__ = ("_active", "_handle", "_length", "_released", "_timeout", "_worker")
 
     def __init__(
         self,
@@ -468,7 +468,7 @@ class EvalSession:
     invalid after ``__aexit__`` — their RPC methods raise ``RuntimeError``.
     """
 
-    __slots__ = ("_manager", "_rw", "_timeout", "_active")
+    __slots__ = ("_active", "_manager", "_rw", "_timeout")
 
     def __init__(self, manager: _WorkerManager, timeout: float | None = None) -> None:
         self._manager = manager

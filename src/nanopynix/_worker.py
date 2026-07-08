@@ -13,9 +13,8 @@ import json
 import os
 import sys
 import traceback
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import nanopynix_expr
 import nanopynix_fetchers
@@ -27,12 +26,21 @@ from pydantic import TypeAdapter
 import nanopynix._protocol as rpc
 from nanopynix._extract import (
     flake_ref_attrs as _flake_ref_attrs,
+)
+from nanopynix._extract import (
     input_attrs as _input_attrs,
+)
+from nanopynix._extract import (
     locked_flake as _locked_flake,
+)
+from nanopynix._extract import (
     store_path as _sp_to_dict,
 )
 from nanopynix.logging import LogCollector
 from nanopynix.models import FlakeRef, Input, PrimOpSpec, StorePath, ValueHandle
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
 
 _StorePathList = TypeAdapter(list[StorePath])
 ReqT = TypeVar("ReqT", bound=rpc.WorkerRequest[Any])
@@ -68,7 +76,7 @@ def _notification(method: str, params: dict) -> dict:
 
 
 @dataclass(frozen=True)
-class Endpoint(Generic[ReqT]):
+class Endpoint[ReqT: rpc.WorkerRequest[Any]]:
     """Worker RPC endpoint bound to a typed request model."""
 
     request: type[ReqT]
@@ -180,10 +188,7 @@ def main() -> None:
         nanopynix_expr.init_libexpr()
         _register_primops(primops)
 
-        if store_uri == "auto":
-            store = nanopynix_store.open_store()
-        else:
-            store = nanopynix_store.open_store(store_uri)
+        store = nanopynix_store.open_store() if store_uri == "auto" else nanopynix_store.open_store(store_uri)
 
         eval_store = None
         if eval_store_uri != store_uri:
@@ -381,7 +386,7 @@ def _store_dispatch(store, eval_store):
 # ── Eval dispatch ──────────────────────────────────────────────────────
 
 
-_es: "nanopynix_expr.EvalState | None" = None
+_es: nanopynix_expr.EvalState | None = None
 
 
 def _get_es(store):
@@ -433,7 +438,7 @@ def _eval_dispatch(store):
 
     def _export(pyv):
         es = _get_es(store)
-        h = cast(Any, es)._export_pyvalue(pyv)
+        h = cast("Any", es)._export_pyvalue(pyv)
         return ValueHandle(handle=h, type=pyv.type_name()).model_dump(mode="json")
 
     def _flake_ref(ref):

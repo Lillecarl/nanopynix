@@ -14,17 +14,20 @@ for the duration of an ``EvalSession``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import json
 import logging
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
-from nanopynix import _protocol as rpc
 from nanopynix.exceptions import from_response
-from nanopynix.models import PrimOpSpec
+
+if TYPE_CHECKING:
+    from nanopynix import _protocol as rpc
+    from nanopynix.models import PrimOpSpec
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -75,19 +78,15 @@ class _LogBus:
         return _Subscription(self, callback)
 
     def _unsubscribe(self, sub: _Subscription) -> None:
-        try:
+        with contextlib.suppress(ValueError):
             self._subscribers.remove(sub._callback)
-        except ValueError:
-            pass
 
     def emit(self, event: object) -> None:
         if not self._subscribers:
             return
         for cb in self._subscribers:
-            try:
+            with contextlib.suppress(Exception):
                 cb(event)
-            except Exception:
-                pass
 
 
 class _Subscription:
@@ -234,11 +233,9 @@ class _WorkerManager:
     async def close(self) -> None:
         """Shut down the worker."""
         if self._writer is not None:
-            try:
-                # Send a JSON-RPC notification that signals shutdown
+            # Send a JSON-RPC notification that signals shutdown
+            with contextlib.suppress(Exception):
                 self._write_line({"jsonrpc": "2.0", "method": "shutdown"})
-            except Exception:
-                pass
 
         if self._proc is not None:
             try:
@@ -248,19 +245,19 @@ class _WorkerManager:
                 pass
             try:
                 await asyncio.wait_for(self._proc.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._proc.kill()
                 await self._proc.wait()
 
         if self._read_task is not None:
             try:
                 await asyncio.wait_for(self._read_task, timeout=2.0)
-            except (asyncio.TimeoutError, Exception):
+            except (TimeoutError, Exception):
                 self._read_task.cancel()
         if self._stderr_task is not None:
             try:
                 await asyncio.wait_for(self._stderr_task, timeout=2.0)
-            except (asyncio.TimeoutError, Exception):
+            except (TimeoutError, Exception):
                 self._stderr_task.cancel()
 
         self._log_done.set()
@@ -270,7 +267,8 @@ class _WorkerManager:
 
     async def _read_stderr(self) -> None:
         """Read worker stderr for debugging."""
-        assert self._proc is not None and self._proc.stderr is not None
+        assert self._proc is not None
+        assert self._proc.stderr is not None
         while True:
             line = await self._proc.stderr.readline()
             if not line:
@@ -300,7 +298,6 @@ class _WorkerManager:
                     event = msg.get("params", msg)
                     self._fail_active_call_from_event(event)
                     self._log_bus.emit(event)
-                # else: invalid, ignore
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -342,7 +339,7 @@ class _WorkerManager:
                 raise WorkerBusy(f"worker is busy after waiting {timeout}s")
             try:
                 await asyncio.wait_for(asyncio.shield(active.future), timeout=remaining)
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
             except Exception:
                 # The previous call failed; let its owner clear the active slot.
@@ -411,7 +408,7 @@ class _WorkerManager:
                     async with asyncio.timeout(min(remaining, 1.0)):
                         msg = await fut
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     if self._last_activity > last_seen:
                         last_seen = self._last_activity
                     continue
@@ -460,7 +457,7 @@ class _WorkerManager:
                 raise WorkerBusy("worker is busy")
             try:
                 await asyncio.wait_for(self._available.acquire(), timeout=timeout)
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
             try:
                 return await self._send_recv(module, fn, args, timeout=timeout)
@@ -489,7 +486,7 @@ class _WorkerManager:
                 raise WorkerBusy("worker is busy")
             try:
                 await asyncio.wait_for(self._available.acquire(), timeout=timeout)
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
         else:
             await self._available.acquire()

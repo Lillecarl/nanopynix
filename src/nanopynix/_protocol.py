@@ -8,10 +8,9 @@ functions so stateful Nix behavior stays easy to find.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, ClassVar, Generic, Self, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
-from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
 from nanopynix.models import (
@@ -27,6 +26,9 @@ from nanopynix.models import (
     StorePath,
     ValueHandle,
 )
+
+if TYPE_CHECKING:
+    from pydantic.fields import FieldInfo
 
 T = TypeVar("T")
 _TypeVarType = type(T)
@@ -61,7 +63,7 @@ def RpcArg(index: int, default: Any = PydanticUndefined) -> Any:
     return Field(default, json_schema_extra=extra)
 
 
-class WorkerRequest(BaseModel, Generic[T]):
+class WorkerRequest[T](BaseModel):
     """Base class for positional worker RPC requests."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
