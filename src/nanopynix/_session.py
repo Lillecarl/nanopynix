@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 from nanopynix import _protocol as rpc
+from nanopynix.exceptions import (
+    EvalSessionClosedError,
+    ForeignValueError,
+    UnresolvedValueError,
+    ValueReleasedError,
+    WrongNixTypeError,
+)
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedFlake, NixType
 from nanopynix.models import DeepAttrs, DeepList, DeepScalar, DeepValueWire, JsonCallArg, RemoteCallArg, RemoteValueRef
 
@@ -52,7 +59,7 @@ class ValueProxy:
     """Proxy for a Nix Value exported on the remote worker.
 
     Lifetime is tied to the ``EvalSession`` that created it — all RPC
-    methods raise ``RuntimeError`` after the session exits.
+    methods raise ``EvalSessionClosedError`` after the session exits.
 
     Supports ``async with`` for early release.
     """
@@ -111,14 +118,14 @@ class ValueProxy:
 
     def _check_active(self) -> None:
         if self._active is not None and not self._active[0]:
-            raise RuntimeError("ValueProxy is invalid — the EvalSession has been closed")
+            raise EvalSessionClosedError("ValueProxy is invalid — the EvalSession has been closed")
         if self._released:
-            raise RuntimeError("ValueProxy has been released")
+            raise ValueReleasedError("ValueProxy has been released")
 
     @property
     def handle(self) -> int:
         if not isinstance(self._state, _ResolvedValue):
-            raise RuntimeError("ValueProxy has not been resolved yet")
+            raise UnresolvedValueError("ValueProxy has not been resolved yet")
         return self._state.handle
 
     @property
@@ -174,7 +181,7 @@ class ValueProxy:
     async def _encode_call_arg(self, value: NixArg, *, timeout: float | None) -> JsonCallArg | RemoteCallArg:
         if isinstance(value, ValueProxy):
             if value._worker is not self._worker:
-                raise ValueError("cannot pass a ValueProxy from another EvalSession")
+                raise ForeignValueError("cannot pass a ValueProxy from another EvalSession")
             await value._ensure_resolved(timeout=timeout)
             return RemoteCallArg(handle=value.handle)
         return JsonCallArg(value=value)
@@ -229,7 +236,7 @@ class ValueProxy:
     async def force_as(self, typ: NixType, *, timeout: float | None = None) -> NixValue:
         actual = await self._ensure_type(timeout=timeout)
         if actual != typ:
-            raise TypeError(f"Nix value is {actual.value}, expected {typ.value}")
+            raise WrongNixTypeError(expected=typ, actual=actual)
         return await self.force(timeout=timeout)
 
     async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
@@ -271,7 +278,7 @@ class ValueProxy:
         await self._ensure_resolved(timeout=timeout)
         actual = await self._ensure_type(timeout=timeout)
         if actual != NixType.FUNCTION:
-            raise TypeError(f"Nix value is {actual.value}, expected function")
+            raise WrongNixTypeError(expected=NixType.FUNCTION, actual=actual)
         t = self._resolve_timeout(timeout)
         call_args = [await self._encode_call_arg(arg, timeout=timeout) for arg in args]
         result = await self._worker.request(
@@ -344,9 +351,9 @@ class ValueAttrs:
 
     def _check_active(self) -> None:
         if self._active is not None and not self._active[0]:
-            raise RuntimeError("ValueAttrs is invalid — the EvalSession has been closed")
+            raise EvalSessionClosedError("ValueAttrs is invalid — the EvalSession has been closed")
         if self._released:
-            raise RuntimeError("ValueAttrs has been released")
+            raise ValueReleasedError("ValueAttrs has been released")
 
     def keys(self) -> list[str]:
         return list(self._keys)
@@ -415,9 +422,9 @@ class ValueList:
 
     def _check_active(self) -> None:
         if self._active is not None and not self._active[0]:
-            raise RuntimeError("ValueList is invalid — the EvalSession has been closed")
+            raise EvalSessionClosedError("ValueList is invalid — the EvalSession has been closed")
         if self._released:
-            raise RuntimeError("ValueList has been released")
+            raise ValueReleasedError("ValueList has been released")
 
     def __len__(self) -> int:
         return self._length
@@ -457,7 +464,7 @@ class EvalSession:
     """Holds the worker exclusively for the duration of an eval session.
 
     All ``ValueProxy`` instances created through this session become
-    invalid after ``__aexit__`` — their RPC methods raise ``RuntimeError``.
+    invalid after ``__aexit__`` — their RPC methods raise ``EvalSessionClosedError``.
     """
 
     __slots__ = ("_active", "_manager", "_rw", "_timeout")
@@ -492,7 +499,7 @@ class EvalSession:
 
     def _check_rw(self) -> None:
         if self._rw is None:
-            raise RuntimeError("EvalSession not entered — use 'async with session.eval() as eval_:'")
+            raise EvalSessionClosedError("EvalSession not entered — use 'async with session.eval() as eval_:'")
 
     def _reserved_worker(self) -> ReservedWorker:
         self._check_rw()

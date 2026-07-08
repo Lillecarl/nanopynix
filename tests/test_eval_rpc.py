@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from nanopynix import NixType, Session, ValueProxy, yaml_primops
+from nanopynix import NixType, Session, ValueProxy, WrongNixTypeError, yaml_primops
 
 pytestmark = pytest.mark.asyncio
 
@@ -175,7 +175,7 @@ async def test_eval_call_non_function_raises():
     async with Session() as nix:
         async with nix.eval() as session:
             value = await session.string("42")
-            with pytest.raises(TypeError, match="expected function"):
+            with pytest.raises(WrongNixTypeError, match="expected function"):
                 await value(1)
 
 

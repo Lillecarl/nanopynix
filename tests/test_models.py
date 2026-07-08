@@ -13,6 +13,7 @@ from nanopynix.models import (
     LogEvent,
     MissingInfo,
     PathInfo,
+    ResultType,
     StorePath,
 )
 
@@ -77,6 +78,7 @@ class TestPathInfo:
             ultimate=True,
         )
         assert pi.path.name == "p"
+        assert pi.deriver is not None
         assert pi.deriver.name == "p.drv"
         assert len(pi.references) == 1
 
@@ -232,6 +234,7 @@ class TestLockedFlake:
             },
         )
         assert lf.description == "A test flake"
+        assert lf.inputs["nixpkgs"].attrs is not None
         assert lf.inputs["nixpkgs"].attrs["rev"] == "abc"
         assert lf.inputs["utils"].is_flake is False
 
@@ -248,6 +251,7 @@ class TestLockedFlake:
             }
         )
         assert isinstance(lf.inputs["nixpkgs"], LockedInput)
+        assert lf.inputs["nixpkgs"].attrs is not None
         assert lf.inputs["nixpkgs"].attrs["rev"] == "abc"
 
 
@@ -272,10 +276,10 @@ class TestLogEvent:
         assert ev.args == []
 
     def test_with_result_type(self):
-        ev = LogEvent(request_id=5, action="result", args=[1, 107], result_type=107)
+        ev = LogEvent(request_id=5, action="result", args=[1, 107], result_type=ResultType.post_build_log_line)
         assert ev.request_id == 5
         assert ev.action == "result"
-        assert ev.result_type == 107
+        assert ev.result_type == ResultType.post_build_log_line
 
 
 class TestResultType:

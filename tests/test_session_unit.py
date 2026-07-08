@@ -11,7 +11,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanopynix import _protocol as rpc
-from nanopynix import NixError, NixType
+from nanopynix import (
+    EvalSessionClosedError,
+    ForeignValueError,
+    NixError,
+    NixType,
+    UnresolvedValueError,
+    ValueReleasedError,
+    WrongNixTypeError,
+)
 from nanopynix._pool import _ActiveCall, _WorkerManager
 from nanopynix._session import EvalSession, ValueProxy
 from nanopynix.models import LogEvent
@@ -106,13 +114,13 @@ class TestEvalSessionLifecycle:
     async def test_file_before_enter_raises(self):
         pool = _mock_pool()
         session = EvalSession(pool)
-        with pytest.raises(RuntimeError, match="not entered"):
+        with pytest.raises(EvalSessionClosedError, match="not entered"):
             await session.file("/some/path.nix")
 
     async def test_string_before_enter_raises(self):
         pool = _mock_pool()
         session = EvalSession(pool)
-        with pytest.raises(RuntimeError, match="not entered"):
+        with pytest.raises(EvalSessionClosedError, match="not entered"):
             await session.string("42")
 
     async def test_file_after_enter(self):
@@ -229,6 +237,17 @@ class TestValueProxyLifecycle:
         assert result == 99
         w._send_recv.assert_awaited_once_with("eval", "force", [1], timeout=None)
 
+    async def test_force_as_wrong_type_raises_typed_error(self):
+        w = self._worker()
+        vp = ValueProxy(w, 1, "string")
+
+        with pytest.raises(WrongNixTypeError) as exc:
+            await vp.force_as(NixType.INT)
+
+        assert exc.value.expected == "int"
+        assert exc.value.actual == "string"
+        w._send_recv.assert_not_awaited()
+
     async def test_call_json_arg_uses_explicit_wire_arg(self):
         w = self._worker()
         w._send_recv.return_value = {"handle": 3, "type": "int"}
@@ -265,6 +284,17 @@ class TestValueProxyLifecycle:
             {"timeout": None},
         )
 
+    async def test_call_non_function_raises_typed_error(self):
+        w = self._worker()
+        vp = ValueProxy(w, 1, "int")
+
+        with pytest.raises(WrongNixTypeError) as exc:
+            await vp()
+
+        assert exc.value.expected == "function"
+        assert exc.value.actual == "int"
+        w._send_recv.assert_not_awaited()
+
     async def test_call_value_proxy_arg_uses_remote_handle(self):
         w = self._worker()
         w._send_recv.return_value = {"handle": 3, "type": "int"}
@@ -280,6 +310,17 @@ class TestValueProxyLifecycle:
             [1, [{"kind": "remote_value", "handle": 2}]],
             timeout=None,
         )
+
+    async def test_call_foreign_value_proxy_raises_typed_error(self):
+        w = self._worker()
+        other = self._worker()
+        fn = ValueProxy(w, 1, "function")
+        arg = ValueProxy(other, 2, "attrs")
+
+        with pytest.raises(ForeignValueError, match="another EvalSession"):
+            await fn(arg)
+
+        w._send_recv.assert_not_awaited()
 
     async def test_attr_returns_new_proxy(self):
         w = self._worker()
@@ -361,7 +402,16 @@ class TestValueProxyLifecycle:
 
         # Session closed
         active[0] = False
-        with pytest.raises(RuntimeError, match="EvalSession has been closed"):
+        with pytest.raises(EvalSessionClosedError, match="EvalSession has been closed"):
+            await vp.force()
+
+    async def test_release_then_force_raises_typed_error(self):
+        w = self._worker()
+        w._send_recv.return_value = None
+        vp = ValueProxy(w, 1, "int")
+        await vp.release()
+
+        with pytest.raises(ValueReleasedError, match="has been released"):
             await vp.force()
 
     async def test_check_active_only_when_flag_provided(self):
@@ -438,7 +488,7 @@ class TestLazyChildProxy:
         cp = ValueProxy.child(w, 1, "name")
         w._send_recv.assert_not_called()
         # accessing a property doesn't trigger RPC either
-        with pytest.raises(RuntimeError, match="not been resolved"):
+        with pytest.raises(UnresolvedValueError, match="not been resolved"):
             _ = cp.handle
         w._send_recv.assert_not_called()
 
@@ -470,7 +520,7 @@ class TestLazyChildProxy:
         active = [False]
         cp = ValueProxy.child(w, 1, "name", _active=active)
 
-        with pytest.raises(RuntimeError, match="EvalSession has been closed"):
+        with pytest.raises(EvalSessionClosedError, match="EvalSession has been closed"):
             await cp.force()
 
     async def test_child_proxy_timeout_override(self):
