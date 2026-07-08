@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from nanopynix._rpc import reserved_call
-from nanopynix.models import ValueHandle
+from nanopynix import _protocol as rpc
+from nanopynix.models import FlakeRef, LockedFlake
 
 if TYPE_CHECKING:
     from nanopynix._pool import ReservedWorker, _WorkerManager
     from nanopynix.store import StoreHandle
+
+    type _EvalWorker = ReservedWorker | _WorkerManager
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -56,7 +58,7 @@ class ValueProxy:
 
     def __init__(
         self,
-        worker: _WorkerManager,
+        worker: _EvalWorker,
         handle: int | None,
         typ: str | None,
         timeout: float | None = None,
@@ -77,7 +79,7 @@ class ValueProxy:
     @classmethod
     def child(
         cls,
-        worker: _WorkerManager,
+        worker: _EvalWorker,
         parent: ValueProxy | int,
         selector: str | int,
         timeout: float | None = None,
@@ -126,20 +128,9 @@ class ValueProxy:
             parent_handle = lazy.parent
         t = self._resolve_timeout(timeout)
         if isinstance(lazy.selector, str):
-            result = await self._worker._send_recv(
-                "eval",
-                "attr",
-                [parent_handle, lazy.selector],
-                timeout=t,
-            )
+            handle = await self._worker.request(rpc.Attr(handle=parent_handle, name=lazy.selector), timeout=t)
         else:
-            result = await self._worker._send_recv(
-                "eval",
-                "list_get",
-                [parent_handle, lazy.selector],
-                timeout=t,
-            )
-        handle = ValueHandle.model_validate(result)
+            handle = await self._worker.request(rpc.ListGet(handle=parent_handle, index=lazy.selector), timeout=t)
         self._state = _ResolvedValue(handle=handle.handle, type_name=handle.type)
 
     # ── force ──────────────────────────────────────────────────────
@@ -169,25 +160,12 @@ class ValueProxy:
                 _active=self._active,
             )
         # scalar — delegate to worker
-        return cast(
-            NixValue,
-            await self._worker._send_recv(
-                "eval",
-                "force",
-                [self.handle],
-                timeout=self._resolve_timeout(timeout),
-            ),
-        )
+        return await self._worker.request(rpc.Force(handle=self.handle), timeout=self._resolve_timeout(timeout))
 
     async def force_deep(self, *, timeout: float | None = None) -> object:
         """Recursive force — returns plain Python dict/list/scalar."""
         await self._ensure_resolved(timeout=timeout)
-        return await self._worker._send_recv(
-            "eval",
-            "force_deep",
-            [self.handle],
-            timeout=self._resolve_timeout(timeout),
-        )
+        return await self._worker.request(rpc.ForceDeep(handle=self.handle), timeout=self._resolve_timeout(timeout))
 
     # ── navigation ─────────────────────────────────────────────────
 
@@ -205,63 +183,30 @@ class ValueProxy:
 
     async def list_length(self, *, timeout: float | None = None) -> int:
         await self._ensure_resolved(timeout=timeout)
-        return cast(
-            int,
-            await self._worker._send_recv(
-                "eval",
-                "list_length",
-                [self.handle],
-                timeout=self._resolve_timeout(timeout),
-            ),
-        )
+        return await self._worker.request(rpc.ListLength(handle=self.handle), timeout=self._resolve_timeout(timeout))
 
     async def attr_names(self, *, timeout: float | None = None) -> list[str]:
         await self._ensure_resolved(timeout=timeout)
-        return cast(
-            list[str],
-            await self._worker._send_recv(
-                "eval",
-                "attr_names",
-                [self.handle],
-                timeout=self._resolve_timeout(timeout),
-            ),
-        )
+        return await self._worker.request(rpc.AttrNames(handle=self.handle), timeout=self._resolve_timeout(timeout))
 
     async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         await self._ensure_resolved(timeout=timeout)
-        return cast(
-            bool,
-            await self._worker._send_recv(
-                "eval",
-                "has_attr",
-                [self.handle, name],
-                timeout=self._resolve_timeout(timeout),
-            ),
+        return await self._worker.request(
+            rpc.HasAttr(handle=self.handle, name=name),
+            timeout=self._resolve_timeout(timeout),
         )
 
     async def call(self, *args: object, timeout: float | None = None) -> ValueProxy:
         await self._ensure_resolved(timeout=timeout)
-        result = ValueHandle.model_validate(
-            await self._worker._send_recv(
-                "eval",
-                "call",
-                [self.handle, list(args)],
-                timeout=self._resolve_timeout(timeout),
-            )
+        result = await self._worker.request(
+            rpc.Call(handle=self.handle, args=list(args)),
+            timeout=self._resolve_timeout(timeout),
         )
         return ValueProxy(self._worker, result.handle, result.type, timeout=self._timeout, _active=self._active)
 
     async def type(self, *, timeout: float | None = None) -> str:
         await self._ensure_resolved(timeout=timeout)
-        type_name = cast(
-            str,
-            await self._worker._send_recv(
-                "eval",
-                "type_name",
-                [self.handle],
-                timeout=self._resolve_timeout(timeout),
-            ),
-        )
+        type_name = await self._worker.request(rpc.TypeName(handle=self.handle), timeout=self._resolve_timeout(timeout))
         self._state = _ResolvedValue(handle=self.handle, type_name=type_name)
         return type_name
 
@@ -295,12 +240,7 @@ class ValueProxy:
             self._released = True
             return
         self._check_active()
-        await self._worker._send_recv(
-            "eval",
-            "release",
-            [self.handle],
-            timeout=self._resolve_timeout(timeout),
-        )
+        await self._worker.request(rpc.Release(handle=self.handle), timeout=self._resolve_timeout(timeout))
         self._released = True
 
     def _resolve_timeout(self, override: float | None) -> float | None:
@@ -330,7 +270,7 @@ class ValueAttrs:
 
     def __init__(
         self,
-        worker: _WorkerManager,
+        worker: _EvalWorker,
         handle: int,
         keys: Sequence[str],
         timeout: float | None = None,
@@ -366,13 +306,9 @@ class ValueAttrs:
     async def force(self, name: str, *, timeout: float | None = None) -> NixValue:
         """Force a single attribute and return its value."""
         self._check_active()
-        result = ValueHandle.model_validate(
-            await self._worker._send_recv(
-                "eval",
-                "attr",
-                [self._handle, name],
-                timeout=timeout if timeout is not None else self._timeout,
-            )
+        result = await self._worker.request(
+            rpc.Attr(handle=self._handle, name=name),
+            timeout=timeout if timeout is not None else self._timeout,
         )
         proxy = ValueProxy(
             self._worker,
@@ -385,12 +321,7 @@ class ValueAttrs:
 
     async def release(self) -> None:
         self._check_active()
-        await self._worker._send_recv(
-            "eval",
-            "release",
-            [self._handle],
-            timeout=self._timeout,
-        )
+        await self._worker.request(rpc.Release(handle=self._handle), timeout=self._timeout)
         self._released = True
 
 
@@ -410,7 +341,7 @@ class ValueList:
 
     def __init__(
         self,
-        worker: _WorkerManager,
+        worker: _EvalWorker,
         handle: int,
         length: int,
         timeout: float | None = None,
@@ -445,13 +376,9 @@ class ValueList:
     async def force(self, idx: int, *, timeout: float | None = None) -> NixValue:
         """Force a single element and return its value."""
         self._check_active()
-        result = ValueHandle.model_validate(
-            await self._worker._send_recv(
-                "eval",
-                "list_get",
-                [self._handle, idx],
-                timeout=timeout if timeout is not None else self._timeout,
-            )
+        result = await self._worker.request(
+            rpc.ListGet(handle=self._handle, index=idx),
+            timeout=timeout if timeout is not None else self._timeout,
         )
         proxy = ValueProxy(
             self._worker,
@@ -464,12 +391,7 @@ class ValueList:
 
     async def release(self) -> None:
         self._check_active()
-        await self._worker._send_recv(
-            "eval",
-            "release",
-            [self._handle],
-            timeout=self._timeout,
-        )
+        await self._worker.request(rpc.Release(handle=self._handle), timeout=self._timeout)
         self._released = True
 
 
@@ -510,7 +432,7 @@ class EvalSession:
         self._active[0] = False
         if self._rw is not None:
             try:
-                await self._rw.send_recv("eval", "release_all", [], timeout=self._timeout)
+                await self._rw.request(rpc.ReleaseAll(), timeout=self._timeout)
             finally:
                 await self._rw.release()
                 self._rw = None
@@ -528,18 +450,8 @@ class EvalSession:
         self._check_rw()
         rw = self._reserved_worker()
 
-        def adapter(value: Any) -> ValueProxy:
-            handle = ValueHandle.model_validate(value)
-            return ValueProxy(rw._manager, handle.handle, handle.type, timeout=self._timeout, _active=self._active)
-
-        return await reserved_call(
-            rw,
-            "eval",
-            "eval_file",
-            [path],
-            adapter,
-            timeout=self._resolve_timeout(timeout),
-        )
+        handle = await rw.request(rpc.EvalFile(path=path), timeout=self._resolve_timeout(timeout))
+        return ValueProxy(rw, handle.handle, handle.type, timeout=self._timeout, _active=self._active)
 
     async def string(
         self, expr: str, path: str = "<string>", *, timeout: float | None = None
@@ -547,50 +459,21 @@ class EvalSession:
         self._check_rw()
         rw = self._reserved_worker()
 
-        def adapter(value: Any) -> ValueProxy:
-            handle = ValueHandle.model_validate(value)
-            return ValueProxy(rw._manager, handle.handle, handle.type, timeout=self._timeout, _active=self._active)
-
-        return await reserved_call(
-            rw,
-            "eval",
-            "eval_string",
-            [expr, path],
-            adapter,
+        handle = await rw.request(
+            rpc.EvalString(expr=expr, source_name=path),
             timeout=self._resolve_timeout(timeout),
         )
+        return ValueProxy(rw, handle.handle, handle.type, timeout=self._timeout, _active=self._active)
 
-    async def lock_flake(
-        self, ref: str | dict, *, timeout: float | None = None
-    ):
+    async def lock_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> LockedFlake:
         self._check_rw()
         rw = self._reserved_worker()
-        from nanopynix.models import LockedFlake
+        return await rw.request(rpc.LockFlake(ref=ref), timeout=self._resolve_timeout(timeout))
 
-        return await reserved_call(
-            rw,
-            "eval",
-            "lock_flake",
-            [ref],
-            LockedFlake.model_validate,
-            timeout=self._resolve_timeout(timeout),
-        )
-
-    async def get_flake(
-        self, ref: str | dict, *, timeout: float | None = None
-    ):
+    async def get_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> FlakeRef:
         self._check_rw()
         rw = self._reserved_worker()
-        from nanopynix.models import FlakeRef
-
-        return await reserved_call(
-            rw,
-            "eval",
-            "get_flake",
-            [ref],
-            FlakeRef.model_validate,
-            timeout=self._resolve_timeout(timeout),
-        )
+        return await rw.request(rpc.GetFlake(ref=ref), timeout=self._resolve_timeout(timeout))
 
     # backward compat
     async def eval_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
