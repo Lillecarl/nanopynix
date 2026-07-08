@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator
 
 from nanopynix._pool import _WorkerManager
 from nanopynix._session import EvalSession
-from nanopynix.models import LogEvent
+from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.store import StoreHandle
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ class Session:
         config: dict[str, str] | None = None,
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
+        primops: list[PrimOpSpec | dict] | None = None,
     ) -> None:
         if config is not None and settings is not None:
             raise TypeError("Use either config= or settings=, not both")
@@ -60,6 +61,7 @@ class Session:
             nix_conf=nix_conf,
             settings=config if config is not None else settings,
             experimental_features=experimental_features,
+            primops=[PrimOpSpec.model_validate(spec) for spec in primops or []],
         )
         self._session_id = uuid.uuid4().hex
 

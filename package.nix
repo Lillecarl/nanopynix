@@ -3,6 +3,7 @@
   buildPythonPackage,
   pkg-config,
   pydantic,
+  pyyaml,
   python,
   nanobind,
   janus,
@@ -61,6 +62,7 @@ buildPythonPackage {
   dependencies = [
     janus
     pydantic
+    pyyaml
   ];
 
   dontUseCmakeConfigure = true;

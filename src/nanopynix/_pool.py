@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from nanopynix.exceptions import from_response
+from nanopynix.models import PrimOpSpec
 
 logger = logging.getLogger(__name__)
 
@@ -159,12 +160,14 @@ class _WorkerManager:
         nix_conf: str | None = "/etc/nix/nix.conf",
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
+        primops: list[PrimOpSpec] | None = None,
     ) -> None:
         self._store_uri = store_uri
         self._eval_store_uri = eval_store_uri or store_uri
         self._nix_conf = nix_conf
         self._settings = settings or {}
         self._features = experimental_features or []
+        self._primops = primops or []
         self._proc: asyncio.subprocess.Process | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
@@ -208,6 +211,7 @@ class _WorkerManager:
                 "nix_conf": self._nix_conf,
                 "settings": self._settings,
                 "experimental_features": self._features,
+                "primops": [spec.model_dump(mode="json") for spec in self._primops],
             },
         )
         if result != "ok":
