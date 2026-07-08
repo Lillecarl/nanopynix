@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from nanopynix import Session
+from nanopynix import Session, yaml_primops
 
 pytestmark = pytest.mark.asyncio
 
@@ -148,6 +148,28 @@ async def test_eval_call_function():
             fn = await session.eval_string("x: x + 1")
             result = await fn.call(41)
             assert await result.force() == 42
+
+
+async def test_worker_yaml_primops():
+    """Importable worker primops parse and render YAML during eval."""
+    async with Session(primops=yaml_primops()) as nix:
+        async with nix.eval() as session:
+            parsed = await session.eval_string(
+                'builtins.fromYAML "apiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: demo\\n"'
+            )
+            assert await parsed.force_deep() == {
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {"name": "demo"},
+            }
+
+            rendered = await session.eval_string(
+                'builtins.toYAML { apiVersion = "v1"; kind = "ConfigMap"; metadata.name = "demo"; }'
+            )
+            text = await rendered.force()
+            assert "apiVersion: v1" in text
+            assert "kind: ConfigMap" in text
+            assert "name: demo" in text
 
 
 async def test_eval_concurrent_sessions(tmp_path):

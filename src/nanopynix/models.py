@@ -128,6 +128,16 @@ class ValueHandle(BaseModel):
     type: str
 
 
+class PrimOpSpec(BaseModel):
+    """Importable Python primop registered inside the worker process."""
+
+    name: str = Field(description="Nix builtin name")
+    arity: int = Field(description="Number of arguments")
+    args: list[str] = Field(default_factory=list, description="Argument names for Nix documentation")
+    doc: str = Field(default="", description="Nix builtin documentation")
+    import_path: str = Field(description="Importable Python callable path, formatted as 'module:attribute'")
+
+
 class LogEvent(BaseModel):
     """A single log event from Nix's internal logger.
 

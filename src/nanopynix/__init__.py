@@ -45,11 +45,13 @@ from nanopynix.models import (
     LogEvent,
     MissingInfo,
     PathInfo,
+    PrimOpSpec,
     ResultType,
     StorePath,
     ValueHandle,
 )
 from nanopynix.nix import Nix, Session
+from nanopynix.primops import from_yaml, to_yaml, yaml_primops
 from nanopynix.store import StoreHandle
 
 # Backward-compatible alias for StoreHandle
@@ -79,6 +81,7 @@ __all__ = [
     "NixError",
     "ParseError",
     "PathInfo",
+    "PrimOpSpec",
     "RestrictedPathError",
     "ResultType",
     "Session",
@@ -99,6 +102,7 @@ __all__ = [
     "WorkerDied",
     "enable_experimental_feature",
     "eval_file",
+    "from_yaml",
     "get_flake",
     "get_setting",
     "get_verbosity",
@@ -117,4 +121,6 @@ __all__ = [
     "remove_logger",
     "set_setting",
     "set_verbosity",
+    "to_yaml",
+    "yaml_primops",
 ]

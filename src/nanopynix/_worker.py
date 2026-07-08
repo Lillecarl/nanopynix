@@ -8,6 +8,7 @@ newlines).
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import sys
@@ -31,7 +32,7 @@ from nanopynix._extract import (
     store_path as _sp_to_dict,
 )
 from nanopynix.logging import LogCollector
-from nanopynix.models import FlakeRef, Input, StorePath, ValueHandle
+from nanopynix.models import FlakeRef, Input, PrimOpSpec, StorePath, ValueHandle
 
 _StorePathList = TypeAdapter(list[StorePath])
 ReqT = TypeVar("ReqT", bound=rpc.WorkerRequest[Any])
@@ -86,6 +87,30 @@ def _dispatch(endpoints: list[Endpoint[Any]]) -> dict[str, Endpoint[Any]]:
     return {endpoint.name: endpoint for endpoint in endpoints}
 
 
+def _import_callable(import_path: str) -> Callable[..., Any]:
+    module_name, sep, attr_path = import_path.partition(":")
+    if not sep or not module_name or not attr_path:
+        raise ValueError(f"invalid primop import path: {import_path!r}")
+    value: Any = importlib.import_module(module_name)
+    for attr in attr_path.split("."):
+        value = getattr(value, attr)
+    if not callable(value):
+        raise TypeError(f"primop import path is not callable: {import_path!r}")
+    return value
+
+
+def _register_primops(raw_specs: list[dict[str, Any]]) -> None:
+    for raw in raw_specs:
+        spec = PrimOpSpec.model_validate(raw)
+        nanopynix_expr.register_primop(
+            spec.name,
+            spec.arity,
+            spec.args,
+            spec.doc,
+            _import_callable(spec.import_path),
+        )
+
+
 # ── Main ───────────────────────────────────────────────────────────────
 
 
@@ -124,6 +149,7 @@ def main() -> None:
     nix_conf = None
     settings = {}
     features: list[str] = []
+    primops: list[dict[str, Any]] = []
 
     if init_msg.get("method") == "init":
         p = init_msg.get("params", {})
@@ -132,38 +158,55 @@ def main() -> None:
         nix_conf = p.get("nix_conf")
         settings = p.get("settings", {})
         features = p.get("experimental_features", [])
+        primops = p.get("primops", [])
         req_id = init_msg.get("id")
     else:
         sys.stderr.write(f"worker: expected init, got {init_msg}\n")
         return
 
-    # Apply config file path before init
-    if nix_conf is not None:
-        os.environ["NIX_USER_CONF_FILES"] = nix_conf
-    if settings:
-        os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
+    try:
+        # Apply config file path before init
+        if nix_conf is not None:
+            os.environ["NIX_USER_CONF_FILES"] = nix_conf
+        if settings:
+            os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
 
-    for k, v in settings.items():
-        nanopynix_util.set_setting(k, v)
-    for f in features:
-        nanopynix_util.enable_experimental_feature(f)
+        for k, v in settings.items():
+            nanopynix_util.set_setting(k, v)
+        for f in features:
+            nanopynix_util.enable_experimental_feature(f)
 
-    nanopynix_util.init_libstore(load_config=False)
-    nanopynix_expr.init_libexpr()
+        nanopynix_util.init_libstore(load_config=False)
+        nanopynix_expr.init_libexpr()
+        _register_primops(primops)
 
-    if store_uri == "auto":
-        store = nanopynix_store.open_store()
-    else:
-        store = nanopynix_store.open_store(store_uri)
+        if store_uri == "auto":
+            store = nanopynix_store.open_store()
+        else:
+            store = nanopynix_store.open_store(store_uri)
 
-    eval_store = None
-    if eval_store_uri != store_uri:
-        eval_store = nanopynix_store.open_store(eval_store_uri)
+        eval_store = None
+        if eval_store_uri != store_uri:
+            eval_store = nanopynix_store.open_store(eval_store_uri)
 
-    dispatch = {
-        "store": _store_dispatch(store, eval_store),
-        "eval": _eval_dispatch(store),
-    }
+        dispatch = {
+            "store": _store_dispatch(store, eval_store),
+            "eval": _eval_dispatch(store),
+        }
+    except Exception as exc:
+        _send(
+            _error(
+                req_id,
+                -32000,
+                str(exc),
+                {
+                    "error_type": type(exc).__qualname__,
+                    "traceback": traceback.format_exc(),
+                },
+            )
+        )
+        traceback.print_exc(file=sys.stderr)
+        return
 
     _send(_result(req_id, "ok"))
 
