@@ -3,7 +3,6 @@
 Primops are registered in conftest.py before the session EvalState is created.
 """
 
-import nanopynix
 
 
 class TestRegisterPrimop:

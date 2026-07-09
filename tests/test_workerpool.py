@@ -5,7 +5,7 @@ import contextlib
 
 import pytest
 
-from nanopynix import LogEvent, Nix, NixError, StoreError, WorkerBusyError, WorkerDiedError
+from nanopynix import LogEvent, Nix, StoreError, WorkerBusyError, WorkerDiedError
 
 pytestmark = pytest.mark.asyncio
 

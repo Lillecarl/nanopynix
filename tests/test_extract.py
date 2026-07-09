@@ -58,7 +58,7 @@ def test_store_path_str_empty_raises():
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_store_path_from_cpp(store):
+def test_store_path_from_cpp():
     sp = nanopynix_store.StorePath("00000000000000000000000000000000-foo-1.0")
     result = store_path(sp)
     assert result["to_string"] == "00000000000000000000000000000000-foo-1.0"

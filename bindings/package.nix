@@ -2,12 +2,8 @@
   lib,
   buildPythonPackage,
   pkg-config,
-  pydantic,
-  pyyaml,
-  strip-ansi,
   python,
   nanobind,
-  janus,
   nix,
   cmake,
   ninja,
@@ -15,7 +11,7 @@
 }:
 
 buildPythonPackage {
-  pname = "nanopynix";
+  pname = "nanopynix-bindings";
   version = "0.1.0";
   pyproject = true;
 
@@ -23,7 +19,6 @@ buildPythonPackage {
     filter =
       path: type:
       let
-        relPath = lib.removePrefix (toString ./. + "/") (toString path);
         baseName = lib.baseNameOf path;
       in
       lib.cleanSourceFilter path type && baseName != "tests";
@@ -60,12 +55,6 @@ buildPythonPackage {
       recursivePropagation
       lib.unique
     ];
-  dependencies = [
-    janus
-    pydantic
-    pyyaml
-    strip-ansi
-  ];
 
   dontUseCmakeConfigure = true;
 
@@ -93,11 +82,10 @@ buildPythonPackage {
     "nanopynix_fetchers"
     "nanopynix_flake"
     "nanopynix_main"
-    "nanopynix"
   ];
 
   meta = with lib; {
-    description = "nanobind-based Python bindings for Nix";
+    description = "nanobind-based Python bindings for Nix (compiled extensions)";
     license = licenses.lgpl21Plus;
     platforms = platforms.unix;
   };

@@ -6,8 +6,6 @@ fallback behavior, and the from_response() factory.
 
 from __future__ import annotations
 
-import pytest
-
 from nanopynix.exceptions import (
     EvalError,
     InfiniteRecursionError,
@@ -339,7 +337,7 @@ def test_from_response_fallback_keeps_type_name():
 
 def test_ordering_missing_argument_before_expected():
     """MissingArgumentError must match before NixTypeError 'expected' pattern."""
-    cls, name = _classify(
+    cls, _name = _classify(
         "function 'f' called without required argument 'x', expected an integer",
         "EvalError",
     )
@@ -348,5 +346,5 @@ def test_ordering_missing_argument_before_expected():
 
 def test_ordering_undefined_before_generic():
     """UndefinedVarError must match before patterns like 'does not exist'."""
-    cls, name = _classify("undefined variable 'x' does not exist", "EvalError")
+    cls, _name = _classify("undefined variable 'x' does not exist", "EvalError")
     assert cls is UndefinedVarError  # not StoreError ("does not exist")

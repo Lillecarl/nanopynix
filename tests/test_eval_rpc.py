@@ -49,7 +49,7 @@ async def test_eval_list(tmp_path):
         assert await first.force() == 1
 
 
-async def test_eval_string(tmp_path):
+async def test_eval_string():
     """session.string evaluates an inline expression."""
     async with Session() as nix, nix.eval() as session:
         root = await session.string("42 + 1")
