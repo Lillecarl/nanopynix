@@ -1,14 +1,17 @@
 """Tests for the PyLogger log streaming with LogCollector."""
 
 import asyncio
-from collections.abc import Callable
-from typing import Protocol, cast
+import contextlib
+from typing import TYPE_CHECKING, Protocol, cast
 
+import nanopynix_util
 import pytest
 
 import nanopynix
-import nanopynix_util
 from nanopynix import LogCollector
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 pytestmark = pytest.mark.asyncio
 
@@ -17,7 +20,7 @@ class _LogTestModule(Protocol):
     def _log_test(self, msg: str) -> None: ...
 
 
-_log_test: Callable[[str], None] = cast("_LogTestModule", nanopynix_util)._log_test
+_log_test: "Callable[[str], None]" = cast("_LogTestModule", nanopynix_util)._log_test
 
 
 async def _collect(collector, count, timeout=2.0):
@@ -28,7 +31,7 @@ async def _collect(collector, count, timeout=2.0):
         for _ in range(count):
             event = await asyncio.wait_for(stream.__anext__(), timeout=timeout)
             events.append(event)
-    except (asyncio.TimeoutError, StopAsyncIteration):
+    except (TimeoutError, StopAsyncIteration):
         pass
     return events
 
@@ -131,10 +134,8 @@ async def test_verbosity_filters_low_levels():
         assert items == [], f"Expected no events at Error verbosity, got {[i[3] for i in items]}"
     finally:
         nanopynix_util.set_verbosity(old)
-        try:
+        with contextlib.suppress(Exception):
             nanopynix_util.remove_logger()
-        except Exception:
-            pass
         await c.aclose()
 
 

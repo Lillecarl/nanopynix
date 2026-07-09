@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanopynix import _protocol as rpc
 from nanopynix import (
     EvalSessionClosedError,
     ForeignValueError,
@@ -21,6 +20,7 @@ from nanopynix import (
     ValueReleasedError,
     WrongNixTypeError,
 )
+from nanopynix import _protocol as rpc
 from nanopynix._pool import _ActiveCall, _WorkerManager
 from nanopynix._session import EvalSession, ValueProxy, _EvalOwner, _EvalOwnerToken, _EvalProxyContext, _ResolvedValue
 from nanopynix.models import LogEvent

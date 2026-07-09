@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
-from pydantic import TypeAdapter
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from nanopynix.models import JsonValue, PrimOpSpec
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _JsonValue = TypeAdapter(JsonValue)
 
@@ -46,7 +47,7 @@ def _yaml12_loader() -> type[Any]:
             |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
             |[-+]?\.(?:inf|Inf|INF)
             |\.(?:nan|NaN|NAN))$""",
-            re.X,
+            re.VERBOSE,
         ),
         list("-+0123456789."),
     )
@@ -59,9 +60,9 @@ def _construct_yaml12_int(loader: Any, node: Any) -> int:
     sign = -1 if value.startswith("-") else 1
     unsigned = value[1:] if value.startswith(("-", "+")) else value
     if unsigned.startswith("0o"):
-        return sign * int(unsigned[2:], 8)
+        return sign * int(unsigned, 0)
     if unsigned.startswith("0x"):
-        return sign * int(unsigned[2:], 16)
+        return sign * int(unsigned, 0)
     return sign * int(unsigned, 10)
 
 

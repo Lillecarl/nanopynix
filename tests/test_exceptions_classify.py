@@ -24,7 +24,6 @@ from nanopynix.exceptions import (
     from_response,
 )
 
-
 # ════════════════════════════════════════════════════════════════════
 # Exception hierarchy
 # ════════════════════════════════════════════════════════════════════
@@ -88,7 +87,6 @@ def test_subclass_repr():
 
 # Direct access to the private classifier for precise testing.
 from nanopynix.exceptions import _classify
-
 
 # ── Eval error patterns ─────────────────────────────────────────
 
