@@ -16,14 +16,14 @@ import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
+from pydantic import TypeAdapter
+
+import nanopynix._protocol as rpc
 import nanopynix_expr
 import nanopynix_fetchers
 import nanopynix_flake
 import nanopynix_store
 import nanopynix_util
-from pydantic import TypeAdapter
-
-import nanopynix._protocol as rpc
 from nanopynix._extract import (
     flake_ref_attrs as _flake_ref_attrs,
 )

@@ -2,13 +2,14 @@
 
 import os
 
-import nanopynix_store
 import pytest
+
+import nanopynix_store
 
 
 def _bash_sp():
     """Return a StorePath for the system bash binary.  Requires NixOS."""
-    bash = os.readlink("/run/current-system/sw/bin/bash")
+    bash = os.readlink("/run/current-system/sw/bin/bash")  # noqa: PTH115
     bash_basename = bash.split("/nix/store/")[1].split("/")[0]
     return nanopynix_store.StorePath(bash_basename)
 

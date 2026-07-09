@@ -5,11 +5,11 @@ Needs C++ modules loaded but no Nix daemon.
 
 from __future__ import annotations
 
+import pytest
+
 import nanopynix_fetchers  # L1 Input
 import nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
 import nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
-import pytest
-
 from nanopynix._extract import (
     flake_ref_attrs,
     input_attrs,

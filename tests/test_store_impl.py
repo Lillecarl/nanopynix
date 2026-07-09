@@ -1,9 +1,9 @@
 """Tests for nanopynix_store.register_store_implementation."""
 
-import nanopynix_store
 import pytest
 
 import nanopynix
+import nanopynix_store
 
 
 class TestRegisterStore:

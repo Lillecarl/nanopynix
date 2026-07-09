@@ -1,40 +1,27 @@
+# ruff: noqa: F401
 """nanopynix — nanobind-based Python bindings for Nix."""
 
-from nanopynix_expr import EvalState, Value, eval_file, init_libexpr, register_primop
-from nanopynix_fetchers import input_from_attrs, input_from_url
-from nanopynix_flake import get_flake, lock_flake, parse_flake_ref
-from nanopynix_main import init_nix, init_plugins
-from nanopynix_store import BuildMode, open_store
-from nanopynix_util import (
-    enable_experimental_feature,
-    get_setting,
-    get_verbosity,
-    init_libstore,
-    install_logger,
-    list_settings,
-    remove_logger,
-    set_setting,
-    set_verbosity,
-)
+from __future__ import annotations
+
 from strip_ansi import strip_ansi
 
-from nanopynix._pool import WorkerBusy, WorkerDied
+from nanopynix._pool import WorkerBusyError, WorkerDiedError
 from nanopynix._session import EvalSession, ValueAttrs, ValueList, ValueProxy
 from nanopynix.exceptions import (
-    AssertionError_,
     EvalError,
     EvalProxyError,
     EvalSessionClosedError,
     ForeignValueError,
     InfiniteRecursionError,
     MissingArgumentError,
+    NixAssertionError,
     NixCoercionError,
     NixError,
+    NixTypeError,
     ParseError,
     RestrictedPathError,
     StoreError,
     ThrownError,
-    TypeError_,
     UndefinedVarError,
     UnresolvedValueError,
     UsageError,
@@ -63,40 +50,33 @@ from nanopynix.nix import LogCapture, Nix, Session
 from nanopynix.primops import from_yaml, from_yaml11, from_yaml11_stream, from_yaml_stream, to_yaml, yaml_primops
 from nanopynix.store import StoreHandle
 from nanopynix.types import NixArg, NixDeepValue, NixValue
+from nanopynix_expr import EvalState, Value, eval_file, init_libexpr, register_primop
+from nanopynix_fetchers import input_from_attrs, input_from_url
+from nanopynix_flake import get_flake, lock_flake, parse_flake_ref
+from nanopynix_main import init_nix, init_plugins
+from nanopynix_store import BuildMode, open_store
+from nanopynix_util import (
+    enable_experimental_feature,
+    get_setting,
+    get_verbosity,
+    init_libstore,
+    install_logger,
+    list_settings,
+    remove_logger,
+    set_setting,
+    set_verbosity,
+)
 
 # Backward-compatible alias for StoreHandle
 Store = StoreHandle
 
 __all__ = [
     # L2
-    "AssertionError_",
-    "BuildMode",
-    "BuildResult",
-    "Derivation",
-    "DerivationOutputs",
-    "EvalError",
-    "EvalProxyError",
-    "EvalSession",
-    "EvalSessionClosedError",
-    # L1
-    "EvalState",
-    "FlakeRef",
-    "ForeignValueError",
-    "InfiniteRecursionError",
-    "Input",
-    "LockedFlake",
-    "LockedInput",
-    "LogCapture",
-    "LogCollector",
-    "LogEvent",
-    "MissingArgumentError",
-    "MissingInfo",
-    "Nix",
-    "NixArg",
+    "NixAssertionError",
     "NixCoercionError",
-    "NixDeepValue",
     "NixError",
     "NixType",
+    "NixTypeError",
     "NixValue",
     "ParseError",
     "PathInfo",
@@ -109,7 +89,6 @@ __all__ = [
     "StoreHandle",
     "StorePath",
     "ThrownError",
-    "TypeError_",
     "UndefinedVarError",
     "UnresolvedValueError",
     "UsageError",
@@ -119,8 +98,8 @@ __all__ = [
     "ValueList",
     "ValueProxy",
     "ValueReleasedError",
-    "WorkerBusy",
-    "WorkerDied",
+    "WorkerBusyError",
+    "WorkerDiedError",
     "WrongNixTypeError",
     "enable_experimental_feature",
     "eval_file",

@@ -1,8 +1,7 @@
-import nanopynix_flake
-
 """Tests for nanopynix_flake (FlakeRef, parse_flake_ref, lock_flake, get_flake)."""
 
 import nanopynix
+import nanopynix_flake
 
 
 class TestParseFlakeRef:

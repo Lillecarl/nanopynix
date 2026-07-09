@@ -279,7 +279,7 @@ async def test_worker_from_yaml_root_list_is_single_document():
 async def test_worker_from_yaml_rejects_document_stream():
     """fromYAML requires exactly one document; streams use fromYAMLStream."""
     async with Session(primops=yaml_primops()) as nix, nix.eval() as session:
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011
             await session.string('builtins.fromYAML "kind: ConfigMap\\n---\\nkind: Service\\n"')
         message = strip_ansi(str(exc_info.value))
         assert "fromYAML: expected exactly one YAML document, got 2" in message
@@ -290,7 +290,7 @@ async def test_worker_from_yaml_rejects_document_stream():
 async def test_worker_from_yaml_parse_error_is_descriptive():
     """YAML parse failures include builtin and source location context."""
     async with Session(primops=yaml_primops()) as nix, nix.eval() as session:
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011
             await session.string('builtins.fromYAML "metadata:\\n  name: demo\\n  : bad\\n"')
         message = strip_ansi(str(exc_info.value))
         assert "fromYAML: failed to parse YAML 1.2 document" in message
@@ -321,7 +321,7 @@ async def test_worker_yaml_stream_primops():
 async def test_worker_to_yaml_rejects_functions():
     """toYAML is JSON-compatible data only; nested functions must not stringify."""
     async with Session(primops=yaml_primops()) as nix, nix.eval() as session:
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011
             await session.string("builtins.toYAML { f = x: x; }")
         message = strip_ansi(str(exc_info.value))
         assert "toYAML: argument contains non JSON-compatible Nix value of type" in message
@@ -333,10 +333,8 @@ async def test_eval_concurrent_sessions(tmp_path):
     """Two concurrent eval sessions — each in its own Session."""
     f1 = tmp_path / "a.nix"
     f2 = tmp_path / "b.nix"
-    with open(f1, "w") as f:
-        f.write("{ val = 10; }")
-    with open(f2, "w") as f:
-        f.write("{ val = 20; }")
+    f1.write_text("{ val = 10; }")
+    f2.write_text("{ val = 20; }")
 
     async def eval_one(path):
         async with Session() as nix, nix.eval() as session:

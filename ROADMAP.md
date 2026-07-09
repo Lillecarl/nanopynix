@@ -9,11 +9,11 @@ compatibility is not a priority while the API is still settling.
 The worker is effectively a single Nix thread hosted in a subprocess. The API
 should expose that reality instead of silently queueing calls.
 
-- Add a `WorkerBusy` exception.
+- Add a `WorkerBusyError` exception.
 - If a store call or eval proxy call starts while the worker is already held,
-  raise `WorkerBusy` immediately by default.
+  raise `WorkerBusyError` immediately by default.
 - If a timeout is supplied, wait for the worker until that timeout is reached,
-  then raise `WorkerBusy`.
+  then raise `WorkerBusyError`.
 - Keep `EvalSession` as an explicit exclusive lease; proxy operations inside it
   still serialize on the reserved worker.
 

@@ -39,8 +39,8 @@ nanopynix.parse_flake_ref("github:...")       → FlakeRef
 nanopynix.yaml_primops()                     → list[PrimOpSpec]
 ```
 
-Exceptions: `NixError`, `UndefinedVarError`, `TypeError_`, `ThrownError`,
-`InfiniteRecursionError`, `AssertionError_`, `MissingArgumentError`,
+Exceptions: `NixError`, `UndefinedVarError`, `NixTypeError`, `ThrownError`,
+`InfiniteRecursionError`, `NixAssertionError`, `MissingArgumentError`,
 `RestrictedPathError`, `ParseError`, `StoreError`, `UsageError`.
 
 Nix error text may include ANSI color escapes because Nix formats diagnostics

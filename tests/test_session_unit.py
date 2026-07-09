@@ -47,7 +47,7 @@ def _mock_reserved_worker():
     rw.send_recv = AsyncMock()
     rw.release = AsyncMock()
 
-    async def request(req: rpc.WorkerRequest, timeout=None):
+    async def request(req: rpc.WorkerRequest, timeout=None):  # noqa: ASYNC109
         result = await rw.send_recv(req.namespace, req.method, req.to_args(), timeout=timeout)
         return type(req).parse_response(result)
 
@@ -207,7 +207,7 @@ class TestValueProxyLifecycle:
         w = MagicMock()
         w._send_recv = AsyncMock()
 
-        async def request(req: rpc.WorkerRequest, timeout=None):
+        async def request(req: rpc.WorkerRequest, timeout=None):  # noqa: ASYNC109
             result = await w._send_recv(req.namespace, req.method, req.to_args(), timeout=timeout)
             return type(req).parse_response(result)
 
@@ -621,7 +621,7 @@ class TestLazyChildProxy:
         w = MagicMock()
         w._send_recv = AsyncMock()
 
-        async def request(req: rpc.WorkerRequest, timeout=None):
+        async def request(req: rpc.WorkerRequest, timeout=None):  # noqa: ASYNC109
             result = await w._send_recv(req.namespace, req.method, req.to_args(), timeout=timeout)
             return type(req).parse_response(result)
 
