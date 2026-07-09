@@ -21,7 +21,7 @@ def init_store():
 
 
 @pytest.fixture(scope="session")
-def store(init_store):
+def store(init_store):  # noqa: ARG001
     """Open the default Nix store (session-scoped)."""
     return nanopynix.open_store()
 
@@ -55,7 +55,7 @@ def _register_test_primops():
 
 
 @pytest.fixture(scope="session")
-def eval_state(store, init_expr, _register_test_primops):
+def eval_state(store, init_expr, _register_test_primops):  # noqa: ARG001
     """Create a session-scoped EvalState. Depends on _register_test_primops
     so that primops are registered before EvalState processes them."""
     return nanopynix.EvalState(store)

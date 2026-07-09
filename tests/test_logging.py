@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import pytest
 
-import nanopynix
 import nanopynix_util
 from nanopynix import LogCollector
 
