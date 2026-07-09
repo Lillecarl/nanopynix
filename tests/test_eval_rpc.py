@@ -5,7 +5,6 @@ import asyncio
 import pytest
 
 from nanopynix import NixCoercionError, NixType, Session, ValueProxy, WrongNixTypeError, strip_ansi, yaml_primops
-from nanopynix.models import JsonValue
 
 pytestmark = pytest.mark.asyncio
 
@@ -386,10 +385,13 @@ async def test_eval_flake_force_json(tmp_path):
     async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
         outputs = await session.eval_flake(str(tmp_path), write_lock_file=False)
         lib = outputs.attr("lib")
-        result: dict[str, JsonValue] = await lib.force_json()  # type: ignore[assignment]
+        result = await lib.force_json()
+        assert isinstance(result, dict)
         assert result["name"] == "test"
-        assert result["nested"]["x"] == 1
-        assert result["nested"]["y"] == ["a", "b"]
+        nested = result["nested"]
+        assert isinstance(nested, dict)
+        assert nested["x"] == 1
+        assert nested["y"] == ["a", "b"]
 
 
 async def test_lock_flake_and_eval_locked(tmp_path):
