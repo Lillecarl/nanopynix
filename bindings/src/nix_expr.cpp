@@ -27,8 +27,8 @@ using namespace nb::literals;
 // =========================================================================
 
 std::string PyValue::type_name() {
-    if (!value) return "null";
-    switch (value->type()) {
+    auto *v = checkedValue();
+    switch (v->type()) {
         case nix::nThunk:    return "thunk";
         case nix::nInt:      return "int";
         case nix::nFloat:    return "float";
@@ -44,66 +44,72 @@ std::string PyValue::type_name() {
     }
 }
 
-bool PyValue::is_null()     const { return value && value->type() == nix::nNull; }
-bool PyValue::is_int()      const { return value && value->type() == nix::nInt; }
-bool PyValue::is_float()    const { return value && value->type() == nix::nFloat; }
-bool PyValue::is_bool()     const { return value && value->type() == nix::nBool; }
-bool PyValue::is_string()   const { return value && value->type() == nix::nString; }
-bool PyValue::is_path()     const { return value && value->type() == nix::nPath; }
-bool PyValue::is_attrs()    const { return value && value->type() == nix::nAttrs; }
-bool PyValue::is_list()     const { return value && value->type() == nix::nList; }
-bool PyValue::is_function() const { return value && value->type() == nix::nFunction; }
-bool PyValue::is_thunk()    const { return value && value->type() == nix::nThunk; }
+bool PyValue::is_null()     const { return checkedValue()->type() == nix::nNull; }
+bool PyValue::is_int()      const { return checkedValue()->type() == nix::nInt; }
+bool PyValue::is_float()    const { return checkedValue()->type() == nix::nFloat; }
+bool PyValue::is_bool()     const { return checkedValue()->type() == nix::nBool; }
+bool PyValue::is_string()   const { return checkedValue()->type() == nix::nString; }
+bool PyValue::is_path()     const { return checkedValue()->type() == nix::nPath; }
+bool PyValue::is_attrs()    const { return checkedValue()->type() == nix::nAttrs; }
+bool PyValue::is_list()     const { return checkedValue()->type() == nix::nList; }
+bool PyValue::is_function() const { return checkedValue()->type() == nix::nFunction; }
+bool PyValue::is_thunk()    const { return checkedValue()->type() == nix::nThunk; }
 
-int64_t PyValue::as_int() const { return static_cast<int64_t>(value->integer()); }
-double PyValue::as_float() const { return value->fpoint(); }
-bool PyValue::as_bool() const { return value->boolean(); }
+int64_t PyValue::as_int() const { return static_cast<int64_t>(checkedValue()->integer()); }
+double PyValue::as_float() const { return checkedValue()->fpoint(); }
+bool PyValue::as_bool() const { return checkedValue()->boolean(); }
 
 std::string PyValue::as_string() const {
-    if (auto sv = value->c_str()) return std::string(sv);
+    auto *v = checkedValue();
+    if (auto sv = v->c_str()) return std::string(sv);
     if (auto *es = evalState())
-        return std::string(es->forceStringNoCtx(*value, nix::noPos, ""));
+        return std::string(es->forceStringNoCtx(*v, nix::noPos, ""));
     return "";
 }
 
-void PyValue::force() { if (auto *es = evalState()) es->forceValue(*value, nix::noPos); }
-void PyValue::force_deep() { if (auto *es = evalState()) es->forceValueDeep(*value); }
+void PyValue::force() { if (auto *es = evalState()) es->forceValue(*checkedValue(), nix::noPos); }
+void PyValue::force_deep() { if (auto *es = evalState()) es->forceValueDeep(*checkedValue()); }
 
 // to_python and to_json are implemented below.
 
 size_t PyValue::list_length() const {
-    if (value->type() != nix::nList) return 0;
-    return value->listSize();
+    auto *v = checkedValue();
+    if (v->type() != nix::nList) return 0;
+    return v->listSize();
 }
 
 PyValue PyValue::list_get(size_t idx) const {
-    if (value->type() != nix::nList) throw std::runtime_error("value is not a list");
-    auto size = value->listSize();
+    auto *v = checkedValue();
+    if (v->type() != nix::nList) throw std::runtime_error("value is not a list");
+    auto size = v->listSize();
     if (idx >= size)
         throw std::out_of_range(
             "list index " + std::to_string(idx) + " out of range for length " + std::to_string(size));
-    auto *elem = value->listView()[idx];
+    auto *elem = v->listView()[idx];
     if (auto *es = evalState()) es->forceValue(*elem, nix::noPos);
-    return PyValue(elem, eval);
+    return PyValue(elem, eval, eval_alive);
 }
 
 std::vector<std::string> PyValue::attr_names() const {
     std::vector<std::string> names;
-    if (value->type() != nix::nAttrs) return names;
-    for (auto &attr : *value->attrs())
+    auto *v = checkedValue();
+    if (v->type() != nix::nAttrs) return names;
+    for (auto &attr : *v->attrs())
         names.push_back(std::string(evalState()->symbols[attr.name]));
     return names;
 }
 
 bool PyValue::has_attr(const std::string &name) const {
-    if (value->type() != nix::nAttrs) return false;
+    auto *v = checkedValue();
+    if (v->type() != nix::nAttrs) return false;
     auto sym = evalState()->symbols.create(name);
-    for (auto &attr : *value->attrs())
+    for (auto &attr : *v->attrs())
         if (attr.name == sym) return true;
     return false;
 }
 
 PyValue PyValue::attr_get(const std::string &name) const {
+    auto *value = checkedValue();
     if (value->type() != nix::nAttrs) throw std::runtime_error("value is not an attribute set");
     auto *es = evalState();
     auto sym = es->symbols.create(name);
@@ -112,7 +118,7 @@ PyValue PyValue::attr_get(const std::string &name) const {
             auto *v = es->allocValue();
             es->forceValue(*attr.value, nix::noPos);
             *v = *attr.value;
-            return PyValue(v, eval);
+            return PyValue(v, eval, eval_alive);
         }
     }
     throw std::runtime_error("attribute '" + name + "' not found");
@@ -121,13 +127,12 @@ PyValue PyValue::attr_get(const std::string &name) const {
 PyValue PyValue::call(PyValue arg) {
     auto *es = evalState();
     auto *result = es->allocValue();
-    es->callFunction(*value, *arg.value, *result, nix::noPos);
+    es->callFunction(*checkedValue(), *arg.checkedValue(), *result, nix::noPos);
     es->forceValue(*result, nix::noPos);
-    return PyValue(result, eval);
+    return PyValue(result, eval, eval_alive);
 }
 
 std::string PyValue::repr() {
-    if (!value) return "PyValue(null)";
     return "PyValue(" + type_name() + ")";
 }
 
@@ -141,11 +146,11 @@ PyValue PyEvalState::eval_string(const std::string &expr, const std::string &pat
     auto *v = state->allocValue();
     state->eval(parsedExpr, *v);
     state->forceValue(*v, nix::noPos);
-    return PyValue(v, evalRef());
+    return PyValue(v, this, alive);
 }
 
 PyValue PyEvalState::alloc_value() {
-    return PyValue(state->allocValue(), evalRef());
+    return PyValue(state->allocValue(), this, alive);
 }
 
 // ── Handle management ─────────────────────────────────────────
@@ -203,7 +208,7 @@ nix::Value *PyEvalState::get_exported(int64_t handle) {
 }
 
 PyValue PyEvalState::value_from_handle(int64_t handle) {
-    return PyValue(get_exported(handle), evalRef());
+    return PyValue(get_exported(handle), this, alive);
 }
 
 void PyEvalState::release_exported(int64_t handle) {
@@ -226,7 +231,7 @@ PyValue PyEvalState::eval_file(const std::string &path) {
     auto *v = state->allocValue();
     state->evalFile(sourcePath, *v);
     // Do NOT force — the caller may want to navigate lazily.
-    return PyValue(v, evalRef());
+    return PyValue(v, this, alive);
 }
 
 // =========================================================================
@@ -234,7 +239,16 @@ PyValue PyEvalState::eval_file(const std::string &path) {
 // =========================================================================
 
 nix::EvalState *PyValue::evalState() const {
-    return eval ? eval->state.get() : nullptr;
+    if (!eval_alive || !*eval_alive || eval == nullptr)
+        throw std::runtime_error("EvalState has been released");
+    return eval->state.get();
+}
+
+nix::Value *PyValue::checkedValue() const {
+    (void) evalState();
+    if (!value)
+        throw std::runtime_error("Nix value has been released");
+    return value;
 }
 
 // =========================================================================
@@ -243,7 +257,7 @@ nix::EvalState *PyValue::evalState() const {
 
 nb::object PyValue::to_python() {
     auto *es = evalState();
-    if (!es || !value) return nb::none();
+    auto *value = checkedValue();
 
     force();
 
@@ -268,7 +282,7 @@ nb::object PyValue::to_python() {
             auto n = value->listSize();
             auto lv = value->listView();
             for (size_t i = 0; i < n; i++)
-                list.append(PyValue(lv[i], eval).to_python());
+                list.append(PyValue(lv[i], eval, eval_alive).to_python());
             return list;
         }
         case nix::nAttrs: {
@@ -279,7 +293,7 @@ nb::object PyValue::to_python() {
                     es->forceValue(*attr.value, nix::noPos);
                     *v = *attr.value;
                     auto key = std::string(es->symbols[attr.name]);
-                    dict[nb::str(key.c_str())] = PyValue(v, eval).to_python();
+                    dict[nb::str(key.c_str())] = PyValue(v, eval, eval_alive).to_python();
                 }
             }
             return dict;
@@ -325,7 +339,7 @@ static nb::object json_to_python(const nlohmann::json &j) {
 
 nb::object PyValue::to_json(bool copy_to_store) {
     auto *es = evalState();
-    if (!es || !value) return nb::none();
+    auto *value = checkedValue();
 
     nix::NixStringContext context;
     nlohmann::json j = nix::printValueAsJSON(
@@ -393,13 +407,12 @@ static void python_to_value(
 {
     if (nb::isinstance<PyValue>(obj)) {
         auto pyv = nb::cast<PyValue>(obj);
-        if (!pyv.value) {
-            v.mkNull();
-        } else if (pyv.eval && pyv.eval->state.get() != &state) {
+        auto *owner = pyv.evalState();
+        if (owner != &state) {
             state.error<nix::TypeError>(
                 "cannot copy a PyValue from another EvalState").debugThrow();
         } else {
-            v = *pyv.value;
+            v = *pyv.checkedValue();
         }
     } else if (obj.is_none()) {
         v.mkNull();
@@ -446,7 +459,7 @@ static void python_to_value(
 PyValue PyEvalState::value_from_python(nb::object obj) {
     auto *v = state->allocValue();
     python_to_value(*state, obj, *v);
-    return PyValue(v, evalRef());
+    return PyValue(v, this, alive);
 }
 
 // Holder for a registered Python primop callback.
@@ -558,11 +571,11 @@ static void bind_value(nb::module_ &m) {
         .def("force", &PyValue::force)
         .def("force_deep", &PyValue::force_deep)
         .def("list_length", &PyValue::list_length)
-        .def("list_get", &PyValue::list_get, "idx"_a)
+        .def("list_get", &PyValue::list_get, "idx"_a, nb::keep_alive<0, 1>())
         .def("attr_names", &PyValue::attr_names)
         .def("has_attr", &PyValue::has_attr, "name"_a)
-        .def("attr_get", &PyValue::attr_get, "name"_a)
-        .def("call", &PyValue::call, "arg"_a)
+        .def("attr_get", &PyValue::attr_get, "name"_a, nb::keep_alive<0, 1>())
+        .def("call", &PyValue::call, "arg"_a, nb::keep_alive<0, 1>())
         .def("to_python", &PyValue::to_python)
         .def("to_json", &PyValue::to_json, "copy_to_store"_a = false)
         .def("__repr__", &PyValue::repr)
@@ -576,9 +589,9 @@ static void bind_eval_state(nb::module_ &m) {
         .def(nb::init<std::shared_ptr<nix::Store>, const std::vector<std::string> &>(),
              "store"_a, "search_path"_a = std::vector<std::string>{})
         .def("eval_string", &PyEvalState::eval_string,
-             "expr"_a, "path"_a = "<string>")
-        .def("eval_file", &PyEvalState::eval_file, "path"_a)
-        .def("alloc_value", &PyEvalState::alloc_value)
+             "expr"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
+        .def("eval_file", &PyEvalState::eval_file, "path"_a, nb::keep_alive<0, 1>())
+        .def("alloc_value", &PyEvalState::alloc_value, nb::keep_alive<0, 1>())
         // Handle management (worker-internal, exported for RPC dispatch)
         .def("export_value", &PyEvalState::export_value, "value"_a,
              "Export a Value and return a GC-safe integer handle.")
@@ -588,10 +601,10 @@ static void bind_eval_state(nb::module_ &m) {
              "Release an exported handle.")
         .def("release_all_exported", &PyEvalState::release_all_exported,
              "Release all exported handles.")
-        .def("value_from_handle", &PyEvalState::value_from_handle, "handle"_a)
-        .def("value_from_python", &PyEvalState::value_from_python, "obj"_a)
+        .def("value_from_handle", &PyEvalState::value_from_handle, "handle"_a, nb::keep_alive<0, 1>())
+        .def("value_from_python", &PyEvalState::value_from_python, "obj"_a, nb::keep_alive<0, 1>())
         .def("_export_pyvalue", [](PyEvalState &es, PyValue &pyv) {
-            return es.export_value(pyv.value);
+            return es.export_value(pyv.checkedValue());
         }, "pyv"_a);
 }
 

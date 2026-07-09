@@ -23,6 +23,7 @@ struct PyEvalState {
     nix::fetchers::Settings fetchSettings;
     nix::EvalSettings evalSettings{_readOnlyMode};
     std::shared_ptr<nix::EvalState> state;
+    std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 
     using EvalSettingsConfigurator = std::function<void(nix::EvalSettings &)>;
 
@@ -42,6 +43,11 @@ struct PyEvalState {
         : store(s.shared_from_this())
     {
         init(searchPath);
+    }
+
+    ~PyEvalState() {
+        if (alive)
+            *alive = false;
     }
 
     PyValue eval_string(const std::string &expr, const std::string &path = "<string>");
@@ -67,10 +73,6 @@ struct PyEvalState {
 
     /// Release all exported handles.
     void release_all_exported();
-
-    std::shared_ptr<PyEvalState> evalRef() {
-        return std::shared_ptr<PyEvalState>(this, [](PyEvalState *){});
-    }
 
 private:
     int64_t _next_handle = 1;
