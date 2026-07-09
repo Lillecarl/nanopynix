@@ -255,6 +255,63 @@ async def test_worker_yaml_primops():
             assert "name: demo" in text
 
 
+async def test_worker_yaml_primops_parse_yaml12_modes():
+    """fromYAML uses modern YAML mode syntax instead of YAML 1.1 octal literals."""
+    async with Session(primops=yaml_primops()) as nix:
+        async with nix.eval() as session:
+            parsed = await session.string('builtins.fromYAML "mode1: 0444\\nmode2: 0o444\\nmode3: \\"0444\\"\\n"')
+            assert await parsed.force_deep() == {
+                "mode1": 444,
+                "mode2": 292,
+                "mode3": "0444",
+            }
+
+
+async def test_worker_yaml_primops_parse_yaml11_modes():
+    """fromYAML11 keeps legacy YAML 1.1 octal parsing for old manifests."""
+    async with Session(primops=yaml_primops()) as nix:
+        async with nix.eval() as session:
+            parsed = await session.string('builtins.fromYAML11 "mode: 0444\\ntruth: yes\\n"')
+            assert await parsed.force_deep() == {"mode": 292, "truth": True}
+
+
+async def test_worker_from_yaml_root_list_is_single_document():
+    """A root list is still one YAML document, not a document stream."""
+    async with Session(primops=yaml_primops()) as nix:
+        async with nix.eval() as session:
+            parsed = await session.string('builtins.fromYAML "- a\\n- b\\n"')
+            assert await parsed.force_deep() == ["a", "b"]
+
+
+async def test_worker_from_yaml_rejects_document_stream():
+    """fromYAML requires exactly one document; streams use fromYAMLStream."""
+    async with Session(primops=yaml_primops()) as nix:
+        async with nix.eval() as session:
+            with pytest.raises(Exception, match="exactly one YAML document|Python primop"):
+                await session.string('builtins.fromYAML "kind: ConfigMap\\n---\\nkind: Service\\n"')
+
+
+async def test_worker_yaml_stream_primops():
+    """YAML stream helpers handle Kubernetes multi-document manifests."""
+    async with Session(primops=yaml_primops()) as nix:
+        async with nix.eval() as session:
+            parsed = await session.string(
+                'builtins.fromYAMLStream "apiVersion: v1\\nkind: ConfigMap\\n---\\napiVersion: v1\\nkind: Service\\n"'
+            )
+            assert await parsed.force_deep() == [
+                {"apiVersion": "v1", "kind": "ConfigMap"},
+                {"apiVersion": "v1", "kind": "Service"},
+            ]
+
+            rendered = await session.string(
+                'builtins.toYAML [ { apiVersion = "v1"; kind = "ConfigMap"; } { apiVersion = "v1"; kind = "Service"; } ]'
+            )
+            text = await rendered.force_as(NixType.STRING)
+            assert text.count("---") == 2
+            assert "kind: ConfigMap" in text
+            assert "kind: Service" in text
+
+
 async def test_worker_to_yaml_rejects_functions():
     """toYAML is JSON-compatible data only; nested functions must not stringify."""
     async with Session(primops=yaml_primops()) as nix:
