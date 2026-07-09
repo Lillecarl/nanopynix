@@ -38,11 +38,12 @@ def _get_es(store):
 
 def _reset_es():
     """Release eval and locked-flake handles for a fresh session."""
-    global _es, _locked_flakes
+    global _es, _locked_flakes, _next_lf_handle
     if _es is not None:
         _es.release_all_exported()
         _es = None
     _locked_flakes.clear()
+    _next_lf_handle = 1
 
 
 def _flake_ref(ref):

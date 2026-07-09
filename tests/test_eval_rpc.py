@@ -4,7 +4,16 @@ import asyncio
 
 import pytest
 
-from nanopynix import NixCoercionError, NixType, Session, ValueProxy, WrongNixTypeError, strip_ansi, yaml_primops
+from nanopynix import (
+    NixCoercionError,
+    NixType,
+    Session,
+    ValueProxy,
+    ValueReleasedError,
+    WrongNixTypeError,
+    strip_ansi,
+    yaml_primops,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -409,14 +418,15 @@ async def test_lock_flake_and_eval_locked(tmp_path):
 
 
 async def test_locked_flake_release_invalidates_handle(tmp_path):
-    """release_locked_flake drops the in-memory lock handle."""
+    """release_locked_flake marks the local handle unusable."""
     _init_git_flake(tmp_path, "val = 99;")
 
     async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
         locked = await session.lock_flake(str(tmp_path), write_lock_file=False)
         await locked.release()
+        await locked.release()
 
-        with pytest.raises(Exception, match="locked flake handle"):
+        with pytest.raises(ValueReleasedError, match="LockedFlakeHandle"):
             await locked.eval()
 
 
