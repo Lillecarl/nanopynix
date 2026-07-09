@@ -257,7 +257,9 @@ class LogEvent(BaseModel):
     def without_ansi(self) -> LogEvent:
         """Return a copy with ANSI color escapes removed from string args."""
 
-        return self.model_copy(update={"args": [_strip_ansi(arg) if isinstance(arg, str) else arg for arg in self.args]})
+        return self.model_copy(
+            update={"args": [_strip_ansi(arg) if isinstance(arg, str) else arg for arg in self.args]}
+        )
 
 
 class ResultType(IntEnum):
