@@ -118,11 +118,12 @@ class ReservedWorker:
     releases the worker back on ``release()``.
     """
 
-    __slots__ = ("_manager", "_released")
+    __slots__ = ("_manager", "_released", "_rpc_lock")
 
     def __init__(self, manager: _WorkerManager) -> None:
         self._manager = manager
         self._released = False
+        self._rpc_lock = asyncio.Lock()
 
     async def send_recv(
         self,
@@ -134,18 +135,20 @@ class ReservedWorker:
         """Send an RPC call on the reserved worker and await the response."""
         if self._released:
             raise RuntimeError("ReservedWorker has been released")
-        return await self._manager._send_recv(module, fn, args, timeout=timeout)
+        async with self._rpc_lock:
+            return await self._manager._send_recv(module, fn, args, timeout=timeout)
 
     async def request(self, request: rpc.WorkerRequest[T], timeout: float | None = None) -> T:
         """Send a typed RPC request on the reserved worker."""
         if self._released:
             raise RuntimeError("ReservedWorker has been released")
-        result = await self._manager._send_recv(
-            request.namespace,
-            request.method,
-            request.to_args(),
-            timeout=timeout,
-        )
+        async with self._rpc_lock:
+            result = await self._manager._send_recv(
+                request.namespace,
+                request.method,
+                request.to_args(),
+                timeout=timeout,
+            )
         return type(request).parse_response(result)
 
     async def release(self) -> None:
