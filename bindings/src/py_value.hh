@@ -14,9 +14,11 @@
 
 struct PyValue {
     nix::Value *value;
-    std::shared_ptr<PyEvalState> eval;
+    PyEvalState *eval;
+    std::shared_ptr<bool> eval_alive;
 
-    PyValue(nix::Value *v, std::shared_ptr<PyEvalState> e) : value(v), eval(std::move(e)) {}
+    PyValue(nix::Value *v, PyEvalState *e, std::shared_ptr<bool> alive)
+        : value(v), eval(e), eval_alive(std::move(alive)) {}
 
     std::string type_name();
     bool is_null() const;
@@ -52,6 +54,6 @@ struct PyValue {
 
     std::string repr();
 
-private:
     nix::EvalState *evalState() const;
+    nix::Value *checkedValue() const;
 };

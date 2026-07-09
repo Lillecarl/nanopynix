@@ -1,6 +1,9 @@
 """Tests for nanopynix_expr (EvalState, Value, eval_string, eval_file, call)."""
 
+import gc
+
 import nanopynix
+import pytest
 
 
 class TestEvalString:
@@ -38,6 +41,15 @@ class TestEvalString:
         v = eval_state.eval_string('"hello ${"world"}"')
         assert v.type() == "string"
         assert v.as_string() == "hello world"
+
+    def test_value_keeps_eval_state_alive(self, store, init_expr):
+        eval_state = nanopynix.EvalState(store)
+        value = eval_state.eval_string("42")
+
+        del eval_state
+        gc.collect()
+
+        assert value.as_int() == 42
 
 
 class TestEvalAttrs:

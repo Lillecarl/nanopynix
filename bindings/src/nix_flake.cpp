@@ -138,7 +138,7 @@ static PyFlakeRef get_flake(PyEvalState &es, PyFlakeRef &flakeRef,
 static PyValue call_flake(PyEvalState &es, PyLockedFlake &lf) {
     auto *v = es.state->allocValue();
     nix::flake::callFlake(*es.state, *lf.locked, *v);
-    return PyValue(v, es.evalRef());
+    return PyValue(v, &es, es.alive);
 }
 
 static PyValue eval_flake(PyEvalState &es, const std::string &ref,
@@ -156,7 +156,7 @@ static PyValue eval_flake(PyEvalState &es, const std::string &ref,
     auto *v = es.state->allocValue();
     nix::flake::callFlake(*es.state, lockedFlake, *v);
 
-    return PyValue(v, es.evalRef());
+    return PyValue(v, &es, es.alive);
 }
 
 // =========================================================================
@@ -211,10 +211,12 @@ NB_MODULE(nanopynix_flake, m) {
           "Resolve a flake reference (without locking)");
     m.def("call_flake", &call_flake,
           "state"_a, "locked_flake"_a,
+          nb::keep_alive<0, 1>(),
           "Call a locked flake's outputs function, returning a Value");
     m.def("eval_flake", &eval_flake,
           "state"_a, "ref"_a,
           "write_lock_file"_a = true,
+          nb::keep_alive<0, 1>(),
           "Lock and evaluate a flake, returning its outputs as a Value");
 
     bind_flake_ref(m);
