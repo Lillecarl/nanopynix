@@ -20,6 +20,39 @@ live summary, use `tee` first, for example:
 The saved log is the source of truth. Use the short live summary only to decide
 what to inspect next, then query `/tmp/pytest.log` for the full failure context.
 
+# Python coding conventions
+
+- Use `from __future__ import annotations` in Python modules that define or use
+  type annotations.
+- Do not use string type hints such as `"Store"`. Use future annotations and
+  `if TYPE_CHECKING:` imports instead.
+- Keep imports at the top of the file. Lazy imports inside functions or methods
+  are forbidden unless they are absolutely necessary to break a circular import
+  cycle; prefer moving shared types to a neutral module over lazy imports.
+- Import ordering:
+  1. `from __future__ import annotations`
+  2. standard library imports
+  3. third-party imports
+  4. local `nanopynix` imports
+  5. `if TYPE_CHECKING:` block containing only type-only imports
+  6. module constants
+  7. code
+- When re-exporting a name from another module, use the explicit re-export
+  pattern `from module import Name as Name`. Consolidate related re-exports into
+  one multi-line import block.
+- Do not use `assert` statements outside `tests/`. For runtime validation, use
+  explicit `if ...: raise ...`. To satisfy type checkers, prefer local variable
+  aliasing or explicit `if value is None: raise ...` checks.
+- Do not use `asyncio.get_event_loop()`. Use `asyncio.get_running_loop()` inside
+  async code. For timestamps, use `time.monotonic()`.
+- Keep a strong reference to background tasks created with
+  `asyncio.create_task()`, for example in an instance `set` or `list`.
+- Use `pathlib.Path` for filesystem paths that are not Nix daemon protocol
+  strings. Convert to `str` as late as possible when crossing an API boundary.
+- Do not hide unexpected failures with `except Exception: pass`. Log unexpected
+  exceptions. Use `contextlib.suppress(...)` only for expected ignored
+  exceptions, with a comment explaining why they are safe to ignore.
+
 # Design notes
 
 **Nix "stderr" = logging, not OS stderr**: Nix uses "stderr" terminology to

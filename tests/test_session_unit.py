@@ -22,7 +22,7 @@ from nanopynix import (
     WrongNixTypeError,
 )
 from nanopynix._pool import _ActiveCall, _WorkerManager
-from nanopynix._session import EvalSession, ValueProxy, _EvalOwner, _EvalProxyContext
+from nanopynix._session import EvalSession, ValueProxy, _EvalOwner, _EvalOwnerToken, _EvalProxyContext, _ResolvedValue
 from nanopynix.models import LogEvent
 
 pytestmark = pytest.mark.asyncio
@@ -215,7 +215,7 @@ class TestValueProxyLifecycle:
         return w
 
     def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
-        return _EvalOwner(object(), active)
+        return _EvalOwner(_EvalOwnerToken(), active)
 
     def _proxy(
         self,
@@ -629,12 +629,12 @@ class TestLazyChildProxy:
         return w
 
     def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
-        return _EvalOwner(object(), active)
+        return _EvalOwner(_EvalOwnerToken(), active)
 
     def _child_proxy(
         self,
         worker,
-        parent: ValueProxy | int,
+        parent: ValueProxy | _ResolvedValue,
         selector: str | int,
         *,
         owner: _EvalOwner | None = None,
@@ -649,7 +649,7 @@ class TestLazyChildProxy:
             {"handle": 5, "type": "int"},  # _resolve
             99,  # force
         ]
-        cp = self._child_proxy(w, 1, "name")
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name")
 
         result = await cp.force()
 
@@ -665,7 +665,7 @@ class TestLazyChildProxy:
             {"handle": 3, "type": "int"},  # _resolve: list_get
             42,  # force: returns int
         ]
-        cp = self._child_proxy(w, 1, 0)
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), 0)
 
         result = await cp.force()
 
@@ -677,7 +677,7 @@ class TestLazyChildProxy:
     async def test_no_rpc_until_force(self):
         """No RPC is made until .force() is called on the child proxy."""
         w = self._worker()
-        cp = self._child_proxy(w, 1, "name")
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name")
         w._send_recv.assert_not_called()
         # accessing a property doesn't trigger RPC either
         with pytest.raises(UnresolvedValueError, match="not been resolved"):
@@ -697,7 +697,7 @@ class TestLazyChildProxy:
                 },
             },  # force_deep
         ]
-        cp = self._child_proxy(w, 1, "name")
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name")
 
         result = await cp.force_deep()
 
@@ -710,7 +710,7 @@ class TestLazyChildProxy:
         """Child proxy raises after session close."""
         w = self._worker()
         active = [False]
-        cp = self._child_proxy(w, 1, "name", owner=self._owner(active))
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name", owner=self._owner(active))
 
         with pytest.raises(EvalSessionClosedError, match="EvalSession has been closed"):
             await cp.force()
@@ -722,7 +722,7 @@ class TestLazyChildProxy:
             {"handle": 5, "type": "int"},
             42,
         ]
-        cp = self._child_proxy(w, 1, "name", timeout=30.0)
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name", timeout=30.0)
 
         await cp.force(timeout=10.0)
 

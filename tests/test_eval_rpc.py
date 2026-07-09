@@ -161,6 +161,20 @@ async def test_eval_call_function_with_value_proxy_arg():
             assert await result.force_as(NixType.INT) == 42
 
 
+async def test_eval_reused_function_can_call_separately_evaluated_value():
+    """A function proxy can be reused with other values evaluated in the same session."""
+    async with Session() as nix:
+        async with nix.eval() as session:
+            fn = await session.string("x: y: x + y")
+            left = await session.string("20 + 1")
+            right = await session.string("20 + 1")
+
+            partial = await fn(left)
+            result = await partial(right)
+
+            assert await result.force_as(NixType.INT) == 42
+
+
 async def test_eval_call_function_with_nested_value_proxy_arg():
     """ValueProxy.call can pass same-session Nix values inside copied containers."""
     async with Session() as nix:

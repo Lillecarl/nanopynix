@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from nanopynix._session import ValueAttrs, ValueList, ValueProxy
-from nanopynix.models import JsonScalar, JsonValue
-
-type NixArg = ValueProxy | JsonScalar | list[NixArg] | dict[str, NixArg]
-type NixValue = ValueProxy | ValueAttrs | ValueList | JsonValue
-type NixDeepValue = ValueProxy | JsonScalar | list[NixDeepValue] | dict[str, NixDeepValue]
+from nanopynix._session import (
+    NixArg as NixArg,
+    NixDeepValue as NixDeepValue,
+    NixValue as NixValue,
+)
 
 __all__ = [
     "NixArg",
