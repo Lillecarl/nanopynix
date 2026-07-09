@@ -93,9 +93,9 @@ class _EvalProxyContext:
         return ValueList(self, handle, length)
 
 
-type NixArg = ValueProxy | JsonScalar | list[NixArg] | dict[str, NixArg]
-type NixValue = ValueProxy | ValueAttrs | ValueList | JsonValue
-type NixDeepValue = ValueProxy | JsonScalar | list[NixDeepValue] | dict[str, NixDeepValue]
+type _NixArg = ValueProxy | JsonScalar | list[_NixArg] | dict[str, _NixArg]
+type _NixValue = ValueProxy | ValueAttrs | ValueList | JsonValue
+type _NixDeepValue = ValueProxy | JsonScalar | list[_NixDeepValue] | dict[str, _NixDeepValue]
 
 
 def _parse_nix_type(value: NixType | str | None) -> NixType | None:
@@ -182,7 +182,7 @@ class ValueProxy:
             return self._decode_remote_ref(value)
         return value
 
-    def _decode_deep_value(self, value: DeepValueWire) -> NixDeepValue:
+    def _decode_deep_value(self, value: DeepValueWire) -> _NixDeepValue:
         if isinstance(value, RemoteValueRef):
             return self._decode_remote_ref(value)
         if isinstance(value, DeepScalar):
@@ -193,7 +193,7 @@ class ValueProxy:
             return {key: self._decode_deep_value(item) for key, item in value.attrs.items()}
         raise TypeError(f"unsupported force_deep RPC value: {value!r}")
 
-    async def _encode_call_arg(self, value: NixArg, *, timeout: float | None) -> CallArgWire:
+    async def _encode_call_arg(self, value: _NixArg, *, timeout: float | None) -> CallArgWire:
         if isinstance(value, ValueProxy):
             if value._ctx.owner.token is not self._ctx.owner.token:
                 raise ForeignValueError("cannot pass a ValueProxy from another EvalSession")
@@ -211,7 +211,7 @@ class ValueProxy:
 
     # ── force ──────────────────────────────────────────────────────
 
-    async def force(self, *, timeout: float | None = None) -> NixValue:
+    async def force(self, *, timeout: float | None = None) -> _NixValue:
         """Evaluate to WHNF.  Compound types return lazy wrappers."""
         typ = await self._ensure_type(timeout=timeout)
         if typ == NixType.ATTRS:
@@ -244,7 +244,7 @@ class ValueProxy:
     async def force_as(self, typ: Literal[NixType.LIST], *, timeout: float | None = None) -> ValueList: ...
     @overload
     async def force_as(self, typ: Literal[NixType.FUNCTION], *, timeout: float | None = None) -> ValueProxy: ...
-    async def force_as(self, typ: NixType, *, timeout: float | None = None) -> NixValue:
+    async def force_as(self, typ: NixType, *, timeout: float | None = None) -> _NixValue:
         actual = await self._ensure_type(timeout=timeout)
         if actual != typ:
             raise WrongNixTypeError(expected=typ, actual=actual)
@@ -336,7 +336,7 @@ class ValueProxy:
             raise NixCoercionError(f"cannot coerce string {value!r} to bool")
         raise NixCoercionError(f"cannot coerce Nix {self.nix_type.value} to bool")
 
-    async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
+    async def force_deep(self, *, timeout: float | None = None) -> _NixDeepValue:
         """Recursive Nix force. Functions remain remote callable ValueProxy objects."""
         await self._ensure_resolved(timeout=timeout)
         result = await self._ctx.worker.request(rpc.ForceDeep(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
@@ -369,7 +369,7 @@ class ValueProxy:
             timeout=self._ctx.resolve_timeout(timeout),
         )
 
-    async def call(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
+    async def call(self, *args: _NixArg, timeout: float | None = None) -> ValueProxy:
         await self._ensure_resolved(timeout=timeout)
         actual = await self._ensure_type(timeout=timeout)
         if actual != NixType.FUNCTION:
@@ -382,7 +382,7 @@ class ValueProxy:
         )
         return self._ctx.value(result.handle, result.type)
 
-    async def __call__(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
+    async def __call__(self, *args: _NixArg, timeout: float | None = None) -> ValueProxy:
         return await self.call(*args, timeout=timeout)
 
     async def get_type(self, *, timeout: float | None = None) -> NixType:
@@ -452,7 +452,7 @@ class ValueAttrs:
         self._check_active()
         return self._ctx.child(self._handle, name)
 
-    async def force(self, name: str, *, timeout: float | None = None) -> NixValue:
+    async def force(self, name: str, *, timeout: float | None = None) -> _NixValue:
         """Force a single attribute and return its value."""
         self._check_active()
         result = await self._ctx.worker.request(
@@ -513,7 +513,7 @@ class ValueList:
         self._check_active()
         return self._ctx.child(self._handle, idx)
 
-    async def force(self, idx: int, *, timeout: float | None = None) -> NixValue:
+    async def force(self, idx: int, *, timeout: float | None = None) -> _NixValue:
         """Force a single element and return its value."""
         self._check_active()
         result = await self._ctx.worker.request(

@@ -61,6 +61,7 @@ from nanopynix.models import (
 from nanopynix.nix import LogCapture, Nix, Session
 from nanopynix.primops import from_yaml, to_yaml, yaml_primops
 from nanopynix.store import StoreHandle
+from nanopynix.types import NixArg, NixDeepValue, NixValue
 
 # Backward-compatible alias for StoreHandle
 Store = StoreHandle
@@ -90,9 +91,12 @@ __all__ = [
     "MissingArgumentError",
     "MissingInfo",
     "Nix",
+    "NixArg",
     "NixCoercionError",
+    "NixDeepValue",
     "NixError",
     "NixType",
+    "NixValue",
     "ParseError",
     "PathInfo",
     "PrimOpSpec",
