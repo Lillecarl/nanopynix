@@ -10,6 +10,19 @@
   scikit-build-core,
 }:
 
+let
+  # nanobind 2.12.0 stubgen never increments pattern.matches in
+  # apply_pattern(), so every .pat rule emits a false "did not match
+  # any elements" warning even when it was applied successfully.
+  # Patch the counter so the warning logic works correctly.
+  nanobindPatched = nanobind.overrideAttrs (old: {
+    postFixup = (old.postFixup or "") + ''
+      find $out -name stubgen.py -path '*/nanobind/*' -exec \
+        sed -i '/# Success, pattern was applied/a\        pattern.matches += 1' {} \;
+    '';
+  });
+in
+
 buildPythonPackage {
   pname = "nanopynix-bindings";
   version = "0.1.0";
@@ -47,7 +60,7 @@ buildPythonPackage {
         ) derivations;
     in
     [
-      nanobind
+      nanobindPatched
     ]
     ++ lib.pipe nix.libs [
       lib.attrsToList
@@ -59,7 +72,7 @@ buildPythonPackage {
   dontUseCmakeConfigure = true;
 
   cmakeFlags = [
-    "-Dnanobind_ROOT=${nanobind}/${python.sitePackages}/nanobind/cmake"
+    "-Dnanobind_ROOT=${nanobindPatched}/${python.sitePackages}/nanobind/cmake"
     "-DPython_EXECUTABLE=${python}/bin/python"
   ];
 
