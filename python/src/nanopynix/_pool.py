@@ -330,7 +330,6 @@ class _WorkerManager:
                 elif "method" in msg and "id" not in msg:
                     # Notification — deliver to log bus
                     event = msg.get("params", msg)
-                    self._fail_active_call_from_event(event)
                     self._log_bus.emit(event)
         except asyncio.CancelledError:
             raise
@@ -351,16 +350,6 @@ class _WorkerManager:
         assert self._writer is not None
         data = json.dumps(msg, separators=_SEPARATORS).encode() + b"\n"
         self._writer.write(data)
-
-    def _fail_active_call_from_event(self, event: object) -> None:
-        if not isinstance(event, dict) or event.get("action") != "error":
-            return
-        active = self._active_call
-        if active is None or active.future.done():
-            return
-        args = event.get("args", [])
-        msg = str(args[-1]) if args else "Nix operation failed"
-        active.future.set_exception(from_response("Error", msg, info={"log_event": event}))
 
     async def _wait_until_idle(self, timeout: float | None) -> None:
         deadline = None if timeout is None else time.monotonic() + timeout
