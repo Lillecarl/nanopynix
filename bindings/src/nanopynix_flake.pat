@@ -1,8 +1,14 @@
 nanopynix_flake.__prefix__:
-    from nanopynix_expr import EvalState
+    \from nanopynix_expr import EvalState
 
 nanopynix_flake.FlakeRef.__init__:
-    def __init__(self, ref: "nix::FlakeRef") -> None: ...
+    def __init__(self, ref: object) -> None: ...
+
+nanopynix_flake.FlakeRef.to_attrs:
+    def to_attrs(self) -> dict[str, str | int | bool]: ...
+
+nanopynix_flake.LockedFlake.inputs:
+    def inputs(self) -> dict[str, object]: ...
 
 nanopynix_flake.lock_flake:
     def lock_flake(state: EvalState, flake_ref: FlakeRef, update_lock_file: bool = True, write_lock_file: bool = True) -> LockedFlake:
