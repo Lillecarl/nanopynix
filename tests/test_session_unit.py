@@ -228,7 +228,7 @@ class TestValueProxyLifecycle:
     ) -> ValueProxy:
         return _EvalProxyContext(worker, owner or self._owner(), timeout).value(handle, typ)
 
-    def test_handle_and_type_are_cached(self):
+    async def test_handle_and_type_are_cached(self):
         w = self._worker()
         vp = self._proxy(w, 42, "int")
         assert vp.handle == 42
