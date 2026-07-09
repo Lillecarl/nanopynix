@@ -304,32 +304,6 @@ class TestValueProxyLifecycle:
         assert exc.value.actual == "string"
         w._send_recv.assert_not_awaited()
 
-    async def test_try_scalar_helpers_are_strict(self):
-        w = self._worker()
-        w._send_recv.return_value = "hello"
-        vp = self._proxy(w, 1, "string")
-
-        assert await vp.try_str() == "hello"
-
-        with pytest.raises(WrongNixTypeError) as exc:
-            await vp.try_int()
-        assert exc.value.expected == "int"
-        assert exc.value.actual == "string"
-
-    async def test_try_container_helpers_are_strict(self):
-        w = self._worker()
-        w._send_recv.return_value = ["x"]
-        vp = self._proxy(w, 1, "attrs")
-
-        attrs = await vp.try_attrs()
-
-        assert attrs.keys() == ["x"]
-
-        with pytest.raises(WrongNixTypeError) as exc:
-            await vp.try_list()
-        assert exc.value.expected == "list"
-        assert exc.value.actual == "attrs"
-
     async def test_coerce_str_accepts_scalars(self):
         cases: list[tuple[NixType | str, object, str]] = [
             (NixType.STRING, "hello", "hello"),

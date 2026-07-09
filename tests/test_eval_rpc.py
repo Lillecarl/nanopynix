@@ -188,17 +188,17 @@ async def test_eval_call_non_function_raises():
             await value(1)
 
 
-async def test_eval_try_and_coerce_helpers():
-    """Strict try_* checks remote type; coerce_* applies explicit scalar conversions."""
+async def test_eval_force_as_and_coerce_helpers():
+    """force_as checks remote type; coerce_* applies explicit scalar conversions."""
     async with Session() as nix, nix.eval() as session:
         number = await session.string("42")
         text_number = await session.string('"42"')
         text_bad = await session.string('"forty-two"')
         attrs = await session.string("{ x = 1; }")
 
-        assert await number.try_int() == 42
+        assert await number.force_as(NixType.INT) == 42
         with pytest.raises(WrongNixTypeError):
-            await text_number.try_int()
+            await text_number.force_as(NixType.INT)
 
         assert await text_number.coerce_int() == 42
         assert await number.coerce_str() == "42"
@@ -403,9 +403,21 @@ async def test_lock_flake_and_eval_locked(tmp_path):
         assert not (tmp_path / "flake.lock").exists()
         assert locked.handle > 0
 
-        outputs = await session.eval_locked_flake(locked.handle)
+        outputs = await locked.eval()
         val = outputs.attr("val")
         assert await val.force() == 99
+
+
+async def test_locked_flake_release_invalidates_handle(tmp_path):
+    """release_locked_flake drops the in-memory lock handle."""
+    _init_git_flake(tmp_path, "val = 99;")
+
+    async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
+        locked = await session.lock_flake(str(tmp_path), write_lock_file=False)
+        await locked.release()
+
+        with pytest.raises(Exception, match="locked flake handle"):
+            await locked.eval()
 
 
 async def test_lock_flake_write_lock_file(tmp_path):
@@ -428,7 +440,7 @@ async def test_lock_flake_write_lock_file(tmp_path):
         locked = await session.lock_flake(str(tmp_path), write_lock_file=False)
         assert not (tmp_path / "flake.lock").exists()
 
-        await session.write_lock_file(locked.handle)
+        await locked.write_lock_file()
         assert (tmp_path / "flake.lock").exists()
 
 
@@ -454,7 +466,7 @@ async def test_lock_flake_no_write_does_not_leak(tmp_path):
 
 
 async def test_lock_flake_update_all(tmp_path):
-    """lock_flake with update_all=True re-resolves all inputs."""
+    """lock_flake with update_inputs=True re-resolves all inputs."""
     (tmp_path / "flake.nix").write_text("""
     {
         inputs.nanopynix.url = "github:lillecarl/nanopynix/develop";
@@ -472,7 +484,7 @@ async def test_lock_flake_update_all(tmp_path):
     async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
         locked = await session.lock_flake(
             str(tmp_path),
-            update_all=True,
+            update_inputs=True,
             write_lock_file=False,
         )
         assert locked.handle > 0

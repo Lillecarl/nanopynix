@@ -27,11 +27,13 @@ from nanopynix.models import (
     JsonScalar,
     JsonValue,
     ListCallArg,
-    LockedFlake,
     NixType,
     RemoteCallArg,
     RemoteValueRef,
     ScalarCallArg,
+)
+from nanopynix.models import (
+    LockedFlake as LockedFlakeWire,
 )
 
 if TYPE_CHECKING:
@@ -275,33 +277,6 @@ class ValueProxy:
         if actual != typ:
             raise WrongNixTypeError(expected=typ, actual=actual)
         return await self.force(timeout=timeout)
-
-    async def try_int(self, *, timeout: float | None = None) -> int:
-        return await self.force_as(NixType.INT, timeout=timeout)
-
-    async def try_float(self, *, timeout: float | None = None) -> float:
-        return await self.force_as(NixType.FLOAT, timeout=timeout)
-
-    async def try_bool(self, *, timeout: float | None = None) -> bool:
-        return await self.force_as(NixType.BOOL, timeout=timeout)
-
-    async def try_str(self, *, timeout: float | None = None) -> str:
-        return await self.force_as(NixType.STRING, timeout=timeout)
-
-    async def try_path(self, *, timeout: float | None = None) -> str:
-        return await self.force_as(NixType.PATH, timeout=timeout)
-
-    async def try_null(self, *, timeout: float | None = None) -> None:
-        return await self.force_as(NixType.NULL, timeout=timeout)
-
-    async def try_attrs(self, *, timeout: float | None = None) -> ValueAttrs:
-        return await self.force_as(NixType.ATTRS, timeout=timeout)
-
-    async def try_list(self, *, timeout: float | None = None) -> ValueList:
-        return await self.force_as(NixType.LIST, timeout=timeout)
-
-    async def try_function(self, *, timeout: float | None = None) -> ValueProxy:
-        return await self.force_as(NixType.FUNCTION, timeout=timeout)
 
     async def coerce_str(self, *, timeout: float | None = None) -> str:
         value = await self.force(timeout=timeout)
@@ -595,6 +570,25 @@ class ValueList:
 # ════════════════════════════════════════════════════════════════════
 
 
+@dataclass(frozen=True)
+class LockedFlakeHandle:
+    """Session-bound handle for an in-memory locked flake."""
+
+    _session: EvalSession
+    handle: int
+    description: str
+    inputs: dict
+
+    async def eval(self, *, timeout: float | None = None) -> ValueProxy:
+        return await self._session.eval_locked_flake(self, timeout=timeout)
+
+    async def write_lock_file(self, *, timeout: float | None = None) -> None:
+        await self._session.write_lock_file(self, timeout=timeout)
+
+    async def release(self, *, timeout: float | None = None) -> None:
+        await self._session.release_locked_flake(self, timeout=timeout)
+
+
 class EvalSession:
     """Holds the worker exclusively for the duration of an eval session.
 
@@ -673,37 +667,47 @@ class EvalSession:
         self,
         ref: str,
         *,
-        update_all: bool = False,
-        update_inputs: list[str] | None = None,
+        update_inputs: bool | list[str] = False,
         write_lock_file: bool = True,
         timeout: float | None = None,
-    ) -> LockedFlake:
+    ) -> LockedFlakeHandle:
         """Lock a flake, optionally updating inputs.
 
         Without update flags, creates missing lock entries only (like
-        ``nix flake lock``).  With ``update_all=True``, re-resolves all
-        inputs (like ``nix flake update``).  With ``update_inputs=["nixpkgs"]``,
-        re-resolves only the specified inputs (like ``nix flake update nixpkgs``).
+        ``nix flake lock``).  With ``update_inputs=True``, re-resolves all
+        inputs.  With ``update_inputs=["nixpkgs"]``, re-resolves only the
+        specified inputs.
 
-        Returns a ``LockedFlake`` with a ``handle`` that can be used with
-        ``eval_locked_flake()``, ``write_lock_file()``, and
-        ``release_locked_flake()``.  When ``write_lock_file=False``, the lock
-        is updated in memory only — call ``write_lock_file(handle)`` later to
-        persist it to disk.
+        Returns a session-bound ``LockedFlakeHandle``.  When
+        ``write_lock_file=False``, the lock is updated in memory only; call
+        ``await locked.write_lock_file()`` later to persist it.
         """
         self._check_rw()
         rw = self._reserved_worker()
-        return await rw.request(
+        locked = await rw.request(
             rpc.LockFlake(
                 ref=ref,
-                update_all=update_all,
-                update_inputs=update_inputs or [],
+                update_inputs=update_inputs,
                 write_lock_file=write_lock_file,
             ),
             timeout=self._resolve_timeout(timeout),
         )
+        return self._locked_flake_handle(locked)
 
-    async def eval_locked_flake(self, handle: int, *, timeout: float | None = None) -> ValueProxy:
+    def _locked_flake_handle(self, locked: LockedFlakeWire) -> LockedFlakeHandle:
+        return LockedFlakeHandle(
+            self,
+            handle=locked.handle,
+            description=locked.description,
+            inputs=locked.inputs,
+        )
+
+    def _locked_flake_id(self, locked: LockedFlakeHandle) -> int:
+        if locked._session is not self:
+            raise ForeignValueError("cannot use a LockedFlakeHandle from another EvalSession")
+        return locked.handle
+
+    async def eval_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> ValueProxy:
         """Evaluate a previously locked flake by handle.
 
         Calls the flake's ``outputs`` function using the in-memory
@@ -713,12 +717,12 @@ class EvalSession:
         self._check_rw()
         rw = self._reserved_worker()
         result = await rw.request(
-            rpc.CallLockedFlake(handle=handle),
+            rpc.CallLockedFlake(handle=self._locked_flake_id(locked)),
             timeout=self._resolve_timeout(timeout),
         )
         return self._proxy_context().value(result.handle, result.type)
 
-    async def write_lock_file(self, handle: int, *, timeout: float | None = None) -> None:
+    async def write_lock_file(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
         """Write a locked flake's lock file to disk.
 
         Persists the in-memory lock from a prior ``lock_flake(write_lock_file=False)``
@@ -728,7 +732,15 @@ class EvalSession:
         self._check_rw()
         rw = self._reserved_worker()
         await rw.request(
-            rpc.WriteLockFile(handle=handle),
+            rpc.WriteLockFile(handle=self._locked_flake_id(locked)),
+            timeout=self._resolve_timeout(timeout),
+        )
+
+    async def release_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
+        self._check_rw()
+        rw = self._reserved_worker()
+        await rw.request(
+            rpc.ReleaseLockedFlake(handle=self._locked_flake_id(locked)),
             timeout=self._resolve_timeout(timeout),
         )
 
