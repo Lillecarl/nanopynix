@@ -232,7 +232,6 @@ def test_locked_flake_shape(eval_state):
     lf = nanopynix_flake.lock_flake(
         eval_state,
         fr,
-        update_lock_file=False,
         write_lock_file=False,
     )
     result = locked_flake(lf)

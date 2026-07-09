@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from nanopynix import NixCoercionError, NixType, Session, ValueProxy, WrongNixTypeError, strip_ansi, yaml_primops
+from nanopynix.models import JsonValue
 
 pytestmark = pytest.mark.asyncio
 
@@ -344,3 +345,159 @@ async def test_eval_concurrent_sessions(tmp_path):
 
     results = await asyncio.gather(eval_one(str(f1)), eval_one(str(f2)))
     assert results == [10, 20]
+
+
+# ── Flake evaluation over RPC ──────────────────────────────────────────
+
+
+def _init_git_flake(tmp_path, outputs_body):
+    """Create a temp flake with a git repo for RPC testing."""
+    (tmp_path / "flake.nix").write_text(f"""
+    {{
+        outputs = {{ ... }}: {{
+            {outputs_body}
+        }};
+    }}
+    """)
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+
+async def test_eval_flake(tmp_path):
+    """eval_flake locks and evaluates a flake, returns navigable outputs."""
+    _init_git_flake(tmp_path, 'greeting = "hello"; count = 42;')
+
+    async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
+        outputs = await session.eval_flake(str(tmp_path), write_lock_file=False)
+        assert outputs.nix_type == NixType.ATTRS
+        greeting = outputs.attr("greeting")
+        assert await greeting.force() == "hello"
+        count = outputs.attr("count")
+        assert await count.force() == 42
+
+
+async def test_eval_flake_force_json(tmp_path):
+    """eval_flake + force_json on a sub-attrset serializes it to JSON."""
+    _init_git_flake(tmp_path, 'lib = { name = "test"; nested = { x = 1; y = [ "a" "b" ]; }; };')
+
+    async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
+        outputs = await session.eval_flake(str(tmp_path), write_lock_file=False)
+        lib = outputs.attr("lib")
+        result: dict[str, JsonValue] = await lib.force_json()  # type: ignore[assignment]
+        assert result["name"] == "test"
+        assert result["nested"]["x"] == 1
+        assert result["nested"]["y"] == ["a", "b"]
+
+
+async def test_lock_flake_and_eval_locked(tmp_path):
+    """lock_flake + eval_locked_flake: in-memory lock, evaluate without writing."""
+    _init_git_flake(tmp_path, "val = 99;")
+
+    async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
+        locked = await session.lock_flake(str(tmp_path), write_lock_file=False)
+        assert not (tmp_path / "flake.lock").exists()
+        assert locked.handle > 0
+
+        outputs = await session.eval_locked_flake(locked.handle)
+        val = outputs.attr("val")
+        assert await val.force() == 99
+
+
+async def test_lock_flake_write_lock_file(tmp_path):
+    """lock_flake with write_lock_file=False, then write_lock_file() persists."""
+    (tmp_path / "flake.nix").write_text("""
+    {
+        inputs.nanopynix.url = "github:lillecarl/nanopynix/develop";
+        outputs = { self, nanopynix, ... }: {
+            val = 1;
+        };
+    }
+    """)
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
+        locked = await session.lock_flake(str(tmp_path), write_lock_file=False)
+        assert not (tmp_path / "flake.lock").exists()
+
+        await session.write_lock_file(locked.handle)
+        assert (tmp_path / "flake.lock").exists()
+
+
+async def test_lock_flake_no_write_does_not_leak(tmp_path):
+    """lock_flake with write_lock_file=False must NOT create flake.lock."""
+    (tmp_path / "flake.nix").write_text("""
+    {
+        inputs.nanopynix.url = "github:lillecarl/nanopynix/develop";
+        outputs = { self, nanopynix, ... }: {
+            val = 1;
+        };
+    }
+    """)
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
+        await session.lock_flake(str(tmp_path), write_lock_file=False)
+        assert not (tmp_path / "flake.lock").exists()
+
+
+async def test_lock_flake_update_all(tmp_path):
+    """lock_flake with update_all=True re-resolves all inputs."""
+    (tmp_path / "flake.nix").write_text("""
+    {
+        inputs.nanopynix.url = "github:lillecarl/nanopynix/develop";
+        outputs = { self, nanopynix, ... }: {
+            x = 1;
+        };
+    }
+    """)
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
+        locked = await session.lock_flake(
+            str(tmp_path),
+            update_all=True,
+            write_lock_file=False,
+        )
+        assert locked.handle > 0
+        assert "nanopynix" in locked.inputs
+
+
+async def test_lock_flake_update_specific_input(tmp_path):
+    """lock_flake with update_inputs re-resolves only specified inputs."""
+    (tmp_path / "flake.nix").write_text("""
+    {
+        inputs.nanopynix.url = "github:lillecarl/nanopynix/develop";
+        outputs = { self, nanopynix, ... }: {
+            x = 1;
+        };
+    }
+    """)
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    async with Session(experimental_features=["flakes"]) as nix, nix.eval() as session:
+        locked = await session.lock_flake(
+            str(tmp_path),
+            update_inputs=["nanopynix"],
+            write_lock_file=False,
+        )
+        assert locked.handle > 0
+        assert "nanopynix" in locked.inputs

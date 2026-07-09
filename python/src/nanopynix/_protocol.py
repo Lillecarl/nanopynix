@@ -338,7 +338,26 @@ class Call(EvalRequest[ValueHandle]):
 class LockFlake(EvalRequest[LockedFlake]):
     method: ClassVar[str] = "lock_flake"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(LockedFlake)
-    ref: str | dict[str, Any] = rpc_arg(0)
+    ref: str = rpc_arg(0)
+    update_all: bool = rpc_arg(1, False)
+    update_inputs: list[str] = rpc_arg(2, [])
+    write_lock_file: bool = rpc_arg(3, True)
+
+
+class CallLockedFlake(EvalRequest[ValueHandle]):
+    method: ClassVar[str] = "call_locked_flake"
+    handle: int = rpc_arg(0)
+
+
+class WriteLockFile(EvalRequest[None]):
+    method: ClassVar[str] = "write_lock_file"
+    handle: int = rpc_arg(0)
+
+
+class EvalFlake(EvalRequest[ValueHandle]):
+    method: ClassVar[str] = "eval_flake"
+    ref: str = rpc_arg(0)
+    write_lock_file: bool = rpc_arg(1, True)
 
 
 class GetFlake(EvalRequest[FlakeRef]):

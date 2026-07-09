@@ -220,6 +220,7 @@ class TestLockedInput:
 class TestLockedFlake:
     def test_full(self):
         lf = LockedFlake(
+            handle=1,
             description="A test flake",
             inputs={
                 "nixpkgs": LockedInput(
@@ -232,6 +233,7 @@ class TestLockedFlake:
                 ),
             },
         )
+        assert lf.handle == 1
         assert lf.description == "A test flake"
         assert lf.inputs["nixpkgs"].attrs is not None
         assert lf.inputs["nixpkgs"].attrs["rev"] == "abc"
@@ -240,6 +242,7 @@ class TestLockedFlake:
     def test_validate_dict_nested(self):
         lf = LockedFlake.model_validate(
             {
+                "handle": 42,
                 "description": "hello",
                 "inputs": {
                     "nixpkgs": {
@@ -249,6 +252,7 @@ class TestLockedFlake:
                 },
             }
         )
+        assert lf.handle == 42
         assert isinstance(lf.inputs["nixpkgs"], LockedInput)
         assert lf.inputs["nixpkgs"].attrs is not None
         assert lf.inputs["nixpkgs"].attrs["rev"] == "abc"

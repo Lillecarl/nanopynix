@@ -15,125 +15,115 @@
 
 #include <nlohmann/json.hpp>
 
-#include "py_eval.hh"
+#include "py_value.hh"
 
 namespace nb = nanobind;
 using namespace nb::literals;
 
 // =========================================================================
-// PyValue
+// PyValue out-of-line method implementations
 // =========================================================================
 
-struct PyValue {
-    nix::Value *value;
-    std::shared_ptr<PyEvalState> eval;
+std::string PyValue::type_name() {
+    if (!value) return "null";
+    switch (value->type()) {
+        case nix::nThunk:    return "thunk";
+        case nix::nInt:      return "int";
+        case nix::nFloat:    return "float";
+        case nix::nBool:     return "bool";
+        case nix::nString:   return "string";
+        case nix::nPath:     return "path";
+        case nix::nNull:     return "null";
+        case nix::nAttrs:    return "attrs";
+        case nix::nList:     return "list";
+        case nix::nFunction: return "function";
+        case nix::nExternal: return "external";
+        default:             return "unknown";
+    }
+}
 
-    PyValue(nix::Value *v, std::shared_ptr<PyEvalState> e) : value(v), eval(std::move(e)) {}
+bool PyValue::is_null()     const { return value && value->type() == nix::nNull; }
+bool PyValue::is_int()      const { return value && value->type() == nix::nInt; }
+bool PyValue::is_float()    const { return value && value->type() == nix::nFloat; }
+bool PyValue::is_bool()     const { return value && value->type() == nix::nBool; }
+bool PyValue::is_string()   const { return value && value->type() == nix::nString; }
+bool PyValue::is_path()     const { return value && value->type() == nix::nPath; }
+bool PyValue::is_attrs()    const { return value && value->type() == nix::nAttrs; }
+bool PyValue::is_list()     const { return value && value->type() == nix::nList; }
+bool PyValue::is_function() const { return value && value->type() == nix::nFunction; }
+bool PyValue::is_thunk()    const { return value && value->type() == nix::nThunk; }
 
-    std::string type_name() {
-        if (!value) return "null";
-        switch (value->type()) {
-            case nix::nThunk:    return "thunk";
-            case nix::nInt:      return "int";
-            case nix::nFloat:    return "float";
-            case nix::nBool:     return "bool";
-            case nix::nString:   return "string";
-            case nix::nPath:     return "path";
-            case nix::nNull:     return "null";
-            case nix::nAttrs:    return "attrs";
-            case nix::nList:     return "list";
-            case nix::nFunction: return "function";
-            case nix::nExternal: return "external";
-            default:             return "unknown";
+int64_t PyValue::as_int() const { return static_cast<int64_t>(value->integer()); }
+double PyValue::as_float() const { return value->fpoint(); }
+bool PyValue::as_bool() const { return value->boolean(); }
+
+std::string PyValue::as_string() const {
+    if (auto sv = value->c_str()) return std::string(sv);
+    if (auto *es = evalState())
+        return std::string(es->forceStringNoCtx(*value, nix::noPos, ""));
+    return "";
+}
+
+void PyValue::force() { if (auto *es = evalState()) es->forceValue(*value, nix::noPos); }
+void PyValue::force_deep() { if (auto *es = evalState()) es->forceValueDeep(*value); }
+
+// to_python and to_json are implemented below.
+
+size_t PyValue::list_length() const {
+    if (value->type() != nix::nList) return 0;
+    return value->listSize();
+}
+
+PyValue PyValue::list_get(size_t idx) const {
+    if (value->type() != nix::nList) throw std::runtime_error("value is not a list");
+    auto *elem = value->listView()[idx];
+    if (auto *es = evalState()) es->forceValue(*elem, nix::noPos);
+    return PyValue(elem, eval);
+}
+
+std::vector<std::string> PyValue::attr_names() const {
+    std::vector<std::string> names;
+    if (value->type() != nix::nAttrs) return names;
+    for (auto &attr : *value->attrs())
+        names.push_back(std::string(evalState()->symbols[attr.name]));
+    return names;
+}
+
+bool PyValue::has_attr(const std::string &name) const {
+    if (value->type() != nix::nAttrs) return false;
+    auto sym = evalState()->symbols.create(name);
+    for (auto &attr : *value->attrs())
+        if (attr.name == sym) return true;
+    return false;
+}
+
+PyValue PyValue::attr_get(const std::string &name) const {
+    if (value->type() != nix::nAttrs) throw std::runtime_error("value is not an attribute set");
+    auto *es = evalState();
+    auto sym = es->symbols.create(name);
+    for (auto &attr : *value->attrs()) {
+        if (attr.name == sym) {
+            auto *v = es->allocValue();
+            es->forceValue(*attr.value, nix::noPos);
+            *v = *attr.value;
+            return PyValue(v, eval);
         }
     }
+    throw std::runtime_error("attribute '" + name + "' not found");
+}
 
-    bool is_null()     const { return value && value->type() == nix::nNull; }
-    bool is_int()      const { return value && value->type() == nix::nInt; }
-    bool is_float()    const { return value && value->type() == nix::nFloat; }
-    bool is_bool()     const { return value && value->type() == nix::nBool; }
-    bool is_string()   const { return value && value->type() == nix::nString; }
-    bool is_path()     const { return value && value->type() == nix::nPath; }
-    bool is_attrs()    const { return value && value->type() == nix::nAttrs; }
-    bool is_list()     const { return value && value->type() == nix::nList; }
-    bool is_function() const { return value && value->type() == nix::nFunction; }
-    bool is_thunk()    const { return value && value->type() == nix::nThunk; }
+PyValue PyValue::call(PyValue arg) {
+    auto *es = evalState();
+    auto *result = es->allocValue();
+    es->callFunction(*value, *arg.value, *result, nix::noPos);
+    es->forceValue(*result, nix::noPos);
+    return PyValue(result, eval);
+}
 
-    int64_t as_int() const { return static_cast<int64_t>(value->integer()); }
-    double as_float() const { return value->fpoint(); }
-    bool as_bool() const { return value->boolean(); }
-
-    std::string as_string() const {
-        if (auto sv = value->c_str()) return std::string(sv);
-        if (auto *es = evalState())
-            return std::string(es->forceStringNoCtx(*value, nix::noPos, ""));
-        return "";
-    }
-
-    void force() { if (auto *es = evalState()) es->forceValue(*value, nix::noPos); }
-    void force_deep() { if (auto *es = evalState()) es->forceValueDeep(*value); }
-
-    nb::object to_python();
-    nb::object to_json(bool copy_to_store = false);
-
-    size_t list_length() const {
-        if (value->type() != nix::nList) return 0;
-        return value->listSize();
-    }
-    PyValue list_get(size_t idx) const {
-        if (value->type() != nix::nList) throw std::runtime_error("value is not a list");
-        auto *elem = value->listView()[idx];
-        if (auto *es = evalState()) es->forceValue(*elem, nix::noPos);
-        return PyValue(elem, eval);
-    }
-
-    std::vector<std::string> attr_names() const {
-        std::vector<std::string> names;
-        if (value->type() != nix::nAttrs) return names;
-        for (auto &attr : *value->attrs())
-            names.push_back(std::string(evalState()->symbols[attr.name]));
-        return names;
-    }
-
-    bool has_attr(const std::string &name) const {
-        if (value->type() != nix::nAttrs) return false;
-        auto sym = evalState()->symbols.create(name);
-        for (auto &attr : *value->attrs())
-            if (attr.name == sym) return true;
-        return false;
-    }
-
-    PyValue attr_get(const std::string &name) const {
-        if (value->type() != nix::nAttrs) throw std::runtime_error("value is not an attribute set");
-        auto *es = evalState();
-        auto sym = es->symbols.create(name);
-        for (auto &attr : *value->attrs()) {
-            if (attr.name == sym) {
-                auto *v = es->allocValue();
-                es->forceValue(*attr.value, nix::noPos);
-                *v = *attr.value;
-                return PyValue(v, eval);
-            }
-        }
-        throw std::runtime_error("attribute '" + name + "' not found");
-    }
-
-    PyValue call(PyValue arg) {
-        auto *es = evalState();
-        auto *result = es->allocValue();
-        es->callFunction(*value, *arg.value, *result, nix::noPos);
-        es->forceValue(*result, nix::noPos);
-        return PyValue(result, eval);
-    }
-
-    std::string repr() {
-        if (!value) return "PyValue(null)";
-        return "PyValue(" + type_name() + ")";
-    }
-
-private:
-    nix::EvalState *evalState() const;
-};
+std::string PyValue::repr() {
+    if (!value) return "PyValue(null)";
+    return "PyValue(" + type_name() + ")";
+}
 
 // =========================================================================
 // PyEvalState out-of-line methods
