@@ -1,12 +1,13 @@
 {
   lib,
+  callPackage,
   buildPythonPackage,
   hatchling,
-  nanopynix-bindings,
   janus,
   pydantic,
   pyyaml,
   strip-ansi,
+  nanopynix-bindings ? callPackage ../bindings/package.nix { },
 }:
 
 buildPythonPackage {
