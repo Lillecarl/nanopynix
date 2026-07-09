@@ -43,6 +43,12 @@ Exceptions: `NixError`, `UndefinedVarError`, `TypeError_`, `ThrownError`,
 `InfiniteRecursionError`, `AssertionError_`, `MissingArgumentError`,
 `RestrictedPathError`, `ParseError`, `StoreError`, `UsageError`.
 
+Nix error text may include ANSI color escapes because Nix formats diagnostics
+for CLI output.  `nanopynix.strip_ansi(text)` removes those escapes when callers
+want clean text while preserving the raw error payload.  `NixError` exposes
+`msg_without_ansi` and `raw_without_ansi`; `LogEvent` exposes `message`,
+`message_without_ansi`, and `without_ansi()`.
+
 Pydantic models at `nanopynix.models.*`.
 
 YAML helpers are intended for worker-side primops:

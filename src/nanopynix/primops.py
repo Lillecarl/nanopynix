@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
+from pydantic import ValidationError
 
 from nanopynix.models import JsonValue, PrimOpSpec
 
@@ -73,52 +74,83 @@ def _construct_yaml12_int(loader: Any, node: Any) -> int:
     return sign * int(unsigned, 10)
 
 
-def _validate_document(value: Any) -> JsonValue:
-    return _JsonValue.validate_python(value)
+def _validate_document(value: Any, builtin: str) -> JsonValue:
+    try:
+        return _JsonValue.validate_python(value)
+    except ValidationError as exc:
+        raise ValueError(f"{builtin}: YAML document is not JSON-compatible: {exc}") from exc
 
 
-def _validate_documents(values: Iterable[Any]) -> list[JsonValue]:
-    return [_validate_document(value) for value in values]
+def _validate_documents(values: Iterable[Any], builtin: str) -> list[JsonValue]:
+    return [_validate_document(value, builtin) for value in values]
 
 
-def _single_document(values: Iterable[Any]) -> JsonValue:
+def _single_document(values: Iterable[Any], builtin: str, stream_builtin: str) -> JsonValue:
     docs = list(values)
     if len(docs) != 1:
-        raise ValueError(f"expected exactly one YAML document, got {len(docs)}")
-    return _validate_document(docs[0])
+        raise ValueError(
+            f"{builtin}: expected exactly one YAML document, got {len(docs)}; "
+            f"use {stream_builtin} for multi-document YAML"
+        )
+    return _validate_document(docs[0], builtin)
+
+
+def _parse_error_message(exc: Exception) -> str:
+    problem = getattr(exc, "problem", None)
+    mark = getattr(exc, "problem_mark", None)
+    if problem is None:
+        return str(exc)
+    if mark is None:
+        return str(problem)
+    return f"{problem} at line {mark.line + 1}, column {mark.column + 1}"
 
 
 def from_yaml(source: str) -> JsonValue:
     """Parse YAML 1.2-style input into JSON-like Python values."""
 
-    return _single_document(_yaml().load_all(source, Loader=_yaml12_loader()))
+    try:
+        return _single_document(_yaml().load_all(source, Loader=_yaml12_loader()), "fromYAML", "fromYAMLStream")
+    except _yaml().YAMLError as exc:
+        raise ValueError(f"fromYAML: failed to parse YAML 1.2 document: {_parse_error_message(exc)}") from exc
 
 
 def from_yaml11(source: str) -> JsonValue:
     """Parse legacy YAML 1.1 input into JSON-like Python values."""
 
-    return _single_document(_yaml().safe_load_all(source))
+    try:
+        return _single_document(_yaml().safe_load_all(source), "fromYAML11", "fromYAML11Stream")
+    except _yaml().YAMLError as exc:
+        raise ValueError(f"fromYAML11: failed to parse YAML 1.1 document: {_parse_error_message(exc)}") from exc
 
 
 def from_yaml_stream(source: str) -> list[JsonValue]:
     """Parse a YAML 1.2-style document stream into JSON-like Python values."""
 
-    return _validate_documents(_yaml().load_all(source, Loader=_yaml12_loader()))
+    try:
+        return _validate_documents(_yaml().load_all(source, Loader=_yaml12_loader()), "fromYAMLStream")
+    except _yaml().YAMLError as exc:
+        raise ValueError(f"fromYAMLStream: failed to parse YAML 1.2 stream: {_parse_error_message(exc)}") from exc
 
 
 def from_yaml11_stream(source: str) -> list[JsonValue]:
     """Parse a legacy YAML 1.1 document stream into JSON-like Python values."""
 
-    return _validate_documents(_yaml().safe_load_all(source))
+    try:
+        return _validate_documents(_yaml().safe_load_all(source), "fromYAML11Stream")
+    except _yaml().YAMLError as exc:
+        raise ValueError(f"fromYAML11Stream: failed to parse YAML 1.1 stream: {_parse_error_message(exc)}") from exc
 
 
 def to_yaml(value: JsonValue) -> str:
     """Render JSON-like Nix/Python values as Kubernetes-compatible YAML."""
 
-    value = _JsonValue.validate_python(value)
-    if isinstance(value, list):
-        return _yaml().safe_dump_all(value, explicit_start=True, sort_keys=False)
-    return _yaml().safe_dump(value, sort_keys=False)
+    value = _validate_document(value, "toYAML")
+    try:
+        if isinstance(value, list):
+            return _yaml().safe_dump_all(value, explicit_start=True, sort_keys=False)
+        return _yaml().safe_dump(value, sort_keys=False)
+    except _yaml().YAMLError as exc:
+        raise ValueError(f"toYAML: failed to render YAML: {_parse_error_message(exc)}") from exc
 
 
 def yaml_primops() -> list[PrimOpSpec]:

@@ -54,6 +54,15 @@ def test_nix_error_kwargs():
     assert e.info == {"traces": []}
 
 
+def test_nix_error_ansi_helpers_preserve_raw_and_newlines():
+    e = NixError("T", "\x1b[31mline 1\x1b[0m\nline 2", raw="\x1b[35mtrace\x1b[0m\nraw")
+
+    assert e.msg == "\x1b[31mline 1\x1b[0m\nline 2"
+    assert e.raw == "\x1b[35mtrace\x1b[0m\nraw"
+    assert e.msg_without_ansi == "line 1\nline 2"
+    assert e.raw_without_ansi == "trace\nraw"
+
+
 def test_hierarchy():
     assert issubclass(StoreError, NixError)
     assert issubclass(EvalError, NixError)

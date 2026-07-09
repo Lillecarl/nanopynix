@@ -4,6 +4,7 @@
   pkg-config,
   pydantic,
   pyyaml,
+  strip-ansi,
   python,
   nanobind,
   janus,
@@ -63,6 +64,7 @@ buildPythonPackage {
     janus
     pydantic
     pyyaml
+    strip-ansi
   ];
 
   dontUseCmakeConfigure = true;
