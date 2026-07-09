@@ -14,7 +14,6 @@ from nanopynix import (
     EvalSessionClosedError,
     ForeignValueError,
     NixCoercionError,
-    NixError,
     NixType,
     UnresolvedValueError,
     ValueReleasedError,
@@ -171,25 +170,37 @@ class TestEvalSessionLifecycle:
         rw.send_recv.assert_awaited_with("eval", "eval_string", ["42", "<string>"], timeout=10.0)
 
 
-class TestWorkerManagerActiveCall:
-    async def test_fatal_log_event_fails_active_call(self):
+class TestWorkerManagerLogEvents:
+    async def test_error_log_event_does_not_fail_active_call(self):
         manager = _WorkerManager()
         fut = asyncio.get_running_loop().create_future()
         manager._active_call = _ActiveCall(req_id=7, future=fut)
+        events = []
+        sub = manager.subscribe(events.append)
 
-        manager._fail_active_call_from_event({"request_id": 7, "action": "error", "args": [0, "attribute 'x' missing"]})
+        try:
+            event = {"request_id": 7, "action": "error", "args": [0, "attribute 'x' missing"]}
+            manager._log_bus.emit(event)
+        finally:
+            sub.unsubscribe()
 
-        assert fut.done()
-        with pytest.raises(NixError, match="attribute 'x' missing"):
-            fut.result()
+        assert events == [event]
+        assert not fut.done()
 
     async def test_non_error_log_event_does_not_fail_active_call(self):
         manager = _WorkerManager()
         fut = asyncio.get_running_loop().create_future()
         manager._active_call = _ActiveCall(req_id=7, future=fut)
+        events = []
+        sub = manager.subscribe(events.append)
 
-        manager._fail_active_call_from_event({"request_id": 7, "action": "warn", "args": ["still running"]})
+        try:
+            event = {"request_id": 7, "action": "warn", "args": ["still running"]}
+            manager._log_bus.emit(event)
+        finally:
+            sub.unsubscribe()
 
+        assert events == [event]
         assert not fut.done()
 
 
