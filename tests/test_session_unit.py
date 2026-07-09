@@ -21,7 +21,7 @@ from nanopynix import (
     WrongNixTypeError,
 )
 from nanopynix import _protocol as rpc
-from nanopynix._pool import _ActiveCall, _WorkerManager
+from nanopynix._pool import ReservedWorker, _ActiveCall, _WorkerManager
 from nanopynix._session import EvalSession, ValueProxy, _EvalOwner, _EvalOwnerToken, _EvalProxyContext, _ResolvedValue
 from nanopynix.models import LogEvent
 
@@ -177,9 +177,7 @@ class TestWorkerManagerActiveCall:
         fut = asyncio.get_running_loop().create_future()
         manager._active_call = _ActiveCall(req_id=7, future=fut)
 
-        manager._fail_active_call_from_event(
-            {"request_id": 7, "action": "error", "args": [0, "attribute 'x' missing"]}
-        )
+        manager._fail_active_call_from_event({"request_id": 7, "action": "error", "args": [0, "attribute 'x' missing"]})
 
         assert fut.done()
         with pytest.raises(NixError, match="attribute 'x' missing"):
@@ -190,11 +188,35 @@ class TestWorkerManagerActiveCall:
         fut = asyncio.get_running_loop().create_future()
         manager._active_call = _ActiveCall(req_id=7, future=fut)
 
-        manager._fail_active_call_from_event(
-            {"request_id": 7, "action": "warn", "args": ["still running"]}
-        )
+        manager._fail_active_call_from_event({"request_id": 7, "action": "warn", "args": ["still running"]})
 
         assert not fut.done()
+
+
+class TestReservedWorker:
+    async def test_concurrent_requests_are_serialized(self):
+        manager = MagicMock()
+        active = 0
+        max_active = 0
+
+        async def send_recv(module, fn, args, timeout=None):  # noqa: ASYNC109
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0)
+            active -= 1
+            return f"{module}.{fn}:{args}:{timeout}"
+
+        manager._send_recv = AsyncMock(side_effect=send_recv)
+        worker = ReservedWorker(manager)
+
+        results = await asyncio.gather(
+            worker.send_recv("eval", "first", [], timeout=1.0),
+            worker.send_recv("eval", "second", [2], timeout=2.0),
+        )
+
+        assert results == ["eval.first:[]:1.0", "eval.second:[2]:2.0"]
+        assert max_active == 1
 
 
 # ════════════════════════════════════════════════════════════════════
