@@ -131,16 +131,37 @@ eval_.lock_flake(ref, *, timeout=None, capture=False) → LockedFlake
 eval_.get_flake(ref, *, timeout=None, capture=False)  → FlakeRef
 ```
 
-### ValueProxy — lazy, all access is async
+### Eval value types
+
+The public eval type aliases are exported from `nanopynix.types` and the
+package root:
+
+```python
+type NixArg = ValueProxy | JsonScalar | list[NixArg] | dict[str, NixArg]
+type NixValue = ValueProxy | ValueAttrs | ValueList | JsonValue
+type NixDeepValue = ValueProxy | JsonScalar | list[NixDeepValue] | dict[str, NixDeepValue]
+```
+
+`NixArg` is what can be copied or passed by handle into a Nix function call.
+`NixValue` is the result of shallow forcing. `NixDeepValue` is the result of
+recursive forcing; nested functions remain `ValueProxy` objects.
+
+### ValueProxy — lazy, all RPC access is async
 
 | Method | Returns | Notes |
 |--------|---------|-------|
 | `.attr(name)` | `ValueProxy` | lazy, no RPC until forced/queried |
-| `.force()` | `ValueAttrs \| ValueList \| scalar` | WHNF — outer constructor only |
-| `.force_deep()` | `dict \| list \| scalar` | recursive (forceValueDeep) |
+| `.force()` | `NixValue` | WHNF — outer constructor only |
+| `.force_deep()` | `NixDeepValue` | recursive (forceValueDeep); functions stay remote |
+| `.force_as(type)` | specific value type | strict Nix type check before forcing |
+| `.try_int()`, `.try_str()`, ... | specific value type | readable strict wrappers around `force_as()` |
+| `.coerce_int()`, `.coerce_str()`, ... | scalar | explicit Python-side scalar coercions |
 | `.call(*args)` | `ValueProxy` | |
-| `.type()` | `str` | async; forces to WHNF and returns `"int"`, `"string"`, `"attrs"`, `"list"`, … |
-| `.is_*()` | `bool` | `is_int`, `is_string`, `is_attrs`, `is_list`, `is_null`, `is_function`, `is_bool` |
+| `.get_type()` | `NixType` | async; forces enough to classify the value |
+
+Strict helpers raise `WrongNixTypeError` when the Nix value has the wrong
+type. Coercion helpers raise `NixCoercionError` when a scalar cannot be
+converted; they do not coerce attrsets, lists, or functions into scalars.
 
 ### Handle lifetime & early release
 
