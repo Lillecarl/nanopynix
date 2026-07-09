@@ -89,8 +89,10 @@ class _LogBus:
         if not self._subscribers:
             return
         for cb in self._subscribers:
-            with contextlib.suppress(Exception):
+            try:
                 cb(event)
+            except Exception:
+                logger.exception("worker log subscriber failed")
 
 
 class _Subscription:
@@ -268,15 +270,18 @@ class _WorkerManager:
         """Shut down the worker."""
         if self._writer is not None:
             # Send a JSON-RPC notification that signals shutdown
-            with contextlib.suppress(Exception):
+            try:
                 self._write_line({"jsonrpc": "2.0", "method": "shutdown"})
+            except Exception:
+                logger.debug("failed to send worker shutdown notification", exc_info=True)
 
         if self._proc is not None:
+            stdin = self._proc.stdin
             try:
-                assert self._proc.stdin is not None
-                self._proc.stdin.close()
+                if stdin is not None:
+                    stdin.close()
             except Exception:
-                pass
+                logger.warning("failed to close worker stdin", exc_info=True)
             try:
                 await asyncio.wait_for(self._proc.wait(), timeout=3.0)
             except TimeoutError:
@@ -301,17 +306,19 @@ class _WorkerManager:
 
     async def _read_stderr(self) -> None:
         """Read worker stderr for debugging."""
-        assert self._proc is not None
-        assert self._proc.stderr is not None
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            raise WorkerDiedError("Worker stderr stream is not available")
         while True:
-            line = await self._proc.stderr.readline()
+            line = await proc.stderr.readline()
             if not line:
                 break
             logger.warning("worker stderr: %s", line.decode(errors="replace").rstrip())
 
     async def _read_loop(self) -> None:
         """Read all messages from worker stdout, route to futures or log bus."""
-        assert self._reader is not None
+        if self._reader is None:
+            raise WorkerDiedError("Worker stdout stream is not available")
         try:
             while True:
                 line = await self._reader.readline()
@@ -347,7 +354,8 @@ class _WorkerManager:
 
     def _write_line(self, msg: dict) -> None:
         """Write a JSON-RPC message as a line to the worker's stdin."""
-        assert self._writer is not None
+        if self._writer is None:
+            raise WorkerDiedError("Worker stdin stream is not available")
         data = json.dumps(msg, separators=_SEPARATORS).encode() + b"\n"
         self._writer.write(data)
 
@@ -412,8 +420,10 @@ class _WorkerManager:
                     "id": req_id,
                 }
             )
-            assert self._writer is not None
-            await self._writer.drain()
+            writer = self._writer
+            if writer is None:
+                raise WorkerDiedError("Worker stdin stream is not available")
+            await writer.drain()
 
             # Wait for response with idle timeout
             last_seen = self._last_activity = time.monotonic()
