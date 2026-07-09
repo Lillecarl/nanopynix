@@ -36,6 +36,7 @@ some raw nanobind bindings still exist for low-level tests and migration work.*
 ```python
 nanopynix.StorePath("abc123-foo")            → StorePath
 nanopynix.parse_flake_ref("github:...")       → FlakeRef
+nanopynix.yaml_primops()                     → list[PrimOpSpec]
 ```
 
 Exceptions: `NixError`, `UndefinedVarError`, `TypeError_`, `ThrownError`,
@@ -43,6 +44,24 @@ Exceptions: `NixError`, `UndefinedVarError`, `TypeError_`, `ThrownError`,
 `RestrictedPathError`, `ParseError`, `StoreError`, `UsageError`.
 
 Pydantic models at `nanopynix.models.*`.
+
+YAML helpers are intended for worker-side primops:
+
+```nix
+builtins.fromYAML "... YAML 1.2/core-style document ..."
+builtins.fromYAML11 "... YAML 1.1 document, e.g. 0444 as octal ..."
+builtins.fromYAMLStream "... multi-document YAML 1.2 stream ..."
+builtins.fromYAML11Stream "... multi-document YAML 1.1 stream ..."
+builtins.toYAML { kind = "ConfigMap"; }
+builtins.toYAML [ { kind = "ConfigMap"; } { kind = "Service"; } ]
+```
+
+`toYAML` emits Kubernetes-compatible YAML from JSON-compatible Nix values.  A
+root list renders as a multi-document stream; other values render as a single
+document.  There is no YAML 1.1 emitter; legacy support is parse-only.
+`fromYAML` and `fromYAML11` require exactly one document.  A single document
+whose root value is a list stays a list; multi-document input must use the
+`*Stream` parser.
 
 ```python
 @dataclass

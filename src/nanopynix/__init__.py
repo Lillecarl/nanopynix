@@ -59,7 +59,7 @@ from nanopynix.models import (
     ValueHandle,
 )
 from nanopynix.nix import LogCapture, Nix, Session
-from nanopynix.primops import from_yaml, to_yaml, yaml_primops
+from nanopynix.primops import from_yaml, from_yaml11, from_yaml11_stream, from_yaml_stream, to_yaml, yaml_primops
 from nanopynix.store import StoreHandle
 from nanopynix.types import NixArg, NixDeepValue, NixValue
 
@@ -124,6 +124,9 @@ __all__ = [
     "enable_experimental_feature",
     "eval_file",
     "from_yaml",
+    "from_yaml11",
+    "from_yaml11_stream",
+    "from_yaml_stream",
     "get_flake",
     "get_setting",
     "get_verbosity",

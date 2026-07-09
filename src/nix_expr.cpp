@@ -318,8 +318,10 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v) {
             auto list = nb::list();
             auto n = v->listSize();
             auto lv = v->listView();
-            for (size_t i = 0; i < n; i++)
+            for (size_t i = 0; i < n; i++) {
+                state.forceValue(*lv[i], nix::noPos);
                 list.append(value_to_python_arg(state, lv[i]));
+            }
             return list;
         }
         case nix::nAttrs: {
