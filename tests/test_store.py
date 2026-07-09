@@ -2,9 +2,8 @@
 
 import os
 
-import pytest
-
 import nanopynix_store
+import pytest
 
 
 def _bash_sp():

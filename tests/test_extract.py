@@ -5,11 +5,10 @@ Needs C++ modules loaded but no Nix daemon.
 
 from __future__ import annotations
 
-import pytest
-
-import nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
 import nanopynix_fetchers  # L1 Input
 import nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
+import nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
+import pytest
 
 from nanopynix._extract import (
     flake_ref_attrs,
@@ -19,7 +18,6 @@ from nanopynix._extract import (
     store_path,
     store_path_str,
 )
-
 
 # ════════════════════════════════════════════════════════════════════
 # store_path_str — pure string parsing
@@ -242,7 +240,7 @@ def test_locked_flake_shape(eval_state):
     assert isinstance(result["description"], str)
     assert isinstance(result["inputs"], dict)
     # Every input has is_flake, attrs, follows
-    for k, v in result["inputs"].items():
+    for v in result["inputs"].values():
         assert "is_flake" in v
         assert "attrs" in v
         assert "follows" in v

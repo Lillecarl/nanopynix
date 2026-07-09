@@ -76,8 +76,8 @@ __all__ = [
     "DerivationOutputs",
     "EvalError",
     "EvalProxyError",
-    "EvalSessionClosedError",
     "EvalSession",
+    "EvalSessionClosedError",
     # L1
     "EvalState",
     "FlakeRef",

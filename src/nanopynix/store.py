@@ -7,7 +7,6 @@ a ``_session_id`` that ``Eval`` checks at runtime.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import nanopynix_store  # BuildMode enum
@@ -16,6 +15,8 @@ from nanopynix import _protocol as rpc
 from nanopynix.models import BuildResult, Derivation, Input, MissingInfo, PathInfo, StorePath
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from nanopynix._pool import _WorkerManager
 
 

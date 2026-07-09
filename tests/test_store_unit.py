@@ -5,13 +5,16 @@ No Nix daemon needed.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
-from nanopynix import _protocol as rpc
 from nanopynix.models import BuildResult, Derivation, MissingInfo, PathInfo, StorePath
 from nanopynix.store import StoreHandle as Store
+
+if TYPE_CHECKING:
+    from nanopynix import _protocol as rpc
 
 pytestmark = pytest.mark.asyncio
 
@@ -123,7 +126,7 @@ class TestPathInfo:
             "ultimate": False,
         }
         sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
-        result = await store.query_path_info(sp)
+        await store.query_path_info(sp)
         pool.call.assert_awaited_with("store", "query_path_info", ["a" * 32 + "-foo"])
 
 

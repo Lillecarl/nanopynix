@@ -15,7 +15,6 @@ from nanopynix.exceptions import (
     ValueReleasedError,
     WrongNixTypeError,
 )
-from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedFlake, NixType
 from nanopynix.models import (
     AttrsCallArg,
     CallArgWire,
@@ -23,7 +22,12 @@ from nanopynix.models import (
     DeepList,
     DeepScalar,
     DeepValueWire,
+    FlakeRef,
+    JsonScalar,
+    JsonValue,
     ListCallArg,
+    LockedFlake,
+    NixType,
     RemoteCallArg,
     RemoteValueRef,
     ScalarCallArg,
