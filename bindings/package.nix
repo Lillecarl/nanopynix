@@ -11,16 +11,15 @@
 }:
 
 let
-  # nanobind 2.12.0 stubgen never increments pattern.matches in
-  # apply_pattern(), so every .pat rule emits a false "did not match
-  # any elements" warning even when it was applied successfully.
-  # Patch the counter so the warning logic works correctly.
-  nanobindPatched = nanobind.overrideAttrs (old: {
-    postFixup = (old.postFixup or "") + ''
-      find $out -name stubgen.py -path '*/nanobind/*' -exec \
-        sed -i '/# Success, pattern was applied/a\        pattern.matches += 1' {} \;
-    '';
-  });
+  # Use latest nanobind (2.13.0 26/07/09) because it's fixed a stub generation bug
+  nanobind2_13 = nanobind.overrideAttrs (
+    final: prev: {
+      version = "2.13.0";
+      src = prev.src.override {
+        hash = "sha256-YAqjcVBkuNsXvrAaVmDRLQ1F38UBqdnIf8+OseNBzG4=";
+      };
+    }
+  );
 in
 
 buildPythonPackage {
@@ -28,15 +27,7 @@ buildPythonPackage {
   version = "0.1.0";
   pyproject = true;
 
-  src = lib.cleanSourceWith {
-    filter =
-      path: type:
-      let
-        baseName = lib.baseNameOf path;
-      in
-      lib.cleanSourceFilter path type && baseName != "tests";
-    src = ./.;
-  };
+  src = lib.cleanSource ./.;
 
   build-system = [
     cmake
@@ -60,7 +51,7 @@ buildPythonPackage {
         ) derivations;
     in
     [
-      nanobindPatched
+      nanobind2_13
     ]
     ++ lib.pipe nix.libs [
       lib.attrsToList
@@ -72,7 +63,7 @@ buildPythonPackage {
   dontUseCmakeConfigure = true;
 
   cmakeFlags = [
-    "-Dnanobind_ROOT=${nanobindPatched}/${python.sitePackages}/nanobind/cmake"
+    "-Dnanobind_ROOT=${nanobind2_13}/${python.sitePackages}/nanobind/cmake"
     "-DPython_EXECUTABLE=${python}/bin/python"
   ];
 
