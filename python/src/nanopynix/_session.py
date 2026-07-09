@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, overload
 
@@ -27,6 +27,7 @@ from nanopynix.models import (
     JsonScalar,
     JsonValue,
     ListCallArg,
+    LockedInput,
     NixType,
     RemoteCallArg,
     RemoteValueRef,
@@ -570,23 +571,33 @@ class ValueList:
 # ════════════════════════════════════════════════════════════════════
 
 
-@dataclass(frozen=True)
+@dataclass
 class LockedFlakeHandle:
     """Session-bound handle for an in-memory locked flake."""
 
-    _session: EvalSession
+    _session: EvalSession = field(repr=False)
     handle: int
     description: str
-    inputs: dict
+    inputs: dict[str, LockedInput]
+    _released: bool = field(default=False, init=False, repr=False)
+
+    def _check_active(self) -> None:
+        if self._released:
+            raise ValueReleasedError("LockedFlakeHandle has been released")
 
     async def eval(self, *, timeout: float | None = None) -> ValueProxy:
+        self._check_active()
         return await self._session.eval_locked_flake(self, timeout=timeout)
 
     async def write_lock_file(self, *, timeout: float | None = None) -> None:
+        self._check_active()
         await self._session.write_lock_file(self, timeout=timeout)
 
     async def release(self, *, timeout: float | None = None) -> None:
+        if self._released:
+            return
         await self._session.release_locked_flake(self, timeout=timeout)
+        self._released = True
 
 
 class EvalSession:
