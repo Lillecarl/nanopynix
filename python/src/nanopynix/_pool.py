@@ -25,6 +25,7 @@ import shutil
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from nanopynix.exceptions import from_response
@@ -41,6 +42,9 @@ _RPC_TIMEOUT = 300.0
 _id_counter = itertools.count()
 
 _SEPARATORS = (",", ":")
+_MIN_OOM_SCORE_ADJ = -1000
+_MAX_OOM_SCORE_ADJ = 1000
+_PROC_ROOT = Path("/proc")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -60,6 +64,30 @@ class WorkerBusyError(RuntimeError):
 class _ActiveCall:
     req_id: int
     future: asyncio.Future
+
+
+def _clamp_oom_score_adj(value: int) -> int:
+    return max(_MIN_OOM_SCORE_ADJ, min(_MAX_OOM_SCORE_ADJ, value))
+
+
+def _oom_score_adj_path(pid: int) -> Path:
+    return _PROC_ROOT / str(pid) / "oom_score_adj"
+
+
+def _set_oom_score_adj(pid: int, value: int) -> bool:
+    """Best-effort Linux OOM priority hint for a child process."""
+    try:
+        _oom_score_adj_path(pid).write_text(f"{_clamp_oom_score_adj(value)}\n")
+    except FileNotFoundError:
+        logger.debug("worker process disappeared before oom_score_adj could be set")
+        return False
+    except PermissionError:
+        logger.debug("permission denied setting worker oom_score_adj to %s", value)
+        return False
+    except OSError:
+        logger.debug("failed to set worker oom_score_adj to %s", value, exc_info=True)
+        return False
+    return True
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -210,6 +238,8 @@ class _WorkerManager:
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
         primops: list[PrimOpSpec] | None = None,
+        worker_oom_score_adj: int | None = 500,
+        reserved_worker_oom_score_adj: int | None = 250,
     ) -> None:
         self._store_uri = store_uri
         self._eval_store_uri = eval_store_uri or store_uri
@@ -217,6 +247,8 @@ class _WorkerManager:
         self._settings = settings or {}
         self._features = experimental_features or []
         self._primops = primops or []
+        self._worker_oom_score_adj = worker_oom_score_adj
+        self._reserved_worker_oom_score_adj = reserved_worker_oom_score_adj
         self._proc: asyncio.subprocess.Process | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
@@ -242,6 +274,7 @@ class _WorkerManager:
             stderr=asyncio.subprocess.PIPE,
             limit=2**63,  # effectively unlimited — OOM is fine, silent truncation is not
         )
+        self._apply_oom_score_adj(self._worker_oom_score_adj)
         self._reader = self._proc.stdout
         self._writer = self._proc.stdin
 
@@ -495,10 +528,14 @@ class _WorkerManager:
             try:
                 return await self._send_recv(module, fn, args, timeout=timeout)
             finally:
+                self._apply_oom_score_adj(self._worker_oom_score_adj)
                 self._available.release()
 
-        async with self._available:
-            return await self._send_recv(module, fn, args, timeout=timeout)
+        try:
+            async with self._available:
+                return await self._send_recv(module, fn, args, timeout=timeout)
+        finally:
+            self._apply_oom_score_adj(self._worker_oom_score_adj)
 
     async def request(self, request: rpc.WorkerRequest[T], *, timeout: float | None = None) -> T:
         """Send a typed RPC request on the worker."""
@@ -523,11 +560,19 @@ class _WorkerManager:
                 raise WorkerBusyError(f"worker is busy after waiting {timeout}s") from exc
         else:
             await self._available.acquire()
+        self._apply_oom_score_adj(self._reserved_worker_oom_score_adj)
         return ReservedWorker(self)
 
     def _release(self) -> None:
         """Release the worker lock (called by ReservedWorker.release())."""
+        self._apply_oom_score_adj(self._worker_oom_score_adj)
         self._available.release()
+
+    def _apply_oom_score_adj(self, value: int | None) -> bool:
+        proc = self._proc
+        if value is None or proc is None:
+            return False
+        return _set_oom_score_adj(proc.pid, value)
 
     # ── log access ─────────────────────────────────────────────────
 

@@ -6,6 +6,7 @@ No Nix daemon needed — exercises error paths and edge cases.
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,6 +20,7 @@ from nanopynix import (
     ValueReleasedError,
     WrongNixTypeError,
 )
+from nanopynix import _pool as pool_mod
 from nanopynix import _protocol as rpc
 from nanopynix._pool import ReservedWorker, _ActiveCall, _WorkerManager
 from nanopynix._session import (
@@ -60,6 +62,46 @@ def _mock_reserved_worker():
 
     rw.request = AsyncMock(side_effect=request)
     return rw
+
+
+async def test_oom_score_adj_is_clamped_and_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(pool_mod, "_PROC_ROOT", tmp_path)
+    proc_dir = tmp_path / "123"
+    proc_dir.mkdir()
+    score_file = proc_dir / "oom_score_adj"
+    score_file.write_text("0\n")
+
+    assert pool_mod._set_oom_score_adj(123, 1200) is True
+    assert score_file.read_text() == "1000\n"
+
+    assert pool_mod._set_oom_score_adj(123, -1200) is True
+    assert score_file.read_text() == "-1000\n"
+
+
+async def test_oom_score_adj_missing_process_is_best_effort(tmp_path, monkeypatch):
+    monkeypatch.setattr(pool_mod, "_PROC_ROOT", tmp_path)
+
+    assert pool_mod._set_oom_score_adj(123, 500) is False
+
+
+async def test_worker_manager_adjusts_oom_score_while_reserved(monkeypatch):
+    calls: list[tuple[int, int]] = []
+
+    def set_score(pid: int, value: int) -> bool:
+        calls.append((pid, value))
+        return True
+
+    monkeypatch.setattr(pool_mod, "_set_oom_score_adj", set_score)
+
+    manager = _WorkerManager(worker_oom_score_adj=500, reserved_worker_oom_score_adj=250)
+    proc = MagicMock()
+    proc.pid = 42
+    manager._proc = cast(Any, proc)
+
+    reserved = await manager.reserve()
+    await reserved.release()
+
+    assert calls == [(42, 250), (42, 500)]
 
 
 # ════════════════════════════════════════════════════════════════════

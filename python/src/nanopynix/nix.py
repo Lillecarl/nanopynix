@@ -90,6 +90,8 @@ class Session:
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
         primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
+        worker_oom_score_adj: int | None = 500,
+        reserved_worker_oom_score_adj: int | None = 250,
     ) -> None:
         if config is not None and settings is not None:
             raise TypeError("Use either config= or settings=, not both")
@@ -100,6 +102,8 @@ class Session:
             settings=config if config is not None else settings,
             experimental_features=experimental_features,
             primops=[PrimOpSpec.model_validate(spec) for spec in primops or []],
+            worker_oom_score_adj=worker_oom_score_adj,
+            reserved_worker_oom_score_adj=reserved_worker_oom_score_adj,
         )
         self._session_id = uuid.uuid4().hex
 
