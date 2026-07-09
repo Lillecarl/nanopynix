@@ -656,10 +656,92 @@ class EvalSession:
         )
         return self._proxy_context().value(handle.handle, handle.type)
 
-    async def lock_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> LockedFlake:
+    async def lock_flake(
+        self,
+        ref: str,
+        *,
+        update_all: bool = False,
+        update_inputs: list[str] | None = None,
+        write_lock_file: bool = True,
+        timeout: float | None = None,
+    ) -> LockedFlake:
+        """Lock a flake, optionally updating inputs.
+
+        Without update flags, creates missing lock entries only (like
+        ``nix flake lock``).  With ``update_all=True``, re-resolves all
+        inputs (like ``nix flake update``).  With ``update_inputs=["nixpkgs"]``,
+        re-resolves only the specified inputs (like ``nix flake update nixpkgs``).
+
+        Returns a ``LockedFlake`` with a ``handle`` that can be used with
+        ``eval_locked_flake()``, ``write_lock_file()``, and
+        ``release_locked_flake()``.  When ``write_lock_file=False``, the lock
+        is updated in memory only — call ``write_lock_file(handle)`` later to
+        persist it to disk.
+        """
         self._check_rw()
         rw = self._reserved_worker()
-        return await rw.request(rpc.LockFlake(ref=ref), timeout=self._resolve_timeout(timeout))
+        return await rw.request(
+            rpc.LockFlake(
+                ref=ref,
+                update_all=update_all,
+                update_inputs=update_inputs or [],
+                write_lock_file=write_lock_file,
+            ),
+            timeout=self._resolve_timeout(timeout),
+        )
+
+    async def eval_locked_flake(self, handle: int, *, timeout: float | None = None) -> ValueProxy:
+        """Evaluate a previously locked flake by handle.
+
+        Calls the flake's ``outputs`` function using the in-memory
+        ``LockedFlake`` from a prior ``lock_flake()`` call.  This allows
+        evaluating with an updated lock that hasn't been written to disk yet.
+        """
+        self._check_rw()
+        rw = self._reserved_worker()
+        result = await rw.request(
+            rpc.CallLockedFlake(handle=handle),
+            timeout=self._resolve_timeout(timeout),
+        )
+        return self._proxy_context().value(result.handle, result.type)
+
+    async def write_lock_file(self, handle: int, *, timeout: float | None = None) -> None:
+        """Write a locked flake's lock file to disk.
+
+        Persists the in-memory lock from a prior ``lock_flake(write_lock_file=False)``
+        call.  The lock file is written to the flake's own directory — for a
+        temp flake this is the temp directory, never a real path.
+        """
+        self._check_rw()
+        rw = self._reserved_worker()
+        await rw.request(
+            rpc.WriteLockFile(handle=handle),
+            timeout=self._resolve_timeout(timeout),
+        )
+
+    async def eval_flake(
+        self,
+        ref: str,
+        *,
+        write_lock_file: bool = True,
+        timeout: float | None = None,
+    ) -> ValueProxy:
+        """Lock and evaluate a flake in one step, returning its outputs as a ``ValueProxy``.
+
+        Equivalent to ``nix eval <ref>#`` — calls ``lockFlake`` then
+        ``callFlake`` and returns the outputs attrset.  Navigate with
+        ``.attr()``, ``.force_json()``, etc.
+
+        For more control (e.g. updating locks in memory before evaluating),
+        use ``lock_flake()`` + ``eval_locked_flake()`` instead.
+        """
+        self._check_rw()
+        rw = self._reserved_worker()
+        handle = await rw.request(
+            rpc.EvalFlake(ref=ref, write_lock_file=write_lock_file),
+            timeout=self._resolve_timeout(timeout),
+        )
+        return self._proxy_context().value(handle.handle, handle.type)
 
     async def get_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> FlakeRef:
         self._check_rw()

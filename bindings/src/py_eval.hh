@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -22,6 +23,13 @@ struct PyEvalState {
     nix::fetchers::Settings fetchSettings;
     nix::EvalSettings evalSettings{_readOnlyMode};
     std::shared_ptr<nix::EvalState> state;
+
+    using EvalSettingsConfigurator = std::function<void(nix::EvalSettings &)>;
+
+    static std::vector<EvalSettingsConfigurator> &evalSettingsConfigurators() {
+        static std::vector<EvalSettingsConfigurator> configurators;
+        return configurators;
+    }
 
     PyEvalState(std::shared_ptr<nix::Store> s,
                 const std::vector<std::string> &searchPath = {})
@@ -68,6 +76,9 @@ private:
     int64_t _next_handle = 1;
 
     void init(const std::vector<std::string> &searchPath) {
+        for (auto &cfg : evalSettingsConfigurators())
+            cfg(evalSettings);
+
         nix::LookupPath lookupPath;
         for (auto &entry : searchPath) {
             auto eq = entry.find('=');

@@ -139,6 +139,7 @@ class LockedInput(BaseModel):
 class LockedFlake(BaseModel):
     """A locked flake with description and resolved inputs."""
 
+    handle: int = Field(description="Worker-side handle to the LockedFlake object")
     description: str = Field(default="", description="Flake description from meta.description")
     inputs: dict[str, LockedInput] = Field(default_factory=dict, description="Locked inputs, keyed by id")
 

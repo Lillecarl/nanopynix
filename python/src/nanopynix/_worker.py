@@ -402,6 +402,9 @@ def _store_dispatch(store, eval_store):
 
 _es: nanopynix_expr.EvalState | None = None
 
+_locked_flakes: dict[int, nanopynix_flake.LockedFlake] = {}
+_next_lf_handle: int = 1
+
 
 def _get_es(store):
     global _es
@@ -412,10 +415,11 @@ def _get_es(store):
 
 def _reset_es():
     """Release all handles and destroy the EvalState for a fresh session."""
-    global _es
+    global _es, _locked_flakes
     if _es is not None:
         _es.release_all_exported()
         _es = None
+    _locked_flakes.clear()
 
 
 def _eval_dispatch(store):
@@ -518,7 +522,39 @@ def _eval_dispatch(store):
         return _type_name(req.handle)
 
     def lock_flake(req: rpc.LockFlake):
-        return _locked_flake(nanopynix_flake.lock_flake(_get_es(store), _flake_ref(req.ref)))
+        global _next_lf_handle
+        ref = nanopynix_flake.parse_flake_ref(req.ref)
+        lf = nanopynix_flake.lock_flake(
+            _get_es(store), ref,
+            update_all=req.update_all,
+            update_inputs=req.update_inputs,
+            write_lock_file=req.write_lock_file,
+        )
+        handle = _next_lf_handle
+        _next_lf_handle += 1
+        _locked_flakes[handle] = lf
+        result = _locked_flake(lf)
+        result["handle"] = handle
+        return result
+
+    def call_locked_flake(req: rpc.CallLockedFlake):
+        lf = _locked_flakes.get(req.handle)
+        if lf is None:
+            raise KeyError(f"locked flake handle {req.handle} not found")
+        es = _get_es(store)
+        pyv = nanopynix_flake.call_flake(es, lf)
+        return _export(pyv)
+
+    def write_lock_file(req: rpc.WriteLockFile):
+        lf = _locked_flakes.get(req.handle)
+        if lf is None:
+            raise KeyError(f"locked flake handle {req.handle} not found")
+        lf.write_lock_file()
+
+    def eval_flake(req: rpc.EvalFlake):
+        es = _get_es(store)
+        pyv = nanopynix_flake.eval_flake(es, req.ref, req.write_lock_file)
+        return _export(pyv)
 
     def get_flake(req: rpc.GetFlake) -> FlakeRef:
         return FlakeRef(attrs=_flake_ref_attrs(nanopynix_flake.get_flake(_get_es(store), _flake_ref(req.ref))))
@@ -541,6 +577,9 @@ def _eval_dispatch(store):
             Endpoint(rpc.TypeName, type_name),
             Endpoint(rpc.Call, call),
             Endpoint(rpc.LockFlake, lock_flake),
+            Endpoint(rpc.CallLockedFlake, call_locked_flake),
+            Endpoint(rpc.WriteLockFile, write_lock_file),
+            Endpoint(rpc.EvalFlake, eval_flake),
             Endpoint(rpc.GetFlake, get_flake),
             Endpoint(rpc.Release, release),
             Endpoint(rpc.ReleaseAll, lambda _: _reset_es()),

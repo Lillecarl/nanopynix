@@ -1,3 +1,5 @@
+#include <filesystem>
+
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -14,7 +16,7 @@
 
 #include "attrs_util.hh"
 
-#include "py_eval.hh"
+#include "py_value.hh"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -53,6 +55,18 @@ struct PyLockedFlake {
 
     std::string get_description() const { return description; }
     nb::typed<nb::dict, nb::str> get_inputs() const { return inputs; }
+
+    void write_lock_file() const {
+        if (!locked)
+            throw std::runtime_error("LockedFlake has been released");
+        auto [lockFileStr, keyMap] = locked->lockFile.to_string();
+        auto relPath = (locked->flake.originalRef.subdir == "" ? "" : locked->flake.originalRef.subdir + "/") + "flake.lock";
+        locked->flake.originalRef.input.putFile(
+            nix::CanonPath(relPath),
+            lockFileStr + "\n",
+            std::nullopt);
+        locked->flake.lockFilePath().invalidateCache();
+    }
 };
 
 // =========================================================================
@@ -66,13 +80,25 @@ static PyFlakeRef parse_flake_ref(const std::string &url) {
     return PyFlakeRef(std::move(ref));
 }
 
-static PyLockedFlake lock_flake(PyEvalState &es, PyFlakeRef &flakeRef,
-                                 bool updateLockFile = true,
-                                 bool writeLockFile = true) {
+static PyLockedFlake lock_flake(
+    PyEvalState &es,
+    PyFlakeRef &flakeRef,
+    bool update_all = false,
+    const std::vector<std::string> &update_inputs = {},
+    bool write_lock_file = true)
+{
     nix::flake::Settings flakeSettings;
     nix::flake::LockFlags lockFlags;
-    lockFlags.updateLockFile = updateLockFile;
-    lockFlags.writeLockFile = writeLockFile;
+    lockFlags.recreateLockFile = update_all;
+    lockFlags.writeLockFile = write_lock_file;
+
+    for (const auto &input : update_inputs) {
+        auto path = nix::flake::NonEmptyInputAttrPath::parse(input);
+        if (!path)
+            throw std::runtime_error(
+                "input path cannot be empty: '" + input + "'");
+        lockFlags.inputUpdates.insert(*path);
+    }
 
     auto locked = std::make_unique<nix::flake::LockedFlake>(
         nix::flake::lockFlake(flakeSettings, *es.state, flakeRef.ref, lockFlags));
@@ -109,6 +135,30 @@ static PyFlakeRef get_flake(PyEvalState &es, PyFlakeRef &flakeRef,
     return PyFlakeRef(std::move(flake.resolvedRef));
 }
 
+static PyValue call_flake(PyEvalState &es, PyLockedFlake &lf) {
+    auto *v = es.state->allocValue();
+    nix::flake::callFlake(*es.state, *lf.locked, *v);
+    return PyValue(v, es.evalRef());
+}
+
+static PyValue eval_flake(PyEvalState &es, const std::string &ref,
+                           bool write_lock_file = true) {
+    nix::flake::Settings flakeSettings;
+    auto flakeRef = nix::parseFlakeRef(
+        es.fetchSettings, ref, std::filesystem::current_path());
+
+    nix::flake::LockFlags lockFlags;
+    lockFlags.writeLockFile = write_lock_file;
+
+    auto lockedFlake = nix::flake::lockFlake(
+        flakeSettings, *es.state, flakeRef, lockFlags);
+
+    auto *v = es.state->allocValue();
+    nix::flake::callFlake(*es.state, lockedFlake, *v);
+
+    return PyValue(v, es.evalRef());
+}
+
 // =========================================================================
 // bindings
 // =========================================================================
@@ -128,6 +178,8 @@ static void bind_locked_flake(nb::module_ &m) {
     nb::class_<PyLockedFlake>(m, "LockedFlake")
         .def("description", &PyLockedFlake::get_description)
         .def("inputs", &PyLockedFlake::get_inputs)
+        .def("write_lock_file", &PyLockedFlake::write_lock_file,
+             "Write the in-memory lock file to the flake's flake.lock on disk")
         .def("__repr__", [](const PyLockedFlake &lf) {
             return "LockedFlake(description='" + lf.description + "')";
         });
@@ -136,17 +188,34 @@ static void bind_locked_flake(nb::module_ &m) {
 // =========================================================================
 
 NB_MODULE(nanopynix_flake, m) {
-    m.doc() = "nanopynix: Nix flake bindings (FlakeRef, lockFlake)";
+    m.doc() = "nanopynix: Nix flake bindings (FlakeRef, lockFlake, callFlake)";
+
+    // Register builtins.getFlake on every EvalState by configuring its
+    // EvalSettings with flake primops.
+    PyEvalState::evalSettingsConfigurators().push_back(
+        [](nix::EvalSettings &es) {
+            static nix::flake::Settings flakeSettings;
+            flakeSettings.configureEvalSettings(es);
+        });
 
     m.def("parse_flake_ref", &parse_flake_ref, "url"_a,
           "Parse a flake reference string (e.g. 'github:NixOS/nixpkgs')");
     m.def("lock_flake", &lock_flake,
           "state"_a, "flake_ref"_a,
-          "update_lock_file"_a = true, "write_lock_file"_a = true,
+          "update_all"_a = false,
+          "update_inputs"_a = std::vector<std::string>{},
+          "write_lock_file"_a = true,
           "Lock a flake reference, returning a LockedFlake with description and inputs");
     m.def("get_flake", &get_flake,
           "state"_a, "flake_ref"_a, "use_registries"_a = true,
           "Resolve a flake reference (without locking)");
+    m.def("call_flake", &call_flake,
+          "state"_a, "locked_flake"_a,
+          "Call a locked flake's outputs function, returning a Value");
+    m.def("eval_flake", &eval_flake,
+          "state"_a, "ref"_a,
+          "write_lock_file"_a = true,
+          "Lock and evaluate a flake, returning its outputs as a Value");
 
     bind_flake_ref(m);
     bind_locked_flake(m);
