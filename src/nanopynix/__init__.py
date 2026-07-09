@@ -16,6 +16,7 @@ from nanopynix_util import (
     set_setting,
     set_verbosity,
 )
+from strip_ansi import strip_ansi
 
 from nanopynix._pool import WorkerBusy, WorkerDied
 from nanopynix._session import EvalSession, ValueAttrs, ValueList, ValueProxy
@@ -145,6 +146,7 @@ __all__ = [
     "remove_logger",
     "set_setting",
     "set_verbosity",
+    "strip_ansi",
     "to_yaml",
     "yaml_primops",
 ]

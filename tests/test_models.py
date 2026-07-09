@@ -264,16 +264,32 @@ class TestLogEvent:
         assert ev.request_id == 42
         assert ev.action == "msg"
         assert ev.args[0] == 3  # lvlInfo
+        assert ev.message == "evaluating file"
+        assert ev.message_without_ansi == "evaluating file"
+
+    def test_msg_event_ansi_helpers_preserve_raw_and_newlines(self):
+        ev = LogEvent(request_id=42, action="msg", args=[3, "\x1b[31mline 1\x1b[0m\nline 2"])
+
+        clean = ev.without_ansi()
+
+        assert ev.message == "\x1b[31mline 1\x1b[0m\nline 2"
+        assert ev.args[1] == "\x1b[31mline 1\x1b[0m\nline 2"
+        assert ev.message_without_ansi == "line 1\nline 2"
+        assert clean.args == [3, "line 1\nline 2"]
+        assert clean.message == "line 1\nline 2"
 
     def test_start_event(self):
         ev = LogEvent(request_id=1, action="start", args=[1, 3, 100, "building", [], 0])
         assert ev.request_id == 1
         assert ev.action == "start"
+        assert ev.message is None
+        assert ev.message_without_ansi is None
 
     def test_defaults(self):
         ev = LogEvent(action="msg")
         assert ev.request_id == 0
         assert ev.args == []
+        assert ev.message is None
 
     def test_with_result_type(self):
         ev = LogEvent(request_id=5, action="result", args=[1, 107], result_type=ResultType.post_build_log_line)

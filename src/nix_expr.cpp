@@ -302,7 +302,7 @@ static PyValue eval_file_impl(PyEvalState &es, const std::string &path) {
 // =========================================================================
 
 // Convert a nix::Value* (already forced) to a Python object, recursively.
-static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v) {
+static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v, const std::string &primop_name) {
     if (!v) return nb::none();
     switch (v->type()) {
         case nix::nNull:   return nb::none();
@@ -320,7 +320,7 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v) {
             auto lv = v->listView();
             for (size_t i = 0; i < n; i++) {
                 state.forceValue(*lv[i], nix::noPos);
-                list.append(value_to_python_arg(state, lv[i]));
+                list.append(value_to_python_arg(state, lv[i], primop_name));
             }
             return list;
         }
@@ -330,20 +330,23 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v) {
                 for (auto &attr : *bindings) {
                     state.forceValue(*attr.value, nix::noPos);
                     dict[nb::str(std::string(state.symbols[attr.name]).c_str())] =
-                        value_to_python_arg(state, attr.value);
+                        value_to_python_arg(state, attr.value, primop_name);
                 }
             }
             return dict;
         }
         default:
             state.error<nix::TypeError>(
-                "Python primop argument contains non JSON-compatible Nix value of type '%s'",
-                showType(v->type())).debugThrow();
+                "%s: argument contains non JSON-compatible Nix value of type '%s'",
+                primop_name, showType(v->type())).debugThrow();
     }
 }
 
 // Set the content of a nix::Value from a Python object, recursively.
-static void python_to_value(nix::EvalState &state, nb::object obj, nix::Value &v) {
+static void python_to_value(
+    nix::EvalState &state, nb::object obj, nix::Value &v,
+    const std::string *primop_name = nullptr)
+{
     if (nb::isinstance<PyValue>(obj)) {
         auto pyv = nb::cast<PyValue>(obj);
         if (!pyv.value) {
@@ -370,7 +373,7 @@ static void python_to_value(nix::EvalState &state, nb::object obj, nix::Value &v
         auto builder = state.buildList(pyList.size());
         for (size_t i = 0; i < pyList.size(); i++) {
             auto *elem = state.allocValue();
-            python_to_value(state, pyList[i], *elem);
+            python_to_value(state, pyList[i], *elem, primop_name);
             builder[i] = elem;
         }
         v.mkList(builder);
@@ -381,13 +384,18 @@ static void python_to_value(nix::EvalState &state, nb::object obj, nix::Value &v
             auto key = nb::cast<std::string>(nb::str(item.first));
             auto sym = state.symbols.create(key);
             auto *val = state.allocValue();
-            python_to_value(state, nb::cast<nb::object>(item.second), *val);
+            python_to_value(state, nb::cast<nb::object>(item.second), *val, primop_name);
             bindings.insert(sym, val);
         }
         v.mkAttrs(bindings);
     } else {
+        if (primop_name) {
+            state.error<nix::TypeError>(
+                "%s: returned a non JSON-compatible Python value",
+                *primop_name).debugThrow();
+        }
         state.error<nix::TypeError>(
-            "Python primop returned a non JSON-compatible Python value").debugThrow();
+            "cannot convert non JSON-compatible Python value to Nix").debugThrow();
     }
 }
 
@@ -427,36 +435,28 @@ static void py_primop_bridge(
     nb::list py_args;
     for (int i = 0; i < arity; i++) {
         state.forceValue(*args[i], nix::noPos);
-        py_args.append(value_to_python_arg(state, args[i]));
+        py_args.append(value_to_python_arg(state, args[i], name));
     }
 
     // Call Python function
     nb::object result;
     try {
         result = it->second.func(*py_args);
-    } catch (nb::python_error &) {
-        // Preserve the Python error detail instead of masking it
-        PyObject *ptype = nullptr, *pvalue = nullptr, *ptraceback = nullptr;
-        PyErr_Fetch(&ptype, &pvalue, &ptraceback);
-        std::string detail = "<unknown Python exception>";
-        if (pvalue) {
-            nb::object py_val = nb::steal(pvalue);
-            nb::str py_str = nb::str(py_val);
-            detail = nb::cast<std::string>(py_str);
-        } else if (ptype) {
-            nb::object py_type = nb::steal(ptype);
-            nb::str py_str = nb::str(py_type);
-            detail = nb::cast<std::string>(py_str);
+    } catch (nb::python_error &e) {
+        std::string detail = e.what();
+        auto newline = detail.rfind('\n');
+        if (newline != std::string::npos) {
+            detail = detail.substr(newline + 1);
         }
-        Py_XDECREF(ptype);
-        Py_XDECREF(pvalue);
-        Py_XDECREF(ptraceback);
-        state.error<nix::EvalError>(
-            "Python primop '%s' raised: %s", name, detail).debugThrow();
+        auto value_error = std::string("ValueError: ");
+        if (detail.rfind(value_error, 0) == 0) {
+            detail = detail.substr(value_error.size());
+        }
+        state.error<nix::EvalError>("%s", detail).debugThrow();
     }
 
     // Convert result to nix::Value
-    python_to_value(state, result, ret);
+    python_to_value(state, result, ret, &name);
 }
 
 static void register_primop(

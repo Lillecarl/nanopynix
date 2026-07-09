@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import re
 
+from strip_ansi import strip_ansi
+
 from nanopynix.models import NixType
 
 # ════════════════════════════════════════════════════════════════════
@@ -44,6 +46,18 @@ class NixError(RuntimeError):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(error_type={self.error_type!r}, msg={self.msg!r})"
+
+    @property
+    def msg_without_ansi(self) -> str:
+        """Error message with ANSI color escapes removed, preserving other text."""
+
+        return strip_ansi(self.msg)
+
+    @property
+    def raw_without_ansi(self) -> str:
+        """Raw traceback text with ANSI color escapes removed."""
+
+        return strip_ansi(self.raw)
 
 
 class StoreError(NixError):
@@ -162,16 +176,12 @@ _CLASSIFIERS: list[tuple[re.Pattern, type[NixError], str]] = [
     (re.compile(r"error \(ignored\)"), NixError, "Error"),  # swallowed by ignoreException
 ]
 
-# Strip ANSI escape sequences before classification.
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
 def _classify(msg: str, fallback_type: str) -> tuple[type[NixError], str]:
     """Determine the Python exception class and Nix error type from a message.
 
     Returns ``(exception_class, error_type_name)``.
     """
-    clean = _ANSI_RE.sub("", msg)
+    clean = strip_ansi(msg)
     for pattern, cls, name in _CLASSIFIERS:
         if pattern.search(clean):
             return cls, name

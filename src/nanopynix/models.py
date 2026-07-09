@@ -11,6 +11,7 @@ from enum import IntEnum, StrEnum
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field, computed_field, field_validator, model_validator
+from strip_ansi import strip_ansi as _strip_ansi
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
@@ -235,6 +236,27 @@ class LogEvent(BaseModel):
         default=None,
         description="ResultType when action='result' (None for other actions)",
     )
+
+    @property
+    def message(self) -> str | None:
+        """Raw message payload for log actions that carry text."""
+
+        if self.action not in {"msg", "warn", "error"} or not self.args:
+            return None
+        message = self.args[-1]
+        return message if isinstance(message, str) else None
+
+    @property
+    def message_without_ansi(self) -> str | None:
+        """Message payload with ANSI color escapes removed, preserving newlines."""
+
+        message = self.message
+        return None if message is None else _strip_ansi(message)
+
+    def without_ansi(self) -> LogEvent:
+        """Return a copy with ANSI color escapes removed from string args."""
+
+        return self.model_copy(update={"args": [_strip_ansi(arg) if isinstance(arg, str) else arg for arg in self.args]})
 
 
 class ResultType(IntEnum):

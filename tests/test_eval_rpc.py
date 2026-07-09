@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from nanopynix import NixCoercionError, NixType, Session, ValueProxy, WrongNixTypeError, yaml_primops
+from nanopynix import NixCoercionError, NixType, Session, ValueProxy, WrongNixTypeError, strip_ansi, yaml_primops
 
 pytestmark = pytest.mark.asyncio
 
@@ -287,8 +287,24 @@ async def test_worker_from_yaml_rejects_document_stream():
     """fromYAML requires exactly one document; streams use fromYAMLStream."""
     async with Session(primops=yaml_primops()) as nix:
         async with nix.eval() as session:
-            with pytest.raises(Exception, match="exactly one YAML document|Python primop"):
+            with pytest.raises(Exception) as exc_info:
                 await session.string('builtins.fromYAML "kind: ConfigMap\\n---\\nkind: Service\\n"')
+            message = strip_ansi(str(exc_info.value))
+            assert "fromYAML: expected exactly one YAML document, got 2" in message
+            assert "use fromYAMLStream for multi-document YAML" in message
+            assert "Python primop" not in message
+
+
+async def test_worker_from_yaml_parse_error_is_descriptive():
+    """YAML parse failures include builtin and source location context."""
+    async with Session(primops=yaml_primops()) as nix:
+        async with nix.eval() as session:
+            with pytest.raises(Exception) as exc_info:
+                await session.string('builtins.fromYAML "metadata:\\n  name: demo\\n  : bad\\n"')
+            message = strip_ansi(str(exc_info.value))
+            assert "fromYAML: failed to parse YAML 1.2 document" in message
+            assert "line 3" in message
+            assert "Python primop" not in message
 
 
 async def test_worker_yaml_stream_primops():
@@ -316,8 +332,12 @@ async def test_worker_to_yaml_rejects_functions():
     """toYAML is JSON-compatible data only; nested functions must not stringify."""
     async with Session(primops=yaml_primops()) as nix:
         async with nix.eval() as session:
-            with pytest.raises(Exception, match="non JSON-compatible|Python primop"):
+            with pytest.raises(Exception) as exc_info:
                 await session.string("builtins.toYAML { f = x: x; }")
+            message = strip_ansi(str(exc_info.value))
+            assert "toYAML: argument contains non JSON-compatible Nix value of type" in message
+            assert "function" in message
+            assert "Python primop" not in message
 
 
 async def test_eval_concurrent_sessions(tmp_path):
