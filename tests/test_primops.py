@@ -4,7 +4,6 @@ Primops are registered in conftest.py before the session EvalState is created.
 """
 
 
-
 class TestRegisterPrimop:
     def test_unary(self, eval_state):
         v = eval_state.eval_string("test_add_one 41")

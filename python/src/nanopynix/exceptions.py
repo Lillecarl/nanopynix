@@ -176,6 +176,7 @@ _CLASSIFIERS: list[tuple[re.Pattern, type[NixError], str]] = [
     (re.compile(r"error \(ignored\)"), NixError, "Error"),  # swallowed by ignoreException
 ]
 
+
 def _classify(msg: str, fallback_type: str) -> tuple[type[NixError], str]:
     """Determine the Python exception class and Nix error type from a message.
 

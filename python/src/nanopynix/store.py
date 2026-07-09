@@ -107,9 +107,7 @@ class StoreHandle:
         s = _to_str(path)
         return await self._pool.request(rpc.QueryPathInfo(path=s))
 
-    async def query_path_from_hash_part(
-        self, hash_part: str
-    ) -> StorePath | None:
+    async def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
         self._check_active()
         return await self._pool.request(rpc.QueryPathFromHashPart(hash_part=hash_part))
 
@@ -133,25 +131,19 @@ class StoreHandle:
             )
         )
 
-    async def query_missing(
-        self, paths: list[StorePath | str]
-    ) -> MissingInfo:
+    async def query_missing(self, paths: list[StorePath | str]) -> MissingInfo:
         self._check_active()
         strs = _to_strs(paths)
         return await self._pool.request(rpc.QueryMissing(paths=strs))
 
     # ── Derivations ───────────────────────────────────────────────
 
-    async def query_derivation_outputs(
-        self, path: StorePath | str
-    ) -> list[StorePath]:
+    async def query_derivation_outputs(self, path: StorePath | str) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
         return await self._pool.request(rpc.QueryDerivationOutputs(path=s))
 
-    async def query_valid_derivers(
-        self, path: StorePath | str
-    ) -> list[StorePath]:
+    async def query_valid_derivers(self, path: StorePath | str) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
         return await self._pool.request(rpc.QueryValidDerivers(path=s))
@@ -162,16 +154,12 @@ class StoreHandle:
         self._check_active()
         return await self._pool.request(rpc.QueryAllValidPaths())
 
-    async def query_referrers(
-        self, path: StorePath | str
-    ) -> list[StorePath]:
+    async def query_referrers(self, path: StorePath | str) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
         return await self._pool.request(rpc.QueryReferrers(path=s))
 
-    async def query_substitutable_paths(
-        self, paths: Sequence[StorePath | str]
-    ) -> list[StorePath]:
+    async def query_substitutable_paths(self, paths: Sequence[StorePath | str]) -> list[StorePath]:
         self._check_active()
         strs = _to_strs(paths)
         return await self._pool.request(rpc.QuerySubstitutablePaths(paths=strs))
@@ -217,9 +205,7 @@ class StoreHandle:
         self._check_active()
         return await self._pool.request(rpc.FetchFromUrl(url=url))
 
-    async def fetch_from_attrs(
-        self, attrs: dict[str, str | int | bool]
-    ) -> Input:
+    async def fetch_from_attrs(self, attrs: dict[str, str | int | bool]) -> Input:
         self._check_active()
         return await self._pool.request(rpc.FetchFromAttrs(attrs=attrs))
 
