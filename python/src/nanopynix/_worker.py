@@ -507,6 +507,8 @@ def _eval_dispatch(store):
         return _export(_get_es(store).value_from_handle(req.handle).attr_get(req.name))
 
     def list_get(req: rpc.ListGet):
+        if req.index < 0:
+            raise IndexError(f"list index must be non-negative, got {req.index}")
         return _export(_get_es(store).value_from_handle(req.handle).list_get(req.index))
 
     def list_length(req: rpc.ListLength):
@@ -525,7 +527,8 @@ def _eval_dispatch(store):
         global _next_lf_handle
         ref = nanopynix_flake.parse_flake_ref(req.ref)
         lf = nanopynix_flake.lock_flake(
-            _get_es(store), ref,
+            _get_es(store),
+            ref,
             update_all=req.update_all,
             update_inputs=req.update_inputs,
             write_lock_file=req.write_lock_file,

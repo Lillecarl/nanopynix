@@ -84,6 +84,13 @@ class TestEvalList:
         assert v.list_get(1).as_int() == 20
         assert v.list_get(2).as_int() == 30
 
+    def test_list_get_out_of_range_raises(self, eval_state):
+        import pytest
+
+        v = eval_state.eval_string("[10 20 30]")
+        with pytest.raises(IndexError, match="out of range"):
+            v.list_get(3)
+
     def test_list_nested(self, eval_state):
         v = eval_state.eval_string("[[1 2] [3 4]]")
         assert v.list_length() == 2

@@ -21,7 +21,7 @@ from nanopynix import (
 )
 from nanopynix import _protocol as rpc
 from nanopynix._pool import ReservedWorker, _ActiveCall, _WorkerManager
-from nanopynix._session import EvalSession, ValueProxy, _EvalOwner, _EvalOwnerToken, _EvalProxyContext, _ResolvedValue
+from nanopynix._session import EvalSession, ValueList, ValueProxy, _EvalOwner, _EvalOwnerToken, _EvalProxyContext, _ResolvedValue
 from nanopynix.models import LogEvent
 
 pytestmark = pytest.mark.asyncio
@@ -562,6 +562,15 @@ class TestValueProxyLifecycle:
         assert await child.get_type() == NixType.INT
         assert child.handle == 3
 
+    async def test_list_get_rejects_negative_index(self):
+        w = self._worker()
+        vp = self._proxy(w, 1, "list")
+
+        with pytest.raises(IndexError, match="non-negative"):
+            vp.list_get(-1)
+
+        w._send_recv.assert_not_awaited()
+
     async def test_list_length(self):
         w = self._worker()
         w._send_recv.return_value = 3
@@ -640,6 +649,43 @@ class TestValueProxyLifecycle:
         active[0] = False
         assert vp.handle == 42
         assert vp.nix_type == NixType.ATTRS
+
+
+class TestValueListBounds:
+    def _worker(self):
+        w = MagicMock()
+        w._send_recv = AsyncMock()
+
+        async def request(req: rpc.WorkerRequest, timeout=None):  # noqa: ASYNC109
+            result = await w._send_recv(req.namespace, req.method, req.to_args(), timeout=timeout)
+            return type(req).parse_response(result)
+
+        w.request = AsyncMock(side_effect=request)
+        return w
+
+    def _list(self, worker, length: int = 2) -> ValueList:
+        ctx = _EvalProxyContext(worker, _EvalOwner(_EvalOwnerToken()), None)
+        return ValueList(ctx, _ResolvedValue(1, NixType.LIST), length)
+
+    async def test_getitem_rejects_out_of_range_indexes(self):
+        w = self._worker()
+        value = self._list(w, length=2)
+
+        with pytest.raises(IndexError, match="out of range"):
+            _ = value[-1]
+        with pytest.raises(IndexError, match="out of range"):
+            _ = value[2]
+
+        w._send_recv.assert_not_awaited()
+
+    async def test_force_rejects_out_of_range_indexes(self):
+        w = self._worker()
+        value = self._list(w, length=2)
+
+        with pytest.raises(IndexError, match="out of range"):
+            await value.force(2)
+
+        w._send_recv.assert_not_awaited()
 
 
 # ════════════════════════════════════════════════════════════════════
