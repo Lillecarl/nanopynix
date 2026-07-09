@@ -5,6 +5,9 @@ nanopynix_expr.__prefix__:
 nanopynix_expr.Value.to_python:
     def to_python(self) -> ValueType: ...
 
+nanopynix_expr.Value.to_json:
+    def to_json(self, *, copy_to_store: bool = False) -> ValueType: ...
+
 nanopynix_expr.EvalState.__init__:
     def __init__(self, store: Store, search_path: Sequence[str] = []) -> None: ...
 

@@ -289,6 +289,12 @@ class ForceDeep(EvalRequest[DeepValueWire]):
     handle: int = rpc_arg(0)
 
 
+class ForceJson(EvalRequest[JsonValue]):
+    method: ClassVar[str] = "force_json"
+    handle: int = rpc_arg(0)
+    copy_to_store: bool = rpc_arg(1, False)
+
+
 class Attr(EvalRequest[ValueHandle]):
     method: ClassVar[str] = "attr"
     handle: int = rpc_arg(0)

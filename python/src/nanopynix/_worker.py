@@ -495,6 +495,10 @@ def _eval_dispatch(store):
         value.force_deep()
         return _deep_value(value)
 
+    def force_json(req: rpc.ForceJson):
+        value = _get_es(store).value_from_handle(req.handle)
+        return value.to_json(copy_to_store=req.copy_to_store)
+
     def attr(req: rpc.Attr):
         return _export(_get_es(store).value_from_handle(req.handle).attr_get(req.name))
 
@@ -528,6 +532,7 @@ def _eval_dispatch(store):
             Endpoint(rpc.EvalString, eval_string),
             Endpoint(rpc.Force, force),
             Endpoint(rpc.ForceDeep, force_deep),
+            Endpoint(rpc.ForceJson, force_json),
             Endpoint(rpc.Attr, attr),
             Endpoint(rpc.ListGet, list_get),
             Endpoint(rpc.ListLength, list_length),

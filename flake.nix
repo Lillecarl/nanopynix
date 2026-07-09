@@ -12,7 +12,10 @@
     in
     {
       packages = forAllSystems (system: {
-        inherit (eachDefNix.${system}) nanopynix-bindings nanopynix;
+        inherit (eachDefNix.${system}) nanopynix-bindings nanopynix pynix;
+      });
+      checks = forAllSystems (system: {
+        pynix = eachDefNix.${system}.pynix;
       });
       legacyPackages = forAllSystems (system: eachPkgs.${system});
     };
