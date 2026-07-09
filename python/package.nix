@@ -14,15 +14,7 @@ buildPythonPackage {
   version = "0.1.0";
   pyproject = true;
 
-  src = lib.cleanSourceWith {
-    filter =
-      path: type:
-      let
-        baseName = lib.baseNameOf path;
-      in
-      lib.cleanSourceFilter path type && baseName != "tests";
-    src = ./.;
-  };
+  src = lib.cleanSource ./.;
 
   build-system = [
     hatchling
