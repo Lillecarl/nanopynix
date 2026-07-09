@@ -1,3 +1,4 @@
+# ruff: noqa: ASYNC109
 """Eval session — exclusive worker lock + ValueProxy for eval over RPC."""
 
 from __future__ import annotations

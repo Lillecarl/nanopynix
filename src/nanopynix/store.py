@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import nanopynix_store  # BuildMode enum
-
 from nanopynix import _protocol as rpc
 from nanopynix.models import BuildResult, Derivation, Input, MissingInfo, PathInfo, StorePath
 

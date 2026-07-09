@@ -68,11 +68,11 @@ class EvalError(NixError):
     """Errors from Nix expression evaluation."""
 
 
-class TypeError_(EvalError):
+class NixTypeError(EvalError):
     """Type errors during evaluation (expected X but found Y)."""
 
 
-class AssertionError_(EvalError):
+class NixAssertionError(EvalError):
     """Assertion failures in Nix expressions."""
 
 
@@ -147,16 +147,16 @@ _CLASSIFIERS: list[tuple[re.Pattern, type[NixError], str]] = [
     # ── Eval errors ──────────────────────────────────────────────
     (re.compile(r"undefined variable"), UndefinedVarError, "UndefinedVarError"),
     (re.compile(r"infinite recursion"), InfiniteRecursionError, "InfiniteRecursionError"),
-    (re.compile(r"assertion .+ failed"), AssertionError_, "AssertionError"),
+    (re.compile(r"assertion .+ failed"), NixAssertionError, "AssertionError"),
     (re.compile(r"access to (absolute path|URI).+forbidden"), RestrictedPathError, "RestrictedPathError"),
     (re.compile(r"threw.*(?:while|error)"), ThrownError, "ThrownError"),
     (re.compile(r"function .+ called without required argument"), MissingArgumentError, "MissingArgumentError"),
     (re.compile(r"invalid value.*expected"), UsageError, "UsageError"),
-    (re.compile(r"expected (?:a |an )"), TypeError_, "TypeError"),
-    (re.compile(r"cannot coerce .+ to a"), TypeError_, "TypeError"),
-    (re.compile(r"cannot add .+ to"), TypeError_, "TypeError"),
-    (re.compile(r"cannot compare"), TypeError_, "TypeError"),
-    (re.compile(r"but found"), TypeError_, "TypeError"),
+    (re.compile(r"expected (?:a |an )"), NixTypeError, "TypeError"),
+    (re.compile(r"cannot coerce .+ to a"), NixTypeError, "TypeError"),
+    (re.compile(r"cannot add .+ to"), NixTypeError, "TypeError"),
+    (re.compile(r"cannot compare"), NixTypeError, "TypeError"),
+    (re.compile(r"but found"), NixTypeError, "TypeError"),
     (re.compile(r"builtin .+ not found"), EvalError, "EvalError"),
     (re.compile(r"attribute .+ missing"), EvalError, "EvalError"),
     (re.compile(r"integer overflow"), EvalError, "EvalError"),
@@ -199,20 +199,20 @@ def from_response(error_type: str, msg: str, *, raw: str = "", info: dict | None
 
 
 __all__ = [
-    "AssertionError_",
     "EvalError",
     "EvalProxyError",
     "EvalSessionClosedError",
     "ForeignValueError",
     "InfiniteRecursionError",
     "MissingArgumentError",
+    "NixAssertionError",
     "NixCoercionError",
     "NixError",
+    "NixTypeError",
     "ParseError",
     "RestrictedPathError",
     "StoreError",
     "ThrownError",
-    "TypeError_",
     "UndefinedVarError",
     "UnresolvedValueError",
     "UsageError",

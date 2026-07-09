@@ -1,3 +1,4 @@
+# ruff: noqa: ASYNC109
 """Subprocess worker — Nix execution backend via asyncio subprocess.
 
 A single subprocess runs an independent Nix process with its own Store,
@@ -44,11 +45,11 @@ _SEPARATORS = (",", ":")
 # ════════════════════════════════════════════════════════════════════
 
 
-class WorkerDied(RuntimeError):
+class WorkerDiedError(RuntimeError):
     """Raised when the subprocess worker dies unexpectedly."""
 
 
-class WorkerBusy(RuntimeError):
+class WorkerBusyError(RuntimeError):
     """Raised when the single worker is already handling another operation."""
 
 
@@ -306,7 +307,7 @@ class _WorkerManager:
             # Wake all pending futures
             for fut in self._pending.values():
                 if not fut.done():
-                    fut.set_exception(WorkerDied("Worker process died"))
+                    fut.set_exception(WorkerDiedError("Worker process died"))
             self._pending.clear()
             self._active_call = None
 
@@ -333,14 +334,14 @@ class _WorkerManager:
         while self._active_call is not None:
             active = self._active_call
             if timeout is None:
-                raise WorkerBusy("worker is busy")
+                raise WorkerBusyError("worker is busy")
             remaining = deadline - time.monotonic() if deadline is not None else timeout
             if remaining <= 0:
-                raise WorkerBusy(f"worker is busy after waiting {timeout}s")
+                raise WorkerBusyError(f"worker is busy after waiting {timeout}s")
             try:
                 await asyncio.wait_for(asyncio.shield(active.future), timeout=remaining)
             except TimeoutError as exc:
-                raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
+                raise WorkerBusyError(f"worker is busy after waiting {timeout}s") from exc
             except Exception:
                 # The previous call failed; let its owner clear the active slot.
                 pass
@@ -362,12 +363,12 @@ class _WorkerManager:
         don't time out while the worker is active.
 
         Raises:
-            WorkerDied: the worker process died.
+            WorkerDiedError: the worker process died.
             TimeoutError: *timeout* seconds elapsed with no activity.
             NixError subclass: the worker returned an error.
         """
         if self._proc is None or self._proc.returncode is not None:
-            raise WorkerDied("Worker is dead")
+            raise WorkerDiedError("Worker is dead")
 
         t = _RPC_TIMEOUT if timeout is None else timeout
         await self._wait_until_idle(timeout)
@@ -416,7 +417,7 @@ class _WorkerManager:
             # Cleanup
             self._pending.pop(req_id, None)
             if msg is None:
-                raise WorkerDied("No response received")
+                raise WorkerDiedError("No response received")
 
             # Decode response
             if "result" in msg:
@@ -431,7 +432,7 @@ class _WorkerManager:
                     info=data.get("info"),
                 )
             else:
-                raise WorkerDied(f"Unexpected response: {msg}")
+                raise WorkerDiedError(f"Unexpected response: {msg}")
 
             return result
         finally:
@@ -451,14 +452,14 @@ class _WorkerManager:
         Acquires the worker lock — only one call in-flight at a time.
         """
         if self._proc is None:
-            raise WorkerDied("Worker not started")
+            raise WorkerDiedError("Worker not started")
         if self._available.locked():
             if timeout is None:
-                raise WorkerBusy("worker is busy")
+                raise WorkerBusyError("worker is busy")
             try:
                 await asyncio.wait_for(self._available.acquire(), timeout=timeout)
             except TimeoutError as exc:
-                raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
+                raise WorkerBusyError(f"worker is busy after waiting {timeout}s") from exc
             try:
                 return await self._send_recv(module, fn, args, timeout=timeout)
             finally:
@@ -480,14 +481,14 @@ class _WorkerManager:
     async def reserve(self, timeout: float | None = None) -> ReservedWorker:
         """Acquire an exclusive worker lease for an EvalSession."""
         if self._proc is None:
-            raise WorkerDied("Worker not started")
+            raise WorkerDiedError("Worker not started")
         if self._available.locked():
             if timeout is None:
-                raise WorkerBusy("worker is busy")
+                raise WorkerBusyError("worker is busy")
             try:
                 await asyncio.wait_for(self._available.acquire(), timeout=timeout)
             except TimeoutError as exc:
-                raise WorkerBusy(f"worker is busy after waiting {timeout}s") from exc
+                raise WorkerBusyError(f"worker is busy after waiting {timeout}s") from exc
         else:
             await self._available.acquire()
         return ReservedWorker(self)

@@ -59,7 +59,7 @@ def _already_model_dump(value: BaseModel) -> dict[str, Any]:
     return value.model_dump(mode="json")
 
 
-def RpcArg(index: int, default: Any = PydanticUndefined) -> Any:
+def rpc_arg(index: int, default: Any = PydanticUndefined) -> Any:
     extra: dict[str, Any] = {"rpc_pos": index}
     if default is PydanticUndefined:
         return Field(json_schema_extra=extra)
@@ -165,49 +165,49 @@ class GetStoreDir(StoreRequest[str]):
 
 class IsValidPath(StoreRequest[bool]):
     method: ClassVar[str] = "is_valid_path"
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class ParseStorePath(StoreRequest[StorePath]):
     method: ClassVar[str] = "parse_store_path"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(StorePath)
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class QueryPathInfo(StoreRequest[PathInfo]):
     method: ClassVar[str] = "query_path_info"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(PathInfo)
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class QueryPathFromHashPart(StoreRequest[StorePath | None]):
     method: ClassVar[str] = "query_path_from_hash_part"
     response_adapter: ClassVar[ResponseAdapter] = _maybe_model_dump(StorePath)
-    hash_part: str = RpcArg(0)
+    hash_part: str = rpc_arg(0)
 
 
 class ComputeFsClosure(StoreRequest[list[StorePath]]):
     method: ClassVar[str] = "compute_fs_closure"
-    path: str = RpcArg(0)
-    flip_direction: bool = RpcArg(1, False)
-    include_outputs: bool = RpcArg(2, False)
-    include_derivers: bool = RpcArg(3, False)
+    path: str = rpc_arg(0)
+    flip_direction: bool = rpc_arg(1, False)
+    include_outputs: bool = rpc_arg(2, False)
+    include_derivers: bool = rpc_arg(3, False)
 
 
 class QueryMissing(StoreRequest[MissingInfo]):
     method: ClassVar[str] = "query_missing"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(MissingInfo)
-    paths: list[str] = RpcArg(0)
+    paths: list[str] = rpc_arg(0)
 
 
 class QueryDerivationOutputs(StoreRequest[list[StorePath]]):
     method: ClassVar[str] = "query_derivation_outputs"
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class QueryValidDerivers(StoreRequest[list[StorePath]]):
     method: ClassVar[str] = "query_valid_derivers"
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class QueryAllValidPaths(StoreRequest[list[StorePath]]):
@@ -216,134 +216,134 @@ class QueryAllValidPaths(StoreRequest[list[StorePath]]):
 
 class QueryReferrers(StoreRequest[list[StorePath]]):
     method: ClassVar[str] = "query_referrers"
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class QuerySubstitutablePaths(StoreRequest[list[StorePath]]):
     method: ClassVar[str] = "query_substitutable_paths"
-    paths: list[str] = RpcArg(0)
+    paths: list[str] = rpc_arg(0)
 
 
 class BuildPathsWithResults(StoreRequest[list[BuildResult]]):
     method: ClassVar[str] = "build_paths_with_results"
     response_adapter: ClassVar[ResponseAdapter] = _adapter_dump(_BuildResultList)
-    paths: list[str] = RpcArg(0)
+    paths: list[str] = rpc_arg(0)
 
 
 class ReadDerivation(StoreRequest[Derivation]):
     method: ClassVar[str] = "read_derivation"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(Derivation)
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class BuildDerivation(StoreRequest[BuildResult]):
     method: ClassVar[str] = "build_derivation"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(BuildResult)
-    path: str = RpcArg(0)
-    build_mode: int = RpcArg(1, 0)
+    path: str = rpc_arg(0)
+    build_mode: int = rpc_arg(1, 0)
 
 
 class FollowLinksToStorePath(StoreRequest[StorePath]):
     method: ClassVar[str] = "follow_links_to_store_path"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(StorePath)
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class AddTempRoot(StoreRequest[None]):
     method: ClassVar[str] = "add_temp_root"
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class FetchFromUrl(StoreRequest[Input]):
     method: ClassVar[str] = "fetch_from_url"
     response_adapter: ClassVar[ResponseAdapter] = _already_model_dump
-    url: str = RpcArg(0)
+    url: str = rpc_arg(0)
 
 
 class FetchFromAttrs(StoreRequest[Input]):
     method: ClassVar[str] = "fetch_from_attrs"
     response_adapter: ClassVar[ResponseAdapter] = _already_model_dump
-    attrs: dict[str, str | int | bool] = RpcArg(0)
+    attrs: dict[str, str | int | bool] = rpc_arg(0)
 
 
 class EvalFile(EvalRequest[ValueHandle]):
     method: ClassVar[str] = "eval_file"
-    path: str = RpcArg(0)
+    path: str = rpc_arg(0)
 
 
 class EvalString(EvalRequest[ValueHandle]):
     method: ClassVar[str] = "eval_string"
-    expr: str = RpcArg(0)
-    source_name: str = RpcArg(1, "<string>")
+    expr: str = rpc_arg(0)
+    source_name: str = rpc_arg(1, "<string>")
 
 
 class Force(EvalRequest[ForceValueWire]):
     method: ClassVar[str] = "force"
     response_adapter: ClassVar[ResponseAdapter] = _adapter_dump(TypeAdapter(ForceValueWire))
-    handle: int = RpcArg(0)
+    handle: int = rpc_arg(0)
 
 
 class ForceDeep(EvalRequest[DeepValueWire]):
     method: ClassVar[str] = "force_deep"
     response_adapter: ClassVar[ResponseAdapter] = _adapter_dump(_DeepValueWire)
-    handle: int = RpcArg(0)
+    handle: int = rpc_arg(0)
 
 
 class Attr(EvalRequest[ValueHandle]):
     method: ClassVar[str] = "attr"
-    handle: int = RpcArg(0)
-    name: str = RpcArg(1)
+    handle: int = rpc_arg(0)
+    name: str = rpc_arg(1)
 
 
 class ListGet(EvalRequest[ValueHandle]):
     method: ClassVar[str] = "list_get"
-    handle: int = RpcArg(0)
-    index: int = RpcArg(1)
+    handle: int = rpc_arg(0)
+    index: int = rpc_arg(1)
 
 
 class ListLength(EvalRequest[int]):
     method: ClassVar[str] = "list_length"
-    handle: int = RpcArg(0)
+    handle: int = rpc_arg(0)
 
 
 class AttrNames(EvalRequest[list[str]]):
     method: ClassVar[str] = "attr_names"
     response_adapter: ClassVar[ResponseAdapter] = _adapter_dump(_StringList)
-    handle: int = RpcArg(0)
+    handle: int = rpc_arg(0)
 
 
 class HasAttr(EvalRequest[bool]):
     method: ClassVar[str] = "has_attr"
-    handle: int = RpcArg(0)
-    name: str = RpcArg(1)
+    handle: int = rpc_arg(0)
+    name: str = rpc_arg(1)
 
 
 class TypeName(EvalRequest[NixType]):
     method: ClassVar[str] = "type_name"
-    handle: int = RpcArg(0)
+    handle: int = rpc_arg(0)
 
 
 class Call(EvalRequest[ValueHandle]):
     method: ClassVar[str] = "call"
-    handle: int = RpcArg(0)
-    args: list[CallArgWire] = RpcArg(1)
+    handle: int = rpc_arg(0)
+    args: list[CallArgWire] = rpc_arg(1)
 
 
 class LockFlake(EvalRequest[LockedFlake]):
     method: ClassVar[str] = "lock_flake"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(LockedFlake)
-    ref: str | dict[str, Any] = RpcArg(0)
+    ref: str | dict[str, Any] = rpc_arg(0)
 
 
 class GetFlake(EvalRequest[FlakeRef]):
     method: ClassVar[str] = "get_flake"
     response_adapter: ClassVar[ResponseAdapter] = _already_model_dump
-    ref: str | dict[str, Any] = RpcArg(0)
+    ref: str | dict[str, Any] = rpc_arg(0)
 
 
 class Release(EvalRequest[None]):
     method: ClassVar[str] = "release"
-    handle: int = RpcArg(0)
+    handle: int = rpc_arg(0)
 
 
 class ReleaseAll(EvalRequest[None]):

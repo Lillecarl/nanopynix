@@ -4,10 +4,10 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Protocol, cast
 
-import nanopynix_util
 import pytest
 
 import nanopynix
+import nanopynix_util
 from nanopynix import LogCollector
 
 if TYPE_CHECKING:
@@ -23,7 +23,7 @@ class _LogTestModule(Protocol):
 _log_test: "Callable[[str], None]" = cast("_LogTestModule", nanopynix_util)._log_test
 
 
-async def _collect(collector, count, timeout=2.0):
+async def _collect(collector, count, timeout=2.0):  # noqa: ASYNC109
     """Collect `count` events from the async stream."""
     events = []
     stream = collector.stream()

@@ -9,18 +9,19 @@ from __future__ import annotations
 import pytest
 
 from nanopynix.exceptions import (
-    AssertionError_,
     EvalError,
     InfiniteRecursionError,
     MissingArgumentError,
+    NixAssertionError,
     NixError,
+    NixTypeError,
     ParseError,
     RestrictedPathError,
     StoreError,
     ThrownError,
-    TypeError_,
     UndefinedVarError,
     UsageError,
+    _classify,
     from_response,
 )
 
@@ -65,8 +66,8 @@ def test_nix_error_ansi_helpers_preserve_raw_and_newlines():
 def test_hierarchy():
     assert issubclass(StoreError, NixError)
     assert issubclass(EvalError, NixError)
-    assert issubclass(TypeError_, EvalError)
-    assert issubclass(AssertionError_, EvalError)
+    assert issubclass(NixTypeError, EvalError)
+    assert issubclass(NixAssertionError, EvalError)
     assert issubclass(UndefinedVarError, EvalError)
     assert issubclass(ThrownError, EvalError)
     assert issubclass(InfiniteRecursionError, EvalError)
@@ -85,9 +86,6 @@ def test_subclass_repr():
 # _classify — each regex pattern
 # ════════════════════════════════════════════════════════════════════
 
-# Direct access to the private classifier for precise testing.
-from nanopynix.exceptions import _classify
-
 # ── Eval error patterns ─────────────────────────────────────────
 
 
@@ -105,7 +103,7 @@ def test_classify_infinite_recursion():
 
 def test_classify_assertion_failed():
     cls, name = _classify("assertion 1 == 2 failed", "EvalError")
-    assert cls is AssertionError_
+    assert cls is NixAssertionError
     assert name == "AssertionError"
 
 
@@ -135,37 +133,37 @@ def test_classify_thrown_error_variant():
 
 def test_classify_type_error_expected():
     cls, name = _classify("expected a string but found an integer", "EvalError")
-    assert cls is TypeError_
+    assert cls is NixTypeError
     assert name == "TypeError"
 
 
 def test_classify_type_error_expected_an():
     cls, name = _classify("expected an integer but got a float", "EvalError")
-    assert cls is TypeError_
+    assert cls is NixTypeError
     assert name == "TypeError"
 
 
 def test_classify_type_error_cannot_coerce():
     cls, name = _classify("cannot coerce a function to a string", "EvalError")
-    assert cls is TypeError_
+    assert cls is NixTypeError
     assert name == "TypeError"
 
 
 def test_classify_type_error_cannot_add():
     cls, name = _classify("cannot add a string to an integer", "EvalError")
-    assert cls is TypeError_
+    assert cls is NixTypeError
     assert name == "TypeError"
 
 
 def test_classify_type_error_cannot_compare():
     cls, name = _classify("cannot compare a set with a list", "EvalError")
-    assert cls is TypeError_
+    assert cls is NixTypeError
     assert name == "TypeError"
 
 
 def test_classify_type_error_but_found():
     cls, name = _classify("value is a function but found a string", "EvalError")
-    assert cls is TypeError_
+    assert cls is NixTypeError
     assert name == "TypeError"
 
 
@@ -304,7 +302,7 @@ def test_classify_fallback():
 def test_classify_ansi_stripping():
     """ANSI escape codes are removed before classification."""
     cls, name = _classify("\x1b[31m\x1b[1massertion 1 == 2 failed\x1b[0m", "EvalError")
-    assert cls is AssertionError_
+    assert cls is NixAssertionError
     assert name == "AssertionError"
 
 
@@ -340,12 +338,12 @@ def test_from_response_fallback_keeps_type_name():
 
 
 def test_ordering_missing_argument_before_expected():
-    """MissingArgumentError must match before TypeError_ 'expected' pattern."""
+    """MissingArgumentError must match before NixTypeError 'expected' pattern."""
     cls, name = _classify(
         "function 'f' called without required argument 'x', expected an integer",
         "EvalError",
     )
-    assert cls is MissingArgumentError  # not TypeError_
+    assert cls is MissingArgumentError  # not NixTypeError
 
 
 def test_ordering_undefined_before_generic():

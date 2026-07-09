@@ -24,7 +24,7 @@ def pool():
     p = MagicMock()
     p.call = AsyncMock()
 
-    async def request(req: rpc.WorkerRequest, timeout=None):
+    async def request(req: rpc.WorkerRequest, timeout=None):  # noqa: ASYNC109
         if timeout is None:
             result = await p.call(req.namespace, req.method, req.to_args())
         else:

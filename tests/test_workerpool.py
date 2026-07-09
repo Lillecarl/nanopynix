@@ -5,7 +5,7 @@ import contextlib
 
 import pytest
 
-from nanopynix import LogEvent, Nix, NixError, StoreError, WorkerBusy, WorkerDied
+from nanopynix import LogEvent, Nix, NixError, StoreError, WorkerBusyError, WorkerDiedError
 
 pytestmark = pytest.mark.asyncio
 
@@ -30,7 +30,7 @@ async def test_two_workers_sequential():
 async def test_worker_busy_while_eval_session_holds_worker():
     """The single worker does not silently queue behind an eval session."""
     async with Nix() as nix, nix.store() as store, nix.eval(store):
-        with pytest.raises(WorkerBusy):
+        with pytest.raises(WorkerBusyError):
             await store.get_uri()
 
 
@@ -67,7 +67,7 @@ async def test_error_propagation():
 
 
 async def test_worker_death_detection():
-    """Killing the worker raises WorkerDied on the next call."""
+    """Killing the worker raises WorkerDiedError on the next call."""
     async with Nix() as nix, nix.store() as store:
         # First call works normally
         uri = await store.get_uri()
@@ -82,8 +82,8 @@ async def test_worker_death_detection():
         # Give the background reader a moment to notice
         await asyncio.sleep(0.2)
 
-        # Next call should raise WorkerDied
-        with pytest.raises(WorkerDied):
+        # Next call should raise WorkerDiedError
+        with pytest.raises(WorkerDiedError):
             await store.get_uri()
 
 
