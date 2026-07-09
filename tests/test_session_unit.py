@@ -21,7 +21,15 @@ from nanopynix import (
 )
 from nanopynix import _protocol as rpc
 from nanopynix._pool import ReservedWorker, _ActiveCall, _WorkerManager
-from nanopynix._session import EvalSession, ValueList, ValueProxy, _EvalOwner, _EvalOwnerToken, _EvalProxyContext, _ResolvedValue
+from nanopynix._session import (
+    EvalSession,
+    ValueList,
+    ValueProxy,
+    _EvalOwner,
+    _EvalOwnerToken,
+    _EvalProxyContext,
+    _ResolvedValue,
+)
 from nanopynix.models import LogEvent
 
 pytestmark = pytest.mark.asyncio
@@ -204,7 +212,7 @@ class TestWorkerManagerLogEvents:
         assert not fut.done()
 
 
-class TestReservedWorker:
+class TestReservedWorkerConcurrency:
     async def test_concurrent_requests_are_serialized(self):
         manager = MagicMock()
         active = 0

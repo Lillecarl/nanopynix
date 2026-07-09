@@ -3,7 +3,6 @@
 import gc
 
 import nanopynix
-import pytest
 
 
 class TestEvalString:
