@@ -19,6 +19,9 @@ import contextlib
 import itertools
 import json
 import logging
+import os
+import shlex
+import shutil
 import sys
 import time
 from dataclasses import dataclass
@@ -157,6 +160,33 @@ class ReservedWorker:
 # ════════════════════════════════════════════════════════════════════
 
 
+def _resolve_worker_command() -> list[str]:
+    """Resolve the command used to launch the worker subprocess.
+
+    Order of preference:
+
+    1. ``NANOPYNIX_WORKER`` env var — explicit override (shell-split, so it
+       may carry flags); useful for pinning the worker in tests.
+    2. ``nanopynix-worker`` on ``PATH`` — the wrapped console_script that
+       ``buildPythonPackage``/``buildPythonApplication`` installs. This is
+       the path that works when nanopynix is consumed as a library
+       dependency: the wrapper bakes in a correct ``PYTHONPATH``, so the
+       worker can import nanopynix + the compiled bindings. A bare
+       ``sys.executable -m`` child would inherit a stripped interpreter
+       and fail with ``ModuleNotFoundError``.
+    3. ``sys.executable -m nanopynix._worker`` — fallback for raw dev /
+       pytest / non-Nix pip installs where nanopynix is already importable
+       by the running interpreter.
+    """
+    override = os.environ.get("NANOPYNIX_WORKER")
+    if override:
+        return shlex.split(override)
+    found = shutil.which("nanopynix-worker")
+    if found:
+        return [found]
+    return [sys.executable, "-m", "nanopynix._worker"]
+
+
 class _WorkerManager:
     """Manages a single subprocess worker with an independent Nix Store.
 
@@ -198,10 +228,10 @@ class _WorkerManager:
 
     async def open(self) -> None:
         """Spawn the worker subprocess."""
+        cmd = _resolve_worker_command()
+        logger.debug("nanopynix: spawning worker: %s", cmd)
         self._proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "nanopynix._worker",
+            *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

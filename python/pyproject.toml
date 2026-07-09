@@ -22,6 +22,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 
+[project.scripts]
+nanopynix-worker = "nanopynix._worker:main"
+
 [project.urls]
 Homepage = "https://github.com/lillecarl/nanopynix"
 

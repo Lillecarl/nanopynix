@@ -11,6 +11,9 @@
 #include <nix/expr/value.hh>
 #include <nix/expr/attr-set.hh>
 #include <nix/expr/primops.hh>
+#include <nix/expr/value-to-json.hh>
+
+#include <nlohmann/json.hpp>
 
 #include "py_eval.hh"
 
@@ -71,6 +74,7 @@ struct PyValue {
     void force_deep() { if (auto *es = evalState()) es->forceValueDeep(*value); }
 
     nb::object to_python();
+    nb::object to_json(bool copy_to_store = false);
 
     size_t list_length() const {
         if (value->type() != nix::nList) return 0;
@@ -287,6 +291,50 @@ nb::object PyValue::to_python() {
         default:
             return nb::str(type_name().c_str());
     }
+}
+
+// =========================================================================
+// PyValue::to_json
+// =========================================================================
+
+static nb::object json_to_python(const nlohmann::json &j) {
+    switch (j.type()) {
+        case nlohmann::json::value_t::null:
+            return nb::none();
+        case nlohmann::json::value_t::boolean:
+            return nb::bool_(j.get<bool>());
+        case nlohmann::json::value_t::number_integer:
+        case nlohmann::json::value_t::number_unsigned:
+            return nb::int_(j.get<int64_t>());
+        case nlohmann::json::value_t::number_float:
+            return nb::float_(j.get<double>());
+        case nlohmann::json::value_t::string:
+            return nb::str(j.get<std::string>().c_str());
+        case nlohmann::json::value_t::array: {
+            nb::list list;
+            for (const auto &elem : j)
+                list.append(json_to_python(elem));
+            return list;
+        }
+        case nlohmann::json::value_t::object: {
+            nb::dict dict;
+            for (auto it = j.begin(); it != j.end(); ++it)
+                dict[nb::str(it.key().c_str())] = json_to_python(it.value());
+            return dict;
+        }
+        default:
+            return nb::none();
+    }
+}
+
+nb::object PyValue::to_json(bool copy_to_store) {
+    auto *es = evalState();
+    if (!es || !value) return nb::none();
+
+    nix::NixStringContext context;
+    nlohmann::json j = nix::printValueAsJSON(
+        *es, true, *value, nix::noPos, context, copy_to_store);
+    return json_to_python(j);
 }
 
 // =========================================================================
@@ -520,6 +568,7 @@ static void bind_value(nb::module_ &m) {
         .def("attr_get", &PyValue::attr_get, "name"_a)
         .def("call", &PyValue::call, "arg"_a)
         .def("to_python", &PyValue::to_python)
+        .def("to_json", &PyValue::to_json, "copy_to_store"_a = false)
         .def("__repr__", &PyValue::repr)
         .def("__str__", &PyValue::as_string);
 }

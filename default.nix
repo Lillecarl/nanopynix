@@ -6,6 +6,7 @@ let
 
   nanopynix-bindings = python3Packages.callPackage ./bindings/package.nix { };
   nanopynix = python3Packages.callPackage ./python/package.nix { inherit nanopynix-bindings; };
+  pynix = python3Packages.callPackage ./pynix/package.nix { inherit nanopynix; };
 
   python = pkgs.python3.withPackages (pp: [
     nanopynix
@@ -54,6 +55,6 @@ in
       '';
   };
 
-  inherit pkgs python nanopynix nanopynix-bindings;
+  inherit pkgs python nanopynix nanopynix-bindings pynix;
   inherit (pkgs) lib;
 }

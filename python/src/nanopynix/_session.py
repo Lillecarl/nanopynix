@@ -367,6 +367,27 @@ class ValueProxy:
         result = await self._ctx.worker.request(rpc.ForceDeep(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
         return self._decode_deep_value(result)
 
+    async def force_json(self, *, copy_to_store: bool = False, timeout: float | None = None) -> JsonValue:
+        """Serialize the Nix value to JSON-compatible Python objects in one C++ pass.
+
+        Uses Nix's ``printValueAsJSON`` with ``strict=true``: attrsets with a
+        ``__toString`` attribute are coerced to its string result, attrsets with
+        an ``outPath`` attribute (e.g. derivations) are serialized to that store
+        path string, and everything else is recursively forced and converted.
+        Avoids the cyclic-``all`` stack overflow that ``force_deep`` hits on
+        derivations, and avoids per-value RPC round-trips.
+
+        Args:
+            copy_to_store: If True, ``path`` values are copied into the Nix store
+                and rendered as store paths. If False (default), paths are
+                rendered as literal filesystem paths.
+        """
+        await self._ensure_resolved(timeout=timeout)
+        return await self._ctx.worker.request(
+            rpc.ForceJson(handle=self.handle, copy_to_store=copy_to_store),
+            timeout=self._ctx.resolve_timeout(timeout),
+        )
+
     # ── navigation ─────────────────────────────────────────────────
 
     def attr(self, name: str, *, timeout: float | None = None) -> ValueProxy:
