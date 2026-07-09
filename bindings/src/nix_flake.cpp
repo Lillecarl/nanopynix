@@ -83,16 +83,23 @@ static PyFlakeRef parse_flake_ref(const std::string &url) {
 static PyLockedFlake lock_flake(
     PyEvalState &es,
     PyFlakeRef &flakeRef,
-    bool update_all = false,
-    const std::vector<std::string> &update_inputs = {},
+    nb::object update_inputs = nb::bool_(false),
     bool write_lock_file = true)
 {
     nix::flake::Settings flakeSettings;
     nix::flake::LockFlags lockFlags;
-    lockFlags.recreateLockFile = update_all;
     lockFlags.writeLockFile = write_lock_file;
 
-    for (const auto &input : update_inputs) {
+    std::vector<std::string> input_updates;
+    if (nb::isinstance<nb::bool_>(update_inputs)) {
+        lockFlags.recreateLockFile = nb::cast<bool>(update_inputs);
+    } else if (nb::isinstance<nb::list>(update_inputs)) {
+        input_updates = nb::cast<std::vector<std::string>>(update_inputs);
+    } else {
+        throw std::runtime_error("update_inputs must be a bool or list[str]");
+    }
+
+    for (const auto &input : input_updates) {
         auto path = nix::flake::NonEmptyInputAttrPath::parse(input);
         if (!path)
             throw std::runtime_error(
@@ -202,8 +209,7 @@ NB_MODULE(nanopynix_flake, m) {
           "Parse a flake reference string (e.g. 'github:NixOS/nixpkgs')");
     m.def("lock_flake", &lock_flake,
           "state"_a, "flake_ref"_a,
-          "update_all"_a = false,
-          "update_inputs"_a = std::vector<std::string>{},
+          "update_inputs"_a = nb::bool_(false),
           "write_lock_file"_a = true,
           "Lock a flake reference, returning a LockedFlake with description and inputs");
     m.def("get_flake", &get_flake,

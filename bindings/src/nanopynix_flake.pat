@@ -18,8 +18,7 @@ nanopynix_flake.lock_flake:
     def lock_flake(
         state: EvalState,
         flake_ref: FlakeRef,
-        update_all: bool = False,
-        update_inputs: list[str] = [],
+        update_inputs: bool | list[str] = False,
         write_lock_file: bool = True,
     ) -> LockedFlake:
         """

@@ -6,7 +6,7 @@ from __future__ import annotations
 from strip_ansi import strip_ansi
 
 from nanopynix._pool import WorkerBusyError, WorkerDiedError
-from nanopynix._session import EvalSession, ValueAttrs, ValueList, ValueProxy
+from nanopynix._session import EvalSession, LockedFlakeHandle, ValueAttrs, ValueList, ValueProxy
 from nanopynix.exceptions import (
     EvalError,
     EvalProxyError,
@@ -98,6 +98,7 @@ __all__ = [
     "ValueList",
     "ValueProxy",
     "ValueReleasedError",
+    "LockedFlakeHandle",
     "WorkerBusyError",
     "WorkerDiedError",
     "WrongNixTypeError",

@@ -94,7 +94,9 @@ class WorkerRequest[T](BaseModel):
             if pos is None:
                 continue
             values.append((pos, getattr(self, name)))
-        return [TypeAdapter(Any).dump_python(value, mode="json") for _, value in sorted(values, key=lambda item: item[0])]
+        return [
+            TypeAdapter(Any).dump_python(value, mode="json") for _, value in sorted(values, key=lambda item: item[0])
+        ]
 
     @classmethod
     def from_args(cls, args: list[Any]) -> Self:
@@ -339,9 +341,8 @@ class LockFlake(EvalRequest[LockedFlake]):
     method: ClassVar[str] = "lock_flake"
     response_adapter: ClassVar[ResponseAdapter] = _model_dump(LockedFlake)
     ref: str = rpc_arg(0)
-    update_all: bool = rpc_arg(1, False)
-    update_inputs: list[str] = rpc_arg(2, [])
-    write_lock_file: bool = rpc_arg(3, True)
+    update_inputs: bool | list[str] = rpc_arg(1, False)
+    write_lock_file: bool = rpc_arg(2, True)
 
 
 class CallLockedFlake(EvalRequest[ValueHandle]):
@@ -351,6 +352,11 @@ class CallLockedFlake(EvalRequest[ValueHandle]):
 
 class WriteLockFile(EvalRequest[None]):
     method: ClassVar[str] = "write_lock_file"
+    handle: int = rpc_arg(0)
+
+
+class ReleaseLockedFlake(EvalRequest[None]):
+    method: ClassVar[str] = "release_locked_flake"
     handle: int = rpc_arg(0)
 
 
