@@ -194,7 +194,9 @@ class ValueProxy:
         cached = self._state.nix_type
         if cached not in (None, NixType.THUNK, NixType.UNKNOWN):
             return cached
-        type_name = await self._ctx.worker.request(rpc.TypeName(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
+        type_name = await self._ctx.worker.request(
+            rpc.TypeName(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        )
         self._state = _ResolvedValue(handle=self.handle, nix_type=type_name)
         return type_name
 
@@ -227,10 +229,7 @@ class ValueProxy:
         if isinstance(value, list):
             return ListCallArg(items=[await self._encode_call_arg(item, timeout=timeout) for item in value])
         if isinstance(value, dict):
-            attrs = {
-                key: await self._encode_call_arg(item, timeout=timeout)
-                for key, item in value.items()
-            }
+            attrs = {key: await self._encode_call_arg(item, timeout=timeout) for key, item in value.items()}
             return AttrsCallArg(attrs=attrs)
         return ScalarCallArg(value=value)
 
@@ -248,7 +247,9 @@ class ValueProxy:
         if typ == NixType.FUNCTION:
             return self
         # scalar — delegate to worker
-        result = await self._ctx.worker.request(rpc.Force(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
+        result = await self._ctx.worker.request(
+            rpc.Force(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        )
         return self._decode_force_value(result)
 
     @overload
@@ -364,7 +365,9 @@ class ValueProxy:
     async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
         """Recursive Nix force. Functions remain remote callable ValueProxy objects."""
         await self._ensure_resolved(timeout=timeout)
-        result = await self._ctx.worker.request(rpc.ForceDeep(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
+        result = await self._ctx.worker.request(
+            rpc.ForceDeep(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        )
         return self._decode_deep_value(result)
 
     async def force_json(self, *, copy_to_store: bool = False, timeout: float | None = None) -> JsonValue:
@@ -397,16 +400,22 @@ class ValueProxy:
 
     def list_get(self, idx: int, *, timeout: float | None = None) -> ValueProxy:
         self._check_active()
+        if idx < 0:
+            raise IndexError(f"list index must be non-negative, got {idx}")
         parent: ValueProxy | _ResolvedValue = self if isinstance(self._state, _LazyValue) else self._resolved
         return self._ctx.child(parent, idx, timeout=timeout)
 
     async def list_length(self, *, timeout: float | None = None) -> int:
         await self._ensure_resolved(timeout=timeout)
-        return await self._ctx.worker.request(rpc.ListLength(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
+        return await self._ctx.worker.request(
+            rpc.ListLength(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        )
 
     async def attr_names(self, *, timeout: float | None = None) -> list[str]:
         await self._ensure_resolved(timeout=timeout)
-        return await self._ctx.worker.request(rpc.AttrNames(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
+        return await self._ctx.worker.request(
+            rpc.AttrNames(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        )
 
     async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         await self._ensure_resolved(timeout=timeout)
@@ -552,16 +561,22 @@ class ValueList:
         if self._released:
             raise ValueReleasedError("ValueList has been released")
 
+    def _check_index(self, idx: int) -> None:
+        if idx < 0 or idx >= self._length:
+            raise IndexError(f"list index {idx} out of range for length {self._length}")
+
     def __len__(self) -> int:
         return self._length
 
     def __getitem__(self, idx: int) -> ValueProxy:
         self._check_active()
+        self._check_index(idx)
         return self._ctx.child(self._value, idx)
 
     async def force(self, idx: int, *, timeout: float | None = None) -> NixValue:
         """Force a single element and return its value."""
         self._check_active()
+        self._check_index(idx)
         result = await self._ctx.worker.request(
             rpc.ListGet(handle=self._value.handle, index=idx),
             timeout=self._ctx.resolve_timeout(timeout),
@@ -644,9 +659,7 @@ class EvalSession:
         handle = await rw.request(rpc.EvalFile(path=path), timeout=self._resolve_timeout(timeout))
         return self._proxy_context().value(handle.handle, handle.type)
 
-    async def string(
-        self, expr: str, path: str = "<string>", *, timeout: float | None = None
-    ) -> ValueProxy:
+    async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
         self._check_rw()
         rw = self._reserved_worker()
 

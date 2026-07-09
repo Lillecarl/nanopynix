@@ -5,6 +5,8 @@
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/shared_ptr.h>
 
+#include <stdexcept>
+
 #include <nix/expr/eval.hh>
 #include <nix/expr/eval-error.hh>
 #include <nix/expr/eval-gc.hh>
@@ -76,6 +78,10 @@ size_t PyValue::list_length() const {
 
 PyValue PyValue::list_get(size_t idx) const {
     if (value->type() != nix::nList) throw std::runtime_error("value is not a list");
+    auto size = value->listSize();
+    if (idx >= size)
+        throw std::out_of_range(
+            "list index " + std::to_string(idx) + " out of range for length " + std::to_string(size));
     auto *elem = value->listView()[idx];
     if (auto *es = evalState()) es->forceValue(*elem, nix::noPos);
     return PyValue(elem, eval);
