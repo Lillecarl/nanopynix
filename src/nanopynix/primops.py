@@ -2,29 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import yaml
 from pydantic import TypeAdapter
 from pydantic import ValidationError
 
 from nanopynix.models import JsonValue, PrimOpSpec
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-
 _JsonValue = TypeAdapter(JsonValue)
 
 
-def _yaml() -> Any:
-    import yaml
-
-    return yaml
-
-
 def _yaml12_loader() -> type[Any]:
-    yaml = _yaml()
-
     class Loader(yaml.SafeLoader):
         pass
 
@@ -109,8 +100,8 @@ def from_yaml(source: str) -> JsonValue:
     """Parse YAML 1.2-style input into JSON-like Python values."""
 
     try:
-        return _single_document(_yaml().load_all(source, Loader=_yaml12_loader()), "fromYAML", "fromYAMLStream")
-    except _yaml().YAMLError as exc:
+        return _single_document(yaml.load_all(source, Loader=_yaml12_loader()), "fromYAML", "fromYAMLStream")
+    except yaml.YAMLError as exc:
         raise ValueError(f"fromYAML: failed to parse YAML 1.2 document: {_parse_error_message(exc)}") from exc
 
 
@@ -118,8 +109,8 @@ def from_yaml11(source: str) -> JsonValue:
     """Parse legacy YAML 1.1 input into JSON-like Python values."""
 
     try:
-        return _single_document(_yaml().safe_load_all(source), "fromYAML11", "fromYAML11Stream")
-    except _yaml().YAMLError as exc:
+        return _single_document(yaml.safe_load_all(source), "fromYAML11", "fromYAML11Stream")
+    except yaml.YAMLError as exc:
         raise ValueError(f"fromYAML11: failed to parse YAML 1.1 document: {_parse_error_message(exc)}") from exc
 
 
@@ -127,8 +118,8 @@ def from_yaml_stream(source: str) -> list[JsonValue]:
     """Parse a YAML 1.2-style document stream into JSON-like Python values."""
 
     try:
-        return _validate_documents(_yaml().load_all(source, Loader=_yaml12_loader()), "fromYAMLStream")
-    except _yaml().YAMLError as exc:
+        return _validate_documents(yaml.load_all(source, Loader=_yaml12_loader()), "fromYAMLStream")
+    except yaml.YAMLError as exc:
         raise ValueError(f"fromYAMLStream: failed to parse YAML 1.2 stream: {_parse_error_message(exc)}") from exc
 
 
@@ -136,8 +127,8 @@ def from_yaml11_stream(source: str) -> list[JsonValue]:
     """Parse a legacy YAML 1.1 document stream into JSON-like Python values."""
 
     try:
-        return _validate_documents(_yaml().safe_load_all(source), "fromYAML11Stream")
-    except _yaml().YAMLError as exc:
+        return _validate_documents(yaml.safe_load_all(source), "fromYAML11Stream")
+    except yaml.YAMLError as exc:
         raise ValueError(f"fromYAML11Stream: failed to parse YAML 1.1 stream: {_parse_error_message(exc)}") from exc
 
 
@@ -147,9 +138,9 @@ def to_yaml(value: JsonValue) -> str:
     value = _validate_document(value, "toYAML")
     try:
         if isinstance(value, list):
-            return _yaml().safe_dump_all(value, explicit_start=True, sort_keys=False)
-        return _yaml().safe_dump(value, sort_keys=False)
-    except _yaml().YAMLError as exc:
+            return yaml.safe_dump_all(value, explicit_start=True, sort_keys=False)
+        return yaml.safe_dump(value, sort_keys=False)
+    except yaml.YAMLError as exc:
         raise ValueError(f"toYAML: failed to render YAML: {_parse_error_message(exc)}") from exc
 
 
