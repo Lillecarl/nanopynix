@@ -35,10 +35,10 @@ logger = logging.getLogger(__name__)
 
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
-# Current worker logging is a long-lived server-streaming RPC on the same H2
-# channel as ordinary calls. Keep one handler slot for that stream and one for
-# the active manager->worker call. EvalSession still serializes Nix eval RPCs at
-# the ReservedWorker boundary.
+# The grpclib-transports backchannel is a long-lived bidi stream on the same H2
+# connection. Keep one handler slot for that stream and one for the active
+# manager->worker call. EvalSession still serializes Nix eval RPCs at the
+# ReservedWorker boundary.
 _WORKER_MAX_CONCURRENCY = 2
 
 
@@ -205,22 +205,23 @@ class _WorkerManager:
         self._eval_service_stub: EvalServiceStub | None = None
         self._available: asyncio.Lock = asyncio.Lock()
         self._log_bus: _LogBus = _LogBus()
-        self._log_task: asyncio.Task | None = None
         self._stack: contextlib.AsyncExitStack | None = None
 
     # ── lifecycle ──────────────────────────────────────────────────
 
     async def open(self) -> None:
         """Spawn the worker via multiprocessing forkserver and initialise Nix."""
-        from grpclib_transports.multiprocessing import multiprocessing_worker
+        from grpclib_transports.multiprocessing import multiprocessing_worker_with_backchannel
+        from nanopynix._manager import ManagerServiceHandler
         from nanopynix_proto.nix.eval import EvalServiceStub
         from nanopynix_proto.nix.store import StoreServiceStub
         from nanopynix_proto.nix.worker import InitRequest, WorkerServiceStub
 
         self._stack = contextlib.AsyncExitStack()
         self._channel = await self._stack.enter_async_context(
-            multiprocessing_worker(
+            multiprocessing_worker_with_backchannel(
                 worker_service_factory,
+                [ManagerServiceHandler(self._log_bus.emit)],
                 preload=["nanopynix._worker"],
                 max_concurrency=_WORKER_MAX_CONCURRENCY,
             )
@@ -258,19 +259,9 @@ class _WorkerManager:
         if init_response.status != "ok":
             raise RuntimeError(f"Worker init failed: {init_response.status}")
 
-        # Start log subscription background task
-        self._log_task = asyncio.create_task(self._log_loop())
-
     async def close(self) -> None:
         """Shut down the worker."""
         try:
-            if self._log_task is not None:
-                self._log_task.cancel()
-                try:
-                    await asyncio.wait_for(self._log_task, timeout=2.0)
-                except (asyncio.CancelledError, TimeoutError):
-                    pass
-
             if self._worker_service_stub is not None:
                 from nanopynix_proto.nix.worker import ShutdownRequest
 
@@ -284,22 +275,6 @@ class _WorkerManager:
                 self._stack = None
 
         self._log_bus.emit(None)
-
-    # ── log loop ──────────────────────────────────────────────────
-
-    async def _log_loop(self) -> None:
-        """Background task: stream log events from worker and deliver to _LogBus."""
-        if self._worker_service_stub is None:
-            return
-        from nanopynix_proto.nix.worker import SubscribeLogsRequest
-
-        try:
-            async for event in self._worker_stub.subscribe_logs(SubscribeLogsRequest(request_id=0)):
-                self._log_bus.emit(event)
-        except (ConnectionError, asyncio.CancelledError):
-            pass
-        except Exception:
-            logger.exception("log loop error")
 
     # ── worker lock ────────────────────────────────────────────────
 
