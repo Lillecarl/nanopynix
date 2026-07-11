@@ -11,6 +11,7 @@ from nanopynix._extract import (
     store_path as _sp_to_pb,
     store_path_str as _sp_str_to_pb,
 )
+from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix_proto.nix import common as common_pb
 from nanopynix_proto.nix.store import (
     AddTempRootRequest,
@@ -95,6 +96,7 @@ def _attrs_value_to_str(v: common_pb.AttrsValue) -> str:
 # ── Service handler ──────────────────────────────────────────────────
 
 
+@wrap_service_handlers
 class StoreServiceHandler(StoreServiceBase):
     """gRPC handler for all store operations."""
 

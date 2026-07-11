@@ -7,7 +7,7 @@ carries a ``_session_id`` that ``Eval`` checks at runtime.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import nanopynix_store  # BuildMode enum
 from nanopynix._pool import _RPC_TIMEOUT, _grpc_call
@@ -108,37 +108,41 @@ class StoreHandle:
         if not self._active:
             raise RuntimeError("StoreHandle is closed — use 'async with session.store() as store:'")
 
+    async def _store_call(self, coro: Any) -> Any:
+        """Acquire the worker lock, execute a gRPC call, handle errors."""
+        return await self._pool.call(_grpc_call(coro))
+
     # ── Identity ──────────────────────────────────────────────────
 
     async def get_uri(self) -> str:
         self._check_active()
-        resp = await _grpc_call(self._pool._store_stub.get_uri(GetUriRequest(), timeout=_RPC_TIMEOUT))
+        resp = await self._store_call(self._pool._store_stub.get_uri(GetUriRequest(), timeout=_RPC_TIMEOUT))
         return resp.uri
 
     async def get_store_dir(self) -> str:
         self._check_active()
-        resp = await _grpc_call(self._pool._store_stub.get_store_dir(GetStoreDirRequest(), timeout=_RPC_TIMEOUT))
+        resp = await self._store_call(self._pool._store_stub.get_store_dir(GetStoreDirRequest(), timeout=_RPC_TIMEOUT))
         return resp.dir
 
     # ── StorePath parsing ─────────────────────────────────────────
 
     async def parse_store_path(self, path: str) -> StorePath:
         self._check_active()
-        return await _grpc_call(
+        return await self._store_call(
             self._pool._store_stub.parse_store_path(ParseStorePathRequest(path=path), timeout=_RPC_TIMEOUT)
         )
 
     async def is_valid_path(self, path: StorePath | str) -> bool:
         self._check_active()
         s = _to_str(path)
-        resp = await _grpc_call(
+        resp = await self._store_call(
             self._pool._store_stub.is_valid_path(IsValidPathRequest(path=s), timeout=_RPC_TIMEOUT)
         )
         return resp.valid
 
     async def follow_links_to_store_path(self, path: str) -> StorePath:
         self._check_active()
-        return await _grpc_call(
+        return await self._store_call(
             self._pool._store_stub.follow_links_to_store_path(
                 FollowLinksToStorePathRequest(path=path), timeout=_RPC_TIMEOUT
             )
@@ -149,13 +153,13 @@ class StoreHandle:
     async def query_path_info(self, path: StorePath | str) -> PathInfo:
         self._check_active()
         s = _to_str(path)
-        return await _grpc_call(
+        return await self._store_call(
             self._pool._store_stub.query_path_info(QueryPathInfoRequest(path=s), timeout=_RPC_TIMEOUT)
         )
 
     async def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
         self._check_active()
-        resp = await _grpc_call(
+        resp = await self._store_call(
             self._pool._store_stub.query_path_from_hash_part(
                 QueryPathFromHashPartRequest(hash_part=hash_part), timeout=_RPC_TIMEOUT
             )
@@ -173,7 +177,7 @@ class StoreHandle:
     ) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        resp = await _grpc_call(
+        resp = await self._store_call(
             self._pool._store_stub.compute_fs_closure(
                 ComputeFsClosureRequest(
                     path=s,
@@ -189,7 +193,7 @@ class StoreHandle:
     async def query_missing(self, paths: list[StorePath | str]) -> MissingInfo:
         self._check_active()
         strs = _to_strs(paths)
-        return await _grpc_call(
+        return await self._store_call(
             self._pool._store_stub.query_missing(QueryMissingRequest(paths=strs), timeout=_RPC_TIMEOUT)
         )
 
@@ -198,7 +202,7 @@ class StoreHandle:
     async def query_derivation_outputs(self, path: StorePath | str) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        resp = await _grpc_call(
+        resp = await self._store_call(
             self._pool._store_stub.query_derivation_outputs(
                 QueryDerivationOutputsRequest(path=s), timeout=_RPC_TIMEOUT
             )
@@ -208,7 +212,7 @@ class StoreHandle:
     async def query_valid_derivers(self, path: StorePath | str) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        resp = await _grpc_call(
+        resp = await self._store_call(
             self._pool._store_stub.query_valid_derivers(
                 QueryValidDeriversRequest(path=s), timeout=_RPC_TIMEOUT
             )
@@ -219,7 +223,7 @@ class StoreHandle:
 
     async def query_all_valid_paths(self) -> list[StorePath]:
         self._check_active()
-        resp = await _grpc_call(
+        resp = await self._store_call(
             self._pool._store_stub.query_all_valid_paths(
                 QueryAllValidPathsRequest(), timeout=_RPC_TIMEOUT
             )
@@ -229,7 +233,7 @@ class StoreHandle:
     async def query_referrers(self, path: StorePath | str) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        resp = await _grpc_call(
+        resp = await self._store_call(
             self._pool._store_stub.query_referrers(QueryReferrersRequest(path=s), timeout=_RPC_TIMEOUT)
         )
         return resp.paths
@@ -237,7 +241,7 @@ class StoreHandle:
     async def query_substitutable_paths(self, paths: Sequence[StorePath | str]) -> list[StorePath]:
         self._check_active()
         strs = _to_strs(paths)
-        resp = await _grpc_call(
+        resp = await self._store_call(
             self._pool._store_stub.query_substitutable_paths(
                 QuerySubstitutablePathsRequest(paths=strs), timeout=_RPC_TIMEOUT
             )
@@ -252,7 +256,7 @@ class StoreHandle:
     ) -> list[BuildResult]:
         self._check_active()
         strs = _to_strs(paths)
-        resp = await _grpc_call(
+        resp = await self._store_call(
             self._pool._store_stub.build_paths_with_results(
                 BuildPathsWithResultsRequest(paths=strs), timeout=_RPC_TIMEOUT
             )
@@ -265,7 +269,7 @@ class StoreHandle:
     ) -> Derivation:
         self._check_active()
         s = _to_str(drv_path)
-        return await _grpc_call(
+        return await self._store_call(
             self._pool._store_stub.read_derivation(ReadDerivationRequest(path=s), timeout=_RPC_TIMEOUT)
         )
 
@@ -277,7 +281,7 @@ class StoreHandle:
         self._check_active()
         s = _to_str(drv_path)
         mode = _build_mode_value(build_mode)
-        return await _grpc_call(
+        return await self._store_call(
             self._pool._store_stub.build_derivation(
                 BuildDerivationRequest(path=s, build_mode=mode), timeout=_RPC_TIMEOUT
             )
@@ -288,7 +292,7 @@ class StoreHandle:
     async def add_temp_root(self, path: StorePath | str) -> None:
         self._check_active()
         s = _to_str(path)
-        await _grpc_call(
+        await self._store_call(
             self._pool._store_stub.add_temp_root(AddTempRootRequest(path=s), timeout=_RPC_TIMEOUT)
         )
 
@@ -296,14 +300,14 @@ class StoreHandle:
 
     async def fetch_from_url(self, url: str) -> Input:
         self._check_active()
-        return await _grpc_call(
+        return await self._store_call(
             self._pool._store_stub.fetch_from_url(FetchFromUrlRequest(url=url), timeout=_RPC_TIMEOUT)
         )
 
     async def fetch_from_attrs(self, attrs: dict[str, str | int | bool]) -> Input:
         self._check_active()
         proto_attrs = {k: _pyval_to_attrs_value(v) for k, v in attrs.items()}
-        return await _grpc_call(
+        return await self._store_call(
             self._pool._store_stub.fetch_from_attrs(FetchFromAttrsRequest(attrs=proto_attrs), timeout=_RPC_TIMEOUT)
         )
 

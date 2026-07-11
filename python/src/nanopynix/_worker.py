@@ -12,6 +12,7 @@ Serves three gRPC services over a single H2 transport:
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib
 import json
 import os
@@ -23,6 +24,9 @@ from typing import Any
 import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
+from grpclib.const import Status
+from grpclib.exceptions import GRPCError
+from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix._worker_eval import EvalServiceHandler
 from nanopynix._worker_store import StoreServiceHandler
 from nanopynix.logging import LogCollector
@@ -89,6 +93,7 @@ class WorkerState:
 # ── WorkerService handler ────────────────────────────────────────────
 
 
+@wrap_service_handlers
 class WorkerServiceHandler(WorkerServiceBase):
     """Lifecycle handler: init, subscribe-logs, shutdown."""
 

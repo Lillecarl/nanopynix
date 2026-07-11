@@ -10,6 +10,7 @@ from nanopynix._extract import (
     flake_ref_attrs as _flake_ref_attrs,
     locked_flake as _locked_flake,
 )
+from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix_proto.nix import common as common_pb
 from nanopynix_proto.nix.eval import (
     AttrNamesRequest,
@@ -75,6 +76,7 @@ def _pyval_to_scalar(v: Any) -> common_pb.ScalarValue:
         return common_pb.ScalarValue(float_value=v)
     return common_pb.ScalarValue(string_value=str(v))
 # ── Service handler ──────────────────────────────────────────────────
+@wrap_service_handlers
 class EvalServiceHandler(EvalServiceBase):
     """gRPC handler for all eval/flake operations."""
 

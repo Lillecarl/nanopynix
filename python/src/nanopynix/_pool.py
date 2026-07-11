@@ -17,7 +17,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-from grpclib.exceptions import GRPCError
+from grpclib.exceptions import GRPCError, StreamTerminatedError
 
 from nanopynix._worker import worker_service_factory
 from nanopynix.exceptions import from_response
@@ -62,6 +62,8 @@ async def _grpc_call(coro: Any) -> Any:
         return await coro
     except GRPCError as exc:
         raise from_response("Unknown", exc.message or str(exc))
+    except (StreamTerminatedError, ConnectionError) as exc:
+        raise WorkerDiedError(str(exc)) from exc
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -253,7 +255,7 @@ class _WorkerManager:
 
                 try:
                     await self._worker_stub.shutdown(ShutdownRequest(), timeout=5.0)
-                except (GRPCError, ConnectionError, asyncio.TimeoutError):
+                except (GRPCError, StreamTerminatedError, ConnectionError, asyncio.TimeoutError, asyncio.CancelledError):
                     logger.debug("worker shutdown failed (expected during teardown)", exc_info=True)
         finally:
             if self._stack is not None:
@@ -298,6 +300,28 @@ class _WorkerManager:
     def _release(self) -> None:
         """Release the worker lock (called by ReservedWorker.release())."""
         self._available.release()
+
+    async def call(self, coro: Any, *, timeout: float | None = None) -> Any:
+        """Acquire the worker lock and await a gRPC coroutine.
+
+        Raises ``WorkerBusyError`` if the worker is reserved by an
+        ``EvalSession`` and no timeout is given.
+        """
+        if self._available.locked():
+            if timeout is None:
+                coro.close()
+                raise WorkerBusyError("worker is busy")
+            try:
+                await asyncio.wait_for(self._available.acquire(), timeout=timeout)
+            except TimeoutError as exc:
+                coro.close()
+                raise WorkerBusyError(f"worker is busy after waiting {timeout}s") from exc
+            try:
+                return await coro
+            finally:
+                self._available.release()
+        async with self._available:
+            return await coro
 
     # ── log access ─────────────────────────────────────────────────
 
