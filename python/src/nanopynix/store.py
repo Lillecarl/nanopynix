@@ -45,12 +45,12 @@ if TYPE_CHECKING:
 
 def _to_str(path: StorePath | str) -> str:
     """Coerce a StorePath or str to a store-path string."""
-    return path.to_string if isinstance(path, StorePath) else path
+    return path.to_string if hasattr(path, "to_string") else path
 
 
 def _to_strs(paths: Sequence[StorePath | str]) -> list[str]:
     """Coerce a list of StorePath|str to a list of store-path strings."""
-    return [p.to_string if isinstance(p, StorePath) else p for p in paths]
+    return [p.to_string if hasattr(p, "to_string") else p for p in paths]
 
 
 def _pyval_to_attrs_value(v: str | int | bool) -> AttrsValue:

@@ -43,20 +43,20 @@ def _identity(value: Any) -> Any:
     return value
 
 
-def _model_dump(model: type[BaseModel]) -> ResponseAdapter:
-    return lambda value: model.model_validate(value).model_dump(mode="json")
+def _model_dump(model: type) -> ResponseAdapter:
+    return lambda value: model.from_dict(value).to_dict()
 
 
 def _adapter_dump(adapter: TypeAdapter[Any]) -> ResponseAdapter:
     return lambda value: adapter.dump_python(adapter.validate_python(value), mode="json")
 
 
-def _maybe_model_dump(model: type[BaseModel]) -> ResponseAdapter:
-    return lambda value: None if value is None else model.model_validate(value).model_dump(mode="json")
+def _maybe_model_dump(model: type) -> ResponseAdapter:
+    return lambda value: None if value is None else model.from_dict(value).to_dict()
 
 
-def _already_model_dump(value: BaseModel) -> dict[str, Any]:
-    return value.model_dump(mode="json")
+def _already_model_dump(value: Any) -> dict[str, Any]:
+    return value.to_dict()
 
 
 def rpc_arg(index: int, default: Any = PydanticUndefined) -> Any:
