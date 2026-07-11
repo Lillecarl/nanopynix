@@ -46,6 +46,7 @@ buildPythonPackage {
       --python_betterproto2_opt=client_generation=async \
       --python_betterproto2_opt=server_generation=async \
       --python_betterproto2_opt=google_protobuf_descriptors \
+      --python_betterproto2_opt=pydantic_dataclasses \
       common.proto \
       store.proto \
       eval.proto \
