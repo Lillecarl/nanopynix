@@ -180,8 +180,10 @@ class EvalServiceHandler(EvalServiceBase):
         return self._deep_value(value)
 
     async def force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
+        import json as _json
+
         value = self._get_es().value_from_handle(message.handle)
-        return ForceJsonResponse(json=value.to_json(copy_to_store=message.copy_to_store))
+        return ForceJsonResponse(json=_json.dumps(value.to_json(copy_to_store=message.copy_to_store)))
 
     async def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
         return self._export(self._get_es().value_from_handle(message.handle).attr_get(message.name))
