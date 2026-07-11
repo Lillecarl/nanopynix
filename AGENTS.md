@@ -1,5 +1,5 @@
 # Useful commands
-- timeout 180 direnv exec . pytest tests
+- direnv exec . timeout 60 pytest tests
 - direnv exec . pyright
 - direnv exec . ruff
 
@@ -15,7 +15,7 @@ Run pytest commands so the complete output is preserved. Do not pipe pytest
 directly into `tail`, `head`, `grep`, or similar filters. If you need a short
 live summary, use `tee` first, for example:
 
-- `timeout 180 direnv exec . pytest tests 2>&1 | tee /tmp/pytest.log | tail -n 80`
+- `direnv exec . timeout 60 pytest tests 2>&1 | tee /tmp/pytest.log | tail -n 80`
 
 The saved log is the source of truth. Use the short live summary only to decide
 what to inspect next, then query `/tmp/pytest.log` for the full failure context.

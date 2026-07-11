@@ -62,7 +62,7 @@ def _import_callable(import_path: str) -> Callable[..., Any]:
 
 def _register_primops(raw_specs: list[dict[str, Any]]) -> None:
     for raw in raw_specs:
-        spec = PrimOpSpec.model_validate(raw)
+        spec = PrimOpSpec.from_dict(raw)
         nanopynix_expr.register_primop(
             spec.name,
             spec.arity,

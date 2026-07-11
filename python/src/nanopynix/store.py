@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import nanopynix_store  # BuildMode enum
-from nanopynix._pool import _RPC_TIMEOUT, _grpc_call
+from nanopynix._pool import _RPC_TIMEOUT, WorkerBusyError, _grpc_call
 from nanopynix_proto.nix.store import (
     AddTempRootRequest,
     BuildDerivationRequest,
@@ -110,7 +110,12 @@ class StoreHandle:
 
     async def _store_call(self, coro: Any) -> Any:
         """Acquire the worker lock, execute a gRPC call, handle errors."""
-        return await self._pool.call(_grpc_call(coro))
+        wrapped = _grpc_call(coro)
+        try:
+            return await self._pool.call(wrapped)
+        except WorkerBusyError:
+            coro.close()
+            raise
 
     # ── Identity ──────────────────────────────────────────────────
 

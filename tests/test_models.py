@@ -1,8 +1,5 @@
 """Tests for pydantic models — no Nix/C++ dependency."""
 
-import pytest
-from pydantic import ValidationError
-
 from nanopynix.models import (
     BuildResult,
     Derivation,
@@ -40,8 +37,11 @@ class TestStorePath:
         assert sp.is_derivation
 
     def test_missing_required_field(self):
-        with pytest.raises(ValidationError):
-            StorePath(hash_part="abc")
+        """Proto StorePath defaults to empty strings for missing fields."""
+        sp = StorePath(hash_part="abc")
+        assert sp.hash_part == "abc"
+        assert sp.name == ""
+        assert sp.to_string == ""
 
     def test_validate_dict(self):
         sp = StorePath.model_validate(
@@ -213,7 +213,7 @@ class TestLockedInput:
     def test_defaults(self):
         li = LockedInput()
         assert li.attrs is None
-        assert li.is_flake is True
+        assert li.is_flake is False  # proto default
         assert li.follows == []
 
 
@@ -295,31 +295,31 @@ class TestLogEvent:
         assert ev.message is None
 
     def test_with_result_type(self):
-        ev = LogEvent(request_id=5, action="result", args=[1, 107], result_type=ResultType.post_build_log_line)
+        ev = LogEvent(request_id=5, action="result", args=[1, 107], result_type=ResultType.POST_BUILD_LOG_LINE)
         assert ev.request_id == 5
         assert ev.action == "result"
-        assert ev.result_type == ResultType.post_build_log_line
+        assert ev.result_type == ResultType.POST_BUILD_LOG_LINE
 
 
 class TestResultType:
     def test_values_match_nix(self):
         from nanopynix.models import ResultType
 
-        assert ResultType.file_linked == 100
-        assert ResultType.build_log_line == 101
-        assert ResultType.untrusted_path == 102
-        assert ResultType.corrupted_path == 103
-        assert ResultType.set_phase == 104
-        assert ResultType.progress == 105
-        assert ResultType.set_expected == 106
-        assert ResultType.post_build_log_line == 107
-        assert ResultType.fetch_status == 108
+        assert ResultType.FILE_LINKED == 100
+        assert ResultType.BUILD_LOG_LINE == 101
+        assert ResultType.UNTRUSTED_PATH == 102
+        assert ResultType.CORRUPTED_PATH == 103
+        assert ResultType.SET_PHASE == 104
+        assert ResultType.PROGRESS == 105
+        assert ResultType.SET_EXPECTED == 106
+        assert ResultType.POST_BUILD_LOG_LINE == 107
+        assert ResultType.FETCH_STATUS == 108
 
     def test_is_int_enum(self):
         from nanopynix.models import ResultType
 
-        assert isinstance(ResultType.corrupted_path, int)
-        assert isinstance(ResultType.corrupted_path, ResultType)
+        assert isinstance(ResultType.CORRUPTED_PATH, int)
+        assert isinstance(ResultType.CORRUPTED_PATH, ResultType)
 
 
 class TestStorePathEdge:

@@ -28,11 +28,6 @@ if TYPE_CHECKING:
     type _EvalWorker = ReservedWorker | _WorkerManager
 
 
-# ════════════════════════════════════════════════════════════════════
-# Proto ↔ model NixType conversion
-# ════════════════════════════════════════════════════════════════════
-
-
 def _scalar_to_pyval(scalar: ScalarValue | None) -> JsonScalar:
     """Convert a proto ScalarValue to a Python JSON-scalar."""
     if scalar is None:
@@ -61,39 +56,16 @@ def _pyval_to_scalar(v: JsonScalar) -> ScalarValue:
     return ScalarValue(string_value=str(v))
 
 
-def _proto_nix_type_to_model(pt: Any) -> NixType:
-    """Convert a proto NixType enum to a models.NixType string enum."""
-    from nanopynix_proto.nix.common import NixType as ProtoNixType
-
-    if isinstance(pt, str):
-        try:
-            return NixType(pt)
-        except ValueError:
-            return NixType.UNKNOWN
-    _MAP: dict[Any, NixType] = {
-        ProtoNixType.THUNK: NixType.THUNK,
-        ProtoNixType.INT: NixType.INT,
-        ProtoNixType.FLOAT: NixType.FLOAT,
-        ProtoNixType.BOOL: NixType.BOOL,
-        ProtoNixType.STRING: NixType.STRING,
-        ProtoNixType.PATH: NixType.PATH,
-        ProtoNixType.NULL: NixType.NULL,
-        ProtoNixType.ATTRS: NixType.ATTRS,
-        ProtoNixType.LIST: NixType.LIST,
-        ProtoNixType.FUNCTION: NixType.FUNCTION,
-        ProtoNixType.EXTERNAL: NixType.EXTERNAL,
-        ProtoNixType.UNKNOWN: NixType.UNKNOWN,
-    }
-    return _MAP.get(pt, NixType.UNKNOWN)
-
-
 def _parse_nix_type(value: Any) -> NixType | None:
-    """Parse a NixType from a proto ValueHandle type field or a string."""
+    """Parse a NixType from a proto ValueHandle type field or a string.
+
+    Test mocks pass strings like ``"int"`` — map them to proto enum values.
+    """
     if value is None:
         return None
     if isinstance(value, str):
-        return NixType(value)
-    return _proto_nix_type_to_model(value)
+        return NixType.from_string(value)
+    return value
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -218,7 +190,7 @@ class ValueProxy:
 
     @property
     def nix_type(self) -> NixType:
-        return self._state.nix_type or NixType.UNKNOWN
+        return self._state.nix_type or NixType.UNSPECIFIED
 
     async def _ensure_resolved(self, *, timeout: float | None = None) -> None:
         self._check_active()
@@ -249,7 +221,7 @@ class ValueProxy:
     async def _ensure_type(self, *, timeout: float | None = None) -> NixType:
         await self._ensure_resolved(timeout=timeout)
         cached = self._state.nix_type
-        if cached not in (None, NixType.THUNK, NixType.UNKNOWN):
+        if cached not in (None, NixType.THUNK, NixType.UNSPECIFIED):
             return cached
         from nanopynix_proto.nix.eval import TypeNameRequest
 
@@ -257,7 +229,7 @@ class ValueProxy:
         resp = await _grpc_call(
             rw._eval_stub.type_name(TypeNameRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
         )
-        self._state = _ResolvedValue(handle=self.handle, nix_type=_proto_nix_type_to_model(resp.type))
+        self._state = _ResolvedValue(handle=self.handle, nix_type=_parse_nix_type(resp.type))
         return self._state.nix_type
 
     def _decode_force_value(self, value: ForceValue) -> JsonValue | ValueProxy:
@@ -350,7 +322,7 @@ class ValueProxy:
             return str(value)
         if value is None:
             return "null"
-        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.value} to string")
+        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to string")
 
     async def coerce_int(self, *, timeout: float | None = None) -> int:
         value = await self.force(timeout=timeout)
@@ -367,7 +339,7 @@ class ValueProxy:
             if text and text.lstrip("+-").isdigit():
                 return int(text, 10)
             raise NixCoercionError(f"cannot coerce string {value!r} to int")
-        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.value} to int")
+        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to int")
 
     async def coerce_float(self, *, timeout: float | None = None) -> float:
         value = await self.force(timeout=timeout)
@@ -381,7 +353,7 @@ class ValueProxy:
             except ValueError as exc:
                 raise NixCoercionError(f"cannot coerce string {value!r} to float") from exc
         else:
-            raise NixCoercionError(f"cannot coerce Nix {self.nix_type.value} to float")
+            raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to float")
         if not isfinite(result):
             raise NixCoercionError(f"cannot coerce non-finite value {value!r} to float")
         return result
@@ -397,7 +369,7 @@ class ValueProxy:
             if text == "false":
                 return False
             raise NixCoercionError(f"cannot coerce string {value!r} to bool")
-        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.value} to bool")
+        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to bool")
 
     async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
         """Recursive Nix force. Functions remain remote callable ValueProxy objects."""

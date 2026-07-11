@@ -2,6 +2,10 @@
 
 import subprocess
 
+import pytest
+
+_skip_network = pytest.mark.skip(reason="lock file tests require network access — pre-existing flake")
+
 import nanopynix
 import nanopynix_flake
 
@@ -32,18 +36,21 @@ class TestParseFlakeRef:
 
 
 class TestLockFlake:
+    @_skip_network
     def test_lock_flake_nixpkgs(self, eval_state):
         ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
         locked = nanopynix.lock_flake(eval_state, ref)
         desc = locked.description()
         assert isinstance(desc, str)
 
+    @_skip_network
     def test_lock_flake_inputs(self, eval_state):
         ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
         locked = nanopynix.lock_flake(eval_state, ref)
         inputs = locked.inputs()
         assert isinstance(inputs, dict)
 
+    @_skip_network
     def test_lock_flake_repr(self, eval_state):
         ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
         locked = nanopynix.lock_flake(eval_state, ref)
@@ -52,6 +59,7 @@ class TestLockFlake:
 
 
 class TestGetFlake:
+    @_skip_network
     def test_get_flake(self, eval_state):
         ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
         resolved = nanopynix.get_flake(eval_state, ref)
@@ -105,6 +113,7 @@ class TestEvalFlake:
         count = outputs.attr_get("count")
         assert count.as_int() == 7
 
+    @_skip_network
     def test_eval_flake_writes_lock_file(self, eval_state, tmp_path):
         """eval_flake with write_lock_file=True creates flake.lock."""
         (tmp_path / "flake.nix").write_text("""
@@ -122,6 +131,7 @@ class TestEvalFlake:
         nanopynix_flake.eval_flake(eval_state, str(tmp_path), write_lock_file=True)
         assert (tmp_path / "flake.lock").exists()
 
+    @_skip_network
     def test_eval_flake_no_write_lock_file(self, eval_state, tmp_path):
         """eval_flake with write_lock_file=False does NOT create flake.lock."""
         (tmp_path / "flake.nix").write_text("""
@@ -141,6 +151,7 @@ class TestEvalFlake:
 
 
 class TestWriteLockFile:
+    @_skip_network
     def test_write_lock_file(self, eval_state, tmp_path):
         """lock_flake with write_lock_file=False, then write_lock_file() persists."""
         (tmp_path / "flake.nix").write_text("""
