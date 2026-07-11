@@ -12,6 +12,7 @@ Serves three gRPC services over a single H2 transport:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import json
 import os
@@ -34,6 +35,7 @@ import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
 from nanopynix._grpc_util import wrap_service_handlers
+from nanopynix._manager import LogAck
 from nanopynix._worker_eval import EvalServiceHandler
 from nanopynix._worker_store import StoreServiceHandler
 from nanopynix.logging import LogCollector
@@ -41,14 +43,15 @@ from nanopynix.models import PrimOpSpec
 
 if TYPE_CHECKING:
     from grpclib._typing import IServable
+    from grpclib_transports import WorkerBackchannel
 
 # Re-export for the multiprocessing runner in _pool.py
 __all__ = ["run_worker", "worker_service_factory", "main"]
 
-# Current worker logging is a long-lived server-streaming RPC on the same H2
-# channel as ordinary calls. Keep one handler slot for that stream and one for
-# the active manager->worker call. EvalSession still serializes Nix eval RPCs at
-# the ReservedWorker boundary.
+# Current worker logging uses the long-lived grpclib-transports backchannel on
+# the same H2 connection as ordinary calls. Keep one handler slot for that stream
+# and one for the active manager->worker call. EvalSession still serializes Nix
+# eval RPCs at the ReservedWorker boundary.
 _WORKER_MAX_CONCURRENCY = 2
 
 
@@ -93,6 +96,7 @@ class WorkerState:
         self.eval_store: Any = None
         self.eval_state: Any = None
         self.collector: LogCollector | None = None
+        self.log_task: asyncio.Task[None] | None = None
         self.locked_flakes: dict[int, Any] = {}
         self._next_lf_handle: int = 1
 
@@ -196,7 +200,28 @@ class WorkerServiceHandler(WorkerServiceBase):
 # ── Factory ──────────────────────────────────────────────────────────
 
 
-def worker_service_factory() -> list[IServable]:
+async def _relay_logs_to_manager(collector: LogCollector, backchannel: WorkerBackchannel) -> None:
+    try:
+        async for event in collector.stream():
+            if event is None:
+                break
+            req_id, action, *args = event
+            await backchannel.call_unary(
+                "/nix.manager.ManagerService/Log",
+                LogEvent(
+                    request_id=req_id,
+                    action=action,
+                    args_json=json.dumps(list(args), default=str),
+                ),
+                LogAck,
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+
+
+def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list[IServable]:
     """Create service handlers with a shared WorkerState.
 
     Must be called *inside* the worker process (before Nix init so that
@@ -207,6 +232,11 @@ def worker_service_factory() -> list[IServable]:
 
     state = WorkerState()
     state.collector = collector
+    if backchannel is not None:
+        state.log_task = asyncio.create_task(
+            _relay_logs_to_manager(collector, backchannel),
+            name="nanopynix-log-backchannel",
+        )
 
     return cast(
         "list[IServable]",
@@ -248,6 +278,11 @@ async def run_worker(
     collector = cast("WorkerServiceHandler", worker_handler)._state.collector
     if collector is not None:
         collector.close()
+    log_task = cast("WorkerServiceHandler", worker_handler)._state.log_task
+    if log_task is not None:
+        log_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await log_task
 
 
 # ── Stdio entry point (console_script / ``python -m nanopynix._worker``) ──
@@ -276,6 +311,11 @@ async def _stdio_main() -> None:
     collector = cast("WorkerServiceHandler", worker_handler)._state.collector
     if collector is not None:
         collector.close()
+    log_task = cast("WorkerServiceHandler", worker_handler)._state.log_task
+    if log_task is not None:
+        log_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await log_task
 
 
 if __name__ == "__main__":
