@@ -53,6 +53,11 @@ def _make_stub_mock() -> MagicMock:
 def pool() -> MagicMock:
     p: MagicMock = MagicMock()
     p._store_stub = _make_stub_mock()
+
+    async def _passthrough(coro):
+        return await coro
+
+    p.call = _passthrough
     return p
 
 
