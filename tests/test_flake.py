@@ -2,17 +2,19 @@
 
 import subprocess
 
-import pytest
-
-_skip_network = pytest.mark.skip(reason="lock file tests require network access — pre-existing flake")
-
 import nanopynix
 import nanopynix_flake
 
 
-def _init_git_flake(tmp_path):
+def _init_git_flake(tmp_path, outputs_body="val = 1;"):
     """Create a temp flake with a git repo so Nix can evaluate it."""
-    (tmp_path / "flake.nix").write_text("")
+    (tmp_path / "flake.nix").write_text(f"""
+    {{
+        outputs = {{ ... }}: {{
+            {outputs_body}
+        }};
+    }}
+    """)
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
@@ -36,32 +38,32 @@ class TestParseFlakeRef:
 
 
 class TestLockFlake:
-    @_skip_network
-    def test_lock_flake_nixpkgs(self, eval_state):
-        ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
+    def test_lock_flake_nixpkgs(self, eval_state, tmp_path):
+        _init_git_flake(tmp_path)
+        ref = nanopynix.parse_flake_ref(str(tmp_path))
         locked = nanopynix.lock_flake(eval_state, ref)
         desc = locked.description()
         assert isinstance(desc, str)
 
-    @_skip_network
-    def test_lock_flake_inputs(self, eval_state):
-        ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
+    def test_lock_flake_inputs(self, eval_state, tmp_path):
+        _init_git_flake(tmp_path)
+        ref = nanopynix.parse_flake_ref(str(tmp_path))
         locked = nanopynix.lock_flake(eval_state, ref)
         inputs = locked.inputs()
         assert isinstance(inputs, dict)
 
-    @_skip_network
-    def test_lock_flake_repr(self, eval_state):
-        ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
+    def test_lock_flake_repr(self, eval_state, tmp_path):
+        _init_git_flake(tmp_path)
+        ref = nanopynix.parse_flake_ref(str(tmp_path))
         locked = nanopynix.lock_flake(eval_state, ref)
         r = repr(locked)
         assert r.startswith("LockedFlake(")
 
 
 class TestGetFlake:
-    @_skip_network
-    def test_get_flake(self, eval_state):
-        ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
+    def test_get_flake(self, eval_state, tmp_path):
+        _init_git_flake(tmp_path)
+        ref = nanopynix.parse_flake_ref(str(tmp_path))
         resolved = nanopynix.get_flake(eval_state, ref)
         assert isinstance(resolved, nanopynix_flake.FlakeRef)
 
@@ -113,58 +115,40 @@ class TestEvalFlake:
         count = outputs.attr_get("count")
         assert count.as_int() == 7
 
-    @_skip_network
     def test_eval_flake_writes_lock_file(self, eval_state, tmp_path):
         """eval_flake with write_lock_file=True creates flake.lock."""
+        dep_dir = tmp_path / "dep"
+        dep_dir.mkdir()
+        _init_git_flake(dep_dir)
+
         (tmp_path / "flake.nix").write_text("""
         {
-            inputs.nanopynix.url = "github:lillecarl/nanopynix/develop";
-            outputs = { self, nanopynix, ... }: {
+            inputs.dep.url = "DIR";
+            outputs = { self, dep, ... }: {
                 val = 1;
             };
         }
-        """)
+        """.replace("DIR", str(dep_dir)))
         subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
         subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
         subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
         assert not (tmp_path / "flake.lock").exists()
         nanopynix_flake.eval_flake(eval_state, str(tmp_path), write_lock_file=True)
         assert (tmp_path / "flake.lock").exists()
 
-    @_skip_network
     def test_eval_flake_no_write_lock_file(self, eval_state, tmp_path):
         """eval_flake with write_lock_file=False does NOT create flake.lock."""
-        (tmp_path / "flake.nix").write_text("""
-        {
-            inputs.nanopynix.url = "github:lillecarl/nanopynix/develop";
-            outputs = { self, nanopynix, ... }: {
-                val = 1;
-            };
-        }
-        """)
-        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+        _init_git_flake(tmp_path)
         assert not (tmp_path / "flake.lock").exists()
         nanopynix_flake.eval_flake(eval_state, str(tmp_path), write_lock_file=False)
         assert not (tmp_path / "flake.lock").exists()
 
 
 class TestWriteLockFile:
-    @_skip_network
     def test_write_lock_file(self, eval_state, tmp_path):
         """lock_flake with write_lock_file=False, then write_lock_file() persists."""
-        (tmp_path / "flake.nix").write_text("""
-        {
-            inputs.nanopynix.url = "github:lillecarl/nanopynix/develop";
-            outputs = { self, nanopynix, ... }: {
-                val = 1;
-            };
-        }
-        """)
-        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+        _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))
         locked = nanopynix.lock_flake(eval_state, ref, write_lock_file=False)
         assert not (tmp_path / "flake.lock").exists()

@@ -7,8 +7,6 @@ import pytest
 
 from nanopynix import LogEvent, Nix, StoreError, WorkerBusyError, WorkerDiedError
 
-pytestmark = pytest.mark.asyncio
-
 
 async def test_single_worker_basics():
     """Basic round-trip with a single worker."""

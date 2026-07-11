@@ -10,6 +10,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
 from nanopynix import (
     EvalSessionClosedError,
@@ -31,10 +32,6 @@ from nanopynix._session import (
     _ResolvedValue,
 )
 from nanopynix.models import LogEvent
-from nanopynix_proto.nix.common import LogEvent as LogEventProto
-
-pytestmark = pytest.mark.asyncio
-
 
 # ════════════════════════════════════════════════════════════════════
 # Helpers
@@ -136,6 +133,11 @@ def _mock_reserved_worker():
     rw._eval_stub = _make_eval_stub()
     rw._store_stub = MagicMock()
     rw.release = AsyncMock()
+
+    async def _call(coro):
+        return await coro
+
+    rw.call = _call
     return rw
 
 
@@ -264,9 +266,7 @@ class TestEvalSessionLifecycle:
 
 class TestValueProxyLifecycle:
     def _worker(self):
-        w = MagicMock()
-        w._eval_stub = _make_eval_stub()
-        return w
+        return _mock_reserved_worker()
 
     def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
         return _EvalOwner(_EvalOwnerToken(), active)
@@ -602,9 +602,7 @@ class TestValueProxyLifecycle:
 
 class TestValueListBounds:
     def _worker(self):
-        w = MagicMock()
-        w._eval_stub = _make_eval_stub()
-        return w
+        return _mock_reserved_worker()
 
     def _list(self, worker, length: int = 2) -> ValueList:
         ctx = _EvalProxyContext(worker, _EvalOwner(_EvalOwnerToken()), None)
@@ -640,9 +638,7 @@ class TestLazyChildProxy:
     """Verify child proxies resolve via attr/list_get, not parent force."""
 
     def _worker(self):
-        w = MagicMock()
-        w._eval_stub = _make_eval_stub()
-        return w
+        return _mock_reserved_worker()
 
     def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
         return _EvalOwner(_EvalOwnerToken(), active)
@@ -767,6 +763,39 @@ class TestReservedWorker:
         manager._store_stub = MagicMock()
         rw = ReservedWorker(manager)
         assert rw._store_stub is manager._store_stub
+
+    async def test_call_serializes_reserved_worker_rpcs(self):
+        """Concurrent calls through one reserved worker run one at a time."""
+        manager = MagicMock(spec=_WorkerManager)
+        rw = ReservedWorker(manager)
+        first_started = asyncio.Event()
+        first_can_finish = asyncio.Event()
+        second_started = asyncio.Event()
+        order: list[str] = []
+
+        async def first():
+            first_started.set()
+            order.append("first-start")
+            await first_can_finish.wait()
+            order.append("first-end")
+            return "first"
+
+        async def second():
+            second_started.set()
+            order.append("second")
+            return "second"
+
+        first_task = asyncio.create_task(rw.call(first()))
+        await first_started.wait()
+        second_task = asyncio.create_task(rw.call(second()))
+        await asyncio.sleep(0)
+
+        assert not second_started.is_set()
+
+        first_can_finish.set()
+        assert await first_task == "first"
+        assert await second_task == "second"
+        assert order == ["first-start", "first-end", "second"]
 
 
 # ════════════════════════════════════════════════════════════════════

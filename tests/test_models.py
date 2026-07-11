@@ -1,5 +1,7 @@
 """Tests for pydantic models — no Nix/C++ dependency."""
 
+from nanopynix_proto.nix.common import AttrsMap, AttrsValue
+
 from nanopynix.models import (
     BuildResult,
     Derivation,
@@ -13,7 +15,6 @@ from nanopynix.models import (
     ResultType,
     StorePath,
 )
-from nanopynix_proto.nix.common import AttrsMap, AttrsValue
 
 # ── StorePath ────────────────────────────────────────────────────────
 
@@ -77,9 +78,13 @@ class TestPathInfo:
             ca="fixed:r:sha256:...",
             ultimate=True,
         )
-        assert pi.path.name == "p"
+        path = pi.path
+        assert path is not None
+        assert path.name == "p"
         assert pi.deriver is not None
-        assert pi.deriver.name == "p.drv"
+        deriver = pi.deriver
+        assert deriver is not None
+        assert deriver.name == "p.drv"
         assert len(pi.references) == 1
 
     def test_minimal(self):

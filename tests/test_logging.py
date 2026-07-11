@@ -4,15 +4,12 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Protocol, cast
 
-import pytest
-
 import nanopynix_util
 from nanopynix import LogCollector
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-pytestmark = pytest.mark.asyncio
 
 
 class _LogTestModule(Protocol):
@@ -162,7 +159,8 @@ async def test_request_id_in_events():
         await c.aclose()
 
 
-@pytest.mark.asyncio
+
+
 async def test_sync_drain():
     """drain() returns pending events without blocking — used by worker subprocess."""
     c = LogCollector()
@@ -180,7 +178,8 @@ async def test_sync_drain():
     c.close()
 
 
-@pytest.mark.asyncio
+
+
 async def test_drain_empty():
     """drain() returns empty list when no events pending."""
     c = LogCollector()

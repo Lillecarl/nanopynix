@@ -25,12 +25,21 @@ from nanopynix.exceptions import from_response
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from nanopynix_proto.nix.eval import EvalServiceStub
+    from nanopynix_proto.nix.store import StoreServiceStub
+    from nanopynix_proto.nix.worker import WorkerServiceStub
+
     from nanopynix.models import PrimOpSpec
 
 logger = logging.getLogger(__name__)
 
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
+# Current worker logging is a long-lived server-streaming RPC on the same H2
+# channel as ordinary calls. Keep one handler slot for that stream and one for
+# the active manager->worker call. EvalSession still serializes Nix eval RPCs at
+# the ReservedWorker boundary.
+_WORKER_MAX_CONCURRENCY = 2
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -121,7 +130,9 @@ class ReservedWorker:
     """Exclusive lease on the session worker, obtained via ``_WorkerManager.reserve()``.
 
     Provides access to ``_eval_stub`` and ``_store_stub`` for direct gRPC
-    calls.  Releases the worker back on ``release()``.
+    calls.  Calls made through ``call()`` are serialized because the worker's
+    Nix state is single-threaded even when the underlying transport can
+    multiplex gRPC streams.
     """
 
     __slots__ = ("_manager", "_released", "_rpc_lock")
@@ -129,6 +140,7 @@ class ReservedWorker:
     def __init__(self, manager: _WorkerManager) -> None:
         self._manager = manager
         self._released = False
+        self._rpc_lock = asyncio.Lock()
 
     @property
     def _eval_stub(self):
@@ -137,6 +149,14 @@ class ReservedWorker:
     @property
     def _store_stub(self):
         return self._manager._store_stub
+
+    async def call(self, coro: Any) -> Any:
+        """Await one reserved-worker RPC with gRPC error conversion."""
+        if self._released:
+            coro.close()
+            raise WorkerDiedError("reserved worker has been released")
+        async with self._rpc_lock:
+            return await _grpc_call(coro)
 
     async def release(self) -> None:
         """Return the worker to the manager.  Idempotent — safe to call twice."""
@@ -180,9 +200,9 @@ class _WorkerManager:
         # OOM score adjustment is not yet supported with multiprocessing transport
         # (no direct access to child PID).  Params kept for API compat.
         self._channel = None
-        self._worker_stub = None
-        self._store_stub = None
-        self._eval_stub = None
+        self._worker_service_stub: WorkerServiceStub | None = None
+        self._store_service_stub: StoreServiceStub | None = None
+        self._eval_service_stub: EvalServiceStub | None = None
         self._available: asyncio.Lock = asyncio.Lock()
         self._log_bus: _LogBus = _LogBus()
         self._log_task: asyncio.Task | None = None
@@ -195,18 +215,19 @@ class _WorkerManager:
         from grpclib_transports.multiprocessing import multiprocessing_worker
         from nanopynix_proto.nix.eval import EvalServiceStub
         from nanopynix_proto.nix.store import StoreServiceStub
-        from nanopynix_proto.nix.worker import InitRequest, SubscribeLogsRequest, WorkerServiceStub
+        from nanopynix_proto.nix.worker import InitRequest, WorkerServiceStub
 
         self._stack = contextlib.AsyncExitStack()
         self._channel = await self._stack.enter_async_context(
             multiprocessing_worker(
                 worker_service_factory,
                 preload=["nanopynix._worker"],
+                max_concurrency=_WORKER_MAX_CONCURRENCY,
             )
         )
-        self._worker_stub = WorkerServiceStub(self._channel)
-        self._store_stub = StoreServiceStub(self._channel)
-        self._eval_stub = EvalServiceStub(self._channel)
+        self._worker_service_stub = WorkerServiceStub(self._channel)
+        self._store_service_stub = StoreServiceStub(self._channel)
+        self._eval_service_stub = EvalServiceStub(self._channel)
 
         # Convert PrimOpSpec to proto
         from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
@@ -250,7 +271,7 @@ class _WorkerManager:
                 except (asyncio.CancelledError, TimeoutError):
                     pass
 
-            if self._worker_stub is not None:
+            if self._worker_service_stub is not None:
                 from nanopynix_proto.nix.worker import ShutdownRequest
 
                 try:
@@ -268,7 +289,7 @@ class _WorkerManager:
 
     async def _log_loop(self) -> None:
         """Background task: stream log events from worker and deliver to _LogBus."""
-        if self._worker_stub is None:
+        if self._worker_service_stub is None:
             return
         from nanopynix_proto.nix.worker import SubscribeLogsRequest
 
@@ -349,3 +370,24 @@ class _WorkerManager:
         Returns a ``_Subscription`` — call ``.unsubscribe()`` to stop.
         """
         return self._log_bus.subscribe(callback)
+
+    @property
+    def _worker_stub(self) -> WorkerServiceStub:
+        stub = self._worker_service_stub
+        if stub is None:
+            raise WorkerDiedError("Worker not started")
+        return stub
+
+    @property
+    def _store_stub(self) -> StoreServiceStub:
+        stub = self._store_service_stub
+        if stub is None:
+            raise WorkerDiedError("Worker not started")
+        return stub
+
+    @property
+    def _eval_stub(self) -> EvalServiceStub:
+        stub = self._eval_service_stub
+        if stub is None:
+            raise WorkerDiedError("Worker not started")
+        return stub

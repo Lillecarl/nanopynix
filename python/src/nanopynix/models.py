@@ -231,10 +231,14 @@ _STR_TO_NIX: dict[str, NixType] = {
 
 
 def _nix_type_from_string(cls: type, value: str) -> NixType:
-    return _STR_TO_NIX.get(value, cls.UNSPECIFIED)
+    return _STR_TO_NIX.get(value, NixType.UNSPECIFIED)
 
 
 NixType.from_string = classmethod(_nix_type_from_string)  # type: ignore[attr-defined]
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+
+type CallArgWire = CallArg
+type DeepValueWire = DeepValue
+type RemoteValueRef = RemoteCallArg

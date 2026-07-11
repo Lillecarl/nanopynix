@@ -4,13 +4,6 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import nanopynix_expr
-import nanopynix_flake
-from nanopynix._extract import (
-    flake_ref_attrs as _flake_ref_attrs,
-    locked_flake as _locked_flake,
-)
-from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix_proto.nix import common as common_pb
 from nanopynix_proto.nix.eval import (
     AttrNamesRequest,
@@ -44,6 +37,16 @@ from nanopynix_proto.nix.eval import (
     WriteLockFileRequest,
     WriteLockFileResponse,
 )
+
+import nanopynix_expr
+import nanopynix_flake
+from nanopynix._extract import (
+    flake_ref_attrs as _flake_ref_attrs,
+)
+from nanopynix._extract import (
+    locked_flake as _locked_flake,
+)
+from nanopynix._grpc_util import wrap_service_handlers
 
 # ── NixType string → enum mapping ────────────────────────────────────
 
@@ -228,6 +231,8 @@ class EvalServiceHandler(EvalServiceBase):
     # ── flake methods ─────────────────────────────────────────────
 
     async def lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
+        if self._state.collector is not None:
+            self._state.collector.callback(0, "msg", 3, f"lock_flake: parsing ref '{message.ref}'")
         ref = nanopynix_flake.parse_flake_ref(message.ref)
 
         if message.update_all is not None:
@@ -237,12 +242,16 @@ class EvalServiceHandler(EvalServiceBase):
         else:
             update_inputs = False
 
+        if self._state.collector is not None:
+            self._state.collector.callback(0, "msg", 3, f"lock_flake: calling C++ lock_flake write_lock_file={message.write_lock_file}")
         lf = nanopynix_flake.lock_flake(
             self._get_es(),
             ref,
             update_inputs=update_inputs,
             write_lock_file=message.write_lock_file,
         )
+        if self._state.collector is not None:
+            self._state.collector.callback(0, "msg", 3, "lock_flake: C++ lock_flake returned")
         handle = self._state._next_lf_handle
         self._state._next_lf_handle += 1
         self._state.locked_flakes[handle] = lf

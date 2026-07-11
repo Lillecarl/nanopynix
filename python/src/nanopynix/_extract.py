@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import nanopynix_flake
 from nanopynix_proto.nix import common as common_pb
+
+import nanopynix_flake
 
 
 def _attrs_value(v: Any) -> common_pb.AttrsValue:
@@ -93,5 +94,6 @@ def locked_flake(lf, /) -> common_pb.LockedFlake:
     lf_inputs = lf.inputs()
     for k in lf_inputs:
         inputs[str(k)] = locked_input(lf_inputs[k])
-    description = lf.description() if callable(lf.description) else str(lf.description)
+    description_raw = lf.description() if callable(lf.description) else lf.description
+    description = str(description_raw)
     return common_pb.LockedFlake(description=description, inputs=inputs)

@@ -18,9 +18,8 @@ from __future__ import annotations
 
 import re
 
-from strip_ansi import strip_ansi
-
 from nanopynix_proto.nix.common import NixType
+from strip_ansi import strip_ansi
 
 # ════════════════════════════════════════════════════════════════════
 # Exception hierarchy
