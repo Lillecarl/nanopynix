@@ -13,11 +13,8 @@ import pytest
 from nanopynix.store import StoreHandle as Store
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
 
-    from nanopynix._pool import _WorkerManager
-
-pytestmark = pytest.mark.asyncio
+    pass
 
 
 def _make_stub_mock() -> MagicMock:

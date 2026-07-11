@@ -1,10 +1,6 @@
 """Integration tests for the L2 Store facade via Session."""
 
-import pytest
-
 from nanopynix import MissingInfo, PathInfo, Session, StorePath
-
-pytestmark = pytest.mark.asyncio
 
 
 async def test_open_close():

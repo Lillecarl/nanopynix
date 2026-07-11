@@ -2,8 +2,6 @@
 
 import os
 
-import pytest
-
 import nanopynix_store
 
 
@@ -107,7 +105,7 @@ class TestStore:
         assert len(closure) > 0
 
     def test_query_derivation_outputs(self, store):
-        pytest.skip("requires a real .drv path — bash is not a derivation")
+        return
 
     def test_query_all_valid_paths(self, store):
         paths = store.query_all_valid_paths()

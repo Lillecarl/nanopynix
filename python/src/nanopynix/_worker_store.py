@@ -4,14 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import nanopynix_fetchers
-import nanopynix_store
-from nanopynix._extract import (
-    input_attrs as _input_attrs,
-    store_path as _sp_to_pb,
-    store_path_str as _sp_str_to_pb,
-)
-from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix_proto.nix import common as common_pb
 from nanopynix_proto.nix.store import (
     AddTempRootRequest,
@@ -41,6 +33,19 @@ from nanopynix_proto.nix.store import (
     ReadDerivationRequest,
     StoreServiceBase,
 )
+
+import nanopynix_fetchers
+import nanopynix_store
+from nanopynix._extract import (
+    input_attrs as _input_attrs,
+)
+from nanopynix._extract import (
+    store_path as _sp_to_pb,
+)
+from nanopynix._extract import (
+    store_path_str as _sp_str_to_pb,
+)
+from nanopynix._grpc_util import wrap_service_handlers
 
 # ── helpers ──────────────────────────────────────────────────────────
 

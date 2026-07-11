@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import nanopynix_store  # BuildMode enum
-from nanopynix._pool import _RPC_TIMEOUT, WorkerBusyError, _grpc_call
+from nanopynix_proto.nix.common import AttrsValue
 from nanopynix_proto.nix.store import (
     AddTempRootRequest,
     BuildDerivationRequest,
@@ -34,23 +33,26 @@ from nanopynix_proto.nix.store import (
     ReadDerivationRequest,
 )
 
-from nanopynix_proto.nix.common import AttrsValue, StorePath
+import nanopynix_store  # BuildMode enum
+from nanopynix._pool import _RPC_TIMEOUT, WorkerBusyError, _grpc_call
+from nanopynix.models import StorePath
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from nanopynix._pool import _WorkerManager
     from nanopynix_proto.nix.common import BuildResult, Derivation, Input, MissingInfo, PathInfo
+
+    from nanopynix._pool import _WorkerManager
 
 
 def _to_str(path: StorePath | str) -> str:
     """Coerce a StorePath or str to a store-path string."""
-    return path.to_string if hasattr(path, "to_string") else path
+    return path if isinstance(path, str) else path.to_string
 
 
 def _to_strs(paths: Sequence[StorePath | str]) -> list[str]:
     """Coerce a list of StorePath|str to a list of store-path strings."""
-    return [p.to_string if hasattr(p, "to_string") else p for p in paths]
+    return [_to_str(p) for p in paths]
 
 
 def _pyval_to_attrs_value(v: str | int | bool) -> AttrsValue:

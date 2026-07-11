@@ -47,8 +47,6 @@ what to inspect next, then query `/tmp/pytest.log` for the full failure context.
   async code. For timestamps, use `time.monotonic()`.
 - Keep a strong reference to background tasks created with
   `asyncio.create_task()`, for example in an instance `set` or `list`.
-- Use `pathlib.Path` for filesystem paths that are not Nix daemon protocol
-  strings. Convert to `str` as late as possible when crossing an API boundary.
 - Do not hide unexpected failures with `except Exception: pass`. Log unexpected
   exceptions. Use `contextlib.suppress(...)` only for expected ignored
   exceptions, with a comment explaining why they are safe to ignore.

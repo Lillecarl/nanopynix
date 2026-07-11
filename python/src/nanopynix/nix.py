@@ -20,11 +20,12 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from nanopynix_proto.nix.common import LogEvent as LogEventProto
+
 from nanopynix._pool import _WorkerManager
 from nanopynix._session import EvalSession
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.store import StoreHandle
-from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping, Sequence
@@ -154,6 +155,9 @@ class Session:
         async for raw in self._manager.log_stream():
             if raw is None:
                 continue  # worker close sentinel
+            if not isinstance(raw, LogEventProto):
+                logger.warning("nanopynix: ignored unexpected log event %r", raw)
+                continue
             yield _raw_log_event(raw)
 
     def capture_logs(self) -> LogCapture:

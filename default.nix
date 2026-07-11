@@ -27,7 +27,7 @@ let
   python = pkgs.python3.withPackages (pp: [
     nanopynix
     pp.pytest
-    pp.pytest-asyncio
+    pp.anyio
   ]);
 in
 {

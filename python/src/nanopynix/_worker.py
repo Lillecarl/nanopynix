@@ -12,25 +12,14 @@ Serves three gRPC services over a single H2 transport:
 from __future__ import annotations
 
 import asyncio
-import functools
 import importlib
 import json
 import os
 import sys
 import traceback
 from collections.abc import AsyncIterator, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
-import nanopynix_expr
-import nanopynix_store
-import nanopynix_util
-from grpclib.const import Status
-from grpclib.exceptions import GRPCError
-from nanopynix._grpc_util import wrap_service_handlers
-from nanopynix._worker_eval import EvalServiceHandler
-from nanopynix._worker_store import StoreServiceHandler
-from nanopynix.logging import LogCollector
-from nanopynix.models import PrimOpSpec
 from nanopynix_proto.nix.common import LogEvent
 from nanopynix_proto.nix.worker import (
     InitRequest,
@@ -41,8 +30,26 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceBase,
 )
 
+import nanopynix_expr
+import nanopynix_store
+import nanopynix_util
+from nanopynix._grpc_util import wrap_service_handlers
+from nanopynix._worker_eval import EvalServiceHandler
+from nanopynix._worker_store import StoreServiceHandler
+from nanopynix.logging import LogCollector
+from nanopynix.models import PrimOpSpec
+
+if TYPE_CHECKING:
+    from grpclib._typing import IServable
+
 # Re-export for the multiprocessing runner in _pool.py
 __all__ = ["run_worker", "worker_service_factory", "main"]
+
+# Current worker logging is a long-lived server-streaming RPC on the same H2
+# channel as ordinary calls. Keep one handler slot for that stream and one for
+# the active manager->worker call. EvalSession still serializes Nix eval RPCs at
+# the ReservedWorker boundary.
+_WORKER_MAX_CONCURRENCY = 2
 
 
 # ── Primop registration ──────────────────────────────────────────────
@@ -117,6 +124,7 @@ class WorkerServiceHandler(WorkerServiceBase):
                 nanopynix_util.enable_experimental_feature(f)
 
             nanopynix_util.init_libstore(load_config=False)
+            nanopynix_util.set_verbosity(5)  # lvlChatty — emit fetch/log events
             nanopynix_expr.init_libexpr()
 
             # Convert proto PrimOpSpec list to the raw-dict format
@@ -148,7 +156,7 @@ class WorkerServiceHandler(WorkerServiceBase):
 
             return InitResponse(status="ok")
 
-        except Exception as exc:
+        except Exception:
             traceback.print_exc(file=sys.stderr)
             # Re-raise so the gRPC framework propagates the error.
             raise
@@ -188,7 +196,7 @@ class WorkerServiceHandler(WorkerServiceBase):
 # ── Factory ──────────────────────────────────────────────────────────
 
 
-def worker_service_factory() -> list[object]:
+def worker_service_factory() -> list[IServable]:
     """Create service handlers with a shared WorkerState.
 
     Must be called *inside* the worker process (before Nix init so that
@@ -200,11 +208,14 @@ def worker_service_factory() -> list[object]:
     state = WorkerState()
     state.collector = collector
 
-    return [
-        WorkerServiceHandler(state),
-        StoreServiceHandler(state),
-        EvalServiceHandler(state),
-    ]
+    return cast(
+        "list[IServable]",
+        [
+            WorkerServiceHandler(state),
+            StoreServiceHandler(state),
+            EvalServiceHandler(state),
+        ],
+    )
 
 
 # ── Async runner (for grpclib-transports multiprocessing mode) ───────
@@ -213,7 +224,7 @@ def worker_service_factory() -> list[object]:
 async def run_worker(
     endpoint: Any,
     tuning: Any = None,
-    max_concurrency: int | None = None,
+    max_concurrency: int | None = _WORKER_MAX_CONCURRENCY,
 ) -> None:
     """Serve gRPC over a multiprocessing pipe endpoint.
 
@@ -233,7 +244,8 @@ async def run_worker(
     )
 
     # Cleanup after transport closes
-    collector = handlers[0]._state.collector
+    worker_handler = handlers[0]
+    collector = cast("WorkerServiceHandler", worker_handler)._state.collector
     if collector is not None:
         collector.close()
 
@@ -257,10 +269,11 @@ async def _stdio_main() -> None:
     from grpclib_transports.stdio import serve_stdio
 
     handlers = worker_service_factory()
-    await serve_stdio(handlers)
+    await serve_stdio(handlers, max_concurrency=_WORKER_MAX_CONCURRENCY)
 
     # Cleanup after transport closes
-    collector = handlers[0]._state.collector
+    worker_handler = handlers[0]
+    collector = cast("WorkerServiceHandler", worker_handler)._state.collector
     if collector is not None:
         collector.close()
 
