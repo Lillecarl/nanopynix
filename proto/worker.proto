@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package nanopynix_proto.worker;
+
+import "common.proto";
+
+service WorkerService {
+  rpc Init(InitRequest) returns (InitResponse);
+  rpc SubscribeLogs(SubscribeLogsRequest) returns (stream nanopynix_proto.common.LogEvent);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+message InitRequest {
+  string store_uri = 1;
+  string eval_store_uri = 2;
+  optional string nix_conf = 3;
+  map<string, string> settings = 4;
+  repeated string experimental_features = 5;
+  repeated nanopynix_proto.common.PrimOpSpec primops = 6;
+}
+
+message InitResponse {
+  string status = 1;
+}
+
+message SubscribeLogsRequest {
+  int64 request_id = 1;
+}
+
+message ShutdownRequest {}
+message ShutdownResponse {}

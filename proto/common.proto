@@ -1,0 +1,212 @@
+syntax = "proto3";
+
+package nanopynix_proto.common;
+
+// ── Enums ──────────────────────────────────────────
+
+enum NixType {
+  NIX_TYPE_UNSPECIFIED = 0;
+  NIX_TYPE_THUNK = 1;
+  NIX_TYPE_INT = 2;
+  NIX_TYPE_FLOAT = 3;
+  NIX_TYPE_BOOL = 4;
+  NIX_TYPE_STRING = 5;
+  NIX_TYPE_PATH = 6;
+  NIX_TYPE_NULL = 7;
+  NIX_TYPE_ATTRS = 8;
+  NIX_TYPE_LIST = 9;
+  NIX_TYPE_FUNCTION = 10;
+  NIX_TYPE_EXTERNAL = 11;
+  NIX_TYPE_UNKNOWN = 12;
+}
+
+enum ResultType {
+  RESULT_TYPE_UNSPECIFIED = 0;
+  RESULT_TYPE_FILE_LINKED = 100;
+  RESULT_TYPE_BUILD_LOG_LINE = 101;
+  RESULT_TYPE_UNTRUSTED_PATH = 102;
+  RESULT_TYPE_CORRUPTED_PATH = 103;
+  RESULT_TYPE_SET_PHASE = 104;
+  RESULT_TYPE_PROGRESS = 105;
+  RESULT_TYPE_SET_EXPECTED = 106;
+  RESULT_TYPE_POST_BUILD_LOG_LINE = 107;
+  RESULT_TYPE_FETCH_STATUS = 108;
+}
+
+// ── Core messages ──────────────────────────────────
+
+message StorePath {
+  string hash_part = 1;
+  string name = 2;
+  string to_string = 3;
+}
+
+message ValueHandle {
+  int64 handle = 1;
+  NixType type = 2;
+}
+
+message StorePathList {
+  repeated StorePath paths = 1;
+}
+
+message PathInfo {
+  StorePath path = 1;
+  string nar_hash = 2;
+  int64 nar_size = 3;
+  optional int64 registration_time = 4;
+  optional StorePath deriver = 5;
+  repeated StorePath references = 6;
+  optional string ca = 7;
+  bool ultimate = 8;
+}
+
+message BuildResult {
+  string drv_path = 1;
+  bool success = 2;
+  string status = 3;
+  string error_msg = 4;
+}
+
+message BuildResultList {
+  repeated BuildResult results = 1;
+}
+
+message MissingInfo {
+  repeated StorePath will_build = 1;
+  repeated StorePath will_substitute = 2;
+  repeated StorePath unknown = 3;
+  int64 download_size = 4;
+  int64 nar_size = 5;
+}
+
+// ── Attrs value (string | int | bool) ──────────────
+
+message AttrsValue {
+  oneof kind {
+    string string_value = 1;
+    int64 int_value = 2;
+    bool bool_value = 3;
+  }
+}
+
+message AttrsMap {
+  map<string, AttrsValue> entries = 1;
+}
+
+message Input {
+  map<string, AttrsValue> attrs = 1;
+}
+
+message FlakeRef {
+  map<string, AttrsValue> attrs = 1;
+}
+
+message LockedInput {
+  AttrsMap attrs = 1;
+  bool is_flake = 2;
+  repeated string follows = 3;
+}
+
+message LockedFlake {
+  int64 handle = 1;
+  string description = 2;
+  map<string, LockedInput> inputs = 3;
+}
+
+// ── Scalar value (JSON scalar: str|int|float|bool|None) ──
+
+message NullValue {}
+
+message ScalarValue {
+  oneof kind {
+    string string_value = 1;
+    int64 int_value = 2;
+    double float_value = 3;
+    bool bool_value = 4;
+    NullValue null_value = 5;
+  }
+}
+
+// ── Recursive wire types ───────────────────────────
+
+message DeepValue {
+  oneof kind {
+    ScalarValue scalar = 1;
+    DeepList list = 2;
+    DeepAttrs attrs = 3;
+    ValueHandle remote_value = 4;
+  }
+}
+
+message DeepList {
+  repeated DeepValue items = 1;
+}
+
+message DeepAttrs {
+  map<string, DeepValue> entries = 1;
+}
+
+message ForceValue {
+  oneof kind {
+    ScalarValue scalar = 1;
+    ValueHandle remote_value = 2;
+  }
+}
+
+message CallArg {
+  oneof kind {
+    ScalarValue scalar = 1;
+    CallArgList list = 2;
+    CallArgAttrs attrs = 3;
+    RemoteCallArg remote_value = 4;
+  }
+}
+
+message CallArgList {
+  repeated CallArg items = 1;
+}
+
+message CallArgAttrs {
+  map<string, CallArg> entries = 1;
+}
+
+message RemoteCallArg {
+  int64 handle = 1;
+}
+
+// ── PrimOp spec ────────────────────────────────────
+
+message PrimOpSpec {
+  string name = 1;
+  int32 arity = 2;
+  repeated string args = 3;
+  string doc = 4;
+  string import_path = 5;
+}
+
+// ── Log event ──────────────────────────────────────
+
+message LogEvent {
+  int64 request_id = 1;
+  string action = 2;
+  string args_json = 3;
+  optional ResultType result_type = 4;
+}
+
+// ── Derivation ─────────────────────────────────────
+
+message DerivationOutputs {
+  repeated string outputs = 1;
+  map<string, string> dynamic_outputs = 2;
+}
+
+message Derivation {
+  string name = 1;
+  string system = 2;
+  string builder = 3;
+  repeated string args = 4;
+  map<string, string> env = 5;
+  map<string, DerivationOutputs> input_drvs = 6;
+  repeated string input_srcs = 7;
+}

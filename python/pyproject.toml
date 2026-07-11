@@ -12,6 +12,8 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "nanopynix-bindings",
+    "nanopynix-proto",
+    "grpclib-transports",
     "janus",
     "pydantic",
     "pyyaml",
