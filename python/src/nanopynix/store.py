@@ -34,11 +34,13 @@ from nanopynix_proto.nix.store import (
     ReadDerivationRequest,
 )
 
+from nanopynix_proto.nix.common import AttrsValue, StorePath
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from nanopynix._pool import _WorkerManager
-    from nanopynix_proto.nix.common import AttrsValue, BuildResult, Derivation, Input, MissingInfo, PathInfo, StorePath
+    from nanopynix_proto.nix.common import BuildResult, Derivation, Input, MissingInfo, PathInfo
 
 
 def _to_str(path: StorePath | str) -> str:
@@ -53,8 +55,6 @@ def _to_strs(paths: Sequence[StorePath | str]) -> list[str]:
 
 def _pyval_to_attrs_value(v: str | int | bool) -> AttrsValue:
     """Convert a Python JSON-scalar value to a proto AttrsValue."""
-    from nanopynix_proto.nix.common import AttrsValue
-
     if isinstance(v, bool):
         return AttrsValue(bool_value=v)
     if isinstance(v, int):

@@ -31,7 +31,7 @@ from nanopynix._session import (
     _ResolvedValue,
 )
 from nanopynix.models import LogEvent
-from nanopynix_proto.common import LogEvent as LogEventProto
+from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
 pytestmark = pytest.mark.asyncio
 
@@ -698,18 +698,14 @@ class TestLazyChildProxy:
         """force_deep resolves child then deep-forces it."""
         w = self._worker()
         w._eval_stub.attr.return_value = _mock_value_handle(5, "attrs")
-        # DeepValue mock: attrs with a:1, b:2
-        deep_val = MagicMock()
-        deep_val.scalar = None
-        deep_val.remote_value = None
-        deep_val.list = None
-        deep_attrs = MagicMock()
-        deep_attrs.entries = {"a": MagicMock(scalar=MagicMock(int_value=1, string_value=None, float_value=None, bool_value=None, null_value=None)),
-                              "b": MagicMock(scalar=MagicMock(int_value=2, string_value=None, float_value=None, bool_value=None, null_value=None))}
-        deep_val.attrs = deep_attrs
-        # Set scalar on the nested DeepValue entries
-        deep_val.attrs.entries["a"].scalar = MagicMock(int_value=1)
-        deep_val.attrs.entries["b"].scalar = MagicMock(int_value=2)
+        from nanopynix_proto.nix.common import DeepAttrs, DeepValue, ScalarValue
+
+        deep_val = DeepValue(
+            attrs=DeepAttrs(entries={
+                "a": DeepValue(scalar=ScalarValue(int_value=1)),
+                "b": DeepValue(scalar=ScalarValue(int_value=2)),
+            })
+        )
         w._eval_stub.force_deep.return_value = deep_val
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name")
 
