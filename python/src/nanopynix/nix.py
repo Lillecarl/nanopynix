@@ -16,7 +16,6 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import json as _json
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -35,15 +34,7 @@ logger = logging.getLogger(__name__)
 
 def _raw_log_event(raw: LogEventProto) -> LogEvent:
     """Convert a proto LogEvent to a pydantic LogEvent model."""
-    args = _json.loads(raw.args_json) if raw.args_json else []
-    data: dict[str, Any] = {
-        "request_id": raw.request_id,
-        "action": raw.action,
-        "args": args,
-    }
-    if raw.action == "result":
-        data["result_type"] = raw.result_type
-    return LogEvent.model_validate(data)
+    return LogEvent.from_proto(raw)
 
 
 class LogCapture:
@@ -68,6 +59,17 @@ class LogCapture:
         if self._sub is not None:
             self._sub.unsubscribe()
             self._sub = None
+
+
+def _to_primop_specs(specs: Sequence[PrimOpSpec | Mapping[str, Any]] | None) -> list[PrimOpSpec]:
+    """Convert a sequence of PrimOpSpecs or dicts to a list of PrimOpSpecs."""
+    result: list[PrimOpSpec] = []
+    for spec in specs or []:
+        if isinstance(spec, PrimOpSpec):
+            result.append(spec)
+        else:
+            result.append(PrimOpSpec(**spec))
+    return result
 
 
 class Session:
@@ -105,7 +107,7 @@ class Session:
             nix_conf=nix_conf,
             settings=config if config is not None else settings,
             experimental_features=experimental_features,
-            primops=[PrimOpSpec.model_validate(spec) for spec in primops or []],
+            primops=_to_primop_specs(primops),
             worker_oom_score_adj=worker_oom_score_adj,
             reserved_worker_oom_score_adj=reserved_worker_oom_score_adj,
         )

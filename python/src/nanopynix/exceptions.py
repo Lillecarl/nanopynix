@@ -20,7 +20,7 @@ import re
 
 from strip_ansi import strip_ansi
 
-from nanopynix.models import NixType
+from nanopynix_proto.nix.common import NixType
 
 # ════════════════════════════════════════════════════════════════════
 # Exception hierarchy
@@ -124,8 +124,8 @@ class WrongNixTypeError(EvalProxyError, TypeError):
     """A Nix value had a different type than the operation requires."""
 
     def __init__(self, *, expected: NixType | str, actual: NixType | str) -> None:
-        self.expected = expected.value if isinstance(expected, NixType) else expected
-        self.actual = actual.value if isinstance(actual, NixType) else actual
+        self.expected = expected.name.lower() if isinstance(expected, NixType) else expected
+        self.actual = actual.name.lower() if isinstance(actual, NixType) else actual
         super().__init__(f"Nix value is {self.actual}, expected {self.expected}")
 
 

@@ -1,37 +1,99 @@
-"""Pydantic models for all nanopynix data types crossing the C++/Python boundary.
+"""Models for all nanopynix data types crossing the C++/Python boundary.
 
-Canonical representation is attrs-based — URL/string forms are computed at the
-facade boundary via ``FlakeRef::fromAttrs(attrs).to_string()`` and
-``parseFlakeRef(url).toAttrs()``.  No C++ dependency in this module.
+Most types are re-exported from ``nanopynix_proto.nix.common`` — the
+proto-generated messages are the canonical wire format.  A few types use
+MonkeyPatcher extension classes to add helper methods that the proto
+generated code doesn't provide (``is_derivation``, ``message``, etc.).
 """
 
 from __future__ import annotations
 
-from enum import IntEnum, StrEnum
-from typing import Literal
+import json
+from typing import Any
 
-from pydantic import AliasChoices, BaseModel, Field, computed_field, field_validator, model_validator
+from grpclib_transports.monkey_patcher import MonkeyPatcher
+from nanopynix_proto.nix.common import (
+    # Types with MonkeyPatcher extensions — imported as private for subclassing
+    BuildResult as _BuildResult,
+)
+from nanopynix_proto.nix.common import (
+    # Types without MonkeyPatcher extensions — re-exported directly
+    CallArg as CallArg,
+)
+from nanopynix_proto.nix.common import (
+    CallArgAttrs as CallArgAttrs,
+)
+from nanopynix_proto.nix.common import (
+    CallArgList as CallArgList,
+)
+from nanopynix_proto.nix.common import (
+    DeepAttrs as DeepAttrs,
+)
+from nanopynix_proto.nix.common import (
+    DeepList as DeepList,
+)
+from nanopynix_proto.nix.common import (
+    DeepValue as DeepValue,
+)
+from nanopynix_proto.nix.common import (
+    Derivation as _Derivation,
+)
+from nanopynix_proto.nix.common import (
+    DerivationOutputs as DerivationOutputs,
+)
+from nanopynix_proto.nix.common import (
+    FlakeRef as FlakeRef,
+)
+from nanopynix_proto.nix.common import (
+    ForceValue as ForceValue,
+)
+from nanopynix_proto.nix.common import (
+    Input as Input,
+)
+from nanopynix_proto.nix.common import (
+    LockedFlake as _LockedFlake,
+)
+from nanopynix_proto.nix.common import (
+    LockedInput as LockedInput,
+)
+from nanopynix_proto.nix.common import (
+    LogEvent as _LogEventProto,
+)
+from nanopynix_proto.nix.common import (
+    MissingInfo as MissingInfo,
+)
+from nanopynix_proto.nix.common import (
+    NixType as NixType,
+)
+from nanopynix_proto.nix.common import (
+    NullValue as NullValue,
+)
+from nanopynix_proto.nix.common import (
+    PathInfo as _PathInfo,
+)
+from nanopynix_proto.nix.common import (
+    PrimOpSpec as PrimOpSpec,
+)
+from nanopynix_proto.nix.common import (
+    RemoteCallArg as RemoteCallArg,
+)
+from nanopynix_proto.nix.common import (
+    ResultType as ResultType,
+)
+from nanopynix_proto.nix.common import (
+    ScalarValue as ScalarValue,
+)
+from nanopynix_proto.nix.common import (
+    StorePath as _StorePath,
+)
+from nanopynix_proto.nix.common import (
+    ValueHandle as ValueHandle,
+)
 from strip_ansi import strip_ansi as _strip_ansi
 
-type JsonScalar = str | int | float | bool | None
-type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
-
-
-class NixType(StrEnum):
-    """Nix value types exposed by eval RPC."""
-
-    THUNK = "thunk"
-    INT = "int"
-    FLOAT = "float"
-    BOOL = "bool"
-    STRING = "string"
-    PATH = "path"
-    NULL = "null"
-    ATTRS = "attrs"
-    LIST = "list"
-    FUNCTION = "function"
-    EXTERNAL = "external"
-    UNKNOWN = "unknown"
+# ══════════════════════════════════════════════════════════════════════════
+# Helper: parse a store path string into keyword arguments
+# ══════════════════════════════════════════════════════════════════════════
 
 
 def _parse_store_path_string(value: str) -> dict[str, str]:
@@ -47,201 +109,54 @@ def _parse_store_path_string(value: str) -> dict[str, str]:
     }
 
 
-class StorePath(BaseModel):
-    """A Nix store path (e.g. ``/nix/store/<hash>-<name>``)."""
+# ══════════════════════════════════════════════════════════════════════════
+# Extension classes (MonkeyPatcher) — these replace the original proto
+# generated types in their module so that all deserialization produces
+# instances of the subclass.
+# ══════════════════════════════════════════════════════════════════════════
 
-    hash_part: str = Field(description="The 32-character hash portion")
-    name: str = Field(description="The name portion (e.g. 'bash-5.2')")
-    to_string: str = Field(description="Full basename: '<hash>-<name>'")
 
-    def __init__(self, value: str | None = None, **data) -> None:
+class StorePathExt(_StorePath, MonkeyPatcher):
+    """Extension of proto StorePath with ``is_derivation`` and string constructor."""
+
+    @property
+    def is_derivation(self) -> bool:
+        """True if this path ends with .drv."""
+        return self.name.endswith(".drv")
+
+    def __init__(self, value: str | None = None, **data: Any) -> None:
         if value is not None:
             if data:
                 raise TypeError("StorePath accepts either a path string or explicit fields, not both")
             data = _parse_store_path_string(value)
         super().__init__(**data)
 
-    @model_validator(mode="before")
     @classmethod
-    def _from_string(cls, value):
-        if isinstance(value, str):
-            return _parse_store_path_string(value)
-        return value
+    def model_validate(cls, data: dict[str, Any]) -> StorePathExt:
+        """Compatibility shim — wraps ``from_dict`` for test convenience."""
+        return cls.from_dict(data)
 
-    @computed_field
+
+class LogEventExt(_LogEventProto, MonkeyPatcher):
+    """Extension of proto LogEvent with ``message``, ``message_without_ansi``, and ``args``."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        if "args" in kwargs:
+            kwargs["args_json"] = json.dumps(kwargs.pop("args"))
+        if "result_type" in kwargs:
+            rtype = kwargs["result_type"]
+            if isinstance(rtype, int):
+                kwargs["result_type"] = ResultType(rtype)
+        super().__init__(**kwargs)
+
     @property
-    def is_derivation(self) -> bool:
-        """True if this path ends with .drv."""
-        return self.name.endswith(".drv")
-
-
-class PathInfo(BaseModel):
-    """ValidPathInfo — metadata about a store path."""
-
-    path: StorePath
-    nar_hash: str = Field(description="NAR hash in SRI format")
-    nar_size: int = Field(description="NAR size in bytes")
-    registration_time: int | None = Field(default=None, description="Unix timestamp of registration")
-    deriver: StorePath | None = Field(default=None, description="The .drv that built this path")
-    references: list[StorePath] = Field(default_factory=list, description="Runtime references")
-    ca: str | None = Field(default=None, description="Content address (if CA derivation)")
-    ultimate: bool = Field(default=False, description="Whether this path is an ultimate root")
-
-
-class BuildResult(BaseModel):
-    """Result of a derivation build."""
-
-    drv_path: str = Field(description="The derivation path that was built")
-    success: bool
-    status: str = Field(description="Outcome: 'built', 'substituted', 'permanent-failure', ...")
-    error_msg: str = Field(default="", description="Error message if build failed")
-
-
-class MissingInfo(BaseModel):
-    """Result of queryMissing — paths not yet in the store."""
-
-    will_build: list[StorePath] = Field(default_factory=list)
-    will_substitute: list[StorePath] = Field(default_factory=list)
-    unknown: list[StorePath] = Field(default_factory=list)
-    download_size: int = Field(default=0)
-    nar_size: int = Field(default=0)
-
-
-class Input(BaseModel):
-    """A flake/fetcher input in canonical attrs form.
-
-    Attrs are the output of ``Input::toAttrs()`` / ``FlakeRef::toAttrs()``:
-    ``{"type": "github", "owner": "NixOS", "repo": "nixpkgs", ...}``.
-    """
-
-    attrs: dict[str, str | int | bool] = Field(default_factory=dict)
-
-
-class FlakeRef(BaseModel):
-    """A parsed flake reference: an Input plus optional subdirectory."""
-
-    attrs: dict[str, str | int | bool] = Field(default_factory=dict)
-
-
-class LockedInput(BaseModel):
-    """A single locked input inside a LockedFlake.
-
-    Either ``attrs`` (direct reference) or ``follows`` (follows another input).
-    """
-
-    attrs: dict[str, str | int | bool] | None = Field(
-        default=None, description="FlakeRef attrs when input has a direct reference"
-    )
-    is_flake: bool = Field(default=True, description="Whether this input is a flake")
-    follows: list[str] = Field(default_factory=list, description="Input IDs this input follows")
-
-
-class LockedFlake(BaseModel):
-    """A locked flake with description and resolved inputs."""
-
-    handle: int = Field(description="Worker-side handle to the LockedFlake object")
-    description: str = Field(default="", description="Flake description from meta.description")
-    inputs: dict[str, LockedInput] = Field(default_factory=dict, description="Locked inputs, keyed by id")
-
-
-class ValueHandle(BaseModel):
-    """Opaque eval value handle exported by the worker."""
-
-    handle: int
-    type: NixType
-
-
-class RemoteValueRef(BaseModel):
-    """Wire reference to a Nix value exported by the worker."""
-
-    kind: Literal["remote_value"] = "remote_value"
-    value: ValueHandle
-
-
-class DeepScalar(BaseModel):
-    """Wire node for a scalar result from recursive forcing."""
-
-    kind: Literal["scalar"] = "scalar"
-    value: JsonScalar
-
-
-class DeepList(BaseModel):
-    """Wire node for a recursively forced Nix list."""
-
-    kind: Literal["list"] = "list"
-    items: list[DeepValueWire]
-
-
-class DeepAttrs(BaseModel):
-    """Wire node for a recursively forced Nix attrset."""
-
-    kind: Literal["attrs"] = "attrs"
-    attrs: dict[str, DeepValueWire]
-
-
-type DeepValueWire = DeepScalar | DeepList | DeepAttrs | RemoteValueRef
-
-
-class ScalarCallArg(BaseModel):
-    """Copied JSON scalar supplied to a Nix function call."""
-
-    kind: Literal["scalar"] = "scalar"
-    value: JsonScalar
-
-
-class ListCallArg(BaseModel):
-    """Copied list supplied to a Nix function call, with remote value leaves allowed."""
-
-    kind: Literal["list"] = "list"
-    items: list[CallArgWire]
-
-
-class AttrsCallArg(BaseModel):
-    """Copied attrset supplied to a Nix function call, with remote value leaves allowed."""
-
-    kind: Literal["attrs"] = "attrs"
-    attrs: dict[str, CallArgWire]
-
-
-class RemoteCallArg(BaseModel):
-    """Existing same-session Nix value supplied to a Nix function call."""
-
-    kind: Literal["remote_value"] = "remote_value"
-    handle: int
-
-
-type CallArgWire = ScalarCallArg | ListCallArg | AttrsCallArg | RemoteCallArg
-
-
-class PrimOpSpec(BaseModel):
-    """Importable Python primop registered inside the worker process."""
-
-    name: str = Field(description="Nix builtin name")
-    arity: int = Field(description="Number of arguments")
-    args: list[str] = Field(default_factory=list, description="Argument names for Nix documentation")
-    doc: str = Field(default="", description="Nix builtin documentation")
-    import_path: str = Field(description="Importable Python callable path, formatted as 'module:attribute'")
-
-
-class LogEvent(BaseModel):
-    """A single log event from Nix's internal logger.
-
-    Worker emits ``request_id`` in the wire format; ``Nix.log_stream()``
-    passes it through as the model's ``request_id`` field.
-    """
-
-    request_id: int = Field(default=0, description="RPC request ID for multiplexing")
-    action: str = Field(description="'msg', 'warn', 'error', 'start', 'stop', or 'result'")
-    args: list = Field(default_factory=list, description="Action-specific arguments")
-    result_type: ResultType | None = Field(
-        default=None,
-        description="ResultType when action='result' (None for other actions)",
-    )
+    def args(self) -> list:
+        """Parsed args from the JSON ``args_json`` field."""
+        return json.loads(self.args_json) if self.args_json else []
 
     @property
     def message(self) -> str | None:
         """Raw message payload for log actions that carry text."""
-
         if self.action not in {"msg", "warn", "error"} or not self.args:
             return None
         message = self.args[-1]
@@ -249,82 +164,163 @@ class LogEvent(BaseModel):
 
     @property
     def message_without_ansi(self) -> str | None:
-        """Message payload with ANSI color escapes removed, preserving newlines."""
-
+        """Message payload with ANSI color escapes removed."""
         message = self.message
         return None if message is None else _strip_ansi(message)
 
-    def without_ansi(self) -> LogEvent:
-        """Return a copy with ANSI color escapes removed from string args."""
+    def without_ansi(self) -> LogEventExt:
+        """Return a new LogEventExt with ANSI escapes removed from string args."""
+        cleaned = [_strip_ansi(a) if isinstance(a, str) else a for a in self.args]
+        return LogEventExt(
+            request_id=self.request_id,
+            action=self.action,
+            args_json=json.dumps(cleaned),
+            result_type=self.result_type,
+        )
 
-        return self.model_copy(
-            update={"args": [_strip_ansi(arg) if isinstance(arg, str) else arg for arg in self.args]}
+    @classmethod
+    def from_proto(cls, proto_event: _LogEventProto) -> LogEventExt:
+        """Construct a LogEventExt from a proto LogEvent message."""
+        return cls(
+            request_id=proto_event.request_id,
+            action=proto_event.action,
+            args_json=proto_event.args_json,
+            result_type=proto_event.result_type,
         )
 
 
-class ResultType(IntEnum):
-    """Nix ``ResultType`` enum — activity build/check result types.
+class PathInfoExt(_PathInfo, MonkeyPatcher):
+    """Extension of proto PathInfo with ``model_validate`` compatibility."""
 
-    Values match ``nix::ResultType`` from ``<nix/util/logging.hh>``.
-    These appear as ``LogEvent.action == 'result'`` with the type in
-    ``LogEvent.result_type``.
+    @classmethod
+    def model_validate(cls, data: dict[str, Any]) -> PathInfoExt:
+        """Compatibility shim — wraps ``from_dict`` for test convenience."""
+        return cls.from_dict(data)
+
+
+class BuildResultExt(_BuildResult, MonkeyPatcher):
+    """Extension of proto BuildResult with ``model_validate`` compatibility."""
+
+    @classmethod
+    def model_validate(cls, data: dict[str, Any]) -> BuildResultExt:
+        """Compatibility shim — wraps ``from_dict`` for test convenience."""
+        return cls.from_dict(data)
+
+
+class LockedFlakeExt(_LockedFlake, MonkeyPatcher):
+    """Extension of proto LockedFlake with ``model_validate`` compatibility.
+
+    ``from_dict`` is not used for nested inputs because the proto map<>
+    deserialization does not handle the AttrsMap message type correctly
+    when passed as a plain dict.  Instead we construct ``LockedInput``
+    instances directly.
     """
 
-    file_linked = 100
-    build_log_line = 101
-    untrusted_path = 102
-    corrupted_path = 103
-    set_phase = 104
-    progress = 105
-    set_expected = 106
-    post_build_log_line = 107
-    fetch_status = 108
-
-
-# ── Derivation ───────────────────────────────────────────────────────
-
-
-class DerivationOutputs(BaseModel):
-    """Output spec for a derivation input."""
-
-    outputs: list[str] = Field(default_factory=list)
-    dynamic_outputs: dict[str, str] = Field(default_factory=dict)
-
-
-class Derivation(BaseModel):
-    """C++ ``nix::Derivation`` data — not the richer ``nix derivation show`` JSON."""
-
-    name: str
-    system: str = Field(validation_alias=AliasChoices("system", "platform"))
-    builder: str
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
-    input_drvs: dict[str, DerivationOutputs] = Field(
-        default_factory=dict,
-        validation_alias=AliasChoices("input_drvs", "inputDrvs"),
-    )  # StorePath string → outputs
-    input_srcs: list[str] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("input_srcs", "inputSrcs"),
-    )  # StorePath strings
-
-    @field_validator("env", mode="before")
     @classmethod
-    def _env_from_nix_pairs(cls, value):
-        if isinstance(value, list):
-            return dict(value)
-        return value
+    def model_validate(cls, data: dict[str, Any]) -> LockedFlakeExt:
+        """Compatibility shim: construct from dict, handling nested inputs."""
+        raw_inputs = data.get("inputs", {})
+        if isinstance(raw_inputs, dict):
+            inputs: dict[str, LockedInput] = {}
+            for k, v in raw_inputs.items():
+                if isinstance(v, dict):
+                    inputs[k] = LockedInput(
+                        attrs=v.get("attrs"),
+                        is_flake=v.get("is_flake", False),
+                        follows=v.get("follows", []),
+                    )
+                else:
+                    inputs[k] = v
+        else:
+            inputs = raw_inputs
+        return cls(
+            handle=data.get("handle", 0),
+            description=data.get("description", ""),
+            inputs=inputs,
+        )
 
-    @field_validator("input_drvs", mode="before")
+
+class DerivationExt(_Derivation, MonkeyPatcher):
+    """Extension of proto Derivation with Nix field alias support."""
+
     @classmethod
-    def _input_drvs_from_nix_list(cls, value):
-        if not isinstance(value, list):
-            return value
-        result = {}
-        for entry in value:
-            children = dict(entry.get("children", {}))
-            result[str(entry["path"])] = {
-                "outputs": list(entry.get("outputs", [])),
-                "dynamic_outputs": {str(k): ",".join(str(o) for o in v) for k, v in children.items()},
-            }
-        return result
+    def model_validate(cls, data: dict[str, Any]) -> DerivationExt:
+        """Compatibility shim: handle Nix's raw dict format with aliases.
+
+        Maps:
+        - ``platform`` → ``system``
+        - ``inputSrcs`` → ``input_srcs``
+        - ``inputDrvs`` → ``input_drvs`` (list format → dict)
+        - ``env`` list of pairs ``[["A", "1"]]`` → dict
+        """
+        d = dict(data)
+
+        # Rename aliases
+        if "platform" in d and "system" not in d:
+            d["system"] = d.pop("platform")
+        if "inputSrcs" in d and "input_srcs" not in d:
+            d["input_srcs"] = d.pop("inputSrcs")
+
+        # Convert env list-of-pairs to dict
+        env = d.get("env")
+        if isinstance(env, list):
+            d["env"] = dict(env)
+
+        # Convert inputDrvs list to map of path -> DerivationOutputs
+        raw_input_drvs = d.pop("inputDrvs", None) or d.get("input_drvs")
+        if isinstance(raw_input_drvs, list):
+            input_drvs: dict[str, DerivationOutputs] = {}
+            for entry in raw_input_drvs:
+                if isinstance(entry, dict):
+                    path = str(entry["path"])
+                    children = entry.get("children", {})
+                    input_drvs[path] = DerivationOutputs(
+                        outputs=list(entry.get("outputs", [])),
+                        dynamic_outputs={str(k): ",".join(str(o) for o in v) for k, v in children.items()},
+                    )
+                else:
+                    input_drvs[str(entry)] = DerivationOutputs()
+            d["input_drvs"] = input_drvs
+
+        return cls(**d)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Public re-exports for extension types
+# ══════════════════════════════════════════════════════════════════════════
+
+BuildResult = BuildResultExt
+Derivation = DerivationExt
+LockedFlake = LockedFlakeExt
+LogEvent = LogEventExt
+PathInfo = PathInfoExt
+StorePath = StorePathExt
+
+# ══════════════════════════════════════════════════════════════════════════
+# NixType enum patch — add from_string classmethod
+# ══════════════════════════════════════════════════════════════════════════
+
+_STR_TO_NIX: dict[str, NixType] = {
+    "thunk": NixType.THUNK,
+    "int": NixType.INT,
+    "float": NixType.FLOAT,
+    "bool": NixType.BOOL,
+    "string": NixType.STRING,
+    "path": NixType.PATH,
+    "null": NixType.NULL,
+    "attrs": NixType.ATTRS,
+    "list": NixType.LIST,
+    "function": NixType.FUNCTION,
+    "external": NixType.EXTERNAL,
+    "unknown": NixType.UNSPECIFIED,
+}
+
+
+def _nix_type_from_string(cls: type, value: str) -> NixType:
+    return _STR_TO_NIX.get(value, cls.UNSPECIFIED)
+
+
+NixType.from_string = classmethod(_nix_type_from_string)  # type: ignore[attr-defined]
+
+type JsonScalar = str | int | float | bool | None
+type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]

@@ -491,7 +491,7 @@ class TestValueProxyLifecycle:
         vp = self._proxy(w, 1, "attrs")
         child = vp.attr("name")
         assert isinstance(child, ValueProxy)
-        assert child.nix_type == NixType.UNKNOWN
+        assert child.nix_type == NixType.UNSPECIFIED
         w._eval_stub.attr.assert_not_awaited()
 
         w._eval_stub.attr.return_value = _mock_value_handle(5, "string")
@@ -663,7 +663,7 @@ class TestLazyChildProxy:
         w = self._worker()
         w._eval_stub.attr.return_value = _mock_value_handle(5, "int")
         w._eval_stub.force.return_value = _mock_force_value_scalar(99)
-        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name")
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
 
         result = await cp.force()
 
@@ -676,7 +676,7 @@ class TestLazyChildProxy:
         w = self._worker()
         w._eval_stub.list_get.return_value = _mock_value_handle(3, "int")
         w._eval_stub.force.return_value = _mock_force_value_scalar(42)
-        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), 0)
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), 0)
 
         result = await cp.force()
 
@@ -687,7 +687,7 @@ class TestLazyChildProxy:
     async def test_no_rpc_until_force(self):
         """No RPC is made until .force() is called on the child proxy."""
         w = self._worker()
-        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name")
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
         w._eval_stub.attr.assert_not_called()
         # accessing a property doesn't trigger RPC either
         with pytest.raises(UnresolvedValueError, match="not been resolved"):
@@ -707,7 +707,7 @@ class TestLazyChildProxy:
             })
         )
         w._eval_stub.force_deep.return_value = deep_val
-        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name")
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
 
         result = await cp.force_deep()
 
@@ -719,7 +719,7 @@ class TestLazyChildProxy:
         """Child proxy raises after session close."""
         w = self._worker()
         active = [False]
-        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name", owner=self._owner(active))
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name", owner=self._owner(active))
 
         with pytest.raises(EvalSessionClosedError, match="EvalSession has been closed"):
             await cp.force()
@@ -729,7 +729,7 @@ class TestLazyChildProxy:
         w = self._worker()
         w._eval_stub.attr.return_value = _mock_value_handle(5, "int")
         w._eval_stub.force.return_value = _mock_force_value_scalar(42)
-        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNKNOWN), "name", timeout=30.0)
+        cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name", timeout=30.0)
 
         await cp.force(timeout=10.0)
 

@@ -77,7 +77,9 @@ def locked_input(li_dict: dict, /) -> common_pb.LockedInput:
             # Malformed ref — return as raw string attrs
             attrs = common_pb.AttrsMap(entries={"ref": _attrs_value(ref_str)})
         else:
-            attrs = _attrs_map(flake_ref_attrs(fr))
+            # flake_ref_attrs already returns dict[str, AttrsValue];
+            # pass it directly — _attrs_map would double-wrap.
+            attrs = common_pb.AttrsMap(entries=flake_ref_attrs(fr))
 
     follows_raw = li_dict.get("follows", [])
     follows = [str(f) for f in follows_raw]
