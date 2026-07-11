@@ -65,6 +65,11 @@ def _proto_nix_type_to_model(pt: Any) -> NixType:
     """Convert a proto NixType enum to a models.NixType string enum."""
     from nanopynix_proto.nix.common import NixType as ProtoNixType
 
+    if isinstance(pt, str):
+        try:
+            return NixType(pt)
+        except ValueError:
+            return NixType.UNKNOWN
     _MAP: dict[Any, NixType] = {
         ProtoNixType.THUNK: NixType.THUNK,
         ProtoNixType.INT: NixType.INT,
