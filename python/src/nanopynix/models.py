@@ -131,12 +131,6 @@ class StorePathExt(_StorePath, MonkeyPatcher):
             data = _parse_store_path_string(value)
         super().__init__(**data)
 
-    @classmethod
-    def model_validate(cls, data: dict[str, Any]) -> StorePathExt:
-        """Compatibility shim — wraps ``from_dict`` for test convenience."""
-        return cls.from_dict(data)
-
-
 class LogEventExt(_LogEventProto, MonkeyPatcher):
     """Extension of proto LogEvent with ``message``, ``message_without_ansi``, and ``args``."""
 
@@ -190,99 +184,19 @@ class LogEventExt(_LogEventProto, MonkeyPatcher):
 
 
 class PathInfoExt(_PathInfo, MonkeyPatcher):
-    """Extension of proto PathInfo with ``model_validate`` compatibility."""
-
-    @classmethod
-    def model_validate(cls, data: dict[str, Any]) -> PathInfoExt:
-        """Compatibility shim — wraps ``from_dict`` for test convenience."""
-        return cls.from_dict(data)
+    """Extension of proto PathInfo."""
 
 
 class BuildResultExt(_BuildResult, MonkeyPatcher):
-    """Extension of proto BuildResult with ``model_validate`` compatibility."""
-
-    @classmethod
-    def model_validate(cls, data: dict[str, Any]) -> BuildResultExt:
-        """Compatibility shim — wraps ``from_dict`` for test convenience."""
-        return cls.from_dict(data)
+    """Extension of proto BuildResult."""
 
 
 class LockedFlakeExt(_LockedFlake, MonkeyPatcher):
-    """Extension of proto LockedFlake with ``model_validate`` compatibility.
-
-    ``from_dict`` is not used for nested inputs because the proto map<>
-    deserialization does not handle the AttrsMap message type correctly
-    when passed as a plain dict.  Instead we construct ``LockedInput``
-    instances directly.
-    """
-
-    @classmethod
-    def model_validate(cls, data: dict[str, Any]) -> LockedFlakeExt:
-        """Compatibility shim: construct from dict, handling nested inputs."""
-        raw_inputs = data.get("inputs", {})
-        if isinstance(raw_inputs, dict):
-            inputs: dict[str, LockedInput] = {}
-            for k, v in raw_inputs.items():
-                if isinstance(v, dict):
-                    inputs[k] = LockedInput(
-                        attrs=v.get("attrs"),
-                        is_flake=v.get("is_flake", False),
-                        follows=v.get("follows", []),
-                    )
-                else:
-                    inputs[k] = v
-        else:
-            inputs = raw_inputs
-        return cls(
-            handle=data.get("handle", 0),
-            description=data.get("description", ""),
-            inputs=inputs,
-        )
+    """Extension of proto LockedFlake."""
 
 
 class DerivationExt(_Derivation, MonkeyPatcher):
-    """Extension of proto Derivation with Nix field alias support."""
-
-    @classmethod
-    def model_validate(cls, data: dict[str, Any]) -> DerivationExt:
-        """Compatibility shim: handle Nix's raw dict format with aliases.
-
-        Maps:
-        - ``platform`` → ``system``
-        - ``inputSrcs`` → ``input_srcs``
-        - ``inputDrvs`` → ``input_drvs`` (list format → dict)
-        - ``env`` list of pairs ``[["A", "1"]]`` → dict
-        """
-        d = dict(data)
-
-        # Rename aliases
-        if "platform" in d and "system" not in d:
-            d["system"] = d.pop("platform")
-        if "inputSrcs" in d and "input_srcs" not in d:
-            d["input_srcs"] = d.pop("inputSrcs")
-
-        # Convert env list-of-pairs to dict
-        env = d.get("env")
-        if isinstance(env, list):
-            d["env"] = dict(env)
-
-        # Convert inputDrvs list to map of path -> DerivationOutputs
-        raw_input_drvs = d.pop("inputDrvs", None) or d.get("input_drvs")
-        if isinstance(raw_input_drvs, list):
-            input_drvs: dict[str, DerivationOutputs] = {}
-            for entry in raw_input_drvs:
-                if isinstance(entry, dict):
-                    path = str(entry["path"])
-                    children = entry.get("children", {})
-                    input_drvs[path] = DerivationOutputs(
-                        outputs=list(entry.get("outputs", [])),
-                        dynamic_outputs={str(k): ",".join(str(o) for o in v) for k, v in children.items()},
-                    )
-                else:
-                    input_drvs[str(entry)] = DerivationOutputs()
-            d["input_drvs"] = input_drvs
-
-        return cls(**d)
+    """Extension of proto Derivation."""
 
 
 # ══════════════════════════════════════════════════════════════════════════

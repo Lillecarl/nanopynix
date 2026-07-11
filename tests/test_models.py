@@ -13,6 +13,7 @@ from nanopynix.models import (
     ResultType,
     StorePath,
 )
+from nanopynix_proto.nix.common import AttrsMap, AttrsValue
 
 # ── StorePath ────────────────────────────────────────────────────────
 
@@ -43,8 +44,8 @@ class TestStorePath:
         assert sp.name == ""
         assert sp.to_string == ""
 
-    def test_validate_dict(self):
-        sp = StorePath.model_validate(
+    def test_from_dict(self):
+        sp = StorePath.from_dict(
             {
                 "hash_part": "abc123def456",
                 "name": "bash-5.2",
@@ -92,8 +93,8 @@ class TestPathInfo:
         assert pi.ca is None
         assert not pi.ultimate
 
-    def test_validate_dict_minimal(self):
-        pi = PathInfo.model_validate(
+    def test_from_dict_minimal(self):
+        pi = PathInfo.from_dict(
             {
                 "path": {"hash_part": "a", "name": "p", "to_string": "a-p"},
                 "nar_hash": "sha256:abc",
@@ -123,8 +124,8 @@ class TestBuildResult:
         assert not br.success
         assert br.error_msg == "compilation failed"
 
-    def test_validate_dict(self):
-        br = BuildResult.model_validate(
+    def test_from_dict(self):
+        br = BuildResult.from_dict(
             {
                 "drv_path": "/nix/store/x.drv",
                 "success": False,
@@ -150,12 +151,24 @@ class TestMissingInfo:
 
 class TestInput:
     def test_github(self):
-        inp = Input(attrs={"type": "github", "owner": "NixOS", "repo": "nixpkgs", "ref": "nixos-24.11"})
-        assert inp.attrs["type"] == "github"
+        inp = Input(
+            attrs={
+                "type": AttrsValue(string_value="github"),
+                "owner": AttrsValue(string_value="NixOS"),
+                "repo": AttrsValue(string_value="nixpkgs"),
+                "ref": AttrsValue(string_value="nixos-24.11"),
+            }
+        )
+        assert inp.attrs["type"].string_value == "github"
 
     def test_indirect(self):
-        inp = Input(attrs={"type": "indirect", "id": "nixpkgs"})
-        assert inp.attrs["id"] == "nixpkgs"
+        inp = Input(
+            attrs={
+                "type": AttrsValue(string_value="indirect"),
+                "id": AttrsValue(string_value="nixpkgs"),
+            }
+        )
+        assert inp.attrs["id"].string_value == "nixpkgs"
 
     def test_empty_default(self):
         inp = Input()
@@ -169,18 +182,24 @@ class TestFlakeRef:
     def test_with_subdir(self):
         fr = FlakeRef(
             attrs={
-                "type": "github",
-                "owner": "NixOS",
-                "repo": "nixpkgs",
-                "ref": "nixos-24.11",
-                "dir": "lib",
+                "type": AttrsValue(string_value="github"),
+                "owner": AttrsValue(string_value="NixOS"),
+                "repo": AttrsValue(string_value="nixpkgs"),
+                "ref": AttrsValue(string_value="nixos-24.11"),
+                "dir": AttrsValue(string_value="lib"),
             }
         )
-        assert fr.attrs["dir"] == "lib"
+        assert fr.attrs["dir"].string_value == "lib"
 
     def test_basic(self):
-        fr = FlakeRef(attrs={"type": "github", "owner": "NixOS", "repo": "nixpkgs"})
-        assert fr.attrs["repo"] == "nixpkgs"
+        fr = FlakeRef(
+            attrs={
+                "type": AttrsValue(string_value="github"),
+                "owner": AttrsValue(string_value="NixOS"),
+                "repo": AttrsValue(string_value="nixpkgs"),
+            }
+        )
+        assert fr.attrs["repo"].string_value == "nixpkgs"
 
     def test_default(self):
         fr = FlakeRef()
@@ -193,11 +212,19 @@ class TestFlakeRef:
 class TestLockedInput:
     def test_with_direct_ref(self):
         li = LockedInput(
-            attrs={"type": "github", "owner": "NixOS", "repo": "nixpkgs", "ref": "nixos-24.11", "rev": "abc123"},
+            attrs=AttrsMap(
+                entries={
+                    "type": AttrsValue(string_value="github"),
+                    "owner": AttrsValue(string_value="NixOS"),
+                    "repo": AttrsValue(string_value="nixpkgs"),
+                    "ref": AttrsValue(string_value="nixos-24.11"),
+                    "rev": AttrsValue(string_value="abc123"),
+                }
+            ),
             is_flake=True,
         )
         assert li.attrs is not None
-        assert li.attrs["rev"] == "abc123"
+        assert li.attrs.entries["rev"].string_value == "abc123"
         assert li.is_flake
         assert li.follows == []
 
@@ -207,7 +234,15 @@ class TestLockedInput:
         assert li.follows == ["nixpkgs", "flake-utils"]
 
     def test_not_a_flake(self):
-        li = LockedInput(attrs={"type": "tarball", "url": "https://..."}, is_flake=False)
+        li = LockedInput(
+            attrs=AttrsMap(
+                entries={
+                    "type": AttrsValue(string_value="tarball"),
+                    "url": AttrsValue(string_value="https://..."),
+                }
+            ),
+            is_flake=False,
+        )
         assert not li.is_flake
 
     def test_defaults(self):
@@ -224,11 +259,24 @@ class TestLockedFlake:
             description="A test flake",
             inputs={
                 "nixpkgs": LockedInput(
-                    attrs={"type": "github", "owner": "NixOS", "repo": "nixpkgs", "rev": "abc"},
+                    attrs=AttrsMap(
+                        entries={
+                            "type": AttrsValue(string_value="github"),
+                            "owner": AttrsValue(string_value="NixOS"),
+                            "repo": AttrsValue(string_value="nixpkgs"),
+                            "rev": AttrsValue(string_value="abc"),
+                        }
+                    ),
                     is_flake=True,
                 ),
                 "utils": LockedInput(
-                    attrs={"type": "github", "owner": "x", "repo": "y"},
+                    attrs=AttrsMap(
+                        entries={
+                            "type": AttrsValue(string_value="github"),
+                            "owner": AttrsValue(string_value="x"),
+                            "repo": AttrsValue(string_value="y"),
+                        }
+                    ),
                     is_flake=False,
                 ),
             },
@@ -236,26 +284,31 @@ class TestLockedFlake:
         assert lf.handle == 1
         assert lf.description == "A test flake"
         assert lf.inputs["nixpkgs"].attrs is not None
-        assert lf.inputs["nixpkgs"].attrs["rev"] == "abc"
+        assert lf.inputs["nixpkgs"].attrs.entries["rev"].string_value == "abc"
         assert lf.inputs["utils"].is_flake is False
 
-    def test_validate_dict_nested(self):
-        lf = LockedFlake.model_validate(
-            {
-                "handle": 42,
-                "description": "hello",
-                "inputs": {
-                    "nixpkgs": {
-                        "attrs": {"type": "github", "owner": "NixOS", "repo": "nixpkgs", "rev": "abc"},
-                        "is_flake": True,
-                    },
-                },
-            }
+    def test_construct_nested(self):
+        lf = LockedFlake(
+            handle=42,
+            description="hello",
+            inputs={
+                "nixpkgs": LockedInput(
+                    attrs=AttrsMap(
+                        entries={
+                            "type": AttrsValue(string_value="github"),
+                            "owner": AttrsValue(string_value="NixOS"),
+                            "repo": AttrsValue(string_value="nixpkgs"),
+                            "rev": AttrsValue(string_value="abc"),
+                        }
+                    ),
+                    is_flake=True,
+                ),
+            },
         )
         assert lf.handle == 42
         assert isinstance(lf.inputs["nixpkgs"], LockedInput)
         assert lf.inputs["nixpkgs"].attrs is not None
-        assert lf.inputs["nixpkgs"].attrs["rev"] == "abc"
+        assert lf.inputs["nixpkgs"].attrs.entries["rev"].string_value == "abc"
 
 
 # ── LogEvent ─────────────────────────────────────────────────────────
@@ -351,21 +404,20 @@ def test_derivation_mutable_defaults_isolated():
     assert d2.input_srcs == []
 
 
-def test_derivation_accepts_nix_field_aliases():
-    drv = Derivation.model_validate(
+def test_derivation_from_dict():
+    drv = Derivation.from_dict(
         {
             "name": "foo",
-            "platform": "x86_64-linux",
+            "system": "x86_64-linux",
             "builder": "/bin/sh",
-            "env": [["A", "1"]],
-            "inputSrcs": ["/nix/store/src"],
-            "inputDrvs": [
-                {
-                    "path": "/nix/store/input.drv",
+            "env": {"A": "1"},
+            "input_srcs": ["/nix/store/src"],
+            "input_drvs": {
+                "/nix/store/input.drv": {
                     "outputs": ["out"],
-                    "children": {"dev": ["out"]},
-                }
-            ],
+                    "dynamic_outputs": {"dev": "out"},
+                },
+            },
         }
     )
 
