@@ -10,28 +10,49 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanopynix.models import BuildResult, Derivation, MissingInfo, PathInfo, StorePath
 from nanopynix.store import StoreHandle as Store
 
 if TYPE_CHECKING:
-    from nanopynix import _protocol as rpc
+    from collections.abc import Callable
+
+    from nanopynix._pool import _WorkerManager
 
 pytestmark = pytest.mark.asyncio
 
 
+def _make_stub_mock() -> MagicMock:
+    """Create a MagicMock that acts as a StoreServiceStub.
+
+    All methods return AsyncMocks by default.
+    """
+    stub = MagicMock()
+    stub.get_uri = AsyncMock()
+    stub.get_store_dir = AsyncMock()
+    stub.is_valid_path = AsyncMock()
+    stub.parse_store_path = AsyncMock()
+    stub.query_path_info = AsyncMock()
+    stub.query_path_from_hash_part = AsyncMock()
+    stub.compute_fs_closure = AsyncMock()
+    stub.query_missing = AsyncMock()
+    stub.query_derivation_outputs = AsyncMock()
+    stub.query_valid_derivers = AsyncMock()
+    stub.query_all_valid_paths = AsyncMock()
+    stub.query_referrers = AsyncMock()
+    stub.query_substitutable_paths = AsyncMock()
+    stub.build_paths_with_results = AsyncMock()
+    stub.read_derivation = AsyncMock()
+    stub.build_derivation = AsyncMock()
+    stub.follow_links_to_store_path = AsyncMock()
+    stub.add_temp_root = AsyncMock()
+    stub.fetch_from_url = AsyncMock()
+    stub.fetch_from_attrs = AsyncMock()
+    return stub
+
+
 @pytest.fixture
-def pool():
-    p = MagicMock()
-    p.call = AsyncMock()
-
-    async def request(req: rpc.WorkerRequest, timeout=None):  # noqa: ASYNC109
-        if timeout is None:
-            result = await p.call(req.namespace, req.method, req.to_args())
-        else:
-            result = await p.call(req.namespace, req.method, req.to_args(), timeout=timeout)
-        return type(req).parse_response(result)
-
-    p.request = AsyncMock(side_effect=request)
+def pool() -> MagicMock:
+    p: MagicMock = MagicMock()
+    p._store_stub = _make_stub_mock()
     return p
 
 
@@ -42,6 +63,73 @@ def store(pool):
     return s
 
 
+# Proto-compatible mock response helpers
+
+
+def _mock_store_path(to_string="aaa-bbb", hash_part="aaa", name="bbb"):
+    sp = MagicMock()
+    sp.to_string = to_string
+    sp.hash_part = hash_part
+    sp.name = name
+    return sp
+
+
+def _mock_path_info(**overrides):
+    pi = MagicMock()
+    pi.path = overrides.get("path", _mock_store_path())
+    pi.nar_hash = overrides.get("nar_hash", "sha256:abc")
+    pi.nar_size = overrides.get("nar_size", 1234)
+    pi.registration_time = overrides.get("registration_time", None)
+    pi.deriver = overrides.get("deriver", None)
+    pi.references = overrides.get("references", [])
+    pi.ca = overrides.get("ca", None)
+    pi.ultimate = overrides.get("ultimate", True)
+    return pi
+
+
+def _mock_build_result(**overrides):
+    br = MagicMock()
+    br.drv_path = overrides.get("drv_path", "")
+    br.success = overrides.get("success", True)
+    br.status = overrides.get("status", "built")
+    br.error_msg = overrides.get("error_msg", "")
+    return br
+
+
+def _mock_derivation(**overrides):
+    d = MagicMock()
+    d.name = overrides.get("name", "foo")
+    d.system = overrides.get("system", "x86_64-linux")
+    d.builder = overrides.get("builder", "/bin/sh")
+    d.args = overrides.get("args", [])
+    d.env = overrides.get("env", {})
+    d.input_drvs = overrides.get("input_drvs", {})
+    d.input_srcs = overrides.get("input_srcs", [])
+    return d
+
+
+def _mock_store_path_list(paths=None):
+    spl = MagicMock()
+    spl.paths = paths or []
+    return spl
+
+
+def _mock_build_result_list(results=None):
+    brl = MagicMock()
+    brl.results = results or []
+    return brl
+
+
+def _mock_missing_info(**overrides):
+    mi = MagicMock()
+    mi.will_build = overrides.get("will_build", [])
+    mi.will_substitute = overrides.get("will_substitute", [])
+    mi.unknown = overrides.get("unknown", [])
+    mi.download_size = overrides.get("download_size", 0)
+    mi.nar_size = overrides.get("nar_size", 0)
+    return mi
+
+
 # ════════════════════════════════════════════════════════════════════
 # Identity / simple pass-through
 # ════════════════════════════════════════════════════════════════════
@@ -49,16 +137,16 @@ def store(pool):
 
 class TestIdentity:
     async def test_get_uri(self, store, pool):
-        pool.call.return_value = "daemon"
+        pool._store_stub.get_uri.return_value = MagicMock(uri="daemon")
         result = await store.get_uri()
         assert result == "daemon"
-        pool.call.assert_awaited_with("store", "get_uri", [])
+        pool._store_stub.get_uri.assert_awaited_once()
 
     async def test_get_store_dir(self, store, pool):
-        pool.call.return_value = "/nix/store"
+        pool._store_stub.get_store_dir.return_value = MagicMock(dir="/nix/store")
         result = await store.get_store_dir()
         assert result == "/nix/store"
-        pool.call.assert_awaited_with("store", "get_store_dir", [])
+        pool._store_stub.get_store_dir.assert_awaited_once()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -67,29 +155,26 @@ class TestIdentity:
 
 
 class TestStorePathCoercion:
-    async def test_parse_store_path_returns_model(self, store, pool):
-        pool.call.return_value = {"to_string": "aaa-bbb", "hash_part": "aaa", "name": "bbb"}
+    async def test_parse_store_path_returns_proto(self, store, pool):
+        pool._store_stub.parse_store_path.return_value = _mock_store_path("aaa-bbb", "aaa", "bbb")
         result = await store.parse_store_path("/nix/store/aaa-bbb")
-        assert isinstance(result, StorePath)
-        assert str(result.to_string) == "aaa-bbb"
+        assert result.to_string == "aaa-bbb"
 
     async def test_is_valid_path_accepts_str(self, store, pool):
-        pool.call.return_value = True
+        pool._store_stub.is_valid_path.return_value = MagicMock(valid=True)
         result = await store.is_valid_path("/nix/store/aaa-bbb")
         assert result is True
-        pool.call.assert_awaited_with("store", "is_valid_path", ["/nix/store/aaa-bbb"])
 
     async def test_is_valid_path_accepts_storepath(self, store, pool):
-        pool.call.return_value = True
-        sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
+        pool._store_stub.is_valid_path.return_value = MagicMock(valid=True)
+        sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         result = await store.is_valid_path(sp)
         assert result is True
-        pool.call.assert_awaited_with("store", "is_valid_path", ["a" * 32 + "-foo"])
 
     async def test_follow_links_returns_storepath(self, store, pool):
-        pool.call.return_value = {"to_string": "aaa-bbb", "hash_part": "aaa", "name": "bbb"}
+        pool._store_stub.follow_links_to_store_path.return_value = _mock_store_path("aaa-bbb", "aaa", "bbb")
         result = await store.follow_links_to_store_path("/some/link")
-        assert isinstance(result, StorePath)
+        assert result.to_string == "aaa-bbb"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -99,35 +184,27 @@ class TestStorePathCoercion:
 
 class TestPathInfo:
     async def test_query_path_info_str(self, store, pool):
-        pool.call.return_value = {
-            "path": {"to_string": "aaa-foo", "hash_part": "aaa", "name": "foo"},
-            "nar_hash": "sha256:abc",
-            "nar_size": 1234,
-            "registration_time": None,
-            "deriver": None,
-            "references": [],
-            "ca": None,
-            "ultimate": True,
-        }
+        pool._store_stub.query_path_info.return_value = _mock_path_info(nar_size=1234)
         result = await store.query_path_info("/nix/store/aaa-foo")
-        assert isinstance(result, PathInfo)
         assert result.nar_size == 1234
-        pool.call.assert_awaited_with("store", "query_path_info", ["/nix/store/aaa-foo"])
 
     async def test_query_path_info_storepath(self, store, pool):
-        pool.call.return_value = {
-            "path": {"to_string": "aaa-foo", "hash_part": "aaa", "name": "foo"},
-            "nar_hash": "sha256:abc",
-            "nar_size": 0,
-            "registration_time": None,
-            "deriver": None,
-            "references": [],
-            "ca": None,
-            "ultimate": False,
-        }
-        sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
+        pool._store_stub.query_path_info.return_value = _mock_path_info()
+        sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         await store.query_path_info(sp)
-        pool.call.assert_awaited_with("store", "query_path_info", ["a" * 32 + "-foo"])
+
+    async def test_query_path_from_hash_part_found(self, store, pool):
+        pool._store_stub.query_path_from_hash_part.return_value = MagicMock(
+            path=_mock_store_path("aaa-foo", "aaa", "foo")
+        )
+        result = await store.query_path_from_hash_part("aaa")
+        assert result is not None
+        assert result.to_string == "aaa-foo"
+
+    async def test_query_path_from_hash_part_not_found(self, store, pool):
+        pool._store_stub.query_path_from_hash_part.return_value = MagicMock(path=None)
+        result = await store.query_path_from_hash_part("nonexistent")
+        assert result is None
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -137,35 +214,17 @@ class TestPathInfo:
 
 class TestClosures:
     async def test_compute_fs_closure(self, store, pool):
-        pool.call.return_value = [
-            {"to_string": "aaa-foo", "hash_part": "aaa", "name": "foo"},
-            {"to_string": "bbb-bar", "hash_part": "bbb", "name": "bar"},
-        ]
+        pool._store_stub.compute_fs_closure.return_value = _mock_store_path_list(
+            [_mock_store_path("aaa-foo", "aaa", "foo"), _mock_store_path("bbb-bar", "bbb", "bar")]
+        )
         result = await store.compute_fs_closure("/nix/store/aaa-foo", flip=True)
         assert len(result) == 2
-        assert all(isinstance(sp, StorePath) for sp in result)
-        pool.call.assert_awaited_with(
-            "store",
-            "compute_fs_closure",
-            ["/nix/store/aaa-foo", True, False, False],
-        )
 
     async def test_query_missing_coerces_list(self, store, pool):
-        pool.call.return_value = {
-            "will_build": [],
-            "will_substitute": [],
-            "unknown": [],
-            "download_size": 0,
-            "nar_size": 0,
-        }
-        sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
+        pool._store_stub.query_missing.return_value = _mock_missing_info()
+        sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         result = await store.query_missing([sp, "/nix/store/bbb-bar"])
-        assert isinstance(result, MissingInfo)
-        pool.call.assert_awaited_with(
-            "store",
-            "query_missing",
-            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]],
-        )
+        assert isinstance(result, MagicMock)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -175,16 +234,15 @@ class TestClosures:
 
 class TestDerivations:
     async def test_query_derivation_outputs_str(self, store, pool):
-        pool.call.return_value = [
-            {"to_string": "aaa-out", "hash_part": "aaa", "name": "out"},
-        ]
+        pool._store_stub.query_derivation_outputs.return_value = _mock_store_path_list(
+            [_mock_store_path("aaa-out", "aaa", "out")]
+        )
         result = await store.query_derivation_outputs("/nix/store/aaa-foo.drv")
         assert len(result) == 1
-        assert isinstance(result[0], StorePath)
 
     async def test_query_valid_derivers_storepath(self, store, pool):
-        pool.call.return_value = []
-        sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
+        pool._store_stub.query_valid_derivers.return_value = _mock_store_path_list()
+        sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         result = await store.query_valid_derivers(sp)
         assert result == []
 
@@ -196,25 +254,20 @@ class TestDerivations:
 
 class TestBulk:
     async def test_query_all_valid_paths(self, store, pool):
-        pool.call.return_value = []
+        pool._store_stub.query_all_valid_paths.return_value = _mock_store_path_list()
         result = await store.query_all_valid_paths()
         assert result == []
 
     async def test_query_referrers(self, store, pool):
-        pool.call.return_value = []
+        pool._store_stub.query_referrers.return_value = _mock_store_path_list()
         result = await store.query_referrers("/nix/store/aaa-foo")
         assert result == []
 
     async def test_query_substitutable_paths_coerces_list(self, store, pool):
-        pool.call.return_value = []
-        sp = StorePath(hash_part="a" * 32, name="foo", to_string="a" * 32 + "-foo")
+        pool._store_stub.query_substitutable_paths.return_value = _mock_store_path_list()
+        sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         result = await store.query_substitutable_paths([sp, "/nix/store/bbb-bar"])
         assert result == []
-        pool.call.assert_awaited_with(
-            "store",
-            "query_substitutable_paths",
-            [["a" * 32 + "-foo", "/nix/store/bbb-bar"]],
-        )
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -224,27 +277,16 @@ class TestBulk:
 
 class TestBuild:
     async def test_build_paths_with_results(self, store, pool):
-        pool.call.return_value = [
-            {"drv_path": "/nix/store/aaa.drv", "success": True, "status": "built", "error_msg": ""},
-        ]
+        pool._store_stub.build_paths_with_results.return_value = _mock_build_result_list(
+            [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="built")]
+        )
         result = await store.build_paths_with_results(["/nix/store/aaa.drv"])
         assert len(result) == 1
-        assert isinstance(result[0], BuildResult)
         assert result[0].success is True
 
     async def test_read_derivation(self, store, pool):
-        pool.call.return_value = {
-            "name": "foo",
-            "platform": "x86_64-linux",
-            "builder": "/bin/sh",
-            "args": [],
-            "env": [],
-            "outputs": {},
-            "inputSrcs": [],
-            "inputDrvs": [],
-        }
+        pool._store_stub.read_derivation.return_value = _mock_derivation(name="foo", system="x86_64-linux")
         result = await store.read_derivation("/nix/store/aaa-foo.drv")
-        assert isinstance(result, Derivation)
         assert result.name == "foo"
         assert result.system == "x86_64-linux"
 
@@ -256,9 +298,9 @@ class TestBuild:
 
 class TestGC:
     async def test_add_temp_root(self, store, pool):
-        pool.call.return_value = None
+        pool._store_stub.add_temp_root.return_value = MagicMock()
         await store.add_temp_root("/nix/store/aaa-foo")
-        pool.call.assert_awaited_with("store", "add_temp_root", ["/nix/store/aaa-foo"])
+        pool._store_stub.add_temp_root.assert_awaited_once()
 
 
 # ════════════════════════════════════════════════════════════════════

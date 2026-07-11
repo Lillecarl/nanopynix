@@ -1,4 +1,4 @@
-"""Eval and flake RPC dispatch for the worker subprocess."""
+"""gRPC EvalService handler for the worker subprocess."""
 
 from __future__ import annotations
 
@@ -6,211 +6,282 @@ from typing import Any, cast
 
 import nanopynix_expr
 import nanopynix_flake
-from nanopynix import _protocol as rpc
-from nanopynix._extract import flake_ref_attrs as _flake_ref_attrs
-from nanopynix._extract import locked_flake as _locked_flake
-from nanopynix._worker_common import Endpoint, dispatch
-from nanopynix.models import (
-    AttrsCallArg,
-    DeepAttrs,
-    DeepList,
-    DeepScalar,
-    FlakeRef,
-    ListCallArg,
-    RemoteCallArg,
-    RemoteValueRef,
-    ScalarCallArg,
-    ValueHandle,
+from nanopynix._extract import (
+    flake_ref_attrs as _flake_ref_attrs,
+    locked_flake as _locked_flake,
+)
+from nanopynix_proto.nix import common as common_pb
+from nanopynix_proto.nix.eval import (
+    AttrNamesRequest,
+    AttrNamesResponse,
+    AttrRequest,
+    CallLockedFlakeRequest,
+    CallRequest,
+    EvalFileRequest,
+    EvalFlakeRequest,
+    EvalServiceBase,
+    EvalStringRequest,
+    ForceDeepRequest,
+    ForceJsonRequest,
+    ForceJsonResponse,
+    ForceRequest,
+    GetFlakeRequest,
+    HasAttrRequest,
+    HasAttrResponse,
+    ListGetRequest,
+    ListLengthRequest,
+    ListLengthResponse,
+    LockFlakeRequest,
+    ReleaseAllRequest,
+    ReleaseAllResponse,
+    ReleaseLockedFlakeRequest,
+    ReleaseLockedFlakeResponse,
+    ReleaseRequest,
+    ReleaseResponse,
+    TypeNameRequest,
+    TypeNameResponse,
+    WriteLockFileRequest,
+    WriteLockFileResponse,
 )
 
-_es: nanopynix_expr.EvalState | None = None
+# ── NixType string → enum mapping ────────────────────────────────────
 
-_locked_flakes: dict[int, nanopynix_flake.LockedFlake] = {}
-_next_lf_handle: int = 1
+_NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
+    "thunk": common_pb.NixType.THUNK,
+    "int": common_pb.NixType.INT,
+    "float": common_pb.NixType.FLOAT,
+    "bool": common_pb.NixType.BOOL,
+    "string": common_pb.NixType.STRING,
+    "path": common_pb.NixType.PATH,
+    "null": common_pb.NixType.NULL,
+    "attrs": common_pb.NixType.ATTRS,
+    "list": common_pb.NixType.LIST,
+    "function": common_pb.NixType.FUNCTION,
+    "external": common_pb.NixType.EXTERNAL,
+    "unknown": common_pb.NixType.UNKNOWN,
+}
 
+_FORCE_SCALAR_TYPES = frozenset({"null", "int", "float", "bool", "string", "path"})
+# ── scalar conversion helpers ────────────────────────────────────────
+def _pyval_to_scalar(v: Any) -> common_pb.ScalarValue:
+    """Convert a Python JSON-scalar value to a ScalarValue proto message."""
+    if v is None:
+        return common_pb.ScalarValue(null_value=common_pb.NullValue())
+    if isinstance(v, bool):
+        return common_pb.ScalarValue(bool_value=v)
+    if isinstance(v, int):
+        return common_pb.ScalarValue(int_value=v)
+    if isinstance(v, float):
+        return common_pb.ScalarValue(float_value=v)
+    return common_pb.ScalarValue(string_value=str(v))
+# ── Service handler ──────────────────────────────────────────────────
+class EvalServiceHandler(EvalServiceBase):
+    """gRPC handler for all eval/flake operations."""
 
-def _get_es(store):
-    global _es
-    if _es is None:
-        _es = nanopynix_expr.EvalState(store)
-    return _es
+    def __init__(self, state: Any) -> None:
+        self._state = state
 
+    # ── eval state management ─────────────────────────────────────
 
-def _reset_es():
-    """Release eval and locked-flake handles for a fresh session."""
-    global _es, _locked_flakes, _next_lf_handle
-    if _es is not None:
-        _es.release_all_exported()
-        _es = None
-    _locked_flakes.clear()
-    _next_lf_handle = 1
+    def _get_es(self) -> Any:
+        if self._state.eval_state is None:
+            if self._state.store is None:
+                raise RuntimeError("store not initialized")
+            self._state.eval_state = nanopynix_expr.EvalState(self._state.store)
+        return self._state.eval_state
 
+    def _reset(self) -> None:
+        """Release eval and locked-flake handles for a fresh session."""
+        es = self._state.eval_state
+        if es is not None:
+            es.release_all_exported()
+            self._state.eval_state = None
+        self._state.locked_flakes.clear()
+        self._state._next_lf_handle = 1
 
-def _flake_ref(ref):
-    if isinstance(ref, str):
-        return nanopynix_flake.parse_flake_ref(ref)
-    msg = "flake references over RPC must currently be strings"
-    raise TypeError(msg)
+    # ── value export helpers ──────────────────────────────────────
 
-
-def eval_dispatch(store):
-    """Return dispatch dict for eval operations."""
-
-    def _export(pyv):
-        es = _get_es(store)
+    def _export(self, pyv: Any) -> common_pb.ValueHandle:
+        es = self._get_es()
         h = cast("Any", es)._export_pyvalue(pyv)
-        return ValueHandle(handle=h, type=pyv.type_name()).model_dump(mode="json")
+        type_name = pyv.type_name()
+        nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
+        return common_pb.ValueHandle(handle=h, type=nix_type)
 
-    def _remote_value(pyv) -> RemoteValueRef:
-        return RemoteValueRef(value=ValueHandle.model_validate(_export(pyv)))
-
-    def _deep_value(pyv):
+    def _deep_value(self, pyv: Any) -> common_pb.DeepValue:
         pyv.force()
         typ = pyv.type_name()
         if typ == "attrs":
-            return DeepAttrs(attrs={name: _deep_value(pyv.attr_get(name)) for name in pyv.attr_names()})
+            return common_pb.DeepValue(
+                attrs=common_pb.DeepAttrs(
+                    entries={name: self._deep_value(pyv.attr_get(name)) for name in pyv.attr_names()}
+                )
+            )
         if typ == "list":
-            return DeepList(items=[_deep_value(pyv.list_get(idx)) for idx in range(pyv.list_length())])
+            return common_pb.DeepValue(
+                list=common_pb.DeepList(
+                    items=[self._deep_value(pyv.list_get(idx)) for idx in range(pyv.list_length())]
+                )
+            )
         if typ == "function":
-            return _remote_value(pyv)
-        if typ in {"null", "int", "float", "bool", "string", "path"}:
-            return DeepScalar(value=pyv.to_python())
-        msg = f"cannot forceDeep unsupported Nix value type '{typ}' over RPC"
-        raise TypeError(msg)
+            return common_pb.DeepValue(remote_value=self._export(pyv))
+        if typ in _FORCE_SCALAR_TYPES:
+            return common_pb.DeepValue(scalar=_pyval_to_scalar(pyv.to_python()))
+        raise TypeError(f"cannot forceDeep unsupported Nix value type '{typ}' over RPC")
 
-    def _force_handle(handle: int):
-        value = _get_es(store).value_from_handle(handle)
+    def _force_handle(self, handle: int) -> common_pb.ForceValue:
+        value = self._get_es().value_from_handle(handle)
         value.force()
         if value.type_name() == "function":
-            return _remote_value(value)
-        return value.to_python()
+            return common_pb.ForceValue(remote_value=self._export(value))
+        return common_pb.ForceValue(scalar=_pyval_to_scalar(value.to_python()))
 
-    def _type_name(handle: int):
-        value = _get_es(store).value_from_handle(handle)
-        value.force()
-        return value.type_name()
+    @staticmethod
+    def _call_arg_to_python(arg: common_pb.CallArg, es: Any) -> Any:
+        """Convert a CallArg proto to a Python/nanobind value for Nix calls."""
+        if arg.scalar is not None:
+            sv = arg.scalar
+            if sv.string_value is not None:
+                return sv.string_value
+            if sv.int_value is not None:
+                return sv.int_value
+            if sv.float_value is not None:
+                return sv.float_value
+            if sv.bool_value is not None:
+                return sv.bool_value
+            return None  # null_value
+        if arg.list is not None:
+            return [EvalServiceHandler._call_arg_to_python(item, es) for item in arg.list.items]
+        if arg.attrs is not None:
+            return {
+                key: EvalServiceHandler._call_arg_to_python(val, es)
+                for key, val in arg.attrs.entries.items()
+            }
+        if arg.remote_value is not None:
+            return es.value_from_handle(arg.remote_value.handle)
+        raise TypeError(f"unsupported call argument: {arg!r}")
 
-    def call(req: rpc.Call):
-        es = _get_es(store)
-        fn = es.value_from_handle(req.handle)
+    # ── eval methods ──────────────────────────────────────────────
 
-        def _call_arg_to_python(arg: rpc.CallArgWire):
-            if isinstance(arg, RemoteCallArg):
-                return es.value_from_handle(arg.handle)
-            if isinstance(arg, ScalarCallArg):
-                return arg.value
-            if isinstance(arg, ListCallArg):
-                return [_call_arg_to_python(item) for item in arg.items]
-            if isinstance(arg, AttrsCallArg):
-                return {key: _call_arg_to_python(item) for key, item in arg.attrs.items()}
-            raise TypeError(f"unsupported call argument: {arg!r}")
+    async def eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
+        return self._export(self._get_es().eval_file(message.path))
 
-        result = fn
-        for arg in req.args:
-            result = result.call(es.value_from_python(_call_arg_to_python(arg)))
-        return _export(result)
+    async def eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
+        return self._export(self._get_es().eval_string(message.expr, message.source_name))
 
-    def eval_file(req: rpc.EvalFile):
-        return _export(_get_es(store).eval_file(req.path))
+    async def force(self, message: ForceRequest) -> common_pb.ForceValue:
+        return self._force_handle(message.handle)
 
-    def eval_string(req: rpc.EvalString):
-        return _export(_get_es(store).eval_string(req.expr, req.source_name))
-
-    def force(req: rpc.Force):
-        return _force_handle(req.handle)
-
-    def force_deep(req: rpc.ForceDeep):
-        value = _get_es(store).value_from_handle(req.handle)
+    async def force_deep(self, message: ForceDeepRequest) -> common_pb.DeepValue:
+        value = self._get_es().value_from_handle(message.handle)
         value.force_deep()
-        return _deep_value(value)
+        return self._deep_value(value)
 
-    def force_json(req: rpc.ForceJson):
-        value = _get_es(store).value_from_handle(req.handle)
-        return value.to_json(copy_to_store=req.copy_to_store)
+    async def force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
+        value = self._get_es().value_from_handle(message.handle)
+        return ForceJsonResponse(json=value.to_json(copy_to_store=message.copy_to_store))
 
-    def attr(req: rpc.Attr):
-        return _export(_get_es(store).value_from_handle(req.handle).attr_get(req.name))
+    async def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
+        return self._export(self._get_es().value_from_handle(message.handle).attr_get(message.name))
 
-    def list_get(req: rpc.ListGet):
-        if req.index < 0:
-            raise IndexError(f"list index must be non-negative, got {req.index}")
-        return _export(_get_es(store).value_from_handle(req.handle).list_get(req.index))
-
-    def list_length(req: rpc.ListLength):
-        return _get_es(store).value_from_handle(req.handle).list_length()
-
-    def attr_names(req: rpc.AttrNames):
-        return _get_es(store).value_from_handle(req.handle).attr_names()
-
-    def has_attr(req: rpc.HasAttr):
-        return _get_es(store).value_from_handle(req.handle).has_attr(req.name)
-
-    def type_name(req: rpc.TypeName):
-        return _type_name(req.handle)
-
-    def lock_flake(req: rpc.LockFlake):
-        global _next_lf_handle
-        ref = nanopynix_flake.parse_flake_ref(req.ref)
-        lf = nanopynix_flake.lock_flake(
-            _get_es(store),
-            ref,
-            update_inputs=req.update_inputs,
-            write_lock_file=req.write_lock_file,
+    async def list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
+        if message.index < 0:
+            raise IndexError(f"list index must be non-negative, got {message.index}")
+        return self._export(
+            self._get_es().value_from_handle(message.handle).list_get(message.index)
         )
-        handle = _next_lf_handle
-        _next_lf_handle += 1
-        _locked_flakes[handle] = lf
-        result = _locked_flake(lf)
-        result["handle"] = handle
-        return result
 
-    def call_locked_flake(req: rpc.CallLockedFlake):
-        lf = _locked_flakes.get(req.handle)
-        if lf is None:
-            raise KeyError(f"locked flake handle {req.handle} not found")
-        pyv = nanopynix_flake.call_flake(_get_es(store), lf)
-        return _export(pyv)
+    async def list_length(self, message: ListLengthRequest) -> ListLengthResponse:
+        return ListLengthResponse(
+            length=self._get_es().value_from_handle(message.handle).list_length()
+        )
 
-    def write_lock_file(req: rpc.WriteLockFile):
-        lf = _locked_flakes.get(req.handle)
+    async def attr_names(self, message: AttrNamesRequest) -> AttrNamesResponse:
+        return AttrNamesResponse(
+            names=self._get_es().value_from_handle(message.handle).attr_names()
+        )
+
+    async def has_attr(self, message: HasAttrRequest) -> HasAttrResponse:
+        return HasAttrResponse(
+            has=self._get_es().value_from_handle(message.handle).has_attr(message.name)
+        )
+
+    async def type_name(self, message: TypeNameRequest) -> TypeNameResponse:
+        value = self._get_es().value_from_handle(message.handle)
+        value.force()
+        type_name = value.type_name()
+        nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
+        return TypeNameResponse(**{"type": nix_type})
+
+    async def call(self, message: CallRequest) -> common_pb.ValueHandle:
+        es = self._get_es()
+        fn = es.value_from_handle(message.handle)
+        result = fn
+        for arg in message.args:
+            result = result.call(es.value_from_python(self._call_arg_to_python(arg, es)))
+        return self._export(result)
+
+    # ── flake methods ─────────────────────────────────────────────
+
+    async def lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
+        ref = nanopynix_flake.parse_flake_ref(message.ref)
+
+        if message.update_all is not None:
+            update_inputs: bool | list[str] = message.update_all
+        elif message.update_inputs_list is not None:
+            update_inputs = list(message.update_inputs_list.inputs)
+        else:
+            update_inputs = False
+
+        lf = nanopynix_flake.lock_flake(
+            self._get_es(),
+            ref,
+            update_inputs=update_inputs,
+            write_lock_file=message.write_lock_file,
+        )
+        handle = self._state._next_lf_handle
+        self._state._next_lf_handle += 1
+        self._state.locked_flakes[handle] = lf
+
+        lf_pb = _locked_flake(lf)
+        lf_pb.handle = handle
+        return lf_pb
+
+    async def call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
+        lf = self._state.locked_flakes.get(message.handle)
         if lf is None:
-            raise KeyError(f"locked flake handle {req.handle} not found")
+            raise KeyError(f"locked flake handle {message.handle} not found")
+        pyv = nanopynix_flake.call_flake(self._get_es(), lf)
+        return self._export(pyv)
+
+    async def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
+        lf = self._state.locked_flakes.get(message.handle)
+        if lf is None:
+            raise KeyError(f"locked flake handle {message.handle} not found")
         lf.write_lock_file()
+        return WriteLockFileResponse()
 
-    def release_locked_flake(req: rpc.ReleaseLockedFlake):
-        _locked_flakes.pop(req.handle, None)
+    async def release_locked_flake(
+        self, message: ReleaseLockedFlakeRequest
+    ) -> ReleaseLockedFlakeResponse:
+        self._state.locked_flakes.pop(message.handle, None)
+        return ReleaseLockedFlakeResponse()
 
-    def eval_flake(req: rpc.EvalFlake):
-        pyv = nanopynix_flake.eval_flake(_get_es(store), req.ref, req.write_lock_file)
-        return _export(pyv)
+    async def eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
+        pyv = nanopynix_flake.eval_flake(
+            self._get_es(), message.ref, message.write_lock_file
+        )
+        return self._export(pyv)
 
-    def get_flake(req: rpc.GetFlake) -> FlakeRef:
-        return FlakeRef(attrs=_flake_ref_attrs(nanopynix_flake.get_flake(_get_es(store), _flake_ref(req.ref))))
+    async def get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
+        ref = nanopynix_flake.parse_flake_ref(message.ref)
+        fr = nanopynix_flake.get_flake(self._get_es(), ref)
+        return common_pb.FlakeRef(attrs=_flake_ref_attrs(fr))
 
-    def release(req: rpc.Release):
-        return _get_es(store).release_exported(req.handle)
+    async def release(self, message: ReleaseRequest) -> ReleaseResponse:
+        self._get_es().release_exported(message.handle)
+        return ReleaseResponse()
 
-    return dispatch(
-        [
-            Endpoint(rpc.EvalFile, eval_file),
-            Endpoint(rpc.EvalString, eval_string),
-            Endpoint(rpc.Force, force),
-            Endpoint(rpc.ForceDeep, force_deep),
-            Endpoint(rpc.ForceJson, force_json),
-            Endpoint(rpc.Attr, attr),
-            Endpoint(rpc.ListGet, list_get),
-            Endpoint(rpc.ListLength, list_length),
-            Endpoint(rpc.AttrNames, attr_names),
-            Endpoint(rpc.HasAttr, has_attr),
-            Endpoint(rpc.TypeName, type_name),
-            Endpoint(rpc.Call, call),
-            Endpoint(rpc.LockFlake, lock_flake),
-            Endpoint(rpc.CallLockedFlake, call_locked_flake),
-            Endpoint(rpc.WriteLockFile, write_lock_file),
-            Endpoint(rpc.ReleaseLockedFlake, release_locked_flake),
-            Endpoint(rpc.EvalFlake, eval_flake),
-            Endpoint(rpc.GetFlake, get_flake),
-            Endpoint(rpc.Release, release),
-            Endpoint(rpc.ReleaseAll, lambda _: _reset_es()),
-        ]
-    )
+    async def release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:
+        self._reset()
+        return ReleaseAllResponse()
