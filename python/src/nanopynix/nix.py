@@ -1,7 +1,7 @@
 """Session manager — lifecycle, configuration, and entry point for all facades.
 
 Manages a single subprocess worker via ``_WorkerManager``.  The worker is an
-independent Nix process (forkserver-based) with its own Store connection,
+independent Nix process (forkserver-based gRPC) with its own Store connection,
 logger, and configuration.
 
 Usage::
@@ -16,6 +16,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -24,6 +25,7 @@ from nanopynix._pool import _WorkerManager
 from nanopynix._session import EvalSession
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.store import StoreHandle
+from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping, Sequence
@@ -31,14 +33,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _raw_log_event(raw: dict[str, Any]) -> LogEvent:
+def _raw_log_event(raw: LogEventProto) -> LogEvent:
+    """Convert a proto LogEvent to a pydantic LogEvent model."""
+    args = _json.loads(raw.args_json) if raw.args_json else []
     data: dict[str, Any] = {
-        "request_id": raw.get("request_id", raw.get("id", 0)),
-        "action": raw["action"],
-        "args": raw["args"],
+        "request_id": raw.request_id,
+        "action": raw.action,
+        "args": args,
     }
-    if raw["action"] == "result" and len(raw["args"]) > 1:
-        data["result_type"] = raw["args"][1]
+    if raw.action == "result":
+        data["result_type"] = raw.result_type
     return LogEvent.model_validate(data)
 
 
@@ -54,7 +58,7 @@ class LogCapture:
         def _append(raw: object) -> None:
             if raw is None:
                 return
-            if isinstance(raw, dict):
+            if isinstance(raw, LogEventProto):
                 self.events.append(_raw_log_event(raw))
 
         self._sub = self._manager.subscribe(_append)
@@ -90,8 +94,8 @@ class Session:
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
         primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
-        worker_oom_score_adj: int | None = 500,
-        reserved_worker_oom_score_adj: int | None = 250,
+        worker_oom_score_adj: int | None = None,
+        reserved_worker_oom_score_adj: int | None = None,
     ) -> None:
         if config is not None and settings is not None:
             raise TypeError("Use either config= or settings=, not both")
@@ -157,13 +161,12 @@ class Session:
     def subscribe(self, callback):
         """Subscribe a callback to live log events.
 
-        The callback receives raw event dicts from the worker
-        (``{\"id\": ..., \"action\": ..., \"args\": [...]}``).
+        The callback receives raw ``LogEvent`` proto messages from the worker.
         Returns a handle — call ``.unsubscribe()`` to stop.
 
         Usage::
 
-            sub = session.subscribe(lambda e: print(e[\"action\"]))
+            sub = session.subscribe(lambda e: print(e.action))
             ...
             sub.unsubscribe()
         """

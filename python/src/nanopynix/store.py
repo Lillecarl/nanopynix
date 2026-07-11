@@ -1,8 +1,8 @@
 """Store facade — async Python wrapper over Nix store operations.
 
 ``StoreHandle`` is a context manager returned by ``Session.store()``.
-It delegates every call to the session's ``_WorkerManager`` and carries
-a ``_session_id`` that ``Eval`` checks at runtime.
+It delegates every call to the session's ``_WorkerManager._store_stub`` and
+carries a ``_session_id`` that ``Eval`` checks at runtime.
 """
 
 from __future__ import annotations
@@ -10,13 +10,35 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import nanopynix_store  # BuildMode enum
-from nanopynix import _protocol as rpc
-from nanopynix.models import BuildResult, Derivation, Input, MissingInfo, PathInfo, StorePath
+from nanopynix._pool import _RPC_TIMEOUT, _grpc_call
+from nanopynix_proto.nix.store import (
+    AddTempRootRequest,
+    BuildDerivationRequest,
+    BuildPathsWithResultsRequest,
+    ComputeFsClosureRequest,
+    FetchFromAttrsRequest,
+    FetchFromUrlRequest,
+    FollowLinksToStorePathRequest,
+    GetStoreDirRequest,
+    GetUriRequest,
+    IsValidPathRequest,
+    ParseStorePathRequest,
+    QueryAllValidPathsRequest,
+    QueryDerivationOutputsRequest,
+    QueryMissingRequest,
+    QueryPathFromHashPartRequest,
+    QueryPathInfoRequest,
+    QueryReferrersRequest,
+    QuerySubstitutablePathsRequest,
+    QueryValidDeriversRequest,
+    ReadDerivationRequest,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from nanopynix._pool import _WorkerManager
+    from nanopynix_proto.nix.common import AttrsValue, BuildResult, Derivation, Input, MissingInfo, PathInfo, StorePath
 
 
 def _to_str(path: StorePath | str) -> str:
@@ -27,6 +49,17 @@ def _to_str(path: StorePath | str) -> str:
 def _to_strs(paths: Sequence[StorePath | str]) -> list[str]:
     """Coerce a list of StorePath|str to a list of store-path strings."""
     return [p.to_string if isinstance(p, StorePath) else p for p in paths]
+
+
+def _pyval_to_attrs_value(v: str | int | bool) -> AttrsValue:
+    """Convert a Python JSON-scalar value to a proto AttrsValue."""
+    from nanopynix_proto.nix.common import AttrsValue
+
+    if isinstance(v, bool):
+        return AttrsValue(bool_value=v)
+    if isinstance(v, int):
+        return AttrsValue(int_value=v)
+    return AttrsValue(string_value=str(v))
 
 
 def _build_mode_value(build_mode: nanopynix_store.BuildMode | int) -> int:
@@ -79,37 +112,55 @@ class StoreHandle:
 
     async def get_uri(self) -> str:
         self._check_active()
-        return await self._pool.request(rpc.GetUri())
+        resp = await _grpc_call(self._pool._store_stub.get_uri(GetUriRequest(), timeout=_RPC_TIMEOUT))
+        return resp.uri
 
     async def get_store_dir(self) -> str:
         self._check_active()
-        return await self._pool.request(rpc.GetStoreDir())
+        resp = await _grpc_call(self._pool._store_stub.get_store_dir(GetStoreDirRequest(), timeout=_RPC_TIMEOUT))
+        return resp.dir
 
     # ── StorePath parsing ─────────────────────────────────────────
 
     async def parse_store_path(self, path: str) -> StorePath:
         self._check_active()
-        return await self._pool.request(rpc.ParseStorePath(path=path))
+        return await _grpc_call(
+            self._pool._store_stub.parse_store_path(ParseStorePathRequest(path=path), timeout=_RPC_TIMEOUT)
+        )
 
     async def is_valid_path(self, path: StorePath | str) -> bool:
         self._check_active()
         s = _to_str(path)
-        return await self._pool.request(rpc.IsValidPath(path=s))
+        resp = await _grpc_call(
+            self._pool._store_stub.is_valid_path(IsValidPathRequest(path=s), timeout=_RPC_TIMEOUT)
+        )
+        return resp.valid
 
     async def follow_links_to_store_path(self, path: str) -> StorePath:
         self._check_active()
-        return await self._pool.request(rpc.FollowLinksToStorePath(path=path))
+        return await _grpc_call(
+            self._pool._store_stub.follow_links_to_store_path(
+                FollowLinksToStorePathRequest(path=path), timeout=_RPC_TIMEOUT
+            )
+        )
 
     # ── Path info ─────────────────────────────────────────────────
 
     async def query_path_info(self, path: StorePath | str) -> PathInfo:
         self._check_active()
         s = _to_str(path)
-        return await self._pool.request(rpc.QueryPathInfo(path=s))
+        return await _grpc_call(
+            self._pool._store_stub.query_path_info(QueryPathInfoRequest(path=s), timeout=_RPC_TIMEOUT)
+        )
 
     async def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
         self._check_active()
-        return await self._pool.request(rpc.QueryPathFromHashPart(hash_part=hash_part))
+        resp = await _grpc_call(
+            self._pool._store_stub.query_path_from_hash_part(
+                QueryPathFromHashPartRequest(hash_part=hash_part), timeout=_RPC_TIMEOUT
+            )
+        )
+        return resp.path
 
     # ── Closures ──────────────────────────────────────────────────
 
@@ -122,47 +173,76 @@ class StoreHandle:
     ) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await self._pool.request(
-            rpc.ComputeFsClosure(
-                path=s,
-                flip_direction=flip,
-                include_outputs=include_outputs,
-                include_derivers=include_derivers,
+        resp = await _grpc_call(
+            self._pool._store_stub.compute_fs_closure(
+                ComputeFsClosureRequest(
+                    path=s,
+                    flip_direction=flip,
+                    include_outputs=include_outputs,
+                    include_derivers=include_derivers,
+                ),
+                timeout=_RPC_TIMEOUT,
             )
         )
+        return resp.paths
 
     async def query_missing(self, paths: list[StorePath | str]) -> MissingInfo:
         self._check_active()
         strs = _to_strs(paths)
-        return await self._pool.request(rpc.QueryMissing(paths=strs))
+        return await _grpc_call(
+            self._pool._store_stub.query_missing(QueryMissingRequest(paths=strs), timeout=_RPC_TIMEOUT)
+        )
 
     # ── Derivations ───────────────────────────────────────────────
 
     async def query_derivation_outputs(self, path: StorePath | str) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await self._pool.request(rpc.QueryDerivationOutputs(path=s))
+        resp = await _grpc_call(
+            self._pool._store_stub.query_derivation_outputs(
+                QueryDerivationOutputsRequest(path=s), timeout=_RPC_TIMEOUT
+            )
+        )
+        return resp.paths
 
     async def query_valid_derivers(self, path: StorePath | str) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await self._pool.request(rpc.QueryValidDerivers(path=s))
+        resp = await _grpc_call(
+            self._pool._store_stub.query_valid_derivers(
+                QueryValidDeriversRequest(path=s), timeout=_RPC_TIMEOUT
+            )
+        )
+        return resp.paths
 
     # ── Bulk queries ──────────────────────────────────────────────
 
     async def query_all_valid_paths(self) -> list[StorePath]:
         self._check_active()
-        return await self._pool.request(rpc.QueryAllValidPaths())
+        resp = await _grpc_call(
+            self._pool._store_stub.query_all_valid_paths(
+                QueryAllValidPathsRequest(), timeout=_RPC_TIMEOUT
+            )
+        )
+        return resp.paths
 
     async def query_referrers(self, path: StorePath | str) -> list[StorePath]:
         self._check_active()
         s = _to_str(path)
-        return await self._pool.request(rpc.QueryReferrers(path=s))
+        resp = await _grpc_call(
+            self._pool._store_stub.query_referrers(QueryReferrersRequest(path=s), timeout=_RPC_TIMEOUT)
+        )
+        return resp.paths
 
     async def query_substitutable_paths(self, paths: Sequence[StorePath | str]) -> list[StorePath]:
         self._check_active()
         strs = _to_strs(paths)
-        return await self._pool.request(rpc.QuerySubstitutablePaths(paths=strs))
+        resp = await _grpc_call(
+            self._pool._store_stub.query_substitutable_paths(
+                QuerySubstitutablePathsRequest(paths=strs), timeout=_RPC_TIMEOUT
+            )
+        )
+        return resp.paths
 
     # ── Build ─────────────────────────────────────────────────────
 
@@ -172,7 +252,12 @@ class StoreHandle:
     ) -> list[BuildResult]:
         self._check_active()
         strs = _to_strs(paths)
-        return await self._pool.request(rpc.BuildPathsWithResults(paths=strs))
+        resp = await _grpc_call(
+            self._pool._store_stub.build_paths_with_results(
+                BuildPathsWithResultsRequest(paths=strs), timeout=_RPC_TIMEOUT
+            )
+        )
+        return resp.results
 
     async def read_derivation(
         self,
@@ -180,7 +265,9 @@ class StoreHandle:
     ) -> Derivation:
         self._check_active()
         s = _to_str(drv_path)
-        return await self._pool.request(rpc.ReadDerivation(path=s))
+        return await _grpc_call(
+            self._pool._store_stub.read_derivation(ReadDerivationRequest(path=s), timeout=_RPC_TIMEOUT)
+        )
 
     async def build_derivation(
         self,
@@ -190,24 +277,35 @@ class StoreHandle:
         self._check_active()
         s = _to_str(drv_path)
         mode = _build_mode_value(build_mode)
-        return await self._pool.request(rpc.BuildDerivation(path=s, build_mode=mode))
+        return await _grpc_call(
+            self._pool._store_stub.build_derivation(
+                BuildDerivationRequest(path=s, build_mode=mode), timeout=_RPC_TIMEOUT
+            )
+        )
 
     # ── GC ────────────────────────────────────────────────────────
 
     async def add_temp_root(self, path: StorePath | str) -> None:
         self._check_active()
         s = _to_str(path)
-        return await self._pool.request(rpc.AddTempRoot(path=s))
+        await _grpc_call(
+            self._pool._store_stub.add_temp_root(AddTempRootRequest(path=s), timeout=_RPC_TIMEOUT)
+        )
 
     # ── Fetchers ──────────────────────────────────────────────────
 
     async def fetch_from_url(self, url: str) -> Input:
         self._check_active()
-        return await self._pool.request(rpc.FetchFromUrl(url=url))
+        return await _grpc_call(
+            self._pool._store_stub.fetch_from_url(FetchFromUrlRequest(url=url), timeout=_RPC_TIMEOUT)
+        )
 
     async def fetch_from_attrs(self, attrs: dict[str, str | int | bool]) -> Input:
         self._check_active()
-        return await self._pool.request(rpc.FetchFromAttrs(attrs=attrs))
+        proto_attrs = {k: _pyval_to_attrs_value(v) for k, v in attrs.items()}
+        return await _grpc_call(
+            self._pool._store_stub.fetch_from_attrs(FetchFromAttrsRequest(attrs=proto_attrs), timeout=_RPC_TIMEOUT)
+        )
 
 
 # Backward-compatible alias

@@ -1,5 +1,5 @@
 # ruff: noqa: ASYNC109
-"""Eval session — exclusive worker lock + ValueProxy for eval over RPC."""
+"""Eval session — exclusive worker lock + ValueProxy for eval over gRPC."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, overload
 
-from nanopynix import _protocol as rpc
+from nanopynix._pool import _grpc_call
 from nanopynix.exceptions import (
     EvalSessionClosedError,
     ForeignValueError,
@@ -16,37 +16,83 @@ from nanopynix.exceptions import (
     ValueReleasedError,
     WrongNixTypeError,
 )
-from nanopynix.models import (
-    AttrsCallArg,
-    CallArgWire,
-    DeepAttrs,
-    DeepList,
-    DeepScalar,
-    DeepValueWire,
-    FlakeRef,
-    JsonScalar,
-    JsonValue,
-    ListCallArg,
-    LockedInput,
-    NixType,
-    RemoteCallArg,
-    RemoteValueRef,
-    ScalarCallArg,
-)
-from nanopynix.models import (
-    LockedFlake as LockedFlakeWire,
-)
+from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
+from nanopynix_proto.nix.common import CallArg, CallArgAttrs, CallArgList, DeepValue, ForceValue, NullValue, RemoteCallArg, ScalarValue, ValueHandle
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from nanopynix._pool import ReservedWorker, _WorkerManager
+    from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
     type _EvalWorker = ReservedWorker | _WorkerManager
 
 
 # ════════════════════════════════════════════════════════════════════
-# ValueProxy — thin RPC client for exported eval handles
+# Proto ↔ model NixType conversion
+# ════════════════════════════════════════════════════════════════════
+
+
+def _scalar_to_pyval(scalar: ScalarValue | None) -> JsonScalar:
+    """Convert a proto ScalarValue to a Python JSON-scalar."""
+    if scalar is None:
+        return None
+    if scalar.string_value is not None:
+        return scalar.string_value
+    if scalar.int_value is not None:
+        return scalar.int_value
+    if scalar.float_value is not None:
+        return scalar.float_value
+    if scalar.bool_value is not None:
+        return scalar.bool_value
+    return None  # null_value
+
+
+def _pyval_to_scalar(v: JsonScalar) -> ScalarValue:
+    """Convert a Python JSON-scalar value to a proto ScalarValue."""
+    if v is None:
+        return ScalarValue(null_value=NullValue())
+    if isinstance(v, bool):
+        return ScalarValue(bool_value=v)
+    if isinstance(v, int):
+        return ScalarValue(int_value=v)
+    if isinstance(v, float):
+        return ScalarValue(float_value=v)
+    return ScalarValue(string_value=str(v))
+
+
+def _proto_nix_type_to_model(pt: Any) -> NixType:
+    """Convert a proto NixType enum to a models.NixType string enum."""
+    from nanopynix_proto.nix.common import NixType as ProtoNixType
+
+    _MAP: dict[Any, NixType] = {
+        ProtoNixType.THUNK: NixType.THUNK,
+        ProtoNixType.INT: NixType.INT,
+        ProtoNixType.FLOAT: NixType.FLOAT,
+        ProtoNixType.BOOL: NixType.BOOL,
+        ProtoNixType.STRING: NixType.STRING,
+        ProtoNixType.PATH: NixType.PATH,
+        ProtoNixType.NULL: NixType.NULL,
+        ProtoNixType.ATTRS: NixType.ATTRS,
+        ProtoNixType.LIST: NixType.LIST,
+        ProtoNixType.FUNCTION: NixType.FUNCTION,
+        ProtoNixType.EXTERNAL: NixType.EXTERNAL,
+        ProtoNixType.UNKNOWN: NixType.UNKNOWN,
+    }
+    return _MAP.get(pt, NixType.UNKNOWN)
+
+
+def _parse_nix_type(value: Any) -> NixType | None:
+    """Parse a NixType from a proto ValueHandle type field or a string."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return NixType(value)
+    return _proto_nix_type_to_model(value)
+
+
+# ════════════════════════════════════════════════════════════════════
+# ValueProxy — thin gRPC client for exported eval handles
 # ════════════════════════════════════════════════════════════════════
 
 
@@ -93,7 +139,7 @@ class _EvalProxyContext:
     def resolve_timeout(self, override: float | None) -> float | None:
         return override if override is not None else self.timeout
 
-    def value(self, handle: int, typ: NixType | str | None) -> ValueProxy:
+    def value(self, handle: int, typ: Any) -> ValueProxy:
         return ValueProxy(self, _ResolvedValue(handle=handle, nix_type=_parse_nix_type(typ)))
 
     def child(
@@ -120,16 +166,10 @@ type NixValue = ValueProxy | ValueAttrs | ValueList | JsonValue
 type NixDeepValue = ValueProxy | JsonScalar | list[NixDeepValue] | dict[str, NixDeepValue]
 
 
-def _parse_nix_type(value: NixType | str | None) -> NixType | None:
-    if value is None:
-        return None
-    return value if isinstance(value, NixType) else NixType(value)
-
-
 class ValueProxy:
     """Proxy for a Nix Value exported on the remote worker.
 
-    Lifetime is tied to the ``EvalSession`` that created it — all RPC
+    Lifetime is tied to the ``EvalSession`` that created it — all gRPC
     methods raise ``EvalSessionClosedError`` after the session exits.
 
     Supports ``async with`` for early release.
@@ -186,55 +226,68 @@ class ValueProxy:
         else:
             parent = lazy.parent
         t = self._ctx.resolve_timeout(timeout)
+        rw = self._ctx.worker
         if isinstance(lazy.selector, str):
-            handle = await self._ctx.worker.request(rpc.Attr(handle=parent.handle, name=lazy.selector), timeout=t)
+            from nanopynix_proto.nix.eval import AttrRequest
+
+            handle = await _grpc_call(
+                rw._eval_stub.attr(AttrRequest(handle=parent.handle, name=lazy.selector), timeout=t)
+            )
         else:
-            handle = await self._ctx.worker.request(rpc.ListGet(handle=parent.handle, index=lazy.selector), timeout=t)
-        self._state = _ResolvedValue(handle=handle.handle, nix_type=handle.type)
+            from nanopynix_proto.nix.eval import ListGetRequest
+
+            handle = await _grpc_call(
+                rw._eval_stub.list_get(ListGetRequest(handle=parent.handle, index=lazy.selector), timeout=t)
+            )
+        self._state = _ResolvedValue(handle=handle.handle, nix_type=_parse_nix_type(handle.type))
 
     async def _ensure_type(self, *, timeout: float | None = None) -> NixType:
         await self._ensure_resolved(timeout=timeout)
         cached = self._state.nix_type
         if cached not in (None, NixType.THUNK, NixType.UNKNOWN):
             return cached
-        type_name = await self._ctx.worker.request(
-            rpc.TypeName(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        from nanopynix_proto.nix.eval import TypeNameRequest
+
+        rw = self._ctx.worker
+        resp = await _grpc_call(
+            rw._eval_stub.type_name(TypeNameRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
         )
-        self._state = _ResolvedValue(handle=self.handle, nix_type=type_name)
-        return type_name
+        self._state = _ResolvedValue(handle=self.handle, nix_type=_proto_nix_type_to_model(resp.type))
+        return self._state.nix_type
 
-    def _decode_remote_ref(self, ref: RemoteValueRef) -> ValueProxy:
-        handle = ref.value
-        return self._ctx.value(handle.handle, handle.type)
+    def _decode_force_value(self, value: ForceValue) -> JsonValue | ValueProxy:
+        if value.remote_value is not None:
+            return self._ctx.value(value.remote_value.handle, value.remote_value.type)
+        return _scalar_to_pyval(value.scalar)
 
-    def _decode_force_value(self, value: rpc.ForceValueWire) -> JsonValue | ValueProxy:
-        if isinstance(value, RemoteValueRef):
-            return self._decode_remote_ref(value)
-        return value
-
-    def _decode_deep_value(self, value: DeepValueWire) -> NixDeepValue:
-        if isinstance(value, RemoteValueRef):
-            return self._decode_remote_ref(value)
-        if isinstance(value, DeepScalar):
-            return value.value
-        if isinstance(value, DeepList):
-            return [self._decode_deep_value(item) for item in value.items]
-        if isinstance(value, DeepAttrs):
-            return {key: self._decode_deep_value(item) for key, item in value.attrs.items()}
+    def _decode_deep_value(self, value: DeepValue) -> NixDeepValue:
+        if value.remote_value is not None:
+            return self._ctx.value(value.remote_value.handle, value.remote_value.type)
+        if value.scalar is not None:
+            return _scalar_to_pyval(value.scalar)
+        if value.list is not None:
+            return [self._decode_deep_value(item) for item in value.list.items]
+        if value.attrs is not None:
+            return {key: self._decode_deep_value(item) for key, item in value.attrs.entries.items()}
         raise TypeError(f"unsupported force_deep RPC value: {value!r}")
 
-    async def _encode_call_arg(self, value: NixArg, *, timeout: float | None) -> CallArgWire:
+    async def _encode_call_arg(self, value: NixArg, *, timeout: float | None) -> CallArg:
         if isinstance(value, ValueProxy):
             if not self._ctx.owner.owns(value):
                 raise ForeignValueError("cannot pass a ValueProxy from another EvalSession")
             await value._ensure_resolved(timeout=timeout)
-            return RemoteCallArg(handle=value.handle)
+            return CallArg(remote_value=RemoteCallArg(handle=value.handle))
         if isinstance(value, list):
-            return ListCallArg(items=[await self._encode_call_arg(item, timeout=timeout) for item in value])
+            return CallArg(
+                list=CallArgList(items=[await self._encode_call_arg(item, timeout=timeout) for item in value])
+            )
         if isinstance(value, dict):
-            attrs = {key: await self._encode_call_arg(item, timeout=timeout) for key, item in value.items()}
-            return AttrsCallArg(attrs=attrs)
-        return ScalarCallArg(value=value)
+            return CallArg(
+                attrs=CallArgAttrs(
+                    entries={key: await self._encode_call_arg(item, timeout=timeout) for key, item in value.items()}
+                )
+            )
+        return CallArg(scalar=_pyval_to_scalar(value))
 
     # ── force ──────────────────────────────────────────────────────
 
@@ -250,8 +303,11 @@ class ValueProxy:
         if typ == NixType.FUNCTION:
             return self
         # scalar — delegate to worker
-        result = await self._ctx.worker.request(
-            rpc.Force(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        from nanopynix_proto.nix.eval import ForceRequest
+
+        rw = self._ctx.worker
+        result = await _grpc_call(
+            rw._eval_stub.force(ForceRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
         )
         return self._decode_force_value(result)
 
@@ -341,8 +397,11 @@ class ValueProxy:
     async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
         """Recursive Nix force. Functions remain remote callable ValueProxy objects."""
         await self._ensure_resolved(timeout=timeout)
-        result = await self._ctx.worker.request(
-            rpc.ForceDeep(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        from nanopynix_proto.nix.eval import ForceDeepRequest
+
+        rw = self._ctx.worker
+        result = await _grpc_call(
+            rw._eval_stub.force_deep(ForceDeepRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
         )
         return self._decode_deep_value(result)
 
@@ -362,10 +421,18 @@ class ValueProxy:
                 rendered as literal filesystem paths.
         """
         await self._ensure_resolved(timeout=timeout)
-        return await self._ctx.worker.request(
-            rpc.ForceJson(handle=self.handle, copy_to_store=copy_to_store),
-            timeout=self._ctx.resolve_timeout(timeout),
+        from nanopynix_proto.nix.eval import ForceJsonRequest
+
+        rw = self._ctx.worker
+        resp = await _grpc_call(
+            rw._eval_stub.force_json(
+                ForceJsonRequest(handle=self.handle, copy_to_store=copy_to_store),
+                timeout=self._ctx.resolve_timeout(timeout),
+            )
         )
+        import json as _json
+
+        return _json.loads(resp.json)
 
     # ── navigation ─────────────────────────────────────────────────
 
@@ -383,22 +450,36 @@ class ValueProxy:
 
     async def list_length(self, *, timeout: float | None = None) -> int:
         await self._ensure_resolved(timeout=timeout)
-        return await self._ctx.worker.request(
-            rpc.ListLength(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        from nanopynix_proto.nix.eval import ListLengthRequest
+
+        rw = self._ctx.worker
+        resp = await _grpc_call(
+            rw._eval_stub.list_length(ListLengthRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
         )
+        return resp.length
 
     async def attr_names(self, *, timeout: float | None = None) -> list[str]:
         await self._ensure_resolved(timeout=timeout)
-        return await self._ctx.worker.request(
-            rpc.AttrNames(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout)
+        from nanopynix_proto.nix.eval import AttrNamesRequest
+
+        rw = self._ctx.worker
+        resp = await _grpc_call(
+            rw._eval_stub.attr_names(AttrNamesRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
         )
+        return resp.names
 
     async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         await self._ensure_resolved(timeout=timeout)
-        return await self._ctx.worker.request(
-            rpc.HasAttr(handle=self.handle, name=name),
-            timeout=self._ctx.resolve_timeout(timeout),
+        from nanopynix_proto.nix.eval import HasAttrRequest
+
+        rw = self._ctx.worker
+        resp = await _grpc_call(
+            rw._eval_stub.has_attr(
+                HasAttrRequest(handle=self.handle, name=name),
+                timeout=self._ctx.resolve_timeout(timeout),
+            )
         )
+        return resp.has
 
     async def call(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
         await self._ensure_resolved(timeout=timeout)
@@ -407,9 +488,11 @@ class ValueProxy:
             raise WrongNixTypeError(expected=NixType.FUNCTION, actual=actual)
         t = self._ctx.resolve_timeout(timeout)
         call_args = [await self._encode_call_arg(arg, timeout=timeout) for arg in args]
-        result = await self._ctx.worker.request(
-            rpc.Call(handle=self.handle, args=call_args),
-            timeout=t,
+        from nanopynix_proto.nix.eval import CallRequest
+
+        rw = self._ctx.worker
+        result = await _grpc_call(
+            rw._eval_stub.call(CallRequest(handle=self.handle, args=call_args), timeout=t)
         )
         return self._ctx.value(result.handle, result.type)
 
@@ -426,7 +509,12 @@ class ValueProxy:
             self._released = True
             return
         self._check_active()
-        await self._ctx.worker.request(rpc.Release(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
+        from nanopynix_proto.nix.eval import ReleaseRequest
+
+        rw = self._ctx.worker
+        await _grpc_call(
+            rw._eval_stub.release(ReleaseRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
+        )
         self._released = True
 
 
@@ -486,16 +574,23 @@ class ValueAttrs:
     async def force(self, name: str, *, timeout: float | None = None) -> NixValue:
         """Force a single attribute and return its value."""
         self._check_active()
-        result = await self._ctx.worker.request(
-            rpc.Attr(handle=self._value.handle, name=name),
-            timeout=self._ctx.resolve_timeout(timeout),
+        from nanopynix_proto.nix.eval import AttrRequest
+
+        rw = self._ctx.worker
+        result = await _grpc_call(
+            rw._eval_stub.attr(AttrRequest(handle=self._value.handle, name=name), timeout=self._ctx.resolve_timeout(timeout))
         )
         proxy = self._ctx.value(result.handle, result.type)
         return await proxy.force()
 
     async def release(self) -> None:
         self._check_active()
-        await self._ctx.worker.request(rpc.Release(handle=self._value.handle), timeout=self._ctx.timeout)
+        from nanopynix_proto.nix.eval import ReleaseRequest
+
+        rw = self._ctx.worker
+        await _grpc_call(
+            rw._eval_stub.release(ReleaseRequest(handle=self._value.handle), timeout=self._ctx.timeout)
+        )
         self._released = True
 
 
@@ -553,16 +648,23 @@ class ValueList:
         """Force a single element and return its value."""
         self._check_active()
         self._check_index(idx)
-        result = await self._ctx.worker.request(
-            rpc.ListGet(handle=self._value.handle, index=idx),
-            timeout=self._ctx.resolve_timeout(timeout),
+        from nanopynix_proto.nix.eval import ListGetRequest
+
+        rw = self._ctx.worker
+        result = await _grpc_call(
+            rw._eval_stub.list_get(ListGetRequest(handle=self._value.handle, index=idx), timeout=self._ctx.resolve_timeout(timeout))
         )
         proxy = self._ctx.value(result.handle, result.type)
         return await proxy.force()
 
     async def release(self) -> None:
         self._check_active()
-        await self._ctx.worker.request(rpc.Release(handle=self._value.handle), timeout=self._ctx.timeout)
+        from nanopynix_proto.nix.eval import ReleaseRequest
+
+        rw = self._ctx.worker
+        await _grpc_call(
+            rw._eval_stub.release(ReleaseRequest(handle=self._value.handle), timeout=self._ctx.timeout)
+        )
         self._released = True
 
 
@@ -635,7 +737,9 @@ class EvalSession:
         self._active[0] = False
         if self._rw is not None:
             try:
-                await self._rw.request(rpc.ReleaseAll(), timeout=self._timeout)
+                from nanopynix_proto.nix.eval import ReleaseAllRequest
+
+                await _grpc_call(self._rw._eval_stub.release_all(ReleaseAllRequest(), timeout=self._timeout))
             finally:
                 await self._rw.release()
                 self._rw = None
@@ -660,17 +764,23 @@ class EvalSession:
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         self._check_rw()
         rw = self._reserved_worker()
+        from nanopynix_proto.nix.eval import EvalFileRequest
 
-        handle = await rw.request(rpc.EvalFile(path=path), timeout=self._resolve_timeout(timeout))
+        handle = await _grpc_call(
+            rw._eval_stub.eval_file(EvalFileRequest(path=path), timeout=self._resolve_timeout(timeout))
+        )
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
         self._check_rw()
         rw = self._reserved_worker()
+        from nanopynix_proto.nix.eval import EvalStringRequest
 
-        handle = await rw.request(
-            rpc.EvalString(expr=expr, source_name=path),
-            timeout=self._resolve_timeout(timeout),
+        handle = await _grpc_call(
+            rw._eval_stub.eval_string(
+                EvalStringRequest(expr=expr, source_name=path),
+                timeout=self._resolve_timeout(timeout),
+            )
         )
         return self._proxy_context().value(handle.handle, handle.type)
 
@@ -695,17 +805,43 @@ class EvalSession:
         """
         self._check_rw()
         rw = self._reserved_worker()
-        locked = await rw.request(
-            rpc.LockFlake(
-                ref=ref,
-                update_inputs=update_inputs,
-                write_lock_file=write_lock_file,
-            ),
-            timeout=self._resolve_timeout(timeout),
-        )
+        from nanopynix_proto.nix.eval import LockFlakeRequest, UpdateInputsList
+
+        if update_inputs is True:
+            locked = await _grpc_call(
+                rw._eval_stub.lock_flake(
+                    LockFlakeRequest(
+                        ref=ref,
+                        update_all=True,
+                        write_lock_file=write_lock_file,
+                    ),
+                    timeout=self._resolve_timeout(timeout),
+                )
+            )
+        elif isinstance(update_inputs, list):
+            locked = await _grpc_call(
+                rw._eval_stub.lock_flake(
+                    LockFlakeRequest(
+                        ref=ref,
+                        update_inputs_list=UpdateInputsList(inputs=update_inputs),
+                        write_lock_file=write_lock_file,
+                    ),
+                    timeout=self._resolve_timeout(timeout),
+                )
+            )
+        else:
+            locked = await _grpc_call(
+                rw._eval_stub.lock_flake(
+                    LockFlakeRequest(
+                        ref=ref,
+                        write_lock_file=write_lock_file,
+                    ),
+                    timeout=self._resolve_timeout(timeout),
+                )
+            )
         return self._locked_flake_handle(locked)
 
-    def _locked_flake_handle(self, locked: LockedFlakeWire) -> LockedFlakeHandle:
+    def _locked_flake_handle(self, locked: LockedFlakeProto) -> LockedFlakeHandle:
         return LockedFlakeHandle(
             self,
             handle=locked.handle,
@@ -727,9 +863,13 @@ class EvalSession:
         """
         self._check_rw()
         rw = self._reserved_worker()
-        result = await rw.request(
-            rpc.CallLockedFlake(handle=self._locked_flake_id(locked)),
-            timeout=self._resolve_timeout(timeout),
+        from nanopynix_proto.nix.eval import CallLockedFlakeRequest
+
+        result = await _grpc_call(
+            rw._eval_stub.call_locked_flake(
+                CallLockedFlakeRequest(handle=self._locked_flake_id(locked)),
+                timeout=self._resolve_timeout(timeout),
+            )
         )
         return self._proxy_context().value(result.handle, result.type)
 
@@ -742,17 +882,25 @@ class EvalSession:
         """
         self._check_rw()
         rw = self._reserved_worker()
-        await rw.request(
-            rpc.WriteLockFile(handle=self._locked_flake_id(locked)),
-            timeout=self._resolve_timeout(timeout),
+        from nanopynix_proto.nix.eval import WriteLockFileRequest
+
+        await _grpc_call(
+            rw._eval_stub.write_lock_file(
+                WriteLockFileRequest(handle=self._locked_flake_id(locked)),
+                timeout=self._resolve_timeout(timeout),
+            )
         )
 
     async def release_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
         self._check_rw()
         rw = self._reserved_worker()
-        await rw.request(
-            rpc.ReleaseLockedFlake(handle=self._locked_flake_id(locked)),
-            timeout=self._resolve_timeout(timeout),
+        from nanopynix_proto.nix.eval import ReleaseLockedFlakeRequest
+
+        await _grpc_call(
+            rw._eval_stub.release_locked_flake(
+                ReleaseLockedFlakeRequest(handle=self._locked_flake_id(locked)),
+                timeout=self._resolve_timeout(timeout),
+            )
         )
 
     async def eval_flake(
@@ -773,16 +921,26 @@ class EvalSession:
         """
         self._check_rw()
         rw = self._reserved_worker()
-        handle = await rw.request(
-            rpc.EvalFlake(ref=ref, write_lock_file=write_lock_file),
-            timeout=self._resolve_timeout(timeout),
+        from nanopynix_proto.nix.eval import EvalFlakeRequest
+
+        handle = await _grpc_call(
+            rw._eval_stub.eval_flake(
+                EvalFlakeRequest(ref=ref, write_lock_file=write_lock_file),
+                timeout=self._resolve_timeout(timeout),
+            )
         )
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def get_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> FlakeRef:
         self._check_rw()
         rw = self._reserved_worker()
-        return await rw.request(rpc.GetFlake(ref=ref), timeout=self._resolve_timeout(timeout))
+        from nanopynix_proto.nix.eval import GetFlakeRequest
+
+        # gRPC stub only accepts string refs; convert dict refs to string
+        ref_str = ref if isinstance(ref, str) else str(ref)
+        return await _grpc_call(
+            rw._eval_stub.get_flake(GetFlakeRequest(ref=ref_str), timeout=self._resolve_timeout(timeout))
+        )
 
     def _resolve_timeout(self, override: float | None) -> float | None:
         return override if override is not None else self._timeout

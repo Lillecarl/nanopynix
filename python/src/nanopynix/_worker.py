@@ -1,56 +1,47 @@
-"""Subprocess worker — Nix execution over stdin/stdout JSON-RPC 2.0.
+"""Subprocess worker — Nix execution over gRPC (multiprocessing pipe or stdio).
 
-Spawned by ``Session._WorkerManager`` via ``asyncio.create_subprocess_exec``.
-Reads JSON-RPC requests from stdin, writes responses and log-event
-notifications to stdout.  One line per message (compact JSON, no embedded
-newlines).
+Spawned by ``Session._WorkerManager`` via ``asyncio.create_subprocess_exec``
+(multiprocessing mode) or via forkserver ``Process`` (grpclib-transports mode).
+Serves three gRPC services over a single H2 transport:
+
+- ``WorkerService``  — Init (bootstrap Nix), SubscribeLogs (server-streaming), Shutdown
+- ``StoreService``   — all store operations
+- ``EvalService``    — all eval/flake operations
 """
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
 import sys
 import traceback
-from typing import TYPE_CHECKING, Any
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
-from nanopynix._worker_eval import eval_dispatch
-from nanopynix._worker_store import store_dispatch
+from nanopynix._worker_eval import EvalServiceHandler
+from nanopynix._worker_store import StoreServiceHandler
 from nanopynix.logging import LogCollector
 from nanopynix.models import PrimOpSpec
+from nanopynix_proto.nix.common import LogEvent
+from nanopynix_proto.nix.worker import (
+    InitRequest,
+    InitResponse,
+    ShutdownRequest,
+    ShutdownResponse,
+    SubscribeLogsRequest,
+    WorkerServiceBase,
+)
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
-# ── Wire format ────────────────────────────────────────────────────────
-
-
-def _send(msg: dict) -> None:
-    """Write a JSON-RPC message as a single line to stdout and flush."""
-    sys.stdout.write(json.dumps(msg, separators=(",", ":")))
-    sys.stdout.write("\n")
-    sys.stdout.flush()
-
-
-def _error(req_id, code: int, message: str, data=None) -> dict:
-    return {
-        "jsonrpc": "2.0",
-        "error": {"code": code, "message": message, "data": data},
-        "id": req_id,
-    }
+# Re-export for the multiprocessing runner in _pool.py
+__all__ = ["run_worker", "worker_service_factory", "main"]
 
 
-def _result(req_id, value) -> dict:
-    return {"jsonrpc": "2.0", "result": value, "id": req_id}
-
-
-def _notification(method: str, params: dict) -> dict:
-    return {"jsonrpc": "2.0", "method": method, "params": params}
+# ── Primop registration ──────────────────────────────────────────────
 
 
 def _import_callable(import_path: str) -> Callable[..., Any]:
@@ -77,148 +68,196 @@ def _register_primops(raw_specs: list[dict[str, Any]]) -> None:
         )
 
 
-# ── Main ───────────────────────────────────────────────────────────────
+# ── Worker state ─────────────────────────────────────────────────────
 
 
-def main() -> None:
-    """Bootstrap Nix, then enter the JSON-RPC loop."""
+class WorkerState:
+    """Shared mutable state held by all three service handlers.
 
-    # ── Logger ──────────────────────────────────────────────────
+    Initialized by ``WorkerServiceHandler.init()`` (bootstraps Nix).
+    """
+
+    def __init__(self) -> None:
+        self.store: Any = None
+        self.eval_store: Any = None
+        self.eval_state: Any = None
+        self.collector: LogCollector | None = None
+        self.locked_flakes: dict[int, Any] = {}
+        self._next_lf_handle: int = 1
+
+
+# ── WorkerService handler ────────────────────────────────────────────
+
+
+class WorkerServiceHandler(WorkerServiceBase):
+    """Lifecycle handler: init, subscribe-logs, shutdown."""
+
+    def __init__(self, state: WorkerState) -> None:
+        self._state = state
+
+    async def init(self, message: InitRequest) -> InitResponse:
+        """Bootstrap Nix: configure, init libstore/libexpr, open store."""
+        try:
+            # Apply config file path before init
+            if message.nix_conf is not None:
+                os.environ["NIX_USER_CONF_FILES"] = message.nix_conf
+            if message.settings:
+                os.environ["NIX_CONFIG"] = "\n".join(
+                    f"{k} = {v}" for k, v in message.settings.items()
+                )
+
+            for k, v in message.settings.items():
+                nanopynix_util.set_setting(k, v)
+            for f in message.experimental_features:
+                nanopynix_util.enable_experimental_feature(f)
+
+            nanopynix_util.init_libstore(load_config=False)
+            nanopynix_expr.init_libexpr()
+
+            # Convert proto PrimOpSpec list to the raw-dict format
+            primops_raw = [
+                {
+                    "name": p.name,
+                    "arity": p.arity,
+                    "args": list(p.args),
+                    "doc": p.doc,
+                    "import_path": p.import_path,
+                }
+                for p in message.primops
+            ]
+            _register_primops(primops_raw)
+
+            store_uri = message.store_uri
+            eval_store_uri = message.eval_store_uri
+
+            self._state.store = (
+                nanopynix_store.open_store()
+                if store_uri == "auto"
+                else nanopynix_store.open_store(store_uri)
+            )
+
+            if eval_store_uri != store_uri:
+                self._state.eval_store = nanopynix_store.open_store(eval_store_uri)
+            else:
+                self._state.eval_store = None
+
+            return InitResponse(status="ok")
+
+        except Exception as exc:
+            traceback.print_exc(file=sys.stderr)
+            # Re-raise so the gRPC framework propagates the error.
+            raise
+
+    async def subscribe_logs(
+        self, message: SubscribeLogsRequest
+    ) -> AsyncIterator[LogEvent]:
+        """Server-streaming RPC — yield log events as they arrive."""
+        collector = self._state.collector
+        if collector is None:
+            return
+
+        try:
+            async for event in collector.stream():
+                if event is None:
+                    break
+                req_id, action, *args = event
+                yield LogEvent(
+                    request_id=req_id,
+                    action=action,
+                    args_json=json.dumps(list(args), default=str),
+                )
+        except asyncio.CancelledError:
+            pass
+
+    async def shutdown(self, message: ShutdownRequest) -> ShutdownResponse:
+        """Acknowledge shutdown request.
+
+        The actual process exit happens when the transport / pipe closes.
+        """
+        collector = self._state.collector
+        if collector is not None:
+            collector.close()
+        return ShutdownResponse()
+
+
+# ── Factory ──────────────────────────────────────────────────────────
+
+
+def worker_service_factory() -> list[object]:
+    """Create service handlers with a shared WorkerState.
+
+    Must be called *inside* the worker process (before Nix init so that
+    the logger is installed early).
+    """
     collector = LogCollector()
     nanopynix_util.install_logger(collector.callback)
 
-    def _emit_events():
-        for event in collector.drain():
-            if event is None:
-                continue
-            req_id, action, *args = event
-            _send(
-                _notification(
-                    "log",
-                    {
-                        "request_id": req_id,
-                        "action": action,
-                        "args": list(args),
-                    },
-                )
-            )
+    state = WorkerState()
+    state.collector = collector
 
-    # ── Init ────────────────────────────────────────────────────
-    # First message from parent is the init request (JSON-RPC)
-    line = sys.stdin.readline()
-    if not line:
-        return
-    init_msg = json.loads(line)
+    return [
+        WorkerServiceHandler(state),
+        StoreServiceHandler(state),
+        EvalServiceHandler(state),
+    ]
 
-    store_uri = "auto"
-    eval_store_uri = "auto"
-    nix_conf = None
-    settings = {}
-    features: list[str] = []
-    primops: list[dict[str, Any]] = []
 
-    if init_msg.get("method") == "init":
-        p = init_msg.get("params", {})
-        store_uri = p.get("store_uri", store_uri)
-        eval_store_uri = p.get("eval_store_uri", store_uri)
-        nix_conf = p.get("nix_conf")
-        settings = p.get("settings", {})
-        features = p.get("experimental_features", [])
-        primops = p.get("primops", [])
-        req_id = init_msg.get("id")
-    else:
-        sys.stderr.write(f"worker: expected init, got {init_msg}\n")
-        return
+# ── Async runner (for grpclib-transports multiprocessing mode) ───────
 
+
+async def run_worker(
+    endpoint: Any,
+    tuning: Any = None,
+    max_concurrency: int | None = None,
+) -> None:
+    """Serve gRPC over a multiprocessing pipe endpoint.
+
+    Called by the forkserver child process via ``_run_multiprocessing_worker``
+    in grpclib_transports.
+    """
+    from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
+    from grpclib_transports.protocol import DEFAULT_TUNING
+
+    tuning = tuning or DEFAULT_TUNING
+    handlers = worker_service_factory()
+    await serve_multiprocessing_endpoint(
+        endpoint,
+        handlers,
+        tuning=tuning,
+        max_concurrency=max_concurrency,
+    )
+
+    # Cleanup after transport closes
+    collector = handlers[0]._state.collector
+    if collector is not None:
+        collector.close()
+
+
+# ── Stdio entry point (console_script / ``python -m nanopynix._worker``) ──
+
+
+def main() -> None:
+    """Stdio entry point — serves gRPC over stdin/stdout.
+
+    This is the ``nanopynix-worker`` console_script target and also the
+    fallback for ``sys.executable -m nanopynix._worker``.
+    """
     try:
-        # Apply config file path before init
-        if nix_conf is not None:
-            os.environ["NIX_USER_CONF_FILES"] = nix_conf
-        if settings:
-            os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
+        asyncio.run(_stdio_main())
+    except KeyboardInterrupt:
+        pass
 
-        for k, v in settings.items():
-            nanopynix_util.set_setting(k, v)
-        for f in features:
-            nanopynix_util.enable_experimental_feature(f)
 
-        nanopynix_util.init_libstore(load_config=False)
-        nanopynix_expr.init_libexpr()
-        _register_primops(primops)
+async def _stdio_main() -> None:
+    from grpclib_transports.stdio import serve_stdio
 
-        store = nanopynix_store.open_store() if store_uri == "auto" else nanopynix_store.open_store(store_uri)
+    handlers = worker_service_factory()
+    await serve_stdio(handlers)
 
-        eval_store = None
-        if eval_store_uri != store_uri:
-            eval_store = nanopynix_store.open_store(eval_store_uri)
-
-        dispatch = {
-            "store": store_dispatch(store, eval_store),
-            "eval": eval_dispatch(store),
-        }
-    except Exception as exc:
-        _send(
-            _error(
-                req_id,
-                -32000,
-                str(exc),
-                {
-                    "error_type": type(exc).__qualname__,
-                    "traceback": traceback.format_exc(),
-                },
-            )
-        )
-        traceback.print_exc(file=sys.stderr)
-        return
-
-    _send(_result(req_id, "ok"))
-
-    # ── RPC loop ────────────────────────────────────────────────
-    for line in sys.stdin:
-        msg = json.loads(line)
-        method = msg.get("method", "")
-        rid = msg.get("id")
-        params = msg.get("params", [])
-
-        parts = method.split(".", 1)
-        if len(parts) != 2:
-            _send(_error(rid, -32601, f"Invalid method: {method}"))
-            continue
-
-        ns, fn = parts
-        ns_dispatch = dispatch.get(ns)
-        if ns_dispatch is None:
-            _send(_error(rid, -32601, f"Unknown namespace: {ns}"))
-            continue
-
-        handler = ns_dispatch.get(fn)
-        if handler is None:
-            _send(_error(rid, -32601, f"Unknown method: {method}"))
-            continue
-
-        nanopynix_util.set_logger_request_id(rid)
-        try:
-            value = handler(params)
-            response = _result(rid, value)
-        except Exception as exc:
-            response = _error(
-                rid,
-                -32000,
-                str(exc),
-                {
-                    "error_type": type(exc).__qualname__,
-                    "traceback": traceback.format_exc(),
-                },
-            )
-            traceback.print_exc(file=sys.stderr)
-        finally:
-            nanopynix_util.set_logger_request_id(0)
-            _emit_events()
-
-        _send(response)
-
-    nanopynix_util.remove_logger()
-    collector.close()
+    # Cleanup after transport closes
+    collector = handlers[0]._state.collector
+    if collector is not None:
+        collector.close()
 
 
 if __name__ == "__main__":

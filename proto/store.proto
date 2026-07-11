@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package nanopynix_proto.store;
+package nix.store;
 
 import "common.proto";
 
@@ -8,23 +8,23 @@ service StoreService {
   rpc GetUri(GetUriRequest) returns (GetUriResponse);
   rpc GetStoreDir(GetStoreDirRequest) returns (GetStoreDirResponse);
   rpc IsValidPath(IsValidPathRequest) returns (IsValidPathResponse);
-  rpc ParseStorePath(ParseStorePathRequest) returns (nanopynix_proto.common.StorePath);
-  rpc QueryPathInfo(QueryPathInfoRequest) returns (nanopynix_proto.common.PathInfo);
+  rpc ParseStorePath(ParseStorePathRequest) returns (nix.common.StorePath);
+  rpc QueryPathInfo(QueryPathInfoRequest) returns (nix.common.PathInfo);
   rpc QueryPathFromHashPart(QueryPathFromHashPartRequest) returns (QueryPathFromHashPartResponse);
-  rpc ComputeFsClosure(ComputeFsClosureRequest) returns (nanopynix_proto.common.StorePathList);
-  rpc QueryMissing(QueryMissingRequest) returns (nanopynix_proto.common.MissingInfo);
-  rpc QueryDerivationOutputs(QueryDerivationOutputsRequest) returns (nanopynix_proto.common.StorePathList);
-  rpc QueryValidDerivers(QueryValidDeriversRequest) returns (nanopynix_proto.common.StorePathList);
-  rpc QueryAllValidPaths(QueryAllValidPathsRequest) returns (nanopynix_proto.common.StorePathList);
-  rpc QueryReferrers(QueryReferrersRequest) returns (nanopynix_proto.common.StorePathList);
-  rpc QuerySubstitutablePaths(QuerySubstitutablePathsRequest) returns (nanopynix_proto.common.StorePathList);
-  rpc BuildPathsWithResults(BuildPathsWithResultsRequest) returns (nanopynix_proto.common.BuildResultList);
-  rpc ReadDerivation(ReadDerivationRequest) returns (nanopynix_proto.common.Derivation);
-  rpc BuildDerivation(BuildDerivationRequest) returns (nanopynix_proto.common.BuildResult);
-  rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (nanopynix_proto.common.StorePath);
+  rpc ComputeFsClosure(ComputeFsClosureRequest) returns (nix.common.StorePathList);
+  rpc QueryMissing(QueryMissingRequest) returns (nix.common.MissingInfo);
+  rpc QueryDerivationOutputs(QueryDerivationOutputsRequest) returns (nix.common.StorePathList);
+  rpc QueryValidDerivers(QueryValidDeriversRequest) returns (nix.common.StorePathList);
+  rpc QueryAllValidPaths(QueryAllValidPathsRequest) returns (nix.common.StorePathList);
+  rpc QueryReferrers(QueryReferrersRequest) returns (nix.common.StorePathList);
+  rpc QuerySubstitutablePaths(QuerySubstitutablePathsRequest) returns (nix.common.StorePathList);
+  rpc BuildPathsWithResults(BuildPathsWithResultsRequest) returns (nix.common.BuildResultList);
+  rpc ReadDerivation(ReadDerivationRequest) returns (nix.common.Derivation);
+  rpc BuildDerivation(BuildDerivationRequest) returns (nix.common.BuildResult);
+  rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (nix.common.StorePath);
   rpc AddTempRoot(AddTempRootRequest) returns (AddTempRootResponse);
-  rpc FetchFromUrl(FetchFromUrlRequest) returns (nanopynix_proto.common.Input);
-  rpc FetchFromAttrs(FetchFromAttrsRequest) returns (nanopynix_proto.common.Input);
+  rpc FetchFromUrl(FetchFromUrlRequest) returns (nix.common.Input);
+  rpc FetchFromAttrs(FetchFromAttrsRequest) returns (nix.common.Input);
 }
 
 message GetUriRequest {}
@@ -56,7 +56,7 @@ message QueryPathFromHashPartRequest {
   string hash_part = 1;
 }
 message QueryPathFromHashPartResponse {
-  optional nanopynix_proto.common.StorePath path = 1;
+  optional nix.common.StorePath path = 1;
 }
 
 message ComputeFsClosureRequest {
@@ -115,5 +115,5 @@ message FetchFromUrlRequest {
 }
 
 message FetchFromAttrsRequest {
-  map<string, nanopynix_proto.common.AttrsValue> attrs = 1;
+  map<string, nix.common.AttrsValue> attrs = 1;
 }

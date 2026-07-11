@@ -42,7 +42,7 @@ buildPythonPackage {
     touch src/nanopynix_proto/py.typed
     protoc \
       --proto_path=. \
-      --python_betterproto2_out=src \
+      --python_betterproto2_out=src/nanopynix_proto \
       --python_betterproto2_opt=client_generation=async \
       --python_betterproto2_opt=server_generation=async \
       --python_betterproto2_opt=google_protobuf_descriptors \

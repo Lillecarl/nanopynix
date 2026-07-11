@@ -1,12 +1,12 @@
 syntax = "proto3";
 
-package nanopynix_proto.worker;
+package nix.worker;
 
 import "common.proto";
 
 service WorkerService {
   rpc Init(InitRequest) returns (InitResponse);
-  rpc SubscribeLogs(SubscribeLogsRequest) returns (stream nanopynix_proto.common.LogEvent);
+  rpc SubscribeLogs(SubscribeLogsRequest) returns (stream nix.common.LogEvent);
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
@@ -16,7 +16,7 @@ message InitRequest {
   optional string nix_conf = 3;
   map<string, string> settings = 4;
   repeated string experimental_features = 5;
-  repeated nanopynix_proto.common.PrimOpSpec primops = 6;
+  repeated nix.common.PrimOpSpec primops = 6;
 }
 
 message InitResponse {

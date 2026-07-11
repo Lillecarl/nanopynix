@@ -1,137 +1,306 @@
-"""Store RPC dispatch for the worker subprocess."""
+"""gRPC StoreService handler for the worker subprocess."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from pydantic import TypeAdapter
+from typing import Any
 
 import nanopynix_fetchers
 import nanopynix_store
-from nanopynix import _protocol as rpc
-from nanopynix._extract import input_attrs as _input_attrs
-from nanopynix._extract import store_path as _sp_to_dict
-from nanopynix._worker_common import Endpoint, dispatch
-from nanopynix.models import Input, StorePath
+from nanopynix._extract import (
+    input_attrs as _input_attrs,
+    store_path as _sp_to_pb,
+    store_path_str as _sp_str_to_pb,
+)
+from nanopynix_proto.nix import common as common_pb
+from nanopynix_proto.nix.store import (
+    AddTempRootRequest,
+    AddTempRootResponse,
+    BuildDerivationRequest,
+    BuildPathsWithResultsRequest,
+    ComputeFsClosureRequest,
+    FetchFromAttrsRequest,
+    FetchFromUrlRequest,
+    FollowLinksToStorePathRequest,
+    GetStoreDirRequest,
+    GetStoreDirResponse,
+    GetUriRequest,
+    GetUriResponse,
+    IsValidPathRequest,
+    IsValidPathResponse,
+    ParseStorePathRequest,
+    QueryAllValidPathsRequest,
+    QueryDerivationOutputsRequest,
+    QueryMissingRequest,
+    QueryPathFromHashPartRequest,
+    QueryPathFromHashPartResponse,
+    QueryPathInfoRequest,
+    QueryReferrersRequest,
+    QuerySubstitutablePathsRequest,
+    QueryValidDeriversRequest,
+    ReadDerivationRequest,
+    StoreServiceBase,
+)
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-_StorePathList = TypeAdapter(list[StorePath])
+# ── helpers ──────────────────────────────────────────────────────────
 
 
-def store_dispatch(store, eval_store):
-    """Return dispatch dict for store operations."""
+def _sp(pb_or_str: common_pb.StorePath | str) -> Any:
+    """Return either a string or a parsed C++ StorePath for the store API.
 
-    def _parse_sp(path: str):
-        if not path.startswith("/"):
-            path = f"{store.get_store_dir()}/{path}"
-        return store.parse_store_path(path)
+    The caller has already resolved relative paths into absolute ones, so
+    we munge it into the format expected by the store methods.
+    """
+    # Handlers resolve paths before calling this helper.
+    return pb_or_str
 
-    def _store_path_list(paths):
-        paths_model = _StorePathList.validate_python([p if isinstance(p, dict) else _sp_to_dict(p) for p in paths])
-        return _StorePathList.dump_python(paths_model, mode="json")
 
-    def _fetcher_attrs(attrs: Mapping[str, str | int | bool]) -> dict[str, str]:
-        return {key: str(value).lower() if isinstance(value, bool) else str(value) for key, value in attrs.items()}
+def _parse_sp(path: str, store: Any) -> Any:
+    """Parse a store path string into a C++ StorePath object."""
+    if not path.startswith("/"):
+        path = f"{store.get_store_dir()}/{path}"
+    return store.parse_store_path(path)
 
-    def get_uri(_: rpc.GetUri) -> str:
-        return store.get_uri()
 
-    def get_store_dir(_: rpc.GetStoreDir) -> str:
-        return store.get_store_dir()
+def _pb_store_path(sp_obj: Any) -> common_pb.StorePath:
+    """Convert a C++ StorePath object (or dict with same keys) to proto."""
+    if isinstance(sp_obj, str):
+        return _sp_str_to_pb(sp_obj)
+    if hasattr(sp_obj, "to_string"):
+        return _sp_to_pb(sp_obj)
+    # Fallback: dict-like with keys
+    return common_pb.StorePath(
+        to_string=str(sp_obj["to_string"]),
+        hash_part=str(sp_obj["hash_part"]),
+        name=str(sp_obj["name"]),
+    )
 
-    def is_valid_path(req: rpc.IsValidPath) -> bool:
-        return store.is_valid_path(_parse_sp(req.path))
 
-    def parse_store_path(req: rpc.ParseStorePath):
-        return _sp_to_dict(_parse_sp(req.path))
+def _pb_store_path_list(objs: Any) -> common_pb.StorePathList:
+    """Convert a list of C++ StorePath objects (or strings/dicts) to StorePathList."""
+    paths = [_pb_store_path(p) for p in objs]
+    return common_pb.StorePathList(paths=paths)
 
-    def query_path_info(req: rpc.QueryPathInfo):
-        return dict(store.query_path_info(_parse_sp(req.path)))
 
-    def query_path_from_hash_part(req: rpc.QueryPathFromHashPart):
-        sp = store.query_path_from_hash_part(req.hash_part)
-        return _sp_to_dict(sp) if sp is not None else None
+def _attrs_value_to_str(v: common_pb.AttrsValue) -> str:
+    """Extract a plain string from an AttrsValue proto for the fetcher API."""
+    if v.string_value is not None:
+        return v.string_value
+    if v.int_value is not None:
+        return str(v.int_value)
+    if v.bool_value is not None:
+        return str(v.bool_value).lower()
+    raise ValueError(f"cannot convert AttrsValue to string: {v!r}")
 
-    def compute_fs_closure(req: rpc.ComputeFsClosure):
-        return _store_path_list(
-            store.compute_fs_closure(
-                _parse_sp(req.path),
-                req.flip_direction,
-                req.include_outputs,
-                req.include_derivers,
+
+# ── Service handler ──────────────────────────────────────────────────
+
+
+class StoreServiceHandler(StoreServiceBase):
+    """gRPC handler for all store operations."""
+
+    def __init__(self, state: Any) -> None:
+        self._state = state
+
+    @property
+    def _store(self) -> Any:
+        if self._state.store is None:
+            raise RuntimeError("store not initialized")
+        return self._state.store
+
+    # ── simple accessors ──────────────────────────────────────────
+
+    async def get_uri(self, message: GetUriRequest) -> GetUriResponse:
+        return GetUriResponse(uri=self._store.get_uri())
+
+    async def get_store_dir(self, message: GetStoreDirRequest) -> GetStoreDirResponse:
+        return GetStoreDirResponse(dir=self._store.get_store_dir())
+
+    async def is_valid_path(self, message: IsValidPathRequest) -> IsValidPathResponse:
+        sp = _parse_sp(message.path, self._store)
+        return IsValidPathResponse(valid=self._store.is_valid_path(sp))
+
+    async def parse_store_path(self, message: ParseStorePathRequest) -> common_pb.StorePath:
+        sp = _parse_sp(message.path, self._store)
+        return _sp_to_pb(sp)
+
+    # ── path info ─────────────────────────────────────────────────
+
+    async def query_path_info(self, message: QueryPathInfoRequest) -> common_pb.PathInfo:
+        sp = _parse_sp(message.path, self._store)
+        info = dict(self._store.query_path_info(sp))
+        return common_pb.PathInfo(
+            path=_pb_store_path(info.get("path")),
+            nar_hash=str(info.get("nar_hash", "")),
+            nar_size=int(info.get("nar_size", 0)),
+            registration_time=info.get("registration_time"),
+            deriver=_pb_store_path(info["deriver"]) if info.get("deriver") else None,
+            references=[_pb_store_path(p) for p in info.get("references", [])],
+            ca=info.get("ca"),
+            ultimate=bool(info.get("ultimate", False)),
+        )
+
+    async def query_path_from_hash_part(
+        self, message: QueryPathFromHashPartRequest
+    ) -> QueryPathFromHashPartResponse:
+        sp = self._store.query_path_from_hash_part(message.hash_part)
+        return QueryPathFromHashPartResponse(
+            path=_sp_to_pb(sp) if sp is not None else None,
+        )
+
+    # ── closure / traversal ───────────────────────────────────────
+
+    async def compute_fs_closure(
+        self, message: ComputeFsClosureRequest
+    ) -> common_pb.StorePathList:
+        sp = _parse_sp(message.path, self._store)
+        objs = self._store.compute_fs_closure(
+            sp,
+            message.flip_direction,
+            message.include_outputs,
+            message.include_derivers,
+        )
+        return _pb_store_path_list(objs)
+
+    async def query_missing(self, message: QueryMissingRequest) -> common_pb.MissingInfo:
+        sps = [_parse_sp(p, self._store) for p in message.paths]
+        info = dict(self._store.query_missing(sps))
+        return common_pb.MissingInfo(
+            will_build=[_pb_store_path(p) for p in info.get("will_build", [])],
+            will_substitute=[_pb_store_path(p) for p in info.get("will_substitute", [])],
+            unknown=[_pb_store_path(p) for p in info.get("unknown", [])],
+            download_size=int(info.get("download_size", 0)),
+            nar_size=int(info.get("nar_size", 0)),
+        )
+
+    async def query_derivation_outputs(
+        self, message: QueryDerivationOutputsRequest
+    ) -> common_pb.StorePathList:
+        sp = _parse_sp(message.path, self._store)
+        objs = self._store.query_derivation_outputs(sp)
+        return _pb_store_path_list(objs)
+
+    async def query_valid_derivers(
+        self, message: QueryValidDeriversRequest
+    ) -> common_pb.StorePathList:
+        sp = _parse_sp(message.path, self._store)
+        objs = self._store.query_valid_derivers(sp)
+        return _pb_store_path_list(objs)
+
+    async def query_all_valid_paths(
+        self, message: QueryAllValidPathsRequest
+    ) -> common_pb.StorePathList:
+        objs = self._store.query_all_valid_paths()
+        return _pb_store_path_list(objs)
+
+    async def query_referrers(self, message: QueryReferrersRequest) -> common_pb.StorePathList:
+        sp = _parse_sp(message.path, self._store)
+        objs = self._store.query_referrers(sp)
+        return _pb_store_path_list(objs)
+
+    async def query_substitutable_paths(
+        self, message: QuerySubstitutablePathsRequest
+    ) -> common_pb.StorePathList:
+        sps = [_parse_sp(p, self._store) for p in message.paths]
+        objs = self._store.query_substitutable_paths(sps)
+        return _pb_store_path_list(objs)
+
+    # ── building ──────────────────────────────────────────────────
+
+    async def build_paths_with_results(
+        self, message: BuildPathsWithResultsRequest
+    ) -> common_pb.BuildResultList:
+        sps = [_parse_sp(p, self._store) for p in message.paths]
+        results = list(self._store.build_paths_with_results(sps, self._state.eval_store))
+        br_list = [_dict_to_build_result(r) for r in results]
+        return common_pb.BuildResultList(results=br_list)
+
+    async def read_derivation(self, message: ReadDerivationRequest) -> common_pb.Derivation:
+        sp = _parse_sp(message.path, self._store)
+        raw = dict(self._store.read_derivation(sp))
+        return _dict_to_derivation(raw)
+
+    async def build_derivation(
+        self, message: BuildDerivationRequest
+    ) -> common_pb.BuildResult:
+        sp = _parse_sp(message.path, self._store)
+        result = dict(self._store.build_derivation(sp, nanopynix_store.BuildMode(message.build_mode)))
+        return _dict_to_build_result(result)
+
+    # ── links / roots ─────────────────────────────────────────────
+
+    async def follow_links_to_store_path(
+        self, message: FollowLinksToStorePathRequest
+    ) -> common_pb.StorePath:
+        sp = self._store.follow_links_to_store_path(message.path)
+        return _sp_to_pb(sp)
+
+    async def add_temp_root(self, message: AddTempRootRequest) -> AddTempRootResponse:
+        sp = _parse_sp(message.path, self._store)
+        self._store.add_temp_root(sp)
+        return AddTempRootResponse()
+
+    # ── fetchers ──────────────────────────────────────────────────
+
+    async def fetch_from_url(self, message: FetchFromUrlRequest) -> common_pb.Input:
+        inp = nanopynix_fetchers.input_from_url(message.url)
+        return common_pb.Input(attrs=_input_attrs(inp))
+
+    async def fetch_from_attrs(self, message: FetchFromAttrsRequest) -> common_pb.Input:
+        attrs = {k: _attrs_value_to_str(v) for k, v in message.attrs.items()}
+        inp = nanopynix_fetchers.input_from_attrs(attrs)
+        return common_pb.Input(attrs=_input_attrs(inp))
+
+
+# ── dict → proto converters ──────────────────────────────────────────
+
+
+def _dict_to_build_result(d: dict[str, Any]) -> common_pb.BuildResult:
+    return common_pb.BuildResult(
+        drv_path=str(d.get("drv_path", "")),
+        success=bool(d.get("success", False)),
+        status=str(d.get("status", "")),
+        error_msg=str(d.get("error_msg", "")),
+    )
+
+
+def _dict_to_derivation(d: dict[str, Any]) -> common_pb.Derivation:
+    # env can be a list of [key, value] pairs or a dict
+    env_raw = d.get("env", {})
+    if isinstance(env_raw, list):
+        env = {str(k): str(v) for k, v in env_raw}
+    else:
+        env = {str(k): str(v) for k, v in env_raw.items()}
+
+    # input_drvs can be a list of {path, outputs, children} or a dict
+    idrvs_raw = d.get("input_drvs", {})
+    if isinstance(idrvs_raw, list):
+        input_drvs: dict[str, common_pb.DerivationOutputs] = {}
+        for entry in idrvs_raw:
+            path = str(entry.get("path", ""))
+            children = dict(entry.get("children", {}))
+            input_drvs[path] = common_pb.DerivationOutputs(
+                outputs=[str(o) for o in entry.get("outputs", [])],
+                dynamic_outputs={str(k): str(v) for k, v in children.items()},
             )
-        )
-
-    def query_missing(req: rpc.QueryMissing):
-        return dict(store.query_missing([_parse_sp(path) for path in req.paths]))
-
-    def query_derivation_outputs(req: rpc.QueryDerivationOutputs):
-        return _store_path_list(store.query_derivation_outputs(_parse_sp(req.path)))
-
-    def query_valid_derivers(req: rpc.QueryValidDerivers):
-        return _store_path_list(store.query_valid_derivers(_parse_sp(req.path)))
-
-    def query_all_valid_paths(_: rpc.QueryAllValidPaths):
-        return _store_path_list(store.query_all_valid_paths())
-
-    def query_referrers(req: rpc.QueryReferrers):
-        return _store_path_list(store.query_referrers(_parse_sp(req.path)))
-
-    def query_substitutable_paths(req: rpc.QuerySubstitutablePaths):
-        return _store_path_list(store.query_substitutable_paths([_parse_sp(path) for path in req.paths]))
-
-    def build_paths_with_results(req: rpc.BuildPathsWithResults):
-        return list(
-            store.build_paths_with_results(
-                [_parse_sp(path) for path in req.paths],
-                eval_store,
+    else:
+        input_drvs = {
+            str(k): common_pb.DerivationOutputs(
+                outputs=[str(o) for o in v.outputs] if hasattr(v, "outputs") else [],
+                dynamic_outputs={
+                    str(kk): str(vv) for kk, vv in (
+                        v.dynamic_outputs.items() if hasattr(v, "dynamic_outputs") else {}
+                    )
+                },
             )
-        )
+            for k, v in idrvs_raw.items()
+        }
 
-    def read_derivation(req: rpc.ReadDerivation):
-        return dict(store.read_derivation(_parse_sp(req.path)))
-
-    def build_derivation(req: rpc.BuildDerivation):
-        return store.build_derivation(
-            _parse_sp(req.path),
-            nanopynix_store.BuildMode(req.build_mode),
-        )
-
-    def follow_links_to_store_path(req: rpc.FollowLinksToStorePath):
-        return _sp_to_dict(store.follow_links_to_store_path(req.path))
-
-    def add_temp_root(req: rpc.AddTempRoot):
-        return store.add_temp_root(_parse_sp(req.path))
-
-    def fetch_from_url(req: rpc.FetchFromUrl) -> Input:
-        return Input(attrs=_input_attrs(nanopynix_fetchers.input_from_url(req.url)))
-
-    def fetch_from_attrs(req: rpc.FetchFromAttrs) -> Input:
-        return Input(attrs=_input_attrs(nanopynix_fetchers.input_from_attrs(_fetcher_attrs(req.attrs))))
-
-    return dispatch(
-        [
-            Endpoint(rpc.GetUri, get_uri),
-            Endpoint(rpc.GetStoreDir, get_store_dir),
-            Endpoint(rpc.IsValidPath, is_valid_path),
-            Endpoint(rpc.ParseStorePath, parse_store_path),
-            Endpoint(rpc.QueryPathInfo, query_path_info),
-            Endpoint(rpc.QueryPathFromHashPart, query_path_from_hash_part),
-            Endpoint(rpc.ComputeFsClosure, compute_fs_closure),
-            Endpoint(rpc.QueryMissing, query_missing),
-            Endpoint(rpc.QueryDerivationOutputs, query_derivation_outputs),
-            Endpoint(rpc.QueryValidDerivers, query_valid_derivers),
-            Endpoint(rpc.QueryAllValidPaths, query_all_valid_paths),
-            Endpoint(rpc.QueryReferrers, query_referrers),
-            Endpoint(rpc.QuerySubstitutablePaths, query_substitutable_paths),
-            Endpoint(rpc.BuildPathsWithResults, build_paths_with_results),
-            Endpoint(rpc.ReadDerivation, read_derivation),
-            Endpoint(rpc.BuildDerivation, build_derivation),
-            Endpoint(rpc.FollowLinksToStorePath, follow_links_to_store_path),
-            Endpoint(rpc.AddTempRoot, add_temp_root),
-            Endpoint(rpc.FetchFromUrl, fetch_from_url),
-            Endpoint(rpc.FetchFromAttrs, fetch_from_attrs),
-        ]
+    return common_pb.Derivation(
+        name=str(d.get("name", "")),
+        system=str(d.get("system", d.get("platform", ""))),
+        builder=str(d.get("builder", "")),
+        args=[str(a) for a in d.get("args", [])],
+        env=env,
+        input_drvs=input_drvs,
+        input_srcs=[str(s) for s in d.get("input_srcs", [])],
     )
