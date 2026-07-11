@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package nanopynix_proto.store;
+
+import "common.proto";
+
+service StoreService {
+  rpc GetUri(GetUriRequest) returns (GetUriResponse);
+  rpc GetStoreDir(GetStoreDirRequest) returns (GetStoreDirResponse);
+  rpc IsValidPath(IsValidPathRequest) returns (IsValidPathResponse);
+  rpc ParseStorePath(ParseStorePathRequest) returns (nanopynix_proto.common.StorePath);
+  rpc QueryPathInfo(QueryPathInfoRequest) returns (nanopynix_proto.common.PathInfo);
+  rpc QueryPathFromHashPart(QueryPathFromHashPartRequest) returns (QueryPathFromHashPartResponse);
+  rpc ComputeFsClosure(ComputeFsClosureRequest) returns (nanopynix_proto.common.StorePathList);
+  rpc QueryMissing(QueryMissingRequest) returns (nanopynix_proto.common.MissingInfo);
+  rpc QueryDerivationOutputs(QueryDerivationOutputsRequest) returns (nanopynix_proto.common.StorePathList);
+  rpc QueryValidDerivers(QueryValidDeriversRequest) returns (nanopynix_proto.common.StorePathList);
+  rpc QueryAllValidPaths(QueryAllValidPathsRequest) returns (nanopynix_proto.common.StorePathList);
+  rpc QueryReferrers(QueryReferrersRequest) returns (nanopynix_proto.common.StorePathList);
+  rpc QuerySubstitutablePaths(QuerySubstitutablePathsRequest) returns (nanopynix_proto.common.StorePathList);
+  rpc BuildPathsWithResults(BuildPathsWithResultsRequest) returns (nanopynix_proto.common.BuildResultList);
+  rpc ReadDerivation(ReadDerivationRequest) returns (nanopynix_proto.common.Derivation);
+  rpc BuildDerivation(BuildDerivationRequest) returns (nanopynix_proto.common.BuildResult);
+  rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (nanopynix_proto.common.StorePath);
+  rpc AddTempRoot(AddTempRootRequest) returns (AddTempRootResponse);
+  rpc FetchFromUrl(FetchFromUrlRequest) returns (nanopynix_proto.common.Input);
+  rpc FetchFromAttrs(FetchFromAttrsRequest) returns (nanopynix_proto.common.Input);
+}
+
+message GetUriRequest {}
+message GetUriResponse {
+  string uri = 1;
+}
+
+message GetStoreDirRequest {}
+message GetStoreDirResponse {
+  string dir = 1;
+}
+
+message IsValidPathRequest {
+  string path = 1;
+}
+message IsValidPathResponse {
+  bool valid = 1;
+}
+
+message ParseStorePathRequest {
+  string path = 1;
+}
+
+message QueryPathInfoRequest {
+  string path = 1;
+}
+
+message QueryPathFromHashPartRequest {
+  string hash_part = 1;
+}
+message QueryPathFromHashPartResponse {
+  optional nanopynix_proto.common.StorePath path = 1;
+}
+
+message ComputeFsClosureRequest {
+  string path = 1;
+  bool flip_direction = 2;
+  bool include_outputs = 3;
+  bool include_derivers = 4;
+}
+
+message QueryMissingRequest {
+  repeated string paths = 1;
+}
+
+message QueryDerivationOutputsRequest {
+  string path = 1;
+}
+
+message QueryValidDeriversRequest {
+  string path = 1;
+}
+
+message QueryAllValidPathsRequest {}
+
+message QueryReferrersRequest {
+  string path = 1;
+}
+
+message QuerySubstitutablePathsRequest {
+  repeated string paths = 1;
+}
+
+message BuildPathsWithResultsRequest {
+  repeated string paths = 1;
+}
+
+message ReadDerivationRequest {
+  string path = 1;
+}
+
+message BuildDerivationRequest {
+  string path = 1;
+  int32 build_mode = 2;
+}
+
+message FollowLinksToStorePathRequest {
+  string path = 1;
+}
+
+message AddTempRootRequest {
+  string path = 1;
+}
+message AddTempRootResponse {}
+
+message FetchFromUrlRequest {
+  string url = 1;
+}
+
+message FetchFromAttrsRequest {
+  map<string, nanopynix_proto.common.AttrsValue> attrs = 1;
+}

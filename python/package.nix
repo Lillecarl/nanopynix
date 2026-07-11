@@ -8,6 +8,8 @@
   pyyaml,
   strip-ansi,
   nanopynix-bindings ? callPackage ../bindings/package.nix { },
+  nanopynix-proto,
+  grpclib-transports,
 }:
 
 buildPythonPackage {
@@ -23,6 +25,8 @@ buildPythonPackage {
 
   dependencies = [
     nanopynix-bindings
+    nanopynix-proto
+    grpclib-transports
     janus
     pydantic
     pyyaml
