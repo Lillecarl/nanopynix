@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from nanopynix_proto.nix import common as common_pb
 from nanopynix_proto.nix.eval import (
@@ -96,10 +96,11 @@ class EvalServiceHandler(EvalServiceBase):
         return self._state.eval_state
 
     def _reset(self) -> None:
-        """Release eval and locked-flake handles for a fresh session."""
+        """Release all handles for a fresh session."""
         es = self._state.eval_state
         if es is not None:
-            es.release_all_exported()
+            for _handle, resource in self._state.handles.iter_kind("value"):
+                es.release_exported_value(resource)
             self._state.eval_state = None
         self._state.handles.clear()
 
@@ -107,10 +108,14 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _export(self, pyv: Any) -> common_pb.ValueHandle:
         es = self._get_es()
-        h = cast("Any", es)._export_pyvalue(pyv)
+        exported = es._export_pyvalue(pyv)
+        handle = self._state.handles.allocate(exported, "value")
         type_name = pyv.type_name()
         nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
-        return common_pb.ValueHandle(handle=h, type=nix_type)
+        return common_pb.ValueHandle(handle=handle, type=nix_type)
+
+    def _resolve(self, handle: int) -> Any:
+        return self._state.handles.get_typed(handle, "value")
 
     def _deep_value(self, pyv: Any) -> common_pb.DeepValue:
         pyv.force()
@@ -134,14 +139,13 @@ class EvalServiceHandler(EvalServiceBase):
         raise TypeError(f"cannot forceDeep unsupported Nix value type '{typ}' over RPC")
 
     def _force_handle(self, handle: int) -> common_pb.ForceValue:
-        value = self._get_es().value_from_handle(handle)
+        value = self._resolve(handle)
         value.force()
         if value.type_name() == "function":
             return common_pb.ForceValue(remote_value=self._export(value))
         return common_pb.ForceValue(scalar=_pyval_to_scalar(value.to_python()))
 
-    @staticmethod
-    def _call_arg_to_python(arg: common_pb.CallArg, es: Any) -> Any:
+    def _call_arg_to_python(self, arg: common_pb.CallArg, es: Any) -> Any:
         """Convert a CallArg proto to a Python/nanobind value for Nix calls."""
         if arg.scalar is not None:
             sv = arg.scalar
@@ -155,14 +159,14 @@ class EvalServiceHandler(EvalServiceBase):
                 return sv.bool_value
             return None  # null_value
         if arg.list is not None:
-            return [EvalServiceHandler._call_arg_to_python(item, es) for item in arg.list.items]
+            return [self._call_arg_to_python(item, es) for item in arg.list.items]
         if arg.attrs is not None:
             return {
-                key: EvalServiceHandler._call_arg_to_python(val, es)
+                key: self._call_arg_to_python(val, es)
                 for key, val in arg.attrs.entries.items()
             }
         if arg.remote_value is not None:
-            return es.value_from_handle(arg.remote_value.handle)
+            return self._resolve(arg.remote_value.handle)
         raise TypeError(f"unsupported call argument: {arg!r}")
 
     # ── eval methods ──────────────────────────────────────────────
@@ -177,43 +181,43 @@ class EvalServiceHandler(EvalServiceBase):
         return self._force_handle(message.handle)
 
     async def force_deep(self, message: ForceDeepRequest) -> common_pb.DeepValue:
-        value = self._get_es().value_from_handle(message.handle)
+        value = self._resolve(message.handle)
         value.force_deep()
         return self._deep_value(value)
 
     async def force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
         import json as _json
 
-        value = self._get_es().value_from_handle(message.handle)
+        value = self._resolve(message.handle)
         return ForceJsonResponse(json=_json.dumps(value.to_json(copy_to_store=message.copy_to_store)))
 
     async def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
-        return self._export(self._get_es().value_from_handle(message.handle).attr_get(message.name))
+        return self._export(self._resolve(message.handle).attr_get(message.name))
 
     async def list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
         if message.index < 0:
             raise IndexError(f"list index must be non-negative, got {message.index}")
         return self._export(
-            self._get_es().value_from_handle(message.handle).list_get(message.index)
+            self._resolve(message.handle).list_get(message.index)
         )
 
     async def list_length(self, message: ListLengthRequest) -> ListLengthResponse:
         return ListLengthResponse(
-            length=self._get_es().value_from_handle(message.handle).list_length()
+            length=self._resolve(message.handle).list_length()
         )
 
     async def attr_names(self, message: AttrNamesRequest) -> AttrNamesResponse:
         return AttrNamesResponse(
-            names=self._get_es().value_from_handle(message.handle).attr_names()
+            names=self._resolve(message.handle).attr_names()
         )
 
     async def has_attr(self, message: HasAttrRequest) -> HasAttrResponse:
         return HasAttrResponse(
-            has=self._get_es().value_from_handle(message.handle).has_attr(message.name)
+            has=self._resolve(message.handle).has_attr(message.name)
         )
 
     async def type_name(self, message: TypeNameRequest) -> TypeNameResponse:
-        value = self._get_es().value_from_handle(message.handle)
+        value = self._resolve(message.handle)
         value.force()
         type_name = value.type_name()
         nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
@@ -221,7 +225,7 @@ class EvalServiceHandler(EvalServiceBase):
 
     async def call(self, message: CallRequest) -> common_pb.ValueHandle:
         es = self._get_es()
-        fn = es.value_from_handle(message.handle)
+        fn = self._resolve(message.handle)
         result = fn
         for arg in message.args:
             result = result.call(es.value_from_python(self._call_arg_to_python(arg, es)))
@@ -285,7 +289,11 @@ class EvalServiceHandler(EvalServiceBase):
         return common_pb.FlakeRef(attrs=_flake_ref_attrs(fr))
 
     async def release(self, message: ReleaseRequest) -> ReleaseResponse:
-        self._get_es().release_exported(message.handle)
+        es = self._state.eval_state
+        if es is not None:
+            pyv = self._resolve(message.handle)
+            es.release_exported_value(pyv)
+        self._state.handles.release(message.handle)
         return ReleaseResponse()
 
     async def release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:

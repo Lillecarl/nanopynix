@@ -56,27 +56,17 @@ struct PyEvalState {
 
     // ── Handle management ───────────────────────────────────────
 
-    /// Export a Value and return an opaque integer handle.
-    int64_t export_value(nix::Value *v);
+    /// Take a GC reference on *v and return a PyValue wrapper.
+    /// The caller must eventually call release_exported_value() on the result.
+    PyValue export_value(nix::Value *v);
 
-    /// Look up a previously exported Value by handle.
-    nix::Value *get_exported(int64_t handle);
-
-    /// Look up and wrap in a PyValue (Python-safe).
-    PyValue value_from_handle(int64_t handle);
+    /// Release the GC reference held by an exported PyValue.
+    void release_exported_value(PyValue &pyv);
 
     /// Convert a JSON-compatible Python object into a Nix Value.
     PyValue value_from_python(nanobind::object obj);
 
-    /// Release a handle.
-    void release_exported(int64_t handle);
-
-    /// Release all exported handles.
-    void release_all_exported();
-
 private:
-    int64_t _next_handle = 1;
-
     void init(const std::vector<std::string> &searchPath) {
         for (auto &cfg : evalSettingsConfigurators())
             cfg(evalSettings);
