@@ -17,7 +17,10 @@ from nanopynix_proto.nix.common import (
     RemoteCallArg,
     ScalarValue,
 )
+from nanopynix_proto.nix.eval import EvalServiceBase
 
+from nanopynix._pool import _RPC_TIMEOUT
+from nanopynix._rpc_proxy import RpcProxyMixin
 from nanopynix.exceptions import (
     EvalSessionClosedError,
     ForeignValueError,
@@ -31,11 +34,10 @@ from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixTy
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from betterproto2 import Message
     from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
     from nanopynix._pool import ReservedWorker, _WorkerManager
-
-    type _EvalWorker = ReservedWorker | _WorkerManager
 
 
 def _scalar_to_pyval(scalar: ScalarValue | None) -> JsonScalar:
@@ -114,14 +116,48 @@ class _EvalOwner:
         return value._ctx.owner.token is self.token
 
 
+# ════════════════════════════════════════════════════════════════════
+# EvalProxy — auto-generated RPC proxy for the EvalService gRPC API
+# ════════════════════════════════════════════════════════════════════
+
+
+class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase):
+    """Auto-generated proxy for all 20 ``EvalService`` gRPC methods.
+
+    Created by ``EvalSession.open()`` when the worker is reserved.
+    Method forwarders dispatch through ``ReservedWorker.call()``,
+    serializing all eval RPCs under the worker's exclusive lease.
+    """
+
+    __slots__ = ("_active", "_rw")
+
+    def __init__(self, rw: ReservedWorker) -> None:
+        self._rw = rw
+        self._active = True
+
+    def _check_active(self) -> None:
+        if not self._active:
+            raise EvalSessionClosedError(
+                "EvalProxy is invalid — the EvalSession has been closed"
+            )
+
+    def deactivate(self) -> None:
+        self._active = False
+
+    async def _rpc_proxy_call(self, method_name: str, message: Message) -> Any:
+        self._check_active()
+        method = getattr(self._rw._eval_stub, method_name)
+        return await self._rw.call(method(message, timeout=_RPC_TIMEOUT))
+
+
 @dataclass(frozen=True)
 class _EvalProxyContext:
-    worker: _EvalWorker
+    proxy: EvalProxy
     owner: _EvalOwner
     timeout: float | None = None
 
     def with_timeout(self, timeout: float | None) -> _EvalProxyContext:
-        return self if timeout is None else _EvalProxyContext(self.worker, self.owner, timeout)
+        return self if timeout is None else _EvalProxyContext(self.proxy, self.owner, timeout)
 
     def resolve_timeout(self, override: float | None) -> float | None:
         return override if override is not None else self.timeout
@@ -212,20 +248,14 @@ class ValueProxy:
             parent = lazy.parent._resolved
         else:
             parent = lazy.parent
-        t = self._ctx.resolve_timeout(timeout)
-        rw = self._ctx.worker
         if isinstance(lazy.selector, str):
             from nanopynix_proto.nix.eval import AttrRequest
 
-            handle = await rw.call(
-                rw._eval_stub.attr(AttrRequest(handle=parent.handle, name=lazy.selector), timeout=t)
-            )
+            handle = await self._ctx.proxy.attr(AttrRequest(handle=parent.handle, name=lazy.selector))
         else:
             from nanopynix_proto.nix.eval import ListGetRequest
 
-            handle = await rw.call(
-                rw._eval_stub.list_get(ListGetRequest(handle=parent.handle, index=lazy.selector), timeout=t)
-            )
+            handle = await self._ctx.proxy.list_get(ListGetRequest(handle=parent.handle, index=lazy.selector))
         self._state = _ResolvedValue(handle=handle.handle, nix_type=_parse_nix_type(handle.type))
 
     async def _ensure_type(self, *, timeout: float | None = None) -> NixType:
@@ -235,10 +265,7 @@ class ValueProxy:
             return cached
         from nanopynix_proto.nix.eval import TypeNameRequest
 
-        rw = self._ctx.worker
-        resp = await rw.call(
-            rw._eval_stub.type_name(TypeNameRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
-        )
+        resp = await self._ctx.proxy.type_name(TypeNameRequest(handle=self.handle))
         resolved_type = _parse_nix_type(resp.type) or NixType.UNSPECIFIED
         self._state = _ResolvedValue(handle=self.handle, nix_type=resolved_type)
         return resolved_type
@@ -293,10 +320,7 @@ class ValueProxy:
         # scalar — delegate to worker
         from nanopynix_proto.nix.eval import ForceRequest
 
-        rw = self._ctx.worker
-        result = await rw.call(
-            rw._eval_stub.force(ForceRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
-        )
+        result = await self._ctx.proxy.force(ForceRequest(handle=self.handle))
         return self._decode_force_value(result)
 
     @overload
@@ -387,10 +411,7 @@ class ValueProxy:
         await self._ensure_resolved(timeout=timeout)
         from nanopynix_proto.nix.eval import ForceDeepRequest
 
-        rw = self._ctx.worker
-        result = await rw.call(
-            rw._eval_stub.force_deep(ForceDeepRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
-        )
+        result = await self._ctx.proxy.force_deep(ForceDeepRequest(handle=self.handle))
         return self._decode_deep_value(result)
 
     async def force_json(self, *, copy_to_store: bool = False, timeout: float | None = None) -> JsonValue:
@@ -411,12 +432,8 @@ class ValueProxy:
         await self._ensure_resolved(timeout=timeout)
         from nanopynix_proto.nix.eval import ForceJsonRequest
 
-        rw = self._ctx.worker
-        resp = await rw.call(
-            rw._eval_stub.force_json(
-                ForceJsonRequest(handle=self.handle, copy_to_store=copy_to_store),
-                timeout=self._ctx.resolve_timeout(timeout),
-            )
+        resp = await self._ctx.proxy.force_json(
+            ForceJsonRequest(handle=self.handle, copy_to_store=copy_to_store),
         )
         import json as _json
 
@@ -440,33 +457,21 @@ class ValueProxy:
         await self._ensure_resolved(timeout=timeout)
         from nanopynix_proto.nix.eval import ListLengthRequest
 
-        rw = self._ctx.worker
-        resp = await rw.call(
-            rw._eval_stub.list_length(ListLengthRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
-        )
+        resp = await self._ctx.proxy.list_length(ListLengthRequest(handle=self.handle))
         return resp.length
 
     async def attr_names(self, *, timeout: float | None = None) -> list[str]:
         await self._ensure_resolved(timeout=timeout)
         from nanopynix_proto.nix.eval import AttrNamesRequest
 
-        rw = self._ctx.worker
-        resp = await rw.call(
-            rw._eval_stub.attr_names(AttrNamesRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
-        )
+        resp = await self._ctx.proxy.attr_names(AttrNamesRequest(handle=self.handle))
         return resp.names
 
     async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         await self._ensure_resolved(timeout=timeout)
         from nanopynix_proto.nix.eval import HasAttrRequest
 
-        rw = self._ctx.worker
-        resp = await rw.call(
-            rw._eval_stub.has_attr(
-                HasAttrRequest(handle=self.handle, name=name),
-                timeout=self._ctx.resolve_timeout(timeout),
-            )
-        )
+        resp = await self._ctx.proxy.has_attr(HasAttrRequest(handle=self.handle, name=name))
         return resp.has
 
     async def call(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
@@ -474,14 +479,10 @@ class ValueProxy:
         actual = await self._ensure_type(timeout=timeout)
         if actual != NixType.FUNCTION:
             raise WrongNixTypeError(expected=NixType.FUNCTION, actual=actual)
-        t = self._ctx.resolve_timeout(timeout)
         call_args = [await self._encode_call_arg(arg, timeout=timeout) for arg in args]
         from nanopynix_proto.nix.eval import CallRequest
 
-        rw = self._ctx.worker
-        result = await rw.call(
-            rw._eval_stub.call(CallRequest(handle=self.handle, args=call_args), timeout=t)
-        )
+        result = await self._ctx.proxy.call(CallRequest(handle=self.handle, args=call_args))
         return self._ctx.value(result.handle, result.type)
 
     async def __call__(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
@@ -499,10 +500,7 @@ class ValueProxy:
         self._check_active()
         from nanopynix_proto.nix.eval import ReleaseRequest
 
-        rw = self._ctx.worker
-        await rw.call(
-            rw._eval_stub.release(ReleaseRequest(handle=self.handle), timeout=self._ctx.resolve_timeout(timeout))
-        )
+        await self._ctx.proxy.release(ReleaseRequest(handle=self.handle))
         self._released = True
 
 
@@ -564,10 +562,7 @@ class ValueAttrs:
         self._check_active()
         from nanopynix_proto.nix.eval import AttrRequest
 
-        rw = self._ctx.worker
-        result = await rw.call(
-            rw._eval_stub.attr(AttrRequest(handle=self._value.handle, name=name), timeout=self._ctx.resolve_timeout(timeout))
-        )
+        result = await self._ctx.proxy.attr(AttrRequest(handle=self._value.handle, name=name))
         proxy = self._ctx.value(result.handle, result.type)
         return await proxy.force()
 
@@ -575,10 +570,7 @@ class ValueAttrs:
         self._check_active()
         from nanopynix_proto.nix.eval import ReleaseRequest
 
-        rw = self._ctx.worker
-        await rw.call(
-            rw._eval_stub.release(ReleaseRequest(handle=self._value.handle), timeout=self._ctx.timeout)
-        )
+        await self._ctx.proxy.release(ReleaseRequest(handle=self._value.handle))
         self._released = True
 
 
@@ -638,10 +630,7 @@ class ValueList:
         self._check_index(idx)
         from nanopynix_proto.nix.eval import ListGetRequest
 
-        rw = self._ctx.worker
-        result = await rw.call(
-            rw._eval_stub.list_get(ListGetRequest(handle=self._value.handle, index=idx), timeout=self._ctx.resolve_timeout(timeout))
-        )
+        result = await self._ctx.proxy.list_get(ListGetRequest(handle=self._value.handle, index=idx))
         proxy = self._ctx.value(result.handle, result.type)
         return await proxy.force()
 
@@ -649,10 +638,7 @@ class ValueList:
         self._check_active()
         from nanopynix_proto.nix.eval import ReleaseRequest
 
-        rw = self._ctx.worker
-        await rw.call(
-            rw._eval_stub.release(ReleaseRequest(handle=self._value.handle), timeout=self._ctx.timeout)
-        )
+        await self._ctx.proxy.release(ReleaseRequest(handle=self._value.handle))
         self._released = True
 
 
@@ -697,11 +683,12 @@ class EvalSession:
     invalid after ``__aexit__`` — their RPC methods raise ``EvalSessionClosedError``.
     """
 
-    __slots__ = ("_active", "_ctx", "_manager", "_owner", "_rw", "_timeout")
+    __slots__ = ("_active", "_ctx", "_manager", "_owner", "_proxy", "_rw", "_timeout")
 
     def __init__(self, manager: _WorkerManager, timeout: float | None = None) -> None:
         self._manager = manager
         self._rw: ReservedWorker | None = None
+        self._proxy: EvalProxy | None = None
         self._timeout = timeout
         self._active: list[bool] = [False]
         self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
@@ -718,7 +705,8 @@ class EvalSession:
         if self._rw is not None:
             return
         self._rw = await self._manager.reserve(timeout=self._timeout)
-        self._ctx = _EvalProxyContext(self._rw, self._owner, self._timeout)
+        self._proxy = EvalProxy(self._rw)
+        self._ctx = _EvalProxyContext(self._proxy, self._owner, self._timeout)
         self._active[0] = True
 
     async def close(self) -> None:
@@ -727,21 +715,19 @@ class EvalSession:
             try:
                 from nanopynix_proto.nix.eval import ReleaseAllRequest
 
-                await self._rw.call(self._rw._eval_stub.release_all(ReleaseAllRequest(), timeout=self._timeout))
+                await self._proxy.release_all(ReleaseAllRequest())  # type: ignore[union-attr]
             finally:
+                self._proxy.deactivate()  # type: ignore[union-attr]
                 await self._rw.release()
                 self._rw = None
+                self._proxy = None
                 self._ctx = None
 
-    def _check_rw(self) -> None:
-        if self._rw is None:
+    def _ensure_proxy(self) -> EvalProxy:
+        p = self._proxy
+        if p is None:
             raise EvalSessionClosedError("EvalSession not entered — use 'async with session.eval() as eval_:'")
-
-    def _reserved_worker(self) -> ReservedWorker:
-        rw = self._rw
-        if rw is None:
-            raise EvalSessionClosedError("EvalSession not entered — use 'async with session.eval() as eval_:'")
-        return rw
+        return p
 
     def _proxy_context(self) -> _EvalProxyContext:
         ctx = self._ctx
@@ -750,26 +736,15 @@ class EvalSession:
         return ctx
 
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
-        self._check_rw()
-        rw = self._reserved_worker()
         from nanopynix_proto.nix.eval import EvalFileRequest
 
-        handle = await rw.call(
-            rw._eval_stub.eval_file(EvalFileRequest(path=path), timeout=self._resolve_timeout(timeout))
-        )
+        handle = await self._ensure_proxy().eval_file(EvalFileRequest(path=path))
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
-        self._check_rw()
-        rw = self._reserved_worker()
         from nanopynix_proto.nix.eval import EvalStringRequest
 
-        handle = await rw.call(
-            rw._eval_stub.eval_string(
-                EvalStringRequest(expr=expr, source_name=path),
-                timeout=self._resolve_timeout(timeout),
-            )
-        )
+        handle = await self._ensure_proxy().eval_string(EvalStringRequest(expr=expr, source_name=path))
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def lock_flake(
@@ -791,41 +766,24 @@ class EvalSession:
         ``write_lock_file=False``, the lock is updated in memory only; call
         ``await locked.write_lock_file()`` later to persist it.
         """
-        self._check_rw()
-        rw = self._reserved_worker()
         from nanopynix_proto.nix.eval import LockFlakeRequest, UpdateInputsList
 
+        proxy = self._ensure_proxy()
         if update_inputs is True:
-            locked = await rw.call(
-                rw._eval_stub.lock_flake(
-                    LockFlakeRequest(
-                        ref=ref,
-                        update_all=True,
-                        write_lock_file=write_lock_file,
-                    ),
-                    timeout=self._resolve_timeout(timeout),
-                )
+            locked = await proxy.lock_flake(
+                LockFlakeRequest(ref=ref, update_all=True, write_lock_file=write_lock_file)
             )
         elif isinstance(update_inputs, list):
-            locked = await rw.call(
-                rw._eval_stub.lock_flake(
-                    LockFlakeRequest(
-                        ref=ref,
-                        update_inputs_list=UpdateInputsList(inputs=update_inputs),
-                        write_lock_file=write_lock_file,
-                    ),
-                    timeout=self._resolve_timeout(timeout),
+            locked = await proxy.lock_flake(
+                LockFlakeRequest(
+                    ref=ref,
+                    update_inputs_list=UpdateInputsList(inputs=update_inputs),
+                    write_lock_file=write_lock_file,
                 )
             )
         else:
-            locked = await rw.call(
-                rw._eval_stub.lock_flake(
-                    LockFlakeRequest(
-                        ref=ref,
-                        write_lock_file=write_lock_file,
-                    ),
-                    timeout=self._resolve_timeout(timeout),
-                )
+            locked = await proxy.lock_flake(
+                LockFlakeRequest(ref=ref, write_lock_file=write_lock_file)
             )
         return self._locked_flake_handle(locked)
 
@@ -849,15 +807,10 @@ class EvalSession:
         ``LockedFlake`` from a prior ``lock_flake()`` call.  This allows
         evaluating with an updated lock that hasn't been written to disk yet.
         """
-        self._check_rw()
-        rw = self._reserved_worker()
         from nanopynix_proto.nix.eval import CallLockedFlakeRequest
 
-        result = await rw.call(
-            rw._eval_stub.call_locked_flake(
-                CallLockedFlakeRequest(handle=self._locked_flake_id(locked)),
-                timeout=self._resolve_timeout(timeout),
-            )
+        result = await self._ensure_proxy().call_locked_flake(
+            CallLockedFlakeRequest(handle=self._locked_flake_id(locked))
         )
         return self._proxy_context().value(result.handle, result.type)
 
@@ -868,27 +821,15 @@ class EvalSession:
         call.  The lock file is written to the flake's own directory — for a
         temp flake this is the temp directory, never a real path.
         """
-        self._check_rw()
-        rw = self._reserved_worker()
         from nanopynix_proto.nix.eval import WriteLockFileRequest
 
-        await rw.call(
-            rw._eval_stub.write_lock_file(
-                WriteLockFileRequest(handle=self._locked_flake_id(locked)),
-                timeout=self._resolve_timeout(timeout),
-            )
-        )
+        await self._ensure_proxy().write_lock_file(WriteLockFileRequest(handle=self._locked_flake_id(locked)))
 
     async def release_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
-        self._check_rw()
-        rw = self._reserved_worker()
         from nanopynix_proto.nix.eval import ReleaseLockedFlakeRequest
 
-        await rw.call(
-            rw._eval_stub.release_locked_flake(
-                ReleaseLockedFlakeRequest(handle=self._locked_flake_id(locked)),
-                timeout=self._resolve_timeout(timeout),
-            )
+        await self._ensure_proxy().release_locked_flake(
+            ReleaseLockedFlakeRequest(handle=self._locked_flake_id(locked))
         )
 
     async def eval_flake(
@@ -907,28 +848,13 @@ class EvalSession:
         For more control (e.g. updating locks in memory before evaluating),
         use ``lock_flake()`` + ``eval_locked_flake()`` instead.
         """
-        self._check_rw()
-        rw = self._reserved_worker()
         from nanopynix_proto.nix.eval import EvalFlakeRequest
 
-        handle = await rw.call(
-            rw._eval_stub.eval_flake(
-                EvalFlakeRequest(ref=ref, write_lock_file=write_lock_file),
-                timeout=self._resolve_timeout(timeout),
-            )
-        )
+        handle = await self._ensure_proxy().eval_flake(EvalFlakeRequest(ref=ref, write_lock_file=write_lock_file))
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def get_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> FlakeRef:
-        self._check_rw()
-        rw = self._reserved_worker()
         from nanopynix_proto.nix.eval import GetFlakeRequest
 
-        # gRPC stub only accepts string refs; convert dict refs to string
         ref_str = ref if isinstance(ref, str) else str(ref)
-        return await rw.call(
-            rw._eval_stub.get_flake(GetFlakeRequest(ref=ref_str), timeout=self._resolve_timeout(timeout))
-        )
-
-    def _resolve_timeout(self, override: float | None) -> float | None:
-        return override if override is not None else self._timeout
+        return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str))
