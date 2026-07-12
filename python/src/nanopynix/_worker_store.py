@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, TypeVar
 
 from nanopynix_proto.nix import common as common_pb
 from nanopynix_proto.nix.store import (
@@ -49,15 +50,7 @@ from nanopynix._grpc_util import wrap_service_handlers
 
 # ── helpers ──────────────────────────────────────────────────────────
 
-
-def _sp(pb_or_str: common_pb.StorePath | str) -> Any:
-    """Return either a string or a parsed C++ StorePath for the store API.
-
-    The caller has already resolved relative paths into absolute ones, so
-    we munge it into the format expected by the store methods.
-    """
-    # Handlers resolve paths before calling this helper.
-    return pb_or_str
+MessageT = TypeVar("MessageT")
 
 
 def _parse_sp(path: str, store: Any) -> Any:
@@ -69,22 +62,12 @@ def _parse_sp(path: str, store: Any) -> Any:
 
 def _pb_store_path(sp_obj: Any) -> common_pb.StorePath:
     """Convert a C++ StorePath object (or dict with same keys) to proto."""
-    if isinstance(sp_obj, str):
-        return _sp_str_to_pb(sp_obj)
-    if hasattr(sp_obj, "to_string"):
-        return _sp_to_pb(sp_obj)
-    # Fallback: dict-like with keys
-    return common_pb.StorePath(
-        to_string=str(sp_obj["to_string"]),
-        hash_part=str(sp_obj["hash_part"]),
-        name=str(sp_obj["name"]),
-    )
+    return common_pb.StorePath.from_dict(_proto_shape_store_path(sp_obj))
 
 
 def _pb_store_path_list(objs: Any) -> common_pb.StorePathList:
     """Convert a list of C++ StorePath objects (or strings/dicts) to StorePathList."""
-    paths = [_pb_store_path(p) for p in objs]
-    return common_pb.StorePathList(paths=paths)
+    return common_pb.StorePathList.from_dict({"paths": [_proto_shape_store_path(p) for p in objs]})
 
 
 def _attrs_value_to_str(v: common_pb.AttrsValue) -> str:
@@ -96,6 +79,44 @@ def _attrs_value_to_str(v: common_pb.AttrsValue) -> str:
     if v.bool_value is not None:
         return str(v.bool_value).lower()
     raise ValueError(f"cannot convert AttrsValue to string: {v!r}")
+
+
+def _message_from_nanobind(cls: type[MessageT], value: Any) -> MessageT:
+    """Validate a nanobind response through the generated betterproto2 dataclass."""
+    return cls.from_dict(_proto_shape(value))  # type: ignore[attr-defined, no-any-return]
+
+
+def _proto_shape(value: Any) -> Any:
+    """Normalize residual nanobind values into proto-shaped plain Python data."""
+    if isinstance(value, Mapping):
+        return {str(k): _proto_shape(v) for k, v in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [_proto_shape(v) for v in value]
+    if _is_store_path_like(value):
+        return _proto_shape_store_path(value)
+    return value
+
+
+def _proto_shape_store_path(value: Any) -> dict[str, str]:
+    if isinstance(value, str):
+        return _sp_str_to_pb(value).to_dict()
+    if isinstance(value, Mapping):
+        return {
+            "to_string": str(value["to_string"]),
+            "hash_part": str(value["hash_part"]),
+            "name": str(value["name"]),
+        }
+    if _is_store_path_like(value):
+        return _sp_to_pb(value).to_dict()
+    raise TypeError(f"cannot convert StorePath-like value to proto dict: {value!r}")
+
+
+def _is_store_path_like(value: Any) -> bool:
+    return (
+        hasattr(value, "to_string")
+        and hasattr(value, "hash_part")
+        and hasattr(value, "name")
+    )
 
 
 # ── Service handler ──────────────────────────────────────────────────
@@ -134,17 +155,7 @@ class StoreServiceHandler(StoreServiceBase):
 
     async def query_path_info(self, message: QueryPathInfoRequest) -> common_pb.PathInfo:
         sp = _parse_sp(message.path, self._store)
-        info = dict(self._store.query_path_info(sp))
-        return common_pb.PathInfo(
-            path=_pb_store_path(info.get("path")),
-            nar_hash=str(info.get("nar_hash", "")),
-            nar_size=int(info.get("nar_size", 0)),
-            registration_time=info.get("registration_time"),
-            deriver=_pb_store_path(info["deriver"]) if info.get("deriver") else None,
-            references=[_pb_store_path(p) for p in info.get("references", [])],
-            ca=info.get("ca"),
-            ultimate=bool(info.get("ultimate", False)),
-        )
+        return _message_from_nanobind(common_pb.PathInfo, self._store.query_path_info(sp))
 
     async def query_path_from_hash_part(
         self, message: QueryPathFromHashPartRequest
@@ -170,14 +181,7 @@ class StoreServiceHandler(StoreServiceBase):
 
     async def query_missing(self, message: QueryMissingRequest) -> common_pb.MissingInfo:
         sps = [_parse_sp(p, self._store) for p in message.paths]
-        info = dict(self._store.query_missing(sps))
-        return common_pb.MissingInfo(
-            will_build=[_pb_store_path(p) for p in info.get("will_build", [])],
-            will_substitute=[_pb_store_path(p) for p in info.get("will_substitute", [])],
-            unknown=[_pb_store_path(p) for p in info.get("unknown", [])],
-            download_size=int(info.get("download_size", 0)),
-            nar_size=int(info.get("nar_size", 0)),
-        )
+        return _message_from_nanobind(common_pb.MissingInfo, self._store.query_missing(sps))
 
     async def query_derivation_outputs(
         self, message: QueryDerivationOutputsRequest
@@ -218,20 +222,18 @@ class StoreServiceHandler(StoreServiceBase):
     ) -> common_pb.BuildResultList:
         sps = [_parse_sp(p, self._store) for p in message.paths]
         results = list(self._store.build_paths_with_results(sps, self._state.eval_store))
-        br_list = [_dict_to_build_result(r) for r in results]
-        return common_pb.BuildResultList(results=br_list)
+        return common_pb.BuildResultList.from_dict({"results": [_proto_shape(r) for r in results]})
 
     async def read_derivation(self, message: ReadDerivationRequest) -> common_pb.Derivation:
         sp = _parse_sp(message.path, self._store)
-        raw = dict(self._store.read_derivation(sp))
-        return _dict_to_derivation(raw)
+        return common_pb.Derivation.from_dict(_proto_shape_derivation(self._store.read_derivation(sp)))
 
     async def build_derivation(
         self, message: BuildDerivationRequest
     ) -> common_pb.BuildResult:
         sp = _parse_sp(message.path, self._store)
-        result = dict(self._store.build_derivation(sp, nanopynix_store.BuildMode(message.build_mode)))
-        return _dict_to_build_result(result)
+        result = self._store.build_derivation(sp, nanopynix_store.BuildMode(message.build_mode))
+        return _message_from_nanobind(common_pb.BuildResult, result)
 
     # ── links / roots ─────────────────────────────────────────────
 
@@ -258,19 +260,8 @@ class StoreServiceHandler(StoreServiceBase):
         return common_pb.Input(attrs=_input_attrs(inp))
 
 
-# ── dict → proto converters ──────────────────────────────────────────
-
-
-def _dict_to_build_result(d: dict[str, Any]) -> common_pb.BuildResult:
-    return common_pb.BuildResult(
-        drv_path=str(d.get("drv_path", "")),
-        success=bool(d.get("success", False)),
-        status=str(d.get("status", "")),
-        error_msg=str(d.get("error_msg", "")),
-    )
-
-
-def _dict_to_derivation(d: dict[str, Any]) -> common_pb.Derivation:
+def _proto_shape_derivation(value: Any) -> dict[str, Any]:
+    d = dict(_proto_shape(value))
     # env can be a list of [key, value] pairs or a dict
     env_raw = d.get("env", {})
     if isinstance(env_raw, list):
@@ -281,33 +272,33 @@ def _dict_to_derivation(d: dict[str, Any]) -> common_pb.Derivation:
     # input_drvs can be a list of {path, outputs, children} or a dict
     idrvs_raw = d.get("input_drvs", {})
     if isinstance(idrvs_raw, list):
-        input_drvs: dict[str, common_pb.DerivationOutputs] = {}
+        input_drvs: dict[str, dict[str, Any]] = {}
         for entry in idrvs_raw:
             path = str(entry.get("path", ""))
             children = dict(entry.get("children", {}))
-            input_drvs[path] = common_pb.DerivationOutputs(
-                outputs=[str(o) for o in entry.get("outputs", [])],
-                dynamic_outputs={str(k): str(v) for k, v in children.items()},
-            )
+            input_drvs[path] = {
+                "outputs": [str(o) for o in entry.get("outputs", [])],
+                "dynamic_outputs": {str(k): str(v) for k, v in children.items()},
+            }
     else:
         input_drvs = {
-            str(k): common_pb.DerivationOutputs(
-                outputs=[str(o) for o in v.outputs] if hasattr(v, "outputs") else [],
-                dynamic_outputs={
+            str(k): {
+                "outputs": [str(o) for o in v.outputs] if hasattr(v, "outputs") else [],
+                "dynamic_outputs": {
                     str(kk): str(vv) for kk, vv in (
                         v.dynamic_outputs.items() if hasattr(v, "dynamic_outputs") else {}
                     )
                 },
-            )
+            }
             for k, v in idrvs_raw.items()
         }
 
-    return common_pb.Derivation(
-        name=str(d.get("name", "")),
-        system=str(d.get("system", d.get("platform", ""))),
-        builder=str(d.get("builder", "")),
-        args=[str(a) for a in d.get("args", [])],
-        env=env,
-        input_drvs=input_drvs,
-        input_srcs=[str(s) for s in d.get("input_srcs", [])],
-    )
+    return {
+        "name": str(d.get("name", "")),
+        "system": str(d.get("system", d.get("platform", ""))),
+        "builder": str(d.get("builder", "")),
+        "args": [str(a) for a in d.get("args", [])],
+        "env": env,
+        "input_drvs": input_drvs,
+        "input_srcs": [str(s) for s in d.get("input_srcs", [])],
+    }
