@@ -54,7 +54,7 @@ async def main() -> None:
         assert await v4.get_type() == NixType.LIST
         assert await v4.list_length() == 5
         assert await v4.list_get(0).force() == 1
-        assert await v4.list_get(4).force() == 5
+        assert await v4.list_get(-1).force() == 5
         print("list: length =", await v4.list_length())
 
         # --- force_json: serialize to dict/list tree (like force_deep) --------

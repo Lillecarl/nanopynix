@@ -511,13 +511,14 @@ class TestValueProxyLifecycle:
         assert await child.get_type() == NixType.INT
         assert child.handle == 3
 
-    async def test_list_get_rejects_negative_index(self):
+    async def test_list_get_accepts_negative_index(self):
         w = self._worker()
         vp = self._proxy(w, 1, "list")
 
-        with pytest.raises(IndexError, match="non-negative"):
-            vp.list_get(-1)
-
+        # Negative indices are deferred to the worker (normalised against list_length).
+        child = vp.list_get(-1)
+        assert child is not None
+        # The stub should not be called yet — list_get is lazy.
         w._eval_stub.list_get.assert_not_awaited()
 
     async def test_list_length(self):
@@ -612,10 +613,15 @@ class TestValueListBounds:
         w = self._worker()
         value = self._list(w, length=2)
 
-        with pytest.raises(IndexError, match="out of range"):
-            _ = value[-1]
+        # In-range: negative index normalised, positive index in range — both ok.
+        assert value[-1] is not None
+        assert value[0] is not None
+
+        # Out of range: positive index past end, negative index too far back.
         with pytest.raises(IndexError, match="out of range"):
             _ = value[2]
+        with pytest.raises(IndexError, match="out of range"):
+            _ = value[-3]
 
         w._eval_stub.list_get.assert_not_awaited()
 
