@@ -192,7 +192,7 @@ class Session:
         """
         return self._manager.subscribe(callback)
 
-    def eval(self, store: StoreHandle | None = None) -> EvalSession:
+    def eval(self, store: StoreHandle) -> EvalSession:
         """Acquire the worker exclusively for an eval session.
 
         Usage::
@@ -202,15 +202,15 @@ class Session:
                     root = await eval_.file("/path/to/flake.nix")
 
         Args:
-            store: Optional StoreHandle for cross-session validation.
-                   If provided and from a different session, raises ValueError.
+            store: Open StoreHandle to use for this eval state. If it belongs to
+                   a different session, raises ValueError.
 
         Returns an ``EvalSession`` context manager that holds the worker
         for the duration.  All exported handles are released on exit.
         """
-        if store is not None and store._session_id != self._session_id:
+        if store._session_id != self._session_id:
             raise ValueError("StoreHandle belongs to a different session")
-        return EvalSession(self._manager)
+        return EvalSession(self._manager, store.store_handle)
 
 
 # Backward-compatible alias

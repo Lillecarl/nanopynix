@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nanopynix import Session
+from nanopynix import NixType, Session
 
 
 @pytest.mark.anyio
@@ -15,7 +15,8 @@ async def test_fetchTree_with_builtins_prefix():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        assert (await (await eval.string("builtins.typeOf builtins.fetchTree")).force()).rstrip("\n") == "lambda"
+        value = await eval.string("builtins.typeOf builtins.fetchTree")
+        assert (await value.force_as(NixType.STRING)).rstrip("\n") == "lambda"
 
 
 @pytest.mark.anyio
@@ -26,4 +27,5 @@ async def test_fetchTree_without_builtins_prefix():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        assert (await (await eval.string("builtins.typeOf fetchTree")).force()).rstrip("\n") == "lambda"
+        value = await eval.string("builtins.typeOf fetchTree")
+        assert (await value.force_as(NixType.STRING)).rstrip("\n") == "lambda"

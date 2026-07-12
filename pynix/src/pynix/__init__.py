@@ -35,7 +35,7 @@ def main() -> None:
     """
 
     async def _run() -> None:
-        async with nanopynix.Session() as nix, nix.eval() as session:
+        async with nanopynix.Session() as nix, nix.store() as store, nix.eval(store) as session:
             root = await session.string(expr)
             value = await root.force_json()
             json.dumps(value, sort_keys=True, indent=2)

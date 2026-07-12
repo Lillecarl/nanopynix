@@ -33,6 +33,7 @@ from nanopynix._session import (
     _ResolvedValue,
 )
 from nanopynix.models import LogEvent
+from nanopynix.store import StoreHandle
 
 # ════════════════════════════════════════════════════════════════════
 # Helpers
@@ -222,6 +223,8 @@ class TestEvalSessionLifecycle:
         assert isinstance(root, ValueProxy)
         assert root.handle == 1
         assert root.nix_type == NixType.ATTRS
+        request = rw._eval_stub.eval_file.call_args.args[0]
+        assert request.store_handle == 1
 
     async def test_string_after_enter(self):
         pool = _mock_pool()
@@ -229,10 +232,12 @@ class TestEvalSessionLifecycle:
         rw._eval_stub.eval_string.return_value = _mock_value_handle(2, "int")
         pool.reserve.return_value = rw
 
-        session = EvalSession(pool)
+        session = EvalSession(pool, store_handle=99)
         await session.__aenter__()
         root = await session.string("42 + 1")
         assert root.nix_type == NixType.INT
+        request = rw._eval_stub.eval_string.call_args.args[0]
+        assert request.store_handle == 99
 
     async def test_timeout_override(self):
         pool = _mock_pool()
@@ -257,6 +262,42 @@ class TestEvalSessionLifecycle:
         await session.string("42")  # no override
         call_kwargs = rw._eval_stub.eval_string.call_args[1]
         assert call_kwargs["timeout"] == _RPC_TIMEOUT
+
+
+class TestSessionEvalFacade:
+    def _session(self):
+        session = Session.__new__(Session)  # type: ignore[attr-defined]
+        session._manager = _mock_pool()
+        session._session_id = "session-id"
+        return session
+
+    def _store(self, session_id: str = "session-id", handle: int = 42) -> StoreHandle:
+        store = StoreHandle(_mock_pool(), "mock", session_id)
+        store._active = True
+        store._store_handle = handle
+        return store
+
+    def test_eval_uses_explicit_store_handle(self):
+        session = self._session()
+        store = self._store(handle=123)
+
+        eval_session = session.eval(store)
+
+        assert eval_session._store_handle == 123
+
+    def test_eval_rejects_foreign_store(self):
+        session = self._session()
+        store = self._store(session_id="other-session")
+
+        with pytest.raises(ValueError, match="different session"):
+            session.eval(store)
+
+    def test_eval_rejects_closed_store(self):
+        session = self._session()
+        store = StoreHandle(_mock_pool(), "mock", "session-id")
+
+        with pytest.raises(RuntimeError, match="StoreHandle is closed"):
+            session.eval(store)
 
 
 # ════════════════════════════════════════════════════════════════════
