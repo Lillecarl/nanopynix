@@ -21,3 +21,9 @@ async def main():
 
 asyncio.run(main())
 ```
+
+---
+
+*This project is made possible by*
+
+[![Dynamist](../.assets/dynamist-logo.png)](https://dynamist.se/)
