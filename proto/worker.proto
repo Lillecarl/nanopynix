@@ -6,6 +6,8 @@ import "common.proto";
 
 service WorkerService {
   rpc Init(InitRequest) returns (InitResponse);
+  rpc OpenStore(OpenStoreRequest) returns (OpenStoreResponse);
+  rpc CloseStore(CloseStoreRequest) returns (CloseStoreResponse);
   rpc SubscribeLogs(SubscribeLogsRequest) returns (stream nix.common.LogEvent);
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
@@ -25,6 +27,20 @@ message InitResponse {
 message SubscribeLogsRequest {
   int64 request_id = 1;
 }
+
+message OpenStoreRequest {
+  string uri = 1;
+}
+message OpenStoreResponse {
+  int64 store_handle = 1;
+  string uri = 2;
+  string store_dir = 3;
+}
+
+message CloseStoreRequest {
+  int64 store_handle = 1;
+}
+message CloseStoreResponse {}
 
 message ShutdownRequest {}
 message ShutdownResponse {}

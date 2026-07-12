@@ -25,18 +25,23 @@ service StoreService {
   rpc AddTempRoot(AddTempRootRequest) returns (AddTempRootResponse);
 }
 
-message GetUriRequest {}
+message GetUriRequest {
+  int64 store_handle = 100;
+}
 message GetUriResponse {
   string uri = 1;
 }
 
-message GetStoreDirRequest {}
+message GetStoreDirRequest {
+  int64 store_handle = 100;
+}
 message GetStoreDirResponse {
   string dir = 1;
 }
 
 message IsValidPathRequest {
   string path = 1;
+  int64 store_handle = 100;
 }
 message IsValidPathResponse {
   bool valid = 1;
@@ -44,14 +49,17 @@ message IsValidPathResponse {
 
 message ParseStorePathRequest {
   string path = 1;
+  int64 store_handle = 100;
 }
 
 message QueryPathInfoRequest {
   string path = 1;
+  int64 store_handle = 100;
 }
 
 message QueryPathFromHashPartRequest {
   string hash_part = 1;
+  int64 store_handle = 100;
 }
 message QueryPathFromHashPartResponse {
   optional nix.common.StorePath path = 1;
@@ -62,48 +70,61 @@ message ComputeFsClosureRequest {
   bool flip_direction = 2;
   bool include_outputs = 3;
   bool include_derivers = 4;
+  int64 store_handle = 100;
 }
 
 message QueryMissingRequest {
   repeated string paths = 1;
+  int64 store_handle = 100;
 }
 
 message QueryDerivationOutputsRequest {
   string path = 1;
+  int64 store_handle = 100;
 }
 
 message QueryValidDeriversRequest {
   string path = 1;
+  int64 store_handle = 100;
 }
 
-message QueryAllValidPathsRequest {}
+message QueryAllValidPathsRequest {
+  int64 store_handle = 100;
+}
 
 message QueryReferrersRequest {
   string path = 1;
+  int64 store_handle = 100;
 }
 
 message QuerySubstitutablePathsRequest {
   repeated string paths = 1;
+  int64 store_handle = 100;
 }
 
 message BuildPathsWithResultsRequest {
   repeated string paths = 1;
+  int64 store_handle = 100;
 }
 
 message ReadDerivationRequest {
   string path = 1;
+  int64 store_handle = 100;
 }
 
 message BuildDerivationRequest {
   string path = 1;
   int32 build_mode = 2;
+  int64 store_handle = 100;
 }
 
 message FollowLinksToStorePathRequest {
   string path = 1;
+  int64 store_handle = 100;
 }
 
 message AddTempRootRequest {
   string path = 1;
+  int64 store_handle = 100;
 }
 message AddTempRootResponse {}

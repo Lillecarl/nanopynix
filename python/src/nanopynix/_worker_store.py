@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from betterproto2 import Casing
+from betterproto2 import Casing, OutputFormat
 from nanopynix_proto.nix.store import StoreServiceBase
 
 import nanopynix_store
@@ -33,15 +33,18 @@ class StoreServiceHandler(
     def __init__(self, state: Any) -> None:
         self._state = state
 
-    @property
-    def _store(self) -> Any:
-        if self._state.store is None:
-            raise RuntimeError("store not initialized")
-        return self._state.store
+    def _get_store(self, store_handle: int) -> Any:
+        if store_handle == 0:
+            if self._state.store is None:
+                raise RuntimeError("store not initialized")
+            return self._state.store
+        return self._state.handles.get_typed(store_handle, "store")
 
     def _nanobind_rpc_call(self, binding_method_name: str, message: Any) -> Any:
-        request = message.to_dict(casing=Casing.SNAKE, include_default_values=True)
-        if hasattr(self._store, binding_method_name):
-            method = getattr(self._store, binding_method_name)
+        request = message.to_dict(casing=Casing.SNAKE, include_default_values=True, output_format=OutputFormat.PYTHON)
+        store_handle = request.pop("store_handle", 0)
+        store = self._get_store(store_handle)
+        if hasattr(store, binding_method_name):
+            method = getattr(store, binding_method_name)
             return method(request)
         raise RuntimeError(f"missing checked nanobind store method: {binding_method_name}")

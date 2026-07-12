@@ -23,8 +23,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_proto.nix.common import LogEvent
 from nanopynix_proto.nix.worker import (
+    CloseStoreRequest,
+    CloseStoreResponse,
     InitRequest,
     InitResponse,
+    OpenStoreRequest,
+    OpenStoreResponse,
     ShutdownRequest,
     ShutdownResponse,
     SubscribeLogsRequest,
@@ -157,6 +161,22 @@ class WorkerServiceHandler(WorkerServiceBase):
             traceback.print_exc(file=sys.stderr)
             # Re-raise so the gRPC framework propagates the error.
             raise
+
+    async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
+        if message.uri == "auto":
+            store = nanopynix_store.open_store()
+        else:
+            store = nanopynix_store.open_store(message.uri)
+        handle = self._state.handles.allocate(store, "store")
+        return OpenStoreResponse(
+            store_handle=handle,
+            uri=store.get_uri(),
+            store_dir=store.get_store_dir(),
+            )
+
+    async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
+        self._state.handles.release(message.store_handle)
+        return CloseStoreResponse()
 
     async def subscribe_logs(
         self, message: SubscribeLogsRequest
