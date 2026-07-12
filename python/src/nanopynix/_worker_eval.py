@@ -221,9 +221,13 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_list_get, message)
 
     def _do_list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
-        if message.index < 0:
-            raise IndexError(f"list index must be non-negative, got {message.index}")
-        return self._export(self._resolve(message.handle).list_get(message.index))
+        pv = self._resolve(message.handle)
+        idx = message.index
+        if idx < 0:
+            idx += pv.list_length()
+        if idx < 0:
+            raise IndexError(f"list index out of range: {message.index}")
+        return self._export(pv.list_get(idx))
 
     async def list_length(self, message: ListLengthRequest) -> ListLengthResponse:
         return await self._state.executor.run(self._do_list_length, message)

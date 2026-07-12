@@ -448,8 +448,6 @@ class ValueProxy:
 
     def list_get(self, idx: int, *, timeout: float | None = None) -> ValueProxy:
         self._check_active()
-        if idx < 0:
-            raise IndexError(f"list index must be non-negative, got {idx}")
         parent: ValueProxy | _ResolvedValue = self if isinstance(self._state, _LazyValue) else self._resolved
         return self._ctx.child(parent, idx, timeout=timeout)
 
@@ -613,7 +611,8 @@ class ValueList:
             raise ValueReleasedError("ValueList has been released")
 
     def _check_index(self, idx: int) -> None:
-        if idx < 0 or idx >= self._length:
+        normalized = idx if idx >= 0 else idx + self._length
+        if normalized < 0 or normalized >= self._length:
             raise IndexError(f"list index {idx} out of range for length {self._length}")
 
     def __len__(self) -> int:
