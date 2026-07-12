@@ -181,6 +181,7 @@ message PrimOpSpec {
   repeated string args = 3;
   string doc = 4;
   string import_path = 5;
+  bool rpc = 6;
 }
 
 // ── Log event ──────────────────────────────────────

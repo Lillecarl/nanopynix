@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package nix.manager;
+
+import "common.proto";
+
+service ManagerPrimopService {
+  rpc Call(CallPrimopRequest) returns (CallPrimopResponse);
+}
+
+message CallPrimopRequest {
+  string name = 1;
+  repeated nix.common.ScalarValue args = 2;
+}
+
+message CallPrimopResponse {
+  nix.common.ScalarValue value = 1;
+}

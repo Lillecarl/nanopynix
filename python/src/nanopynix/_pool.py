@@ -29,6 +29,8 @@ if TYPE_CHECKING:
     from nanopynix_proto.nix.store import StoreServiceStub
     from nanopynix_proto.nix.worker import WorkerServiceStub
 
+    from collections.abc import Callable
+
     from nanopynix.models import PrimOpSpec
 
 logger = logging.getLogger(__name__)
@@ -187,6 +189,7 @@ class _WorkerManager:
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
         primops: list[PrimOpSpec] | None = None,
+        primop_callables: dict[str, Callable[..., Any]] | None = None,
         worker_oom_score_adj: int | None = None,
         reserved_worker_oom_score_adj: int | None = None,
     ) -> None:
@@ -195,12 +198,14 @@ class _WorkerManager:
         self._settings = settings or {}
         self._features = experimental_features or []
         self._primops = primops or []
+        self._primop_callables = primop_callables or {}
         # OOM score adjustment is not yet supported with multiprocessing transport
         # (no direct access to child PID).  Params kept for API compat.
         self._channel = None
         self._worker_service_stub: WorkerServiceStub | None = None
         self._store_service_stub: StoreServiceStub | None = None
         self._eval_service_stub: EvalServiceStub | None = None
+        self._primop_handler: Any = None
         self._available: asyncio.Lock = asyncio.Lock()
         self._log_bus: _LogBus = _LogBus()
         self._stack: contextlib.AsyncExitStack | None = None
@@ -214,13 +219,20 @@ class _WorkerManager:
         from nanopynix_proto.nix.store import StoreServiceStub
         from nanopynix_proto.nix.worker import InitRequest, WorkerServiceStub
 
-        from nanopynix._manager import ManagerServiceHandler
+        from nanopynix._manager import ManagerPrimopServiceHandler, ManagerServiceHandler
 
         self._stack = contextlib.AsyncExitStack()
+
+        self._primop_handler = ManagerPrimopServiceHandler()
+        self._primop_handler.register_all(self._primop_callables)
+
         self._channel = await self._stack.enter_async_context(
             multiprocessing_worker_with_backchannel(
                 worker_service_factory,
-                [ManagerServiceHandler(self._log_bus.emit)],
+                [
+                    ManagerServiceHandler(self._log_bus.emit),
+                    self._primop_handler,
+                ],
                 preload=["nanopynix._worker"],
                 max_concurrency=_WORKER_MAX_CONCURRENCY,
             )
@@ -239,6 +251,7 @@ class _WorkerManager:
                 args=list(p.args),
                 doc=p.doc,
                 import_path=p.import_path,
+                rpc=p.rpc if hasattr(p, "rpc") else False,
             )
             for p in self._primops
         ]
