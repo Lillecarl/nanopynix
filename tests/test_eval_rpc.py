@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from nanopynix_proto.nix.store import GetUriRequest
 
 from nanopynix import (
     NixCoercionError,
@@ -14,7 +15,6 @@ from nanopynix import (
     strip_ansi,
     yaml_primops,
 )
-from nanopynix_proto.nix.store import GetUriRequest
 
 
 async def test_eval_file_simple(tmp_path):

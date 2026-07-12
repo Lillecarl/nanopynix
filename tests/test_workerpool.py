@@ -4,9 +4,9 @@ import asyncio
 import contextlib
 
 import pytest
+from nanopynix_proto.nix.store import GetStoreDirRequest, GetUriRequest, QueryPathInfoRequest
 
 from nanopynix import LogEvent, Nix, StoreError, WorkerBusyError, WorkerDiedError
-from nanopynix_proto.nix.store import GetStoreDirRequest, GetUriRequest, QueryPathInfoRequest
 
 
 async def test_single_worker_basics():

@@ -1,6 +1,6 @@
 """Integration tests for the L2 Store facade via Session."""
 
-from nanopynix import MissingInfo, PathInfo, Session, StorePath
+from nanopynix_proto.nix.common import StorePath as StorePathProto
 from nanopynix_proto.nix.store import (
     AddTempRootRequest,
     ComputeFsClosureRequest,
@@ -18,6 +18,8 @@ from nanopynix_proto.nix.store import (
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
 )
+
+from nanopynix import MissingInfo, PathInfo, Session, StorePath
 
 
 async def test_open_close():
@@ -52,7 +54,7 @@ async def test_parse_store_path():
         if paths:
             path = StorePath(paths[0])
             sp = await store.parse_store_path(ParseStorePathRequest(path=path.to_string))
-            assert isinstance(sp, StorePath)
+            assert isinstance(sp, StorePathProto)
             assert path.to_string == StorePath(sp).to_string
 
 
@@ -72,7 +74,7 @@ async def test_query_path_info():
             path = StorePath(paths[0])
             pi = await store.query_path_info(QueryPathInfoRequest(path=path.to_string))
             assert isinstance(pi, PathInfo)
-            assert isinstance(pi.path, StorePath)
+            assert isinstance(pi.path, StorePathProto)
             assert pi.nar_size >= 0
 
 
@@ -83,7 +85,7 @@ async def test_query_path_from_hash_part():
             hp = StorePath(paths[0]).hash_part
             response = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=hp))
             sp = response.path
-            assert isinstance(sp, StorePath)
+            assert isinstance(sp, StorePathProto)
 
 
 async def test_compute_fs_closure():
@@ -94,7 +96,7 @@ async def test_compute_fs_closure():
             closure = (await store.compute_fs_closure(ComputeFsClosureRequest(path=path.to_string))).paths
             assert isinstance(closure, list)
             assert len(closure) >= 1
-            assert all(isinstance(sp, StorePath) for sp in closure)
+            assert all(isinstance(sp, StorePathProto) for sp in closure)
 
 
 async def test_query_missing():
@@ -150,7 +152,7 @@ async def test_follow_links_to_store_path():
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
             sp = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path="/run/current-system"))
-            assert isinstance(sp, StorePath)
+            assert isinstance(sp, StorePathProto)
 
 
 async def test_store_path_str_and_model_roundtrip():

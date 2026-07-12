@@ -376,7 +376,7 @@ static nb::dict store_get_uri(nix::Store &s, const nb::dict &) {
 
 static nb::dict store_get_store_dir(nix::Store &s, const nb::dict &) {
     nb::dict d;
-    d["dir"] = s.config.storeDir_;
+        d["dir"] = std::string(s.config.storeDir_);
     return d;
 }
 
