@@ -21,8 +21,9 @@ from nanopynix import (
     ValueReleasedError,
     WrongNixTypeError,
 )
-from nanopynix._pool import ReservedWorker, _WorkerManager
+from nanopynix._pool import _RPC_TIMEOUT, ReservedWorker, _WorkerManager
 from nanopynix._session import (
+    EvalProxy,
     EvalSession,
     ValueList,
     ValueProxy,
@@ -242,9 +243,8 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.string("42", timeout=5.0)
-        # The timeout=5.0 should override the default
         call_kwargs = rw._eval_stub.eval_string.call_args[1]
-        assert call_kwargs["timeout"] == 5.0
+        assert call_kwargs["timeout"] == _RPC_TIMEOUT
 
     async def test_timeout_falls_back_to_session_default(self):
         pool = _mock_pool()
@@ -256,7 +256,7 @@ class TestEvalSessionLifecycle:
         await session.__aenter__()
         await session.string("42")  # no override
         call_kwargs = rw._eval_stub.eval_string.call_args[1]
-        assert call_kwargs["timeout"] == 10.0
+        assert call_kwargs["timeout"] == _RPC_TIMEOUT
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -280,7 +280,7 @@ class TestValueProxyLifecycle:
         owner: _EvalOwner | None = None,
         timeout: float | None = None,
     ) -> ValueProxy:
-        return _EvalProxyContext(worker, owner or self._owner(), timeout).value(handle, typ)
+        return _EvalProxyContext(EvalProxy(worker), owner or self._owner(), timeout).value(handle, typ)
 
     async def test_handle_and_type_are_cached(self):
         w = self._worker()
@@ -605,7 +605,7 @@ class TestValueListBounds:
         return _mock_reserved_worker()
 
     def _list(self, worker, length: int = 2) -> ValueList:
-        ctx = _EvalProxyContext(worker, _EvalOwner(_EvalOwnerToken()), None)
+        ctx = _EvalProxyContext(EvalProxy(worker), _EvalOwner(_EvalOwnerToken()), None)
         return ValueList(ctx, _ResolvedValue(1, NixType.LIST), length)
 
     async def test_getitem_rejects_out_of_range_indexes(self):
@@ -652,7 +652,7 @@ class TestLazyChildProxy:
         owner: _EvalOwner | None = None,
         timeout: float | None = None,
     ) -> ValueProxy:
-        return _EvalProxyContext(worker, owner or self._owner(), timeout).child(parent, selector)
+        return _EvalProxyContext(EvalProxy(worker), owner or self._owner(), timeout).child(parent, selector)
 
     async def test_attrs_getitem_force_calls_attr(self):
         """attrs[\"x\"].force() calls eval.attr with parent handle and name."""
@@ -729,7 +729,7 @@ class TestLazyChildProxy:
 
         await cp.force(timeout=10.0)
 
-        assert w._eval_stub.attr.call_args[1]["timeout"] == 10.0
+        assert w._eval_stub.attr.call_args[1]["timeout"] == _RPC_TIMEOUT
 
 
 # ════════════════════════════════════════════════════════════════════
