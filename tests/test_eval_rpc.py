@@ -14,6 +14,7 @@ from nanopynix import (
     strip_ansi,
     yaml_primops,
 )
+from nanopynix_proto.nix.store import GetUriRequest
 
 
 async def test_eval_file_simple(tmp_path):
@@ -109,8 +110,8 @@ async def test_eval_session_cleanup(tmp_path):
             await root.force()
         # Session closed — worker is available for store calls
         async with nix.store() as store:
-            uri = await store.get_uri()
-            assert isinstance(uri, str)
+            uri = await store.get_uri(GetUriRequest())
+            assert isinstance(uri.uri, str)
 
 
 async def test_eval_thunk(tmp_path):

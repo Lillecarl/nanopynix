@@ -119,12 +119,29 @@ def _parse_store_path_string(value: str) -> dict[str, str]:
 class StorePathExt(_StorePath, MonkeyPatcher):
     """Extension of proto StorePath with ``is_derivation`` and string constructor."""
 
+    def __new__(cls, value: str | _StorePath | None = None, **data: Any) -> StorePathExt:
+        if isinstance(value, cls) and not data:
+            return value
+        return super().__new__(cls)
+
     @property
     def is_derivation(self) -> bool:
         """True if this path ends with .drv."""
         return self.name.endswith(".drv")
 
-    def __init__(self, value: str | None = None, **data: Any) -> None:
+    def __init__(self, value: str | _StorePath | None = None, **data: Any) -> None:
+        if isinstance(value, _StorePath):
+            if data:
+                raise TypeError("StorePath accepts either a proto StorePath or explicit fields, not both")
+            if value is self:
+                return
+            data = {
+                "hash_part": value.hash_part,
+                "name": value.name,
+                "to_string": value.to_string,
+            }
+            super().__init__(**data)
+            return
         if value is not None:
             if data:
                 raise TypeError("StorePath accepts either a path string or explicit fields, not both")
