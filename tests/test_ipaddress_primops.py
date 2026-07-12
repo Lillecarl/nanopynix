@@ -1,13 +1,17 @@
 """Tests for ipaddress primops (parseAddress, parseNetwork, parseInterface)."""
 
-# pyright: reportIndexIssue=false, reportArgumentType=false, reportOperatorIssue=false, reportOptionalSubscript=false, reportCallIssue=false
-
 from __future__ import annotations
 
 import pytest
 
 from nanopynix import NixType, Session
+from nanopynix._session import NixDeepValue
 from nanopynix.ipaddress_primops import ipaddress_primops
+
+
+def _as_dict(v: NixDeepValue) -> dict[str, NixDeepValue]:
+    assert isinstance(v, dict)
+    return v
 
 
 @pytest.mark.anyio
@@ -74,7 +78,7 @@ async def test_parse_network_v4():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseNetwork "192.168.1.0/24"')
-        result = await v.force_deep()
+        result = _as_dict(await v.force_deep())
         assert result["version"] == 4
         assert result["prefixlen"] == 24
         assert result["numAddresses"] == 256
@@ -83,7 +87,6 @@ async def test_parse_network_v4():
         assert result["netmask"] == "255.255.255.0"
         assert result["isPrivate"] is True
         assert result["isGlobal"] is False
-        # host and subnet are callables and cannot appear in force_deep output.
 
 
 @pytest.mark.anyio
@@ -94,11 +97,11 @@ async def test_parse_network_v6():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseNetwork "2a00:1450::/32"')
-        result = await v.force_deep()
+        result = _as_dict(await v.force_deep())
         assert result["version"] == 6
         assert result["prefixlen"] == 32
         assert result["isSiteLocal"] is False
-        assert result["numAddresses"] > 0
+        assert isinstance(result["numAddresses"], int) and result["numAddresses"] > 0
 
 
 @pytest.mark.anyio
@@ -109,14 +112,14 @@ async def test_parse_interface():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseInterface "192.168.1.1/24"')
-        result = await v.force_deep()
+        result = _as_dict(await v.force_deep())
         assert result["withPrefixlen"] == "192.168.1.1/24"
         assert result["withNetmask"] == "192.168.1.1/255.255.255.0"
-        ip = result["ip"]
+        ip = _as_dict(result["ip"])
         assert ip["version"] == 4
         assert ip["compressed"] == "192.168.1.1"
         assert ip["isPrivate"] is True
-        net = result["network"]
+        net = _as_dict(result["network"])
         assert net["version"] == 4
         assert net["prefixlen"] == 24
         assert net["networkAddress"] == "192.168.1.0"
@@ -194,7 +197,7 @@ async def test_loopback_address():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseAddress "127.0.0.1"')
-        result = await v.force_deep()
+        result = _as_dict(await v.force_deep())
         assert result["isLoopback"] is True
         assert result["isGlobal"] is False
         assert result["version"] == 4
@@ -208,5 +211,5 @@ async def test_multicast_address():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseAddress "224.0.0.1"')
-        result = await v.force_deep()
+        result = _as_dict(await v.force_deep())
         assert result["isMulticast"] is True

@@ -1,4 +1,3 @@
-# pyright: reportIndexIssue=false, reportArgumentType=false, reportOptionalSubscript=false, reportCallIssue=false
 """Evaluate Nix expressions and navigate results.
 
 Run with::
