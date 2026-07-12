@@ -10,6 +10,7 @@ select = [
 
 ignore = [
     "E501",  # line length handled by line-length setting
+    "A001",  # "eval" used as variable name for eval sessions
 ]
 
 [lint.isort]

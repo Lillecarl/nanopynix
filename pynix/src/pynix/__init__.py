@@ -38,9 +38,7 @@ def main() -> None:
         async with nanopynix.Session() as nix, nix.eval() as session:
             root = await session.string(expr)
             value = await root.force_json()
-            rendered = json.dumps(value, sort_keys=True, indent=2)
-            print("pynix: evaluated and serialized:")
-            print(rendered)
+            json.dumps(value, sort_keys=True, indent=2)
 
     asyncio.run(_run())
 

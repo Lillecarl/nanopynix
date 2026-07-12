@@ -237,7 +237,7 @@ _STR_TO_NIX: dict[str, NixType] = {
 }
 
 
-def _nix_type_from_string(cls: type, value: str) -> NixType:
+def _nix_type_from_string(_cls: type, value: str) -> NixType:
     return _STR_TO_NIX.get(value, NixType.UNSPECIFIED)
 
 

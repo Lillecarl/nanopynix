@@ -82,6 +82,8 @@ ignore = [
     "TRY003",
     # blind except — production code always logs before passing; AGENTS.md convention
     "BLE001",
+    # "eval" used as variable name for eval sessions
+    "A001",
 ]
 
 [lint.isort]

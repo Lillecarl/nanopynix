@@ -5,7 +5,6 @@ No Nix daemon needed.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -30,10 +29,6 @@ from nanopynix_proto.nix.store import (
 )
 
 from nanopynix.store import StoreHandle as Store
-
-if TYPE_CHECKING:
-
-    pass
 
 
 def _make_stub_mock() -> MagicMock:
@@ -100,10 +95,10 @@ def _mock_path_info(**overrides):
     pi.path = overrides.get("path", _mock_store_path())
     pi.nar_hash = overrides.get("nar_hash", "sha256:abc")
     pi.nar_size = overrides.get("nar_size", 1234)
-    pi.registration_time = overrides.get("registration_time", None)
-    pi.deriver = overrides.get("deriver", None)
+    pi.registration_time = overrides.get("registration_time")
+    pi.deriver = overrides.get("deriver")
     pi.references = overrides.get("references", [])
-    pi.ca = overrides.get("ca", None)
+    pi.ca = overrides.get("ca")
     pi.ultimate = overrides.get("ultimate", True)
     return pi
 
