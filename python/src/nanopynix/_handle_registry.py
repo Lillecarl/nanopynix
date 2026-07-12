@@ -35,6 +35,13 @@ class HandleRegistry:
             )
         return resource
 
+    def iter_kind(self, kind: str) -> list[tuple[int, Any]]:
+        return [
+            (handle, resource)
+            for handle, (k, resource) in self._resources.items()
+            if k == kind
+        ]
+
     def release(self, handle: int) -> None:
         self._resources.pop(handle, None)
 
