@@ -15,6 +15,7 @@
 #include <nix/expr/attr-set.hh>
 #include <nix/expr/primops.hh>
 #include <nix/expr/value-to-json.hh>
+#include <nix/util/experimental-features.hh>
 
 #include <nlohmann/json.hpp>
 
@@ -645,7 +646,11 @@ static void bind_eval_state(nb::module_ &m) {
 NB_MODULE(nanopynix_expr, m) {
     m.doc() = "nanopynix: Nix expr bindings (EvalState, Value)";
 
-    m.def("init_libexpr", []() { nix::initGC(); });
+    m.def("init_libexpr", []() {
+        nix::initGC();
+        auto &f = nix::experimentalFeatureSettings.experimentalFeatures.get();
+        f.insert(nix::Xp::FetchTree);
+    });
     m.def("eval_file", &eval_file_impl, "state"_a, "path"_a);
     m.def("register_primop", &register_primop,
           "name"_a, "arity"_a, "arg_names"_a, "doc"_a, "callback"_a,
