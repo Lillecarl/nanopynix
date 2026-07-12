@@ -5,6 +5,7 @@
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/shared_ptr.h>
 
+#include <atomic>
 #include <stdexcept>
 
 #include <nix/expr/eval.hh>
@@ -366,6 +367,32 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v, cons
     }
 }
 
+// Ownership container for anonymous primops created from Python callables.
+// These live for the lifetime of the process (matches nix::PrimOp lifetime).
+static std::vector<std::unique_ptr<nix::PrimOp>> &anon_primops() {
+    static std::vector<std::unique_ptr<nix::PrimOp>> ops;
+    return ops;
+}
+
+// Forward declaration — py_primop_bridge is defined later but called
+// from the callable branch in python_to_value.
+static void py_primop_bridge(
+    const std::string &name, int arity,
+    nix::EvalState &state, const nix::PosIdx,
+    nix::Value **args, nix::Value &ret);
+
+// Holder for a registered Python primop callback (forward-declared for
+// the callable branch in python_to_value).
+struct PyPrimOpCallback {
+    nb::object func;
+    int arity;
+};
+
+static std::map<std::string, PyPrimOpCallback> &py_primop_registry() {
+    static std::map<std::string, PyPrimOpCallback> reg;
+    return reg;
+}
+
 // Set the content of a nix::Value from a Python object, recursively.
 static void python_to_value(
     nix::EvalState &state, nb::object obj, nix::Value &v,
@@ -411,6 +438,60 @@ static void python_to_value(
             bindings.insert(sym, val);
         }
         v.mkAttrs(bindings);
+    } else if (nb::isinstance<nb::callable>(obj)) {
+        // Python callable → anonymous Nix primop.
+        int arity = 0;
+        try {
+            auto inspect = nb::module_::import_("inspect");
+            auto sig = inspect.attr("signature")(obj);
+            auto params = nb::cast<nb::object>(sig.attr("parameters"));
+            auto builtins = nb::module_::import_("builtins");
+            arity = nb::cast<int>(builtins.attr("len")(params));
+        } catch (nb::python_error &) {
+            arity = 0; // uninspectable → evaluate immediately
+        }
+
+        if (arity == 0) {
+            nb::object result;
+            try {
+                result = obj();
+            } catch (nb::python_error &e) {
+                if (primop_name) {
+                    state.error<nix::EvalError>(
+                        "%s: Python callable raised: %s",
+                        *primop_name, e.what()).debugThrow();
+                }
+                throw;
+            }
+            python_to_value(state, result, v, primop_name);
+        } else {
+            static std::atomic<int> anon_counter{0};
+            std::string anon_name = "__anon_primop_" + std::to_string(anon_counter++);
+
+            std::vector<std::string> arg_names;
+            for (int i = 0; i < arity; i++)
+                arg_names.push_back("x" + std::to_string(i + 1));
+
+            auto &reg = py_primop_registry();
+            reg[anon_name] = PyPrimOpCallback{std::move(obj), arity};
+
+            auto impl = [anon_name, arity](
+                nix::EvalState &st, const nix::PosIdx pos,
+                nix::Value **args, nix::Value &ret) {
+                py_primop_bridge(anon_name, arity, st, pos, args, ret);
+            };
+
+            auto &ops = anon_primops();
+            auto &anon = ops.emplace_back(std::make_unique<nix::PrimOp>(nix::PrimOp{
+                .name = anon_name,
+                .args = arg_names,
+                .arity = static_cast<size_t>(arity),
+                .doc = std::nullopt,
+                .impl = impl,
+            }));
+
+            v.mkPrimOp(anon.get());
+        }
     } else {
         if (primop_name) {
             state.error<nix::TypeError>(
@@ -426,18 +507,6 @@ PyValue PyEvalState::value_from_python(nb::object obj) {
     auto *v = state->allocValue();
     python_to_value(*state, obj, *v);
     return PyValue(v, this, alive);
-}
-
-// Holder for a registered Python primop callback.
-struct PyPrimOpCallback {
-    nb::object func;
-    int arity;
-};
-
-// Global registry: primop name → callback
-static std::map<std::string, PyPrimOpCallback> &py_primop_registry() {
-    static std::map<std::string, PyPrimOpCallback> reg;
-    return reg;
 }
 
 // C++ primop implementation that bridges to Python.
