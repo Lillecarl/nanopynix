@@ -210,7 +210,7 @@ class Session:
         """
         if store._session_id != self._session_id:
             raise ValueError("StoreHandle belongs to a different session")
-        return EvalSession(self._manager, store.store_handle)
+        return EvalSession(self._manager, store.store_handle, session_id=self._session_id)
 
 
 # Backward-compatible alias

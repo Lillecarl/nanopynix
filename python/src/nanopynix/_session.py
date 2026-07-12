@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
     from nanopynix._pool import ReservedWorker, _WorkerManager
+    from nanopynix.store import StoreHandle
     from nanopynix_store import BuildMode as BuildModeType
 
 
@@ -163,11 +164,12 @@ class _EvalProxyContext:
     owner: _EvalOwner
     timeout: float | None = None
     store_handle: int = 1
+    session_id: str = ""
 
     def with_timeout(self, timeout: float | None) -> _EvalProxyContext:
         if timeout is None:
             return self
-        return _EvalProxyContext(self.proxy, self.owner, timeout, self.store_handle)
+        return _EvalProxyContext(self.proxy, self.owner, timeout, self.store_handle, self.session_id)
 
     def resolve_timeout(self, override: float | None) -> float | None:
         return override if override is not None else self.timeout
@@ -453,6 +455,8 @@ class ValueProxy:
         self,
         *,
         build_mode: BuildModeType | int | None = None,
+        store: StoreHandle | None = None,
+        single: bool = False,
         timeout: float | None = None,
     ) -> dict[str, str]:
         """Build the derivation represented by this evaluated value."""
@@ -461,6 +465,15 @@ class ValueProxy:
             BuildPathsWithResultsRequest,
             ReadDerivationRequest,
         )
+
+        from nanopynix_store import BuildMode
+
+        if store is None:
+            build_store_handle = self._ctx.store_handle
+        else:
+            if store._session_id != self._ctx.session_id:
+                raise ValueError("StoreHandle belongs to a different session")
+            build_store_handle = store.store_handle
 
         if not await self.has_attr("type", timeout=timeout):
             raise TypeError("nix value is not a derivation")
@@ -472,9 +485,21 @@ class ValueProxy:
             actual_type = await self.attr("drvPath").get_type(timeout=timeout)
             raise WrongNixTypeError(expected=NixType.STRING, actual=actual_type)
         if build_mode is None:
+            mode_value = BuildMode.Normal.value
+        elif isinstance(build_mode, int):
+            mode_value = build_mode
+        else:
+            mode_value = build_mode.value
+
+        if not single:
             build_results = await self._ctx.proxy._store_proxy_call(
                 "build_paths_with_results",
-                BuildPathsWithResultsRequest(paths=[drv_path], store_handle=self._ctx.store_handle),
+                BuildPathsWithResultsRequest(
+                    paths=[drv_path],
+                    build_mode=mode_value,
+                    eval_store_handle=self._ctx.store_handle,
+                    store_handle=build_store_handle,
+                ),
             )
             if not build_results.results:
                 raise StoreError("StoreError", f"build returned no result for derivation {drv_path}")
@@ -483,16 +508,12 @@ class ValueProxy:
                 msg = result.error_msg or f"failed to build derivation {drv_path}"
                 raise StoreError("StoreError", msg)
         else:
-            if isinstance(build_mode, int):
-                mode_value = build_mode
-            else:
-                mode_value = build_mode.value
             result = await self._ctx.proxy._store_proxy_call(
                 "build_derivation",
                 BuildDerivationRequest(
                     path=drv_path,
                     build_mode=mode_value,
-                    store_handle=self._ctx.store_handle,
+                    store_handle=build_store_handle,
                 ),
             )
             if not result.success:
@@ -763,11 +784,18 @@ class EvalSession:
     invalid after ``__aexit__`` — their RPC methods raise ``EvalSessionClosedError``.
     """
 
-    __slots__ = ("_active", "_ctx", "_manager", "_owner", "_proxy", "_rw", "_store_handle", "_timeout")
+    __slots__ = ("_active", "_ctx", "_manager", "_owner", "_proxy", "_rw", "_session_id", "_store_handle", "_timeout")
 
-    def __init__(self, manager: _WorkerManager, store_handle: int = 1, timeout: float | None = None) -> None:
+    def __init__(
+        self,
+        manager: _WorkerManager,
+        store_handle: int = 1,
+        timeout: float | None = None,
+        session_id: str = "",
+    ) -> None:
         self._manager = manager
         self._store_handle = store_handle
+        self._session_id = session_id
         self._rw: ReservedWorker | None = None
         self._proxy: EvalProxy | None = None
         self._timeout = timeout
@@ -787,7 +815,13 @@ class EvalSession:
             return
         self._rw = await self._manager.reserve(timeout=self._timeout)
         self._proxy = EvalProxy(self._rw)
-        self._ctx = _EvalProxyContext(self._proxy, self._owner, self._timeout, self._store_handle)
+        self._ctx = _EvalProxyContext(
+            self._proxy,
+            self._owner,
+            self._timeout,
+            self._store_handle,
+            self._session_id,
+        )
         self._active[0] = True
 
     async def close(self) -> None:

@@ -104,6 +104,8 @@ message QuerySubstitutablePathsRequest {
 
 message BuildPathsWithResultsRequest {
   repeated string paths = 1;
+  int32 build_mode = 2;
+  int64 eval_store_handle = 3;
   int64 store_handle = 100;
 }
 
