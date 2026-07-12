@@ -116,7 +116,7 @@ class Session:
         )
         self._session_id = uuid.uuid4().hex
 
-    def store(self, uri: str = "daemon") -> StoreHandle:
+    def store(self, uri: str = "auto") -> StoreHandle:
         """Create a StoreHandle for store operations.
 
         Usage::

@@ -22,11 +22,13 @@ async def test_eval_file_simple(tmp_path):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ a = 1; b = "hello"; c = true; }')
 
-    async with Session() as nix, nix.eval() as session:
-        root = await session.file(str(nix_file))
-        assert root.nix_type == NixType.ATTRS
-        result = await root.force_deep()
-        assert result == {"a": 1, "b": "hello", "c": True}
+    async with Session() as nix:
+        async with nix.store() as store:
+            async with nix.eval(store) as session:
+                root = await session.file(str(nix_file))
+                assert root.nix_type == NixType.ATTRS
+                result = await root.force_deep()
+                assert result == {"a": 1, "b": "hello", "c": True}
 
 
 async def test_eval_attr_navigation(tmp_path):

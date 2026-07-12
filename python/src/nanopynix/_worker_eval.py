@@ -90,19 +90,22 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _get_es(self) -> Any:
         if self._state.eval_state is None:
-            if self._state.store is None:
-                raise RuntimeError("store not initialized")
-            self._state.eval_state = nanopynix_expr.EvalState(self._state.store)
+            stores = self._state.handles.iter_kind("store")
+            if not stores:
+                raise RuntimeError("no store open — open a store before evaluating")
+            self._state.eval_state = nanopynix_expr.EvalState(stores[0][1])
         return self._state.eval_state
 
     def _reset(self) -> None:
-        """Release all handles for a fresh session."""
+        """Release value and locked-flake handles for a fresh session."""
         es = self._state.eval_state
         if es is not None:
-            for _handle, resource in self._state.handles.iter_kind("value"):
+            for handle, resource in self._state.handles.iter_kind("value"):
                 es.release_exported_value(resource)
+                self._state.handles.release(handle)
             self._state.eval_state = None
-        self._state.handles.clear()
+        for handle, _resource in self._state.handles.iter_kind("locked_flake"):
+            self._state.handles.release(handle)
 
     # ── value export helpers ──────────────────────────────────────
 

@@ -34,10 +34,6 @@ class StoreServiceHandler(
         self._state = state
 
     def _get_store(self, store_handle: int) -> Any:
-        if store_handle == 0:
-            if self._state.store is None:
-                raise RuntimeError("store not initialized")
-            return self._state.store
         return self._state.handles.get_typed(store_handle, "store")
 
     def _nanobind_rpc_call(self, binding_method_name: str, message: Any) -> Any:
