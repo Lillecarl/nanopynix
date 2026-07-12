@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grpclib.exceptions import GRPCError, StreamTerminatedError
@@ -40,6 +41,8 @@ _RPC_TIMEOUT = 300.0
 # manager->worker call. EvalSession still serializes Nix eval RPCs at the
 # ReservedWorker boundary.
 _WORKER_MAX_CONCURRENCY = 2
+_OOM_SCORE_ADJ_MIN = -1000
+_OOM_SCORE_ADJ_MAX = 1000
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -73,6 +76,15 @@ async def _grpc_call(coro: Any) -> Any:
         raise from_response("Unknown", exc.message or str(exc)) from exc
     except (StreamTerminatedError, ConnectionError) as exc:
         raise WorkerDiedError(str(exc)) from exc
+
+
+def _clamp_oom_score_adj(value: int) -> int:
+    return min(_OOM_SCORE_ADJ_MAX, max(_OOM_SCORE_ADJ_MIN, value))
+
+
+def _write_oom_score_adj(pid: int, value: int, *, proc_root: Path = Path("/proc")) -> None:
+    path = proc_root / str(pid) / "oom_score_adj"
+    path.write_text(f"{_clamp_oom_score_adj(value)}\n")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -203,8 +215,9 @@ class _WorkerManager:
         self._pure_eval = pure_eval
         self._restrict_eval = restrict_eval
         self._allowed_uris = list(allowed_uris) if allowed_uris else []
-        # OOM score adjustment is not yet supported with multiprocessing transport
-        # (no direct access to child PID).  Params kept for API compat.
+        self._worker_oom_score_adj = worker_oom_score_adj
+        self._reserved_worker_oom_score_adj = reserved_worker_oom_score_adj
+        self._worker_pid: int | None = None
         self._channel = None
         self._worker_service_stub: WorkerServiceStub | None = None
         self._store_service_stub: StoreServiceStub | None = None
@@ -237,6 +250,7 @@ class _WorkerManager:
                     ManagerServiceHandler(self._log_bus.emit),
                     self._primop_handler,
                 ],
+                on_process_start=self._on_worker_process_start,
                 preload=["nanopynix._worker"],
                 max_concurrency=_WORKER_MAX_CONCURRENCY,
             )
@@ -309,10 +323,12 @@ class _WorkerManager:
                 raise WorkerBusyError(f"worker is busy after waiting {timeout}s") from exc
         else:
             await self._available.acquire()
+        self._set_worker_oom_score_adj(self._reserved_worker_oom_score_adj)
         return ReservedWorker(self)
 
     def _release(self) -> None:
         """Release the worker lock (called by ReservedWorker.release())."""
+        self._set_worker_oom_score_adj(self._worker_oom_score_adj)
         self._available.release()
 
     async def call(self, coro: Any, *, timeout: float | None = None) -> Any:
@@ -363,6 +379,21 @@ class _WorkerManager:
         Returns a ``_Subscription`` — call ``.unsubscribe()`` to stop.
         """
         return self._log_bus.subscribe(callback)
+
+    def _on_worker_process_start(self, proc: Any) -> None:
+        self._worker_pid = proc.pid
+        self._set_worker_oom_score_adj(self._worker_oom_score_adj)
+
+    def _set_worker_oom_score_adj(self, value: int | None) -> None:
+        if value is None:
+            return
+        pid = self._worker_pid
+        if pid is None:
+            return
+        try:
+            _write_oom_score_adj(pid, value)
+        except OSError:
+            logger.debug("failed to set worker oom_score_adj", exc_info=True)
 
     @property
     def _worker_stub(self) -> WorkerServiceStub:
