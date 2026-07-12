@@ -88,8 +88,8 @@ class TestStore:
         assert len(info["nar_hash"]) > 0
         refs = info["references"]
         assert isinstance(refs, list)
-        # path is a dict with to_string/hash_part/name
-        assert info["path"]["to_string"] == sp.to_string()
+        # path is a proto-shaped dict with only the stored StorePath basename.
+        assert info["path"]["base_name"] == sp.to_string()
         assert info["nar_size"] > 0
 
     def test_query_path_from_hash_part(self, store):

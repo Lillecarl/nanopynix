@@ -50,16 +50,18 @@ async def test_parse_store_path():
     async with Session() as session, session.store() as store:
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
-            sp = await store.parse_store_path(ParseStorePathRequest(path=paths[0].to_string))
+            path = StorePath(paths[0])
+            sp = await store.parse_store_path(ParseStorePathRequest(path=path.to_string))
             assert isinstance(sp, StorePath)
-            assert paths[0].to_string == sp.to_string
+            assert path.to_string == StorePath(sp).to_string
 
 
 async def test_is_valid_path():
     async with Session() as session, session.store() as store:
         valid_paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if valid_paths:
-            response = await store.is_valid_path(IsValidPathRequest(path=valid_paths[0].to_string))
+            path = StorePath(valid_paths[0])
+            response = await store.is_valid_path(IsValidPathRequest(path=path.to_string))
             assert response.valid
 
 
@@ -67,7 +69,8 @@ async def test_query_path_info():
     async with Session() as session, session.store() as store:
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
-            pi = await store.query_path_info(QueryPathInfoRequest(path=paths[0].to_string))
+            path = StorePath(paths[0])
+            pi = await store.query_path_info(QueryPathInfoRequest(path=path.to_string))
             assert isinstance(pi, PathInfo)
             assert isinstance(pi.path, StorePath)
             assert pi.nar_size >= 0
@@ -77,7 +80,7 @@ async def test_query_path_from_hash_part():
     async with Session() as session, session.store() as store:
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
-            hp = paths[0].hash_part
+            hp = StorePath(paths[0]).hash_part
             response = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=hp))
             sp = response.path
             assert isinstance(sp, StorePath)
@@ -87,7 +90,8 @@ async def test_compute_fs_closure():
     async with Session() as session, session.store() as store:
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
-            closure = (await store.compute_fs_closure(ComputeFsClosureRequest(path=paths[0].to_string))).paths
+            path = StorePath(paths[0])
+            closure = (await store.compute_fs_closure(ComputeFsClosureRequest(path=path.to_string))).paths
             assert isinstance(closure, list)
             assert len(closure) >= 1
             assert all(isinstance(sp, StorePath) for sp in closure)
@@ -114,7 +118,8 @@ async def test_query_valid_derivers():
     async with Session() as session, session.store() as store:
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
-            derivers = (await store.query_valid_derivers(QueryValidDeriversRequest(path=paths[0].to_string))).paths
+            path = StorePath(paths[0])
+            derivers = (await store.query_valid_derivers(QueryValidDeriversRequest(path=path.to_string))).paths
             assert isinstance(derivers, list)
 
 
@@ -122,7 +127,8 @@ async def test_query_referrers():
     async with Session() as session, session.store() as store:
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
-            refs = (await store.query_referrers(QueryReferrersRequest(path=paths[0].to_string))).paths
+            path = StorePath(paths[0])
+            refs = (await store.query_referrers(QueryReferrersRequest(path=path.to_string))).paths
             assert isinstance(refs, list)
 
 
@@ -130,9 +136,10 @@ async def test_query_substitutable_paths():
     async with Session() as session, session.store() as store:
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
+            path = StorePath(paths[0])
             subs = (
                 await store.query_substitutable_paths(
-                    QuerySubstitutablePathsRequest(paths=[paths[0].to_string])
+                    QuerySubstitutablePathsRequest(paths=[path.to_string])
                 )
             ).paths
             assert isinstance(subs, list)
@@ -160,4 +167,5 @@ async def test_add_temp_root():
     async with Session() as session, session.store() as store:
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
-            await store.add_temp_root(AddTempRootRequest(path=paths[0].to_string))
+            path = StorePath(paths[0])
+            await store.add_temp_root(AddTempRootRequest(path=path.to_string))

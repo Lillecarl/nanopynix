@@ -30,12 +30,8 @@ using namespace nb::literals;
 // =========================================================================
 
 static nb::dict store_path_to_dict(const std::string &to_string) {
-    // "<hash>-<name>" — hash is base32, never contains '-'
-    auto hyphen = to_string.find('-');
     nb::dict d;
-    d["to_string"] = to_string;
-    d["hash_part"] = to_string.substr(0, hyphen);
-    d["name"] = to_string.substr(hyphen + 1);
+    d["base_name"] = to_string;
     return d;
 }
 

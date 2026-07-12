@@ -25,28 +25,12 @@ def _attrs_value(v: Any) -> common_pb.AttrsValue:
 
 def store_path(sp, /) -> common_pb.StorePath:
     """Extract a L1 StorePath to a proto StorePath message."""
-    return common_pb.StorePath(
-        to_string=sp.to_string(),
-        hash_part=sp.hash_part(),
-        name=sp.name(),
-    )
+    return common_pb.StorePath(base_name=sp.to_string())
 
 
 def store_path_str(s: str, /) -> common_pb.StorePath:
-    """Parse a raw StorePath string (``<hash>-<name>``) to a proto StorePath.
-
-    The hash part is always the segment before the first ``-`` — Nix hash
-    encodings (base32) never contain ``-``, so ``str.index`` is reliable here.
-    """
-    try:
-        hyphen = s.index("-")
-    except ValueError:
-        raise ValueError(f"Invalid store path: no '-' separator in '{s}'") from None
-    return common_pb.StorePath(
-        to_string=s,
-        hash_part=s[:hyphen],
-        name=s[hyphen + 1 :],
-    )
+    """Extract the basename from a raw store path string."""
+    return common_pb.StorePath(base_name=s.rstrip("/").rsplit("/", 1)[-1])
 
 
 def _attrs_map(d: dict[str, Any]) -> common_pb.AttrsMap:

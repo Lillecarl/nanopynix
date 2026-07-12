@@ -5,8 +5,6 @@ Needs C++ modules loaded but no Nix daemon.
 
 from __future__ import annotations
 
-import pytest
-
 import nanopynix_fetchers  # L1 Input
 import nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
 import nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
@@ -18,6 +16,7 @@ from nanopynix._extract import (
     store_path,
     store_path_str,
 )
+from nanopynix.models import StorePath
 
 # ════════════════════════════════════════════════════════════════════
 # store_path_str — pure string parsing
@@ -25,32 +24,31 @@ from nanopynix._extract import (
 
 
 def test_store_path_str_basic():
-    result = store_path_str("00000000000000000000000000000000-bash-5.2")
-    assert result.to_string == "00000000000000000000000000000000-bash-5.2"
-    assert result.hash_part == "00000000000000000000000000000000"
-    assert result.name == "bash-5.2"
+    sp = StorePath(store_path_str("00000000000000000000000000000000-bash-5.2"))
+    assert sp.base_name == "00000000000000000000000000000000-bash-5.2"
+    assert sp.to_string == "00000000000000000000000000000000-bash-5.2"
+    assert sp.hash_part == "00000000000000000000000000000000"
+    assert sp.name == "bash-5.2"
 
 
 def test_store_path_str_single_dash_name():
-    result = store_path_str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo")
-    assert result.hash_part == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    assert result.name == "foo"
+    sp = StorePath(store_path_str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"))
+    assert sp.hash_part == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    assert sp.name == "foo"
 
 
 def test_store_path_str_multiple_dashes():
-    result = store_path_str("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-python3.13-nanopynix-0.1.0")
-    assert result.hash_part == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    assert result.name == "python3.13-nanopynix-0.1.0"
+    sp = StorePath(store_path_str("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-python3.13-nanopynix-0.1.0"))
+    assert sp.hash_part == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    assert sp.name == "python3.13-nanopynix-0.1.0"
 
 
-def test_store_path_str_no_dash_raises():
-    with pytest.raises(ValueError, match="no '-' separator"):
-        store_path_str("justaname")
+def test_store_path_str_accepts_unvalidated_basename():
+    assert store_path_str("justaname").base_name == "justaname"
 
 
-def test_store_path_str_empty_raises():
-    with pytest.raises(ValueError, match="no '-' separator"):
-        store_path_str("")
+def test_store_path_str_accepts_empty_basename():
+    assert store_path_str("").base_name == ""
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -60,18 +58,20 @@ def test_store_path_str_empty_raises():
 
 def test_store_path_from_cpp():
     sp = nanopynix_store.StorePath("00000000000000000000000000000000-foo-1.0")
-    result = store_path(sp)
-    assert result.to_string == "00000000000000000000000000000000-foo-1.0"
-    assert result.hash_part == "00000000000000000000000000000000"
-    assert result.name == "foo-1.0"
+    converted = StorePath(store_path(sp))
+    assert converted.base_name == "00000000000000000000000000000000-foo-1.0"
+    assert converted.to_string == "00000000000000000000000000000000-foo-1.0"
+    assert converted.hash_part == "00000000000000000000000000000000"
+    assert converted.name == "foo-1.0"
 
 
 def test_store_path_from_store_parse(store):
     sp = store.parse_store_path(store.get_store_dir() + "/00000000000000000000000000000000-hello")
-    result = store_path(sp)
-    assert result.to_string == "00000000000000000000000000000000-hello"
-    assert result.hash_part == "00000000000000000000000000000000"
-    assert result.name == "hello"
+    converted = StorePath(store_path(sp))
+    assert converted.base_name == "00000000000000000000000000000000-hello"
+    assert converted.to_string == "00000000000000000000000000000000-hello"
+    assert converted.hash_part == "00000000000000000000000000000000"
+    assert converted.name == "hello"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -86,13 +86,12 @@ def test_path_info_from_real_path(store):
         return
     # query_all_valid_paths returns list of dicts now
     first = path_strs[0]
-    sp = nanopynix_store.StorePath(first["to_string"])
+    sp = nanopynix_store.StorePath(first["base_name"])
     result = store.query_path_info(sp)  # returns dict
 
     assert isinstance(result, dict)
     assert "path" in result
-    assert "to_string" in result["path"]
-    assert "hash_part" in result["path"]
+    assert "base_name" in result["path"]
     assert isinstance(result["nar_hash"], str)
     assert result["nar_hash"]
     assert isinstance(result["nar_size"], int)
@@ -100,19 +99,19 @@ def test_path_info_from_real_path(store):
     assert isinstance(result["ultimate"], bool)
     assert isinstance(result["references"], list)
     for ref in result["references"]:
-        assert "to_string" in ref
+        assert "base_name" in ref
 
 
 def test_path_info_deriver_none(store):
     """A non-derivation path should have deriver=None."""
     path_strs = store.query_all_valid_paths()
     for d in path_strs:
-        sp = nanopynix_store.StorePath(d["to_string"])
+        sp = nanopynix_store.StorePath(d["base_name"])
         if not sp.is_derivation():
             result = store.query_path_info(sp)
             assert "deriver" in result
             if result["deriver"] is not None:
-                assert "to_string" in result["deriver"]
+                assert "base_name" in result["deriver"]
             break
     else:
         return

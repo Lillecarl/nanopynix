@@ -92,21 +92,12 @@ from nanopynix_proto.nix.common import (
 from strip_ansi import strip_ansi as _strip_ansi
 
 # ══════════════════════════════════════════════════════════════════════════
-# Helper: parse a store path string into keyword arguments
+# Helper: extract the StorePath basename
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def _parse_store_path_string(value: str) -> dict[str, str]:
-    basename = value.rstrip("/").rsplit("/", 1)[-1]
-    try:
-        hyphen = basename.index("-")
-    except ValueError:
-        raise ValueError(f"Invalid store path: no '-' separator in '{value}'") from None
-    return {
-        "hash_part": basename[:hyphen],
-        "name": basename[hyphen + 1 :],
-        "to_string": basename,
-    }
+def _store_path_base_name(value: str) -> str:
+    return value.rstrip("/").rsplit("/", 1)[-1]
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -119,10 +110,30 @@ def _parse_store_path_string(value: str) -> dict[str, str]:
 class StorePathExt(_StorePath, MonkeyPatcher):
     """Extension of proto StorePath with ``is_derivation`` and string constructor."""
 
+    HashLen = 32
+    MaxPathLen = 211
+
     def __new__(cls, value: str | _StorePath | None = None, **data: Any) -> StorePathExt:
         if isinstance(value, cls) and not data:
             return value
         return super().__new__(cls)
+
+    @property
+    def hash_part(self) -> str:
+        """The store path hash prefix."""
+        return self.base_name[: self.HashLen]
+
+    @property
+    def name(self) -> str:
+        """The store path name after the hash separator."""
+        if len(self.base_name) <= self.HashLen:
+            return ""
+        return self.base_name[self.HashLen + 1 :]
+
+    @property
+    def to_string(self) -> str:
+        """The store path basename."""
+        return self.base_name
 
     @property
     def is_derivation(self) -> bool:
@@ -135,18 +146,15 @@ class StorePathExt(_StorePath, MonkeyPatcher):
                 raise TypeError("StorePath accepts either a proto StorePath or explicit fields, not both")
             if value is self:
                 return
-            data = {
-                "hash_part": value.hash_part,
-                "name": value.name,
-                "to_string": value.to_string,
-            }
+            data = {"base_name": value.base_name}
             super().__init__(**data)
             return
         if value is not None:
             if data:
                 raise TypeError("StorePath accepts either a path string or explicit fields, not both")
-            data = _parse_store_path_string(value)
+            data = {"base_name": _store_path_base_name(value)}
         super().__init__(**data)
+
 
 class LogEventExt(_LogEventProto, MonkeyPatcher):
     """Extension of proto LogEvent with ``message``, ``message_without_ansi``, and ``args``."""
