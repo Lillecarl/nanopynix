@@ -1,12 +1,20 @@
 """Subprocess worker — Nix execution over gRPC (multiprocessing pipe or stdio).
 
-Spawned by ``Session._WorkerManager`` via ``asyncio.create_subprocess_exec``
-(multiprocessing mode) or via forkserver ``Process`` (grpclib-transports mode).
-Serves three gRPC services over a single H2 transport:
+Threading model
+  Two threads with a clear boundary:
 
-- ``WorkerService``  — Init (bootstrap Nix), SubscribeLogs (server-streaming), Shutdown
-- ``StoreService``   — all store operations
-- ``EvalService``    — all eval/flake operations
+  * **Event loop thread** — gRPC handlers, H2 transport, WorkerBackchannel,
+    log-relay task, primop-dispatcher task.
+  * **Nix thread** — dedicated ``ThreadPoolExecutor(max_workers=1)`` for
+    all Nix C++ operations (EvalState, Store, flake locking, evaluation).
+
+  The event loop never blocks on Nix — handlers dispatch via
+  ``executor.run()`` and the loop stays free for log relaying, primop RPC
+  dispatch, and other gRPC calls.  ``HandleRegistry`` is locked for
+  cross-thread access.  ``LogCollector`` is inherently thread-safe
+  (``janus.Queue``).
+
+Spawned by ``Session._WorkerManager``.
 """
 
 from __future__ import annotations
@@ -85,7 +93,7 @@ def _register_primops(
         if spec.rpc:
             if rpc_bridge is None:
                 raise RuntimeError(f"RPC primop {spec.name!r} registered without backchannel")
-            from nanopynix._worker_primop import rpc_primop_callback_factory
+            from nanopynix._worker_primop import rpc_primop_callback_factory as rpc_primop_callback_factory
 
             callback = rpc_primop_callback_factory(rpc_bridge, spec.name, spec.arity)
         else:
@@ -105,7 +113,13 @@ def _register_primops(
 class WorkerState:
     """Shared mutable state held by all three service handlers.
 
-    Initialized by ``WorkerServiceHandler.init()`` (bootstraps Nix).
+    Thread confinement:
+      * ``eval_state`` — Nix thread only (``_worker_nix.NixThreadExecutor``)
+      * ``collector`` — both threads (already thread-safe via ``janus.Queue``)
+      * ``log_task`` — event loop only (asyncio.Task)
+      * ``handles`` — both threads (locked ``HandleRegistry``)
+      * ``executor`` — event loop only (owns the Nix thread)
+      * ``rpc_bridge`` — Nix thread reads, event loop writes (internal locking)
     """
 
     def __init__(self) -> None:
@@ -113,6 +127,7 @@ class WorkerState:
         self.collector: LogCollector | None = None
         self.log_task: asyncio.Task[None] | None = None
         self.handles: HandleRegistry = HandleRegistry()
+        self.executor: Any = None
         self.rpc_bridge: Any = None
 
 
@@ -209,6 +224,10 @@ class WorkerServiceHandler(WorkerServiceBase):
         collector = self._state.collector
         if collector is not None:
             collector.close()
+        if self._state.rpc_bridge is not None:
+            self._state.rpc_bridge.stop()
+        if self._state.executor is not None:
+            self._state.executor.shutdown(wait=False)
         return ShutdownResponse()
 
 
@@ -241,6 +260,12 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
 
     Must be called *inside* the worker process (before Nix init so that
     the logger is installed early).
+
+    Sets up:
+
+    * ``LogCollector`` + log-relay task (event loop thread)
+    * ``NixThreadExecutor`` (dedicated single-worker thread)
+    * ``ThreadedRpcPrimopBridge`` (Nix→event-loop primop dispatch)
     """
     collector = LogCollector()
     nanopynix_util.install_logger(collector.callback)
@@ -252,12 +277,17 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
             _relay_logs_to_manager(collector, backchannel),
             name="nanopynix-log-backchannel",
         )
-        import nest_asyncio
 
-        nest_asyncio.apply()
-        from nanopynix._worker_primop import _RpcPrimopBridge
+        from nanopynix._worker_nix import NixThreadExecutor
 
-        state.rpc_bridge = _RpcPrimopBridge(backchannel)
+        state.executor = NixThreadExecutor()
+
+        from nanopynix._worker_primop import ThreadedRpcPrimopBridge
+
+        loop = asyncio.get_running_loop()
+        bridge = ThreadedRpcPrimopBridge(backchannel, loop)
+        bridge.start()
+        state.rpc_bridge = bridge
 
     return cast(
         "list[IServable]",
@@ -296,14 +326,19 @@ async def run_worker(
 
     # Cleanup after transport closes
     worker_handler = handlers[0]
-    collector = cast("WorkerServiceHandler", worker_handler)._state.collector
+    worker_state = cast("WorkerServiceHandler", worker_handler)._state
+    collector = worker_state.collector
     if collector is not None:
         collector.close()
-    log_task = cast("WorkerServiceHandler", worker_handler)._state.log_task
+    log_task = worker_state.log_task
     if log_task is not None:
         log_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await log_task
+    if worker_state.rpc_bridge is not None:
+        worker_state.rpc_bridge.stop()
+    if worker_state.executor is not None:
+        worker_state.executor.shutdown(wait=True)
 
 
 # ── Stdio entry point (console_script / ``python -m nanopynix._worker``) ──
@@ -327,14 +362,19 @@ async def _stdio_main() -> None:
 
     # Cleanup after transport closes
     worker_handler = handlers[0]
-    collector = cast("WorkerServiceHandler", worker_handler)._state.collector
+    worker_state = cast("WorkerServiceHandler", worker_handler)._state
+    collector = worker_state.collector
     if collector is not None:
         collector.close()
-    log_task = cast("WorkerServiceHandler", worker_handler)._state.log_task
+    log_task = worker_state.log_task
     if log_task is not None:
         log_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await log_task
+    if worker_state.rpc_bridge is not None:
+        worker_state.rpc_bridge.stop()
+    if worker_state.executor is not None:
+        worker_state.executor.shutdown(wait=True)
 
 
 if __name__ == "__main__":

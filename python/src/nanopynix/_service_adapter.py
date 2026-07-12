@@ -10,7 +10,12 @@ if TYPE_CHECKING:
 
 
 class GeneratedServiceAdapterMixin:
-    """Install generated service methods from a checked binding method surface."""
+    """Install generated service methods from a checked binding method surface.
+
+    If ``nix_executor_attr`` is given, generated forwarders dispatch the
+    nanobind call through ``NixThreadExecutor.run()`` so that store operations
+    run on the dedicated Nix thread rather than blocking the event loop.
+    """
 
     def __init_subclass__(
         cls,
@@ -18,13 +23,16 @@ class GeneratedServiceAdapterMixin:
         rpc_service_base: type | None = None,
         binding_method_names: set[str] | None = None,
         method_prefix: str = "",
+        nix_executor_attr: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init_subclass__(**kwargs)
         if rpc_service_base is not None:
             if binding_method_names is None:
                 raise TypeError("binding_method_names is required with rpc_service_base")
-            _install_generated_service_methods(cls, rpc_service_base, binding_method_names, method_prefix)
+            _install_generated_service_methods(
+                cls, rpc_service_base, binding_method_names, method_prefix, nix_executor_attr
+            )
 
     def _nanobind_rpc_call(self, binding_method_name: str, message: Message) -> Any:
         raise NotImplementedError
@@ -35,6 +43,7 @@ def _install_generated_service_methods(
     service_base: type,
     binding_method_names: set[str],
     method_prefix: str,
+    nix_executor_attr: str | None,
 ) -> None:
     expected = _service_method_names(service_base)
     actual = {name.removeprefix(method_prefix) for name in binding_method_names}
@@ -52,7 +61,11 @@ def _install_generated_service_methods(
     for method_name in sorted(expected):
         method = getattr(service_base, method_name)
         response_type = get_type_hints(method)["return"]
-        setattr(cls, method_name, _make_service_forwarder(method_name, method_prefix, response_type))
+        setattr(
+            cls,
+            method_name,
+            _make_service_forwarder(method_name, method_prefix, response_type, nix_executor_attr),
+        )
 
 
 def _service_method_names(service_base: type) -> set[str]:
@@ -67,8 +80,25 @@ def _make_service_forwarder(
     method_name: str,
     method_prefix: str,
     response_type: type[Message],
+    nix_executor_attr: str | None,
 ) -> Callable[[GeneratedServiceAdapterMixin, Message], Any]:
     binding_method_name = f"{method_prefix}{method_name}"
+
+    if nix_executor_attr is not None:
+
+        async def _forward_nix(self: GeneratedServiceAdapterMixin, message: Message) -> Message:
+            executor: Any = _resolve_attr(self, nix_executor_attr)
+            raw = await executor.run(
+                lambda: self._nanobind_rpc_call(binding_method_name, message)
+            )
+            if isinstance(raw, response_type):
+                return raw
+            if isinstance(raw, Mapping):
+                return response_type.from_dict(_proto_shape(raw))
+            raise TypeError(f"{binding_method_name} returned {type(raw).__name__}, expected proto-shaped mapping")
+
+        _forward_nix.__name__ = method_name
+        return _forward_nix
 
     async def _forward(self: GeneratedServiceAdapterMixin, message: Message) -> Message:
         raw = self._nanobind_rpc_call(binding_method_name, message)
@@ -80,6 +110,12 @@ def _make_service_forwarder(
 
     _forward.__name__ = method_name
     return _forward
+
+
+def _resolve_attr(obj: Any, attr_path: str) -> Any:
+    for part in attr_path.split("."):
+        obj = getattr(obj, part)
+    return obj
 
 
 def _proto_shape(value: Any) -> Any:

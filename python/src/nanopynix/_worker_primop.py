@@ -1,36 +1,32 @@
-"""Worker-side RPC primop bridge — synchronously calls the manager via backchannel.
+"""Thread-safe primop bridge — Nix thread → event loop → manager.
 
-A single ``_RpcPrimopBridge`` instance lives in ``WorkerState``.
-Its ``call()`` method MUST be synchronous because it is invoked from
-the C++ ``py_primop_bridge`` during Nix evaluation.
+When a manager-side primop fires during Nix evaluation, the C++
+``py_primop_bridge`` calls a Python callback synchronously on the
+Nix thread.  That callback must make a gRPC backchannel call to the
+manager, but the backchannel lives on the event loop thread.
 
-Why ``nest_asyncio`` (nested event loop)?
-  The C++ primop bridge runs on the asyncio event loop thread (same
-  thread that handles gRPC).  When Nix evaluates a primop we hold the
-  GIL and the event loop is blocked — we can't ``await`` without
-  re-entering the event loop.  ``nest_asyncio.apply()`` patches
-  ``loop.run_until_complete()`` to allow nested execution on a running
-  loop; the I/O in ``select()`` temporarily releases the GIL, which
-  is safe because re-acquisition happens on the same thread.
+This bridge uses ``call_soon_threadsafe`` to enqueue the request
+on the event loop, then blocks on a ``concurrent.futures.Future``
+whose ``result()`` releases the GIL — allowing the event loop to
+process the backchannel call and fulfil the future.
 
-Alternatives considered:
-  - Separate thread + event loop: requires a thread-safe transport
-    (grpclib clients are not thread-safe) or a second H2 connection.
-  - C++ promise/future: the event loop thread is blocked in C++, so
-    no Python callback can run on it until the C++ function returns —
-    we'd need a second thread anyway.
+No ``nest_asyncio`` needed.
 """
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 from typing import TYPE_CHECKING, Any
 
 from nanopynix_proto.nix.common import NullValue, ScalarValue
 
 if TYPE_CHECKING:
     from grpclib_transports import WorkerBackchannel
+    from nanopynix_proto.nix.manager import CallPrimopResponse
 
 _CALL_ROUTE = "/nix.manager.ManagerPrimopService/Call"
+_RPC_TIMEOUT = 300.0
 
 
 def _python_to_scalar_value(value: Any) -> ScalarValue:
@@ -47,7 +43,9 @@ def _python_to_scalar_value(value: Any) -> ScalarValue:
     raise TypeError(f"unsupported RPC primop arg type: {type(value)}")
 
 
-def _scalar_value_to_python(sv: ScalarValue) -> Any:
+def _scalar_value_to_python(sv: ScalarValue | None) -> Any:
+    if sv is None:
+        return None
     from betterproto2 import which_one_of
 
     kind = which_one_of(sv, "kind")[0]
@@ -64,36 +62,70 @@ def _scalar_value_to_python(sv: ScalarValue) -> Any:
     return None
 
 
-class _RpcPrimopBridge:
-    def __init__(self, backchannel: WorkerBackchannel) -> None:
-        self._backchannel = backchannel
+class ThreadedRpcPrimopBridge:
+    """Bridges synchronous primop calls on the Nix thread to async
+    backchannel RPCs on the event loop thread."""
 
-    def call(self, name: str, args: list[Any]) -> Any:
+    def __init__(self, backchannel: WorkerBackchannel, loop: asyncio.AbstractEventLoop) -> None:
+        self._backchannel = backchannel
+        self._loop = loop
+        self._queue: asyncio.Queue[
+            tuple[str, list[Any], concurrent.futures.Future[Any]]
+        ] = asyncio.Queue()
+        self._task: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(
+            self._dispatch_loop(), name="nix-primop-dispatcher"
+        )
+
+    def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+
+    async def _dispatch_loop(self) -> None:
         from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
-        loop = __import__("asyncio").get_running_loop()
+        try:
+            while True:
+                name, args, future = await self._queue.get()
+                try:
+                    request = CallPrimopRequest(
+                        name=name,
+                        args=[_python_to_scalar_value(a) for a in args],
+                    )
+                    response: CallPrimopResponse = await self._backchannel.call_unary(
+                        _CALL_ROUTE, request, CallPrimopResponse
+                    )
+                    future.set_result(_scalar_value_to_python(response.value))
+                except Exception as exc:
+                    future.set_exception(exc)
+        except asyncio.CancelledError:
+            raise
 
-        async def _do_call() -> Any:
-            request = CallPrimopRequest(
-                name=name,
-                args=[_python_to_scalar_value(a) for a in args],
-            )
-            response: CallPrimopResponse = await self._backchannel.call_unary(
-                _CALL_ROUTE, request, CallPrimopResponse
-            )
-            if response.value is None:
-                return None
-            return _scalar_value_to_python(response.value)
+    # ── called from the Nix thread ──────────────────────────────────
 
-        return loop.run_until_complete(_do_call())
+    def call(self, name: str, args: list[Any]) -> Any:
+        future: concurrent.futures.Future[Any] = concurrent.futures.Future()
+        self._loop.call_soon_threadsafe(
+            self._queue.put_nowait, (name, args, future)
+        )
+        try:
+            return future.result(timeout=_RPC_TIMEOUT)
+        except concurrent.futures.TimeoutError as exc:
+            raise TimeoutError(
+                f"manager primop {name!r} timed out after {_RPC_TIMEOUT:.0f}s"
+            ) from exc
 
 
-def rpc_primop_callback_factory(bridge: _RpcPrimopBridge, name: str, arity: int):
+def rpc_primop_callback_factory(
+    bridge: ThreadedRpcPrimopBridge, name: str, arity: int
+):
     """Return a synchronous callable suitable for ``register_primop()``.
 
     The worker-side primop registration calls this factory for each
-    ``PrimOpSpec`` where ``rpc=True``.  The returned callable forwards
-    every invocation to the manager via the gRPC backchannel.
+    ``PrimOpSpec`` where ``rpc=True``.
     """
 
     def _callback(*args: Any) -> Any:

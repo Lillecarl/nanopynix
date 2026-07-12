@@ -1,4 +1,9 @@
-"""gRPC EvalService handler for the worker subprocess."""
+"""gRPC EvalService handler for the worker subprocess.
+
+Thread boundary: all Nix C++ operations run on the dedicated Nix thread
+(via ``NixThreadExecutor.run()``).  The gRPC handlers run on the event
+loop and dispatch synchronously — the event loop never blocks on Nix.
+"""
 
 from __future__ import annotations
 
@@ -40,15 +45,9 @@ from nanopynix_proto.nix.eval import (
 
 import nanopynix_expr
 import nanopynix_flake
-from nanopynix._extract import (
-    flake_ref_attrs as _flake_ref_attrs,
-)
-from nanopynix._extract import (
-    locked_flake as _locked_flake,
-)
+from nanopynix._extract import flake_ref_attrs as _flake_ref_attrs
+from nanopynix._extract import locked_flake as _locked_flake
 from nanopynix._grpc_util import wrap_service_handlers
-
-# ── NixType string → enum mapping ────────────────────────────────────
 
 _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
     "thunk": common_pb.NixType.THUNK,
@@ -66,9 +65,9 @@ _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
 }
 
 _FORCE_SCALAR_TYPES = frozenset({"null", "int", "float", "bool", "string", "path"})
-# ── scalar conversion helpers ────────────────────────────────────────
+
+
 def _pyval_to_scalar(v: Any) -> common_pb.ScalarValue:
-    """Convert a Python JSON-scalar value to a ScalarValue proto message."""
     if v is None:
         return common_pb.ScalarValue(null_value=common_pb.NullValue())
     if isinstance(v, bool):
@@ -78,15 +77,22 @@ def _pyval_to_scalar(v: Any) -> common_pb.ScalarValue:
     if isinstance(v, float):
         return common_pb.ScalarValue(float_value=v)
     return common_pb.ScalarValue(string_value=str(v))
-# ── Service handler ──────────────────────────────────────────────────
+
+
 @wrap_service_handlers
 class EvalServiceHandler(EvalServiceBase):
-    """gRPC handler for all eval/flake operations."""
+    """gRPC handler for all eval/flake operations.
+
+    Every method follows the same dispatch pattern::
+
+        async def method(self, message):
+            return await self._state.executor.run(self._do_method, message)
+    """
 
     def __init__(self, state: Any) -> None:
         self._state = state
 
-    # ── eval state management ─────────────────────────────────────
+    # ── helpers (run on the Nix thread) ──────────────────────────
 
     def _get_es(self) -> Any:
         if self._state.eval_state is None:
@@ -97,7 +103,6 @@ class EvalServiceHandler(EvalServiceBase):
         return self._state.eval_state
 
     def _reset(self) -> None:
-        """Release value and locked-flake handles for a fresh session."""
         es = self._state.eval_state
         if es is not None:
             for handle, resource in self._state.handles.iter_kind("value"):
@@ -106,8 +111,6 @@ class EvalServiceHandler(EvalServiceBase):
             self._state.eval_state = None
         for handle, _resource in self._state.handles.iter_kind("locked_flake"):
             self._state.handles.release(handle)
-
-    # ── value export helpers ──────────────────────────────────────
 
     def _export(self, pyv: Any) -> common_pb.ValueHandle:
         es = self._get_es()
@@ -149,7 +152,6 @@ class EvalServiceHandler(EvalServiceBase):
         return common_pb.ForceValue(scalar=_pyval_to_scalar(value.to_python()))
 
     def _call_arg_to_python(self, arg: common_pb.CallArg, es: Any) -> Any:
-        """Convert a CallArg proto to a Python/nanobind value for Nix calls."""
         if arg.scalar is not None:
             sv = arg.scalar
             if sv.string_value is not None:
@@ -160,7 +162,7 @@ class EvalServiceHandler(EvalServiceBase):
                 return sv.float_value
             if sv.bool_value is not None:
                 return sv.bool_value
-            return None  # null_value
+            return None
         if arg.list is not None:
             return [self._call_arg_to_python(item, es) for item in arg.list.items]
         if arg.attrs is not None:
@@ -175,51 +177,76 @@ class EvalServiceHandler(EvalServiceBase):
     # ── eval methods ──────────────────────────────────────────────
 
     async def eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
+        return await self._state.executor.run(self._do_eval_file, message)
+
+    def _do_eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
         return self._export(self._get_es().eval_file(message.path))
 
     async def eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
+        return await self._state.executor.run(self._do_eval_string, message)
+
+    def _do_eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
         return self._export(self._get_es().eval_string(message.expr, message.source_name))
 
     async def force(self, message: ForceRequest) -> common_pb.ForceValue:
+        return await self._state.executor.run(self._do_force, message)
+
+    def _do_force(self, message: ForceRequest) -> common_pb.ForceValue:
         return self._force_handle(message.handle)
 
     async def force_deep(self, message: ForceDeepRequest) -> common_pb.DeepValue:
+        return await self._state.executor.run(self._do_force_deep, message)
+
+    def _do_force_deep(self, message: ForceDeepRequest) -> common_pb.DeepValue:
         value = self._resolve(message.handle)
         value.force_deep()
         return self._deep_value(value)
 
     async def force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
+        return await self._state.executor.run(self._do_force_json, message)
+
+    def _do_force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
         import json as _json
 
         value = self._resolve(message.handle)
         return ForceJsonResponse(json=_json.dumps(value.to_json(copy_to_store=message.copy_to_store)))
 
     async def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
+        return await self._state.executor.run(self._do_attr, message)
+
+    def _do_attr(self, message: AttrRequest) -> common_pb.ValueHandle:
         return self._export(self._resolve(message.handle).attr_get(message.name))
 
     async def list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
+        return await self._state.executor.run(self._do_list_get, message)
+
+    def _do_list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
         if message.index < 0:
             raise IndexError(f"list index must be non-negative, got {message.index}")
-        return self._export(
-            self._resolve(message.handle).list_get(message.index)
-        )
+        return self._export(self._resolve(message.handle).list_get(message.index))
 
     async def list_length(self, message: ListLengthRequest) -> ListLengthResponse:
-        return ListLengthResponse(
-            length=self._resolve(message.handle).list_length()
-        )
+        return await self._state.executor.run(self._do_list_length, message)
+
+    def _do_list_length(self, message: ListLengthRequest) -> ListLengthResponse:
+        return ListLengthResponse(length=self._resolve(message.handle).list_length())
 
     async def attr_names(self, message: AttrNamesRequest) -> AttrNamesResponse:
-        return AttrNamesResponse(
-            names=self._resolve(message.handle).attr_names()
-        )
+        return await self._state.executor.run(self._do_attr_names, message)
+
+    def _do_attr_names(self, message: AttrNamesRequest) -> AttrNamesResponse:
+        return AttrNamesResponse(names=self._resolve(message.handle).attr_names())
 
     async def has_attr(self, message: HasAttrRequest) -> HasAttrResponse:
-        return HasAttrResponse(
-            has=self._resolve(message.handle).has_attr(message.name)
-        )
+        return await self._state.executor.run(self._do_has_attr, message)
+
+    def _do_has_attr(self, message: HasAttrRequest) -> HasAttrResponse:
+        return HasAttrResponse(has=self._resolve(message.handle).has_attr(message.name))
 
     async def type_name(self, message: TypeNameRequest) -> TypeNameResponse:
+        return await self._state.executor.run(self._do_type_name, message)
+
+    def _do_type_name(self, message: TypeNameRequest) -> TypeNameResponse:
         value = self._resolve(message.handle)
         value.force()
         type_name = value.type_name()
@@ -227,6 +254,9 @@ class EvalServiceHandler(EvalServiceBase):
         return TypeNameResponse(type=nix_type)
 
     async def call(self, message: CallRequest) -> common_pb.ValueHandle:
+        return await self._state.executor.run(self._do_call, message)
+
+    def _do_call(self, message: CallRequest) -> common_pb.ValueHandle:
         es = self._get_es()
         fn = self._resolve(message.handle)
         result = fn
@@ -237,6 +267,9 @@ class EvalServiceHandler(EvalServiceBase):
     # ── flake methods ─────────────────────────────────────────────
 
     async def lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
+        return await self._state.executor.run(self._do_lock_flake, message)
+
+    def _do_lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
         if self._state.collector is not None:
             self._state.collector.callback(0, "msg", 3, f"lock_flake: parsing ref '{message.ref}'")
         ref = nanopynix_flake.parse_flake_ref(message.ref)
@@ -265,11 +298,17 @@ class EvalServiceHandler(EvalServiceBase):
         return lf_pb
 
     async def call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
+        return await self._state.executor.run(self._do_call_locked_flake, message)
+
+    def _do_call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
         lf = self._state.handles.get_typed(message.handle, "locked_flake")
         pyv = nanopynix_flake.call_flake(self._get_es(), lf)
         return self._export(pyv)
 
     async def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
+        return await self._state.executor.run(self._do_write_lock_file, message)
+
+    def _do_write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
         lf = self._state.handles.get_typed(message.handle, "locked_flake")
         lf.write_lock_file()
         return WriteLockFileResponse()
@@ -277,21 +316,33 @@ class EvalServiceHandler(EvalServiceBase):
     async def release_locked_flake(
         self, message: ReleaseLockedFlakeRequest
     ) -> ReleaseLockedFlakeResponse:
+        return await self._state.executor.run(self._do_release_locked_flake, message)
+
+    def _do_release_locked_flake(
+        self, message: ReleaseLockedFlakeRequest
+    ) -> ReleaseLockedFlakeResponse:
         self._state.handles.release(message.handle)
         return ReleaseLockedFlakeResponse()
 
     async def eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
-        pyv = nanopynix_flake.eval_flake(
-            self._get_es(), message.ref, message.write_lock_file
-        )
+        return await self._state.executor.run(self._do_eval_flake, message)
+
+    def _do_eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
+        pyv = nanopynix_flake.eval_flake(self._get_es(), message.ref, message.write_lock_file)
         return self._export(pyv)
 
     async def get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
+        return await self._state.executor.run(self._do_get_flake, message)
+
+    def _do_get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
         ref = nanopynix_flake.parse_flake_ref(message.ref)
         fr = nanopynix_flake.get_flake(self._get_es(), ref)
         return common_pb.FlakeRef(attrs=_flake_ref_attrs(fr))
 
     async def release(self, message: ReleaseRequest) -> ReleaseResponse:
+        return await self._state.executor.run(self._do_release, message)
+
+    def _do_release(self, message: ReleaseRequest) -> ReleaseResponse:
         es = self._state.eval_state
         if es is not None:
             pyv = self._resolve(message.handle)
@@ -300,5 +351,8 @@ class EvalServiceHandler(EvalServiceBase):
         return ReleaseResponse()
 
     async def release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:
+        return await self._state.executor.run(self._do_release_all, message)
+
+    def _do_release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:
         self._reset()
         return ReleaseAllResponse()
