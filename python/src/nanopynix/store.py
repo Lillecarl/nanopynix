@@ -28,32 +28,30 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         self._active = False
 
     async def open(self) -> None:
-        """Activate the handle, opened lazily if not the main store."""
-        if self._uri != "daemon":
-            from nanopynix_proto.nix.worker import OpenStoreRequest
+        """Open a store on the worker and activate the handle."""
+        from nanopynix_proto.nix.worker import OpenStoreRequest
 
-            resp = await self._pool.call(
-                self._pool._worker_stub.open_store(
-                    OpenStoreRequest(uri=self._uri), timeout=_RPC_TIMEOUT
-                )
+        resp = await self._pool.call(
+            self._pool._worker_stub.open_store(
+                OpenStoreRequest(uri=self._uri), timeout=_RPC_TIMEOUT
             )
-            self._store_handle = resp.store_handle
+        )
+        self._store_handle = resp.store_handle
         self._active = True
 
     async def close(self) -> None:
-        """Deactivate the handle, releasing the store on the worker if non-main."""
-        if self._store_handle:
-            from nanopynix_proto.nix.worker import CloseStoreRequest
+        """Close the store on the worker and deactivate the handle."""
+        from nanopynix_proto.nix.worker import CloseStoreRequest
 
-            try:
-                await self._pool.call(
-                    self._pool._worker_stub.close_store(
-                        CloseStoreRequest(store_handle=self._store_handle),
-                        timeout=_RPC_TIMEOUT,
-                    )
+        try:
+            await self._pool.call(
+                self._pool._worker_stub.close_store(
+                    CloseStoreRequest(store_handle=self._store_handle),
+                    timeout=_RPC_TIMEOUT,
                 )
-            except Exception:
-                pass
+            )
+        except Exception:
+            pass
         self._active = False
 
     async def __aenter__(self) -> StoreHandle:
