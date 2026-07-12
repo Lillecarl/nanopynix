@@ -18,6 +18,9 @@ message InitRequest {
   map<string, string> settings = 3;
   repeated string experimental_features = 4;
   repeated nix.common.PrimOpSpec primops = 5;
+  optional bool pure_eval = 6;
+  optional bool restrict_eval = 7;
+  repeated string allowed_uris = 8;
 }
 
 message InitResponse {

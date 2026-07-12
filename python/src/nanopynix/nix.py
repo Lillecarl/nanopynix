@@ -101,6 +101,9 @@ class Session:
         experimental_features: list[str] | None = None,
         primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
         primop_callables: Mapping[str, Callable[..., Any]] | None = None,
+        pure_eval: bool | None = None,
+        restrict_eval: bool | None = None,
+        allowed_uris: Sequence[str] | None = None,
         worker_oom_score_adj: int | None = None,
         reserved_worker_oom_score_adj: int | None = None,
     ) -> None:
@@ -113,6 +116,9 @@ class Session:
             experimental_features=experimental_features,
             primops=_to_primop_specs(primops),
             primop_callables=dict(primop_callables) if primop_callables is not None else None,
+            pure_eval=pure_eval,
+            restrict_eval=restrict_eval,
+            allowed_uris=allowed_uris,
             worker_oom_score_adj=worker_oom_score_adj,
             reserved_worker_oom_score_adj=reserved_worker_oom_score_adj,
         )

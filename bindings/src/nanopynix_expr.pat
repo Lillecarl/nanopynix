@@ -2,6 +2,13 @@ nanopynix_expr.__prefix__:
     type ValueType = int | float | bool | str | None | list[ValueType] | dict[str, ValueType]
     \from nanopynix_store import Store
 
+nanopynix_expr._set_pure_eval:
+    def _set_pure_eval(pure: bool) -> None: ...
+nanopynix_expr._set_restrict_eval:
+    def _set_restrict_eval(restrict: bool) -> None: ...
+nanopynix_expr._set_allowed_uris:
+    def _set_allowed_uris(uris: list[str]) -> None: ...
+
 nanopynix_expr.Value.to_python:
     def to_python(self) -> ValueType: ...
 

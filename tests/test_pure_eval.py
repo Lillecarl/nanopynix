@@ -1,0 +1,93 @@
+"""Tests for pure/impure evaluation control via Session(pure_eval=...)."""
+
+from __future__ import annotations
+
+import pytest
+
+from nanopynix import NixType, Session
+from nanopynix.exceptions import EvalError
+
+
+@pytest.mark.anyio
+async def test_pure_eval_blocks_impure_builtins():
+    """pure_eval=True removes impure constants from the base environment."""
+    async with (
+        Session(pure_eval=True) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        # currentTime and currentSystem are not added when pureEval is on.
+        with pytest.raises(EvalError, match="currentTime"):
+            await eval.string("builtins.currentTime")
+
+        with pytest.raises(EvalError, match="currentSystem"):
+            await eval.string("builtins.currentSystem")
+
+
+@pytest.mark.anyio
+async def test_impure_allows_impure_builtins():
+    """pure_eval=False (default) allows currentTime and currentSystem."""
+    async with (
+        Session(pure_eval=False) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        v = await eval.string("builtins.currentTime")
+        assert await v.force_as(NixType.INT) > 0
+
+        system = await eval.string("builtins.currentSystem")
+        assert isinstance(await system.force(), str)
+
+
+@pytest.mark.anyio
+async def test_default_is_impure():
+    """Omitting pure_eval defaults to impure (pure_eval=False)."""
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        v = await eval.string("builtins.currentTime")
+        assert await v.force_as(NixType.INT) > 0
+
+
+@pytest.mark.anyio
+async def test_restrict_eval_blocks_absolute_paths():
+    """restrict_eval=True blocks readFile of paths outside the Nix store."""
+    async with (
+        Session(pure_eval=True, restrict_eval=True) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        # Any absolute path outside the store is forbidden.
+        with pytest.raises(EvalError, match="is forbidden"):
+            await eval.string('builtins.readFile "/etc/hostname"')
+
+
+@pytest.mark.anyio
+async def test_restrict_eval_allows_derivations():
+    """restrict_eval=True allows building derivations (they're in the store)."""
+    async with (
+        Session(pure_eval=True, restrict_eval=True) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        # Derivation outputs are store paths, always allowed under restrictEval.
+        v = await eval.string(
+            'builtins.derivation { name = "pure-test"; builder = "/bin/echo"; system = "x86_64-linux"; }'
+        )
+        assert await v.get_type() == NixType.ATTRS
+        assert await v.has_attr("name") is True
+
+
+@pytest.mark.anyio
+async def test_allowed_uris_is_exposed():
+    """allowed_uris param reaches the worker without error."""
+    async with (
+        Session(pure_eval=True, allowed_uris=["https://github.com"]) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        # Just smoke-test: eval should work with allowed_uris set.
+        v = await eval.string("1 + 1")
+        assert await v.force_as(NixType.INT) == 2
