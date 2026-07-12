@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 from nanopynix_proto.nix.store import StoreServiceBase
@@ -43,15 +44,13 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         """Close the store on the worker and deactivate the handle."""
         from nanopynix_proto.nix.worker import CloseStoreRequest
 
-        try:
+        with contextlib.suppress(Exception):
             await self._pool.call(
                 self._pool._worker_stub.close_store(
                     CloseStoreRequest(store_handle=self._store_handle),
                     timeout=_RPC_TIMEOUT,
                 )
             )
-        except Exception:
-            pass
         self._active = False
 
     async def __aenter__(self) -> StoreHandle:

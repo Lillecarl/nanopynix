@@ -18,7 +18,6 @@ import json
 import os
 import sys
 import traceback
-from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_proto.nix.common import LogEvent
@@ -47,11 +46,13 @@ from nanopynix.logging import LogCollector
 from nanopynix.models import PrimOpSpec
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
     from grpclib._typing import IServable
     from grpclib_transports import WorkerBackchannel
 
 # Re-export for the multiprocessing runner in _pool.py
-__all__ = ["run_worker", "worker_service_factory", "main"]
+__all__ = ["main", "run_worker", "worker_service_factory"]
 
 # Current worker logging uses the long-lived grpclib-transports backchannel on
 # the same H2 connection as ordinary calls. Keep one handler slot for that stream
@@ -154,10 +155,7 @@ class WorkerServiceHandler(WorkerServiceBase):
             raise
 
     async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
-        if message.uri == "auto":
-            store = nanopynix_store.open_store()
-        else:
-            store = nanopynix_store.open_store(message.uri)
+        store = nanopynix_store.open_store() if message.uri == "auto" else nanopynix_store.open_store(message.uri)
         handle = self._state.handles.allocate(store, "store")
         return OpenStoreResponse(
             store_handle=handle,
@@ -298,10 +296,8 @@ def main() -> None:
     This is the ``nanopynix-worker`` console_script target and also the
     fallback for ``sys.executable -m nanopynix._worker``.
     """
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(_stdio_main())
-    except KeyboardInterrupt:
-        pass
 
 
 async def _stdio_main() -> None:

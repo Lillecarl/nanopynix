@@ -71,6 +71,7 @@ from nanopynix_util import (
 Store = StoreHandle
 
 __all__ = [
+    "LockedFlakeHandle",
     # L2
     "NixAssertionError",
     "NixCoercionError",
@@ -98,7 +99,6 @@ __all__ = [
     "ValueList",
     "ValueProxy",
     "ValueReleasedError",
-    "LockedFlakeHandle",
     "WorkerBusyError",
     "WorkerDiedError",
     "WrongNixTypeError",

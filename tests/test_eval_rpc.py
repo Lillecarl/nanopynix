@@ -132,14 +132,13 @@ async def test_eval_session_cleanup(tmp_path):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; }")
 
-    async with Session() as session:
-        async with session.store() as store:
-            async with session.eval(store) as eval:
-                root = await eval.file(str(nix_file))
-                await root.force()
-            # Eval session closed — store is still available
-            uri = await store.get_uri(GetUriRequest())
-            assert isinstance(uri.uri, str)
+    async with Session() as session, session.store() as store:
+        async with session.eval(store) as eval:
+            root = await eval.file(str(nix_file))
+            await root.force()
+        # Eval session closed — store is still available
+        uri = await store.get_uri(GetUriRequest())
+        assert isinstance(uri.uri, str)
 
 
 async def test_eval_thunk(tmp_path):

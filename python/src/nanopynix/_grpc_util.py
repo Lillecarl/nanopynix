@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from grpclib.const import Status
 from grpclib.exceptions import GRPCError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def convert_handler_errors(func: Callable[..., Any]) -> Callable[..., Any]:

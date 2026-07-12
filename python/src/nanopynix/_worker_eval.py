@@ -224,7 +224,7 @@ class EvalServiceHandler(EvalServiceBase):
         value.force()
         type_name = value.type_name()
         nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
-        return TypeNameResponse(**{"type": nix_type})
+        return TypeNameResponse(type=nix_type)
 
     async def call(self, message: CallRequest) -> common_pb.ValueHandle:
         es = self._get_es()

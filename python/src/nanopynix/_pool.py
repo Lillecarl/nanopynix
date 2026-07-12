@@ -70,7 +70,7 @@ async def _grpc_call(coro: Any) -> Any:
     try:
         return await coro
     except GRPCError as exc:
-        raise from_response("Unknown", exc.message or str(exc))
+        raise from_response("Unknown", exc.message or str(exc)) from exc
     except (StreamTerminatedError, ConnectionError) as exc:
         raise WorkerDiedError(str(exc)) from exc
 
@@ -265,7 +265,7 @@ class _WorkerManager:
 
                 try:
                     await self._worker_stub.shutdown(ShutdownRequest(), timeout=5.0)
-                except (GRPCError, StreamTerminatedError, ConnectionError, asyncio.TimeoutError, asyncio.CancelledError):
+                except (TimeoutError, GRPCError, StreamTerminatedError, ConnectionError, asyncio.CancelledError):
                     logger.debug("worker shutdown failed (expected during teardown)", exc_info=True)
         finally:
             if self._stack is not None:
