@@ -7,6 +7,7 @@
 
 #include <nix/store/store-api.hh>
 #include <nix/store/store-open.hh>
+#include <nix/store/names.hh>
 #include <nix/store/path.hh>
 #include <nix/store/derived-path.hh>
 #include <nix/store/build-result.hh>
@@ -559,6 +560,22 @@ NB_MODULE(nanopynix_store, m) {
 
     bind_store_path(m);
     bind_store(m);
+
+    // ── Pure utility functions (no init required) ───────────────
+    m.def("compare_versions", [](const std::string &v1, const std::string &v2) -> int {
+            auto ord = nix::compareVersions(v1, v2);
+            if (ord < 0) return -1;
+            if (ord > 0) return 1;
+            return 0;
+          },
+          "v1"_a, "v2"_a,
+          "Compare two Nix version strings. Returns -1, 0, or 1.");
+    m.def("check_name", [](const std::string &name) {
+            nix::checkName(name);
+            return true;
+          },
+          "name"_a,
+          "Validate a store path name component. Returns True or raises BadStorePath.");
 
     // ── Exception bindings ──────────────────────────────────────
     nb::exception<nix::InvalidPath> py_invalid_path(m, "InvalidPath", PyExc_RuntimeError);

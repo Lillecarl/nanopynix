@@ -6,6 +6,7 @@
 #include <nanobind/stl/shared_ptr.h>
 
 #include <atomic>
+#include <cstdlib>
 #include <stdexcept>
 
 #include <nix/expr/eval.hh>
@@ -650,6 +651,13 @@ NB_MODULE(nanopynix_expr, m) {
         nix::initGC();
         auto &f = nix::experimentalFeatureSettings.experimentalFeatures.get();
         f.insert(nix::Xp::FetchTree);
+    });
+    m.def("parse_nix_path", []() -> std::vector<std::string> {
+        const char *env = std::getenv("NIX_PATH");
+        if (!env || !*env)
+            return {};
+        auto entries = nix::EvalSettings::parseNixPath(env);
+        return {entries.begin(), entries.end()};
     });
     m.def("eval_file", &eval_file_impl, "state"_a, "path"_a);
     m.def("register_primop", &register_primop,
