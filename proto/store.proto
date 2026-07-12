@@ -23,8 +23,6 @@ service StoreService {
   rpc BuildDerivation(BuildDerivationRequest) returns (nix.common.BuildResult);
   rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (nix.common.StorePath);
   rpc AddTempRoot(AddTempRootRequest) returns (AddTempRootResponse);
-  rpc FetchFromUrl(FetchFromUrlRequest) returns (nix.common.Input);
-  rpc FetchFromAttrs(FetchFromAttrsRequest) returns (nix.common.Input);
 }
 
 message GetUriRequest {}
@@ -109,11 +107,3 @@ message AddTempRootRequest {
   string path = 1;
 }
 message AddTempRootResponse {}
-
-message FetchFromUrlRequest {
-  string url = 1;
-}
-
-message FetchFromAttrsRequest {
-  map<string, nix.common.AttrsValue> attrs = 1;
-}

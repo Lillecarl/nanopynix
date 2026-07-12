@@ -12,11 +12,10 @@ service WorkerService {
 
 message InitRequest {
   string store_uri = 1;
-  string eval_store_uri = 2;
-  optional string nix_conf = 3;
-  map<string, string> settings = 4;
-  repeated string experimental_features = 5;
-  repeated nix.common.PrimOpSpec primops = 6;
+  optional string nix_conf = 2;
+  map<string, string> settings = 3;
+  repeated string experimental_features = 4;
+  repeated nix.common.PrimOpSpec primops = 5;
 }
 
 message InitResponse {

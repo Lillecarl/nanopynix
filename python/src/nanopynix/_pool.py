@@ -183,7 +183,6 @@ class _WorkerManager:
         self,
         *,
         store_uri: str = "auto",
-        eval_store_uri: str | None = None,
         nix_conf: str | None = "/etc/nix/nix.conf",
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
@@ -192,7 +191,6 @@ class _WorkerManager:
         reserved_worker_oom_score_adj: int | None = None,
     ) -> None:
         self._store_uri = store_uri
-        self._eval_store_uri = eval_store_uri or store_uri
         self._nix_conf = nix_conf
         self._settings = settings or {}
         self._features = experimental_features or []
@@ -248,7 +246,6 @@ class _WorkerManager:
         init_response = await self._worker_stub.init(
             InitRequest(
                 store_uri=self._store_uri,
-                eval_store_uri=self._eval_store_uri,
                 nix_conf=self._nix_conf,
                 settings=self._settings,
                 experimental_features=self._features,

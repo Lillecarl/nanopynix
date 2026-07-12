@@ -93,7 +93,6 @@ class WorkerState:
 
     def __init__(self) -> None:
         self.store: Any = None
-        self.eval_store: Any = None
         self.eval_state: Any = None
         self.collector: LogCollector | None = None
         self.log_task: asyncio.Task[None] | None = None
@@ -145,18 +144,12 @@ class WorkerServiceHandler(WorkerServiceBase):
             _register_primops(primops_raw)
 
             store_uri = message.store_uri
-            eval_store_uri = message.eval_store_uri
 
             self._state.store = (
                 nanopynix_store.open_store()
                 if store_uri == "auto"
                 else nanopynix_store.open_store(store_uri)
             )
-
-            if eval_store_uri != store_uri:
-                self._state.eval_store = nanopynix_store.open_store(eval_store_uri)
-            else:
-                self._state.eval_store = None
 
             return InitResponse(status="ok")
 
