@@ -81,6 +81,8 @@ class Capture[T]:
 ## Session
 
 ```python
+from nanopynix_proto.nix.store import QueryPathInfoRequest
+
 async with nanopynix.Session(
     nix_conf: str | None = "/etc/nix/nix.conf",  # None = skip
     config: dict[str, str] | None = None,          # NIX_CONFIG
@@ -286,10 +288,8 @@ async with nanopynix.Session(
     sub = session.subscribe(lambda e: print(f"[{e.action}] {e.args}"))
 
     async with session.store() as store:
-        info = await store.query_path_info(sp, capture=True)
-        print(info.value.nar_hash)
-        for event in info.logs:
-            print(f"  captured: {event.action}")
+        info = await store.query_path_info(QueryPathInfoRequest(path=sp.to_string))
+        print(info.nar_hash)
 
         async with session.eval(store) as eval_:
             root = await eval_.file("default.nix")

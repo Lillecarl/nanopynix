@@ -6,9 +6,11 @@ logger, and configuration.
 
 Usage::
 
+    from nanopynix_proto.nix.store import QueryPathInfoRequest
+
     async with Session(store_uri="daemon", experimental_features=["flakes"]) as session:
         async with session.store() as store:
-            info = await store.query_path_info("/nix/store/...")
+            info = await store.query_path_info(QueryPathInfoRequest(path="/nix/store/..."))
         async for event in session.log_stream():
             ...
 """
@@ -78,13 +80,15 @@ class Session:
 
     Usage::
 
+        from nanopynix_proto.nix.store import QueryPathInfoRequest
+
         async with Session(
             store_uri="daemon",
             settings={"max-jobs": "4"},
             experimental_features=["flakes"],
         ) as session:
             async with session.store() as store:
-                info = await store.query_path_info(sp)
+                info = await store.query_path_info(QueryPathInfoRequest(path=sp.to_string))
     """
 
     def __init__(
@@ -119,9 +123,13 @@ class Session:
 
         Usage::
 
+            from nanopynix_proto.nix.store import BuildDerivationRequest, QueryPathInfoRequest
+
             async with session.store() as store:
-                info = await store.query_path_info(sp)
-                drv = await store.build_derivation(sp, mode)
+                info = await store.query_path_info(QueryPathInfoRequest(path=sp.to_string))
+                drv = await store.build_derivation(
+                    BuildDerivationRequest(path=sp.to_string, build_mode=mode)
+                )
 
         The handle carries this session's ID — passing it to
         ``Eval`` from a different session raises ``ValueError``.
