@@ -23,7 +23,7 @@ from nanopynix._worker import worker_service_factory
 from nanopynix.exceptions import from_response
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Sequence
 
     from nanopynix_proto.nix.eval import EvalServiceStub
     from nanopynix_proto.nix.store import StoreServiceStub
@@ -188,6 +188,9 @@ class _WorkerManager:
         experimental_features: list[str] | None = None,
         primops: list[PrimOpSpec] | None = None,
         primop_callables: dict[str, Callable[..., Any]] | None = None,
+        pure_eval: bool | None = None,
+        restrict_eval: bool | None = None,
+        allowed_uris: Sequence[str] | None = None,
         worker_oom_score_adj: int | None = None,
         reserved_worker_oom_score_adj: int | None = None,
     ) -> None:
@@ -197,6 +200,9 @@ class _WorkerManager:
         self._features = experimental_features or []
         self._primops = primops or []
         self._primop_callables = primop_callables or {}
+        self._pure_eval = pure_eval
+        self._restrict_eval = restrict_eval
+        self._allowed_uris = list(allowed_uris) if allowed_uris else []
         # OOM score adjustment is not yet supported with multiprocessing transport
         # (no direct access to child PID).  Params kept for API compat.
         self._channel = None
@@ -262,6 +268,9 @@ class _WorkerManager:
                 settings=self._settings,
                 experimental_features=self._features,
                 primops=proto_primops,
+                pure_eval=self._pure_eval,
+                restrict_eval=self._restrict_eval,
+                allowed_uris=self._allowed_uris,
             ),
             timeout=_RPC_TIMEOUT,
         )

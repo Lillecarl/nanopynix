@@ -161,6 +161,13 @@ class WorkerServiceHandler(WorkerServiceBase):
             nanopynix_util.set_verbosity(5)  # lvlChatty — emit fetch/log events
             nanopynix_expr.init_libexpr()
 
+            if message.pure_eval is not None:
+                nanopynix_expr._set_pure_eval(message.pure_eval)
+            if message.restrict_eval is not None:
+                nanopynix_expr._set_restrict_eval(message.restrict_eval)
+            if message.allowed_uris:
+                nanopynix_expr._set_allowed_uris(message.allowed_uris)
+
             # Convert proto PrimOpSpec list to the raw-dict format
             primops_raw = [
                 {

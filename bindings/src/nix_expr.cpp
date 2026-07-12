@@ -652,6 +652,31 @@ NB_MODULE(nanopynix_expr, m) {
           "Register a Python function as a Nix builtin. "
           "The callback receives Python-primitive arguments and must return a Python primitive.");
 
+    m.def("_set_pure_eval", [](bool pure) {
+        PyEvalState::evalSettingsConfigurators().push_back(
+            [=](nix::EvalSettings &es) { es.pureEval = pure; }
+        );
+    });
+
+    m.def("_set_restrict_eval", [](bool restrict_) {
+        PyEvalState::evalSettingsConfigurators().push_back(
+            [=](nix::EvalSettings &es) { es.restrictEval = restrict_; }
+        );
+    });
+
+    m.def("_set_allowed_uris", [](const std::vector<std::string> &uris) {
+        static std::vector<std::string> desired;
+        desired = uris;
+        PyEvalState::evalSettingsConfigurators().push_back(
+            [](nix::EvalSettings &es) {
+                auto &s = es.allowedUris;
+                s.set("", false);  // clear
+                for (auto &u : desired)
+                    s.set(u, true);
+            }
+        );
+    });
+
     m.def("_cleanup_primop_registry", [] {
         if (Py_IsInitialized())
             py_primop_registry().clear();
