@@ -50,7 +50,8 @@ buildPythonPackage {
       common.proto \
       store.proto \
       eval.proto \
-      worker.proto
+      worker.proto \
+      manager.proto
   '';
 
   meta = with lib; {

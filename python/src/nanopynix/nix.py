@@ -30,7 +30,7 @@ from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.store import StoreHandle
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping, Sequence
+    from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,7 @@ class Session:
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
         primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
+        primop_callables: Mapping[str, Callable[..., Any]] | None = None,
         worker_oom_score_adj: int | None = None,
         reserved_worker_oom_score_adj: int | None = None,
     ) -> None:
@@ -111,6 +112,7 @@ class Session:
             settings=config if config is not None else settings,
             experimental_features=experimental_features,
             primops=_to_primop_specs(primops),
+            primop_callables=dict(primop_callables) if primop_callables is not None else None,
             worker_oom_score_adj=worker_oom_score_adj,
             reserved_worker_oom_score_adj=reserved_worker_oom_score_adj,
         )

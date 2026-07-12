@@ -76,15 +76,26 @@ def _import_callable(import_path: str) -> Callable[..., Any]:
     return value
 
 
-def _register_primops(raw_specs: list[dict[str, Any]]) -> None:
+def _register_primops(
+    raw_specs: list[dict[str, Any]],
+    rpc_bridge: Any = None,
+) -> None:
     for raw in raw_specs:
         spec = PrimOpSpec.from_dict(raw)
+        if spec.rpc:
+            if rpc_bridge is None:
+                raise RuntimeError(f"RPC primop {spec.name!r} registered without backchannel")
+            from nanopynix._worker_primop import rpc_primop_callback_factory
+
+            callback = rpc_primop_callback_factory(rpc_bridge, spec.name, spec.arity)
+        else:
+            callback = _import_callable(spec.import_path)
         nanopynix_expr.register_primop(
             spec.name,
             spec.arity,
             spec.args,
             spec.doc,
-            _import_callable(spec.import_path),
+            callback,
         )
 
 
@@ -102,6 +113,7 @@ class WorkerState:
         self.collector: LogCollector | None = None
         self.log_task: asyncio.Task[None] | None = None
         self.handles: HandleRegistry = HandleRegistry()
+        self.rpc_bridge: Any = None
 
 
 # ── WorkerService handler ────────────────────────────────────────────
@@ -142,10 +154,11 @@ class WorkerServiceHandler(WorkerServiceBase):
                     "args": list(p.args),
                     "doc": p.doc,
                     "import_path": p.import_path,
+                    "rpc": p.rpc,
                 }
                 for p in message.primops
             ]
-            _register_primops(primops_raw)
+            _register_primops(primops_raw, rpc_bridge=self._state.rpc_bridge)
 
             return InitResponse(status="ok")
 
@@ -239,6 +252,12 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
             _relay_logs_to_manager(collector, backchannel),
             name="nanopynix-log-backchannel",
         )
+        import nest_asyncio
+
+        nest_asyncio.apply()
+        from nanopynix._worker_primop import _RpcPrimopBridge
+
+        state.rpc_bridge = _RpcPrimopBridge(backchannel)
 
     return cast(
         "list[IServable]",

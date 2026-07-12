@@ -4,6 +4,7 @@
   buildPythonPackage,
   hatchling,
   janus,
+  nest-asyncio,
   pydantic,
   pyyaml,
   strip-ansi,
@@ -28,6 +29,7 @@ buildPythonPackage {
     nanopynix-proto
     grpclib-transports
     janus
+    nest-asyncio
     pydantic
     pyyaml
     strip-ansi
