@@ -28,6 +28,9 @@ let
     nanopynix
     pp.pytest
     pp.anyio
+    pp.sphinx
+    pp.myst-parser
+    pp.furo
   ]);
 in
 {
