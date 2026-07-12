@@ -12,7 +12,7 @@ def ipaddress_primops() -> list[PrimOpSpec]:
             arity=1,
             args=["source"],
             doc=(
-                "Parse an IP address string (e.g. ``\"192.168.1.1\"``) into an attrset\n"
+                'Parse an IP address string (e.g. ``"192.168.1.1"``) into an attrset\n'
                 "with properties like ``version``, ``isPrivate``, ``isGlobal``, etc."
             ),
             import_path="nanopynix._ipaddress:parse_address",
@@ -22,7 +22,7 @@ def ipaddress_primops() -> list[PrimOpSpec]:
             arity=1,
             args=["source"],
             doc=(
-                "Parse a network string (e.g. ``\"192.168.1.0/24\"``) into an attrset\n"
+                'Parse a network string (e.g. ``"192.168.1.0/24"``) into an attrset\n'
                 "with ``prefixlen``, ``numAddresses``, callable ``hosts`` and ``subnets``\n"
                 "methods, and is* property checks."
             ),
@@ -33,7 +33,7 @@ def ipaddress_primops() -> list[PrimOpSpec]:
             arity=1,
             args=["source"],
             doc=(
-                "Parse an interface string (e.g. ``\"192.168.1.1/24\"``) into an attrset\n"
+                'Parse an interface string (e.g. ``"192.168.1.1/24"``) into an attrset\n'
                 "with ``ip`` and ``network`` sub-attrsets."
             ),
             import_path="nanopynix._ipaddress:parse_interface",

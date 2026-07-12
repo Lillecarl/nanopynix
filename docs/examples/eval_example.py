@@ -5,6 +5,8 @@ Run with::
     python docs/examples/eval_example.py
 """
 
+# ruff: noqa: T201
+
 from __future__ import annotations
 
 import asyncio
@@ -41,7 +43,7 @@ async def main() -> None:
 
         # --- force_as for type-checked scalar extraction ----------------------
 
-        v3 = await eval.string("{ version = 4; enabled = true; name = \"demo\"; }")
+        v3 = await eval.string('{ version = 4; enabled = true; name = "demo"; }')
         assert await v3.attr("version").force_as(NixType.INT) == 4
         assert await v3.attr("enabled").force_as(NixType.BOOL) is True
         assert await v3.attr("name").force_as(NixType.STRING) == "demo"

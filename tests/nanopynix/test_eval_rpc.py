@@ -1,9 +1,9 @@
 """Tests for eval over RPC — EvalSession + ValueProxy."""
 
 import asyncio
-from pathlib import Path
 
 import pytest
+from anyio import Path
 from nanopynix_proto.nix.store import GetUriRequest
 
 from nanopynix import (
@@ -340,7 +340,7 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active():
         assert set(outputs) == {"out"}
         assert outputs["out"].startswith("/nix/store/")
         assert "nanopynix-build-value-test" in outputs["out"]
-        assert Path(outputs["out"]).read_text() == "hello\n"
+        assert await Path(outputs["out"]).read_text() == "hello\n"
 
 
 async def test_evaluated_derivation_can_build_with_explicit_build_store():
@@ -378,7 +378,7 @@ async def test_evaluated_derivation_can_build_with_explicit_build_store():
         assert set(outputs) == {"out"}
         assert outputs["out"].startswith("/nix/store/")
         assert "nanopynix-build-value-explicit-store-test" in outputs["out"]
-        assert Path(outputs["out"]).read_text() == "explicit\n"
+        assert await Path(outputs["out"]).read_text() == "explicit\n"
 
 
 async def test_worker_yaml_primops():

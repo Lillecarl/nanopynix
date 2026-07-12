@@ -78,7 +78,7 @@ def _register_test_primops():
     nanopynix.register_primop(
         "test_callable_curry", 2, ["a", "b"],
         "returns a callable that takes one arg",
-        lambda a, b: lambda x: x * 2,
+        lambda _a, _b: lambda x: x * 2,
     )
 
 

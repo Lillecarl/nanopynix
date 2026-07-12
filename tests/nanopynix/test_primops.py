@@ -105,7 +105,7 @@ class TestCallableToNixFunction:
 
     def test_closure_in_attrset(self, eval_state):
         """A callable in an attrset captures the primop's closure over its args."""
-        v = eval_state.eval_string("(test_closure_fn 40 \"hello\").greet \"world\"")
+        v = eval_state.eval_string('(test_closure_fn 40 "hello").greet "world"')
         assert v.as_string() == "hello world 42"
 
     def test_callable_curry(self, eval_state):

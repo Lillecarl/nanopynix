@@ -22,10 +22,11 @@ let
       grpclib-transports
       ;
   };
-  pynix = python3Packages.callPackage ./pynix/package.nix { inherit nanopynix; };
+  clypi = python3Packages.callPackage ./nix/clypi.nix { };
+  pynix = python3Packages.callPackage ./pynix/package.nix { inherit nanopynix clypi; };
 
   shell = python3Packages.callPackage ./nix/shell.nix {
-    inherit nanopynix;
+    inherit nanopynix pynix;
   };
 in
 {
@@ -37,6 +38,7 @@ in
     nanopynix-proto
     pynix
     grpclib-transports
+    clypi
     ;
   inherit (pkgs) lib;
 }
