@@ -270,19 +270,26 @@ static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path)
 }
 
 static nb::list build_paths_with_results(
-        nix::Store &s, const std::vector<nix::StorePath> &paths) {
+        nix::Store &s,
+        const std::vector<nix::StorePath> &paths,
+        nix::BuildMode buildMode = nix::bmNormal,
+        std::shared_ptr<nix::Store> evalStore = nullptr) {
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
-    auto results = s.buildPathsWithResults(dps);
+    auto results = s.buildPathsWithResults(dps, buildMode, evalStore);
     nb::list out;
     for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
     return out;
 }
 
-static void build_paths(nix::Store &s, const std::vector<nix::StorePath> &paths) {
+static void build_paths(
+        nix::Store &s,
+        const std::vector<nix::StorePath> &paths,
+        nix::BuildMode buildMode = nix::bmNormal,
+        std::shared_ptr<nix::Store> evalStore = nullptr) {
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
-    s.buildPaths(dps);
+    s.buildPaths(dps, buildMode, evalStore);
 }
 
 static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
@@ -450,9 +457,16 @@ static nb::dict store_query_substitutable_paths(
 }
 
 static nb::dict store_build_paths_with_results(
-        nix::Store &s, const nb::dict &request) {
+        nix::Store &s,
+        const nb::dict &request,
+        std::shared_ptr<nix::Store> evalStore = nullptr) {
+    auto build_mode = static_cast<nix::BuildMode>(nb::cast<int>(request[nb::str("build_mode")]));
     nb::dict d;
-    d["results"] = build_paths_with_results(s, request_store_paths(s, request, "paths"));
+    d["results"] = build_paths_with_results(
+        s,
+        request_store_paths(s, request, "paths"),
+        build_mode,
+        evalStore);
     return d;
 }
 
@@ -493,8 +507,13 @@ static void bind_store(nb::module_ &m) {
         .def("follow_links_to_store_path",
              [](nix::Store &s, const std::string &p) { return s.followLinksToStorePath(p); }, "path"_a)
         // Build
-        .def("build_paths", &build_paths, "paths"_a)
-        .def("build_paths_with_results", &build_paths_with_results, "paths"_a)
+        .def("build_paths", &build_paths, "paths"_a, "build_mode"_a = nix::bmNormal, "eval_store"_a = nullptr)
+        .def(
+            "build_paths_with_results",
+            &build_paths_with_results,
+            "paths"_a,
+            "build_mode"_a = nix::bmNormal,
+            "eval_store"_a = nullptr)
         .def("read_derivation", &read_derivation, "drv_path"_a)
         .def("build_derivation", &build_derivation, "drv_path"_a, "build_mode"_a)
         // Path info
@@ -528,7 +547,11 @@ static void bind_store(nb::module_ &m) {
         .def("store_query_all_valid_paths", &store_query_all_valid_paths, "request"_a)
         .def("store_query_referrers", &store_query_referrers, "request"_a)
         .def("store_query_substitutable_paths", &store_query_substitutable_paths, "request"_a)
-        .def("store_build_paths_with_results", &store_build_paths_with_results, "request"_a)
+        .def(
+            "store_build_paths_with_results",
+            &store_build_paths_with_results,
+            "request"_a,
+            "eval_store"_a = nullptr)
         .def("store_read_derivation", &store_read_derivation, "request"_a)
         .def("store_build_derivation", &store_build_derivation, "request"_a)
         .def("store_follow_links_to_store_path", &store_follow_links_to_store_path, "request"_a)

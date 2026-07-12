@@ -343,6 +343,44 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active():
         assert Path(outputs["out"]).read_text() == "hello\n"
 
 
+async def test_evaluated_derivation_can_build_with_explicit_build_store():
+    """ValueProxy.build(store=...) uses that store for building, keeping the eval store as context."""
+    async with (
+        Session() as session,
+        session.store() as eval_store,
+        session.store() as build_store,
+        session.eval(eval_store) as eval,
+    ):
+        drv = await eval.string(
+            """
+            let
+              script = builtins.derivation {
+                name = "nanopynix-build-value-script";
+                system = builtins.currentSystem;
+                builder = "/bin/sh";
+                args = [
+                  "-c"
+                  "printf '%s\\n' 'echo explicit > $out' > $out"
+                ];
+              };
+            in
+              builtins.derivation {
+                name = "nanopynix-build-value-explicit-store-test";
+                system = builtins.currentSystem;
+                builder = "/bin/sh";
+                args = [ "${script}" ];
+              }
+            """
+        )
+
+        outputs = await drv.build(store=build_store)
+
+        assert set(outputs) == {"out"}
+        assert outputs["out"].startswith("/nix/store/")
+        assert "nanopynix-build-value-explicit-store-test" in outputs["out"]
+        assert Path(outputs["out"]).read_text() == "explicit\n"
+
+
 async def test_worker_yaml_primops():
     """Importable worker primops parse and render YAML during eval."""
     async with (

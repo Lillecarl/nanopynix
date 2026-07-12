@@ -618,6 +618,8 @@ class TestValueProxyLifecycle:
         w._store_stub.build_paths_with_results.assert_awaited_once()
         build_request = w._store_stub.build_paths_with_results.call_args.args[0]
         assert build_request.paths == ["/nix/store/aaa-demo.drv"]
+        assert build_request.build_mode == BuildMode.Normal.value
+        assert build_request.eval_store_handle == 123
         assert build_request.store_handle == 123
         w._store_stub.build_derivation.assert_not_awaited()
         w._store_stub.read_derivation.assert_awaited_once()
@@ -625,7 +627,38 @@ class TestValueProxyLifecycle:
         assert read_request.path == "/nix/store/aaa-demo.drv"
         assert read_request.store_handle == 123
 
-    async def test_build_mode_uses_force_build_derivation(self):
+    async def test_build_mode_uses_cascading_build(self):
+        w = self._worker()
+        w._eval_stub.has_attr.return_value = _mock_has_attr_response(True)
+        w._eval_stub.attr.side_effect = [
+            _mock_value_handle(5, "string"),
+            _mock_value_handle(6, "string"),
+        ]
+        w._eval_stub.force_json.side_effect = [
+            MagicMock(json='"derivation"'),
+            MagicMock(json='"/nix/store/aaa-demo.drv"'),
+        ]
+        build_result = MagicMock()
+        build_result.success = True
+        w._store_stub.build_paths_with_results.return_value = SimpleNamespace(results=[build_result])
+        w._store_stub.read_derivation.return_value = SimpleNamespace(
+            outputs={"out": SimpleNamespace(path="/nix/store/aaa-demo")},
+            env={},
+        )
+        vp = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123).value(1, "attrs")
+
+        result = await vp.build(build_mode=BuildMode.Check)
+
+        assert result == {"out": "/nix/store/aaa-demo"}
+        w._store_stub.build_paths_with_results.assert_awaited_once()
+        build_request = w._store_stub.build_paths_with_results.call_args.args[0]
+        assert build_request.paths == ["/nix/store/aaa-demo.drv"]
+        assert build_request.build_mode == BuildMode.Check.value
+        assert build_request.eval_store_handle == 123
+        assert build_request.store_handle == 123
+        w._store_stub.build_derivation.assert_not_awaited()
+
+    async def test_single_build_uses_build_derivation(self):
         w = self._worker()
         w._eval_stub.has_attr.return_value = _mock_has_attr_response(True)
         w._eval_stub.attr.side_effect = [
@@ -645,7 +678,7 @@ class TestValueProxyLifecycle:
         )
         vp = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123).value(1, "attrs")
 
-        result = await vp.build(build_mode=BuildMode.Check)
+        result = await vp.build(build_mode=BuildMode.Check, single=True)
 
         assert result == {"out": "/nix/store/aaa-demo"}
         w._store_stub.build_paths_with_results.assert_not_awaited()
@@ -654,6 +687,48 @@ class TestValueProxyLifecycle:
         assert build_request.path == "/nix/store/aaa-demo.drv"
         assert build_request.build_mode == BuildMode.Check.value
         assert build_request.store_handle == 123
+
+    async def test_build_store_overrides_build_store_not_eval_store(self):
+        w = self._worker()
+        w._eval_stub.has_attr.return_value = _mock_has_attr_response(True)
+        w._eval_stub.attr.side_effect = [
+            _mock_value_handle(5, "string"),
+            _mock_value_handle(6, "string"),
+        ]
+        w._eval_stub.force_json.side_effect = [
+            MagicMock(json='"derivation"'),
+            MagicMock(json='"/nix/store/aaa-demo.drv"'),
+        ]
+        build_result = MagicMock()
+        build_result.success = True
+        w._store_stub.build_paths_with_results.return_value = SimpleNamespace(results=[build_result])
+        w._store_stub.read_derivation.return_value = SimpleNamespace(
+            outputs={"out": SimpleNamespace(path="/nix/store/aaa-demo")},
+            env={},
+        )
+        build_store = StoreHandle(_mock_pool(), "mock", "session-id")
+        build_store._active = True
+        build_store._store_handle = 456
+        ctx = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123, session_id="session-id")
+        vp = ctx.value(1, "attrs")
+
+        result = await vp.build(store=build_store)
+
+        assert result == {"out": "/nix/store/aaa-demo"}
+        build_request = w._store_stub.build_paths_with_results.call_args.args[0]
+        assert build_request.store_handle == 456
+        assert build_request.eval_store_handle == 123
+
+    async def test_build_rejects_foreign_build_store(self):
+        w = self._worker()
+        build_store = StoreHandle(_mock_pool(), "mock", "other-session")
+        build_store._active = True
+        build_store._store_handle = 456
+        ctx = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123, session_id="session-id")
+        vp = ctx.value(1, "attrs")
+
+        with pytest.raises(ValueError, match="different session"):
+            await vp.build(store=build_store)
 
     async def test_get_type_delegates_to_worker_for_thunk(self):
         w = self._worker()

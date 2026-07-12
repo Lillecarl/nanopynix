@@ -47,5 +47,9 @@ class StoreServiceHandler(
         store = self._get_store(store_handle)
         if hasattr(store, binding_method_name):
             method = getattr(store, binding_method_name)
+            if binding_method_name == "store_build_paths_with_results":
+                eval_store_handle = request.pop("eval_store_handle", 0)
+                eval_store = self._get_store(eval_store_handle) if eval_store_handle else None
+                return method(request, eval_store)
             return method(request)
         raise RuntimeError(f"missing checked nanobind store method: {binding_method_name}")
