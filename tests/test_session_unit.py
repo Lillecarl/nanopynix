@@ -6,12 +6,13 @@ No Nix daemon needed — exercises error paths and edge cases.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
+import nanopynix._pool as pool_module
 from nanopynix import (
     EvalSessionClosedError,
     ForeignValueError,
@@ -843,6 +844,49 @@ class TestReservedWorker:
         assert await first_task == "first"
         assert await second_task == "second"
         assert order == ["first-start", "first-end", "second"]
+
+
+class TestWorkerOomScore:
+    def test_write_oom_score_adj_clamps_value(self, tmp_path):
+        proc_dir = tmp_path / "123"
+        proc_dir.mkdir()
+
+        pool_module._write_oom_score_adj(123, 2000, proc_root=tmp_path)
+
+        assert (proc_dir / "oom_score_adj").read_text() == "1000\n"
+
+    def test_worker_start_sets_base_oom_score(self, monkeypatch):
+        calls: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            pool_module,
+            "_write_oom_score_adj",
+            lambda pid, value: calls.append((pid, value)),
+        )
+        manager = _WorkerManager(worker_oom_score_adj=500)
+
+        manager._on_worker_process_start(MagicMock(pid=1234))
+
+        assert manager._worker_pid == 1234
+        assert calls == [(1234, 500)]
+
+    async def test_reserved_worker_score_is_restored_on_release(self, monkeypatch):
+        calls: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            pool_module,
+            "_write_oom_score_adj",
+            lambda pid, value: calls.append((pid, value)),
+        )
+        manager = _WorkerManager(
+            worker_oom_score_adj=500,
+            reserved_worker_oom_score_adj=250,
+        )
+        manager._channel = cast(Any, object())
+        manager._worker_pid = 1234
+
+        worker = await manager.reserve()
+        await worker.release()
+
+        assert calls == [(1234, 250), (1234, 500)]
 
 
 # ════════════════════════════════════════════════════════════════════
