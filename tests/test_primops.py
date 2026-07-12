@@ -77,3 +77,52 @@ class TestRegisterPrimop:
     def test_high_arity(self, eval_state):
         v = eval_state.eval_string("test_add4 10 10 10 12")
         assert v.as_int() == 42
+
+
+class TestCallableToNixFunction:
+    """Tests that Python callables returned from primops become Nix functions."""
+
+    def test_return_callable_zero_arity(self, eval_state):
+        """Zero-arg callable returned from a primop → evaluated immediately."""
+        v = eval_state.eval_string("test_return_lazy_42")
+        assert v.as_int() == 42
+
+    def test_attrset_zero_arity_property(self, eval_state):
+        """Attrset with a zero-arg callable → evaluated as a property value."""
+        v = eval_state.eval_string("test_attrs_property 7")
+        assert v.is_attrs()
+        assert v.attr_get("result").as_int() == 49
+
+    def test_attrset_one_arg_callable(self, eval_state):
+        """Attrset with a 1-arg callable → becomes a Nix function. Call it from Nix."""
+        v = eval_state.eval_string("(test_attrs_fn 10).add 11")
+        assert v.as_int() == 21
+
+    def test_attrset_two_arg_callable(self, eval_state):
+        """Attrset with a 2-arg callable → becomes a Nix function. Call it twice."""
+        v = eval_state.eval_string("(test_attrs_fn2 3).mul 2 5")
+        assert v.as_int() == 30
+
+    def test_closure_in_attrset(self, eval_state):
+        """A callable in an attrset captures the primop's closure over its args."""
+        v = eval_state.eval_string("(test_closure_fn 40 \"hello\").greet \"world\"")
+        assert v.as_string() == "hello world 42"
+
+    def test_callable_curry(self, eval_state):
+        """A callable returned directly from a primop can be called from Nix."""
+        v = eval_state.eval_string("(test_callable_curry 0 0) 21")
+        assert v.as_int() == 42
+
+    def test_value_from_python_lambda(self, eval_state):
+        """value_from_python converts a lambda to a Nix primop value."""
+        v = eval_state.value_from_python(lambda x: x * 3)
+        result = v.call(eval_state.eval_string("5"))
+        assert result.as_int() == 15
+
+    def test_value_from_python_dict_with_lambda(self, eval_state):
+        """value_from_python converts a dict with a lambda → attrset with Nix function."""
+        v = eval_state.value_from_python({"add_one": lambda x: x + 1})
+        assert v.is_attrs()
+        fn = v.attr_get("add_one")
+        result = fn.call(eval_state.eval_string("41"))
+        assert result.as_int() == 42
