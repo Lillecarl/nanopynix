@@ -24,59 +24,14 @@ let
   };
   pynix = python3Packages.callPackage ./pynix/package.nix { inherit nanopynix; };
 
-  python = pkgs.python3.withPackages (pp: [
-    nanopynix
-    pp.pytest
-    pp.anyio
-    pp.sphinx
-    pp.myst-parser
-    pp.furo
-  ]);
+  shell = python3Packages.callPackage ./nix/shell.nix {
+    inherit nanopynix;
+  };
 in
 {
-  shell = pkgs.mkShell {
-    packages = [
-      python
-      pkgs.pyright
-      pkgs.ruff
-    ];
-  };
-  ruff = pkgs.writeShellApplication {
-    name = "ruff";
-    runtimeInputs = [
-      python
-      pkgs.ruff
-    ];
-    text = # bash
-      ''
-        ruff "$@"
-      '';
-  };
-  pyright = pkgs.writeShellApplication {
-    name = "pyright";
-    runtimeInputs = [
-      python
-      pkgs.pyright
-    ];
-    text = # bash
-      ''
-        pyright "$@"
-      '';
-  };
-  pytest = pkgs.writeShellApplication {
-    name = "pytest";
-    runtimeInputs = [
-      python
-    ];
-    text = # bash
-      ''
-        pytest "$@"
-      '';
-  };
-
   inherit
     pkgs
-    python
+    shell
     nanopynix
     nanopynix-bindings
     nanopynix-proto
