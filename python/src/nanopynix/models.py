@@ -2,8 +2,8 @@
 
 Most types are re-exported from ``nanopynix_proto.nix.common`` — the
 proto-generated messages are the canonical wire format.  A few types use
-MonkeyPatcher extension classes to add helper methods that the proto
-generated code doesn't provide (``is_derivation``, ``message``, etc.).
+extension subclasses to add helper methods that the proto generated code
+doesn't provide (``is_derivation``, ``message``, etc.).
 """
 
 from __future__ import annotations
@@ -11,13 +11,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from grpclib_transports.monkey_patcher import MonkeyPatcher
 from nanopynix_proto.nix.common import (
-    # Types with MonkeyPatcher extensions — imported as private for subclassing
-    BuildResult as _BuildResult,
+    # Types with extension subclasses — imported as private for subclassing
+    BuildResult as BuildResult,
 )
 from nanopynix_proto.nix.common import (
-    # Types without MonkeyPatcher extensions — re-exported directly
     CallArg as CallArg,
 )
 from nanopynix_proto.nix.common import (
@@ -36,7 +34,7 @@ from nanopynix_proto.nix.common import (
     DeepValue as DeepValue,
 )
 from nanopynix_proto.nix.common import (
-    Derivation as _Derivation,
+    Derivation as Derivation,
 )
 from nanopynix_proto.nix.common import (
     DerivationOutputs as DerivationOutputs,
@@ -51,7 +49,7 @@ from nanopynix_proto.nix.common import (
     Input as Input,
 )
 from nanopynix_proto.nix.common import (
-    LockedFlake as _LockedFlake,
+    LockedFlake as LockedFlake,
 )
 from nanopynix_proto.nix.common import (
     LockedInput as LockedInput,
@@ -69,7 +67,7 @@ from nanopynix_proto.nix.common import (
     NullValue as NullValue,
 )
 from nanopynix_proto.nix.common import (
-    PathInfo as _PathInfo,
+    PathInfo as PathInfo,
 )
 from nanopynix_proto.nix.common import (
     PrimOpSpec as PrimOpSpec,
@@ -101,14 +99,15 @@ def _store_path_base_name(value: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Extension classes (MonkeyPatcher) — these replace the original proto
-# generated types in their module so that all deserialization produces
-# instances of the subclass.
+# Extension subclasses — add helper methods on top of proto-generated types.
 # ══════════════════════════════════════════════════════════════════════════
 
 
-class StorePathExt(_StorePath, MonkeyPatcher):
+class StorePathExt(_StorePath):
     """Extension of proto StorePath with ``is_derivation`` and string constructor."""
+
+    _ = _StorePath._betterproto
+    _betterproto_meta = _StorePath._betterproto_meta
 
     HashLen = 32
     MaxPathLen = 211
@@ -156,8 +155,11 @@ class StorePathExt(_StorePath, MonkeyPatcher):
         super().__init__(**data)
 
 
-class LogEventExt(_LogEventProto, MonkeyPatcher):
+class LogEventExt(_LogEventProto):
     """Extension of proto LogEvent with ``message``, ``message_without_ansi``, and ``args``."""
+
+    _ = _LogEventProto._betterproto
+    _betterproto_meta = _LogEventProto._betterproto_meta
 
     def __init__(self, **kwargs: Any) -> None:
         if "args" in kwargs:
@@ -208,31 +210,11 @@ class LogEventExt(_LogEventProto, MonkeyPatcher):
         )
 
 
-class PathInfoExt(_PathInfo, MonkeyPatcher):
-    """Extension of proto PathInfo."""
-
-
-class BuildResultExt(_BuildResult, MonkeyPatcher):
-    """Extension of proto BuildResult."""
-
-
-class LockedFlakeExt(_LockedFlake, MonkeyPatcher):
-    """Extension of proto LockedFlake."""
-
-
-class DerivationExt(_Derivation, MonkeyPatcher):
-    """Extension of proto Derivation."""
-
-
 # ══════════════════════════════════════════════════════════════════════════
-# Public re-exports for extension types
+# Public re-exports
 # ══════════════════════════════════════════════════════════════════════════
 
-BuildResult = BuildResultExt
-Derivation = DerivationExt
-LockedFlake = LockedFlakeExt
 LogEvent = LogEventExt
-PathInfo = PathInfoExt
 StorePath = StorePathExt
 
 # ══════════════════════════════════════════════════════════════════════════

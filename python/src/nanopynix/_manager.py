@@ -9,7 +9,6 @@ import betterproto2
 import grpclib
 from betterproto2 import grpclib as betterproto2_grpclib
 from grpclib.const import Cardinality, Handler, Status
-
 from nanopynix_proto.nix.common import LogEvent
 
 if TYPE_CHECKING:

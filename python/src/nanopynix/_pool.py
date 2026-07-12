@@ -210,10 +210,11 @@ class _WorkerManager:
     async def open(self) -> None:
         """Spawn the worker via multiprocessing forkserver and initialise Nix."""
         from grpclib_transports.multiprocessing import multiprocessing_worker_with_backchannel
-        from nanopynix._manager import ManagerServiceHandler
         from nanopynix_proto.nix.eval import EvalServiceStub
         from nanopynix_proto.nix.store import StoreServiceStub
         from nanopynix_proto.nix.worker import InitRequest, WorkerServiceStub
+
+        from nanopynix._manager import ManagerServiceHandler
 
         self._stack = contextlib.AsyncExitStack()
         self._channel = await self._stack.enter_async_context(

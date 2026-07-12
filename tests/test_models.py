@@ -1,6 +1,7 @@
 """Tests for pydantic models — no Nix/C++ dependency."""
 
 from nanopynix_proto.nix.common import AttrsMap, AttrsValue
+from nanopynix_proto.nix.common import StorePath as StorePathProto
 
 from nanopynix.models import (
     BuildResult,
@@ -99,7 +100,7 @@ class TestPathInfo:
                 "nar_size": 0,
             }
         )
-        assert isinstance(pi.path, StorePath)
+        assert isinstance(pi.path, StorePathProto)
         assert pi.nar_size == 0
 
 

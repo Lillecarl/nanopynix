@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from betterproto2 import Casing
 from nanopynix_proto.nix.store import StoreServiceBase
 
 import nanopynix_store
@@ -39,7 +40,7 @@ class StoreServiceHandler(
         return self._state.store
 
     def _nanobind_rpc_call(self, binding_method_name: str, message: Any) -> Any:
-        request = message.to_dict()
+        request = message.to_dict(casing=Casing.SNAKE, include_default_values=True)
         if hasattr(self._store, binding_method_name):
             method = getattr(self._store, binding_method_name)
             return method(request)

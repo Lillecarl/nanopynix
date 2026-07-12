@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from nanopynix.store import StoreHandle as Store
 from nanopynix_proto.nix.store import (
     AddTempRootRequest,
     BuildPathsWithResultsRequest,
@@ -30,6 +28,8 @@ from nanopynix_proto.nix.store import (
     QueryValidDeriversRequest,
     ReadDerivationRequest,
 )
+
+from nanopynix.store import StoreHandle as Store
 
 if TYPE_CHECKING:
 
