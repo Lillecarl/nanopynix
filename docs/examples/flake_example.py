@@ -1,4 +1,3 @@
-# pyright: reportIndexIssue=false, reportArgumentType=false, reportOptionalSubscript=false, reportCallIssue=false
 """Evaluate a Nix flake — lock, eval, navigate outputs.
 
 Run with::
@@ -64,6 +63,7 @@ async def main() -> None:
             info = outputs.attr("info")
             assert await info.get_type() == NixType.ATTRS
             info_json = await info.force_json()
+            assert isinstance(info_json, dict)
             assert info_json["name"] == "demo-flake"
             assert info_json["features"] == ["fast", "reliable"]
             print("info force_json:", info_json)

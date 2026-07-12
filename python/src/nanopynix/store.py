@@ -76,7 +76,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
     async def _rpc_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
         if self._store_handle:
-            message.store_handle = self._store_handle
+            setattr(message, "store_handle", self._store_handle)
         method = getattr(self._pool._store_stub, method_name)
         return await self._store_call(method(message, timeout=_RPC_TIMEOUT))
 
