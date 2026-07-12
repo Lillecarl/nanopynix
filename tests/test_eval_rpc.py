@@ -315,12 +315,23 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active():
     ):
         drv = await eval.string(
             """
-            builtins.derivation {
-              name = "nanopynix-build-value-test";
-              system = builtins.currentSystem;
-              builder = "/bin/sh";
-              args = [ "-c" "echo hello > $out" ];
-            }
+            let
+              script = builtins.derivation {
+                name = "nanopynix-build-value-script";
+                system = builtins.currentSystem;
+                builder = "/bin/sh";
+                args = [
+                  "-c"
+                  "printf '%s\\n' 'echo hello > $out' > $out"
+                ];
+              };
+            in
+              builtins.derivation {
+                name = "nanopynix-build-value-test";
+                system = builtins.currentSystem;
+                builder = "/bin/sh";
+                args = [ "${script}" ];
+              }
             """
         )
 
