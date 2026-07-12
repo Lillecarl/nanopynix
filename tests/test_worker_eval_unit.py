@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from nanopynix._handle_registry import HandleRegistry
 from nanopynix._worker_eval import EvalServiceHandler
 
@@ -19,15 +21,15 @@ class _FakeEvalState:
         self.released.append(value)
 
 
-def test_eval_state_uses_requested_store_handle(monkeypatch):
+def test_eval_state_binds_to_first_requested_store_handle(monkeypatch):
     import nanopynix._worker_eval as worker_eval
 
     monkeypatch.setattr(worker_eval.nanopynix_expr, "EvalState", _FakeEvalState)
     monkeypatch.setattr(worker_eval.nanopynix_expr, "parse_nix_path", lambda: ["nixpkgs=/tmp/nixpkgs"])
 
     handles = HandleRegistry()
-    first_handle = handles.allocate("first-store", "store")
     second_handle = handles.allocate("second-store", "store")
+    first_handle = handles.allocate("first-store", "store")
     state = SimpleNamespace(
         eval_state=None,
         eval_store_handle=None,
@@ -44,8 +46,8 @@ def test_eval_state_uses_requested_store_handle(monkeypatch):
 
     assert handler._get_es(second_handle) is selected
 
-    switched = handler._get_es(first_handle)
+    with pytest.raises(RuntimeError, match="already bound to a different store"):
+        handler._get_es(first_handle)
 
-    assert switched is not selected
-    assert switched.store == "first-store"
-    assert state.eval_store_handle == first_handle
+    assert state.eval_state is selected
+    assert state.eval_store_handle == second_handle

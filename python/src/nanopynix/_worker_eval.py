@@ -96,17 +96,17 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _get_es(self, store_handle: int | None = None) -> Any:
         if store_handle is not None:
-            self._use_store_handle(store_handle)
+            self._select_store_handle(store_handle)
         if self._state.eval_state is None:
             raise RuntimeError("no eval store selected — open a store before evaluating")
         return self._state.eval_state
 
-    def _use_store_handle(self, store_handle: int) -> None:
+    def _select_store_handle(self, store_handle: int) -> None:
         store = self._state.handles.get_typed(store_handle, "store")
         if self._state.eval_state is not None and self._state.eval_store_handle == store_handle:
             return
         if self._state.eval_state is not None:
-            self._reset()
+            raise RuntimeError("eval session is already bound to a different store")
         self._state.eval_state = nanopynix_expr.EvalState(store, nanopynix_expr.parse_nix_path())
         self._state.eval_store_handle = store_handle
 
