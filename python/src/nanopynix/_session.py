@@ -25,6 +25,7 @@ from nanopynix.exceptions import (
     EvalSessionClosedError,
     ForeignValueError,
     NixCoercionError,
+    StoreError,
     UnresolvedValueError,
     ValueReleasedError,
     WrongNixTypeError,
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
     from nanopynix._pool import ReservedWorker, _WorkerManager
+    from nanopynix_store import BuildMode as BuildModeType
 
 
 def _scalar_to_pyval(scalar: ScalarValue | None) -> JsonScalar:
@@ -149,15 +151,23 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
         method = getattr(self._rw._eval_stub, method_name)
         return await self._rw.call(method(message, timeout=_RPC_TIMEOUT))
 
+    async def _store_proxy_call(self, method_name: str, message: Message) -> Any:
+        self._check_active()
+        method = getattr(self._rw._store_stub, method_name)
+        return await self._rw.call(method(message, timeout=_RPC_TIMEOUT))
+
 
 @dataclass(frozen=True)
 class _EvalProxyContext:
     proxy: EvalProxy
     owner: _EvalOwner
     timeout: float | None = None
+    store_handle: int = 1
 
     def with_timeout(self, timeout: float | None) -> _EvalProxyContext:
-        return self if timeout is None else _EvalProxyContext(self.proxy, self.owner, timeout)
+        if timeout is None:
+            return self
+        return _EvalProxyContext(self.proxy, self.owner, timeout, self.store_handle)
 
     def resolve_timeout(self, override: float | None) -> float | None:
         return override if override is not None else self.timeout
@@ -439,6 +449,65 @@ class ValueProxy:
 
         return _json.loads(resp.json)
 
+    async def build(
+        self,
+        *,
+        build_mode: BuildModeType | int | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, str]:
+        """Build the derivation represented by this evaluated value."""
+        from nanopynix_proto.nix.store import BuildDerivationRequest, ReadDerivationRequest
+
+        from nanopynix_store import BuildMode
+
+        if not await self.has_attr("type", timeout=timeout):
+            raise TypeError("nix value is not a derivation")
+        value_type = await self.attr("type", timeout=timeout).force_json(timeout=timeout)
+        if value_type != "derivation":
+            raise TypeError("nix value is not a derivation")
+        drv_path = await self.attr("drvPath", timeout=timeout).force_json(timeout=timeout)
+        if not isinstance(drv_path, str):
+            actual_type = await self.attr("drvPath").get_type(timeout=timeout)
+            raise WrongNixTypeError(expected=NixType.STRING, actual=actual_type)
+        if build_mode is None:
+            mode_value = BuildMode.Normal.value
+        elif isinstance(build_mode, int):
+            mode_value = build_mode
+        else:
+            mode_value = build_mode.value
+        result = await self._ctx.proxy._store_proxy_call(
+            "build_derivation",
+            BuildDerivationRequest(
+                path=drv_path,
+                build_mode=mode_value,
+                store_handle=self._ctx.store_handle,
+            ),
+        )
+        if not result.success:
+            msg = result.error_msg or f"failed to build derivation {drv_path}"
+            raise StoreError("StoreError", msg)
+
+        derivation = await self._ctx.proxy._store_proxy_call(
+            "read_derivation",
+            ReadDerivationRequest(path=drv_path, store_handle=self._ctx.store_handle),
+        )
+
+        outputs: dict[str, str] = {}
+        for output, output_info in derivation.outputs.items():
+            path = output_info.path
+            if path is None:
+                raise StoreError("StoreError", f"derivation output {output!r} has no path")
+            outputs[output] = path
+        if outputs:
+            return outputs
+
+        for output in derivation.env.get("outputs", "out").split():
+            path = derivation.env.get(output)
+            if path is None:
+                raise StoreError("StoreError", f"derivation output {output!r} has no path")
+            outputs[output] = path
+        return outputs
+
     # ── navigation ─────────────────────────────────────────────────
 
     def attr(self, name: str, *, timeout: float | None = None) -> ValueProxy:
@@ -706,7 +775,7 @@ class EvalSession:
             return
         self._rw = await self._manager.reserve(timeout=self._timeout)
         self._proxy = EvalProxy(self._rw)
-        self._ctx = _EvalProxyContext(self._proxy, self._owner, self._timeout)
+        self._ctx = _EvalProxyContext(self._proxy, self._owner, self._timeout, self._store_handle)
         self._active[0] = True
 
     async def close(self) -> None:
