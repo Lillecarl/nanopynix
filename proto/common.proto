@@ -200,6 +200,14 @@ message DerivationOutputs {
   map<string, string> dynamic_outputs = 2;
 }
 
+message DerivationOutput {
+  string type = 1;
+  optional string path = 2;
+  optional string ca = 3;
+  optional string method = 4;
+  optional string hash_algo = 5;
+}
+
 message Derivation {
   string name = 1;
   string system = 2;
@@ -208,4 +216,5 @@ message Derivation {
   map<string, string> env = 5;
   map<string, DerivationOutputs> input_drvs = 6;
   repeated string input_srcs = 7;
+  map<string, DerivationOutput> outputs = 8;
 }

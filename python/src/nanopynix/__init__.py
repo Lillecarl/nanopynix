@@ -72,6 +72,7 @@ Store = StoreHandle
 
 __all__ = [
     "LockedFlakeHandle",
+    "BuildMode",
     # L2
     "NixAssertionError",
     "NixCoercionError",

@@ -295,7 +295,7 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
             [&](const nix::DerivationOutput::CAFloating &caf) {
                 o["type"] = "CAFloating";
                 o["method"] = std::string(caf.method.render());
-                o["hashAlgo"] = std::string(nix::printHashAlgo(caf.hashAlgo));
+                o["hash_algo"] = std::string(nix::printHashAlgo(caf.hashAlgo));
             },
             [&](const nix::DerivationOutput::Deferred &) {
                 o["type"] = "Deferred";
@@ -303,60 +303,45 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
             [&](const nix::DerivationOutput::Impure &imp) {
                 o["type"] = "Impure";
                 o["method"] = std::string(imp.method.render());
-                o["hashAlgo"] = std::string(nix::printHashAlgo(imp.hashAlgo));
+                o["hash_algo"] = std::string(nix::printHashAlgo(imp.hashAlgo));
             },
         }, output.raw);
         outputs[name.c_str()] = o;
     }
     d["outputs"] = outputs;
 
-    // inputSrcs: set<StorePath>
-    nb::list inputSrcs;
-    for (auto &p : drv.inputSrcs) inputSrcs.append(s.printStorePath(p));
-    d["inputSrcs"] = inputSrcs;
+    // input_srcs: set<StorePath>
+    nb::list input_srcs;
+    for (auto &p : drv.inputSrcs) input_srcs.append(s.printStorePath(p));
+    d["input_srcs"] = input_srcs;
 
-    // inputDrvs: DerivedPathMap<set<OutputName>>
-    nb::list inputDrvs;
-    bool has_dynamic = false;
+    // input_drvs: map<drvPath, DerivationOutputs>
+    nb::dict input_drvs;
     for (auto &[path, node] : drv.inputDrvs.map) {
         nb::dict entry;
-        entry["path"] = s.printStorePath(path);
         nb::list outs;
         for (auto &o : node.value) outs.append(o);
         entry["outputs"] = outs;
-        // Nested paths → dynamic derivations
-        nb::dict children;
+        nb::dict dynamic_outputs;
         for (auto &[outputName, child] : node.childMap) {
-            has_dynamic = true;
-            nb::list childOuts;
-            for (auto &o : child.value) childOuts.append(o);
-            children[outputName.c_str()] = childOuts;
+            if (!child.value.empty())
+                dynamic_outputs[outputName.c_str()] = *child.value.begin();
         }
-        if (!children.empty()) entry["children"] = children;
-        inputDrvs.append(entry);
+        entry["dynamic_outputs"] = dynamic_outputs;
+        input_drvs[s.printStorePath(path).c_str()] = entry;
     }
-    d["inputDrvs"] = inputDrvs;
-    d["has_dynamic_inputs"] = has_dynamic;
+    d["input_drvs"] = input_drvs;
 
-    d["platform"] = drv.platform;
+    d["system"] = drv.platform;
     d["builder"] = drv.builder;
 
     nb::list args;
     for (auto &a : drv.args) args.append(a);
     d["args"] = args;
 
-    nb::list env;
-    for (auto &[k, v] : drv.env) env.append(nb::make_tuple(k, v));
+    nb::dict env;
+    for (auto &[k, v] : drv.env) env[k.c_str()] = v;
     d["env"] = env;
-
-    if (drv.structuredAttrs)
-        d["structuredAttrs"] = nlohmann::json(drv.structuredAttrs->structuredAttrs).dump();
-    else
-        d["structuredAttrs"] = nb::none();
-
-    auto dtype = drv.type();
-    d["is_ca"] = dtype.isCA();
-    d["has_known_output_paths"] = dtype.hasKnownOutputPaths();
 
     return d;
 }

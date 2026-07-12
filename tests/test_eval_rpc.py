@@ -1,6 +1,7 @@
 """Tests for eval over RPC — EvalSession + ValueProxy."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from nanopynix_proto.nix.store import GetUriRequest
@@ -303,6 +304,32 @@ async def test_force_deep_preserves_nested_functions():
 
         g_result = await g({"name": "deep"})
         assert await g_result.force_as(NixType.STRING) == "deep"
+
+
+async def test_evaluated_derivation_can_build_while_eval_session_is_active():
+    """ValueProxy.build builds the evaluated derivation through the eval store handle."""
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        drv = await eval.string(
+            """
+            builtins.derivation {
+              name = "nanopynix-build-value-test";
+              system = builtins.currentSystem;
+              builder = "/bin/sh";
+              args = [ "-c" "echo hello > $out" ];
+            }
+            """
+        )
+
+        outputs = await drv.build()
+
+        assert set(outputs) == {"out"}
+        assert outputs["out"].startswith("/nix/store/")
+        assert "nanopynix-build-value-test" in outputs["out"]
+        assert Path(outputs["out"]).read_text() == "hello\n"
 
 
 async def test_worker_yaml_primops():
