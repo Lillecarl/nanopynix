@@ -3,6 +3,9 @@
   buildPythonApplication,
   hatchling,
   nanopynix,
+  clypi,
+  rich,
+  structlog,
 }:
 
 buildPythonApplication {
@@ -18,6 +21,9 @@ buildPythonApplication {
 
   dependencies = [
     nanopynix
+    clypi
+    rich
+    structlog
   ];
 
   meta = with lib; {

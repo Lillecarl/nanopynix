@@ -5,6 +5,8 @@ Run with::
     python docs/examples/flake_example.py
 """
 
+# ruff: noqa: T201
+
 from __future__ import annotations
 
 import asyncio

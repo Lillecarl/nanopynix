@@ -71,9 +71,8 @@ from nanopynix_util import (
 Store = StoreHandle
 
 __all__ = [
-    "LockedFlakeHandle",
     "BuildMode",
-    # L2
+    "LockedFlakeHandle",
     "NixAssertionError",
     "NixCoercionError",
     "NixError",

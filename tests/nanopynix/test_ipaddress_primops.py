@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from nanopynix import NixType, Session
-from nanopynix._session import NixDeepValue
 from nanopynix.ipaddress_primops import ipaddress_primops
+
+if TYPE_CHECKING:
+    from nanopynix._session import NixDeepValue
 
 
 def _as_dict(v: NixDeepValue) -> dict[str, NixDeepValue]:
@@ -101,7 +105,8 @@ async def test_parse_network_v6():
         assert result["version"] == 6
         assert result["prefixlen"] == 32
         assert result["isSiteLocal"] is False
-        assert isinstance(result["numAddresses"], int) and result["numAddresses"] > 0
+        assert isinstance(result["numAddresses"], int)
+        assert result["numAddresses"] > 0
 
 
 @pytest.mark.anyio

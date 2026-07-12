@@ -8,7 +8,7 @@ from nanopynix import NixType, Session
 
 
 @pytest.mark.anyio
-async def test_fetchTree_with_builtins_prefix():
+async def test_fetchtree_with_builtins_prefix():
     """builtins.fetchTree is registered when the fetch-tree experimental feature is enabled."""
     async with (
         Session() as session,
@@ -20,7 +20,7 @@ async def test_fetchTree_with_builtins_prefix():
 
 
 @pytest.mark.anyio
-async def test_fetchTree_without_builtins_prefix():
+async def test_fetchtree_without_builtins_prefix():
     """fetchTree is also available at top-level scope (without builtins. prefix)."""
     async with (
         Session() as session,

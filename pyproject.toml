@@ -1,4 +1,4 @@
 [tool.pyright]
 pythonVersion = "3.13"
-extraPaths = ["python/src"]
+extraPaths = ["python/src", "pynix/src"]
 exclude = ["result"]

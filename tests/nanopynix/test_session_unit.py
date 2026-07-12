@@ -999,7 +999,7 @@ class TestWorkerOomScore:
             worker_oom_score_adj=500,
             reserved_worker_oom_score_adj=250,
         )
-        manager._channel = cast(Any, object())
+        manager._channel = cast("Any", object())
         manager._worker_pid = 1234
 
         worker = await manager.reserve()

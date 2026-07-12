@@ -51,6 +51,12 @@ what to inspect next, then query `/tmp/pytest.log` for the full failure context.
   exceptions. Use `contextlib.suppress(...)` only for expected ignored
   exceptions, with a comment explaining why they are safe to ignore.
 
+# Banned patterns
+
+- **Sync subprocess calls are forbidden.** Never use `subprocess.run`, `subprocess.call`,
+  `subprocess.Popen` (without async wrappers), or `os.system`. Use
+  `asyncio.create_subprocess_exec` instead, even in test code.
+
 # Design notes
 
 **Nix "stderr" = logging, not OS stderr**: Nix uses "stderr" terminology to

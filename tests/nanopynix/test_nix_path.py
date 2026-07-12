@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 
 
 def test_parse_nix_path_empty(monkeypatch):
@@ -20,10 +21,10 @@ def test_parse_nix_path_simple(monkeypatch):
     import nanopynix_expr
 
     with tempfile.TemporaryDirectory() as d:
-        a = os.path.join(d, "a")
-        b = os.path.join(d, "b")
-        os.makedirs(a)
-        os.makedirs(b)
+        a = str(Path(d) / "a")
+        b = str(Path(d) / "b")
+        Path(a).mkdir(parents=True)
+        Path(b).mkdir(parents=True)
         monkeypatch.setenv("NIX_PATH", f"foo={a}:bar={b}")
         result = nanopynix_expr.parse_nix_path()
     assert len(result) == 2

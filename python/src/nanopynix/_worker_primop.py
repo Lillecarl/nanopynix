@@ -87,22 +87,19 @@ class ThreadedRpcPrimopBridge:
     async def _dispatch_loop(self) -> None:
         from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
-        try:
-            while True:
-                name, args, future = await self._queue.get()
-                try:
-                    request = CallPrimopRequest(
-                        name=name,
-                        args=[_python_to_scalar_value(a) for a in args],
-                    )
-                    response: CallPrimopResponse = await self._backchannel.call_unary(
-                        _CALL_ROUTE, request, CallPrimopResponse
-                    )
-                    future.set_result(_scalar_value_to_python(response.value))
-                except Exception as exc:
-                    future.set_exception(exc)
-        except asyncio.CancelledError:
-            raise
+        while True:
+            name, args, future = await self._queue.get()
+            try:
+                request = CallPrimopRequest(
+                    name=name,
+                    args=[_python_to_scalar_value(a) for a in args],
+                )
+                response: CallPrimopResponse = await self._backchannel.call_unary(
+                    _CALL_ROUTE, request, CallPrimopResponse
+                )
+                future.set_result(_scalar_value_to_python(response.value))
+            except Exception as exc:
+                future.set_exception(exc)
 
     # ── called from the Nix thread ──────────────────────────────────
 

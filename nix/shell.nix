@@ -4,6 +4,7 @@
   pyright,
   ruff,
   nanopynix,
+  pynix,
   pytest,
   anyio,
   sphinx,
@@ -13,8 +14,9 @@
 let
   pythonEnv = python.withPackages (
     pp:
-    nanopynix.dependencies ++ nanopynix.nativeBuildInputs ++ [
+    nanopynix.dependencies ++ nanopynix.nativeBuildInputs ++ pynix.dependencies ++ pynix.nativeBuildInputs ++ [
       nanopynix
+      pynix
       pytest
       anyio
       sphinx
