@@ -29,11 +29,13 @@ service EvalService {
 
 message EvalFileRequest {
   string path = 1;
+  int64 store_handle = 2;
 }
 
 message EvalStringRequest {
   string expr = 1;
   string source_name = 2;
+  int64 store_handle = 3;
 }
 
 message ForceRequest {
@@ -103,6 +105,7 @@ message LockFlakeRequest {
     UpdateInputsList update_inputs_list = 3;
   }
   bool write_lock_file = 4;
+  int64 store_handle = 5;
 }
 
 message UpdateInputsList {
@@ -126,10 +129,12 @@ message ReleaseLockedFlakeResponse {}
 message EvalFlakeRequest {
   string ref = 1;
   bool write_lock_file = 2;
+  int64 store_handle = 3;
 }
 
 message GetFlakeRequest {
   string ref = 1;
+  int64 store_handle = 2;
 }
 
 message ReleaseRequest {

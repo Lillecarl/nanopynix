@@ -52,6 +52,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
                 )
             )
         self._active = False
+        self._store_handle = 0
 
     async def __aenter__(self) -> StoreHandle:
         await self.open()
@@ -63,6 +64,12 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
     def _check_active(self) -> None:
         if not self._active:
             raise RuntimeError("StoreHandle is closed — use 'async with session.store() as store:'")
+
+    @property
+    def store_handle(self) -> int:
+        """Worker-side handle for this opened store."""
+        self._check_active()
+        return self._store_handle
 
     async def _store_call(self, coro: Any) -> Any:
         """Acquire the worker lock, execute a gRPC call, and handle errors."""

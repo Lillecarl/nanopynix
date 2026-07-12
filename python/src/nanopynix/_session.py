@@ -682,10 +682,11 @@ class EvalSession:
     invalid after ``__aexit__`` — their RPC methods raise ``EvalSessionClosedError``.
     """
 
-    __slots__ = ("_active", "_ctx", "_manager", "_owner", "_proxy", "_rw", "_timeout")
+    __slots__ = ("_active", "_ctx", "_manager", "_owner", "_proxy", "_rw", "_store_handle", "_timeout")
 
-    def __init__(self, manager: _WorkerManager, timeout: float | None = None) -> None:
+    def __init__(self, manager: _WorkerManager, store_handle: int = 1, timeout: float | None = None) -> None:
         self._manager = manager
+        self._store_handle = store_handle
         self._rw: ReservedWorker | None = None
         self._proxy: EvalProxy | None = None
         self._timeout = timeout
@@ -737,13 +738,17 @@ class EvalSession:
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         from nanopynix_proto.nix.eval import EvalFileRequest
 
-        handle = await self._ensure_proxy().eval_file(EvalFileRequest(path=path))
+        handle = await self._ensure_proxy().eval_file(
+            EvalFileRequest(path=path, store_handle=self._store_handle)
+        )
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
         from nanopynix_proto.nix.eval import EvalStringRequest
 
-        handle = await self._ensure_proxy().eval_string(EvalStringRequest(expr=expr, source_name=path))
+        handle = await self._ensure_proxy().eval_string(
+            EvalStringRequest(expr=expr, source_name=path, store_handle=self._store_handle)
+        )
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def lock_flake(
@@ -770,7 +775,12 @@ class EvalSession:
         proxy = self._ensure_proxy()
         if update_inputs is True:
             locked = await proxy.lock_flake(
-                LockFlakeRequest(ref=ref, update_all=True, write_lock_file=write_lock_file)
+                LockFlakeRequest(
+                    ref=ref,
+                    update_all=True,
+                    write_lock_file=write_lock_file,
+                    store_handle=self._store_handle,
+                )
             )
         elif isinstance(update_inputs, list):
             locked = await proxy.lock_flake(
@@ -778,11 +788,16 @@ class EvalSession:
                     ref=ref,
                     update_inputs_list=UpdateInputsList(inputs=update_inputs),
                     write_lock_file=write_lock_file,
+                    store_handle=self._store_handle,
                 )
             )
         else:
             locked = await proxy.lock_flake(
-                LockFlakeRequest(ref=ref, write_lock_file=write_lock_file)
+                LockFlakeRequest(
+                    ref=ref,
+                    write_lock_file=write_lock_file,
+                    store_handle=self._store_handle,
+                )
             )
         return self._locked_flake_handle(locked)
 
@@ -849,11 +864,19 @@ class EvalSession:
         """
         from nanopynix_proto.nix.eval import EvalFlakeRequest
 
-        handle = await self._ensure_proxy().eval_flake(EvalFlakeRequest(ref=ref, write_lock_file=write_lock_file))
+        handle = await self._ensure_proxy().eval_flake(
+            EvalFlakeRequest(
+                ref=ref,
+                write_lock_file=write_lock_file,
+                store_handle=self._store_handle,
+            )
+        )
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def get_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> FlakeRef:
         from nanopynix_proto.nix.eval import GetFlakeRequest
 
         ref_str = ref if isinstance(ref, str) else str(ref)
-        return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str))
+        return await self._ensure_proxy().get_flake(
+            GetFlakeRequest(ref=ref_str, store_handle=self._store_handle)
+        )

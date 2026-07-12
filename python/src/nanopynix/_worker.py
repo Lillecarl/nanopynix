@@ -129,6 +129,7 @@ class WorkerState:
         self.handles: HandleRegistry = HandleRegistry()
         self.executor: Any = None
         self.rpc_bridge: Any = None
+        self.eval_store_handle: int | None = None
 
 
 # ── WorkerService handler ────────────────────────────────────────────
