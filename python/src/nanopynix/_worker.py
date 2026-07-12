@@ -35,6 +35,7 @@ import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
 from nanopynix._grpc_util import wrap_service_handlers
+from nanopynix._handle_registry import HandleRegistry
 from nanopynix._manager import LogAck
 from nanopynix._worker_eval import EvalServiceHandler
 from nanopynix._worker_store import StoreServiceHandler
@@ -96,8 +97,7 @@ class WorkerState:
         self.eval_state: Any = None
         self.collector: LogCollector | None = None
         self.log_task: asyncio.Task[None] | None = None
-        self.locked_flakes: dict[int, Any] = {}
-        self._next_lf_handle: int = 1
+        self.handles: HandleRegistry = HandleRegistry()
 
 
 # ── WorkerService handler ────────────────────────────────────────────

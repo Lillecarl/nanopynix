@@ -101,8 +101,7 @@ class EvalServiceHandler(EvalServiceBase):
         if es is not None:
             es.release_all_exported()
             self._state.eval_state = None
-        self._state.locked_flakes.clear()
-        self._state._next_lf_handle = 1
+        self._state.handles.clear()
 
     # ── value export helpers ──────────────────────────────────────
 
@@ -252,32 +251,26 @@ class EvalServiceHandler(EvalServiceBase):
         )
         if self._state.collector is not None:
             self._state.collector.callback(0, "msg", 3, "lock_flake: C++ lock_flake returned")
-        handle = self._state._next_lf_handle
-        self._state._next_lf_handle += 1
-        self._state.locked_flakes[handle] = lf
+        handle = self._state.handles.allocate(lf, "locked_flake")
 
         lf_pb = _locked_flake(lf)
         lf_pb.handle = handle
         return lf_pb
 
     async def call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
-        lf = self._state.locked_flakes.get(message.handle)
-        if lf is None:
-            raise KeyError(f"locked flake handle {message.handle} not found")
+        lf = self._state.handles.get_typed(message.handle, "locked_flake")
         pyv = nanopynix_flake.call_flake(self._get_es(), lf)
         return self._export(pyv)
 
     async def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
-        lf = self._state.locked_flakes.get(message.handle)
-        if lf is None:
-            raise KeyError(f"locked flake handle {message.handle} not found")
+        lf = self._state.handles.get_typed(message.handle, "locked_flake")
         lf.write_lock_file()
         return WriteLockFileResponse()
 
     async def release_locked_flake(
         self, message: ReleaseLockedFlakeRequest
     ) -> ReleaseLockedFlakeResponse:
-        self._state.locked_flakes.pop(message.handle, None)
+        self._state.handles.release(message.handle)
         return ReleaseLockedFlakeResponse()
 
     async def eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
