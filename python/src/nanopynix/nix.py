@@ -95,7 +95,6 @@ class Session:
         self,
         *,
         store_uri: str = "auto",
-        eval_store_uri: str | None = None,
         nix_conf: str | None = "/etc/nix/nix.conf",
         config: dict[str, str] | None = None,
         settings: dict[str, str] | None = None,
@@ -108,7 +107,6 @@ class Session:
             raise TypeError("Use either config= or settings=, not both")
         self._manager = _WorkerManager(
             store_uri=store_uri,
-            eval_store_uri=eval_store_uri,
             nix_conf=nix_conf,
             settings=config if config is not None else settings,
             experimental_features=experimental_features,

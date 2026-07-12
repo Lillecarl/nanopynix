@@ -177,6 +177,31 @@ static void process_connection(std::shared_ptr<nix::Store> store, int fd, bool t
         recursive ? nix::daemon::RecursiveFlag::Recursive : nix::daemon::RecursiveFlag::NotRecursive);
 }
 
+static std::string request_string(const nb::dict &request, const char *key) {
+    return nb::cast<std::string>(request[nb::str(key)]);
+}
+
+static bool request_bool(const nb::dict &request, const char *key) {
+    return nb::cast<bool>(request[nb::str(key)]);
+}
+
+static nix::StorePath request_store_path(nix::Store &s, const nb::dict &request, const char *key) {
+    auto path = request_string(request, key);
+    if (!path.empty() && path[0] != '/') path = s.config.storeDir_ + "/" + path;
+    return s.parseStorePath(path);
+}
+
+static std::vector<nix::StorePath> request_store_paths(nix::Store &s, const nb::dict &request, const char *key) {
+    std::vector<std::string> raw = nb::cast<std::vector<std::string>>(request[nb::str(key)]);
+    std::vector<nix::StorePath> paths;
+    paths.reserve(raw.size());
+    for (auto &path : raw) {
+        if (!path.empty() && path[0] != '/') path = s.config.storeDir_ + "/" + path;
+        paths.push_back(s.parseStorePath(path));
+    }
+    return paths;
+}
+
 // --- PathInfo ---
 
 static nb::dict query_path_info(nix::Store &s, const nix::StorePath &path) {
@@ -233,26 +258,19 @@ static nb::list query_substitutable_paths(nix::Store &s, const std::vector<nix::
 // --- Build ---
 
 static nb::list build_paths_with_results(
-        nix::Store &s, const std::vector<nix::StorePath> &paths,
-        std::shared_ptr<nix::Store> evalStore = nullptr) {
+        nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(nix::DerivedPath{nix::DerivedPath::Opaque{p}});
-    auto results = evalStore
-        ? s.buildPathsWithResults(dps, nix::bmNormal, evalStore)
-        : s.buildPathsWithResults(dps);
+    auto results = s.buildPathsWithResults(dps);
     nb::list out;
     for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
     return out;
 }
 
-static void build_paths(nix::Store &s, const std::vector<nix::StorePath> &paths,
-                         std::shared_ptr<nix::Store> evalStore = nullptr) {
+static void build_paths(nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(nix::DerivedPath{nix::DerivedPath::Opaque{p}});
-    if (evalStore)
-        s.buildPaths(dps, nix::bmNormal, evalStore);
-    else
-        s.buildPaths(dps);
+    s.buildPaths(dps);
 }
 
 static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
@@ -350,6 +368,118 @@ static nb::dict build_derivation(nix::Store &s, const nix::StorePath &drvPath,
     return build_result_from_br(result);
 }
 
+static nb::dict store_get_uri(nix::Store &s, const nb::dict &) {
+    nb::dict d;
+    d["uri"] = s.config.getHumanReadableURI();
+    return d;
+}
+
+static nb::dict store_get_store_dir(nix::Store &s, const nb::dict &) {
+    nb::dict d;
+    d["dir"] = s.config.storeDir_;
+    return d;
+}
+
+static nb::dict store_is_valid_path(nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    d["valid"] = s.isValidPath(request_store_path(s, request, "path"));
+    return d;
+}
+
+static nb::dict store_parse_store_path(nix::Store &s, const nb::dict &request) {
+    return store_path_to_dict(request_store_path(s, request, "path"));
+}
+
+static nb::dict store_query_path_info(nix::Store &s, const nb::dict &request) {
+    return query_path_info(s, request_store_path(s, request, "path"));
+}
+
+static nb::dict store_query_path_from_hash_part(
+        nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    auto path = s.queryPathFromHashPart(request_string(request, "hash_part"));
+    if (path) d["path"] = store_path_to_dict(*path);
+    else d["path"] = nb::none();
+    return d;
+}
+
+static nb::dict store_compute_fs_closure(
+        nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    d["paths"] = compute_fs_closure(
+        s,
+        request_store_path(s, request, "path"),
+        request_bool(request, "flip_direction"),
+        request_bool(request, "include_outputs"),
+        request_bool(request, "include_derivers"));
+    return d;
+}
+
+static nb::dict store_query_missing(nix::Store &s, const nb::dict &request) {
+    return query_missing(s, request_store_paths(s, request, "paths"));
+}
+
+static nb::dict store_query_derivation_outputs(
+        nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    d["paths"] = query_derivation_outputs(s, request_store_path(s, request, "path"));
+    return d;
+}
+
+static nb::dict store_query_valid_derivers(
+        nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    d["paths"] = query_valid_derivers(s, request_store_path(s, request, "path"));
+    return d;
+}
+
+static nb::dict store_query_all_valid_paths(nix::Store &s, const nb::dict &) {
+    nb::dict d;
+    d["paths"] = query_all_valid_paths(s);
+    return d;
+}
+
+static nb::dict store_query_referrers(nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    d["paths"] = query_referrers(s, request_store_path(s, request, "path"));
+    return d;
+}
+
+static nb::dict store_query_substitutable_paths(
+        nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    d["paths"] = query_substitutable_paths(s, request_store_paths(s, request, "paths"));
+    return d;
+}
+
+static nb::dict store_build_paths_with_results(
+        nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    d["results"] = build_paths_with_results(s, request_store_paths(s, request, "paths"));
+    return d;
+}
+
+static nb::dict store_read_derivation(nix::Store &s, const nb::dict &request) {
+    return read_derivation(s, request_store_path(s, request, "path"));
+}
+
+static nb::dict store_build_derivation(nix::Store &s, const nb::dict &request) {
+    return build_derivation(
+        s,
+        request_store_path(s, request, "path"),
+        static_cast<nix::BuildMode>(nb::cast<int>(request[nb::str("build_mode")])));
+}
+
+static nb::dict store_follow_links_to_store_path(
+        nix::Store &s, const nb::dict &request) {
+    return store_path_to_dict(s.followLinksToStorePath(request_string(request, "path")));
+}
+
+static nb::dict store_add_temp_root(nix::Store &s, const nb::dict &request) {
+    s.addTempRoot(request_store_path(s, request, "path"));
+    return nb::dict();
+}
+
 // =========================================================================
 // Store bindings
 // =========================================================================
@@ -366,8 +496,8 @@ static void bind_store(nb::module_ &m) {
         .def("follow_links_to_store_path",
              [](nix::Store &s, const std::string &p) { return s.followLinksToStorePath(p); }, "path"_a)
         // Build
-        .def("build_paths", &build_paths, "paths"_a, "eval_store"_a = nb::none())
-        .def("build_paths_with_results", &build_paths_with_results, "paths"_a, "eval_store"_a = nb::none())
+        .def("build_paths", &build_paths, "paths"_a)
+        .def("build_paths_with_results", &build_paths_with_results, "paths"_a)
         .def("read_derivation", &read_derivation, "drv_path"_a)
         .def("build_derivation", &build_derivation, "drv_path"_a, "build_mode"_a)
         // Path info
@@ -386,7 +516,26 @@ static void bind_store(nb::module_ &m) {
         .def("query_referrers", &query_referrers, "path"_a)
         .def("query_substitutable_paths", &query_substitutable_paths, "paths"_a)
         // GC
-        .def("add_temp_root", [](nix::Store &s, const nix::StorePath &p) { s.addTempRoot(p); }, "path"_a);
+        .def("add_temp_root", [](nix::Store &s, const nix::StorePath &p) { s.addTempRoot(p); }, "path"_a)
+        // Proto-shaped StoreService RPC entrypoints
+        .def("store_get_uri", &store_get_uri, "request"_a)
+        .def("store_get_store_dir", &store_get_store_dir, "request"_a)
+        .def("store_is_valid_path", &store_is_valid_path, "request"_a)
+        .def("store_parse_store_path", &store_parse_store_path, "request"_a)
+        .def("store_query_path_info", &store_query_path_info, "request"_a)
+        .def("store_query_path_from_hash_part", &store_query_path_from_hash_part, "request"_a)
+        .def("store_compute_fs_closure", &store_compute_fs_closure, "request"_a)
+        .def("store_query_missing", &store_query_missing, "request"_a)
+        .def("store_query_derivation_outputs", &store_query_derivation_outputs, "request"_a)
+        .def("store_query_valid_derivers", &store_query_valid_derivers, "request"_a)
+        .def("store_query_all_valid_paths", &store_query_all_valid_paths, "request"_a)
+        .def("store_query_referrers", &store_query_referrers, "request"_a)
+        .def("store_query_substitutable_paths", &store_query_substitutable_paths, "request"_a)
+        .def("store_build_paths_with_results", &store_build_paths_with_results, "request"_a)
+        .def("store_read_derivation", &store_read_derivation, "request"_a)
+        .def("store_build_derivation", &store_build_derivation, "request"_a)
+        .def("store_follow_links_to_store_path", &store_follow_links_to_store_path, "request"_a)
+        .def("store_add_temp_root", &store_add_temp_root, "request"_a);
 }
 
 // =========================================================================
