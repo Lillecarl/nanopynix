@@ -101,22 +101,14 @@ def _proto_shape_store_path(value: Any) -> dict[str, str]:
     if isinstance(value, str):
         return _sp_str_to_pb(value).to_dict()
     if isinstance(value, Mapping):
-        return {
-            "to_string": str(value["to_string"]),
-            "hash_part": str(value["hash_part"]),
-            "name": str(value["name"]),
-        }
+        return {str(k): _proto_shape(v) for k, v in value.items()}
     if _is_store_path_like(value):
         return _sp_to_pb(value).to_dict()
     raise TypeError(f"cannot convert StorePath-like value to proto dict: {value!r}")
 
 
 def _is_store_path_like(value: Any) -> bool:
-    return (
-        hasattr(value, "to_string")
-        and hasattr(value, "hash_part")
-        and hasattr(value, "name")
-    )
+    return hasattr(value, "to_string")
 
 
 # ── Service handler ──────────────────────────────────────────────────

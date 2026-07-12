@@ -36,9 +36,7 @@ enum ResultType {
 // ── Core messages ──────────────────────────────────
 
 message StorePath {
-  string hash_part = 1;
-  string name = 2;
-  string to_string = 3;
+  string base_name = 1;
 }
 
 message ValueHandle {

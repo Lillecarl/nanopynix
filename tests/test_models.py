@@ -21,46 +21,39 @@ from nanopynix.models import (
 
 class TestStorePath:
     def test_basic(self):
-        sp = StorePath(
-            hash_part="abc123def456",
-            name="hello-2.12.1",
-            to_string="abc123def456-hello-2.12.1",
-        )
-        assert sp.hash_part == "abc123def456"
+        sp = StorePath(base_name="a" * 32 + "-hello-2.12.1")
+        assert sp.base_name == "a" * 32 + "-hello-2.12.1"
+        assert sp.hash_part == "a" * 32
         assert sp.name == "hello-2.12.1"
+        assert sp.to_string == "a" * 32 + "-hello-2.12.1"
         assert not sp.is_derivation
 
     def test_is_derivation(self):
-        sp = StorePath(
-            hash_part="abc123def456",
-            name="hello-2.12.1.drv",
-            to_string="abc123def456-hello-2.12.1.drv",
-        )
+        sp = StorePath(base_name="a" * 32 + "-hello-2.12.1.drv")
         assert sp.is_derivation
 
     def test_missing_required_field(self):
         """Proto StorePath defaults to empty strings for missing fields."""
-        sp = StorePath(hash_part="abc")
-        assert sp.hash_part == "abc"
+        sp = StorePath()
+        assert sp.base_name == ""
+        assert sp.hash_part == ""
         assert sp.name == ""
         assert sp.to_string == ""
 
     def test_from_dict(self):
         sp = StorePath.from_dict(
             {
-                "hash_part": "abc123def456",
-                "name": "bash-5.2",
-                "to_string": "abc123def456-bash-5.2",
+                "base_name": "a" * 32 + "-bash-5.2",
             }
         )
         assert sp.name == "bash-5.2"
         assert not sp.is_derivation
 
     def test_construct_from_string(self):
-        sp = StorePath("abc123def456-bash-5.2")
-        assert sp.hash_part == "abc123def456"
+        sp = StorePath("a" * 32 + "-bash-5.2")
+        assert sp.hash_part == "a" * 32
         assert sp.name == "bash-5.2"
-        assert sp.to_string == "abc123def456-bash-5.2"
+        assert sp.to_string == "a" * 32 + "-bash-5.2"
 
 
 # ── PathInfo ─────────────────────────────────────────────────────────
@@ -69,27 +62,27 @@ class TestStorePath:
 class TestPathInfo:
     def test_full(self):
         pi = PathInfo(
-            path=StorePath(hash_part="a", name="p", to_string="a-p"),
+            path=StorePath(base_name="a" * 32 + "-p"),
             nar_hash="sha256:abc",
             nar_size=1234,
             registration_time=1700000000,
-            deriver=StorePath(hash_part="b", name="p.drv", to_string="b-p.drv"),
-            references=[StorePath(hash_part="c", name="dep", to_string="c-dep")],
+            deriver=StorePath(base_name="b" * 32 + "-p.drv"),
+            references=[StorePath(base_name="c" * 32 + "-dep")],
             ca="fixed:r:sha256:...",
             ultimate=True,
         )
         path = pi.path
         assert path is not None
-        assert path.name == "p"
+        assert StorePath(path).name == "p"
         assert pi.deriver is not None
         deriver = pi.deriver
         assert deriver is not None
-        assert deriver.name == "p.drv"
+        assert StorePath(deriver).name == "p.drv"
         assert len(pi.references) == 1
 
     def test_minimal(self):
         pi = PathInfo(
-            path=StorePath(hash_part="a", name="p", to_string="a-p"),
+            path=StorePath(base_name="a" * 32 + "-p"),
             nar_hash="sha256:abc",
             nar_size=0,
         )
@@ -101,7 +94,7 @@ class TestPathInfo:
     def test_from_dict_minimal(self):
         pi = PathInfo.from_dict(
             {
-                "path": {"hash_part": "a", "name": "p", "to_string": "a-p"},
+                "path": {"base_name": "a" * 32 + "-p"},
                 "nar_hash": "sha256:abc",
                 "nar_size": 0,
             }
@@ -382,16 +375,16 @@ class TestResultType:
 
 class TestStorePathEdge:
     def test_is_derivation_drv_extension(self):
-        sp = StorePath(hash_part="a" * 32, name="foo.drv", to_string="a" * 32 + "-foo.drv")
+        sp = StorePath(base_name="a" * 32 + "-foo.drv")
         assert sp.is_derivation is True
 
     def test_is_derivation_drv_in_middle(self):
         """Only names ending with .drv are derivations."""
-        sp = StorePath(hash_part="a" * 32, name="foo.drv.bar", to_string="a" * 32 + "-foo.drv.bar")
+        sp = StorePath(base_name="a" * 32 + "-foo.drv.bar")
         assert sp.is_derivation is False
 
     def test_is_derivation_no_drv(self):
-        sp = StorePath(hash_part="a" * 32, name="bash-5.2", to_string="a" * 32 + "-bash-5.2")
+        sp = StorePath(base_name="a" * 32 + "-bash-5.2")
         assert sp.is_derivation is False
 
 
