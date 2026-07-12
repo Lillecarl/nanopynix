@@ -1,5 +1,7 @@
 # pynixd
 
+[![Documentation Status](https://readthedocs.org/projects/pynixd/badge/?version=latest)](https://pynixd.readthedocs.io/en/latest/?badge=latest)
+
 > Built by me with a bunch of AI models
 
 A Nix daemon protocol proxy and distributed build cache implemented in Python using AsyncSSH. pynixd acts as an intermediary between Nix clients and remote builders, providing query caching, build deduplication, and intelligent scheduling across multiple build backends.
@@ -155,6 +157,14 @@ Versions are managed by nixpkgs:
 - aiohttp
 - aiosqlite >= 0.21
 - pyinstrument
+
+[Documentation](https://pynixd.readthedocs.io/)
+
+---
+
+*This project is made possible by*
+
+[![Dynamist](.assets/dynamist-logo.png)](https://dynamist.se/)
 
 ## License
 
