@@ -7,7 +7,9 @@
 #include <nix/util/configuration.hh>
 #include <nix/util/error.hh>
 #include <nix/util/experimental-features.hh>
+#include <nix/util/hash.hh>
 #include <nix/util/logging.hh>
+#include <nix/util/url.hh>
 
 #include <memory>
 
@@ -193,6 +195,66 @@ NB_MODULE(nanopynix_util, m) {
           "4=Talkative, 5=Chatty, 6=Debug, 7=Vomit.");
     m.def("get_verbosity", &get_verbosity,
           "Get the current Nix log verbosity level.");
+
+    // ── URL utilities (no init required) ────────────────────────
+    m.def("percent_encode", [](const std::string &s, const std::string &keep) -> std::string {
+            return nix::percentEncode(s, keep);
+          },
+          "s"_a, "keep"_a = std::string{},
+          "Percent-encode string per RFC 3986. Characters in *keep* are left unencoded.");
+    m.def("percent_decode", [](const std::string &s) -> std::string {
+            return nix::percentDecode(s);
+          },
+          "s"_a,
+          "Percent-decode string per RFC 3986.");
+    m.def("fix_git_url", [](const std::string &url) -> std::string {
+            return nix::fixGitURL(url).to_string();
+          },
+          "url"_a,
+          "Normalize SCP-style and git+https:// URLs to proper URL format.");
+    m.def("is_valid_scheme_name", [](const std::string &scheme) -> bool {
+            return nix::isValidSchemeName(scheme);
+          },
+          "scheme"_a,
+          "Check whether *scheme* is a valid RFC 3986 scheme name.");
+
+    // ── Hash utilities (no init required) ───────────────────────
+    m.def("parse_hash_algo", [](const std::string &s) -> int {
+            return static_cast<int>(nix::parseHashAlgo(s));
+          },
+          "s"_a,
+          "Parse a hash algorithm name (e.g. 'sha256') into an int enum.");
+    m.def("parse_hash_algo_opt", [](const std::string &s) -> std::optional<int> {
+            auto r = nix::parseHashAlgoOpt(s);
+            if (r) return static_cast<int>(*r);
+            return std::nullopt;
+          },
+          "s"_a,
+          "Parse a hash algorithm name without throwing. Returns None on failure.");
+    m.def("print_hash_algo", [](int algo) -> std::string {
+            return std::string(nix::printHashAlgo(static_cast<nix::HashAlgorithm>(algo)));
+          },
+          "algo"_a,
+          "Convert a hash algorithm int enum back to its name string.");
+    m.def("parse_hash_format", [](const std::string &s) -> int {
+            return static_cast<int>(nix::parseHashFormat(s));
+          },
+          "s"_a,
+          "Parse a hash format name (e.g. 'base64', 'nix32', 'sri') into an int enum.");
+    m.def("print_hash_format", [](int fmt) -> std::string {
+            return std::string(nix::printHashFormat(static_cast<nix::HashFormat>(fmt)));
+          },
+          "fmt"_a,
+          "Convert a hash format int enum back to its name string.");
+
+    m.def("parse_hash_any", [](const std::string &s, std::optional<int> algo_opt) -> std::string {
+            std::optional<nix::HashAlgorithm> ha;
+            if (algo_opt) ha = static_cast<nix::HashAlgorithm>(*algo_opt);
+            auto h = nix::Hash::parseAny(s, ha);
+            return h.to_string(nix::HashFormat::SRI, true);
+          },
+          "s"_a, "algo"_a = nb::none(),
+          "Parse a hash string in any format (SRI, hex, base32, base64) and return SRI form.");
 
     // ── Exception bindings ──────────────────────────────────────
     // Register specific Nix C++ exceptions as Python types.

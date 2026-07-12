@@ -99,7 +99,7 @@ class EvalServiceHandler(EvalServiceBase):
             stores = self._state.handles.iter_kind("store")
             if not stores:
                 raise RuntimeError("no store open — open a store before evaluating")
-            self._state.eval_state = nanopynix_expr.EvalState(stores[0][1])
+            self._state.eval_state = nanopynix_expr.EvalState(stores[0][1], nanopynix_expr.parse_nix_path())
         return self._state.eval_state
 
     def _reset(self) -> None:

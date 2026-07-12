@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nanopynix import NixType, Session
+from nanopynix import Session
 
 
 @pytest.mark.anyio
