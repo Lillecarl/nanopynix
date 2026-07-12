@@ -137,6 +137,7 @@ def _mock_reserved_worker():
     rw = MagicMock()
     rw._eval_stub = _make_eval_stub()
     rw._store_stub = MagicMock()
+    rw._store_stub.build_paths_with_results = AsyncMock()
     rw._store_stub.build_derivation = AsyncMock()
     rw._store_stub.read_derivation = AsyncMock()
     rw.release = AsyncMock()
@@ -585,7 +586,46 @@ class TestValueProxyLifecycle:
         vp = self._proxy(w, 1, "attrs")
         assert await vp.has_attr("foo") is True
 
-    async def test_build_derivation_uses_drv_path_and_eval_store_handle(self):
+    async def test_build_uses_cascading_build_by_default(self):
+        w = self._worker()
+        w._eval_stub.has_attr.return_value = _mock_has_attr_response(True)
+        w._eval_stub.attr.side_effect = [
+            _mock_value_handle(5, "string"),
+            _mock_value_handle(6, "string"),
+        ]
+        w._eval_stub.force_json.side_effect = [
+            MagicMock(json='"derivation"'),
+            MagicMock(json='"/nix/store/aaa-demo.drv"'),
+        ]
+        build_result = MagicMock()
+        build_result.success = True
+        w._store_stub.build_paths_with_results.return_value = SimpleNamespace(results=[build_result])
+        w._store_stub.read_derivation.return_value = SimpleNamespace(
+            outputs={"out": SimpleNamespace(path="/nix/store/aaa-demo")},
+            env={},
+        )
+        vp = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123).value(1, "attrs")
+
+        result = await vp.build()
+
+        assert result == {"out": "/nix/store/aaa-demo"}
+        assert w._eval_stub.attr.await_count == 2
+        attr_requests = [call.args[0] for call in w._eval_stub.attr.await_args_list]
+        assert [(request.handle, request.name) for request in attr_requests] == [
+            (1, "type"),
+            (1, "drvPath"),
+        ]
+        w._store_stub.build_paths_with_results.assert_awaited_once()
+        build_request = w._store_stub.build_paths_with_results.call_args.args[0]
+        assert build_request.paths == ["/nix/store/aaa-demo.drv"]
+        assert build_request.store_handle == 123
+        w._store_stub.build_derivation.assert_not_awaited()
+        w._store_stub.read_derivation.assert_awaited_once()
+        read_request = w._store_stub.read_derivation.call_args.args[0]
+        assert read_request.path == "/nix/store/aaa-demo.drv"
+        assert read_request.store_handle == 123
+
+    async def test_build_mode_uses_force_build_derivation(self):
         w = self._worker()
         w._eval_stub.has_attr.return_value = _mock_has_attr_response(True)
         w._eval_stub.attr.side_effect = [
@@ -608,21 +648,12 @@ class TestValueProxyLifecycle:
         result = await vp.build(build_mode=BuildMode.Check)
 
         assert result == {"out": "/nix/store/aaa-demo"}
-        assert w._eval_stub.attr.await_count == 2
-        attr_requests = [call.args[0] for call in w._eval_stub.attr.await_args_list]
-        assert [(request.handle, request.name) for request in attr_requests] == [
-            (1, "type"),
-            (1, "drvPath"),
-        ]
+        w._store_stub.build_paths_with_results.assert_not_awaited()
         w._store_stub.build_derivation.assert_awaited_once()
         build_request = w._store_stub.build_derivation.call_args.args[0]
         assert build_request.path == "/nix/store/aaa-demo.drv"
         assert build_request.build_mode == BuildMode.Check.value
         assert build_request.store_handle == 123
-        w._store_stub.read_derivation.assert_awaited_once()
-        read_request = w._store_stub.read_derivation.call_args.args[0]
-        assert read_request.path == "/nix/store/aaa-demo.drv"
-        assert read_request.store_handle == 123
 
     async def test_get_type_delegates_to_worker_for_thunk(self):
         w = self._worker()

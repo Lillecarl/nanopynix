@@ -456,9 +456,11 @@ class ValueProxy:
         timeout: float | None = None,
     ) -> dict[str, str]:
         """Build the derivation represented by this evaluated value."""
-        from nanopynix_proto.nix.store import BuildDerivationRequest, ReadDerivationRequest
-
-        from nanopynix_store import BuildMode
+        from nanopynix_proto.nix.store import (
+            BuildDerivationRequest,
+            BuildPathsWithResultsRequest,
+            ReadDerivationRequest,
+        )
 
         if not await self.has_attr("type", timeout=timeout):
             raise TypeError("nix value is not a derivation")
@@ -470,22 +472,32 @@ class ValueProxy:
             actual_type = await self.attr("drvPath").get_type(timeout=timeout)
             raise WrongNixTypeError(expected=NixType.STRING, actual=actual_type)
         if build_mode is None:
-            mode_value = BuildMode.Normal.value
-        elif isinstance(build_mode, int):
-            mode_value = build_mode
+            build_results = await self._ctx.proxy._store_proxy_call(
+                "build_paths_with_results",
+                BuildPathsWithResultsRequest(paths=[drv_path], store_handle=self._ctx.store_handle),
+            )
+            if not build_results.results:
+                raise StoreError("StoreError", f"build returned no result for derivation {drv_path}")
+            result = build_results.results[0]
+            if not result.success:
+                msg = result.error_msg or f"failed to build derivation {drv_path}"
+                raise StoreError("StoreError", msg)
         else:
-            mode_value = build_mode.value
-        result = await self._ctx.proxy._store_proxy_call(
-            "build_derivation",
-            BuildDerivationRequest(
-                path=drv_path,
-                build_mode=mode_value,
-                store_handle=self._ctx.store_handle,
-            ),
-        )
-        if not result.success:
-            msg = result.error_msg or f"failed to build derivation {drv_path}"
-            raise StoreError("StoreError", msg)
+            if isinstance(build_mode, int):
+                mode_value = build_mode
+            else:
+                mode_value = build_mode.value
+            result = await self._ctx.proxy._store_proxy_call(
+                "build_derivation",
+                BuildDerivationRequest(
+                    path=drv_path,
+                    build_mode=mode_value,
+                    store_handle=self._ctx.store_handle,
+                ),
+            )
+            if not result.success:
+                msg = result.error_msg or f"failed to build derivation {drv_path}"
+                raise StoreError("StoreError", msg)
 
         derivation = await self._ctx.proxy._store_proxy_call(
             "read_derivation",

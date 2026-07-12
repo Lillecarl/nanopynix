@@ -258,10 +258,21 @@ static nb::list query_substitutable_paths(nix::Store &s, const std::vector<nix::
 
 // --- Build ---
 
+static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path) {
+    if (path.isDerivation()) {
+        return nix::DerivedPath::Built{
+            .drvPath = nix::make_ref<const nix::SingleDerivedPath>(
+                nix::SingleDerivedPath::Opaque{path}),
+            .outputs = nix::OutputsSpec::All{},
+        };
+    }
+    return nix::DerivedPath::Opaque{path};
+}
+
 static nb::list build_paths_with_results(
         nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::DerivedPaths dps;
-    for (auto &p : paths) dps.push_back(nix::DerivedPath{nix::DerivedPath::Opaque{p}});
+    for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
     auto results = s.buildPathsWithResults(dps);
     nb::list out;
     for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
@@ -270,7 +281,7 @@ static nb::list build_paths_with_results(
 
 static void build_paths(nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::DerivedPaths dps;
-    for (auto &p : paths) dps.push_back(nix::DerivedPath{nix::DerivedPath::Opaque{p}});
+    for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
     s.buildPaths(dps);
 }
 
