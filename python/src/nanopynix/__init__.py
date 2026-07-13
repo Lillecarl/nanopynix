@@ -65,6 +65,8 @@ from nanopynix.settings import (
 )
 from nanopynix.store import StoreHandle
 from nanopynix.types import NixArg, NixDeepValue, NixValue
+from nanopynix.verbosity import LogLevelInput, normalize_log_level
+from nanopynix_proto.nix.common import LogLevel
 from nanopynix_expr import EvalState, Value, eval_file, init_libexpr, register_primop
 from nanopynix_fetchers import input_from_attrs, input_from_url
 from nanopynix_flake import get_flake, lock_flake, parse_flake_ref
@@ -89,6 +91,8 @@ Store = StoreHandle
 __all__ = [
     "BuildMode",
     "LockedFlakeHandle",
+    "LogLevel",
+    "LogLevelInput",
     "NixAssertionError",
     "NixCoercionError",
     "NixError",
@@ -157,6 +161,7 @@ __all__ = [
     "set_setting",
     "set_verbosity",
     "strip_ansi",
+    "normalize_log_level",
     "to_yaml",
     "yaml_primops",
 ]

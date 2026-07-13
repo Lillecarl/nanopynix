@@ -652,13 +652,20 @@ NB_MODULE(nanopynix_expr, m) {
         auto &f = nix::experimentalFeatureSettings.experimentalFeatures.get();
         f.insert(nix::Xp::FetchTree);
     });
-    m.def("parse_nix_path", []() -> std::vector<std::string> {
-        const char *env = std::getenv("NIX_PATH");
-        if (!env || !*env)
+    m.def("parse_nix_path", [](std::optional<std::string> raw) -> std::vector<std::string> {
+        std::string value;
+        if (raw) {
+            value = *raw;
+        } else {
+            const char *env = std::getenv("NIX_PATH");
+            if (env)
+                value = env;
+        }
+        if (value.empty())
             return {};
-        auto entries = nix::EvalSettings::parseNixPath(env);
+        auto entries = nix::EvalSettings::parseNixPath(value);
         return {entries.begin(), entries.end()};
-    });
+    }, "value"_a = nb::none());
     m.def("list_eval_settings_metadata_json", []() {
         bool readOnlyMode = false;
         nix::EvalSettings evalSettings{readOnlyMode};

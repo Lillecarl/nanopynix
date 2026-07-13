@@ -21,6 +21,8 @@ message InitRequest {
   optional bool pure_eval = 6;
   optional bool restrict_eval = 7;
   repeated string allowed_uris = 8;
+  optional nix.common.LogLevel verbosity = 9;
+  repeated string nix_path = 10;
 }
 
 message InitResponse {

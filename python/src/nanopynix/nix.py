@@ -29,6 +29,8 @@ from nanopynix._session import EvalSession
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.settings import NixSettings, normalize_nix_settings
 from nanopynix.store import StoreHandle
+from nanopynix.verbosity import LogLevelInput, normalize_log_level
+import nanopynix_expr
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -77,6 +79,14 @@ def _to_primop_specs(specs: Sequence[PrimOpSpec | Mapping[str, Any]] | None) -> 
     return result
 
 
+def _normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
+    if nix_path is None:
+        return list(nanopynix_expr.parse_nix_path())
+    if isinstance(nix_path, str):
+        return list(nanopynix_expr.parse_nix_path(nix_path))
+    return list(nix_path)
+
+
 class Session:
     """Session runtime — manages a single subprocess worker.
 
@@ -99,7 +109,8 @@ class Session:
         nix_conf: str | None = "/etc/nix/nix.conf",
         settings: NixSettings | PathLike[str] | str | None = None,
         experimental_features: list[str] | None = None,
-        verbosity: int | None = None,
+        verbosity: LogLevelInput | None = None,
+        nix_path: str | Sequence[str] | None = None,
         primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
         primop_callables: Mapping[str, Callable[..., Any]] | None = None,
         pure_eval: bool | None = None,
@@ -110,13 +121,13 @@ class Session:
     ) -> None:
         nix_settings = normalize_nix_settings(settings).with_experimental_features(experimental_features)
         worker_settings = nix_settings.to_worker_settings()
-        if verbosity is not None:
-            worker_settings["__nanopynix_verbosity"] = str(verbosity)
         self._manager = _WorkerManager(
             store_uri=store_uri,
             nix_conf=nix_conf,
             settings=worker_settings,
             experimental_features=[],
+            verbosity=normalize_log_level(verbosity) if verbosity is not None else None,
+            nix_path=_normalize_nix_path(nix_path),
             primops=_to_primop_specs(primops),
             primop_callables=dict(primop_callables) if primop_callables is not None else None,
             pure_eval=pure_eval,

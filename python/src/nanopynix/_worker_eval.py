@@ -107,7 +107,7 @@ class EvalServiceHandler(EvalServiceBase):
             return
         if self._state.eval_state is not None:
             raise RuntimeError("eval session is already bound to a different store")
-        self._state.eval_state = nanopynix_expr.EvalState(store, nanopynix_expr.parse_nix_path())
+        self._state.eval_state = nanopynix_expr.EvalState(store, list(self._state.nix_path))
         self._state.eval_store_handle = store_handle
 
     def _reset(self) -> None:

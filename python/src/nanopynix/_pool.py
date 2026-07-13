@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
 
     from nanopynix_proto.nix.eval import EvalServiceStub
+    from nanopynix_proto.nix.common import LogLevel
     from nanopynix_proto.nix.store import StoreServiceStub
     from nanopynix_proto.nix.worker import WorkerServiceStub
 
@@ -198,6 +199,8 @@ class _WorkerManager:
         nix_conf: str | None = "/etc/nix/nix.conf",
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
+        verbosity: LogLevel | None = None,
+        nix_path: Sequence[str] | None = None,
         primops: list[PrimOpSpec] | None = None,
         primop_callables: dict[str, Callable[..., Any]] | None = None,
         pure_eval: bool | None = None,
@@ -210,6 +213,8 @@ class _WorkerManager:
         self._nix_conf = nix_conf
         self._settings = settings or {}
         self._features = experimental_features or []
+        self._verbosity = verbosity
+        self._nix_path = list(nix_path) if nix_path else []
         self._primops = primops or []
         self._primop_callables = primop_callables or {}
         self._pure_eval = pure_eval
@@ -285,6 +290,8 @@ class _WorkerManager:
                 pure_eval=self._pure_eval,
                 restrict_eval=self._restrict_eval,
                 allowed_uris=self._allowed_uris,
+                verbosity=self._verbosity,
+                nix_path=self._nix_path,
             ),
             timeout=_RPC_TIMEOUT,
         )
