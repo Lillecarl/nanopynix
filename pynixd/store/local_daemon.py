@@ -35,8 +35,10 @@ log = structlog.get_logger(__name__)
 class LocalStore(DaemonStore):
     """Connects to a local nix-daemon via Unix socket.
 
-    Always spawns and manages its own daemon subprocess with a custom
-    --store path. The socket is placed at
+    Manages a private daemon subprocess for isolated store paths. The root
+    store instead connects to the host's system daemon: its store database is
+    protected and cannot safely be served by an unprivileged private daemon.
+    A managed socket is placed at
     ``<store_path>/<socket_path>`` and the daemon is told about it via
     NIX_DAEMON_SOCKET_PATH.
 
@@ -46,10 +48,12 @@ class LocalStore(DaemonStore):
 
     def __init__(self, spec: LocalSocketStoreSpec) -> None:
         super().__init__(spec)
-        self.managed = True
 
         socket_path = spec.socket_path or Path("nix/var/nix/daemon-socket/pynixd-nix")
-        if not socket_path.is_absolute():
+        self.managed = self.store_path != Path("/")
+        if not self.managed and not socket_path.is_absolute():
+            self.socket_path = Path("/nix/var/nix/daemon-socket/socket")
+        elif not socket_path.is_absolute():
             self.socket_path = self.store_path / socket_path
         else:
             self.socket_path = socket_path
@@ -64,8 +68,10 @@ class LocalStore(DaemonStore):
         self.extra_args = spec.extra_args or []
         self.settings = spec.settings or PynixdSettings()
 
-        # Register atexit handler to ensure daemon is killed even if close() is never called
-        atexit.register(self._atexit_kill_daemon)
+        # Register atexit handler to ensure a private daemon is killed even
+        # if close() is never called. The system daemon is never ours to kill.
+        if self.managed:
+            atexit.register(self._atexit_kill_daemon)
 
         # Resource Monitoring
         self.monitor: ResourceMonitor | None = (
@@ -88,6 +94,11 @@ class LocalStore(DaemonStore):
         if self.daemon_proc is not None:
             if self.daemon_ready is not None:
                 await self.daemon_ready.wait()
+            return
+
+        if not self.managed:
+            if not self.socket_path.exists():
+                raise RuntimeError(f"System Nix daemon socket does not exist: {self.socket_path}")
             return
 
         self.daemon_ready = anyio.Event()

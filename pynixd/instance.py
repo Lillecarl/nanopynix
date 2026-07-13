@@ -105,7 +105,14 @@ class Server:
         settings: PynixdSettings | None = None,
         **kwargs: Any,
     ) -> None:
-        settings = settings or PynixdSettings(**kwargs)
+        if settings is None:
+            # ``PynixdSettings`` describes the daemon CLI, whose default Unix
+            # socket lives under /run.  A programmatic Server is commonly an
+            # ephemeral SSH or HTTP endpoint, however, and must not require
+            # permission to create a system runtime directory unless its
+            # caller explicitly requested a Unix socket.
+            kwargs.setdefault("unix_path", None)
+            settings = PynixdSettings(**kwargs)
 
         if stores is None:
             spec = LocalSocketStoreSpec(store_id=StoreId("local"), monitor=False)

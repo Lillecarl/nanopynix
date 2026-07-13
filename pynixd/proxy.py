@@ -177,8 +177,13 @@ class DaemonProxy:
 
             our_features = get_extension_features()
 
-            # Aggregated feature_matrix from all stores (local is already in stores)
+            # Only build-capable stores contribute scheduling capabilities.
+            # Substituters are deliberately non-scheduleable; advertising
+            # their host features would incorrectly tell clients that this
+            # server can build for those platforms.
             for store in self.stores.values():
+                if store.no_schedule:
+                    continue
                 fm = store._feature_matrix
                 if fm:
                     for system, features in fm.items():
