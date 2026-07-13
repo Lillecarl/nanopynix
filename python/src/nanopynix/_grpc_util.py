@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import functools
+import inspect
 from typing import TYPE_CHECKING, Any
 
 from grpclib.const import Status
@@ -40,6 +40,6 @@ def wrap_service_handlers(cls: type) -> type:
         if name.startswith("_"):
             continue
         method = cls.__dict__[name]
-        if asyncio.iscoroutinefunction(method):
+        if inspect.iscoroutinefunction(method):
             setattr(cls, name, convert_handler_errors(method))
     return cls
