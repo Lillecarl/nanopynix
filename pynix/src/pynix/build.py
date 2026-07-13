@@ -5,12 +5,14 @@ import sys
 from pathlib import Path  # noqa: TC003
 from typing import override
 
+import structlog
 from clypi import Command, arg
 from rich.console import Console
 
 from pynix._util import forward_nix_logs, prepare_sys_path
 
 console = Console()
+logger = structlog.get_logger("pynix.build")
 
 _DEFAULT_SUBSTITUTERS = "https://cache.nixos.org/"
 _DEFAULT_TRUSTED_PUBLIC_KEYS = "cache.nixos.org-1:NCHdD59X431o0gWfe6E3gSxWeQa73p0i1d94vQxFh9s="
@@ -35,7 +37,7 @@ class Build(Command):
         help="Flake reference (e.g. '.#hello'). The attrpath after '#' selects the derivation.",
     )
     store: str = arg("auto", help="Store URI to build with.")
-    eval_store: str = arg("auto", help="Store URI to evaluate with.")
+    eval_store: str | None = arg(None, help="Store URI to evaluate with. Defaults to --store.")
     substituters: str = arg(_DEFAULT_SUBSTITUTERS, help="Space-separated substituter URLs.")
     trusted_public_keys: str = arg(_DEFAULT_TRUSTED_PUBLIC_KEYS, help="Space-separated substituter public keys.")
     verbosity: int = arg(_DEFAULT_VERBOSITY, help="Nix log verbosity, 0=error through 7=vomit.")
@@ -57,27 +59,27 @@ class Build(Command):
             substituters=self.substituters.split(),
             trusted_public_keys=self.trusted_public_keys.split(),
         )
-        async with (
-            nanopynix.Session(settings=settings, verbosity=self.verbosity) as nix,
-            forward_nix_logs(nix, print_build_logs=self.print_build_logs),
-            nix.store(self.eval_store) as eval_store,
-            nix.store(self.store) as build_store,
-            nix.eval(eval_store) as session,
-        ):
-            if self.file is not None:
-                root = await session.file(str(self.file))
-                if self.attrpath is not None:
-                    root = _navigate(root, self.attrpath)
-            else:
-                if self.flake is None:
-                    console.print("[red]Error:[/red] either --file or --flake is required")
-                    raise SystemExit(1)
-                base_ref, _, flake_attr = self.flake.partition("#")
-                root = await session.eval_flake(base_ref)
-                if flake_attr:
-                    root = _navigate(root, flake_attr)
-
-            outputs = await root.build(store=build_store)
+        async with nanopynix.Session(settings=settings, verbosity=self.verbosity) as nix:
+            async with forward_nix_logs(nix, print_build_logs=self.print_build_logs):
+                if self.eval_store is None:
+                    async with nix.store(self.store) as store:
+                        async with nix.eval(store) as session:
+                            logger.info("pynix build evaluating target")
+                            root = await _evaluate_build_target(self, session)
+                            logger.info("pynix build target evaluated")
+                            outputs = await root.build(store=store)
+                            logger.info("pynix build finished")
+                else:
+                    async with (
+                        nix.store(self.eval_store) as eval_store,
+                        nix.store(self.store) as build_store,
+                        nix.eval(eval_store) as session,
+                    ):
+                        logger.info("pynix build evaluating target")
+                        root = await _evaluate_build_target(self, session)
+                        logger.info("pynix build target evaluated")
+                        outputs = await root.build(store=build_store)
+                        logger.info("pynix build finished")
 
         _print_json({"outputs": outputs})
 
@@ -85,6 +87,22 @@ class Build(Command):
 def _navigate(root, attrpath: str):
     for part in attrpath.split("."):
         root = root.attr(part)
+    return root
+
+
+async def _evaluate_build_target(command: Build, session):
+    if command.file is not None:
+        root = await session.file(str(command.file))
+        if command.attrpath is not None:
+            root = _navigate(root, command.attrpath)
+        return root
+    if command.flake is None:
+        console.print("[red]Error:[/red] either --file or --flake is required")
+        raise SystemExit(1)
+    base_ref, _, flake_attr = command.flake.partition("#")
+    root = await session.eval_flake(base_ref)
+    if flake_attr:
+        root = _navigate(root, flake_attr)
     return root
 
 

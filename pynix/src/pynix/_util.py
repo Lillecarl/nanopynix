@@ -12,6 +12,7 @@ import structlog
 
 _RESULT_BUILD_LOG_LINE = 101
 _RESULT_POST_BUILD_LOG_LINE = 107
+_LOG_DRAIN_SECONDS = 0.5
 
 
 def prepare_sys_path() -> None:
@@ -37,6 +38,7 @@ async def forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> A
     try:
         yield
     finally:
+        await asyncio.sleep(_LOG_DRAIN_SECONDS)
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task

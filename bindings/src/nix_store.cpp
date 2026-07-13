@@ -534,6 +534,26 @@ static nb::list build_for_humans(
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
 
+    if (!evalStore) {
+        try {
+            auto missing = s.queryMissing(dps);
+            if (!missing.willSubstitute.empty())
+                s.substitutePaths(missing.willSubstitute);
+        } catch (nix::Error &) {
+            // BuildPathsWithResults will report the actionable build failure.
+        }
+        std::vector<nix::KeyedBuildResult> results;
+        try {
+            results = s.buildPathsWithResults(dps, buildMode, nullptr);
+        } catch (nix::Error &e) {
+            e.addTrace({}, "while building paths for build_for_humans");
+            throw;
+        }
+        nb::list out;
+        for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
+        return out;
+    }
+
     nix::StorePathSet knownOutputs;
     try {
         knownOutputs = known_output_paths_from_eval_store(s, dps, evalStore);
