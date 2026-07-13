@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gc
 from pathlib import Path
+from typing import Any
 
 import nanopynix
 
