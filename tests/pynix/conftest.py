@@ -1,7 +1,8 @@
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportPrivateUsage=false, reportUnknownLambdaType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportPrivateUsage=false, reportUnknownLambdaType=false, reportUnknownArgumentType=false
 # conftest.py interacts heavily with nanopynix/pynix C++ nanobind extensions
-# that lack type stubs.  Member types, variable types, private imports, and
-# lambdas without type context are inherent to the test infrastructure.
+# that lack type stubs.  Member types, variable types, private imports,
+# unknown argument types, and lambdas without type context are inherent to the
+# test infrastructure.
 
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ from structlog.exceptions import DropEvent
 from pynix import Pynix
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Generator
+    from collections.abc import AsyncIterator, Callable, Generator, Iterator
 
     from structlog.typing import EventDict, WrappedLogger
 

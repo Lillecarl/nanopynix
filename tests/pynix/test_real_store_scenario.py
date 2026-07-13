@@ -1,6 +1,8 @@
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 # All lines access PynixStoreScenario fixture methods/results whose return types
 # cascade from C++ nanobind extensions and cannot be resolved by the type checker.
+# reportUnknownArgumentType: request.node.nodeid and similar fixture attributes
+# are typed as Any by pytest stubs, causing cascade into function call args.
 
 from __future__ import annotations
 
@@ -156,7 +158,7 @@ async def test_scenario_builds_hello_unfree_locally_and_forwards_logs(
     assert scenario.last_logs is not None
     assert any(
         entry.get("event") == "nix log"
-        and isinstance(entry.get("message"), str)
-        and "building derivation" in entry["message"]
+        and isinstance(_msg := entry.get("message"), str)
+        and "building derivation" in _msg
         for entry in scenario.last_logs
     )

@@ -367,20 +367,19 @@ async def run_worker(
     )
 
     # Cleanup after transport closes
-    worker_handler = handlers[0]
-    worker_state = cast("WorkerServiceHandler", worker_handler)._state  # type: ignore[reportPrivateUsage] -- internal cross-class access within worker module
-    collector = worker_state.collector
+    worker_state: WorkerState = cast(WorkerServiceHandler, handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
+    collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
     if collector is not None:
-        collector.close()
-    log_task = worker_state.log_task
+        collector.close()  # type: ignore[reportUnknownMemberType]
+    log_task = worker_state.log_task  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
     if log_task is not None:
-        log_task.cancel()
+        log_task.cancel()  # type: ignore[reportUnknownMemberType]
         with contextlib.suppress(asyncio.CancelledError):
             await log_task
     if worker_state.rpc_bridge is not None:
-        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- rpc_bridge is Any, no stubs
+        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType]
     if worker_state.executor is not None:
-        worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType] -- executor is Any, no stubs
+        worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType]
 
 
 # ── Stdio entry point (console_script / ``python -m nanopynix._worker``) ──
@@ -403,20 +402,19 @@ async def _stdio_main() -> None:
     await serve_stdio(handlers, max_concurrency=_WORKER_MAX_CONCURRENCY)
 
     # Cleanup after transport closes
-    worker_handler = handlers[0]
-    worker_state = cast("WorkerServiceHandler", worker_handler)._state  # type: ignore[reportPrivateUsage] -- internal cross-class access within worker module
-    collector = worker_state.collector
+    worker_state: WorkerState = cast(WorkerServiceHandler, handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
+    collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
     if collector is not None:
-        collector.close()
-    log_task = worker_state.log_task
+        collector.close()  # type: ignore[reportUnknownMemberType]
+    log_task = worker_state.log_task  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
     if log_task is not None:
-        log_task.cancel()
+        log_task.cancel()  # type: ignore[reportUnknownMemberType]
         with contextlib.suppress(asyncio.CancelledError):
             await log_task
     if worker_state.rpc_bridge is not None:
-        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- rpc_bridge is Any, no stubs
+        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType]
     if worker_state.executor is not None:
-        worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType] -- executor is Any, no stubs
+        worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType]
 
 
 if __name__ == "__main__":
