@@ -1,7 +1,8 @@
 """Tests for nanopynix_fetchers (Input, input_from_url, input_from_attrs)."""
 
-# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportMissingParameterType=false
 # nanopynix / nanopynix_fetchers are C++ nanobind extensions without type stubs.
+# Fixture store parameter and variable types from extension calls are unresolvable.
 
 import nanopynix
 import nanopynix_fetchers

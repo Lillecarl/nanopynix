@@ -14,7 +14,7 @@ import nanopynix
 import nanopynix_flake
 
 
-def _init_git_flake(tmp_path, outputs_body="val = 1;"):
+def _init_git_flake(tmp_path: Path, outputs_body: str = "val = 1;") -> None:
     """Create a temp flake with a git repo so Nix can evaluate it."""
     (tmp_path / "flake.nix").write_text(f"""
     {{
@@ -31,13 +31,13 @@ def _init_git_flake(tmp_path, outputs_body="val = 1;"):
 class TestParseFlakeRef:
     def test_github_ref(self) -> None:
         ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
-        assert isinstance(ref, nanopynix_flake.FlakeRef)
+        assert isinstance(ref, nanopynix_flake.FlakeRef)  # type: ignore[reportUnnecessaryIsInstance] -- FlakeRef is C++ nanobind type, no stubs, pyright cannot resolve
         s = str(ref)
         assert "github:NixOS/nixpkgs" in s or "github" in s.lower()
 
     def test_indirect_ref(self) -> None:
         ref = nanopynix.parse_flake_ref("nixpkgs")
-        assert isinstance(ref, nanopynix_flake.FlakeRef)
+        assert isinstance(ref, nanopynix_flake.FlakeRef)  # type: ignore[reportUnnecessaryIsInstance] -- FlakeRef is C++ nanobind type, no stubs
 
     def test_repr(self) -> None:
         ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")
@@ -73,7 +73,7 @@ class TestGetFlake:
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))
         resolved = nanopynix.get_flake(eval_state, ref)
-        assert isinstance(resolved, nanopynix_flake.FlakeRef)
+        assert isinstance(resolved, nanopynix_flake.FlakeRef)  # type: ignore[reportUnnecessaryIsInstance] -- FlakeRef is C++ nanobind type, no stubs
 
 
 class TestCallFlake:

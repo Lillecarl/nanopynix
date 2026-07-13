@@ -1,6 +1,6 @@
 """Tests for nanopynix_store (StorePath, Store, BuildResult, PathInfo)."""
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnnecessaryIsInstance=false
 # nanopynix_store is a C++ nanobind extension without type stubs.
 
 from __future__ import annotations

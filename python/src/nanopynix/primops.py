@@ -88,8 +88,8 @@ def _single_document(values: Iterable[Any], builtin: str, stream_builtin: str) -
 
 
 def _parse_error_message(exc: Exception) -> str:
-    problem = getattr(exc, "problem", None)
-    mark = getattr(exc, "problem_mark", None)
+    problem = getattr(exc, "problem", None)  # type: ignore[reportUnknownVariableType] -- dynamic attribute access on yaml exception
+    mark = getattr(exc, "problem_mark", None)  # type: ignore[reportUnknownVariableType] -- dynamic attribute access on yaml exception
     if problem is None:
         return str(exc)
     if mark is None:

@@ -1,6 +1,6 @@
 """Integration tests for manager-side RPC primops."""
 
-# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # Session / nanopynix are C++ nanobind extensions without type stubs.
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ async def test_manager_rpc_primop_lambda() -> None:
         rpc=True,
     )
     async with (
-        Session(primops=[spec], primop_callables={"managerTriple": lambda x: x * 3}) as session,
+        Session(primops=[spec], primop_callables={"managerTriple": lambda x: x * 3}) as session,  # type: ignore[reportUnknownLambdaType] -- lambda within dict value has no type context
         session.store() as store,
         session.eval(store) as eval,
     ):
