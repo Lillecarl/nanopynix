@@ -5,12 +5,22 @@ import sys
 from typing import override
 
 import structlog
-from clypi import Command, arg
-from nanopynix_proto.nix.store import CollectGarbageRequest, FindRootsRequest, GcAction
+from clypi import Command, Positional, arg
+from nanopynix_proto.nix.store import (
+    CollectGarbageRequest,
+    EnsurePathRequest,
+    FindRootsRequest,
+    GcAction,
+    OptimiseStoreRequest,
+    QueryPathFromHashPartRequest,
+    VerifyStoreRequest,
+)
 
 from pynix._util import prepare_sys_path
 
 logger = structlog.get_logger(__name__)
+
+_DEFAULT_STORE_URI = "auto"
 
 
 class PrintRoots(Command):
@@ -76,10 +86,78 @@ class Gc(Command):
     subcommand: PrintRoots | PrintDead | PrintAlive
 
 
+class PathFromHashPart(Command):
+    """Resolve a store path from its hash prefix"""
+
+    hash_part: Positional[str] = arg(help="Store path hash prefix to resolve.")
+    store_uri: str = arg(_DEFAULT_STORE_URI, help="Store URI to query.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, nix.store(self.store_uri) as store:
+            resp = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=self.hash_part))
+            path = _format_store_path(resp.path.base_name) if resp.path is not None else None
+            _print_json({"path": path})
+
+
+class EnsurePath(Command):
+    """Ensure a store path is valid, substituting it if available"""
+
+    path: Positional[str] = arg(help="Store path to ensure.")
+    store_uri: str = arg(_DEFAULT_STORE_URI, help="Store URI to use.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, nix.store(self.store_uri) as store:
+            await store.ensure_path(EnsurePathRequest(path=self.path))
+            _print_json({"path": self.path, "valid": True})
+
+
+class Optimise(Command):
+    """Optimise store disk usage by hard-linking duplicate files"""
+
+    store_uri: str = arg(_DEFAULT_STORE_URI, help="Store URI to optimise.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, nix.store(self.store_uri) as store:
+            await store.optimise_store(OptimiseStoreRequest())
+            _print_json({"optimised": True})
+
+
+class Verify(Command):
+    """Verify store integrity"""
+
+    check_contents: bool = arg(False, help="Check path contents, not only metadata.")
+    repair: bool = arg(False, help="Attempt repair while verifying.")
+    store_uri: str = arg(_DEFAULT_STORE_URI, help="Store URI to verify.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, nix.store(self.store_uri) as store:
+            resp = await store.verify_store(
+                VerifyStoreRequest(check_contents=self.check_contents, repair=self.repair)
+            )
+            _print_json({"errors": resp.errors})
+
+
 class Store(Command):
     """Manage the Nix store"""
 
-    subcommand: Gc
+    subcommand: Gc | PathFromHashPart | EnsurePath | Optimise | Verify
+
 
 
 def _format_store_path(base_name: str) -> str:
