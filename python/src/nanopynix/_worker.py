@@ -123,7 +123,7 @@ def _register_primops(
 
 
 def _effective_settings_for_log() -> dict[str, str | None]:
-    return {name: nanopynix_util.get_setting(name) for name in _DIAGNOSTIC_SETTINGS}
+    return {name: nanopynix_util.get_setting(name) for name in _DIAGNOSTIC_SETTINGS}  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return type, no stubs
 
 
 def _install_worker_diagnostics(collector: LogCollector) -> None:
@@ -243,7 +243,7 @@ class WorkerServiceHandler(WorkerServiceBase):
         )
 
     def _open_store(self, uri: str) -> tuple[int, str, str]:
-        store = nanopynix_store.open_store() if uri == "auto" else nanopynix_store.open_store(uri)
+        store = nanopynix_store.open_store() if uri == "auto" else nanopynix_store.open_store(uri)  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return type, no stubs
         handle = self._state.handles.allocate(store, "store")
         if self._state.collector is not None:
             self._state.collector.callback(

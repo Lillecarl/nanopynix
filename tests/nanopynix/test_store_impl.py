@@ -1,5 +1,7 @@
 """Tests for nanopynix_store.register_store_implementation."""
 
+from __future__ import annotations
+
 import pytest
 
 import nanopynix

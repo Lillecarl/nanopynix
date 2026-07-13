@@ -46,7 +46,7 @@ async def _init_git_flake(flake_dir: Path, nixpkgs_path: str) -> None:
         await proc.wait()
 
 
-async def test_show_file(tmp_path, capsys):
+async def test_show_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("""
     let
@@ -73,7 +73,7 @@ async def test_show_file(tmp_path, capsys):
     assert "out" in drv["outputs"]
 
 
-async def test_show_file_with_attrpath(tmp_path, capsys):
+async def test_show_file_with_attrpath(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("""
     let
@@ -98,7 +98,7 @@ async def test_show_file_with_attrpath(tmp_path, capsys):
     assert result[drv_path]["name"] == "nested-hello-1"
 
 
-async def test_show_flake(capsys, nixpkgs_path: str):
+async def test_show_flake(capsys: pytest.CaptureFixture[str], nixpkgs_path: str) -> None:
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
         await _init_git_flake(flake_dir, nixpkgs_path)
@@ -112,7 +112,7 @@ async def test_show_flake(capsys, nixpkgs_path: str):
     assert "out" in drv["outputs"]
 
 
-async def test_show_flake_greeting_is_not_derivation(capsys, nixpkgs_path: str):
+async def test_show_flake_greeting_is_not_derivation(capsys: pytest.CaptureFixture[str], nixpkgs_path: str) -> None:
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
         await _init_git_flake(flake_dir, nixpkgs_path)
@@ -123,7 +123,7 @@ async def test_show_flake_greeting_is_not_derivation(capsys, nixpkgs_path: str):
     assert "value is not a derivation" in captured.out
 
 
-async def test_show_missing_both_errors(capsys):
+async def test_show_missing_both_errors(capsys: pytest.CaptureFixture[str]) -> None:
     cmd = Pynix.parse(["derivation", "show"])
     with pytest.raises(SystemExit):
         await cmd.astart()
@@ -131,7 +131,7 @@ async def test_show_missing_both_errors(capsys):
     assert "either --file or --flake is required" in captured.out
 
 
-async def test_show_both_file_and_flake_errors(tmp_path, capsys):
+async def test_show_both_file_and_flake_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{}")
     cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), "--flake", ".#hello"])

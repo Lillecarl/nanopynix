@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 
 import pytest
-from anyio import Path
+from pathlib import Path
+
+from anyio import Path as AnyioPath
 
 from pynix import Pynix
 
 
-async def test_build_file_derivation(tmp_path, capsys):
+async def test_build_file_derivation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "build-test.nix"
     nix_file.write_text("""
     let
@@ -31,10 +33,10 @@ async def test_build_file_derivation(tmp_path, capsys):
     data = json.loads(captured.out)
     out_path = data["outputs"]["out"]
     assert "pynix-build-file-test" in out_path
-    assert await Path(out_path).read_text() == "built-from-file\n"
+    assert await AnyioPath(out_path).read_text() == "built-from-file\n"
 
 
-async def test_build_file_derivation_attrpath(tmp_path, capsys):
+async def test_build_file_derivation_attrpath(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "build-test.nix"
     nix_file.write_text("""
     let
@@ -70,10 +72,10 @@ async def test_build_file_derivation_attrpath(tmp_path, capsys):
     data = json.loads(captured.out)
     out_path = data["outputs"]["out"]
     assert "pynix-build-attr-test" in out_path
-    assert await Path(out_path).read_text() == "built-from-attr\n"
+    assert await AnyioPath(out_path).read_text() == "built-from-attr\n"
 
 
-async def test_build_file_auto_calls_defaulted_lambda_before_attrpath(tmp_path, capsys):
+async def test_build_file_auto_calls_defaulted_lambda_before_attrpath(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "default.nix"
     nix_file.write_text("""
     { pkgs ? import <nixpkgs> {}, name ? "pynix-build-autocall-test" }:
@@ -96,10 +98,10 @@ async def test_build_file_auto_calls_defaulted_lambda_before_attrpath(tmp_path, 
     data = json.loads(captured.out)
     out_path = data["outputs"]["out"]
     assert "pynix-build-autocall-test" in out_path
-    assert await Path(out_path).read_text() == "built-from-autocall\n"
+    assert await AnyioPath(out_path).read_text() == "built-from-autocall\n"
 
 
-async def test_build_missing_attrpath_errors_before_build(tmp_path, capsys):
+async def test_build_missing_attrpath_errors_before_build(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "build-test.nix"
     nix_file.write_text("""
     let
@@ -126,7 +128,7 @@ async def test_build_missing_attrpath_errors_before_build(tmp_path, capsys):
     assert "attribute 'missing' not found" in captured.err
 
 
-async def test_build_flake_derivation(capsys, git_flake):
+async def test_build_flake_derivation(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
     cmd = Pynix.parse(["build", "--flake", f"{git_flake}#hello"])
 
     await cmd.astart()
@@ -135,10 +137,10 @@ async def test_build_flake_derivation(capsys, git_flake):
     data = json.loads(captured.out)
     out_path = data["outputs"]["out"]
     assert "test-hello" in out_path
-    assert await Path(out_path).read_text() == "hi\n"
+    assert await AnyioPath(out_path).read_text() == "hi\n"
 
 
-async def test_build_missing_input_errors(capsys):
+async def test_build_missing_input_errors(capsys: pytest.CaptureFixture[str]) -> None:
     cmd = Pynix.parse(["build"])
 
     with pytest.raises(SystemExit):

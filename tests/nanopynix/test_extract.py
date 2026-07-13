@@ -5,9 +5,13 @@ Needs C++ modules loaded but no Nix daemon.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import nanopynix_fetchers  # L1 Input
 import nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
 import nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
+import nanopynix
 from nanopynix._extract import (
     flake_ref_attrs,
     input_attrs,
@@ -65,7 +69,7 @@ def test_store_path_from_cpp():
     assert converted.name == "foo-1.0"
 
 
-def test_store_path_from_store_parse(store):
+def test_store_path_from_store_parse(store: Any):
     sp = store.parse_store_path(store.get_store_dir() + "/00000000000000000000000000000000-hello")
     converted = StorePath(store_path(sp))
     assert converted.base_name == "00000000000000000000000000000000-hello"
@@ -79,7 +83,7 @@ def test_store_path_from_store_parse(store):
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_path_info_from_real_path(store):
+def test_path_info_from_real_path(store: Any):
     """C++ query_path_info now returns a dict directly — validate shape."""
     path_strs = store.query_all_valid_paths()
     if not path_strs:
@@ -102,7 +106,7 @@ def test_path_info_from_real_path(store):
         assert "base_name" in ref
 
 
-def test_path_info_deriver_none(store):
+def test_path_info_deriver_none(store: Any):
     """A non-derivation path should have deriver=None."""
     path_strs = store.query_all_valid_paths()
     for d in path_strs:
@@ -132,7 +136,7 @@ def test_build_result_fields():
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_missing_info_shape(store):
+def test_missing_info_shape(store: Any):
     """C++ query_missing now returns a dict directly — validate shape."""
     sp = nanopynix_store.StorePath("00000000000000000000000000000000-nonexistent-1.0")
     result = store.query_missing([sp])  # returns dict
@@ -228,7 +232,7 @@ def test_locked_input_follows_multiple():
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_locked_flake_shape(eval_state, tmp_path):
+def test_locked_flake_shape(eval_state: nanopynix.EvalState, tmp_path: Path):
     """lock_flake returns a LockedFlake, extract yields expected dict shape."""
     import subprocess
 
