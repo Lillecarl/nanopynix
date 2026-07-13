@@ -121,7 +121,9 @@ async def test_query_derived_outputs():
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         drvs = [path for path in (StorePath(path) for path in paths) if path.is_derivation]
         if drvs:
-            outputs = (await store.query_derivation_outputs(QueryDerivationOutputsRequest(path=drvs[0].to_string))).paths
+            outputs = (
+                await store.query_derivation_outputs(QueryDerivationOutputsRequest(path=drvs[0].to_string))
+            ).paths
             assert isinstance(outputs, list)
 
 
@@ -148,11 +150,7 @@ async def test_query_substitutable_paths():
         paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
         if paths:
             path = StorePath(paths[0])
-            subs = (
-                await store.query_substitutable_paths(
-                    QuerySubstitutablePathsRequest(paths=[path.to_string])
-                )
-            ).paths
+            subs = (await store.query_substitutable_paths(QuerySubstitutablePathsRequest(paths=[path.to_string]))).paths
             assert isinstance(subs, list)
 
 
@@ -211,9 +209,7 @@ async def test_add_perm_root_and_indirect_root(tmp_path):
         if paths:
             path = StorePath(paths[0])
             root_path = tmp_path / "nanopynix-gc-root"
-            response = await store.add_perm_root(
-                AddPermRootRequest(store_path=path.to_string, gc_root=str(root_path))
-            )
+            response = await store.add_perm_root(AddPermRootRequest(store_path=path.to_string, gc_root=str(root_path)))
             assert response.path == str(root_path)
             assert root_path.is_symlink()
             await store.add_indirect_root(AddIndirectRootRequest(path=str(root_path)))

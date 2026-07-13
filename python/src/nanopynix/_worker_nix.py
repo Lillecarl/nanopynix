@@ -26,9 +26,7 @@ class NixThreadExecutor:
     """
 
     def __init__(self) -> None:
-        self._pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="nix"
-        )
+        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="nix")
 
     async def run(self, func: Callable[..., _T], *args: Any) -> _T:
         loop = asyncio.get_running_loop()

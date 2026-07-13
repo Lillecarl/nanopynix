@@ -87,7 +87,9 @@ class TestHashUtilities:
         assert result == "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
 
     def test_parse_hash_any_with_algo(self):
-        result = nanopynix_util.parse_hash_any("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", algo=44)
+        result = nanopynix_util.parse_hash_any(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", algo=44
+        )
         assert result == "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
 
 

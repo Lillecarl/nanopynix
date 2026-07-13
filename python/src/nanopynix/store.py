@@ -33,9 +33,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         from nanopynix_proto.nix.worker import OpenStoreRequest
 
         resp = await self._pool.call(
-            self._pool._worker_stub.open_store(
-                OpenStoreRequest(uri=self._uri), timeout=_RPC_TIMEOUT
-            )
+            self._pool._worker_stub.open_store(OpenStoreRequest(uri=self._uri), timeout=_RPC_TIMEOUT)
         )
         self._store_handle = resp.store_handle
         self._active = True
@@ -87,6 +85,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
             message_any.store_handle = self._store_handle
         method = getattr(self._pool._store_stub, method_name)
         return await self._store_call(method(message, timeout=_RPC_TIMEOUT))
+
 
 # Backward-compatible alias
 Store = StoreHandle

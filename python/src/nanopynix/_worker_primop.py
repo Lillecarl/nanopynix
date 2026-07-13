@@ -69,15 +69,11 @@ class ThreadedRpcPrimopBridge:
     def __init__(self, backchannel: WorkerBackchannel, loop: asyncio.AbstractEventLoop) -> None:
         self._backchannel = backchannel
         self._loop = loop
-        self._queue: asyncio.Queue[
-            tuple[str, list[Any], concurrent.futures.Future[Any]]
-        ] = asyncio.Queue()
+        self._queue: asyncio.Queue[tuple[str, list[Any], concurrent.futures.Future[Any]]] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
-        self._task = asyncio.create_task(
-            self._dispatch_loop(), name="nix-primop-dispatcher"
-        )
+        self._task = asyncio.create_task(self._dispatch_loop(), name="nix-primop-dispatcher")
 
     def stop(self) -> None:
         if self._task is not None:
@@ -105,20 +101,14 @@ class ThreadedRpcPrimopBridge:
 
     def call(self, name: str, args: list[Any]) -> Any:
         future: concurrent.futures.Future[Any] = concurrent.futures.Future()
-        self._loop.call_soon_threadsafe(
-            self._queue.put_nowait, (name, args, future)
-        )
+        self._loop.call_soon_threadsafe(self._queue.put_nowait, (name, args, future))
         try:
             return future.result(timeout=_RPC_TIMEOUT)
         except concurrent.futures.TimeoutError as exc:
-            raise TimeoutError(
-                f"manager primop {name!r} timed out after {_RPC_TIMEOUT:.0f}s"
-            ) from exc
+            raise TimeoutError(f"manager primop {name!r} timed out after {_RPC_TIMEOUT:.0f}s") from exc
 
 
-def rpc_primop_callback_factory(
-    bridge: ThreadedRpcPrimopBridge, name: str, arity: int
-):
+def rpc_primop_callback_factory(bridge: ThreadedRpcPrimopBridge, name: str, arity: int):
     """Return a synchronous callable suitable for ``register_primop()``.
 
     The worker-side primop registration calls this factory for each
@@ -127,9 +117,7 @@ def rpc_primop_callback_factory(
 
     def _callback(*args: Any) -> Any:
         if len(args) != arity:
-            raise TypeError(
-                f"primop {name!r} expects {arity} arguments, got {len(args)}"
-            )
+            raise TypeError(f"primop {name!r} expects {arity} arguments, got {len(args)}")
         return bridge.call(name, list(args))
 
     return _callback

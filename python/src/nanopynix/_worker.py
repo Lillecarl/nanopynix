@@ -149,9 +149,7 @@ class WorkerServiceHandler(WorkerServiceBase):
             if message.nix_conf is not None:
                 os.environ["NIX_USER_CONF_FILES"] = message.nix_conf
             if message.settings:
-                os.environ["NIX_CONFIG"] = "\n".join(
-                    f"{k} = {v}" for k, v in message.settings.items()
-                )
+                os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in message.settings.items())
 
             for k, v in message.settings.items():
                 nanopynix_util.set_setting(k, v)
@@ -197,15 +195,13 @@ class WorkerServiceHandler(WorkerServiceBase):
             store_handle=handle,
             uri=store.get_uri(),
             store_dir=store.get_store_dir(),
-            )
+        )
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
         self._state.handles.release(message.store_handle)
         return CloseStoreResponse()
 
-    async def subscribe_logs(
-        self, message: SubscribeLogsRequest
-    ) -> AsyncIterator[LogEvent]:
+    async def subscribe_logs(self, message: SubscribeLogsRequest) -> AsyncIterator[LogEvent]:
         """Server-streaming RPC — yield log events as they arrive."""
         collector = self._state.collector
         if collector is None:

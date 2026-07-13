@@ -47,9 +47,7 @@ def _network_to_dict(net: ipaddress.IPv4Network | ipaddress.IPv6Network) -> dict
         "isReserved": net.is_reserved,
         "isUnspecified": net.is_unspecified,
         "address": lambda n: str(net[int(n)]),
-        "subnet": lambda n, prefixlen_diff: str(
-            list(net.subnets(prefixlen_diff=prefixlen_diff))[int(n)]
-        ),
+        "subnet": lambda n, prefixlen_diff: str(list(net.subnets(prefixlen_diff=prefixlen_diff))[int(n)]),
     }
     if isinstance(net, ipaddress.IPv4Network):
         d["broadcastAddress"] = str(net.broadcast_address)

@@ -18,7 +18,11 @@
 let
   pythonEnv = python.withPackages (
     pp:
-    nanopynix.dependencies ++ nanopynix.nativeBuildInputs ++ pynix.dependencies ++ pynix.nativeBuildInputs ++ [
+    nanopynix.dependencies
+    ++ nanopynix.nativeBuildInputs
+    ++ pynix.dependencies
+    ++ pynix.nativeBuildInputs
+    ++ [
       nanopynix
       pynix
       pytest

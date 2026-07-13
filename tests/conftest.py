@@ -81,27 +81,37 @@ def _register_test_primops():
     # Callable-returning primops (tests the Python-callable → Nix-function bridge).
     nanopynix.register_primop("test_return_lazy_42", 0, [], "returns a zero-arg lambda → 42", lambda: lambda: 42)
     nanopynix.register_primop(
-        "test_attrs_property", 1, ["n"],
+        "test_attrs_property",
+        1,
+        ["n"],
         "returns { result = lambda: n * n; } (zero-arg, evaluated immediately)",
         lambda n: {"result": lambda: n * n},
     )
     nanopynix.register_primop(
-        "test_attrs_fn", 1, ["x"],
+        "test_attrs_fn",
+        1,
+        ["x"],
         "returns { add = lambda y: x + y; } (1-arg callable)",
         lambda x: {"add": lambda y: x + y},
     )
     nanopynix.register_primop(
-        "test_attrs_fn2", 1, ["x"],
+        "test_attrs_fn2",
+        1,
+        ["x"],
         "returns { mul = lambda a, b: x * a * b; } (2-arg callable)",
         lambda x: {"mul": lambda a, b: x * a * b},
     )
     nanopynix.register_primop(
-        "test_closure_fn", 2, ["n", "prefix"],
+        "test_closure_fn",
+        2,
+        ["n", "prefix"],
         "returns { greet = lambda name: prefix + ' ' + name + ' ' + str(n+2); }",
         lambda n, prefix: {"greet": lambda name: f"{prefix} {name} {n + 2}"},
     )
     nanopynix.register_primop(
-        "test_callable_curry", 2, ["a", "b"],
+        "test_callable_curry",
+        2,
+        ["a", "b"],
         "returns a callable that takes one arg",
         lambda _a, _b: lambda x: x * 2,
     )

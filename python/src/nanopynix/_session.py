@@ -140,9 +140,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
 
     def _check_active(self) -> None:
         if not self._active:
-            raise EvalSessionClosedError(
-                "EvalProxy is invalid — the EvalSession has been closed"
-            )
+            raise EvalSessionClosedError("EvalProxy is invalid — the EvalSession has been closed")
 
     def deactivate(self) -> None:
         self._active = False
@@ -850,9 +848,7 @@ class EvalSession:
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         from nanopynix_proto.nix.eval import EvalFileRequest
 
-        handle = await self._ensure_proxy().eval_file(
-            EvalFileRequest(path=path, store_handle=self._store_handle)
-        )
+        handle = await self._ensure_proxy().eval_file(EvalFileRequest(path=path, store_handle=self._store_handle))
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
@@ -954,9 +950,7 @@ class EvalSession:
     async def release_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
         from nanopynix_proto.nix.eval import ReleaseLockedFlakeRequest
 
-        await self._ensure_proxy().release_locked_flake(
-            ReleaseLockedFlakeRequest(handle=self._locked_flake_id(locked))
-        )
+        await self._ensure_proxy().release_locked_flake(ReleaseLockedFlakeRequest(handle=self._locked_flake_id(locked)))
 
     async def eval_flake(
         self,
@@ -989,6 +983,4 @@ class EvalSession:
         from nanopynix_proto.nix.eval import GetFlakeRequest
 
         ref_str = ref if isinstance(ref, str) else str(ref)
-        return await self._ensure_proxy().get_flake(
-            GetFlakeRequest(ref=ref_str, store_handle=self._store_handle)
-        )
+        return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str, store_handle=self._store_handle))

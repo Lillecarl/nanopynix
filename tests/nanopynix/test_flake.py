@@ -121,14 +121,16 @@ class TestEvalFlake:
         dep_dir.mkdir()
         _init_git_flake(dep_dir)
 
-        (tmp_path / "flake.nix").write_text("""
+        (tmp_path / "flake.nix").write_text(
+            """
         {
             inputs.dep.url = "DIR";
             outputs = { self, dep, ... }: {
                 val = 1;
             };
         }
-        """.replace("DIR", str(dep_dir)))
+        """.replace("DIR", str(dep_dir))
+        )
         subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
         subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
         subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
