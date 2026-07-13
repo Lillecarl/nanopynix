@@ -526,13 +526,13 @@ async def test_eval_concurrent_sessions(tmp_path: Path):
     f1.write_text("{ val = 10; }")
     f2.write_text("{ val = 20; }")
 
-    async def eval_one(path):
+    async def eval_one(path: str) -> Any:
         async with (
             Session() as nix,
             nix.store() as store,
             nix.eval(store) as session,
         ):
-            root = await session.file(path)
+            root = await session.file(path)  # type: ignore[reportUnknownMemberType] -- session from nanobind
             v = root.attr("val")
             return await v.force()
 

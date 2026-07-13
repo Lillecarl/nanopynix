@@ -13,7 +13,7 @@ from nanopynix.models import JsonValue, PrimOpSpec
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-_JsonValue = TypeAdapter(JsonValue)
+_JsonValue: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 def _yaml12_loader() -> type[Any]:
@@ -68,7 +68,7 @@ def _construct_yaml12_int(loader: Any, node: Any) -> int:
 
 def _validate_document(value: Any, builtin: str) -> JsonValue:
     try:
-        return _JsonValue.validate_python(value)
+        result: JsonValue = _JsonValue.validate_python(value)  # type: ignore[reportUnknownVariableType] -- TypeAdapter returns Any
     except ValidationError as exc:
         raise ValueError(f"{builtin}: YAML document is not JSON-compatible: {exc}") from exc
 

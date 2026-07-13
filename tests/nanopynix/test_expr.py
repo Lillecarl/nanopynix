@@ -44,7 +44,7 @@ class TestEvalString:
         assert v.type() == "string"
         assert v.as_string() == "hello world"
 
-    def test_value_keeps_eval_state_alive(self, store: nanopynix.Store, init_expr: object):
+    def test_value_keeps_eval_state_alive(self, store: Any, init_expr: object) -> None:
         eval_state = nanopynix.EvalState(store)
         value = eval_state.eval_string("42")
 

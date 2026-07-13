@@ -73,9 +73,9 @@ class TestInputFromAttrs:
 
 
 class TestInputFingerprint:
-    def test_get_fingerprint(self, store):
+    def test_get_fingerprint(self, store: Any) -> None:
         inp = nanopynix.input_from_url("github:NixOS/nixpkgs")
-        fp = inp.get_fingerprint(store)
+        fp = inp.get_fingerprint(store)  # type: ignore[reportUnknownMemberType] -- inp from nanobind
         if fp is not None:
             assert isinstance(fp, str)
             assert len(fp) > 0
