@@ -13,18 +13,18 @@ class TestRegisterStore:
         """Register a minimal store implementation and open it."""
 
         class MinimalStore:
-            def is_valid_path_uncached(self, path_str):
+            def is_valid_path_uncached(self, path_str: str) -> bool:
                 return True
 
-            def query_path_info(self, path_str):
+            def query_path_info(self, path_str: str) -> None:
                 return None
 
-            def query_path_from_hash_part(self, hash_part):
+            def query_path_from_hash_part(self, hash_part: str) -> None:
                 return None
 
         class Factory:
             @staticmethod
-            def open_store():
+            def open_store() -> object:
                 return MinimalStore()
 
         nanopynix_store.register_store_implementation(
@@ -44,7 +44,7 @@ class TestRegisterStore:
 
         class Factory:
             @staticmethod
-            def open_store():
+            def open_store() -> None:
                 return None
 
         nanopynix_store.register_store_implementation(
@@ -67,15 +67,15 @@ class TestRegisterStore:
 
         class Factory:
             @staticmethod
-            def open_store():
+            def open_store() -> object:
                 class S:
-                    def is_valid_path_uncached(self, p):
+                    def is_valid_path_uncached(self, p: str) -> bool:
                         return True
 
-                    def query_path_info(self, p):
+                    def query_path_info(self, p: str) -> None:
                         return None
 
-                    def query_path_from_hash_part(self, h):
+                    def query_path_from_hash_part(self, h: str) -> None:
                         return None
 
                 return S()
@@ -96,15 +96,15 @@ class TestRegisterStore:
         """Store returns False for unknown paths."""
 
         class Factory:
-            def open_store(self):
+            def open_store(self) -> object:
                 class S:
-                    def is_valid_path_uncached(self, p):
+                    def is_valid_path_uncached(self, p: str) -> bool:
                         return False
 
-                    def query_path_info(self, p):
+                    def query_path_info(self, p: str) -> None:
                         return None
 
-                    def query_path_from_hash_part(self, h):
+                    def query_path_from_hash_part(self, h: str) -> None:
                         return None
 
                 return S()
@@ -124,20 +124,20 @@ class TestRegisterStore:
         """Python store's is_valid_path_uncached controls validity."""
 
         class Factory:
-            def open_store(self):
+            def open_store(self) -> object:
                 class S:
-                    def __init__(self):
-                        self.valid = {
+                    def __init__(self) -> None:
+                        self.valid: set[str] = {
                             "00000000000000000000000000000001-yes",
                         }
 
-                    def is_valid_path_uncached(self, p):
+                    def is_valid_path_uncached(self, p: str) -> bool:
                         return p in self.valid
 
-                    def query_path_info(self, p):
+                    def query_path_info(self, p: str) -> None:
                         return None
 
-                    def query_path_from_hash_part(self, h):
+                    def query_path_from_hash_part(self, h: str) -> None:
                         return None
 
                 return S()

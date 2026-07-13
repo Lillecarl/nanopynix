@@ -93,8 +93,8 @@ class PynixStoreScenario:
             redirect_stdout(stdout),
             redirect_stderr(stderr),
         ):
-            cmd = Pynix.parse(args)
-            await cmd.astart()
+            cmd = Pynix.parse(args)  # type: ignore[reportUnknownMemberType]  # Pynix C++ nanobind extension without full stubs
+            await cmd.astart()  # type: ignore[reportUnknownMemberType]  # Pynix C++ nanobind extension without full stubs
         self.last_stdout = stdout.getvalue()
         self.last_stderr = stderr.getvalue()
         self.last_logs = [dict(entry) for entry in self.live_log.entries_for(test_name)[before:]]
@@ -306,7 +306,7 @@ def pynix_live_log(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[PynixLiveLog]:
     log_dir = tmp_path_factory.mktemp("pynix-live-logs")
-    stack_file = (log_dir / "pynix-manager-stacks.log").open("a")
+    stack_file: io.TextIOWrapper = (log_dir / "pynix-manager-stacks.log").open("a")
     with contextlib.suppress(RuntimeError, ValueError):
         faulthandler.register(signal.SIGUSR2, file=stack_file, all_threads=True)
     log = PynixLiveLog(path=log_dir / "pynix-structlog.jsonl", stack_path=log_dir / "pynix-manager-stacks.log")
@@ -413,7 +413,7 @@ async def empty_store(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIt
 
 
 @pytest.fixture
-async def git_flake(nixpkgs_path: str):
+async def git_flake(nixpkgs_path: str) -> AsyncIterator[Path]:
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
         (flake_dir / "flake.nix").write_text(f"""
@@ -487,30 +487,30 @@ def _patched_environ(values: dict[str, str]) -> Generator[None, None, None]:
 def _pynix_configure_logging_noop() -> Generator[None, None, None]:
     import pynix._util as pynix_util
 
-    old_configure_logging = pynix_util.configure_logging
-    pynix_util.configure_logging = lambda: None
+    old_configure_logging = pynix_util.configure_logging  # type: ignore[reportUnknownMemberType]  # pynix._util is C++/nanobind extension without stubs
+    pynix_util.configure_logging = lambda: None  # type: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pynix._util has no stubs
     try:
         yield
     finally:
-        pynix_util.configure_logging = old_configure_logging
+        pynix_util.configure_logging = old_configure_logging  # type: ignore[reportUnknownMemberType]  # pynix._util has no stubs
 
 
 @contextlib.contextmanager
 def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
     import nanopynix
 
-    old_session = nanopynix.Session
+    old_session = nanopynix.Session  # type: ignore[reportUnknownMemberType]  # nanopynix C++/nanobind extension without full stubs
 
-    class VerboseSession(old_session):
+    class VerboseSession(old_session):  # type: ignore[reportUnknownVariableType]  # old_session type unknown from C++ extension
         def __init__(self, *args: object, **kwargs: object) -> None:
             kwargs.setdefault("verbosity", verbosity)
             super().__init__(*args, **kwargs)
 
-    nanopynix.Session = VerboseSession
+    nanopynix.Session = VerboseSession  # type: ignore[reportUnknownMemberType]  # nanopynix has no stubs
     try:
         yield
     finally:
-        nanopynix.Session = old_session
+        nanopynix.Session = old_session  # type: ignore[reportUnknownMemberType]  # nanopynix has no stubs
 
 
 @contextlib.contextmanager

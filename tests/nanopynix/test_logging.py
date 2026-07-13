@@ -1,5 +1,9 @@
 """Tests for the PyLogger log streaming with LogCollector."""
 
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# LogCollector, nanopynix_util.{install_logger,remove_logger,get/set_verbosity,set_logger_request_id}
+# are C++ nanobind extension functions without type stubs; all member/variable types are Unknown.
+
 from __future__ import annotations
 
 import asyncio

@@ -46,19 +46,19 @@ def _init():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wi
 
 
 @pytest.fixture(scope="session")
-def init_store():
+def init_store() -> None:
     """Initialize libstore (once per session) without loading nix.conf."""
     nanopynix.init_libstore(load_config=False)
 
 
 @pytest.fixture(scope="session")
-def store(init_store):  # noqa: ARG001
+def store(init_store: object) -> object:  # noqa: ARG001
     """Open the default Nix store (session-scoped)."""
     return nanopynix.open_store()
 
 
 @pytest.fixture(scope="session")
-def init_expr():
+def init_expr() -> None:
     """Initialize libexpr (once per session)."""
     nanopynix.init_libexpr()
 
@@ -85,7 +85,7 @@ def _register_test_primops():  # type: ignore[reportUnusedFunction] -- pytest au
     nanopynix.register_primop("test_add4", 4, ["a", "b", "c", "d"], "add 4 ints", lambda a, b, c, d: a + b + c + d)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
 
     # Callable-returning primops (tests the Python-callable → Nix-function bridge).
-    nanopynix.register_primop("test_return_lazy_42", 0, [], "returns a zero-arg lambda → 42", lambda: lambda: 42)
+    nanopynix.register_primop("test_return_lazy_42", 0, [], "returns a zero-arg lambda → 42", lambda: lambda: 42)  # type: ignore[reportUnknownLambdaType]  # primop callbacks receive Any from Nix
     nanopynix.register_primop(
         "test_attrs_property",
         1,
@@ -124,7 +124,7 @@ def _register_test_primops():  # type: ignore[reportUnusedFunction] -- pytest au
 
 
 @pytest.fixture(scope="session")
-def eval_state(store, init_expr, _register_test_primops):  # noqa: ARG001
+def eval_state(store: object, init_expr: object, _register_test_primops: object) -> object:  # noqa: ARG001
     """Create a session-scoped EvalState. Depends on _register_test_primops
     so that primops are registered before EvalState processes them."""
     return nanopynix.EvalState(store)
@@ -146,4 +146,4 @@ def _cleanup_primops():  # type: ignore[reportUnusedFunction] -- pytest autouse 
     class _PrimopRegistryModule(Protocol):
         def _cleanup_primop_registry(self) -> None: ...
 
-    atexit.register(cast("_PrimopRegistryModule", nanopynix_expr)._cleanup_primop_registry)
+    atexit.register(cast("_PrimopRegistryModule", nanopynix_expr)._cleanup_primop_registry)  # type: ignore[reportPrivateUsage]  # intentional cleanup of C++ state at process exit
