@@ -221,7 +221,27 @@ async def test_ensure_path(populated_store: dict[str, str], capsys):
     assert data == {"path": store_path, "valid": True}
 
 
-async def test_store_cat_reads_file_from_temporary_store(tmp_path, monkeypatch, capsys):
+async def test_store_cat_reads_file_from_populated_store(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(["store", "cat", populated_store["text_path"], "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    assert captured.out == "temporary-store-message\n"
+
+
+async def test_store_ls_lists_populated_store_path(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(["store", "ls", populated_store["hello_path"], "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    assert "bin" in captured.out.splitlines()
+
+    cmd = Pynix.parse(["store", "ls", populated_store["hello_path"], "--json", "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert {"name": "bin", "type": "directory"} in data["entries"]
+
+
+async def test_store_cat_local_path_mapping_unit(tmp_path, monkeypatch, capsys):
     store_root = tmp_path / "store-root"
     store_url = f"local?root={store_root}"
     out_path = "/nix/store/00000000000000000000000000000000-pynix-store-cat-test"
@@ -236,7 +256,7 @@ async def test_store_cat_reads_file_from_temporary_store(tmp_path, monkeypatch, 
     assert captured.out == "cat-output\n"
 
 
-async def test_store_ls_lists_directory_from_temporary_store(tmp_path, monkeypatch, capsys):
+async def test_store_ls_local_path_mapping_unit(tmp_path, monkeypatch, capsys):
     store_root = tmp_path / "store-root"
     store_url = f"local?root={store_root}"
     out_path = "/nix/store/00000000000000000000000000000000-pynix-store-ls-test"
