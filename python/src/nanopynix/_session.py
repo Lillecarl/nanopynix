@@ -497,7 +497,7 @@ class ValueProxy:
         )
 
         build_results = await self._ctx.proxy._store_proxy_call(
-            "build_paths_with_results",
+            "build_for_humans",
             BuildPathsWithResultsRequest(
                 paths=[drv_path],
                 build_mode=build_mode,

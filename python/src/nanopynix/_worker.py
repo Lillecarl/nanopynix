@@ -145,19 +145,21 @@ class WorkerServiceHandler(WorkerServiceBase):
     async def init(self, message: InitRequest) -> InitResponse:
         """Bootstrap Nix: configure, init libstore/libexpr, open store."""
         try:
+            settings = dict(message.settings)
+            verbosity = settings.pop("__nanopynix_verbosity", None)
             # Apply config file path before init
             if message.nix_conf is not None:
                 os.environ["NIX_USER_CONF_FILES"] = message.nix_conf
-            if message.settings:
-                os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in message.settings.items())
+            if settings:
+                os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
 
-            for k, v in message.settings.items():
+            for k, v in settings.items():
                 nanopynix_util.set_setting(k, v)
             for f in message.experimental_features:
                 nanopynix_util.enable_experimental_feature(f)
 
             nanopynix_util.init_libstore(load_config=False)
-            nanopynix_util.set_verbosity(5)  # lvlChatty — emit fetch/log events
+            nanopynix_util.set_verbosity(int(verbosity) if verbosity is not None else 2)
             nanopynix_expr.init_libexpr()
 
             if message.pure_eval is not None:
@@ -189,16 +191,20 @@ class WorkerServiceHandler(WorkerServiceBase):
             raise
 
     async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
-        store = nanopynix_store.open_store() if message.uri == "auto" else nanopynix_store.open_store(message.uri)
-        handle = self._state.handles.allocate(store, "store")
+        store_handle, uri, store_dir = await self._state.executor.run(self._open_store, message.uri)
         return OpenStoreResponse(
-            store_handle=handle,
-            uri=store.get_uri(),
-            store_dir=store.get_store_dir(),
+            store_handle=store_handle,
+            uri=uri,
+            store_dir=store_dir,
         )
 
+    def _open_store(self, uri: str) -> tuple[int, str, str]:
+        store = nanopynix_store.open_store() if uri == "auto" else nanopynix_store.open_store(uri)
+        handle = self._state.handles.allocate(store, "store")
+        return handle, store.get_uri(), store.get_store_dir()
+
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
-        self._state.handles.release(message.store_handle)
+        await self._state.executor.run(self._state.handles.release, message.store_handle)
         return CloseStoreResponse()
 
     async def subscribe_logs(self, message: SubscribeLogsRequest) -> AsyncIterator[LogEvent]:
@@ -276,16 +282,16 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
 
     state = WorkerState()
     state.collector = collector
+
+    from nanopynix._worker_nix import NixThreadExecutor
+
+    state.executor = NixThreadExecutor()
+
     if backchannel is not None:
         state.log_task = asyncio.create_task(
             _relay_logs_to_manager(collector, backchannel),
             name="nanopynix-log-backchannel",
         )
-
-        from nanopynix._worker_nix import NixThreadExecutor
-
-        state.executor = NixThreadExecutor()
-
         from nanopynix._worker_primop import ThreadedRpcPrimopBridge
 
         loop = asyncio.get_running_loop()

@@ -12,6 +12,15 @@ from pathlib import Path
 import pytest
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-temp-store-builds",
+        action="store_true",
+        default=False,
+        help="run tests that build into temporary Nix stores",
+    )
+
+
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -25,10 +34,13 @@ async def nixpkgs_path(repo_root: Path) -> str:
 
 @pytest.fixture(scope="module")
 async def populated_store(
+    request: pytest.FixtureRequest,
     repo_root: Path,
     nixpkgs_path: str,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> AsyncIterator[dict[str, str]]:
+    if not request.config.getoption("--run-temp-store-builds"):
+        pytest.skip("requires --run-temp-store-builds")
     store_root = tmp_path_factory.mktemp("pynix-store")
     store_url = f"local?root={store_root}"
     env = os.environ.copy()
@@ -50,6 +62,18 @@ async def populated_store(
         yield {"store_url": store_url, "hello_path": hello_path}
     finally:
         _rmtree_force(store_root)
+
+
+@pytest.fixture
+async def empty_store(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[dict[str, Path | str]]:
+    if not request.config.getoption("--run-temp-store-builds"):
+        pytest.skip("requires --run-temp-store-builds")
+    store_root = tmp_path / "store-root"
+    try:
+        yield {"store_url": f"local?root={store_root}", "store_root": store_root}
+    finally:
+        if store_root.exists():
+            _rmtree_force(store_root)
 
 
 @pytest.fixture

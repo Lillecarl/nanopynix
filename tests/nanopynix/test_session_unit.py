@@ -138,6 +138,7 @@ def _mock_reserved_worker():
     rw._eval_stub = _make_eval_stub()
     rw._store_stub = MagicMock()
     rw._store_stub.build_paths_with_results = AsyncMock()
+    rw._store_stub.build_for_humans = AsyncMock()
     rw._store_stub.build_derivation = AsyncMock()
     rw._store_stub.read_derivation = AsyncMock()
     rw.release = AsyncMock()
@@ -599,7 +600,7 @@ class TestValueProxyLifecycle:
         ]
         build_result = MagicMock()
         build_result.success = True
-        w._store_stub.build_paths_with_results.return_value = SimpleNamespace(results=[build_result])
+        w._store_stub.build_for_humans.return_value = SimpleNamespace(results=[build_result])
         w._store_stub.read_derivation.return_value = SimpleNamespace(
             outputs={"out": SimpleNamespace(path="/nix/store/aaa-demo")},
             env={},
@@ -615,12 +616,13 @@ class TestValueProxyLifecycle:
             (1, "type"),
             (1, "drvPath"),
         ]
-        w._store_stub.build_paths_with_results.assert_awaited_once()
-        build_request = w._store_stub.build_paths_with_results.call_args.args[0]
+        w._store_stub.build_for_humans.assert_awaited_once()
+        build_request = w._store_stub.build_for_humans.call_args.args[0]
         assert build_request.paths == ["/nix/store/aaa-demo.drv"]
         assert build_request.build_mode == BuildMode.Normal.value
         assert build_request.eval_store_handle == 123
         assert build_request.store_handle == 123
+        w._store_stub.build_paths_with_results.assert_not_awaited()
         w._store_stub.build_derivation.assert_not_awaited()
         w._store_stub.read_derivation.assert_awaited_once()
         read_request = w._store_stub.read_derivation.call_args.args[0]
@@ -640,7 +642,7 @@ class TestValueProxyLifecycle:
         ]
         build_result = MagicMock()
         build_result.success = True
-        w._store_stub.build_paths_with_results.return_value = SimpleNamespace(results=[build_result])
+        w._store_stub.build_for_humans.return_value = SimpleNamespace(results=[build_result])
         w._store_stub.read_derivation.return_value = SimpleNamespace(
             outputs={"out": SimpleNamespace(path="/nix/store/aaa-demo")},
             env={},
@@ -650,12 +652,13 @@ class TestValueProxyLifecycle:
         result = await vp.build(build_mode=BuildMode.Check)
 
         assert result == {"out": "/nix/store/aaa-demo"}
-        w._store_stub.build_paths_with_results.assert_awaited_once()
-        build_request = w._store_stub.build_paths_with_results.call_args.args[0]
+        w._store_stub.build_for_humans.assert_awaited_once()
+        build_request = w._store_stub.build_for_humans.call_args.args[0]
         assert build_request.paths == ["/nix/store/aaa-demo.drv"]
         assert build_request.build_mode == BuildMode.Check.value
         assert build_request.eval_store_handle == 123
         assert build_request.store_handle == 123
+        w._store_stub.build_paths_with_results.assert_not_awaited()
         w._store_stub.build_derivation.assert_not_awaited()
 
     async def test_build_store_overrides_build_store_not_eval_store(self):
@@ -671,7 +674,7 @@ class TestValueProxyLifecycle:
         ]
         build_result = MagicMock()
         build_result.success = True
-        w._store_stub.build_paths_with_results.return_value = SimpleNamespace(results=[build_result])
+        w._store_stub.build_for_humans.return_value = SimpleNamespace(results=[build_result])
         w._store_stub.read_derivation.return_value = SimpleNamespace(
             outputs={"out": SimpleNamespace(path="/nix/store/aaa-demo")},
             env={},
@@ -685,7 +688,7 @@ class TestValueProxyLifecycle:
         result = await vp.build(store=build_store)
 
         assert result == {"out": "/nix/store/aaa-demo"}
-        build_request = w._store_stub.build_paths_with_results.call_args.args[0]
+        build_request = w._store_stub.build_for_humans.call_args.args[0]
         assert build_request.store_handle == 456
         assert build_request.eval_store_handle == 123
 
