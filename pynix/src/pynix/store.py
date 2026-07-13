@@ -26,12 +26,14 @@ _DEFAULT_STORE = "auto"
 class PrintRoots(Command):
     """List the garbage collector roots"""
 
+    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+
     @override
     async def run(self) -> None:
         prepare_sys_path()
         import nanopynix
 
-        async with nanopynix.Session() as nix, nix.store() as store:
+        async with nanopynix.Session() as nix, nix.store(self.store) as store:
             resp = await store.find_roots(FindRootsRequest())
             roots = []
             for root in resp.roots:
@@ -55,6 +57,7 @@ class PrintDead(Command):
         False,
         help="Actually delete the dead store paths instead of just listing them.",
     )
+    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -62,7 +65,7 @@ class PrintDead(Command):
         import nanopynix
 
         action = GcAction.DELETE_DEAD if self.rip else GcAction.RETURN_DEAD
-        async with nanopynix.Session() as nix, nix.store() as store:
+        async with nanopynix.Session() as nix, nix.store(self.store) as store:
             resp = await store.collect_garbage(CollectGarbageRequest(action=action))
             _print_json({"paths": list(resp.paths), "bytesFreed": resp.bytes_freed})
 
@@ -70,12 +73,14 @@ class PrintDead(Command):
 class PrintAlive(Command):
     """List live paths in the store (reachable from GC roots)"""
 
+    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+
     @override
     async def run(self) -> None:
         prepare_sys_path()
         import nanopynix
 
-        async with nanopynix.Session() as nix, nix.store() as store:
+        async with nanopynix.Session() as nix, nix.store(self.store) as store:
             resp = await store.collect_garbage(CollectGarbageRequest(action=GcAction.RETURN_LIVE))
             _print_json({"paths": list(resp.paths)})
 

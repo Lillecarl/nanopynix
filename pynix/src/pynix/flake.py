@@ -13,6 +13,8 @@ from pynix._util import prepare_sys_path
 logger = structlog.get_logger(__name__)
 console = Console()
 
+_DEFAULT_STORE = "auto"
+
 
 class Show(Command):
     """Show the outputs provided by a flake"""
@@ -23,6 +25,7 @@ class Show(Command):
         short="A",
         help="Dot-separated attribute path within the flake outputs to start from.",
     )
+    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
 
     @override
     async def run(self) -> None:
@@ -35,7 +38,7 @@ class Show(Command):
 
         async with (
             nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
-            nix.store() as store,
+            nix.store(self.store) as store,
             nix.eval(store) as session,
         ):
             outputs = await session.eval_flake(base_ref)

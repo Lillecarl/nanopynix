@@ -4,7 +4,7 @@ from pynix import Pynix
 
 
 async def test_flake_show_root(capsys, git_flake):
-    cmd = Pynix.parse(["flake", "show", str(git_flake)])
+    cmd = Pynix.parse(["flake", "show", str(git_flake), "--store", "auto"])
     await cmd.astart()
     captured = capsys.readouterr()
     assert "hello" in captured.out

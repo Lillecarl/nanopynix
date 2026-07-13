@@ -15,7 +15,7 @@ def _parse_json_output(out: str) -> object:
 
 
 async def test_eval_expr(capsys):
-    cmd = Pynix.parse(["eval", "--expr", "1 + 1"])
+    cmd = Pynix.parse(["eval", "--expr", "1 + 1", "--store", "auto"])
     await cmd.astart()
     captured = capsys.readouterr()
     assert _parse_json_output(captured.out) == 2

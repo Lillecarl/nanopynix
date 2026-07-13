@@ -48,7 +48,7 @@ async def test_show_file(tmp_path, capsys):
       args = [ "-c" "echo hi > $out" ];
     }
     """)
-    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file)])
+    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), "--store", "auto"])
     await cmd.astart()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
