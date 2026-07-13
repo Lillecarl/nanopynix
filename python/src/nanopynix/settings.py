@@ -278,22 +278,22 @@ def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None
 
 
 def list_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_util.list_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+    raw: dict[str, object] = json.loads(nanopynix_util.list_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType] -- C++ nanobind return, no stubs
     return _settings_metadata_from_raw(raw)
 
 
 def list_eval_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_expr.list_eval_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+    raw: dict[str, object] = json.loads(nanopynix_expr.list_eval_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType] -- C++ nanobind return, no stubs
     return _settings_metadata_from_raw(raw)
 
 
 def list_fetch_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_fetchers.list_fetch_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+    raw: dict[str, object] = json.loads(nanopynix_fetchers.list_fetch_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType] -- C++ nanobind return, no stubs
     return _settings_metadata_from_raw(raw)
 
 
 def list_flake_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_flake.list_flake_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+    raw: dict[str, object] = json.loads(nanopynix_flake.list_flake_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType] -- C++ nanobind return, no stubs
     return _settings_metadata_from_raw(raw)
 
 
@@ -317,7 +317,7 @@ def check_all_settings_model_drift(*, include_optional: bool = False) -> dict[st
 def _settings_metadata_from_raw(raw: object) -> dict[str, NixSettingMetadata]:
     if not isinstance(raw, dict):
         raise TypeError("Nix returned non-object settings metadata")
-    return {key: NixSettingMetadata.model_validate(value) for key, value in raw.items()}
+    return {str(key): NixSettingMetadata.model_validate(value) for key, value in raw.items()}  # type: ignore[reportUnknownArgumentType]  # raw is dict[Any, Any] from nanobind JSON
 
 
 def _metadata_for_surface(surface: SettingsSurface) -> dict[str, NixSettingMetadata]:

@@ -38,25 +38,26 @@ class TestParseFlakeRef:
 
     def test_repr(self) -> None:
         ref = nanopynix.parse_flake_ref("github:NixOS/nixpkgs")  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
+        r = repr(ref)  # type: ignore[reportUnknownVariableType]  # ref type from nanobind
         assert r.startswith("FlakeRef(")
 
 
 class TestLockFlake:
-    def test_lock_flake_nixpkgs(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_lock_flake_nixpkgs(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         locked = nanopynix.lock_flake(eval_state, ref)  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         desc = locked.description()  # type: ignore[reportUnknownMemberType]  # LockedFlake from nanobind
         assert isinstance(desc, str)
 
-    def test_lock_flake_inputs(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_lock_flake_inputs(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension
         locked = nanopynix.lock_flake(eval_state, ref)  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension
         inputs = locked.inputs()  # type: ignore[reportUnknownMemberType]  # LockedFlake from nanobind
         assert isinstance(inputs, dict)
 
-    def test_lock_flake_repr(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_lock_flake_repr(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension
         locked = nanopynix.lock_flake(eval_state, ref)  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension
@@ -65,7 +66,7 @@ class TestLockFlake:
 
 
 class TestGetFlake:
-    def test_get_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_get_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension
         resolved = nanopynix.get_flake(eval_state, ref)  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension
@@ -73,7 +74,7 @@ class TestGetFlake:
 
 
 class TestCallFlake:
-    def test_call_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_call_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         """call_flake evaluates a locked flake's outputs."""
         (tmp_path / "flake.nix").write_text("""
         {
@@ -98,7 +99,7 @@ class TestCallFlake:
 
 
 class TestEvalFlake:
-    def test_eval_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_eval_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         """eval_flake locks and evaluates a flake in one step."""
         (tmp_path / "flake.nix").write_text("""
         {
@@ -119,7 +120,7 @@ class TestEvalFlake:
         count = outputs.attr_get("count")  # type: ignore[reportUnknownMemberType]  # NixValue from nanobind
         assert count.as_int() == 7  # type: ignore[reportUnknownMemberType]  # NixValue from nanobind
 
-    def test_eval_flake_writes_lock_file(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_eval_flake_writes_lock_file(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         """eval_flake with write_lock_file=True creates flake.lock."""
         dep_dir = tmp_path / "dep"
         dep_dir.mkdir()
@@ -143,7 +144,7 @@ class TestEvalFlake:
         nanopynix_flake.eval_flake(eval_state, str(tmp_path), write_lock_file=True)  # type: ignore[reportUnknownMemberType]  # nanopynix_flake nanobind extension
         assert (tmp_path / "flake.lock").exists()
 
-    def test_eval_flake_no_write_lock_file(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_eval_flake_no_write_lock_file(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         """eval_flake with write_lock_file=False does NOT create flake.lock."""
         _init_git_flake(tmp_path)
         assert not (tmp_path / "flake.lock").exists()
@@ -152,7 +153,7 @@ class TestEvalFlake:
 
 
 class TestWriteLockFile:
-    def test_write_lock_file(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_write_lock_file(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension without stubs
         """lock_flake with write_lock_file=False, then write_lock_file() persists."""
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))  # type: ignore[reportUnknownMemberType]  # nanopynix nanobind extension

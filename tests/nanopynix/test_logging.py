@@ -24,9 +24,9 @@ class _LogTestModule(Protocol):
 _log_test: "Callable[[str], None]" = cast("_LogTestModule", nanopynix_util)._log_test
 
 
-async def _collect(collector, count, timeout=2.0):  # noqa: ASYNC109
+async def _collect(collector: LogCollector, count: int, timeout: float = 2.0) -> list[tuple[int, str, int, str]]:  # noqa: ASYNC109
     """Collect `count` events from the async stream."""
-    events = []
+    events: list[tuple[int, str, int, str]] = []
     stream = collector.stream()
     try:
         for _ in range(count):

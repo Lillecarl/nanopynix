@@ -49,7 +49,7 @@ class LogCapture:
 
     def __init__(self, manager: _WorkerManager) -> None:
         self._manager = manager
-        self._sub = None
+        self._sub: Any = None
         self.events: list[LogEvent] = []
 
     async def __aenter__(self) -> LogCapture:
@@ -64,7 +64,7 @@ class LogCapture:
 
     async def __aexit__(self, *args: object) -> None:
         if self._sub is not None:
-            self._sub.unsubscribe()
+            self._sub.unsubscribe()  # type: ignore[reportUnknownMemberType]  # subscription handle type from worker manager, no stubs
             self._sub = None
 
 
@@ -81,9 +81,9 @@ def _to_primop_specs(specs: Sequence[PrimOpSpec | Mapping[str, Any]] | None) -> 
 
 def _normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
     if nix_path is None:
-        return list(nanopynix_expr.parse_nix_path())
+        return list(nanopynix_expr.parse_nix_path())  # type: ignore[reportUnknownMemberType]  # nanopynix_expr C++ nanobind extension without stubs
     if isinstance(nix_path, str):
-        return list(nanopynix_expr.parse_nix_path(nix_path))
+        return list(nanopynix_expr.parse_nix_path(nix_path))  # type: ignore[reportUnknownMemberType]  # nanopynix_expr C++ nanobind extension without stubs
     return list(nix_path)
 
 
@@ -192,7 +192,7 @@ class Session:
         """Record typed log events during an async context block."""
         return LogCapture(self._manager)
 
-    def subscribe(self, callback):
+    def subscribe(self, callback: Any) -> Any:
         """Subscribe a callback to live log events.
 
         The callback receives raw ``LogEvent`` proto messages from the worker.
@@ -222,7 +222,7 @@ class Session:
         Returns an ``EvalSession`` context manager that holds the worker
         for the duration.  All exported handles are released on exit.
         """
-        if store._session_id != self._session_id:
+        if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage]  # cross-session guard on internal ID
             raise ValueError("StoreHandle belongs to a different session")
         return EvalSession(self._manager, store.store_handle, session_id=self._session_id)
 

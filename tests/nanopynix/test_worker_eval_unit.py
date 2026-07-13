@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from nanopynix._handle_registry import HandleRegistry
-from nanopynix._worker_eval import EvalServiceHandler
+from nanopynix._handle_registry import HandleRegistry  # type: ignore[reportPrivateUsage]
+from nanopynix._worker_eval import EvalServiceHandler  # type: ignore[reportPrivateUsage]
 
 
 class _FakeEvalState:
@@ -21,8 +21,8 @@ class _FakeEvalState:
         self.released.append(value)
 
 
-def test_eval_state_binds_to_first_requested_store_handle(monkeypatch):
-    import nanopynix._worker_eval as worker_eval
+def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.MonkeyPatch):
+    import nanopynix._worker_eval as worker_eval  # type: ignore[reportPrivateUsage]
 
     monkeypatch.setattr(worker_eval.nanopynix_expr, "EvalState", _FakeEvalState)
 
@@ -37,17 +37,17 @@ def test_eval_state_binds_to_first_requested_store_handle(monkeypatch):
     )
     handler = EvalServiceHandler(state)
 
-    selected = handler._get_es(second_handle)
+    selected = handler._get_es(second_handle)  # type: ignore[reportPrivateUsage]
 
     assert isinstance(selected, _FakeEvalState)
     assert selected.store == "second-store"
     assert selected.nix_path == ["nixpkgs=/tmp/nixpkgs"]
     assert state.eval_store_handle == second_handle
 
-    assert handler._get_es(second_handle) is selected
+    assert handler._get_es(second_handle) is selected  # type: ignore[reportPrivateUsage]
 
     with pytest.raises(RuntimeError, match="already bound to a different store"):
-        handler._get_es(first_handle)
+        handler._get_es(first_handle)  # type: ignore[reportPrivateUsage]
 
     assert state.eval_state is selected
     assert state.eval_store_handle == second_handle
