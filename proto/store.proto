@@ -32,6 +32,8 @@ service StoreService {
   rpc OptimiseStore(OptimiseStoreRequest) returns (OptimiseStoreResponse);
   rpc VerifyStore(VerifyStoreRequest) returns (VerifyStoreResponse);
   rpc GetBuildLog(GetBuildLogRequest) returns (GetBuildLogResponse);
+  rpc AddToStore(AddToStoreRequest) returns (nix.common.StorePath);
+  rpc ComputeStorePath(ComputeStorePathRequest) returns (nix.common.StorePath);
 }
 
 message GetUriRequest {
@@ -213,4 +215,20 @@ message GetBuildLogRequest {
 }
 message GetBuildLogResponse {
   optional string log = 1;
+}
+
+message AddToStoreRequest {
+  string path = 1;
+  optional string name = 2;
+  string method = 3;
+  string hash_algo = 4;
+  int64 store_handle = 100;
+}
+
+message ComputeStorePathRequest {
+  string path = 1;
+  optional string name = 2;
+  string method = 3;
+  string hash_algo = 4;
+  int64 store_handle = 100;
 }

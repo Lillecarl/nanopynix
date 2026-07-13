@@ -5,6 +5,7 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/typing.h>
 
+#include <filesystem>
 #include <limits>
 
 #include <nix/store/store-api.hh>
@@ -26,6 +27,8 @@
 #include <nix/util/serialise.hh>
 #include <nix/util/file-descriptor.hh>
 #include <nix/util/error.hh>
+#include <nix/util/file-system.hh>
+#include <nix/util/posix-source-accessor.hh>
 
 #include "py_store_impl.hh"
 
@@ -200,6 +203,13 @@ static bool request_bool(const nb::dict &request, const char *key) {
 
 static uint64_t request_uint64(const nb::dict &request, const char *key) {
     return nb::cast<uint64_t>(request[nb::str(key)]);
+}
+
+static std::optional<std::string> request_optional_string(const nb::dict &request, const char *key) {
+    auto value = request[nb::str(key)];
+    if (value.is_none())
+        return std::nullopt;
+    return nb::cast<std::string>(value);
 }
 
 static nix::StorePath request_store_path(nix::Store &s, const nb::dict &request, const char *key) {
@@ -428,6 +438,32 @@ static nix::LogStore &require_log_store(nix::Store &s) {
     if (store == nullptr)
         throw nix::Error("store '%s' does not support retrieving build logs", s.config.getHumanReadableURI());
     return *store;
+}
+
+static nix::ContentAddressMethod request_content_address_method(const nb::dict &request) {
+    auto raw = request_string(request, "method");
+    if (raw.empty())
+        raw = "nar";
+    return nix::ContentAddressMethod::parse(raw);
+}
+
+static nix::HashAlgorithm request_hash_algo(const nb::dict &request) {
+    auto raw = request_string(request, "hash_algo");
+    if (raw.empty())
+        raw = "sha256";
+    return nix::parseHashAlgo(raw);
+}
+
+static std::string request_store_add_name(const nb::dict &request) {
+    if (auto name = request_optional_string(request, "name"))
+        return *name;
+    auto path = std::filesystem::path(request_string(request, "path"));
+    return path.filename().string();
+}
+
+static nix::SourcePath request_source_path(const nb::dict &request) {
+    return nix::PosixSourceAccessor::createAtRoot(
+        nix::makeParentCanonical(std::filesystem::path(request_string(request, "path"))));
 }
 
 static nix::GCAction gc_action_from_int(int action) {
@@ -823,6 +859,24 @@ static nb::dict store_get_build_log(nix::Store &s, const nb::dict &request) {
     return d;
 }
 
+static nb::dict store_add_to_store(nix::Store &s, const nb::dict &request) {
+    return store_path_to_dict(s.addToStoreSlow(
+        request_store_add_name(request),
+        request_source_path(request),
+        request_content_address_method(request),
+        request_hash_algo(request),
+        {}).path);
+}
+
+static nb::dict store_compute_store_path(nix::Store &s, const nb::dict &request) {
+    return store_path_to_dict(s.computeStorePath(
+        request_store_add_name(request),
+        request_source_path(request),
+        request_content_address_method(request),
+        request_hash_algo(request),
+        {}).first);
+}
+
 // =========================================================================
 // Store bindings
 // =========================================================================
@@ -936,7 +990,9 @@ static void bind_store(nb::module_ &m) {
         .def("store_ensure_path", &store_ensure_path, "request"_a)
         .def("store_optimise_store", &store_optimise_store, "request"_a)
         .def("store_verify_store", &store_verify_store, "request"_a)
-        .def("store_get_build_log", &store_get_build_log, "request"_a);
+        .def("store_get_build_log", &store_get_build_log, "request"_a)
+        .def("store_add_to_store", &store_add_to_store, "request"_a)
+        .def("store_compute_store_path", &store_compute_store_path, "request"_a);
 }
 
 // =========================================================================
