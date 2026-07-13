@@ -225,6 +225,7 @@ class WorkerServiceHandler(WorkerServiceBase):
                 }
                 for p in message.primops
             ]
+            assert self._state.rpc_bridge is not None  # set by worker_service_factory before init
             _register_primops(primops_raw, rpc_bridge=self._state.rpc_bridge)
 
             return InitResponse(status="ok")
@@ -235,6 +236,7 @@ class WorkerServiceHandler(WorkerServiceBase):
             raise
 
     async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
+        assert self._state.executor is not None  # set by worker_service_factory before init
         store_handle, uri, store_dir = await self._state.executor.run(self._open_store, message.uri)
         return OpenStoreResponse(
             store_handle=store_handle,
@@ -255,6 +257,7 @@ class WorkerServiceHandler(WorkerServiceBase):
         return handle, store.get_uri(), store.get_store_dir()  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
+        assert self._state.executor is not None  # set by worker_service_factory before init
         await self._state.executor.run(self._state.handles.release, message.store_handle)
         return CloseStoreResponse()
 

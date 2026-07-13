@@ -1,5 +1,9 @@
 """Import-time checked adapters from generated RPC services to local RPC calls."""
 
+# pyright: reportPrivateUsage=false
+# The mixin adapter pattern intentionally delegates to _nanobind_rpc_call across
+# subclass boundaries.  This is by design, not a private-access violation.
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
@@ -84,7 +88,7 @@ def _make_service_forwarder(
 
         async def _forward_nix(self: GeneratedServiceAdapterMixin, message: Message) -> Message:
             executor: Any = _resolve_attr(self, nix_executor_attr)
-            raw = await executor.run(lambda: self._nanobind_rpc_call(binding_method_name, message))  # type: ignore[reportPrivateUsage] -- cross-class RPC dispatch
+            raw = await executor.run(lambda: self._nanobind_rpc_call(binding_method_name, message))
             if isinstance(raw, response_type):
                 return raw
             if isinstance(raw, Mapping):
@@ -95,7 +99,7 @@ def _make_service_forwarder(
         return _forward_nix
 
     async def _forward(self: GeneratedServiceAdapterMixin, message: Message) -> Message:
-        raw = self._nanobind_rpc_call(binding_method_name, message)  # type: ignore[reportPrivateUsage] -- cross-class RPC dispatch
+        raw = self._nanobind_rpc_call(binding_method_name, message)
         if isinstance(raw, response_type):
             return raw
         if isinstance(raw, Mapping):

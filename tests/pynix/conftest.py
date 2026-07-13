@@ -1,3 +1,7 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# conftest.py interacts heavily with nanopynix/pynix C++ nanobind extensions
+# that lack type stubs.  Member types and variable types are inherently unknown.
+
 from __future__ import annotations
 
 import asyncio
@@ -93,8 +97,8 @@ class PynixStoreScenario:
             redirect_stdout(stdout),
             redirect_stderr(stderr),
         ):
-            cmd = Pynix.parse(args)  # type: ignore[reportUnknownMemberType]  # Pynix C++ nanobind extension without full stubs
-            await cmd.astart()  # type: ignore[reportUnknownMemberType]  # Pynix C++ nanobind extension without full stubs
+            cmd = Pynix.parse(args)
+            await cmd.astart()
         self.last_stdout = stdout.getvalue()
         self.last_stderr = stderr.getvalue()
         self.last_logs = [dict(entry) for entry in self.live_log.entries_for(test_name)[before:]]
@@ -487,26 +491,26 @@ def _patched_environ(values: dict[str, str]) -> Generator[None, None, None]:
 def _pynix_configure_logging_noop() -> Generator[None, None, None]:
     import pynix._util as pynix_util
 
-    old_configure_logging = pynix_util.configure_logging  # type: ignore[reportUnknownMemberType]  # pynix._util is C++/nanobind extension without stubs
-    pynix_util.configure_logging = lambda: None  # type: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pynix._util has no stubs
+    old_configure_logging = pynix_util.configure_logging
+    pynix_util.configure_logging = lambda: None
     try:
         yield
     finally:
-        pynix_util.configure_logging = old_configure_logging  # type: ignore[reportUnknownMemberType]  # pynix._util has no stubs
+        pynix_util.configure_logging = old_configure_logging
 
 
 @contextlib.contextmanager
 def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
     import nanopynix
 
-    old_session = nanopynix.Session  # type: ignore[reportUnknownMemberType]  # nanopynix C++/nanobind extension without full stubs
+    old_session = nanopynix.Session
 
-    class VerboseSession(old_session):  # type: ignore[reportUnknownVariableType, reportUnknownBaseType]  # old_session type unknown from C++ extension
+    class VerboseSession(old_session):  # type: ignore[reportUnknownBaseType]  # old_session is a C++ nanobind type, no stubs
         def __init__(self, *args: object, **kwargs: object) -> None:
             kwargs.setdefault("verbosity", verbosity)
-            super().__init__(*args, **kwargs)  # type: ignore[reportUnknownMemberType]  # super() base is C++ nanobind type, no stubs
+            super().__init__(*args, **kwargs)
 
-    nanopynix.Session = VerboseSession  # type: ignore[reportUnknownMemberType]  # nanopynix has no stubs
+    nanopynix.Session = VerboseSession
     try:
         yield
     finally:

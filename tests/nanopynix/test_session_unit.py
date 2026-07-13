@@ -3,8 +3,9 @@
 No Nix daemon needed — exercises error paths and edge cases.
 """
 
-# pyright: reportPrivateUsage=false
+# pyright: reportPrivateUsage=false, reportUnknownMemberType=false
 # The entire file exercises pool/session internals via mock access.
+# All members accessed on MagicMock objects are inherently unknown.
 
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
-import nanopynix._pool as pool_module  # type: ignore[reportPrivateUsage] -- test accesses pool internals
+import nanopynix._pool as pool_module
 from nanopynix import (
     BuildMode,
     EvalSessionClosedError,
@@ -28,17 +29,17 @@ from nanopynix import (
     ValueReleasedError,
     WrongNixTypeError,
 )
-from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- test accesses pool private constants
-from nanopynix._pool import ReservedWorker, _WorkerManager as _WorkerManager  # type: ignore[reportPrivateUsage] -- test accesses pool internals
+from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT
+from nanopynix._pool import ReservedWorker, _WorkerManager as _WorkerManager
 from nanopynix._session import (
     EvalProxy,
     EvalSession,
     ValueList,
     ValueProxy,
-    _EvalOwner as _EvalOwner,  # type: ignore[reportPrivateUsage] -- test mocks
-    _EvalOwnerToken as _EvalOwnerToken,  # type: ignore[reportPrivateUsage] -- test mocks
-    _EvalProxyContext as _EvalProxyContext,  # type: ignore[reportPrivateUsage] -- test mocks
-    _ResolvedValue as _ResolvedValue,  # type: ignore[reportPrivateUsage] -- test mocks
+    _EvalOwner as _EvalOwner,
+    _EvalOwnerToken as _EvalOwnerToken,
+    _EvalProxyContext as _EvalProxyContext,
+    _ResolvedValue as _ResolvedValue,
 )
 from nanopynix.models import LogEvent
 from nanopynix.nix import Session

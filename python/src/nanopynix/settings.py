@@ -1,5 +1,8 @@
 """Typed Nix configuration models."""
 
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# nanopynix_* C++ nanobind extension calls lack type stubs.
+
 from __future__ import annotations
 
 import json
@@ -278,22 +281,22 @@ def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None
 
 
 def list_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_util.list_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType] -- C++ nanobind return, no stubs
+    raw: dict[str, object] = json.loads(nanopynix_util.list_settings_metadata_json())  # type: ignore[reportUnknownArgumentType] -- C++ nanobind return type passed to json.loads
     return _settings_metadata_from_raw(raw)
 
 
 def list_eval_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_expr.list_eval_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType] -- C++ nanobind return, no stubs
+    raw: dict[str, object] = json.loads(nanopynix_expr.list_eval_settings_metadata_json())  # type: ignore[reportUnknownArgumentType] -- C++ nanobind return type passed to json.loads
     return _settings_metadata_from_raw(raw)
 
 
 def list_fetch_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_fetchers.list_fetch_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType] -- C++ nanobind return, no stubs
+    raw: dict[str, object] = json.loads(nanopynix_fetchers.list_fetch_settings_metadata_json())  # type: ignore[reportUnknownArgumentType] -- C++ nanobind return type passed to json.loads
     return _settings_metadata_from_raw(raw)
 
 
 def list_flake_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_flake.list_flake_settings_metadata_json())  # type: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType] -- C++ nanobind return, no stubs
+    raw: dict[str, object] = json.loads(nanopynix_flake.list_flake_settings_metadata_json())  # type: ignore[reportUnknownArgumentType] -- C++ nanobind return type passed to json.loads
     return _settings_metadata_from_raw(raw)
 
 

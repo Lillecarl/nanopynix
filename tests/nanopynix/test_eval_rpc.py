@@ -1,5 +1,8 @@
 """Tests for eval over RPC — EvalSession + ValueProxy."""
 
+# pyright: reportUnknownMemberType=false
+# Session / nanopynix are C++ nanobind extensions without type stubs.
+
 from __future__ import annotations
 
 import asyncio
