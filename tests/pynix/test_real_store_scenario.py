@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # All lines access PynixStoreScenario fixture methods/results whose return types
 # cascade from C++ nanobind extensions and cannot be resolved by the type checker.
 

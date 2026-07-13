@@ -1,7 +1,8 @@
 """Integration tests for the L2 Store facade via Session."""
 
-# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnnecessaryIsInstance=false
 # nanopynix / nanopynix_proto are C++ nanobind extensions without type stubs.
+# Variable types and isinstance checks involving C++ types are inherently unresolvable.
 
 from __future__ import annotations
 

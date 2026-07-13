@@ -1,6 +1,7 @@
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportPrivateUsage=false, reportUnknownLambdaType=false
 # conftest.py interacts heavily with nanopynix/pynix C++ nanobind extensions
-# that lack type stubs.  Member types and variable types are inherently unknown.
+# that lack type stubs.  Member types, variable types, private imports, and
+# lambdas without type context are inherent to the test infrastructure.
 
 from __future__ import annotations
 

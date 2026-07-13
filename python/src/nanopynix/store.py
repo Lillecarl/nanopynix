@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from nanopynix_proto.nix.store import StoreServiceBase
 
 from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
-from nanopynix._pool import WorkerBusyError, _grpc_call
+from nanopynix._pool import WorkerBusyError, _grpc_call  # type: ignore[reportPrivateUsage] -- cross-module internal utility
 from nanopynix._rpc_proxy import RpcProxyMixin
 
 if TYPE_CHECKING:
@@ -72,7 +72,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
     async def _store_call(self, coro: Any) -> Any:
         """Acquire the worker lock, execute a gRPC call, and handle errors."""
-        wrapped = _grpc_call(coro)
+        wrapped = _grpc_call(coro)  # type: ignore[reportUnknownVariableType] -- _grpc_call return type not resolved
         try:
             return await self._pool.call(wrapped)
         except WorkerBusyError:

@@ -1,8 +1,10 @@
 """Import-time checked adapters from generated RPC services to local RPC calls."""
 
-# pyright: reportPrivateUsage=false
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false
 # The mixin adapter pattern intentionally delegates to _nanobind_rpc_call across
 # subclass boundaries.  This is by design, not a private-access violation.
+# Unknown variable types arise from dynamically resolving methods via getattr
+# and get_type_hints on generated service base classes without stubs.
 
 from __future__ import annotations
 

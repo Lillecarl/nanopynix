@@ -1,5 +1,6 @@
-# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportMissingParameterType=false
 # nanopynix / pynix are C++ nanobind extensions without type stubs.
+# Variable types cascade from unknown member access; capsys fixture lacks stubs.
 
 from __future__ import annotations
 

@@ -3,7 +3,7 @@
 No Nix daemon needed.
 """
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportPrivateUsage=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 # These are suppressed file-wide because every test uses MagicMock objects whose
 # members are inherently unknown at the type-checker level.
 
