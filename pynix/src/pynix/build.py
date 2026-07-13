@@ -53,13 +53,12 @@ class Build(Command):
             console.print("[red]Error:[/red] --file and --flake are mutually exclusive")
             raise SystemExit(1)
 
-        settings = {
-            "substituters": self.substituters,
-            "trusted-public-keys": self.trusted_public_keys,
-            "__nanopynix_verbosity": str(self.verbosity),
-        }
+        settings = nanopynix.NixSettingsEnv(
+            substituters=self.substituters.split(),
+            trusted_public_keys=self.trusted_public_keys.split(),
+        )
         async with (
-            nanopynix.Session(experimental_features=["flakes", "nix-command"], settings=settings) as nix,
+            nanopynix.Session(settings=settings, verbosity=self.verbosity) as nix,
             forward_nix_logs(nix, print_build_logs=self.print_build_logs),
             nix.store(self.eval_store) as eval_store,
             nix.store(self.store) as build_store,

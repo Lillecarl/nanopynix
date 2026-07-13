@@ -27,10 +27,12 @@ from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from nanopynix._pool import _WorkerManager
 from nanopynix._session import EvalSession
 from nanopynix.models import LogEvent, PrimOpSpec
+from nanopynix.settings import NixSettings, normalize_nix_settings
 from nanopynix.store import StoreHandle
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+    from os import PathLike
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +86,7 @@ class Session:
 
         async with Session(
             store_uri="daemon",
-            settings={"max-jobs": "4"},
-            experimental_features=["flakes"],
+            settings=NixSettings(max_jobs=4),
         ) as session:
             async with session.store() as store:
                 info = await store.query_path_info(QueryPathInfoRequest(path=sp.to_string))
@@ -96,9 +97,9 @@ class Session:
         *,
         store_uri: str = "auto",
         nix_conf: str | None = "/etc/nix/nix.conf",
-        config: dict[str, str] | None = None,
-        settings: dict[str, str] | None = None,
+        settings: NixSettings | PathLike[str] | str | None = None,
         experimental_features: list[str] | None = None,
+        verbosity: int | None = None,
         primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
         primop_callables: Mapping[str, Callable[..., Any]] | None = None,
         pure_eval: bool | None = None,
@@ -107,13 +108,15 @@ class Session:
         worker_oom_score_adj: int | None = None,
         reserved_worker_oom_score_adj: int | None = None,
     ) -> None:
-        if config is not None and settings is not None:
-            raise TypeError("Use either config= or settings=, not both")
+        nix_settings = normalize_nix_settings(settings).with_experimental_features(experimental_features)
+        worker_settings = nix_settings.to_worker_settings()
+        if verbosity is not None:
+            worker_settings["__nanopynix_verbosity"] = str(verbosity)
         self._manager = _WorkerManager(
             store_uri=store_uri,
             nix_conf=nix_conf,
-            settings=config if config is not None else settings,
-            experimental_features=experimental_features,
+            settings=worker_settings,
+            experimental_features=[],
             primops=_to_primop_specs(primops),
             primop_callables=dict(primop_callables) if primop_callables is not None else None,
             pure_eval=pure_eval,

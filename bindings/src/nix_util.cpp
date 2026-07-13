@@ -4,6 +4,7 @@
 #include <nanobind/stl/map.h>
 
 #include <nix/store/globals.hh>
+#include <nix/util/config-global.hh>
 #include <nix/util/configuration.hh>
 #include <nix/util/error.hh>
 #include <nix/util/experimental-features.hh>
@@ -12,6 +13,7 @@
 #include <nix/util/url.hh>
 
 #include <memory>
+#include <nlohmann/json.hpp>
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -21,36 +23,28 @@ using namespace nb::literals;
 // =========================================================================
 
 static std::optional<std::string> get_setting(const std::string &name) {
-    // Try main settings first
-    {
-        std::map<std::string, nix::Config::SettingInfo> settings;
-        nix::settings.getSettings(settings);
-        auto it = settings.find(name);
-        if (it != settings.end()) return it->second.value;
-    }
-    // Fall back to experimental feature settings
-    {
-        std::map<std::string, nix::Config::SettingInfo> settings;
-        nix::experimentalFeatureSettings.getSettings(settings);
-        auto it = settings.find(name);
-        if (it != settings.end()) return it->second.value;
-    }
+    std::map<std::string, nix::Config::SettingInfo> settings;
+    nix::globalConfig.getSettings(settings);
+    auto it = settings.find(name);
+    if (it != settings.end()) return it->second.value;
     return std::nullopt;
 }
 
 static void set_setting(const std::string &name, const std::string &value) {
-    if (nix::settings.set(name, value)) return;
-    if (nix::experimentalFeatureSettings.set(name, value)) return;
+    if (nix::globalConfig.set(name, value)) return;
     throw std::runtime_error("unknown setting: " + name);
 }
 
 static std::map<std::string, std::string> list_settings() {
     std::map<std::string, nix::Config::SettingInfo> settings;
-    nix::settings.getSettings(settings);
-    nix::experimentalFeatureSettings.getSettings(settings);
+    nix::globalConfig.getSettings(settings);
     std::map<std::string, std::string> out;
     for (auto &[k, v] : settings) out[k] = v.value;
     return out;
+}
+
+static std::string list_settings_metadata_json() {
+    return nix::globalConfig.toJSON().dump();
 }
 
 static void enable_experimental_feature(const std::string &name) {
@@ -175,6 +169,7 @@ NB_MODULE(nanopynix_util, m) {
     m.def("set_setting", &set_setting, "name"_a, "value"_a);
     m.def("get_setting", &get_setting, "name"_a);
     m.def("list_settings", &list_settings);
+    m.def("list_settings_metadata_json", &list_settings_metadata_json);
     m.def("enable_experimental_feature", &enable_experimental_feature, "name"_a,
           "Enable an experimental Nix feature (e.g. 'flakes', 'nix-command')");
 

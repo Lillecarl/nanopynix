@@ -5,6 +5,7 @@
   hatchling,
   janus,
   pydantic,
+  pydantic-settings,
   pyyaml,
   strip-ansi,
   nanopynix-bindings ? callPackage ../bindings/package.nix { },
@@ -29,6 +30,7 @@ buildPythonPackage {
     grpclib-transports
     janus
     pydantic
+    pydantic-settings
     pyyaml
     strip-ansi
   ];
