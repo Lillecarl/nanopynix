@@ -36,12 +36,14 @@ class ConnectionPool:
         factory: Callable[[], Awaitable[Connection]],
         gate: ResourceGate,
         idle_ttl: float = 10.0,
+        max_connections: int = 64,
         on_connection_created: Callable[[Connection], None] | None = None,
     ) -> None:
         self.store_id = store_id
         self.factory = factory
         self.gate = gate
         self.idle_ttl = idle_ttl
+        self._slots = asyncio.Semaphore(max_connections)
         self.on_connection_created = on_connection_created
 
         self.active_connections = 0
@@ -191,45 +193,49 @@ class ConnectionPool:
                     await conn.close()
             return
 
-        # Wait for memory safety before acquiring
-        await self.gate.wait_mem_clear()
-
-        self.active_connections += 1
-        conn: Connection | None = None
+        await self._slots.acquire()
         try:
-            conn = await self.get_or_create_conn()
+            # Wait for memory safety before allocating a connection.
+            await self.gate.wait_mem_clear()
 
-            # Increment nesting count
-            counts = _nested_conns.get({}).copy()
-            counts[self.store_id] = counts.get(self.store_id, 0) + 1
-            _nested_conns.set(counts)
-
+            self.active_connections += 1
+            conn: Connection | None = None
             try:
-                async with conn:
-                    yield conn
-            finally:
-                # Decrement nesting count
+                conn = await self.get_or_create_conn()
+
+                # Increment nesting count
                 counts = _nested_conns.get({}).copy()
-                counts[self.store_id] = counts.get(self.store_id, 0) - 1
+                counts[self.store_id] = counts.get(self.store_id, 0) + 1
                 _nested_conns.set(counts)
 
-                if conn is not None:
-                    if conn.dirty:
-                        log.warning(
-                            "store_discarding_dirty_connection",
-                            store_id=self.store_id,
-                            conn_id=conn.id,
-                            op_log=" -> ".join(conn.op_log[-10:]) or "(empty)",
-                        )
-                        if conn in self.all_conns:
-                            self.all_conns.remove(conn)
-                        with suppress(Exception):
-                            await conn.close()
-                    else:
-                        self.idle_conns.append((conn, time.monotonic()))
-                        self.start_sweep()
+                try:
+                    async with conn:
+                        yield conn
+                finally:
+                    # Decrement nesting count
+                    counts = _nested_conns.get({}).copy()
+                    counts[self.store_id] = counts.get(self.store_id, 0) - 1
+                    _nested_conns.set(counts)
+
+                    if conn is not None:
+                        if conn.dirty:
+                            log.warning(
+                                "store_discarding_dirty_connection",
+                                store_id=self.store_id,
+                                conn_id=conn.id,
+                                op_log=" -> ".join(conn.op_log[-10:]) or "(empty)",
+                            )
+                            if conn in self.all_conns:
+                                self.all_conns.remove(conn)
+                            with suppress(Exception):
+                                await conn.close()
+                        else:
+                            self.idle_conns.append((conn, time.monotonic()))
+                            self.start_sweep()
+            finally:
+                self.active_connections -= 1
         finally:
-            self.active_connections -= 1
+            self._slots.release()
 
     def build_conn(self) -> AbstractAsyncContextManager[Connection]:
         return self.acquire("build")
