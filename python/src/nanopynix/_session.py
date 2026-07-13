@@ -581,6 +581,14 @@ class ValueProxy:
         result = await self._ctx.proxy.call(CallRequest(handle=self.handle, args=call_args))
         return self._ctx.value(result.handle, result.type)
 
+    async def auto_call(self, *, timeout: float | None = None) -> ValueProxy:
+        """Apply Nix top-level auto-call semantics to a function value."""
+        await self._ensure_resolved(timeout=timeout)
+        from nanopynix_proto.nix.eval import AutoCallRequest
+
+        result = await self._ctx.proxy.auto_call(AutoCallRequest(handle=self.handle))
+        return self._ctx.value(result.handle, result.type)
+
     async def __call__(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
         return await self.call(*args, timeout=timeout)
 

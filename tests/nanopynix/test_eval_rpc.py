@@ -244,6 +244,20 @@ async def test_eval_callable_function_proxy():
         assert await result.force_as(NixType.STRING) == "demo"
 
 
+async def test_eval_auto_call_function_with_default_attrset_args():
+    """auto_call applies Nix top-level call semantics for all-default attrset lambdas."""
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        fn = await eval.string('{ pkgs ? {}, name ? "demo" }: { inherit name pkgs; }')
+        result = await fn.auto_call()
+
+        assert await result.attr("name").force_as(NixType.STRING) == "demo"
+        assert await result.has_attr("pkgs")
+
+
 async def test_eval_call_non_function_raises():
     """Calling a non-function checks the remote type before issuing call RPC."""
     async with (

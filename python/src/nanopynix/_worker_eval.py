@@ -14,6 +14,7 @@ from nanopynix_proto.nix.eval import (
     AttrNamesRequest,
     AttrNamesResponse,
     AttrRequest,
+    AutoCallRequest,
     CallLockedFlakeRequest,
     CallRequest,
     EvalFileRequest,
@@ -260,6 +261,12 @@ class EvalServiceHandler(EvalServiceBase):
         type_name = value.type_name()
         nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
         return TypeNameResponse(type=nix_type)
+
+    async def auto_call(self, message: AutoCallRequest) -> common_pb.ValueHandle:
+        return await self._state.executor.run(self._do_auto_call, message)
+
+    def _do_auto_call(self, message: AutoCallRequest) -> common_pb.ValueHandle:
+        return self._export(self._resolve(message.handle).auto_call())
 
     async def call(self, message: CallRequest) -> common_pb.ValueHandle:
         return await self._state.executor.run(self._do_call, message)

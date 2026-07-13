@@ -74,6 +74,52 @@ async def test_build_file_derivation_attrpath(tmp_path, capsys):
     assert Path(out_path).read_text() == "built-from-attr\n"
 
 
+async def test_build_file_auto_calls_defaulted_lambda_before_attrpath(tmp_path, capsys):
+    nix_file = tmp_path / "default.nix"
+    nix_file.write_text("""
+    { pkgs ? {}, name ? "pynix-build-autocall-test" }:
+    {
+      package = builtins.derivation {
+        inherit name;
+        system = builtins.currentSystem;
+        builder = "/bin/sh";
+        args = [ "-c" "echo built-from-autocall > $out" ];
+      };
+    }
+    """)
+    cmd = Pynix.parse(["build", "--file", str(nix_file), "--attrpath", "package"])
+
+    await cmd.astart()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    out_path = data["outputs"]["out"]
+    assert "pynix-build-autocall-test" in out_path
+    assert Path(out_path).read_text() == "built-from-autocall\n"
+
+
+async def test_build_missing_attrpath_errors_before_build(tmp_path, capsys):
+    nix_file = tmp_path / "build-test.nix"
+    nix_file.write_text("""
+    {
+      package = builtins.derivation {
+        name = "pynix-build-attr-test";
+        system = builtins.currentSystem;
+        builder = "/bin/sh";
+        args = [ "-c" "echo should-not-build > $out" ];
+      };
+    }
+    """)
+    cmd = Pynix.parse(["build", "--file", str(nix_file), "--attrpath", "missing"])
+
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "attribute 'missing' not found" in captured.err
+
+
 async def test_build_flake_derivation(capsys, git_flake):
     cmd = Pynix.parse(["build", "--flake", f"{git_flake}#hello"])
 
@@ -93,4 +139,5 @@ async def test_build_missing_input_errors(capsys):
         await cmd.astart()
 
     captured = capsys.readouterr()
-    assert "either --file or --flake is required" in captured.out
+    assert captured.out == ""
+    assert "either --file or --flake is required" in captured.err
