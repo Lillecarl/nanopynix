@@ -1,5 +1,6 @@
 nanopynix_expr.__prefix__:
     type ValueType = int | float | bool | str | None | list[ValueType] | dict[str, ValueType]
+    \from collections.abc import Callable, Sequence
     \from nanopynix_store import Store
 
 nanopynix_expr._set_pure_eval:
@@ -8,6 +9,15 @@ nanopynix_expr._set_restrict_eval:
     def _set_restrict_eval(restrict: bool) -> None: ...
 nanopynix_expr._set_allowed_uris:
     def _set_allowed_uris(uris: list[str]) -> None: ...
+
+nanopynix_expr.register_primop:
+    def register_primop(
+        name: str,
+        arity: int,
+        arg_names: Sequence[str],
+        doc: str,
+        callback: Callable[..., ValueType],
+    ) -> None: ...
 
 nanopynix_expr.Value.to_python:
     def to_python(self) -> ValueType: ...
