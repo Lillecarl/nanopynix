@@ -169,6 +169,11 @@ async def _write_value(val: Any, ann: type, ctx: WriteContext) -> None:
     if origin is types.UnionType:
         non_none = tuple(a for a in args if a is not type(None))
         if len(non_none) == 1:
+            if val is None and non_none[0].__name__ == "StorePath":
+                # Nix represents an absent deriver as an empty store-path
+                # string, not the Python value's textual representation.
+                ctx.writer.write_string("")
+                return
             return await _write_value(val, non_none[0], ctx)
 
     # -- list generics --
