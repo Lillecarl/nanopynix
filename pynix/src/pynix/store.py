@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, override
+from urllib.parse import parse_qs, urlparse
 
 import structlog
 from clypi import Command, Positional, arg
@@ -24,6 +26,7 @@ from nanopynix_proto.nix.store import (
     QueryAllValidPathsRequest,
     QueryDerivationOutputsRequest,
     QueryMissingRequest,
+    QueryPathInfoRequest,
     QueryPathFromHashPartRequest,
     QueryReferrersRequest,
     QuerySubstitutablePathsRequest,
@@ -371,6 +374,56 @@ class EnsurePath(Command):
             _print_json({"path": self.path, "valid": True})
 
 
+class Cat(Command):
+    """Print a file inside a local Nix store path"""
+
+    path: Positional[str] = arg(help="File path to print.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+            resolved = await _resolve_local_store_path(store, self.store, self.path)
+
+        if not resolved.is_file():
+            raise SystemExit(f"{self.path} is not a regular file")
+        with resolved.open("rb") as f:
+            sys.stdout.buffer.write(f.read())
+
+
+class Ls(Command):
+    """List files inside a local Nix store path"""
+
+    path: Positional[str] = arg(help="File or directory path to list.")
+    json: bool = arg(False, help="Print machine-readable JSON.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+            resolved = await _resolve_local_store_path(store, self.store, self.path)
+
+        if resolved.is_dir():
+            entries = sorted(resolved.iterdir(), key=lambda path: path.name)
+        elif resolved.exists():
+            entries = [resolved]
+        else:
+            raise SystemExit(f"{self.path} does not exist")
+
+        if self.json:
+            _print_json({"entries": [_directory_entry_to_json(entry) for entry in entries]})
+            return
+        for entry in entries:
+            sys.stdout.write(entry.name)
+            sys.stdout.write("\n")
+
+
 class Optimise(Command):
     """Optimise store disk usage by hard-linking duplicate files"""
 
@@ -425,6 +478,8 @@ class Store(Command):
         | AddIndirectRoot
         | PathFromHashPart
         | EnsurePath
+        | Cat
+        | Ls
         | Optimise
         | Verify
     )
@@ -446,3 +501,56 @@ def _print_json(obj: object) -> None:
 
 def _print_paths(paths: Iterable[Any]) -> None:
     _print_json({"paths": [_format_store_path(path.base_name) for path in paths]})
+
+
+async def _resolve_local_store_path(store: Any, store_uri: str, path: str) -> Path:
+    store_dir_resp = await store.get_store_dir(GetStoreDirRequest())
+    store_dir = store_dir_resp.dir.rstrip("/")
+    store_path, suffix = _split_store_path(path, store_dir)
+    await store.query_path_info(QueryPathInfoRequest(path=store_path))
+
+    physical_store_dir = _physical_store_dir(store_uri, store_dir)
+    return physical_store_dir / store_path.removeprefix(f"{store_dir}/") / suffix
+
+
+def _split_store_path(path: str, store_dir: str) -> tuple[str, Path]:
+    prefix = f"{store_dir}/"
+    if not path.startswith(prefix):
+        raise SystemExit(f"{path} is not inside {store_dir}")
+    rest = path.removeprefix(prefix)
+    base_name, separator, suffix = rest.partition("/")
+    if not base_name:
+        raise SystemExit(f"{path} is not a store path")
+    suffix_path = Path(suffix) if separator else Path()
+    if suffix_path.is_absolute() or ".." in suffix_path.parts:
+        raise SystemExit(f"{path} escapes {store_dir}/{base_name}")
+    return f"{store_dir}/{base_name}", suffix_path
+
+
+def _physical_store_dir(store_uri: str, store_dir: str) -> Path:
+    if store_uri == _DEFAULT_STORE:
+        return Path(store_dir)
+    parsed = urlparse(store_uri)
+    if parsed.scheme in {"", "local"}:
+        query = parse_qs(parsed.query)
+        root_values = query.get("root")
+        if root_values:
+            return Path(root_values[-1]) / store_dir.removeprefix("/")
+        if parsed.scheme == "local" and parsed.netloc == "":
+            return Path(store_dir)
+    raise SystemExit(f"store {store_uri!r} is not a local filesystem store")
+
+
+def _directory_entry_to_json(path: Path) -> dict[str, object]:
+    result: dict[str, object] = {"name": path.name}
+    if path.is_symlink():
+        result["type"] = "symlink"
+        result["target"] = str(path.readlink())
+    elif path.is_dir():
+        result["type"] = "directory"
+    elif path.is_file():
+        result["type"] = "regular"
+        result["size"] = path.stat().st_size
+    else:
+        result["type"] = "unknown"
+    return result
