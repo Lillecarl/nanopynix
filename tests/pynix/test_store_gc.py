@@ -76,7 +76,7 @@ async def test_ensure_path(capsys):
 
 
 async def test_optimise_empty_local_store(tmp_path, capsys):
-    cmd = Pynix.parse(["store", "optimise", "--store-uri", f"local?root={tmp_path}"])
+    cmd = Pynix.parse(["store", "optimise", "--store", f"local?root={tmp_path}"])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -84,7 +84,7 @@ async def test_optimise_empty_local_store(tmp_path, capsys):
 
 
 async def test_verify_empty_local_store(tmp_path, capsys):
-    cmd = Pynix.parse(["store", "verify", "--store-uri", f"local?root={tmp_path}"])
+    cmd = Pynix.parse(["store", "verify", "--store", f"local?root={tmp_path}"])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
