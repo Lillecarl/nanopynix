@@ -21,6 +21,7 @@ def convert_handler_errors(func: Callable[..., Any]) -> Callable[..., Any]:
     the original error message so the client can classify it via
     ``exceptions.from_response()``.
     """
+
     @functools.wraps(func)
     async def wrapper(self: Any, message: Any) -> Any:
         try:
@@ -29,6 +30,7 @@ def convert_handler_errors(func: Callable[..., Any]) -> Callable[..., Any]:
             raise
         except Exception as exc:
             raise GRPCError(Status.UNKNOWN, f"{type(exc).__name__}: {exc}") from exc
+
     return wrapper
 
 

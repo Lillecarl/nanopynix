@@ -76,9 +76,7 @@ async def test_show_file_with_attrpath(tmp_path, capsys):
       };
     }
     """)
-    cmd = Pynix.parse([
-        "derivation", "show", "--file", str(nix_file), "--attrpath", "hello"
-    ])
+    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), "--attrpath", "hello"])
     await cmd.astart()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
@@ -91,9 +89,7 @@ async def test_show_flake(capsys):
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
         await _init_git_flake(flake_dir)
-        cmd = Pynix.parse([
-            "derivation", "show", "--flake", f"{flake_dir}#hello"
-        ])
+        cmd = Pynix.parse(["derivation", "show", "--flake", f"{flake_dir}#hello"])
         await cmd.astart()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
@@ -109,9 +105,7 @@ async def test_show_flake_greeting_is_not_derivation(capsys):
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
         await _init_git_flake(flake_dir)
-        cmd = Pynix.parse([
-            "derivation", "show", "--flake", f"{flake_dir}#greeting"
-        ])
+        cmd = Pynix.parse(["derivation", "show", "--flake", f"{flake_dir}#greeting"])
         with pytest.raises(SystemExit):
             await cmd.astart()
     captured = capsys.readouterr()
@@ -131,9 +125,7 @@ async def test_show_missing_both_errors(capsys):
 async def test_show_both_file_and_flake_errors(tmp_path, capsys):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{}")
-    cmd = Pynix.parse([
-        "derivation", "show", "--file", str(nix_file), "--flake", ".#hello"
-    ])
+    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), "--flake", ".#hello"])
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()

@@ -6,9 +6,7 @@ build-backend = "hatchling.build"
 name = "nanopynix-proto"
 version = "0.1.0"
 description = "gRPC protobuf definitions for nanopynix (betterproto2 compiled)"
-authors = [
-    { name = "nanopynix contributors" },
-]
+authors = [{ name = "nanopynix contributors" }]
 requires-python = ">=3.12"
 dependencies = []
 

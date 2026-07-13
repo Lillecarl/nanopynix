@@ -6,14 +6,12 @@ build-backend = "scikit_build_core.build"
 name = "nanopynix-bindings"
 version = "0.1.0"
 description = "nanobind-based Python bindings for Nix (compiled extensions)"
-authors = [
-    { name = "nanopynix contributors" },
-]
+authors = [{ name = "nanopynix contributors" }]
 requires-python = ">=3.10"
 classifiers = [
-    "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: C++",
+  "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: C++",
 ]
 
 [project.urls]

@@ -864,10 +864,12 @@ class TestLazyChildProxy:
         from nanopynix_proto.nix.common import DeepAttrs, DeepValue, ScalarValue
 
         deep_val = DeepValue(
-            attrs=DeepAttrs(entries={
-                "a": DeepValue(scalar=ScalarValue(int_value=1)),
-                "b": DeepValue(scalar=ScalarValue(int_value=2)),
-            })
+            attrs=DeepAttrs(
+                entries={
+                    "a": DeepValue(scalar=ScalarValue(int_value=1)),
+                    "b": DeepValue(scalar=ScalarValue(int_value=2)),
+                }
+            )
         )
         w._eval_stub.force_deep.return_value = deep_val
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")

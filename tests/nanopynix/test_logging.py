@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-
 class _LogTestModule(Protocol):
     def _log_test(self, msg: str) -> None: ...
 
@@ -159,8 +158,6 @@ async def test_request_id_in_events():
         await c.aclose()
 
 
-
-
 async def test_sync_drain():
     """drain() returns pending events without blocking — used by worker subprocess."""
     c = LogCollector()
@@ -176,8 +173,6 @@ async def test_sync_drain():
     assert c.drain() == []
 
     c.close()
-
-
 
 
 async def test_drain_empty():

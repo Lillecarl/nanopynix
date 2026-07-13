@@ -60,9 +60,7 @@ async def main() -> None:
 
         # --- force_json: serialize to dict/list tree (like force_deep) --------
 
-        v5 = await eval.string(
-            '{ lib = { name = "mylib"; version = "2.0"; deps = [ "a" "b" ]; }; }'
-        )
+        v5 = await eval.string('{ lib = { name = "mylib"; version = "2.0"; deps = [ "a" "b" ]; }; }')
         lib = v5.attr("lib")
         lib_json = await lib.force_json()
         assert lib_json == {"name": "mylib", "version": "2.0", "deps": ["a", "b"]}

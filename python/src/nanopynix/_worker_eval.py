@@ -143,9 +143,7 @@ class EvalServiceHandler(EvalServiceBase):
             )
         if typ == "list":
             return common_pb.DeepValue(
-                list=common_pb.DeepList(
-                    items=[self._deep_value(pyv.list_get(idx)) for idx in range(pyv.list_length())]
-                )
+                list=common_pb.DeepList(items=[self._deep_value(pyv.list_get(idx)) for idx in range(pyv.list_length())])
             )
         if typ == "function":
             return common_pb.DeepValue(remote_value=self._export(pyv))
@@ -175,10 +173,7 @@ class EvalServiceHandler(EvalServiceBase):
         if arg.list is not None:
             return [self._call_arg_to_python(item, es) for item in arg.list.items]
         if arg.attrs is not None:
-            return {
-                key: self._call_arg_to_python(val, es)
-                for key, val in arg.attrs.entries.items()
-            }
+            return {key: self._call_arg_to_python(val, es) for key, val in arg.attrs.entries.items()}
         if arg.remote_value is not None:
             return self._resolve(arg.remote_value.handle)
         raise TypeError(f"unsupported call argument: {arg!r}")
@@ -296,7 +291,9 @@ class EvalServiceHandler(EvalServiceBase):
             update_inputs = False
 
         if self._state.collector is not None:
-            self._state.collector.callback(0, "msg", 3, f"lock_flake: calling C++ lock_flake write_lock_file={message.write_lock_file}")
+            self._state.collector.callback(
+                0, "msg", 3, f"lock_flake: calling C++ lock_flake write_lock_file={message.write_lock_file}"
+            )
         lf = nanopynix_flake.lock_flake(
             es,
             ref,
@@ -327,14 +324,10 @@ class EvalServiceHandler(EvalServiceBase):
         lf.write_lock_file()
         return WriteLockFileResponse()
 
-    async def release_locked_flake(
-        self, message: ReleaseLockedFlakeRequest
-    ) -> ReleaseLockedFlakeResponse:
+    async def release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
         return await self._state.executor.run(self._do_release_locked_flake, message)
 
-    def _do_release_locked_flake(
-        self, message: ReleaseLockedFlakeRequest
-    ) -> ReleaseLockedFlakeResponse:
+    def _do_release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
         self._state.handles.release(message.handle)
         return ReleaseLockedFlakeResponse()
 

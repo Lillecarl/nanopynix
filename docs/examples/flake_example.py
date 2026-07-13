@@ -34,12 +34,8 @@ def _init_flake(flake_dir: Path) -> None:
     }
     """)
     subprocess.run(["git", "init"], cwd=flake_dir, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "add", "flake.nix"], cwd=flake_dir, check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=flake_dir, check=True, capture_output=True
-    )
+    subprocess.run(["git", "add", "flake.nix"], cwd=flake_dir, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=flake_dir, check=True, capture_output=True)
 
 
 async def main() -> None:

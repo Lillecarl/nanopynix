@@ -65,10 +65,7 @@ async def test_parse_address_v6():
             "isReserved": False,
             "isUnspecified": False,
             "maxPrefixlen": 128,
-            "reversePointer": (
-                "e.0.0.2.0.0.0.0.0.0.0.0.0.0.0.0.0.3.8.0.1.0.0.4."
-                "0.5.4.1.0.0.a.2.ip6.arpa"
-            ),
+            "reversePointer": ("e.0.0.2.0.0.0.0.0.0.0.0.0.0.0.0.0.3.8.0.1.0.0.4.0.5.4.1.0.0.a.2.ip6.arpa"),
             "isSiteLocal": False,
             "ipv4Mapped": None,
         }
@@ -138,13 +135,9 @@ async def test_network_address():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        a0 = await eval.string(
-            '(builtins.parseNetwork "192.168.1.0/30").address 0'
-        )
+        a0 = await eval.string('(builtins.parseNetwork "192.168.1.0/30").address 0')
         assert await a0.force_as(NixType.STRING) == "192.168.1.0"  # network
-        a1 = await eval.string(
-            '(builtins.parseNetwork "192.168.1.0/30").address 1'
-        )
+        a1 = await eval.string('(builtins.parseNetwork "192.168.1.0/30").address 1')
         assert await a1.force_as(NixType.STRING) == "192.168.1.1"
 
 
@@ -156,9 +149,7 @@ async def test_network_address_negative():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        a = await eval.string(
-            '(builtins.parseNetwork "192.168.1.0/24").address (-1)'
-        )
+        a = await eval.string('(builtins.parseNetwork "192.168.1.0/24").address (-1)')
         assert await a.force_as(NixType.STRING) == "192.168.1.255"
 
 
@@ -170,13 +161,9 @@ async def test_network_subnet():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        s0 = await eval.string(
-            '(builtins.parseNetwork "192.168.1.0/24").subnet 0 1'
-        )
+        s0 = await eval.string('(builtins.parseNetwork "192.168.1.0/24").subnet 0 1')
         assert await s0.force_as(NixType.STRING) == "192.168.1.0/25"
-        s1 = await eval.string(
-            '(builtins.parseNetwork "192.168.1.0/24").subnet 1 1'
-        )
+        s1 = await eval.string('(builtins.parseNetwork "192.168.1.0/24").subnet 1 1')
         assert await s1.force_as(NixType.STRING) == "192.168.1.128/25"
 
 
@@ -188,9 +175,7 @@ async def test_network_subnet_ipv6():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        s = await eval.string(
-            '(builtins.parseNetwork "2001:db8::/32").subnet 0 16'
-        )
+        s = await eval.string('(builtins.parseNetwork "2001:db8::/32").subnet 0 16')
         assert await s.force_as(NixType.STRING) == "2001:db8::/48"
 
 

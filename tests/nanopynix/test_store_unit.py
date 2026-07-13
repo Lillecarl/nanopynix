@@ -261,9 +261,7 @@ class TestClosures:
         pool._store_stub.compute_fs_closure.return_value = _mock_store_path_list(
             [_mock_store_path("aaa-foo", "aaa", "foo"), _mock_store_path("bbb-bar", "bbb", "bar")]
         )
-        result = await store.compute_fs_closure(
-            ComputeFsClosureRequest(path="/nix/store/aaa-foo", flip_direction=True)
-        )
+        result = await store.compute_fs_closure(ComputeFsClosureRequest(path="/nix/store/aaa-foo", flip_direction=True))
         assert len(result.paths) == 2
 
     async def test_query_missing_coerces_list(self, store, pool):
@@ -368,9 +366,7 @@ class TestGC:
 
     async def test_add_perm_root(self, store, pool):
         pool._store_stub.add_perm_root.return_value = MagicMock(path="/tmp/root")
-        result = await store.add_perm_root(
-            AddPermRootRequest(store_path="/nix/store/aaa-foo", gc_root="/tmp/root")
-        )
+        result = await store.add_perm_root(AddPermRootRequest(store_path="/nix/store/aaa-foo", gc_root="/tmp/root"))
         assert result.path == "/tmp/root"
         pool._store_stub.add_perm_root.assert_awaited_once()
 

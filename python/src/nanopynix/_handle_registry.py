@@ -37,18 +37,12 @@ class HandleRegistry:
     def get_typed(self, handle: int, expected_kind: str) -> Any:
         kind, resource = self.get(handle)
         if kind != expected_kind:
-            raise TypeError(
-                f"handle {handle} is a {kind}, not a {expected_kind}"
-            )
+            raise TypeError(f"handle {handle} is a {kind}, not a {expected_kind}")
         return resource
 
     def iter_kind(self, kind: str) -> list[tuple[int, Any]]:
         with self._lock:
-            return [
-                (handle, resource)
-                for handle, (k, resource) in self._resources.items()
-                if k == kind
-            ]
+            return [(handle, resource) for handle, (k, resource) in self._resources.items() if k == kind]
 
     def release(self, handle: int) -> None:
         with self._lock:

@@ -3,23 +3,24 @@ line-length = 120
 
 [lint]
 select = [
-    "E", "W",  # pycodestyle
-    "F",       # pyflakes (real bugs)
-    "I",       # isort
+  "E",
+  "W", # pycodestyle
+  "F", # pyflakes (real bugs)
+  "I", # isort
 ]
 
 ignore = [
-    "E501",  # line length handled by line-length setting
-    "A001",  # "eval" used as variable name for eval sessions
+  "E501", # line length handled by line-length setting
+  "A001", # "eval" used as variable name for eval sessions
 ]
 
 [lint.isort]
 known-first-party = [
-    "nanopynix",
-    "nanopynix_expr",
-    "nanopynix_fetchers",
-    "nanopynix_flake",
-    "nanopynix_main",
-    "nanopynix_store",
-    "nanopynix_util",
+  "nanopynix",
+  "nanopynix_expr",
+  "nanopynix_fetchers",
+  "nanopynix_flake",
+  "nanopynix_main",
+  "nanopynix_store",
+  "nanopynix_util",
 ]

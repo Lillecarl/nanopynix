@@ -13,11 +13,7 @@ from nanopynix._service_adapter import GeneratedServiceAdapterMixin
 
 
 def _store_binding_method_names() -> set[str]:
-    return {
-        name
-        for name in dir(nanopynix_store.Store)
-        if name.startswith("store_")
-    }
+    return {name for name in dir(nanopynix_store.Store) if name.startswith("store_")}
 
 
 @wrap_service_handlers

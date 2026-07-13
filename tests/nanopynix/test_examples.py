@@ -26,8 +26,6 @@ def test_example_runs(path: Path) -> None:
     finally:
         pending = asyncio.all_tasks(loop)
         if pending:
-            loop.run_until_complete(
-                asyncio.gather(*pending, return_exceptions=True)
-            )
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
         sys.path.remove(str(_EXAMPLES))

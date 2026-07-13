@@ -69,11 +69,7 @@ def _install_generated_service_methods(
 
 
 def _service_method_names(service_base: type) -> set[str]:
-    return {
-        name
-        for name, value in service_base.__dict__.items()
-        if not name.startswith("_") and callable(value)
-    }
+    return {name for name, value in service_base.__dict__.items() if not name.startswith("_") and callable(value)}
 
 
 def _make_service_forwarder(
@@ -88,9 +84,7 @@ def _make_service_forwarder(
 
         async def _forward_nix(self: GeneratedServiceAdapterMixin, message: Message) -> Message:
             executor: Any = _resolve_attr(self, nix_executor_attr)
-            raw = await executor.run(
-                lambda: self._nanobind_rpc_call(binding_method_name, message)
-            )
+            raw = await executor.run(lambda: self._nanobind_rpc_call(binding_method_name, message))
             if isinstance(raw, response_type):
                 return raw
             if isinstance(raw, Mapping):
