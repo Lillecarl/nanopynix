@@ -3,7 +3,7 @@
 No Nix daemon needed — exercises error paths and edge cases.
 """
 
-# pyright: reportPrivateUsage=false, reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportPrivateUsage=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false, reportUnknownArgumentType=false
 # The entire file exercises pool/session internals via mock access.
 # All members and variables accessed on MagicMock objects are inherently unknown.
 
