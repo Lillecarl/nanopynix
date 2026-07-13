@@ -1,5 +1,8 @@
 """Tests for nanopynix_fetchers (Input, input_from_url, input_from_attrs)."""
 
+# pyright: reportUnknownMemberType=false
+# nanopynix / nanopynix_fetchers are C++ nanobind extensions without type stubs.
+
 import nanopynix
 import nanopynix_fetchers
 

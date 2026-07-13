@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# pyright: reportUnknownMemberType=false
+# nanopynix / nanopynix_proto are C++ nanobind extensions without type stubs.
+
 import contextlib
 import json
 import sys
