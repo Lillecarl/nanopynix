@@ -6,12 +6,13 @@ from pynix.derivation import Derivation  # noqa: TC001
 from pynix.eval import Eval  # noqa: TC001
 from pynix.flake import Flake  # noqa: TC001
 from pynix.path_info import PathInfo  # noqa: TC001
+from pynix.store import Store  # noqa: TC001
 
 
 class Pynix(Command):
     """pynix — nanopynix CLI"""
 
-    subcommand: Eval | Derivation | Flake | PathInfo
+    subcommand: Eval | Derivation | Flake | PathInfo | Store
 
 
 def main() -> None:
