@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sys
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, override
 
 import structlog
@@ -24,6 +25,12 @@ logger = structlog.get_logger(__name__)
 console = Console()
 
 _DEFAULT_STORE = "auto"
+_MAX_TREE_NODES = 200
+
+
+@dataclass
+class _TreeBudget:
+    remaining: int = _MAX_TREE_NODES
 
 
 class Show(Command):
@@ -59,7 +66,7 @@ class Show(Command):
                 outputs = _navigate(outputs, self.attrpath)
 
             tree = Tree(f"[bold]{self.flake_ref}[/bold]")
-            await _build_tree(tree, outputs, NixType)
+            await _build_tree(tree, outputs, NixType, budget=_TreeBudget())
             console.print(tree)
 
 
@@ -91,7 +98,14 @@ def _navigate(root: ValueProxy, attrpath: str) -> ValueProxy:
     return root
 
 
-async def _build_tree(tree: Tree, value: ValueProxy, nix_type_enum: type[NixType], *, depth: int = 0) -> None:
+async def _build_tree(
+    tree: Tree,
+    value: ValueProxy,
+    nix_type_enum: type[NixType],
+    *,
+    depth: int = 0,
+    budget: _TreeBudget,
+) -> None:
     if depth > 6:
         tree.add("[dim]<...>[/dim]")
         return
@@ -104,26 +118,37 @@ async def _build_tree(tree: Tree, value: ValueProxy, nix_type_enum: type[NixType
         names: list[str] = []
         with contextlib.suppress(Exception):
             names = await value.attr_names()
+        if "type" in names and "drvPath" in names:
+            tree.add("[dim]<derivation>[/dim]")
+            return
         for name in names:
+            if budget.remaining == 0:
+                tree.add("[dim]<...>[/dim]")
+                break
+            budget.remaining -= 1
             child = value.attr(name)
             child_type = nix_type_enum.UNSPECIFIED
             with contextlib.suppress(Exception):
                 child_type = await child.get_type()
             label = _format_attr(name, child_type, nix_type_enum)
             branch = tree.add(label)
-            await _build_tree(branch, child, nix_type_enum, depth=depth + 1)
+            await _build_tree(branch, child, nix_type_enum, depth=depth + 1, budget=budget)
     elif nix_type == nix_type_enum.LIST:
         length = 0
         with contextlib.suppress(Exception):
             length = await value.list_length()
         for i in range(min(length, 10)):
+            if budget.remaining == 0:
+                tree.add("[dim]<...>[/dim]")
+                break
+            budget.remaining -= 1
             child = value.list_get(i)
             child_type = nix_type_enum.UNSPECIFIED
             with contextlib.suppress(Exception):
                 child_type = await child.get_type()
             label = _format_attr(f"[{i}]", child_type, nix_type_enum)
             branch = tree.add(label)
-            await _build_tree(branch, child, nix_type_enum, depth=depth + 1)
+            await _build_tree(branch, child, nix_type_enum, depth=depth + 1, budget=budget)
         if length > 10:
             tree.add(f"[dim]... {length - 10} more items[/dim]")
     elif nix_type in (nix_type_enum.THUNK, nix_type_enum.UNSPECIFIED):
