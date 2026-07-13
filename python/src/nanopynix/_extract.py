@@ -7,7 +7,7 @@ Input/FlakeRef/LockedFlake still need explicit extraction.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from nanopynix_proto.nix import common as common_pb
 

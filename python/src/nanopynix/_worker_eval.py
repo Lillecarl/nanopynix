@@ -51,7 +51,7 @@ import nanopynix_flake
 from nanopynix._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._extract import locked_flake as _locked_flake
 from nanopynix._grpc_util import wrap_service_handlers
-from nanopynix._service_adapter import _proto_shape
+from nanopynix._service_adapter import _proto_shape  # type: ignore[reportPrivateUsage] -- internal module registry pattern
 
 _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
     "thunk": common_pb.NixType.THUNK,

@@ -320,7 +320,7 @@ def check_all_settings_model_drift(*, include_optional: bool = False) -> dict[st
 def _settings_metadata_from_raw(raw: object) -> dict[str, NixSettingMetadata]:
     if not isinstance(raw, dict):
         raise TypeError("Nix returned non-object settings metadata")
-    return {str(key): NixSettingMetadata.model_validate(value) for key, value in raw.items()}  # type: ignore[reportUnknownArgumentType]  # raw is dict[Any, Any] from nanobind JSON
+    return {str(key): NixSettingMetadata.model_validate(value) for key, value in raw.items()}  # type: ignore[reportUnknownArgumentType] -- raw is dict[Any, Any] from nanobind JSON
 
 
 def _metadata_for_surface(surface: SettingsSurface) -> dict[str, NixSettingMetadata]:

@@ -253,7 +253,7 @@ class TestEvalSessionLifecycle:
         assert isinstance(root, ValueProxy)
         assert root.handle == 1
         assert root.nix_type == NixType.ATTRS
-        request = rw._eval_stub.eval_file.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
+        request = rw._eval_stub.eval_file.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 1
 
     async def test_string_after_enter(self):
@@ -266,7 +266,7 @@ class TestEvalSessionLifecycle:
         await session.__aenter__()
         root = await session.string("42 + 1")
         assert root.nix_type == NixType.INT
-        request = rw._eval_stub.eval_string.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
+        request = rw._eval_stub.eval_string.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 99
 
     async def test_timeout_override(self):
@@ -278,7 +278,7 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.string("42", timeout=5.0)
-        call_kwargs = rw._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript]
+        call_kwargs = rw._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
         assert call_kwargs["timeout"] == _RPC_TIMEOUT
 
     async def test_timeout_falls_back_to_session_default(self):
@@ -290,21 +290,21 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.string("42")  # no override
-        call_kwargs = rw._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript]
+        call_kwargs = rw._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
         assert call_kwargs["timeout"] == _RPC_TIMEOUT
 
 
 class TestSessionEvalFacade:
     def _session(self) -> Session:
         session = object.__new__(Session)
-        session._manager = _mock_pool()  # type: ignore[reportPrivateUsage]
-        session._session_id = "session-id"  # type: ignore[reportPrivateUsage]
+        session._manager = _mock_pool()  # type: ignore[reportPrivateUsage] -- test injects mock manager
+        session._session_id = "session-id"  # type: ignore[reportPrivateUsage] -- test injects internal session ID
         return session
 
     def _store(self, session_id: str = "session-id", handle: int = 42) -> StoreHandle:
         store = StoreHandle(_mock_pool(), "mock", session_id)
-        store._active = True  # type: ignore[reportPrivateUsage]
-        store._store_handle = handle  # type: ignore[reportPrivateUsage]
+        store._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
+        store._store_handle = handle  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
         return store
 
     def test_eval_uses_explicit_store_handle(self):
@@ -313,7 +313,7 @@ class TestSessionEvalFacade:
 
         eval_session = session.eval(store)
 
-        assert eval_session._store_handle == 123  # type: ignore[reportPrivateUsage]
+        assert eval_session._store_handle == 123  # type: ignore[reportPrivateUsage] -- test inspects internal store handle
 
     def test_eval_rejects_foreign_store(self):
         session = self._session()
@@ -619,7 +619,7 @@ class TestValueProxyLifecycle:
 
         assert result == {"out": "/nix/store/aaa-demo"}
         w._eval_stub.build.assert_awaited_once()
-        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
+        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert build_request.handle == 1
         assert build_request.build_mode == BuildMode.Normal.value
         assert build_request.build_store_handle == 0
@@ -639,7 +639,7 @@ class TestValueProxyLifecycle:
 
         assert result == {"out": "/nix/store/aaa-demo"}
         w._eval_stub.build.assert_awaited_once()
-        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
+        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert build_request.handle == 1
         assert build_request.build_mode == BuildMode.Check.value
         assert build_request.build_store_handle == 0
@@ -651,15 +651,15 @@ class TestValueProxyLifecycle:
         w = self._worker()
         w._eval_stub.build.return_value = _mock_build_response()
         build_store = StoreHandle(_mock_pool(), "mock", "session-id")
-        build_store._active = True  # type: ignore[reportPrivateUsage]
-        build_store._store_handle = 456  # type: ignore[reportPrivateUsage]
+        build_store._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
+        build_store._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
         ctx = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123, session_id="session-id")
         vp = ctx.value(1, "attrs")
 
         result = await vp.build(store=build_store)
 
         assert result == {"out": "/nix/store/aaa-demo"}
-        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
+        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert build_request.handle == 1
         assert build_request.build_store_handle == 456
         w._store_stub.build_for_humans.assert_not_awaited()
@@ -667,8 +667,8 @@ class TestValueProxyLifecycle:
     async def test_build_rejects_foreign_build_store(self):
         w = self._worker()
         build_store = StoreHandle(_mock_pool(), "mock", "other-session")
-        build_store._active = True  # type: ignore[reportPrivateUsage]
-        build_store._store_handle = 456  # type: ignore[reportPrivateUsage]
+        build_store._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
+        build_store._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
         ctx = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123, session_id="session-id")
         vp = ctx.value(1, "attrs")
 
@@ -873,7 +873,7 @@ class TestLazyChildProxy:
 
         await cp.force(timeout=10.0)
 
-        assert w._eval_stub.attr.call_args[1]["timeout"] == _RPC_TIMEOUT  # type: ignore[reportUnknownMemberType, reportOptionalSubscript]
+        assert w._eval_stub.attr.call_args[1]["timeout"] == _RPC_TIMEOUT  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1029,7 +1029,7 @@ class TestLogStreamRequestId:
                 ]
             )
         )
-        session._manager = manager  # type: ignore[reportPrivateUsage]
+        session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
         events = [e async for e in session.log_stream()]
 
@@ -1063,7 +1063,7 @@ class TestLogStreamRequestId:
                 ]
             )
         )
-        session._manager = manager  # type: ignore[reportPrivateUsage]
+        session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
         events = [e async for e in session.log_stream()]
         assert len(events) == 1
@@ -1074,11 +1074,11 @@ class TestLogCapture:
     async def test_capture_records_typed_events(self):
         session = object.__new__(Session)
         manager = _WorkerManager()
-        session._manager = manager  # type: ignore[reportPrivateUsage]
+        session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
         async with session.capture_logs() as logs:
-            manager._log_bus.emit(self._proto_log_event(4, "msg", [3, "hello"]))  # type: ignore[reportPrivateUsage]
-            manager._log_bus.emit(self._proto_log_event(4, "result", [1, 100], result_type=100))  # type: ignore[reportPrivateUsage]
+            manager._log_bus.emit(self._proto_log_event(4, "msg", [3, "hello"]))  # type: ignore[reportPrivateUsage] -- test accesses internal log bus
+            manager._log_bus.emit(self._proto_log_event(4, "result", [1, 100], result_type=100))  # type: ignore[reportPrivateUsage] -- test accesses internal log bus
 
         assert [event.action for event in logs.events] == ["msg", "result"]
         assert logs.events[0].request_id == 4
@@ -1088,12 +1088,12 @@ class TestLogCapture:
     async def test_capture_unsubscribes_on_exit(self):
         session = object.__new__(Session)
         manager = _WorkerManager()
-        session._manager = manager  # type: ignore[reportPrivateUsage]
+        session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
         async with session.capture_logs() as logs:
-            manager._log_bus.emit(self._proto_log_event(1, "msg", ["inside"]))  # type: ignore[reportPrivateUsage]
+            manager._log_bus.emit(self._proto_log_event(1, "msg", ["inside"]))  # type: ignore[reportPrivateUsage] -- test accesses internal log bus
 
-        manager._log_bus.emit(self._proto_log_event(1, "msg", ["outside"]))  # type: ignore[reportPrivateUsage]
+        manager._log_bus.emit(self._proto_log_event(1, "msg", ["outside"]))  # type: ignore[reportPrivateUsage] -- test accesses internal log bus
 
         assert len(logs.events) == 1
         assert logs.events[0].args == ["inside"]

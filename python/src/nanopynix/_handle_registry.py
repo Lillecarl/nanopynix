@@ -16,7 +16,7 @@ from typing import Any
 
 @dataclass
 class HandleRegistry:
-    _resources: dict[int, tuple[str, Any]] = field(default_factory=dict)
+    _resources: dict[int, tuple[str, Any]] = field(default_factory=dict[int, tuple[str, Any]])
     _next: int = 1
     _lock: threading.Lock = field(default_factory=threading.Lock)
 

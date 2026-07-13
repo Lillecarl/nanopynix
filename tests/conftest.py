@@ -85,7 +85,7 @@ def _register_test_primops():  # type: ignore[reportUnusedFunction] -- pytest au
     nanopynix.register_primop("test_add4", 4, ["a", "b", "c", "d"], "add 4 ints", lambda a, b, c, d: a + b + c + d)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
 
     # Callable-returning primops (tests the Python-callable → Nix-function bridge).
-    nanopynix.register_primop("test_return_lazy_42", 0, [], "returns a zero-arg lambda → 42", lambda: lambda: 42)  # type: ignore[reportUnknownLambdaType]  # primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_return_lazy_42", 0, [], "returns a zero-arg lambda → 42", lambda: lambda: 42)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     nanopynix.register_primop(
         "test_attrs_property",
         1,
@@ -146,4 +146,4 @@ def _cleanup_primops():  # type: ignore[reportUnusedFunction] -- pytest autouse 
     class _PrimopRegistryModule(Protocol):
         def _cleanup_primop_registry(self) -> None: ...
 
-    atexit.register(cast("_PrimopRegistryModule", nanopynix_expr)._cleanup_primop_registry)  # type: ignore[reportPrivateUsage]  # intentional cleanup of C++ state at process exit
+    atexit.register(cast("_PrimopRegistryModule", nanopynix_expr)._cleanup_primop_registry)  # type: ignore[reportPrivateUsage] -- intentional cleanup of C++ state at process exit
