@@ -10,19 +10,27 @@ import pytest
 from pynix import Pynix
 
 
-async def _init_git_flake(flake_dir: Path) -> None:
-    (flake_dir / "flake.nix").write_text("""
-    {
-      outputs = { ... }: {
-        hello = builtins.derivation {
-          name = "test-hello";
-          system = builtins.currentSystem;
-          builder = "/bin/sh";
-          args = [ "-c" "echo hi > $out" ];
-        };
+async def _init_git_flake(flake_dir: Path, nixpkgs_path: str) -> None:
+    (flake_dir / "flake.nix").write_text(f"""
+    {{
+      inputs.nixpkgs.url = "path:{nixpkgs_path}";
+      outputs = {{ nixpkgs, ... }}:
+      let
+        system = builtins.currentSystem;
+        pkgs = nixpkgs.legacyPackages.${{system}};
+      in
+      {{
+        hello = pkgs.stdenvNoCC.mkDerivation {{
+          pname = "test-hello";
+          version = "1";
+          dontUnpack = true;
+          installPhase = ''
+            echo hi > "$out"
+          '';
+        }};
         greeting = "hi";
-      };
-    }
+      }};
+    }}
     """)
     for args in (
         ["git", "init"],
@@ -41,11 +49,16 @@ async def _init_git_flake(flake_dir: Path) -> None:
 async def test_show_file(tmp_path, capsys):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("""
-    builtins.derivation {
-      name = "test-drv";
-      system = builtins.currentSystem;
-      builder = "/bin/sh";
-      args = [ "-c" "echo hi > $out" ];
+    let
+      pkgs = import <nixpkgs> {};
+    in
+    pkgs.stdenvNoCC.mkDerivation {
+      pname = "test-drv";
+      version = "1";
+      dontUnpack = true;
+      installPhase = ''
+        echo hi > "$out"
+      '';
     }
     """)
     cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), "--store", "auto"])
@@ -55,22 +68,25 @@ async def test_show_file(tmp_path, capsys):
 
     drv_path = next(iter(result))
     drv = result[drv_path]
-    assert drv["name"] == "test-drv"
-    assert drv["builder"] == "/bin/sh"
+    assert drv["name"] == "test-drv-1"
     assert drv["system"] == "x86_64-linux"
-    assert drv["args"] == ["-c", "echo hi > $out"]
     assert "out" in drv["outputs"]
 
 
 async def test_show_file_with_attrpath(tmp_path, capsys):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("""
+    let
+      pkgs = import <nixpkgs> {};
+    in
     {
-      hello = builtins.derivation {
-        name = "nested-hello";
-        system = builtins.currentSystem;
-        builder = "/bin/sh";
-        args = [ "-c" "echo hi > $out" ];
+      hello = pkgs.stdenvNoCC.mkDerivation {
+        pname = "nested-hello";
+        version = "1";
+        dontUnpack = true;
+        installPhase = ''
+          echo hi > "$out"
+        '';
       };
     }
     """)
@@ -79,28 +95,27 @@ async def test_show_file_with_attrpath(tmp_path, capsys):
     captured = capsys.readouterr()
     result = json.loads(captured.out)
     drv_path = next(iter(result))
-    assert result[drv_path]["name"] == "nested-hello"
+    assert result[drv_path]["name"] == "nested-hello-1"
 
 
-async def test_show_flake(capsys):
+async def test_show_flake(capsys, nixpkgs_path: str):
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
-        await _init_git_flake(flake_dir)
+        await _init_git_flake(flake_dir, nixpkgs_path)
         cmd = Pynix.parse(["derivation", "show", "--flake", f"{flake_dir}#hello"])
         await cmd.astart()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
     drv_path = next(iter(result))
     drv = result[drv_path]
-    assert drv["name"] == "test-hello"
-    assert drv["builder"] == "/bin/sh"
+    assert drv["name"] == "test-hello-1"
     assert "out" in drv["outputs"]
 
 
-async def test_show_flake_greeting_is_not_derivation(capsys):
+async def test_show_flake_greeting_is_not_derivation(capsys, nixpkgs_path: str):
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
-        await _init_git_flake(flake_dir)
+        await _init_git_flake(flake_dir, nixpkgs_path)
         cmd = Pynix.parse(["derivation", "show", "--flake", f"{flake_dir}#greeting"])
         with pytest.raises(SystemExit):
             await cmd.astart()

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import faulthandler
 import io
 import json
 import os
+import signal
 import shutil
 import stat
 import tempfile
@@ -23,11 +25,13 @@ from structlog.typing import EventDict, WrappedLogger
 from pynix import Pynix
 
 _CURRENT_PYNIX_TEST: ContextVar[str] = ContextVar("_CURRENT_PYNIX_TEST", default="unknown")
+_DEFAULT_TEST_NIX_VERBOSITY = 5
 
 
 @dataclass
 class PynixLiveLog:
     path: Path
+    stack_path: Path
 
     def __post_init__(self) -> None:
         self.entries_by_test: dict[str, list[dict[str, object]]] = {}
@@ -66,6 +70,9 @@ class PynixStoreScenario:
     text_path: str | None = None
     local_log_path: str | None = None
     local_log_stderr: str = ""
+    nixpkgs_hello_path: str | None = None
+    nixpkgs_hello_unfree_path: str | None = None
+    flake_hello_path: str | None = None
 
     @property
     def log_path(self) -> Path:
@@ -99,6 +106,30 @@ class PynixStoreScenario:
     async def run_pynix_json(self, args: list[str], *, test_name: str = "unknown") -> object:
         stdout, _stderr = await self.run_pynix(args, test_name=test_name)
         return json.loads(stdout)
+
+    async def get_store_dirs(self, *, test_name: str = "unknown") -> dict[str, object]:
+        data = await self.run_pynix_json(["store", "dirs", "--store", self.store_url], test_name=test_name)
+        if not isinstance(data, dict):
+            raise TypeError("store dirs must produce an object")
+        return data
+
+    async def assert_temp_store_dirs(self, *, test_name: str = "unknown") -> dict[str, object]:
+        dirs = await self.get_store_dirs(test_name=test_name)
+        expected = {
+            "storeDir": "/nix/store",
+            "rootDir": str(self.store_root),
+            "stateDir": str(self.store_root / "nix" / "var" / "nix"),
+            "logDir": str(self.store_root / "nix" / "var" / "log" / "nix"),
+            "realStoreDir": str(self.store_root / "nix" / "store"),
+            "buildDir": str(self.store_root / "nix" / "var" / "nix" / "builds"),
+        }
+        for key, value in expected.items():
+            if dirs.get(key) != value:
+                raise AssertionError(f"expected store dir {key}={value!r}, got {dirs.get(key)!r}; all dirs={dirs!r}")
+        uri = dirs.get("uri")
+        if not isinstance(uri, str) or "local" not in uri:
+            raise AssertionError(f"expected local store uri, got {uri!r}; all dirs={dirs!r}")
+        return dirs
 
     async def add_text_file(self, contents: str = "temporary-store-message\n", *, test_name: str = "unknown") -> str:
         source = self.work_root / "message.txt"
@@ -143,11 +174,17 @@ class PynixStoreScenario:
     async def build_local_log_derivation(self, *, test_name: str = "unknown") -> str:
         log_nix_file = self.work_root / "log-test.nix"
         log_nix_file.write_text("""
-        builtins.derivation {
-          name = "pynix-log-test";
-          system = builtins.currentSystem;
-          builder = "/bin/sh";
-          args = [ "-c" "echo pynix-log-line >&2; echo log-output > $out" ];
+        let
+          pkgs = import <nixpkgs> {};
+        in
+        pkgs.stdenvNoCC.mkDerivation {
+          pname = "pynix-log-test";
+          version = "1";
+          dontUnpack = true;
+          installPhase = ''
+            echo pynix-log-line >&2
+            echo log-output > "$out"
+          '';
         }
         """)
         data = await self.run_pynix_json(
@@ -158,7 +195,7 @@ class PynixStoreScenario:
                 "--store",
                 self.store_url,
                 "--verbosity",
-                "7",
+                "6",
                 "--print-build-logs",
             ],
             test_name=test_name,
@@ -169,6 +206,62 @@ class PynixStoreScenario:
         self.local_log_stderr = self.last_stderr
         return self.local_log_path
 
+    async def build_nixpkgs_package(self, attrpath: str, *, test_name: str = "unknown") -> str:
+        if attrpath == "hello-unfree":
+            pkgs_nix_file = self.work_root / "pkgs-allow-unfree-default.nix"
+            pkgs_nix_file.write_text("""
+            { pkgs ? import <nixpkgs> { config.allowUnfree = true; } }:
+            pkgs
+            """)
+            build_attrpath = attrpath
+        else:
+            pkgs_nix_file = self.repo_root / "default.nix"
+            build_attrpath = f"pkgs.{attrpath}"
+        data = await self.run_pynix_json(
+            [
+                "build",
+                "--file",
+                str(pkgs_nix_file),
+                "--attrpath",
+                build_attrpath,
+                "--store",
+                self.store_url,
+                "--verbosity",
+                "0",
+                "--print-build-logs",
+            ],
+            test_name=test_name,
+        )
+        if not isinstance(data, dict):
+            raise TypeError("build must produce an object")
+        output = _require_output(data, "out")
+        if attrpath == "hello":
+            self.nixpkgs_hello_path = output
+        elif attrpath == "hello-unfree":
+            self.nixpkgs_hello_unfree_path = output
+        return output
+
+    async def build_flake_hello(self, *, test_name: str = "unknown") -> str:
+        system = await self.get_current_system(test_name=f"{test_name}:current-system")
+        flake_ref = f"{self.repo_root}#legacyPackages.{system}.hello"
+        data = await self.run_pynix_json(
+            [
+                "build",
+                "--flake",
+                flake_ref,
+                "--store",
+                self.store_url,
+                "--verbosity",
+                "0",
+                "--print-build-logs",
+            ],
+            test_name=test_name,
+        )
+        if not isinstance(data, dict):
+            raise TypeError("build must produce an object")
+        self.flake_hello_path = _require_output(data, "out")
+        return self.flake_hello_path
+
     def require_hello_path(self) -> str:
         return _require_present(self.hello_path, "hello_path")
 
@@ -177,6 +270,15 @@ class PynixStoreScenario:
 
     def require_local_log_path(self) -> str:
         return _require_present(self.local_log_path, "local_log_path")
+
+    def require_nixpkgs_hello_path(self) -> str:
+        return _require_present(self.nixpkgs_hello_path, "nixpkgs_hello_path")
+
+    def require_nixpkgs_hello_unfree_path(self) -> str:
+        return _require_present(self.nixpkgs_hello_unfree_path, "nixpkgs_hello_unfree_path")
+
+    def require_flake_hello_path(self) -> str:
+        return _require_present(self.flake_hello_path, "flake_hello_path")
 
     def physical_path(self, store_path: str) -> Path:
         return self.store_root / store_path.removeprefix("/")
@@ -196,13 +298,26 @@ def pynix_live_log(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> PynixLiveLog:
     log_dir = tmp_path_factory.mktemp("pynix-live-logs")
-    log = PynixLiveLog(path=log_dir / "pynix-structlog.jsonl")
+    stack_file = (log_dir / "pynix-manager-stacks.log").open("a")
+    with contextlib.suppress(RuntimeError, ValueError):
+        faulthandler.register(signal.SIGUSR2, file=stack_file, all_threads=True)
+
+    def cleanup() -> None:
+        with contextlib.suppress(RuntimeError, ValueError):
+            faulthandler.unregister(signal.SIGUSR2)
+        stack_file.close()
+
+    request.addfinalizer(cleanup)
+    log = PynixLiveLog(path=log_dir / "pynix-structlog.jsonl", stack_path=log_dir / "pynix-manager-stacks.log")
     terminal = request.config.pluginmanager.get_plugin("terminalreporter")
     if terminal is not None:
         terminal.write_line("")
         terminal.write_line("================================================================")
         terminal.write_line(f"PYNIX LIVE STRUCTLOG JSONL: {log.path}")
         terminal.write_line(f"tail -f {log.path}")
+        terminal.write_line(f"PYNIX MANAGER PID: {os.getpid()}")
+        terminal.write_line(f"PYNIX MANAGER STACKS: {log.stack_path}")
+        terminal.write_line(f"kill -USR2 {os.getpid()}")
         terminal.write_line("================================================================")
     return log
 
@@ -213,11 +328,13 @@ def _capture_pynix_test_structlog(
     pynix_live_log: PynixLiveLog,
 ) -> Iterator[None]:
     test_name = request.node.nodeid
+    marker = request.node.get_closest_marker("pynix_verbosity")
+    verbosity = marker.args[0] if marker is not None else _DEFAULT_TEST_NIX_VERBOSITY
     old_config = structlog.get_config()
     token = _CURRENT_PYNIX_TEST.set(test_name)
     pynix_live_log.append({"event": "pytest test start", "test": test_name})
     with _pynix_configure_logging_noop():
-        with _nanopynix_default_verbosity(7):
+        with _nanopynix_default_verbosity(verbosity):
             structlog.configure(processors=[pynix_live_log.capture])
             try:
                 yield
@@ -293,21 +410,29 @@ async def empty_store(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIt
 
 
 @pytest.fixture
-async def git_flake():
+async def git_flake(nixpkgs_path: str):
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
-        (flake_dir / "flake.nix").write_text("""
-        {
-          outputs = { ... }: {
-            hello = builtins.derivation {
-              name = "test-hello";
-              system = builtins.currentSystem;
-              builder = "/bin/sh";
-              args = [ "-c" "echo hi > $out" ];
-            };
+        (flake_dir / "flake.nix").write_text(f"""
+        {{
+          inputs.nixpkgs.url = "path:{nixpkgs_path}";
+          outputs = {{ nixpkgs, ... }}:
+          let
+            system = builtins.currentSystem;
+            pkgs = nixpkgs.legacyPackages.${{system}};
+          in
+          {{
+            hello = pkgs.stdenvNoCC.mkDerivation {{
+              pname = "test-hello";
+              version = "1";
+              dontUnpack = true;
+              installPhase = ''
+                echo hi > "$out"
+              '';
+            }};
             greeting = "hi";
-          };
-        }
+          }};
+        }}
         """)
         for args in (
             ["git", "init"],

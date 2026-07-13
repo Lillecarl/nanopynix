@@ -61,13 +61,16 @@ struct PyLockedFlake {
     void write_lock_file() const {
         if (!locked)
             throw std::runtime_error("LockedFlake has been released");
-        auto [lockFileStr, keyMap] = locked->lockFile.to_string();
-        auto relPath = (locked->flake.originalRef.subdir == "" ? "" : locked->flake.originalRef.subdir + "/") + "flake.lock";
-        locked->flake.originalRef.input.putFile(
-            nix::CanonPath(relPath),
-            lockFileStr + "\n",
-            std::nullopt);
-        locked->flake.lockFilePath().invalidateCache();
+        {
+            nb::gil_scoped_release release;
+            auto [lockFileStr, keyMap] = locked->lockFile.to_string();
+            auto relPath = (locked->flake.originalRef.subdir == "" ? "" : locked->flake.originalRef.subdir + "/") + "flake.lock";
+            locked->flake.originalRef.input.putFile(
+                nix::CanonPath(relPath),
+                lockFileStr + "\n",
+                std::nullopt);
+            locked->flake.lockFilePath().invalidateCache();
+        }
     }
 };
 
@@ -78,8 +81,12 @@ struct PyLockedFlake {
 static PyFlakeRef parse_flake_ref(const std::string &url) {
     nix::flake::Settings flakeSettings;
     nix::fetchers::Settings fetchSettings;
-    auto ref = nix::parseFlakeRef(fetchSettings, url);
-    return PyFlakeRef(std::move(ref));
+    std::optional<nix::FlakeRef> ref;
+    {
+        nb::gil_scoped_release release;
+        ref.emplace(nix::parseFlakeRef(fetchSettings, url));
+    }
+    return PyFlakeRef(std::move(*ref));
 }
 
 static PyLockedFlake lock_flake(
@@ -109,8 +116,12 @@ static PyLockedFlake lock_flake(
         lockFlags.inputUpdates.insert(*path);
     }
 
-    auto locked = std::make_unique<nix::flake::LockedFlake>(
-        nix::flake::lockFlake(flakeSettings, *es.state, flakeRef.ref, lockFlags));
+    std::unique_ptr<nix::flake::LockedFlake> locked;
+    {
+        nb::gil_scoped_release release;
+        locked = std::make_unique<nix::flake::LockedFlake>(
+            nix::flake::lockFlake(flakeSettings, *es.state, flakeRef.ref, lockFlags));
+    }
 
     std::string desc;
     if (locked->flake.description)
@@ -137,33 +148,42 @@ static PyLockedFlake lock_flake(
 
 static PyFlakeRef get_flake(PyEvalState &es, PyFlakeRef &flakeRef,
                              bool useRegistries = true) {
-    auto flake = nix::flake::getFlake(
-        *es.state, flakeRef.ref,
-        useRegistries ? nix::fetchers::UseRegistries::All
-                       : nix::fetchers::UseRegistries::No);
-    return PyFlakeRef(std::move(flake.resolvedRef));
+    std::optional<nix::flake::Flake> flake;
+    {
+        nb::gil_scoped_release release;
+        flake.emplace(nix::flake::getFlake(
+            *es.state, flakeRef.ref,
+            useRegistries ? nix::fetchers::UseRegistries::All
+                          : nix::fetchers::UseRegistries::No));
+    }
+    return PyFlakeRef(std::move(flake->resolvedRef));
 }
 
 static PyValue call_flake(PyEvalState &es, PyLockedFlake &lf) {
-    auto *v = es.state->allocValue();
-    nix::flake::callFlake(*es.state, *lf.locked, *v);
+    nix::Value *v;
+    {
+        nb::gil_scoped_release release;
+        v = es.state->allocValue();
+        nix::flake::callFlake(*es.state, *lf.locked, *v);
+    }
     return PyValue(v, &es, es.alive);
 }
 
 static PyValue eval_flake(PyEvalState &es, const std::string &ref,
                            bool write_lock_file = true) {
     nix::flake::Settings flakeSettings;
-    auto flakeRef = nix::parseFlakeRef(
-        es.fetchSettings, ref, std::filesystem::current_path());
-
     nix::flake::LockFlags lockFlags;
     lockFlags.writeLockFile = write_lock_file;
-
-    auto lockedFlake = nix::flake::lockFlake(
-        flakeSettings, *es.state, flakeRef, lockFlags);
-
-    auto *v = es.state->allocValue();
-    nix::flake::callFlake(*es.state, lockedFlake, *v);
+    nix::Value *v;
+    {
+        nb::gil_scoped_release release;
+        auto flakeRef = nix::parseFlakeRef(
+            es.fetchSettings, ref, std::filesystem::current_path());
+        auto lockedFlake = nix::flake::lockFlake(
+            flakeSettings, *es.state, flakeRef, lockFlags);
+        v = es.state->allocValue();
+        nix::flake::callFlake(*es.state, lockedFlake, *v);
+    }
 
     return PyValue(v, &es, es.alive);
 }

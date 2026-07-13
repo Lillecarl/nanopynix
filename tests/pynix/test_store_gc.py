@@ -123,11 +123,16 @@ async def test_query_missing(populated_store: dict[str, str], capsys):
 async def test_query_derivation_outputs(tmp_path, capsys):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("""
-    builtins.derivation {
-      name = "query-outputs";
-      system = builtins.currentSystem;
-      builder = "/bin/sh";
-      args = [ "-c" "echo hi > $out" ];
+    let
+      pkgs = import <nixpkgs> {};
+    in
+    pkgs.stdenvNoCC.mkDerivation {
+      pname = "query-outputs";
+      version = "1";
+      dontUnpack = true;
+      installPhase = ''
+        echo hi > "$out"
+      '';
     }
     """)
     show = Pynix.parse(["derivation", "show", "--file", str(nix_file)])

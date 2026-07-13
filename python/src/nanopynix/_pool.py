@@ -37,11 +37,10 @@ logger = logging.getLogger(__name__)
 
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
-# The grpclib-transports backchannel is a long-lived bidi stream on the same H2
-# connection. Keep one handler slot for that stream and one for the active
-# manager->worker call. EvalSession still serializes Nix eval RPCs at the
-# ReservedWorker boundary.
-_WORKER_MAX_CONCURRENCY = 2
+# Keep one handler slot for each long-lived stream (primop backchannel and
+# SubscribeLogs) plus one for the active manager->worker call. EvalSession still
+# serializes Nix eval RPCs at the ReservedWorker boundary.
+_WORKER_MAX_CONCURRENCY = 3
 _OOM_SCORE_ADJ_MIN = -1000
 _OOM_SCORE_ADJ_MAX = 1000
 
@@ -230,6 +229,7 @@ class _WorkerManager:
         self._primop_handler: Any = None
         self._available: asyncio.Lock = asyncio.Lock()
         self._log_bus: _LogBus = _LogBus()
+        self._log_task: asyncio.Task[None] | None = None
         self._stack: contextlib.AsyncExitStack | None = None
 
     # ── lifecycle ──────────────────────────────────────────────────
@@ -241,7 +241,7 @@ class _WorkerManager:
         from nanopynix_proto.nix.store import StoreServiceStub
         from nanopynix_proto.nix.worker import InitRequest, WorkerServiceStub
 
-        from nanopynix._manager import ManagerPrimopServiceHandler, ManagerServiceHandler
+        from nanopynix._manager import ManagerPrimopServiceHandler
 
         self._stack = contextlib.AsyncExitStack()
 
@@ -252,7 +252,6 @@ class _WorkerManager:
             multiprocessing_worker_with_backchannel(
                 worker_service_factory,
                 [
-                    ManagerServiceHandler(self._log_bus.emit),
                     self._primop_handler,
                 ],
                 on_process_start=self._on_worker_process_start,
@@ -263,6 +262,7 @@ class _WorkerManager:
         self._worker_service_stub = WorkerServiceStub(self._channel)
         self._store_service_stub = StoreServiceStub(self._channel)
         self._eval_service_stub = EvalServiceStub(self._channel)
+        self._log_task = asyncio.create_task(self._forward_worker_logs(), name="nanopynix-worker-logs")
 
         # Convert PrimOpSpec to proto
         from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
@@ -309,6 +309,11 @@ class _WorkerManager:
                 except (TimeoutError, GRPCError, StreamTerminatedError, ConnectionError, asyncio.CancelledError):
                     logger.debug("worker shutdown failed (expected during teardown)", exc_info=True)
         finally:
+            if self._log_task is not None:
+                self._log_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self._log_task
+                self._log_task = None
             if self._stack is not None:
                 await self._stack.aclose()
                 self._stack = None
@@ -386,6 +391,17 @@ class _WorkerManager:
         Returns a ``_Subscription`` — call ``.unsubscribe()`` to stop.
         """
         return self._log_bus.subscribe(callback)
+
+    async def _forward_worker_logs(self) -> None:
+        from nanopynix_proto.nix.worker import SubscribeLogsRequest
+
+        try:
+            async for event in self._worker_stub.subscribe_logs(SubscribeLogsRequest()):
+                self._log_bus.emit(event)
+        except asyncio.CancelledError:
+            raise
+        except (GRPCError, StreamTerminatedError, ConnectionError):
+            logger.debug("worker log stream ended", exc_info=True)
 
     def _on_worker_process_start(self, proc: Any) -> None:
         self._worker_pid = proc.pid

@@ -12,11 +12,15 @@
 #include <nix/expr/eval.hh>
 #include <nix/expr/eval-error.hh>
 #include <nix/expr/eval-gc.hh>
+#include <nix/expr/get-drvs.hh>
 #include <nix/expr/value.hh>
 #include <nix/expr/attr-set.hh>
 #include <nix/expr/primops.hh>
 #include <nix/expr/value-to-json.hh>
+#include <nix/store/build-result.hh>
+#include <nix/store/derived-path.hh>
 #include <nix/util/experimental-features.hh>
+#include <nix/util/logging.hh>
 
 #include <nlohmann/json.hpp>
 
@@ -24,6 +28,60 @@
 
 namespace nb = nanobind;
 using namespace nb::literals;
+
+static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
+    using enum nix::BuildResult::Success::Status;
+    switch (s) {
+        case Built:                  return "built";
+        case Substituted:            return "substituted";
+        case AlreadyValid:           return "already-valid";
+        case ResolvesToAlreadyValid: return "resolves-to-already-valid";
+    }
+    return "unknown";
+}
+
+static std::string build_failure_status_str(nix::BuildResult::Failure::Status s) {
+    using enum nix::BuildResult::Failure::Status;
+    switch (s) {
+        case PermanentFailure:  return "permanent-failure";
+        case InputRejected:     return "input-rejected";
+        case OutputRejected:    return "output-rejected";
+        case TransientFailure:  return "transient-failure";
+        case CachedFailure:     return "cached-failure";
+        case TimedOut:          return "timed-out";
+        case MiscFailure:       return "misc-failure";
+        case DependencyFailed:  return "dependency-failed";
+        case LogLimitExceeded:  return "log-limit-exceeded";
+        case NotDeterministic:  return "not-deterministic";
+        case NoSubstituters:    return "no-substituters";
+        case HashMismatch:      return "hash-mismatch";
+    }
+    return "unknown";
+}
+
+static nb::dict build_result_to_dict(
+        const std::string &drv_path,
+        bool success,
+        const std::string &status,
+        const std::string &error_msg) {
+    nb::dict d;
+    d["drv_path"] = drv_path;
+    d["success"] = success;
+    d["status"] = status;
+    d["error_msg"] = error_msg;
+    return d;
+}
+
+static nb::dict build_result_from_kbr(
+        const nix::KeyedBuildResult &kbr,
+        const nix::StoreDirConfig &store) {
+    auto path = kbr.path.to_string(store);
+    if (auto *success = kbr.tryGetSuccess())
+        return build_result_to_dict(path, true, build_success_status_str(success->status), "");
+    if (auto *failure = kbr.tryGetFailure())
+        return build_result_to_dict(path, false, build_failure_status_str(failure->status), failure->msg());
+    return build_result_to_dict(path, false, "unknown", "");
+}
 
 // =========================================================================
 // PyValue out-of-line method implementations
@@ -65,13 +123,26 @@ bool PyValue::as_bool() const { return checkedValue()->boolean(); }
 std::string PyValue::as_string() const {
     auto *v = checkedValue();
     if (auto sv = v->c_str()) return std::string(sv);
-    if (auto *es = evalState())
+    if (auto *es = evalState()) {
+        nb::gil_scoped_release release;
         return std::string(es->forceStringNoCtx(*v, nix::noPos, ""));
+    }
     return "";
 }
 
-void PyValue::force() { if (auto *es = evalState()) es->forceValue(*checkedValue(), nix::noPos); }
-void PyValue::force_deep() { if (auto *es = evalState()) es->forceValueDeep(*checkedValue()); }
+void PyValue::force() {
+    if (auto *es = evalState()) {
+        nb::gil_scoped_release release;
+        es->forceValue(*checkedValue(), nix::noPos);
+    }
+}
+
+void PyValue::force_deep() {
+    if (auto *es = evalState()) {
+        nb::gil_scoped_release release;
+        es->forceValueDeep(*checkedValue());
+    }
+}
 
 // to_python and to_json are implemented below.
 
@@ -89,7 +160,10 @@ PyValue PyValue::list_get(size_t idx) const {
         throw std::out_of_range(
             "list index " + std::to_string(idx) + " out of range for length " + std::to_string(size));
     auto *elem = v->listView()[idx];
-    if (auto *es = evalState()) es->forceValue(*elem, nix::noPos);
+    if (auto *es = evalState()) {
+        nb::gil_scoped_release release;
+        es->forceValue(*elem, nix::noPos);
+    }
     return PyValue(elem, eval, eval_alive);
 }
 
@@ -118,8 +192,12 @@ PyValue PyValue::attr_get(const std::string &name) const {
     auto sym = es->symbols.create(name);
     for (auto &attr : *value->attrs()) {
         if (attr.name == sym) {
-            auto *v = es->allocValue();
-            es->forceValue(*attr.value, nix::noPos);
+            nix::Value *v;
+            {
+                nb::gil_scoped_release release;
+                v = es->allocValue();
+                es->forceValue(*attr.value, nix::noPos);
+            }
             *v = *attr.value;
             return PyValue(v, eval, eval_alive);
         }
@@ -129,19 +207,86 @@ PyValue PyValue::attr_get(const std::string &name) const {
 
 PyValue PyValue::auto_call() {
     auto *es = evalState();
-    auto *result = es->allocValue();
-    auto attrs = es->buildBindings(0);
-    es->autoCallFunction(*attrs.alreadySorted(), *checkedValue(), *result);
-    es->forceValue(*result, nix::noPos);
+    nix::Value *result;
+    {
+        nb::gil_scoped_release release;
+        result = es->allocValue();
+        auto attrs = es->buildBindings(0);
+        es->autoCallFunction(*attrs.alreadySorted(), *checkedValue(), *result);
+        es->forceValue(*result, nix::noPos);
+    }
     return PyValue(result, eval, eval_alive);
 }
 
 PyValue PyValue::call(PyValue arg) {
     auto *es = evalState();
-    auto *result = es->allocValue();
-    es->callFunction(*checkedValue(), *arg.checkedValue(), *result, nix::noPos);
-    es->forceValue(*result, nix::noPos);
+    nix::Value *result;
+    {
+        nb::gil_scoped_release release;
+        result = es->allocValue();
+        es->callFunction(*checkedValue(), *arg.checkedValue(), *result, nix::noPos);
+        es->forceValue(*result, nix::noPos);
+    }
     return PyValue(result, eval, eval_alive);
+}
+
+nb::dict PyValue::build(
+        std::shared_ptr<nix::Store> build_store,
+        nix::BuildMode build_mode,
+        std::shared_ptr<nix::Store> eval_store) {
+    auto *es = evalState();
+    auto *v = checkedValue();
+
+    std::optional<nix::StorePath> drv_path;
+    nix::PackageInfo::Outputs output_paths;
+    {
+        nb::gil_scoped_release release;
+        auto package_info = nix::getDerivation(*es, *v, false);
+        if (!package_info)
+            throw nix::Error("selected value is not a derivation");
+        drv_path = package_info->queryDrvPath();
+        if (!drv_path)
+            throw nix::Error("selected derivation has no drvPath");
+        output_paths = package_info->queryOutputs(true, false);
+    }
+
+    nix::StringSet output_names;
+    for (auto &[name, _path] : output_paths)
+        output_names.insert(name);
+    if (output_names.empty())
+        output_names.insert("out");
+
+    nb::dict outputs;
+    for (auto &[name, path] : output_paths) {
+        if (path)
+            outputs[name.c_str()] = eval->store->printStorePath(*path);
+    }
+
+    nix::DerivedPaths paths{
+        nix::DerivedPath::Built{
+            .drvPath = nix::makeConstantStorePathRef(*drv_path),
+            .outputs = nix::OutputsSpec::Names{output_names},
+        },
+    };
+
+    auto store = build_store ? build_store : eval->store;
+    std::vector<nix::KeyedBuildResult> results;
+    try {
+        nb::gil_scoped_release release;
+        results = store->buildPathsWithResults(paths, build_mode, eval_store);
+    } catch (nix::Error &e) {
+        nix::logger->logEI(nix::lvlError, e.info());
+        e.addTrace({}, "while building evaluated derivation");
+        throw;
+    }
+
+    nb::list out;
+    for (auto &kbr : results) out.append(build_result_from_kbr(kbr, *store));
+    nb::dict response;
+    response["drv_path"] = eval->store->printStorePath(*drv_path);
+    response["outputs"] = outputs;
+    response["results"] = out;
+    return response;
 }
 
 std::string PyValue::repr() {
@@ -153,11 +298,15 @@ std::string PyValue::repr() {
 // =========================================================================
 
 PyValue PyEvalState::eval_string(const std::string &expr, const std::string &path) {
-    auto *parsedExpr = state->parseExprFromString(
-        expr, state->rootPath(nix::CanonPath(path)));
-    auto *v = state->allocValue();
-    state->eval(parsedExpr, *v);
-    state->forceValue(*v, nix::noPos);
+    nix::Value *v;
+    {
+        nb::gil_scoped_release release;
+        auto *parsedExpr = state->parseExprFromString(
+            expr, state->rootPath(nix::CanonPath(path)));
+        v = state->allocValue();
+        state->eval(parsedExpr, *v);
+        state->forceValue(*v, nix::noPos);
+    }
     return PyValue(v, this, alive);
 }
 
@@ -205,9 +354,13 @@ void PyEvalState::release_exported_value(PyValue &pyv) {
 }
 
 PyValue PyEvalState::eval_file(const std::string &path) {
-    auto sourcePath = state->rootPath(nix::CanonPath(path));
-    auto *v = state->allocValue();
-    state->evalFile(sourcePath, *v);
+    nix::Value *v;
+    {
+        nb::gil_scoped_release release;
+        auto sourcePath = state->rootPath(nix::CanonPath(path));
+        v = state->allocValue();
+        state->evalFile(sourcePath, *v);
+    }
     // Do NOT force — the caller may want to navigate lazily.
     return PyValue(v, this, alive);
 }
@@ -248,12 +401,22 @@ nb::object PyValue::to_python() {
             return nb::float_(value->fpoint());
         case nix::nBool:
             return nb::bool_(value->boolean());
-        case nix::nString:
-            return nb::str(std::string(es->forceStringNoCtx(*value, nix::noPos, "")).c_str());
+        case nix::nString: {
+            std::string string;
+            {
+                nb::gil_scoped_release release;
+                string = es->forceStringNoCtx(*value, nix::noPos, "");
+            }
+            return nb::str(string.c_str());
+        }
         case nix::nPath: {
             nix::NixStringContext ctx;
-            return nb::str(std::string(es->coerceToPath(
-                nix::noPos, *value, ctx, "").path.abs()).c_str());
+            std::string path;
+            {
+                nb::gil_scoped_release release;
+                path = es->coerceToPath(nix::noPos, *value, ctx, "").path.abs();
+            }
+            return nb::str(path.c_str());
         }
         case nix::nList: {
             auto list = nb::list();
@@ -267,8 +430,12 @@ nb::object PyValue::to_python() {
             auto dict = nb::dict();
             if (auto *bindings = value->attrs()) {
                 for (auto &attr : *bindings) {
-                    auto *v = es->allocValue();
-                    es->forceValue(*attr.value, nix::noPos);
+                    nix::Value *v;
+                    {
+                        nb::gil_scoped_release release;
+                        v = es->allocValue();
+                        es->forceValue(*attr.value, nix::noPos);
+                    }
                     *v = *attr.value;
                     auto key = std::string(es->symbols[attr.name]);
                     dict[nb::str(key.c_str())] = PyValue(v, eval, eval_alive).to_python();
@@ -320,8 +487,11 @@ nb::object PyValue::to_json(bool copy_to_store) {
     auto *value = checkedValue();
 
     nix::NixStringContext context;
-    nlohmann::json j = nix::printValueAsJSON(
-        *es, true, *value, nix::noPos, context, copy_to_store);
+    nlohmann::json j;
+    {
+        nb::gil_scoped_release release;
+        j = nix::printValueAsJSON(*es, true, *value, nix::noPos, context, copy_to_store);
+    }
     return json_to_python(j);
 }
 
@@ -345,17 +515,32 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v, cons
         case nix::nInt:    return nb::int_(static_cast<int64_t>(v->integer()));
         case nix::nFloat:  return nb::float_(v->fpoint());
         case nix::nBool:   return nb::bool_(v->boolean());
-        case nix::nString: return nb::str(std::string(state.forceStringNoCtx(*v, nix::noPos, "")).c_str());
+        case nix::nString: {
+            std::string string;
+            {
+                nb::gil_scoped_release release;
+                string = state.forceStringNoCtx(*v, nix::noPos, "");
+            }
+            return nb::str(string.c_str());
+        }
         case nix::nPath: {
             nix::NixStringContext ctx;
-            return nb::str(std::string(state.coerceToPath(nix::noPos, *v, ctx, "").path.abs()).c_str());
+            std::string path;
+            {
+                nb::gil_scoped_release release;
+                path = state.coerceToPath(nix::noPos, *v, ctx, "").path.abs();
+            }
+            return nb::str(path.c_str());
         }
         case nix::nList: {
             auto list = nb::list();
             auto n = v->listSize();
             auto lv = v->listView();
             for (size_t i = 0; i < n; i++) {
-                state.forceValue(*lv[i], nix::noPos);
+                {
+                    nb::gil_scoped_release release;
+                    state.forceValue(*lv[i], nix::noPos);
+                }
                 list.append(value_to_python_arg(state, lv[i], primop_name));
             }
             return list;
@@ -364,7 +549,10 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v, cons
             auto dict = nb::dict();
             if (auto *bindings = v->attrs()) {
                 for (auto &attr : *bindings) {
-                    state.forceValue(*attr.value, nix::noPos);
+                    {
+                        nb::gil_scoped_release release;
+                        state.forceValue(*attr.value, nix::noPos);
+                    }
                     dict[nb::str(std::string(state.symbols[attr.name]).c_str())] =
                         value_to_python_arg(state, attr.value, primop_name);
                 }
@@ -537,7 +725,10 @@ static void py_primop_bridge(
     // Build Python args list
     nb::list py_args;
     for (int i = 0; i < arity; i++) {
-        state.forceValue(*args[i], nix::noPos);
+        {
+            nb::gil_scoped_release release;
+            state.forceValue(*args[i], nix::noPos);
+        }
         py_args.append(value_to_python_arg(state, args[i], name));
     }
 
@@ -623,6 +814,15 @@ static void bind_value(nb::module_ &m) {
         .def("attr_get", &PyValue::attr_get, "name"_a, nb::keep_alive<0, 1>())
         .def("auto_call", &PyValue::auto_call, nb::keep_alive<0, 1>())
         .def("call", &PyValue::call, "arg"_a, nb::keep_alive<0, 1>())
+        .def("build", [](PyValue &self, nb::object build_store, int build_mode, nb::object eval_store) {
+            std::shared_ptr<nix::Store> build_store_ptr = nullptr;
+            std::shared_ptr<nix::Store> eval_store_ptr = nullptr;
+            if (!build_store.is_none())
+                build_store_ptr = nb::cast<std::shared_ptr<nix::Store>>(build_store);
+            if (!eval_store.is_none())
+                eval_store_ptr = nb::cast<std::shared_ptr<nix::Store>>(eval_store);
+            return self.build(build_store_ptr, static_cast<nix::BuildMode>(build_mode), eval_store_ptr);
+        }, "build_store"_a = nb::none(), "build_mode"_a = static_cast<int>(nix::bmNormal), "eval_store"_a = nb::none())
         .def("to_python", &PyValue::to_python)
         .def("to_json", &PyValue::to_json, "copy_to_store"_a = false)
         .def("__repr__", &PyValue::repr)
@@ -661,7 +861,7 @@ NB_MODULE(nanopynix_expr, m) {
         nix::initGC();
         auto &f = nix::experimentalFeatureSettings.experimentalFeatures.get();
         f.insert(nix::Xp::FetchTree);
-    });
+    }, nb::call_guard<nb::gil_scoped_release>());
     m.def("parse_nix_path", [](std::optional<std::string> raw) -> std::vector<std::string> {
         std::string value;
         if (raw) {

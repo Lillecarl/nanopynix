@@ -15,6 +15,8 @@ from nanopynix_proto.nix.eval import (
     AttrNamesResponse,
     AttrRequest,
     AutoCallRequest,
+    BuildRequest,
+    BuildResponse,
     CallLockedFlakeRequest,
     CallRequest,
     EvalFileRequest,
@@ -49,6 +51,7 @@ import nanopynix_flake
 from nanopynix._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._extract import locked_flake as _locked_flake
 from nanopynix._grpc_util import wrap_service_handlers
+from nanopynix._service_adapter import _proto_shape
 
 _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
     "thunk": common_pb.NixType.THUNK,
@@ -132,6 +135,9 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _resolve(self, handle: int) -> Any:
         return self._state.handles.get_typed(handle, "value")
+
+    def _get_store(self, store_handle: int) -> Any:
+        return self._state.handles.get_typed(store_handle, "store")
 
     def _deep_value(self, pyv: Any) -> common_pb.DeepValue:
         pyv.force()
@@ -278,6 +284,39 @@ class EvalServiceHandler(EvalServiceBase):
         for arg in message.args:
             result = result.call(es.value_from_python(self._call_arg_to_python(arg, es)))
         return self._export(result)
+
+    async def build(self, message: BuildRequest) -> BuildResponse:
+        return await self._state.executor.run(self._do_build, message)
+
+    def _do_build(self, message: BuildRequest) -> BuildResponse:
+        self._get_es()
+        value = self._resolve(message.handle)
+        build_store = self._get_store(message.build_store_handle) if message.build_store_handle else None
+        eval_store = None
+        if build_store is not None and self._state.eval_store_handle != message.build_store_handle:
+            if self._state.eval_store_handle is None:
+                raise RuntimeError("no eval store selected — open a store before building")
+            eval_store = self._get_store(self._state.eval_store_handle)
+        if self._state.collector is not None:
+            self._state.collector.callback(
+                0,
+                "msg",
+                int(common_pb.LogLevel.DEBUG),
+                "eval build start "
+                f"handle={message.handle} build_store_handle={message.build_store_handle or 'eval'} "
+                f"eval_store={'separate' if eval_store is not None else 'none'} build_mode={message.build_mode}",
+            )
+        raw = value.build(build_store, message.build_mode, eval_store)
+        if self._state.collector is not None:
+            shaped = _proto_shape(raw)
+            self._state.collector.callback(
+                0,
+                "msg",
+                int(common_pb.LogLevel.DEBUG),
+                f"eval build finish drv_path={shaped.get('drv_path', '')} outputs={sorted(shaped.get('outputs', {}))}",
+            )
+            return BuildResponse.from_dict(shaped)
+        return BuildResponse.from_dict(_proto_shape(raw))
 
     # ── flake methods ─────────────────────────────────────────────
 

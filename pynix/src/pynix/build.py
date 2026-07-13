@@ -16,7 +16,7 @@ error_console = Console(stderr=True)
 logger = structlog.get_logger("pynix.build")
 
 _DEFAULT_SUBSTITUTERS = "https://cache.nixos.org/"
-_DEFAULT_TRUSTED_PUBLIC_KEYS = "cache.nixos.org-1:NCHdD59X431o0gWfe6E3gSxWeQa73p0i1d94vQxFh9s="
+_DEFAULT_TRUSTED_PUBLIC_KEYS = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
 _DEFAULT_VERBOSITY = "notice"
 
 
@@ -69,18 +69,18 @@ class Build(Command):
                                 logger.info("pynix build evaluating target")
                                 root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
                                 logger.info("pynix build target evaluated")
-                                outputs = await root.build(store=store)
-                                logger.info("pynix build finished")
+                                outputs = await root.build()
+                            logger.info("pynix build finished")
                     else:
                         async with (
                             nix.store(self.eval_store) as eval_store,
                             nix.store(self.store) as build_store,
-                            nix.eval(eval_store) as session,
                         ):
-                            logger.info("pynix build evaluating target")
-                            root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
-                            logger.info("pynix build target evaluated")
-                            outputs = await root.build(store=build_store)
+                            async with nix.eval(eval_store) as session:
+                                logger.info("pynix build evaluating target")
+                                root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
+                                logger.info("pynix build target evaluated")
+                                outputs = await root.build(store=build_store)
                             logger.info("pynix build finished")
                 except BuildTargetError as exc:
                     error_console.print(f"[red]Error:[/red] {exc}")

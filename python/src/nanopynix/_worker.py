@@ -21,10 +21,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import faulthandler
 import importlib
 import json
 import os
+import signal
 import sys
+import time
 import traceback
 from typing import TYPE_CHECKING, Any, cast
 
@@ -47,7 +50,6 @@ import nanopynix_store
 import nanopynix_util
 from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix._handle_registry import HandleRegistry
-from nanopynix._manager import LogAck
 from nanopynix._worker_eval import EvalServiceHandler
 from nanopynix._worker_store import StoreServiceHandler
 from nanopynix.logging import LogCollector
@@ -62,11 +64,24 @@ if TYPE_CHECKING:
 # Re-export for the multiprocessing runner in _pool.py
 __all__ = ["main", "run_worker", "worker_service_factory"]
 
-# Current worker logging uses the long-lived grpclib-transports backchannel on
-# the same H2 connection as ordinary calls. Keep one handler slot for that stream
-# and one for the active manager->worker call. EvalSession still serializes Nix
-# eval RPCs at the ReservedWorker boundary.
-_WORKER_MAX_CONCURRENCY = 2
+# Keep handler slots for the long-lived primop backchannel, the long-lived
+# SubscribeLogs stream, and the active manager->worker call. EvalSession still
+# serializes Nix eval RPCs at the ReservedWorker boundary.
+_WORKER_MAX_CONCURRENCY = 3
+
+_DIAGNOSTIC_SETTINGS = (
+    "http-connections",
+    "max-jobs",
+    "build-dir",
+    "substitute",
+    "substituters",
+    "trusted-public-keys",
+    "builders",
+    "builders-use-substitutes",
+    "sandbox",
+    "system",
+    "system-features",
+)
 
 
 # ── Primop registration ──────────────────────────────────────────────
@@ -107,6 +122,26 @@ def _register_primops(
         )
 
 
+def _effective_settings_for_log() -> dict[str, str | None]:
+    return {name: nanopynix_util.get_setting(name) for name in _DIAGNOSTIC_SETTINGS}
+
+
+def _install_worker_diagnostics(collector: LogCollector) -> None:
+    def _dump_worker_diagnostics(signum: int, _frame: Any) -> None:
+        timestamp = time.monotonic()
+        print(
+            f"\n=== nanopynix worker diagnostics signal={signum} monotonic={timestamp:.6f} ===",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(f"log_collector={collector.stats()}", file=sys.stderr, flush=True)
+        print("python_threads:", file=sys.stderr, flush=True)
+        faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        print("=== end nanopynix worker diagnostics ===", file=sys.stderr, flush=True)
+
+    signal.signal(signal.SIGUSR1, _dump_worker_diagnostics)
+
+
 # ── Worker state ─────────────────────────────────────────────────────
 
 
@@ -116,7 +151,7 @@ class WorkerState:
     Thread confinement:
       * ``eval_state`` — Nix thread only (``_worker_nix.NixThreadExecutor``)
       * ``collector`` — both threads (already thread-safe via ``janus.Queue``)
-      * ``log_task`` — event loop only (asyncio.Task)
+      * ``log_task`` — unused compatibility slot; parent consumes SubscribeLogs
       * ``handles`` — both threads (locked ``HandleRegistry``)
       * ``executor`` — event loop only (owns the Nix thread)
       * ``rpc_bridge`` — Nix thread reads, event loop writes (internal locking)
@@ -169,6 +204,14 @@ class WorkerServiceHandler(WorkerServiceBase):
             if message.allowed_uris:
                 nanopynix_expr._set_allowed_uris(message.allowed_uris)
             self._state.nix_path = list(message.nix_path)
+            if self._state.collector is not None:
+                self._state.collector.callback(
+                    0,
+                    "msg",
+                    int(LogLevel.DEBUG),
+                    "worker effective settings "
+                    f"settings={_effective_settings_for_log()} nix_path={self._state.nix_path}",
+                )
 
             # Convert proto PrimOpSpec list to the raw-dict format
             primops_raw = [
@@ -202,6 +245,13 @@ class WorkerServiceHandler(WorkerServiceBase):
     def _open_store(self, uri: str) -> tuple[int, str, str]:
         store = nanopynix_store.open_store() if uri == "auto" else nanopynix_store.open_store(uri)
         handle = self._state.handles.allocate(store, "store")
+        if self._state.collector is not None:
+            self._state.collector.callback(
+                0,
+                "msg",
+                int(LogLevel.DEBUG),
+                f"worker open_store handle={handle} uri={store.get_uri()} dirs={store.get_store_dirs()}",
+            )
         return handle, store.get_uri(), store.get_store_dir()
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
@@ -245,27 +295,6 @@ class WorkerServiceHandler(WorkerServiceBase):
 # ── Factory ──────────────────────────────────────────────────────────
 
 
-async def _relay_logs_to_manager(collector: LogCollector, backchannel: WorkerBackchannel) -> None:
-    try:
-        async for event in collector.stream():
-            if event is None:
-                break
-            req_id, action, *args = event
-            await backchannel.call_unary(
-                "/nix.manager.ManagerService/Log",
-                LogEvent(
-                    request_id=req_id,
-                    action=action,
-                    args_json=json.dumps(list(args), default=str),
-                ),
-                LogAck,
-            )
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        traceback.print_exc(file=sys.stderr)
-
-
 def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list[IServable]:
     """Create service handlers with a shared WorkerState.
 
@@ -280,6 +309,9 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
     """
     collector = LogCollector()
     nanopynix_util.install_logger(collector.callback)
+    with contextlib.suppress(RuntimeError, ValueError):
+        _install_worker_diagnostics(collector)
+    collector.callback(0, "msg", int(LogLevel.DEBUG), f"nanopynix worker pid={os.getpid()} diagnostics=SIGUSR1")
 
     state = WorkerState()
     state.collector = collector
@@ -289,10 +321,6 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
     state.executor = NixThreadExecutor()
 
     if backchannel is not None:
-        state.log_task = asyncio.create_task(
-            _relay_logs_to_manager(collector, backchannel),
-            name="nanopynix-log-backchannel",
-        )
         from nanopynix._worker_primop import ThreadedRpcPrimopBridge
 
         loop = asyncio.get_running_loop()

@@ -41,13 +41,31 @@ class LogCollector:
     """
 
     def __init__(self, maxsize: int = 10_000) -> None:
+        self._maxsize = maxsize
         self._queue = janus.Queue(maxsize=maxsize)
+        self._enqueued = 0
 
     # ── callback (thread-safe, called from C++ on any GIL thread) ──
 
     def callback(self, req_id: int, action: str, *args: object) -> None:
-        """Push an event onto the queue — thread-safe."""
-        self._queue.sync_q.put_nowait((req_id, action, *args))
+        """Push an event onto the queue — thread-safe and lossless.
+
+        If the manager falls behind, this deliberately backpressures the Nix
+        logger callback instead of dropping events. The worker event loop drains
+        the async side through ``SubscribeLogs``.
+        """
+        self._queue.sync_q.put((req_id, action, *args))
+        self._enqueued += 1
+
+    def stats(self) -> dict[str, int | bool]:
+        """Return queue counters for worker signal diagnostics."""
+        return {
+            "maxsize": self._maxsize,
+            "qsize": self._queue.sync_q.qsize(),
+            "full": self._queue.sync_q.full(),
+            "empty": self._queue.sync_q.empty(),
+            "enqueued": self._enqueued,
+        }
 
     # ── sync drain (for the worker subprocess) ─────────────────────
 
@@ -90,4 +108,4 @@ class LogCollector:
 
     def send_sentinel(self) -> None:
         """Push a ``None`` sentinel to unblock ``stream()`` without closing."""
-        self._queue.sync_q.put_nowait(None)
+        self._queue.sync_q.put(None)

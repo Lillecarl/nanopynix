@@ -6,7 +6,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, overload
-
 from nanopynix_proto.nix.common import (
     CallArg,
     CallArgAttrs,
@@ -41,7 +40,6 @@ if TYPE_CHECKING:
     from nanopynix._pool import ReservedWorker, _WorkerManager
     from nanopynix.store import StoreHandle
     from nanopynix_store import BuildMode as BuildModeType
-
 
 def _scalar_to_pyval(scalar: ScalarValue | None) -> JsonScalar:
     """Convert a proto ScalarValue to a Python JSON-scalar."""
@@ -458,10 +456,8 @@ class ValueProxy:
     ) -> dict[str, str]:
         """Build the derivation represented by this evaluated value."""
         build_store_handle = self._build_store_handle(store)
-        drv_path = await self._derivation_drv_path(timeout=timeout)
         mode_value = self._build_mode_value(build_mode)
-        await self._build_derivation_path(drv_path, mode_value, build_store_handle)
-        return await self._read_derivation_outputs(drv_path)
+        return await self._build_evaluated_value(mode_value, build_store_handle, timeout=timeout)
 
     def _build_store_handle(self, store: StoreHandle | None) -> int:
         if store is None:
@@ -469,18 +465,6 @@ class ValueProxy:
         if store._session_id != self._ctx.session_id:
             raise ValueError("StoreHandle belongs to a different session")
         return store.store_handle
-
-    async def _derivation_drv_path(self, *, timeout: float | None) -> str:
-        if not await self.has_attr("type", timeout=timeout):
-            raise TypeError("nix value is not a derivation")
-        value_type = await self.attr("type", timeout=timeout).force_json(timeout=timeout)
-        if value_type != "derivation":
-            raise TypeError("nix value is not a derivation")
-        drv_path = await self.attr("drvPath", timeout=timeout).force_json(timeout=timeout)
-        if isinstance(drv_path, str):
-            return drv_path
-        actual_type = await self.attr("drvPath").get_type(timeout=timeout)
-        raise WrongNixTypeError(expected=NixType.STRING, actual=actual_type)
 
     def _build_mode_value(self, build_mode: BuildModeType | int | None) -> int:
         from nanopynix_store import BuildMode
@@ -491,50 +475,33 @@ class ValueProxy:
             return build_mode
         return build_mode.value
 
-    async def _build_derivation_path(self, drv_path: str, build_mode: int, build_store_handle: int) -> None:
-        from nanopynix_proto.nix.store import (
-            BuildPathsWithResultsRequest,
-        )
+    async def _build_evaluated_value(
+        self,
+        build_mode: int,
+        build_store_handle: int,
+        *,
+        timeout: float | None,
+    ) -> dict[str, str]:
+        from nanopynix_proto.nix.eval import BuildRequest
 
-        eval_store_handle = 0 if build_store_handle == self._ctx.store_handle else self._ctx.store_handle
-        build_results = await self._ctx.proxy._store_proxy_call(
-            "build_for_humans",
-            BuildPathsWithResultsRequest(
-                paths=[drv_path],
+        await self._ensure_resolved(timeout=timeout)
+        request_build_store_handle = 0 if build_store_handle == self._ctx.store_handle else build_store_handle
+        build_response = await self._ctx.proxy.build(
+            BuildRequest(
+                handle=self.handle,
                 build_mode=build_mode,
-                eval_store_handle=eval_store_handle,
-                store_handle=build_store_handle,
-            ),
+                build_store_handle=request_build_store_handle,
+            )
         )
-        if not build_results.results:
-            raise StoreError("StoreError", f"build returned no result for derivation {drv_path}")
-        result = build_results.results[0]
+        if not build_response.results:
+            raise StoreError("StoreError", f"build returned no result for evaluated derivation {build_response.drv_path}")
+        result = build_response.results[0]
         if not result.success:
-            msg = result.error_msg or f"failed to build derivation {drv_path}"
+            msg = result.error_msg or f"failed to build evaluated derivation {build_response.drv_path}"
             raise StoreError("StoreError", msg)
-
-    async def _read_derivation_outputs(self, drv_path: str) -> dict[str, str]:
-        from nanopynix_proto.nix.store import ReadDerivationRequest
-
-        derivation = await self._ctx.proxy._store_proxy_call(
-            "read_derivation",
-            ReadDerivationRequest(path=drv_path, store_handle=self._ctx.store_handle),
-        )
-
-        outputs: dict[str, str] = {}
-        for output, output_info in derivation.outputs.items():
-            path = output_info.path
-            if path is None:
-                raise StoreError("StoreError", f"derivation output {output!r} has no path")
-            outputs[output] = path
-        if outputs:
-            return outputs
-
-        for output in derivation.env.get("outputs", "out").split():
-            path = derivation.env.get(output)
-            if path is None:
-                raise StoreError("StoreError", f"derivation output {output!r} has no path")
-            outputs[output] = path
+        outputs = dict(build_response.outputs)
+        if not outputs:
+            raise StoreError("StoreError", f"derivation {build_response.drv_path} has no outputs")
         return outputs
 
     # ── navigation ─────────────────────────────────────────────────
