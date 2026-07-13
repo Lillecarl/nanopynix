@@ -21,7 +21,7 @@ class _LogTestModule(Protocol):
     def _log_test(self, msg: str) -> None: ...
 
 
-_log_test: "Callable[[str], None]" = cast("_LogTestModule", nanopynix_util)._log_test
+_log_test: "Callable[[str], None]" = cast("_LogTestModule", nanopynix_util)._log_test  # type: ignore[reportPrivateUsage] -- test imports private helper
 
 
 async def _collect(collector: LogCollector, count: int, timeout: float = 2.0) -> list[tuple[int, str, int, str]]:  # noqa: ASYNC109

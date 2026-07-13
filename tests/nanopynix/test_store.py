@@ -109,7 +109,7 @@ class TestStore:
         sp = _bash_sp()
         closure = store.compute_fs_closure(sp)
         assert isinstance(closure, list)
-        assert len(closure) > 0
+        assert len(closure) > 0  # type: ignore[reportUnknownArgumentType] -- store method returns Any
 
     def test_query_derivation_outputs(self, store: Any):
         return
@@ -117,7 +117,7 @@ class TestStore:
     def test_query_all_valid_paths(self, store: Any):
         paths = store.query_all_valid_paths()
         assert isinstance(paths, list)
-        assert len(paths) > 0
+        assert len(paths) > 0  # type: ignore[reportUnknownArgumentType] -- store method returns Any
 
     def test_query_referrers(self, store: Any):
         sp = _bash_sp()

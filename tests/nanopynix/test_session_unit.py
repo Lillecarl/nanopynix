@@ -166,7 +166,7 @@ def _mock_reserved_worker():
     rw._store_stub.read_derivation = AsyncMock()
     rw.release = AsyncMock()
 
-    async def _call(coro):
+    async def _call(coro: Any) -> Any:
         return await coro
 
     rw.call = _call

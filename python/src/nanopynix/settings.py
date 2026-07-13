@@ -366,5 +366,5 @@ def _render_value(value: object) -> str:
     if isinstance(value, dict):
         return " ".join(f"{key}={item}" for key, item in value.items())
     if isinstance(value, list):
-        return " ".join(str(item) for item in value)
+        return " ".join(str(item) for item in value)  # type: ignore[reportUnknownArgumentType] -- value is list[Unknown] from Any input
     return str(value)

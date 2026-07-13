@@ -102,7 +102,7 @@ def test_path_info_from_real_path(store: Any):
     assert result["nar_size"] >= 0
     assert isinstance(result["ultimate"], bool)
     assert isinstance(result["references"], list)
-    for ref in result["references"]:
+    for ref in result["references"]:  # type: ignore[reportUnknownVariableType] -- result from nanobind
         assert "base_name" in ref
 
 

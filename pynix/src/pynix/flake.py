@@ -130,7 +130,7 @@ async def _build_tree(tree: Tree, value: ValueProxy, nix_type_enum: type[NixType
         tree.add(f"[dim]{nix_type.name.lower()}[/dim]")
 
 
-def _format_attr(name: str, nix_type: int, nix_type_enum: type[NixType]) -> str:
+def _format_attr(name: str, nix_type: NixType, nix_type_enum: type[NixType]) -> str:
     if nix_type == nix_type_enum.ATTRS:
         return f"[cyan]{name}[/cyan]"
     if nix_type == nix_type_enum.LIST:

@@ -14,7 +14,7 @@ from nanopynix._rpc_proxy import RpcProxyMixin
 if TYPE_CHECKING:
     from betterproto2 import Message
 
-    from nanopynix._pool import _WorkerManager
+    from nanopynix._pool import _WorkerManager  # type: ignore[reportPrivateUsage] -- TYPE_CHECKING import of lifecycle type
 
 
 class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreServiceBase):

@@ -19,7 +19,7 @@ from nanopynix.exceptions import (
     ThrownError,
     UndefinedVarError,
     UsageError,
-    _classify,
+    _classify,  # type: ignore[reportPrivateUsage] -- test imports private classifier
     from_response,
 )
 
