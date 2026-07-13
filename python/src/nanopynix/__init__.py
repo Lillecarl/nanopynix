@@ -71,6 +71,7 @@ from nanopynix_flake import get_flake, lock_flake, parse_flake_ref
 from nanopynix_main import init_nix, init_plugins
 from nanopynix_store import BuildMode, open_store
 from nanopynix_util import (
+    current_system,
     enable_experimental_feature,
     get_setting,
     get_verbosity,
@@ -126,6 +127,7 @@ __all__ = [
     "WrongNixTypeError",
     "check_all_settings_model_drift",
     "check_settings_model_drift",
+    "current_system",
     "enable_experimental_feature",
     "eval_file",
     "from_yaml",

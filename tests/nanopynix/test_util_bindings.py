@@ -8,6 +8,24 @@ import nanopynix_store
 import nanopynix_util
 
 
+class TestCurrentSystem:
+    def test_current_system_is_non_empty(self):
+        assert nanopynix_util.current_system()
+
+    def test_current_system_uses_system_setting(self):
+        previous_system = nanopynix_util.get_setting("system")
+        previous_eval_system = nanopynix_util.get_setting("eval-system")
+        if previous_eval_system is not None:
+            nanopynix_util.set_setting("eval-system", "")
+        nanopynix_util.set_setting("system", "mips64-linux")
+        try:
+            assert nanopynix_util.current_system() == "mips64-linux"
+        finally:
+            nanopynix_util.set_setting("system", previous_system or "")
+            if previous_eval_system is not None:
+                nanopynix_util.set_setting("eval-system", previous_eval_system)
+
+
 class TestUrlUtilities:
     def test_percent_encode_default(self):
         assert nanopynix_util.percent_encode("hello world") == "hello%20world"
