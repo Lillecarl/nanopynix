@@ -2,4 +2,4 @@
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 extraPaths = ["python/src", "pynix/src"]
-exclude = ["result"]
+exclude = ["**/result*"]
