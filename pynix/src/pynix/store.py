@@ -20,7 +20,7 @@ from pynix._util import prepare_sys_path
 
 logger = structlog.get_logger(__name__)
 
-_DEFAULT_STORE_URI = "auto"
+_DEFAULT_STORE = "auto"
 
 
 class PrintRoots(Command):
@@ -90,14 +90,14 @@ class PathFromHashPart(Command):
     """Resolve a store path from its hash prefix"""
 
     hash_part: Positional[str] = arg(help="Store path hash prefix to resolve.")
-    store_uri: str = arg(_DEFAULT_STORE_URI, help="Store URI to query.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
 
     @override
     async def run(self) -> None:
         prepare_sys_path()
         import nanopynix
 
-        async with nanopynix.Session() as nix, nix.store(self.store_uri) as store:
+        async with nanopynix.Session() as nix, nix.store(self.store) as store:
             resp = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=self.hash_part))
             path = _format_store_path(resp.path.base_name) if resp.path is not None else None
             _print_json({"path": path})
@@ -107,14 +107,14 @@ class EnsurePath(Command):
     """Ensure a store path is valid, substituting it if available"""
 
     path: Positional[str] = arg(help="Store path to ensure.")
-    store_uri: str = arg(_DEFAULT_STORE_URI, help="Store URI to use.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
 
     @override
     async def run(self) -> None:
         prepare_sys_path()
         import nanopynix
 
-        async with nanopynix.Session() as nix, nix.store(self.store_uri) as store:
+        async with nanopynix.Session() as nix, nix.store(self.store) as store:
             await store.ensure_path(EnsurePathRequest(path=self.path))
             _print_json({"path": self.path, "valid": True})
 
@@ -122,14 +122,14 @@ class EnsurePath(Command):
 class Optimise(Command):
     """Optimise store disk usage by hard-linking duplicate files"""
 
-    store_uri: str = arg(_DEFAULT_STORE_URI, help="Store URI to optimise.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to optimise.")
 
     @override
     async def run(self) -> None:
         prepare_sys_path()
         import nanopynix
 
-        async with nanopynix.Session() as nix, nix.store(self.store_uri) as store:
+        async with nanopynix.Session() as nix, nix.store(self.store) as store:
             await store.optimise_store(OptimiseStoreRequest())
             _print_json({"optimised": True})
 
@@ -139,14 +139,14 @@ class Verify(Command):
 
     check_contents: bool = arg(False, help="Check path contents, not only metadata.")
     repair: bool = arg(False, help="Attempt repair while verifying.")
-    store_uri: str = arg(_DEFAULT_STORE_URI, help="Store URI to verify.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to verify.")
 
     @override
     async def run(self) -> None:
         prepare_sys_path()
         import nanopynix
 
-        async with nanopynix.Session() as nix, nix.store(self.store_uri) as store:
+        async with nanopynix.Session() as nix, nix.store(self.store) as store:
             resp = await store.verify_store(
                 VerifyStoreRequest(check_contents=self.check_contents, repair=self.repair)
             )

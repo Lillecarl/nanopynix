@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from clypi import Command
 
+from pynix.build import Build  # noqa: TC001
 from pynix.derivation import Derivation  # noqa: TC001
 from pynix.eval import Eval  # noqa: TC001
 from pynix.flake import Flake  # noqa: TC001
@@ -12,7 +13,7 @@ from pynix.store import Store  # noqa: TC001
 class Pynix(Command):
     """pynix — nanopynix CLI"""
 
-    subcommand: Eval | Derivation | Flake | PathInfo | Store
+    subcommand: Build | Eval | Derivation | Flake | PathInfo | Store
 
 
 def main() -> None:
