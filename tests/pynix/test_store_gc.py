@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import json
+import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -215,6 +221,49 @@ async def test_ensure_path(populated_store: dict[str, str], capsys):
     assert data == {"path": store_path, "valid": True}
 
 
+async def test_store_cat_reads_file_from_temporary_store(tmp_path, monkeypatch, capsys):
+    store_root = tmp_path / "store-root"
+    store_url = f"local?root={store_root}"
+    out_path = "/nix/store/00000000000000000000000000000000-pynix-store-cat-test"
+    output_file = store_root / out_path.removeprefix("/") / "share" / "message"
+    output_file.parent.mkdir(parents=True)
+    output_file.write_text("cat-output\n")
+    _install_fake_nanopynix(monkeypatch=monkeypatch, store_root=store_root)
+
+    cmd = Pynix.parse(["store", "cat", f"{out_path}/share/message", "--store", store_url])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    assert captured.out == "cat-output\n"
+
+
+async def test_store_ls_lists_directory_from_temporary_store(tmp_path, monkeypatch, capsys):
+    store_root = tmp_path / "store-root"
+    store_url = f"local?root={store_root}"
+    out_path = "/nix/store/00000000000000000000000000000000-pynix-store-ls-test"
+    store_path = store_root / out_path.removeprefix("/")
+    (store_path / "bin").mkdir(parents=True)
+    (store_path / "share").mkdir()
+    (store_path / "bin" / "tool").touch()
+    (store_path / "share" / "message").touch()
+    _install_fake_nanopynix(monkeypatch=monkeypatch, store_root=store_root)
+
+    cmd = Pynix.parse(["store", "ls", out_path, "--store", store_url])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ["bin", "share"]
+
+    cmd = Pynix.parse(["store", "ls", out_path, "--json", "--store", store_url])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data == {
+        "entries": [
+            {"name": "bin", "type": "directory"},
+            {"name": "share", "type": "directory"},
+        ]
+    }
+
+
 async def test_optimise_empty_local_store(tmp_path, capsys):
     cmd = Pynix.parse(["store", "optimise", "--store", f"local?root={tmp_path}"])
     await cmd.astart()
@@ -229,3 +278,55 @@ async def test_verify_empty_local_store(tmp_path, capsys):
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert data == {"errors": False}
+
+
+def _install_fake_nanopynix(*, monkeypatch: pytest.MonkeyPatch, store_root: Path) -> None:
+    import pynix.store as store_module
+
+    monkeypatch.setattr(store_module, "prepare_sys_path", lambda: None)
+    monkeypatch.setattr(store_module, "forward_nix_logs", _noop_forward_nix_logs)
+    monkeypatch.setitem(sys.modules, "nanopynix", SimpleNamespace(Session=lambda: _FakeSession(store_root)))
+
+
+@asynccontextmanager
+async def _noop_forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncIterator[None]:
+    yield
+
+
+class _FakeSession:
+    def __init__(self, store_root: Path) -> None:
+        self._store_root = store_root
+
+    async def __aenter__(self) -> _FakeSession:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    def store(self, store_uri: str) -> _FakeStore:
+        return _FakeStore(self._store_root, store_uri)
+
+    async def log_stream(self) -> AsyncIterator[None]:
+        if False:
+            yield None
+
+
+class _FakeStore:
+    def __init__(self, store_root: Path, store_uri: str) -> None:
+        self._store_root = store_root
+        self._store_uri = store_uri
+
+    async def __aenter__(self) -> _FakeStore:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def get_store_dir(self, request: Any) -> SimpleNamespace:
+        return SimpleNamespace(dir="/nix/store")
+
+    async def query_path_info(self, request: Any) -> SimpleNamespace:
+        physical_path = self._store_root / request.path.removeprefix("/")
+        if not physical_path.exists():
+            raise FileNotFoundError(request.path)
+        return SimpleNamespace()
