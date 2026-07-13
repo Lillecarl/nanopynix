@@ -1,9 +1,12 @@
 """Tests for eval over RPC — EvalSession + ValueProxy."""
 
+from __future__ import annotations
+
 import asyncio
+from pathlib import Path
 
 import pytest
-from anyio import Path
+from anyio import Path as AnyioPath
 from nanopynix_proto.nix.store import GetUriRequest
 
 from nanopynix import (
@@ -18,7 +21,7 @@ from nanopynix import (
 )
 
 
-async def test_eval_file_simple(tmp_path):
+async def test_eval_file_simple(tmp_path: Path):
     """session.file returns a ValueProxy, force_deep() resolves to Python dict."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ a = 1; b = "hello"; c = true; }')
@@ -34,7 +37,7 @@ async def test_eval_file_simple(tmp_path):
         assert result == {"a": 1, "b": "hello", "c": True}
 
 
-async def test_eval_attr_navigation(tmp_path):
+async def test_eval_attr_navigation(tmp_path: Path):
     """Navigate into an attrset via .attr(), then force."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ inner = { x = 42; y = "hi"; }; }')
@@ -52,7 +55,7 @@ async def test_eval_attr_navigation(tmp_path):
         assert await x.force_as(NixType.INT) == 42
 
 
-async def test_eval_list(tmp_path):
+async def test_eval_list(tmp_path: Path):
     """session.file a list, navigate by index, force."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("[ 1 2 3 ]")
@@ -82,7 +85,7 @@ async def test_eval_string():
         assert await root.force() == 43
 
 
-async def test_eval_attr_names(tmp_path):
+async def test_eval_attr_names(tmp_path: Path):
     """attr_names() returns keys of an attrset (insertion order)."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ z = 1; a = 2; m = 3; }")
@@ -97,7 +100,7 @@ async def test_eval_attr_names(tmp_path):
         assert set(names) == {"a", "m", "z"}
 
 
-async def test_eval_has_attr(tmp_path):
+async def test_eval_has_attr(tmp_path: Path):
     """has_attr() checks for key existence."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ foo = 1; }")
@@ -112,7 +115,7 @@ async def test_eval_has_attr(tmp_path):
         assert await root.has_attr("bar") is False
 
 
-async def test_eval_force_does_not_consume(tmp_path):
+async def test_eval_force_does_not_consume(tmp_path: Path):
     """force_deep() does NOT release the handle — we can force again."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; }")
@@ -128,7 +131,7 @@ async def test_eval_force_does_not_consume(tmp_path):
         assert r1 == r2 == {"a": 1}
 
 
-async def test_eval_session_cleanup(tmp_path):
+async def test_eval_session_cleanup(tmp_path: Path):
     """Handles are released when the eval session exits."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; }")
@@ -142,7 +145,7 @@ async def test_eval_session_cleanup(tmp_path):
         assert isinstance(uri.uri, str)
 
 
-async def test_eval_thunk(tmp_path):
+async def test_eval_thunk(tmp_path: Path):
     """session.file on a file with a thunk (lazy value)."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("let x = 1 + 2; in { inherit x; }")
@@ -159,7 +162,7 @@ async def test_eval_thunk(tmp_path):
         assert result == 3
 
 
-async def test_eval_nested_navigation(tmp_path):
+async def test_eval_nested_navigation(tmp_path: Path):
     """Deep navigation: a.b.c"""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = { b = { c = 99; }; }; }")
@@ -348,7 +351,7 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active():
         assert set(outputs) == {"out"}
         assert outputs["out"].startswith("/nix/store/")
         assert "nanopynix-build-value-test" in outputs["out"]
-        assert await Path(outputs["out"]).read_text() == "hello\n"
+        assert await AnyioPath(outputs["out"]).read_text() == "hello\n"
 
 
 async def test_evaluated_derivation_can_build_with_explicit_build_store():
@@ -380,7 +383,7 @@ async def test_evaluated_derivation_can_build_with_explicit_build_store():
         assert set(outputs) == {"out"}
         assert outputs["out"].startswith("/nix/store/")
         assert "nanopynix-build-value-explicit-store-test" in outputs["out"]
-        assert await Path(outputs["out"]).read_text() == "explicit\n"
+        assert await AnyioPath(outputs["out"]).read_text() == "explicit\n"
 
 
 async def test_worker_yaml_primops():
@@ -512,7 +515,7 @@ async def test_worker_to_yaml_rejects_functions():
         assert "Python primop" not in message
 
 
-async def test_eval_concurrent_sessions(tmp_path):
+async def test_eval_concurrent_sessions(tmp_path: Path):
     """Two concurrent eval sessions — each in its own Session."""
     f1 = tmp_path / "a.nix"
     f2 = tmp_path / "b.nix"
@@ -536,7 +539,7 @@ async def test_eval_concurrent_sessions(tmp_path):
 # ── Flake evaluation over RPC ──────────────────────────────────────────
 
 
-def _init_git_flake(tmp_path, outputs_body):
+def _init_git_flake(tmp_path: Path, outputs_body: str):
     """Create a temp flake with a git repo for RPC testing."""
     (tmp_path / "flake.nix").write_text(f"""
     {{
@@ -552,7 +555,7 @@ def _init_git_flake(tmp_path, outputs_body):
     subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
 
 
-async def test_eval_flake(tmp_path):
+async def test_eval_flake(tmp_path: Path):
     """eval_flake locks and evaluates a flake, returns navigable outputs."""
     _init_git_flake(tmp_path, 'greeting = "hello"; count = 42;')
 
@@ -569,7 +572,7 @@ async def test_eval_flake(tmp_path):
         assert await count.force() == 42
 
 
-async def test_eval_flake_force_json(tmp_path):
+async def test_eval_flake_force_json(tmp_path: Path):
     """eval_flake + force_json on a sub-attrset serializes it to JSON."""
     _init_git_flake(tmp_path, 'lib = { name = "test"; nested = { x = 1; y = [ "a" "b" ]; }; };')
 
@@ -589,7 +592,7 @@ async def test_eval_flake_force_json(tmp_path):
         assert nested["y"] == ["a", "b"]
 
 
-async def test_lock_flake_and_eval_locked(tmp_path):
+async def test_lock_flake_and_eval_locked(tmp_path: Path):
     """lock_flake + eval_locked_flake: in-memory lock, evaluate without writing."""
     _init_git_flake(tmp_path, "val = 99;")
 
@@ -607,7 +610,7 @@ async def test_lock_flake_and_eval_locked(tmp_path):
         assert await val.force() == 99
 
 
-async def test_locked_flake_release_invalidates_handle(tmp_path):
+async def test_locked_flake_release_invalidates_handle(tmp_path: Path):
     """release_locked_flake marks the local handle unusable."""
     _init_git_flake(tmp_path, "val = 99;")
 
@@ -624,7 +627,7 @@ async def test_locked_flake_release_invalidates_handle(tmp_path):
             await locked.eval()
 
 
-async def test_lock_flake_write_lock_file(tmp_path):
+async def test_lock_flake_write_lock_file(tmp_path: Path):
     """lock_flake with write_lock_file=False, then write_lock_file() persists."""
     _init_git_flake(tmp_path, "val = 1;")
 
@@ -640,7 +643,7 @@ async def test_lock_flake_write_lock_file(tmp_path):
         assert (tmp_path / "flake.lock").exists()
 
 
-async def test_lock_flake_no_write_does_not_leak(tmp_path):
+async def test_lock_flake_no_write_does_not_leak(tmp_path: Path):
     """lock_flake with write_lock_file=False must NOT create flake.lock."""
     _init_git_flake(tmp_path, "val = 1;")
 
@@ -653,7 +656,7 @@ async def test_lock_flake_no_write_does_not_leak(tmp_path):
         assert not (tmp_path / "flake.lock").exists()
 
 
-async def test_lock_flake_update_all(tmp_path):
+async def test_lock_flake_update_all(tmp_path: Path):
     """lock_flake with update_inputs=True re-resolves all inputs."""
     _init_git_flake(tmp_path, "x = 1;")
 
@@ -670,7 +673,7 @@ async def test_lock_flake_update_all(tmp_path):
         assert locked.handle > 0
 
 
-async def test_lock_flake_update_specific_input(tmp_path):
+async def test_lock_flake_update_specific_input(tmp_path: Path):
     """lock_flake with update_inputs=list re-resolves only specified inputs."""
     _init_git_flake(tmp_path, "x = 1;")
 
