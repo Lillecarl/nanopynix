@@ -1,5 +1,56 @@
 {
   "nodes": {
+    "flake-compatish": {
+      "locked": {
+        "lastModified": 1783977694,
+        "narHash": "sha256-Pa/Q2Cl5PCnJFR8KkwMrkEQuSquMzXVFovZN6pf3f4c=",
+        "owner": "lillecarl",
+        "repo": "flake-compatish",
+        "rev": "c3857835d74a84e47a2d439022ac40e6a87c30f2",
+        "type": "github"
+      },
+      "original": {
+        "owner": "lillecarl",
+        "repo": "flake-compatish",
+        "type": "github"
+      }
+    },
+    "flake-compatish_2": {
+      "locked": {
+        "lastModified": 1783975188,
+        "narHash": "sha256-GH6Z1/0LXbQ6tKEWwpeVfrWvWvCJhte8B6yTQMMtIfQ=",
+        "owner": "lillecarl",
+        "repo": "flake-compatish",
+        "rev": "1a139e919618779b02154f8b9f05d5346a0aabf1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "lillecarl",
+        "repo": "flake-compatish",
+        "type": "github"
+      }
+    },
+    "grpclib-transports": {
+      "inputs": {
+        "flake-compatish": "flake-compatish_2",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783975976,
+        "narHash": "sha256-LlzY7q2yOR9NJ/VGnIE1R3ZF0VrB6P5EncJNqBz9AgM=",
+        "owner": "lillecarl",
+        "repo": "grpclib-transports",
+        "rev": "d7544b9dec34ab5098368c70bf2522db62bed159",
+        "type": "github"
+      },
+      "original": {
+        "owner": "lillecarl",
+        "repo": "grpclib-transports",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1783279667,
@@ -18,6 +69,8 @@
     },
     "root": {
       "inputs": {
+        "flake-compatish": "flake-compatish",
+        "grpclib-transports": "grpclib-transports",
         "nixpkgs": "nixpkgs"
       }
     }

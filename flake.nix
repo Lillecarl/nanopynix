@@ -1,14 +1,24 @@
 {
   inputs = {
+    flake-compatish.url = "github:lillecarl/flake-compatish";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    grpclib-transports = {
+      url = "github:lillecarl/grpclib-transports";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
   outputs =
     inputs:
     let
       lib = inputs.nixpkgs.lib;
       forAllSystems = lib.genAttrs lib.systems.flakeExposed;
-      eachPkgs = forAllSystems (system: import inputs.nixpkgs { inherit system; });
-      eachDefNix = forAllSystems (system: import ./. { pkgs = eachPkgs.${system}; });
+      eachDefNix = forAllSystems (
+        system:
+        import ./. {
+          inherit system;
+          pkgs = inputs.self.legacyPackages.${system};
+        }
+      );
     in
     {
       packages = forAllSystems (system: {
@@ -17,6 +27,6 @@
       checks = forAllSystems (system: {
         pynix = eachDefNix.${system}.pynix;
       });
-      legacyPackages = forAllSystems (system: eachPkgs.${system});
+      legacyPackages = forAllSystems (system: inputs.nixpkgs.legacyPackages.${system});
     };
 }

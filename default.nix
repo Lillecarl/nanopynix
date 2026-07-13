@@ -1,10 +1,12 @@
 {
-  pkgs ? import <nixpkgs> { },
+  inputs ? (import ./nix/compat.nix).inputs,
+  system ? builtins.currentSystem,
+  pkgs ? inputs.nixpkgs.legacyPackages.${system},
 }:
 let
   inherit (pkgs) python3Packages;
 
-  grpclab-all = pkgs.callPackage ../grpclab { };
+  grpclab-all = pkgs.callPackage inputs.grpclib-transports { };
   inherit (grpclab-all)
     grpclib-transports
     betterproto2
