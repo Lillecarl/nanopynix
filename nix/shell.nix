@@ -3,6 +3,10 @@
   python,
   pyright,
   ruff,
+  nixfmt,
+  clang-tools,
+  taplo,
+  treefmt,
   nanopynix,
   pynix,
   pytest,
@@ -30,5 +34,9 @@ mkShell {
     pythonEnv
     pyright
     ruff
+    nixfmt
+    clang-tools
+    taplo
+    treefmt
   ];
 }
