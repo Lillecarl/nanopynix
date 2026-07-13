@@ -11,6 +11,12 @@ import nanopynix
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--run-temp-store-builds",
+        action="store_true",
+        default=False,
+        help="run tests that build into temporary Nix stores",
+    )
+    parser.addoption(
         "--run-live-gc",
         action="store_true",
         default=False,

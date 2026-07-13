@@ -12,6 +12,7 @@
 #include <nix/store/gc-store.hh>
 #include <nix/store/indirect-root-store.hh>
 #include <nix/store/local-fs-store.hh>
+#include <nix/store/log-store.hh>
 #include <nix/store/names.hh>
 #include <nix/store/path.hh>
 #include <nix/store/derived-path.hh>
@@ -422,6 +423,13 @@ static nix::IndirectRootStore &require_indirect_root_store(nix::Store &s) {
     return *store;
 }
 
+static nix::LogStore &require_log_store(nix::Store &s) {
+    auto *store = dynamic_cast<nix::LogStore *>(&s);
+    if (store == nullptr)
+        throw nix::Error("store '%s' does not support retrieving build logs", s.config.getHumanReadableURI());
+    return *store;
+}
+
 static nix::GCAction gc_action_from_int(int action) {
     switch (action) {
         case 1: return nix::GCAction::gcReturnLive;
@@ -805,6 +813,16 @@ static nb::dict store_verify_store(nix::Store &s, const nb::dict &request) {
     return d;
 }
 
+static nb::dict store_get_build_log(nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    auto log = require_log_store(s).getBuildLog(request_store_path(s, request, "path"));
+    if (log)
+        d["log"] = *log;
+    else
+        d["log"] = nb::none();
+    return d;
+}
+
 // =========================================================================
 // Store bindings
 // =========================================================================
@@ -917,7 +935,8 @@ static void bind_store(nb::module_ &m) {
         .def("store_add_indirect_root", &store_add_indirect_root, "request"_a)
         .def("store_ensure_path", &store_ensure_path, "request"_a)
         .def("store_optimise_store", &store_optimise_store, "request"_a)
-        .def("store_verify_store", &store_verify_store, "request"_a);
+        .def("store_verify_store", &store_verify_store, "request"_a)
+        .def("store_get_build_log", &store_get_build_log, "request"_a);
 }
 
 // =========================================================================

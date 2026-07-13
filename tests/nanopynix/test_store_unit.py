@@ -21,6 +21,7 @@ from nanopynix_proto.nix.store import (
     GcAction,
     GetStoreDirRequest,
     GetUriRequest,
+    GetBuildLogRequest,
     IsValidPathRequest,
     OptimiseStoreRequest,
     ParseStorePathRequest,
@@ -71,6 +72,7 @@ def _make_stub_mock() -> MagicMock:
     stub.ensure_path = AsyncMock()
     stub.optimise_store = AsyncMock()
     stub.verify_store = AsyncMock()
+    stub.get_build_log = AsyncMock()
     stub.fetch_from_url = AsyncMock()
     stub.fetch_from_attrs = AsyncMock()
     return stub
@@ -192,6 +194,12 @@ class TestIdentity:
         result = await store.get_store_dir(GetStoreDirRequest())
         assert result.dir == "/nix/store"
         pool._store_stub.get_store_dir.assert_awaited_once()
+
+    async def test_get_build_log(self, store, pool):
+        pool._store_stub.get_build_log.return_value = MagicMock(log="hello log\n")
+        result = await store.get_build_log(GetBuildLogRequest(path="/nix/store/aaa-bbb"))
+        assert result.log == "hello log\n"
+        pool._store_stub.get_build_log.assert_awaited_once()
 
 
 # ════════════════════════════════════════════════════════════════════
