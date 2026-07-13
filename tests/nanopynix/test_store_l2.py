@@ -130,7 +130,7 @@ async def test_compute_fs_closure():
                 path = StorePath(paths[0])
                 closure = (await store.compute_fs_closure(ComputeFsClosureRequest(path=path.to_string))).paths
                 assert isinstance(closure, list)
-                assert len(closure) >= 1  # type: ignore[reportUnknownArgumentType] -- closure from nanobind
+                assert len(closure) >= 1  # type: ignore[reportUnknownArgumentType] -- generated protobuf paths field is list[Unknown]
                 assert all(isinstance(sp, StorePathProto) for sp in closure)
 
 

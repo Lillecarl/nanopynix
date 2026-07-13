@@ -13,8 +13,8 @@ def test_parse_nix_path_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     import nanopynix_expr
 
     monkeypatch.delenv("NIX_PATH", raising=False)
-    result = nanopynix_expr.parse_nix_path()  # type: ignore[reportUnknownMemberType] -- nanopynix_expr C++ extension without stubs
-    assert result == []  # type: ignore[reportUnknownVariableType] -- result type unknown from C++ extension
+    result = nanopynix_expr.parse_nix_path()
+    assert result == []
 
 
 def test_parse_nix_path_simple(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -27,10 +27,10 @@ def test_parse_nix_path_simple(monkeypatch: pytest.MonkeyPatch) -> None:
         Path(a).mkdir(parents=True)
         Path(b).mkdir(parents=True)
         monkeypatch.setenv("NIX_PATH", f"foo={a}:bar={b}")
-        result = nanopynix_expr.parse_nix_path()  # type: ignore[reportUnknownMemberType] -- nanopynix_expr C++ extension without stubs
-    assert len(result) == 2  # type: ignore[reportUnknownVariableType] -- result type unknown from C++ extension
-    assert result[0] == f"foo={a}"  # type: ignore[reportUnknownMemberType] -- result from C++ extension
-    assert result[1] == f"bar={b}"  # type: ignore[reportUnknownMemberType] -- result from C++ extension
+        result = nanopynix_expr.parse_nix_path()
+    assert len(result) == 2
+    assert result[0] == f"foo={a}"
+    assert result[1] == f"bar={b}"
 
 
 def test_parse_nix_path_explicit_value_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,8 +43,8 @@ def test_parse_nix_path_explicit_value_without_env(monkeypatch: pytest.MonkeyPat
         b = str(Path(d) / "b")
         Path(a).mkdir(parents=True)
         Path(b).mkdir(parents=True)
-        result = nanopynix_expr.parse_nix_path(f"foo={a}:bar={b}")  # type: ignore[reportUnknownMemberType] -- nanopynix_expr C++ extension without stubs
-    assert result == [f"foo={a}", f"bar={b}"]  # type: ignore[reportUnknownVariableType] -- result type unknown from C++ extension
+        result = nanopynix_expr.parse_nix_path(f"foo={a}:bar={b}")
+    assert result == [f"foo={a}", f"bar={b}"]
 
 
 def test_parse_nix_path_url_style(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,7 +52,7 @@ def test_parse_nix_path_url_style(monkeypatch: pytest.MonkeyPatch) -> None:
     import nanopynix_expr
 
     monkeypatch.setenv("NIX_PATH", "nixpkgs=https://github.com/NixOS/nixpkgs/archive/master.tar.gz")
-    result = nanopynix_expr.parse_nix_path()  # type: ignore[reportUnknownMemberType] -- nanopynix_expr C++ extension without stubs
-    assert len(result) == 1  # type: ignore[reportUnknownVariableType] -- result type unknown from C++ extension
-    assert "://" in result[0]  # type: ignore[reportUnknownMemberType] -- result from C++ extension
-    assert "nixpkgs=" in result[0]  # type: ignore[reportUnknownMemberType] -- result from C++ extension
+    result = nanopynix_expr.parse_nix_path()
+    assert len(result) == 1
+    assert "://" in result[0]
+    assert "nixpkgs=" in result[0]

@@ -113,7 +113,7 @@ def _register_primops(
             callback = rpc_primop_callback_factory(rpc_bridge, spec.name, spec.arity)
         else:
             callback = _import_callable(spec.import_path)
-        nanopynix_expr.register_primop(  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+        nanopynix_expr.register_primop(
             spec.name,
             spec.arity,
             spec.args,
@@ -123,7 +123,7 @@ def _register_primops(
 
 
 def _effective_settings_for_log() -> dict[str, str | None]:
-    return {name: nanopynix_util.get_setting(name) for name in _DIAGNOSTIC_SETTINGS}  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return type, no stubs
+    return {name: nanopynix_util.get_setting(name) for name in _DIAGNOSTIC_SETTINGS}
 
 
 def _install_worker_diagnostics(collector: LogCollector) -> None:
@@ -189,20 +189,20 @@ class WorkerServiceHandler(WorkerServiceBase):
                 os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
 
             for k, v in settings.items():
-                nanopynix_util.set_setting(k, v)  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+                nanopynix_util.set_setting(k, v)
             for f in message.experimental_features:
-                nanopynix_util.enable_experimental_feature(f)  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+                nanopynix_util.enable_experimental_feature(f)
 
-            nanopynix_util.init_libstore(load_config=False)  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
-            nanopynix_util.set_verbosity(int(message.verbosity if message.verbosity is not None else LogLevel.NOTICE))  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
-            nanopynix_expr.init_libexpr()  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+            nanopynix_util.init_libstore(load_config=False)
+            nanopynix_util.set_verbosity(int(message.verbosity if message.verbosity is not None else LogLevel.NOTICE))
+            nanopynix_expr.init_libexpr()
 
             if message.pure_eval is not None:
-                nanopynix_expr._set_pure_eval(message.pure_eval)  # type: ignore[reportPrivateUsage, reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+                nanopynix_expr._set_pure_eval(message.pure_eval)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
             if message.restrict_eval is not None:
-                nanopynix_expr._set_restrict_eval(message.restrict_eval)  # type: ignore[reportPrivateUsage, reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+                nanopynix_expr._set_restrict_eval(message.restrict_eval)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
             if message.allowed_uris:
-                nanopynix_expr._set_allowed_uris(message.allowed_uris)  # type: ignore[reportPrivateUsage, reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+                nanopynix_expr._set_allowed_uris(message.allowed_uris)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
             self._state.nix_path = list(message.nix_path)
             if self._state.collector is not None:
                 self._state.collector.callback(
@@ -245,16 +245,16 @@ class WorkerServiceHandler(WorkerServiceBase):
         )
 
     def _open_store(self, uri: str) -> tuple[int, str, str]:
-        store = nanopynix_store.open_store() if uri == "auto" else nanopynix_store.open_store(uri)  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return type, no stubs
+        store = nanopynix_store.open_store() if uri == "auto" else nanopynix_store.open_store(uri)
         handle = self._state.handles.allocate(store, "store")
         if self._state.collector is not None:
             self._state.collector.callback(
                 0,
                 "msg",
                 int(LogLevel.DEBUG),
-                f"worker open_store handle={handle} uri={store.get_uri()} dirs={store.get_store_dirs()}",  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+                f"worker open_store handle={handle} uri={store.get_uri()} dirs={store.get_store_dirs()}",
             )
-        return handle, store.get_uri(), store.get_store_dir()  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+        return handle, store.get_uri(), store.get_store_dir()
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
         assert self._state.executor is not None  # set by worker_service_factory before init
@@ -311,7 +311,7 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
     * ``ThreadedRpcPrimopBridge`` (Nix→event-loop primop dispatch)
     """
     collector = LogCollector()
-    nanopynix_util.install_logger(collector.callback)  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- C++ nanobind return, no stubs
+    nanopynix_util.install_logger(collector.callback)
     with contextlib.suppress(RuntimeError, ValueError):
         _install_worker_diagnostics(collector)
     collector.callback(0, "msg", int(LogLevel.DEBUG), f"nanopynix worker pid={os.getpid()} diagnostics=SIGUSR1")

@@ -217,7 +217,7 @@ class TestIdentity:
 
         result = await store.add_to_store(request)
 
-        assert result.to_string == "aaa-added"  # type: ignore[attr-defined] -- StorePath nanobind type, to_string not in stubs
+        assert result.to_string == "aaa-added"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
         pool._store_stub.add_to_store.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
         sent = pool._store_stub.add_to_store.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args; await_args may be None
         assert sent.store_handle == 123
@@ -229,7 +229,7 @@ class TestIdentity:
 
         result = await store.compute_store_path(request)
 
-        assert result.to_string == "bbb-added"  # type: ignore[attr-defined] -- StorePath nanobind type, to_string not in stubs
+        assert result.to_string == "bbb-added"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
         pool._store_stub.compute_store_path.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
         sent = pool._store_stub.compute_store_path.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args; await_args may be None
         assert sent.store_handle == 456
@@ -244,7 +244,7 @@ class TestStorePathCoercion:
     async def test_parse_store_path_returns_proto(self, store: Store, pool: MagicMock):
         pool._store_stub.parse_store_path.return_value = _mock_store_path("aaa-bbb", "aaa", "bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
         result = await store.parse_store_path(ParseStorePathRequest(path="/nix/store/aaa-bbb"))
-        assert result.to_string == "aaa-bbb"  # type: ignore[attr-defined] -- StorePath nanobind type, to_string not in stubs
+        assert result.to_string == "aaa-bbb"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
 
     async def test_is_valid_path_accepts_str(self, store: Store, pool: MagicMock):
         pool._store_stub.is_valid_path.return_value = MagicMock(valid=True)  # type: ignore[reportPrivateUsage] -- test accesses private stub
@@ -260,7 +260,7 @@ class TestStorePathCoercion:
     async def test_follow_links_returns_storepath(self, store: Store, pool: MagicMock):
         pool._store_stub.follow_links_to_store_path.return_value = _mock_store_path("aaa-bbb", "aaa", "bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
         result = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path="/some/link"))
-        assert result.to_string == "aaa-bbb"  # type: ignore[attr-defined] -- StorePath nanobind type, to_string not in stubs
+        assert result.to_string == "aaa-bbb"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -285,7 +285,7 @@ class TestPathInfo:
         )
         result = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part="aaa"))
         assert result.path is not None
-        assert result.path.to_string == "aaa-foo"  # type: ignore[attr-defined] -- StorePath nanobind type, to_string not in stubs
+        assert result.path.to_string == "aaa-foo"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
 
     async def test_query_path_from_hash_part_not_found(self, store: Store, pool: MagicMock):
         pool._store_stub.query_path_from_hash_part.return_value = MagicMock(path=None)  # type: ignore[reportPrivateUsage] -- test accesses private stub

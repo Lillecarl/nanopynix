@@ -282,22 +282,22 @@ def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None
 
 
 def list_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_util.list_settings_metadata_json())  # type: ignore[reportUnknownArgumentType] -- C++ nanobind return type passed to json.loads
+    raw: dict[str, object] = json.loads(nanopynix_util.list_settings_metadata_json())
     return _settings_metadata_from_raw(raw)
 
 
 def list_eval_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_expr.list_eval_settings_metadata_json())  # type: ignore[reportUnknownArgumentType] -- C++ nanobind return type passed to json.loads
+    raw: dict[str, object] = json.loads(nanopynix_expr.list_eval_settings_metadata_json())
     return _settings_metadata_from_raw(raw)
 
 
 def list_fetch_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_fetchers.list_fetch_settings_metadata_json())  # type: ignore[reportUnknownArgumentType] -- C++ nanobind return type passed to json.loads
+    raw: dict[str, object] = json.loads(nanopynix_fetchers.list_fetch_settings_metadata_json())
     return _settings_metadata_from_raw(raw)
 
 
 def list_flake_settings_metadata() -> dict[str, NixSettingMetadata]:
-    raw: dict[str, object] = json.loads(nanopynix_flake.list_flake_settings_metadata_json())  # type: ignore[reportUnknownArgumentType] -- C++ nanobind return type passed to json.loads
+    raw: dict[str, object] = json.loads(nanopynix_flake.list_flake_settings_metadata_json())
     return _settings_metadata_from_raw(raw)
 
 

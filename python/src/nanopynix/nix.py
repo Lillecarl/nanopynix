@@ -81,9 +81,9 @@ def _to_primop_specs(specs: Sequence[PrimOpSpec | Mapping[str, Any]] | None) -> 
 
 def _normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
     if nix_path is None:
-        return list(nanopynix_expr.parse_nix_path())  # type: ignore[reportUnknownMemberType] -- nanopynix_expr C++ nanobind extension without stubs
+        return list(nanopynix_expr.parse_nix_path())
     if isinstance(nix_path, str):
-        return list(nanopynix_expr.parse_nix_path(nix_path))  # type: ignore[reportUnknownMemberType] -- nanopynix_expr C++ nanobind extension without stubs
+        return list(nanopynix_expr.parse_nix_path(nix_path))
     return list(nix_path)
 
 

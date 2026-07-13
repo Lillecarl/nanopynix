@@ -77,6 +77,7 @@ buildPythonPackage {
       PYTHONPATH="$_site:$PYTHONPATH" \
         ${python}/bin/python -m nanobind.stubgen -m "$mod" $_pat -O "$_site"
     done
+    touch "$_site/py.typed"
   '';
 
   pythonImportsCheck = [
