@@ -22,6 +22,7 @@ from nanopynix_proto.nix.store import (
     FollowLinksToStorePathRequest,
     GcAction,
     GetStoreDirRequest,
+    GetStoreDirsRequest,
     GetUriRequest,
     IsValidPathRequest,
     OptimiseStoreRequest,
@@ -124,7 +125,23 @@ class Info(Command):
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             uri = await store.get_uri(GetUriRequest())
             store_dir = await store.get_store_dir(GetStoreDirRequest())
-            _print_json({"uri": uri.uri, "storeDir": store_dir.dir})
+            dirs = await store.get_store_dirs(GetStoreDirsRequest())
+            _print_json({"uri": uri.uri, "storeDir": store_dir.dir, "dirs": _store_dirs_to_json(dirs)})
+
+
+class Dirs(Command):
+    """Show configured local store directories"""
+
+    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+            dirs = await store.get_store_dirs(GetStoreDirsRequest())
+            _print_json(_store_dirs_to_json(dirs))
 
 
 class IsValidPath(Command):
@@ -565,6 +582,7 @@ class Store(Command):
     subcommand: (
         Gc
         | Info
+        | Dirs
         | IsValidPath
         | FollowLinksToStorePath
         | ComputeFsClosure
@@ -606,6 +624,18 @@ def _print_json(obj: object) -> None:
 
 def _print_paths(paths: Iterable[Any]) -> None:
     _print_json({"paths": [_format_store_path(path.base_name) for path in paths]})
+
+
+def _store_dirs_to_json(dirs: Any) -> dict[str, str | None]:
+    return {
+        "storeDir": dirs.store_dir,
+        "uri": dirs.uri,
+        "rootDir": dirs.root_dir,
+        "stateDir": dirs.state_dir,
+        "logDir": dirs.log_dir,
+        "realStoreDir": dirs.real_store_dir,
+        "buildDir": dirs.build_dir,
+    }
 
 
 async def _add_to_store(

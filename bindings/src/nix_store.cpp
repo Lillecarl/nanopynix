@@ -13,6 +13,7 @@
 #include <nix/store/gc-store.hh>
 #include <nix/store/indirect-root-store.hh>
 #include <nix/store/local-fs-store.hh>
+#include <nix/store/local-store.hh>
 #include <nix/store/log-store.hh>
 #include <nix/store/names.hh>
 #include <nix/store/path.hh>
@@ -28,6 +29,7 @@
 #include <nix/util/file-descriptor.hh>
 #include <nix/util/error.hh>
 #include <nix/util/file-system.hh>
+#include <nix/util/logging.hh>
 #include <nix/util/posix-source-accessor.hh>
 
 #include "py_store_impl.hh"
@@ -177,9 +179,11 @@ static void bind_store_path(nb::module_ &m) {
 // =========================================================================
 
 static std::shared_ptr<nix::Store> open_store_uri(const std::string &uri) {
+    nb::gil_scoped_release release;
     return nix::openStore(uri).get_ptr();
 }
 static std::shared_ptr<nix::Store> open_store_default() {
+    nb::gil_scoped_release release;
     return nix::openStore().get_ptr();
 }
 
@@ -232,8 +236,12 @@ static std::vector<nix::StorePath> request_store_paths(nix::Store &s, const nb::
 // --- PathInfo ---
 
 static nb::dict query_path_info(nix::Store &s, const nix::StorePath &path) {
-    auto info = s.queryPathInfo(path);
-    return path_info_to_dict(*info);
+    std::optional<nix::ref<const nix::ValidPathInfo>> info;
+    {
+        nb::gil_scoped_release release;
+        info.emplace(s.queryPathInfo(path));
+    }
+    return path_info_to_dict(**info);
 }
 
 // --- Closures ---
@@ -241,7 +249,10 @@ static nb::dict query_path_info(nix::Store &s, const nix::StorePath &path) {
 static nb::list compute_fs_closure(nix::Store &s, const nix::StorePath &path,
                                     bool flip, bool include_outputs, bool include_derivers) {
     nix::StorePathSet out;
-    s.computeFSClosure(path, out, flip, include_outputs, include_derivers);
+    {
+        nb::gil_scoped_release release;
+        s.computeFSClosure(path, out, flip, include_outputs, include_derivers);
+    }
     return store_paths_to_dict_list(out);
 }
 
@@ -258,127 +269,14 @@ static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path)
     return nix::DerivedPath::Opaque{path};
 }
 
-static nix::StorePathSet known_output_paths_from_eval_store(
-        nix::Store &s,
-        const nix::DerivedPaths &paths,
-        const std::shared_ptr<nix::Store> &evalStore) {
-    auto &store = evalStore ? *evalStore : s;
-    nix::StorePathSet outputPaths;
-
-    for (const auto &path : paths) {
-        std::visit(nix::overloaded{
-            [&](const nix::DerivedPath::Opaque &) {},
-            [&](const nix::DerivedPath::Built &built) {
-                auto drvPath = built.drvPath->getBaseStorePath();
-                if (!store.isValidPath(drvPath))
-                    return;
-                for (auto &[outputName, pathOpt] : store.queryStaticPartialDerivationOutputMap(drvPath)) {
-                    if (pathOpt)
-                        outputPaths.insert(*pathOpt);
-                }
-            },
-        }, path.raw());
-    }
-
-    return outputPaths;
-}
-
-static bool all_valid_paths(nix::Store &s, const nix::StorePathSet &paths) {
-    for (auto &path : paths)
-        if (!s.isValidPath(path))
-            return false;
-    return true;
-}
-
-static nb::list successful_build_results_for_targets(
-        nix::Store &s,
-        const nix::DerivedPaths &paths,
-        const std::string &status) {
-    nb::list out;
-    for (const auto &path : paths) {
-        std::visit(nix::overloaded{
-            [&](const nix::DerivedPath::Opaque &opaque) {
-                out.append(build_result_to_dict(s.printStorePath(opaque.path), true, status, ""));
-            },
-            [&](const nix::DerivedPath::Built &built) {
-                auto drvPath = s.printStorePath(built.drvPath->getBaseStorePath()) + "^*";
-                out.append(build_result_to_dict(drvPath, true, status, ""));
-            },
-        }, path.raw());
-    }
-    return out;
-}
-
-static void copy_target_drvs_from_eval_store(
-        nix::Store &s,
-        const nix::DerivedPaths &paths,
-        const std::shared_ptr<nix::Store> &evalStore) {
-    if (!evalStore || evalStore.get() == &s)
-        return;
-
-    for (const auto &path : paths) {
-        std::visit(nix::overloaded{
-            [&](const nix::DerivedPath::Opaque &) {},
-            [&](const nix::DerivedPath::Built &built) {
-                auto drvPath = built.drvPath->getBaseStorePath();
-                if (evalStore->isValidPath(drvPath))
-                    nix::copyStorePath(*evalStore, s, drvPath);
-            },
-        }, path.raw());
-    }
-}
-
-static void add_store_path_if_present(
-        const nix::StoreDirConfig &store,
-        nix::StorePathSet &out,
-        const std::string &path) {
-    try {
-        out.insert(store.toStorePath(path).first);
-    } catch (nix::Error &) {
-        // Not every derivation field is a store path; ignore ordinary strings.
-    }
-}
-
-static nix::StorePathSet build_input_paths_from_eval_store(
-        nix::Store &s,
-        const nix::DerivedPaths &paths,
-        const std::shared_ptr<nix::Store> &evalStore) {
-    auto &store = evalStore ? *evalStore : s;
-    nix::StorePathSet inputPaths;
-
-    for (const auto &path : paths) {
-        std::visit(nix::overloaded{
-            [&](const nix::DerivedPath::Opaque &) {},
-            [&](const nix::DerivedPath::Built &built) {
-                auto drvPath = built.drvPath->getBaseStorePath();
-                if (!store.isValidPath(drvPath))
-                    return;
-                auto drv = store.readDerivation(drvPath);
-                add_store_path_if_present(store, inputPaths, drv.builder);
-                for (auto &inputSrc : drv.inputSrcs)
-                    inputPaths.insert(inputSrc);
-                for (auto &[inputDrv, inputNode] : drv.inputDrvs.map) {
-                    if (!store.isValidPath(inputDrv))
-                        continue;
-                    for (auto &[outputName, pathOpt] : store.queryStaticPartialDerivationOutputMap(inputDrv)) {
-                        if (!pathOpt)
-                            continue;
-                        auto outputs = static_cast<nix::StringSet>(inputNode.value);
-                        if (outputs.empty() || outputs.contains(outputName))
-                            inputPaths.insert(*pathOpt);
-                    }
-                }
-            },
-        }, path.raw());
-    }
-
-    return inputPaths;
-}
-
 static nb::dict query_missing(nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
-    auto m = s.queryMissing(dps);
+    nix::MissingPaths m;
+    {
+        nb::gil_scoped_release release;
+        m = s.queryMissing(dps);
+    }
     nb::dict d;
     d["will_build"] = store_paths_to_dict_list(m.willBuild);
     d["will_substitute"] = store_paths_to_dict_list(m.willSubstitute);
@@ -391,22 +289,44 @@ static nb::dict query_missing(nix::Store &s, const std::vector<nix::StorePath> &
 // --- Collective queries ---
 
 static nb::list query_derivation_outputs(nix::Store &s, const nix::StorePath &path) {
-    return store_paths_to_dict_list(s.queryDerivationOutputs(path));
+    nix::StorePathSet paths;
+    {
+        nb::gil_scoped_release release;
+        paths = s.queryDerivationOutputs(path);
+    }
+    return store_paths_to_dict_list(paths);
 }
 static nb::list query_valid_derivers(nix::Store &s, const nix::StorePath &path) {
-    return store_paths_to_dict_list(s.queryValidDerivers(path));
+    nix::StorePathSet paths;
+    {
+        nb::gil_scoped_release release;
+        paths = s.queryValidDerivers(path);
+    }
+    return store_paths_to_dict_list(paths);
 }
 static nb::list query_all_valid_paths(nix::Store &s) {
-    return store_paths_to_dict_list(s.queryAllValidPaths());
+    nix::StorePathSet paths;
+    {
+        nb::gil_scoped_release release;
+        paths = s.queryAllValidPaths();
+    }
+    return store_paths_to_dict_list(paths);
 }
 static nb::list query_referrers(nix::Store &s, const nix::StorePath &path) {
     nix::StorePathSet refs;
-    s.queryReferrers(path, refs);
+    {
+        nb::gil_scoped_release release;
+        s.queryReferrers(path, refs);
+    }
     return store_paths_to_dict_list(refs);
 }
 static nb::list query_substitutable_paths(nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::StorePathSet ps(paths.begin(), paths.end());
-    auto subs = s.querySubstitutablePaths(ps);
+    nix::StorePathSet subs;
+    {
+        nb::gil_scoped_release release;
+        subs = s.querySubstitutablePaths(ps);
+    }
     return store_paths_to_dict_list(subs);
 }
 
@@ -477,7 +397,11 @@ static nix::GCAction gc_action_from_int(int action) {
 }
 
 static nb::list find_roots(nix::Store &s, bool censor) {
-    auto roots = require_gc_store(s).findRoots(censor);
+    nix::Roots roots;
+    {
+        nb::gil_scoped_release release;
+        roots = require_gc_store(s).findRoots(censor);
+    }
     nb::list result;
     for (auto &[target, links] : roots) {
         for (auto &link : links) {
@@ -503,7 +427,10 @@ static nb::dict collect_garbage(
     options.maxFreed = max_freed;
 
     nix::GCResults results;
-    require_gc_store(s).collectGarbage(options, results);
+    {
+        nb::gil_scoped_release release;
+        require_gc_store(s).collectGarbage(options, results);
+    }
 
     nb::dict d;
     d["paths"] = string_set_to_list(results.paths);
@@ -520,7 +447,11 @@ static nb::list build_paths_with_results(
         std::shared_ptr<nix::Store> evalStore = nullptr) {
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
-    auto results = s.buildPathsWithResults(dps, buildMode, evalStore);
+    std::vector<nix::KeyedBuildResult> results;
+    {
+        nb::gil_scoped_release release;
+        results = s.buildPathsWithResults(dps, buildMode, evalStore);
+    }
     nb::list out;
     for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
     return out;
@@ -534,63 +465,12 @@ static nb::list build_for_humans(
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
 
-    if (!evalStore) {
-        try {
-            auto missing = s.queryMissing(dps);
-            if (!missing.willSubstitute.empty())
-                s.substitutePaths(missing.willSubstitute);
-        } catch (nix::Error &) {
-            // BuildPathsWithResults will report the actionable build failure.
-        }
-        std::vector<nix::KeyedBuildResult> results;
-        try {
-            results = s.buildPathsWithResults(dps, buildMode, nullptr);
-        } catch (nix::Error &e) {
-            e.addTrace({}, "while building paths for build_for_humans");
-            throw;
-        }
-        nb::list out;
-        for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
-        return out;
-    }
-
-    nix::StorePathSet knownOutputs;
-    try {
-        knownOutputs = known_output_paths_from_eval_store(s, dps, evalStore);
-    } catch (nix::Error &e) {
-        e.addTrace({}, "while discovering build_for_humans output paths");
-        throw;
-    }
-    bool knownOutputsWereValid = !knownOutputs.empty() && all_valid_paths(s, knownOutputs);
-    if (!knownOutputs.empty() && !knownOutputsWereValid) {
-        try {
-            s.substitutePaths(knownOutputs);
-        } catch (nix::Error &) {
-            // Fall back to an actual build below if substitutes are unavailable.
-        }
-    }
-    if (!knownOutputs.empty() && all_valid_paths(s, knownOutputs))
-        return successful_build_results_for_targets(
-            s,
-            dps,
-            knownOutputsWereValid ? "already-valid" : "substituted");
-
-    copy_target_drvs_from_eval_store(s, dps, evalStore);
-    auto inputPaths = build_input_paths_from_eval_store(s, dps, evalStore);
-    if (!inputPaths.empty())
-        s.substitutePaths(inputPaths);
-    try {
-        auto missing = s.queryMissing(dps);
-        if (!missing.willSubstitute.empty())
-            s.substitutePaths(missing.willSubstitute);
-    } catch (nix::Error &) {
-        // Some eval-store derivations reference input .drv paths that are not valid
-        // in that eval store. Let buildPathsWithResults handle the eval/build split.
-    }
     std::vector<nix::KeyedBuildResult> results;
     try {
+        nb::gil_scoped_release release;
         results = s.buildPathsWithResults(dps, buildMode, evalStore);
     } catch (nix::Error &e) {
+        nix::logger->logEI(nix::lvlError, e.info());
         e.addTrace({}, "while building paths for build_for_humans");
         throw;
     }
@@ -606,11 +486,16 @@ static void build_paths(
         std::shared_ptr<nix::Store> evalStore = nullptr) {
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
+    nb::gil_scoped_release release;
     s.buildPaths(dps, buildMode, evalStore);
 }
 
 static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
-    auto drv = s.readDerivation(drvPath);
+    nix::Derivation drv;
+    {
+        nb::gil_scoped_release release;
+        drv = s.readDerivation(drvPath);
+    }
     nb::dict d;
     d["name"] = drv.name;
 
@@ -683,9 +568,13 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
 
 static nb::dict build_derivation(nix::Store &s, const nix::StorePath &drvPath,
                                   nix::BuildMode buildMode) {
-    auto drv = s.readDerivation(drvPath);
-    auto result = s.buildDerivation(drvPath,
-        static_cast<const nix::BasicDerivation &>(drv), buildMode);
+    nix::BuildResult result;
+    {
+        nb::gil_scoped_release release;
+        auto drv = s.readDerivation(drvPath);
+        result = s.buildDerivation(
+            drvPath, static_cast<const nix::BasicDerivation &>(drv), buildMode);
+    }
     return build_result_from_br(result);
 }
 
@@ -697,13 +586,54 @@ static nb::dict store_get_uri(nix::Store &s, const nb::dict &) {
 
 static nb::dict store_get_store_dir(nix::Store &s, const nb::dict &) {
     nb::dict d;
-        d["dir"] = std::string(s.config.storeDir_);
+    d["dir"] = std::string(s.config.storeDir_);
     return d;
 }
 
-static nb::dict store_is_valid_path(nix::Store &s, const nb::dict &request) {
+static nb::dict store_dirs_to_dict(nix::Store &s) {
     nb::dict d;
-    d["valid"] = s.isValidPath(request_store_path(s, request, "path"));
+    d["store_dir"] = std::string(s.config.storeDir_);
+    d["uri"] = s.config.getHumanReadableURI();
+    d["root_dir"] = nb::none();
+    d["state_dir"] = nb::none();
+    d["log_dir"] = nb::none();
+    d["real_store_dir"] = nb::none();
+    d["build_dir"] = nb::none();
+
+    if (auto *local_fs_store = dynamic_cast<nix::LocalFSStore *>(&s)) {
+        auto &config = local_fs_store->config;
+        auto root_dir = config.rootDir.get();
+        if (root_dir)
+            d["root_dir"] = root_dir->string();
+        d["state_dir"] = config.stateDir.get().string();
+        d["log_dir"] = config.logDir.get().string();
+        d["real_store_dir"] = config.realStoreDir.get().string();
+    }
+
+    if (auto *local_store = dynamic_cast<nix::LocalStore *>(&s)) {
+        d["build_dir"] = local_store->config->getBuildDir().string();
+    }
+
+    return d;
+}
+
+static nb::dict store_get_store_dirs(nix::Store &s, const nb::dict &) {
+    return store_dirs_to_dict(s);
+}
+
+static nb::dict store_get_store_dirs_direct(nix::Store &s) {
+    return store_dirs_to_dict(s);
+}
+
+static nb::dict store_is_valid_path(nix::Store &s, const nb::dict &request) {
+    auto path = request_store_path(s, request, "path");
+    bool valid;
+    {
+        nb::gil_scoped_release release;
+        valid = s.isValidPath(path);
+    }
+    nb::dict d;
+    d["valid"] = valid;
     return d;
 }
 
@@ -717,8 +647,12 @@ static nb::dict store_query_path_info(nix::Store &s, const nb::dict &request) {
 
 static nb::dict store_query_path_from_hash_part(
         nix::Store &s, const nb::dict &request) {
+    std::optional<nix::StorePath> path;
+    {
+        nb::gil_scoped_release release;
+        path = s.queryPathFromHashPart(request_string(request, "hash_part"));
+    }
     nb::dict d;
-    auto path = s.queryPathFromHashPart(request_string(request, "hash_part"));
     if (path) d["path"] = store_path_to_dict(*path);
     else d["path"] = nb::none();
     return d;
@@ -814,11 +748,20 @@ static nb::dict store_build_derivation(nix::Store &s, const nb::dict &request) {
 
 static nb::dict store_follow_links_to_store_path(
         nix::Store &s, const nb::dict &request) {
-    return store_path_to_dict(s.followLinksToStorePath(request_string(request, "path")));
+    std::optional<nix::StorePath> path;
+    {
+        nb::gil_scoped_release release;
+        path.emplace(s.followLinksToStorePath(request_string(request, "path")));
+    }
+    return store_path_to_dict(*path);
 }
 
 static nb::dict store_add_temp_root(nix::Store &s, const nb::dict &request) {
-    s.addTempRoot(request_store_path(s, request, "path"));
+    auto path = request_store_path(s, request, "path");
+    {
+        nb::gil_scoped_release release;
+        s.addTempRoot(path);
+    }
     return nb::dict();
 }
 
@@ -838,40 +781,65 @@ static nb::dict store_collect_garbage(nix::Store &s, const nb::dict &request) {
 }
 
 static nb::dict store_add_perm_root(nix::Store &s, const nb::dict &request) {
-    auto root = require_local_fs_store(s).addPermRoot(
-        request_store_path(s, request, "store_path"),
-        request_string(request, "gc_root"));
+    auto store_path = request_store_path(s, request, "store_path");
+    auto gc_root = request_string(request, "gc_root");
+    std::filesystem::path root;
+    {
+        nb::gil_scoped_release release;
+        root = require_local_fs_store(s).addPermRoot(store_path, gc_root);
+    }
     nb::dict d;
     d["path"] = root.string();
     return d;
 }
 
 static nb::dict store_add_indirect_root(nix::Store &s, const nb::dict &request) {
-    require_indirect_root_store(s).addIndirectRoot(request_string(request, "path"));
+    auto path = request_string(request, "path");
+    {
+        nb::gil_scoped_release release;
+        require_indirect_root_store(s).addIndirectRoot(path);
+    }
     return nb::dict();
 }
 
 static nb::dict store_ensure_path(nix::Store &s, const nb::dict &request) {
-    s.ensurePath(request_store_path(s, request, "path"));
+    auto path = request_store_path(s, request, "path");
+    {
+        nb::gil_scoped_release release;
+        s.ensurePath(path);
+    }
     return nb::dict();
 }
 
 static nb::dict store_optimise_store(nix::Store &s, const nb::dict &) {
-    s.optimiseStore();
+    {
+        nb::gil_scoped_release release;
+        s.optimiseStore();
+    }
     return nb::dict();
 }
 
 static nb::dict store_verify_store(nix::Store &s, const nb::dict &request) {
+    auto check_contents = request_bool(request, "check_contents");
+    auto repair = request_bool(request, "repair");
+    size_t errors;
+    {
+        nb::gil_scoped_release release;
+        errors = s.verifyStore(check_contents, repair ? nix::Repair : nix::NoRepair);
+    }
     nb::dict d;
-    d["errors"] = s.verifyStore(
-        request_bool(request, "check_contents"),
-        request_bool(request, "repair") ? nix::Repair : nix::NoRepair);
+    d["errors"] = errors;
     return d;
 }
 
 static nb::dict store_get_build_log(nix::Store &s, const nb::dict &request) {
+    auto path = request_store_path(s, request, "path");
+    std::optional<std::string> log;
+    {
+        nb::gil_scoped_release release;
+        log = require_log_store(s).getBuildLog(path);
+    }
     nb::dict d;
-    auto log = require_log_store(s).getBuildLog(request_store_path(s, request, "path"));
     if (log)
         d["log"] = *log;
     else
@@ -880,21 +848,29 @@ static nb::dict store_get_build_log(nix::Store &s, const nb::dict &request) {
 }
 
 static nb::dict store_add_to_store(nix::Store &s, const nb::dict &request) {
-    return store_path_to_dict(s.addToStoreSlow(
-        request_store_add_name(request),
-        request_source_path(request),
-        request_content_address_method(request),
-        request_hash_algo(request),
-        {}).path);
+    auto name = request_store_add_name(request);
+    auto source_path = request_source_path(request);
+    auto method = request_content_address_method(request);
+    auto hash_algo = request_hash_algo(request);
+    std::optional<nix::StorePath> path;
+    {
+        nb::gil_scoped_release release;
+        path.emplace(s.addToStoreSlow(name, source_path, method, hash_algo, {}).path);
+    }
+    return store_path_to_dict(*path);
 }
 
 static nb::dict store_compute_store_path(nix::Store &s, const nb::dict &request) {
-    return store_path_to_dict(s.computeStorePath(
-        request_store_add_name(request),
-        request_source_path(request),
-        request_content_address_method(request),
-        request_hash_algo(request),
-        {}).first);
+    auto name = request_store_add_name(request);
+    auto source_path = request_source_path(request);
+    auto method = request_content_address_method(request);
+    auto hash_algo = request_hash_algo(request);
+    std::optional<nix::StorePath> path;
+    {
+        nb::gil_scoped_release release;
+        path.emplace(s.computeStorePath(name, source_path, method, hash_algo, {}).first);
+    }
+    return store_path_to_dict(*path);
 }
 
 // =========================================================================
@@ -906,12 +882,16 @@ static void bind_store(nb::module_ &m) {
         // Query
         .def("get_store_dir",
              [](nix::Store &s) -> std::string { return s.config.storeDir_; })
+        .def("get_store_dirs", &store_get_store_dirs_direct)
         .def("get_uri",
              [](nix::Store &s) -> std::string { return s.config.getHumanReadableURI(); })
-        .def("is_valid_path", [](nix::Store &s, const nix::StorePath &p) { return s.isValidPath(p); }, "path"_a)
-        .def("parse_store_path", [](nix::Store &s, const std::string &p) { return s.parseStorePath(p); }, "path"_a)
+        .def("is_valid_path", [](nix::Store &s, const nix::StorePath &p) { return s.isValidPath(p); },
+             nb::call_guard<nb::gil_scoped_release>(), "path"_a)
+        .def("parse_store_path", [](nix::Store &s, const std::string &p) { return s.parseStorePath(p); },
+             nb::call_guard<nb::gil_scoped_release>(), "path"_a)
         .def("follow_links_to_store_path",
-             [](nix::Store &s, const std::string &p) { return s.followLinksToStorePath(p); }, "path"_a)
+             [](nix::Store &s, const std::string &p) { return s.followLinksToStorePath(p); },
+             nb::call_guard<nb::gil_scoped_release>(), "path"_a)
         // Build
         .def("build_paths", &build_paths, "paths"_a, "build_mode"_a = nix::bmNormal, "eval_store"_a = nullptr)
         .def(
@@ -931,7 +911,8 @@ static void bind_store(nb::module_ &m) {
         // Path info
         .def("query_path_info", &query_path_info, "path"_a)
         .def("query_path_from_hash_part",
-             [](nix::Store &s, const std::string &h) { return s.queryPathFromHashPart(h); }, "hash"_a)
+             [](nix::Store &s, const std::string &h) { return s.queryPathFromHashPart(h); },
+             nb::call_guard<nb::gil_scoped_release>(), "hash"_a)
         // Closures
         .def("compute_fs_closure", &compute_fs_closure,
              "path"_a, "flip_direction"_a = false, "include_outputs"_a = false, "include_derivers"_a = false)
@@ -944,7 +925,8 @@ static void bind_store(nb::module_ &m) {
         .def("query_referrers", &query_referrers, "path"_a)
         .def("query_substitutable_paths", &query_substitutable_paths, "paths"_a)
         // GC
-        .def("add_temp_root", [](nix::Store &s, const nix::StorePath &p) { s.addTempRoot(p); }, "path"_a)
+        .def("add_temp_root", [](nix::Store &s, const nix::StorePath &p) { s.addTempRoot(p); },
+             nb::call_guard<nb::gil_scoped_release>(), "path"_a)
         .def("find_roots", &find_roots, "censor"_a = true)
         .def(
             "collect_garbage",
@@ -958,6 +940,7 @@ static void bind_store(nb::module_ &m) {
             [](nix::Store &s, const nix::StorePath &store_path, const std::string &gc_root) {
                 return require_local_fs_store(s).addPermRoot(store_path, gc_root).string();
             },
+            nb::call_guard<nb::gil_scoped_release>(),
             "store_path"_a,
             "gc_root"_a)
         .def(
@@ -965,19 +948,24 @@ static void bind_store(nb::module_ &m) {
             [](nix::Store &s, const std::string &path) {
                 require_indirect_root_store(s).addIndirectRoot(path);
             },
+            nb::call_guard<nb::gil_scoped_release>(),
             "path"_a)
-        .def("ensure_path", [](nix::Store &s, const nix::StorePath &p) { s.ensurePath(p); }, "path"_a)
-        .def("optimise_store", [](nix::Store &s) { s.optimiseStore(); })
+        .def("ensure_path", [](nix::Store &s, const nix::StorePath &p) { s.ensurePath(p); },
+             nb::call_guard<nb::gil_scoped_release>(), "path"_a)
+        .def("optimise_store", [](nix::Store &s) { s.optimiseStore(); },
+             nb::call_guard<nb::gil_scoped_release>())
         .def(
             "verify_store",
             [](nix::Store &s, bool check_contents, bool repair) {
                 return s.verifyStore(check_contents, repair ? nix::Repair : nix::NoRepair);
             },
+            nb::call_guard<nb::gil_scoped_release>(),
             "check_contents"_a = false,
             "repair"_a = false)
         // Proto-shaped StoreService RPC entrypoints
         .def("store_get_uri", &store_get_uri, "request"_a)
         .def("store_get_store_dir", &store_get_store_dir, "request"_a)
+        .def("store_get_store_dirs", &store_get_store_dirs, "request"_a)
         .def("store_is_valid_path", &store_is_valid_path, "request"_a)
         .def("store_parse_store_path", &store_parse_store_path, "request"_a)
         .def("store_query_path_info", &store_query_path_info, "request"_a)
@@ -1033,7 +1021,7 @@ NB_MODULE(nanopynix_store, m) {
 
     m.def("open_store", &open_store_uri, "uri"_a);
     m.def("open_store", &open_store_default);
-    m.def("process_connection", &process_connection,
+    m.def("process_connection", &process_connection, nb::call_guard<nb::gil_scoped_release>(),
           "store"_a, "fd"_a, "trusted"_a = true, "recursive"_a = false,
           "Handle a single daemon client connection on the given fd.");
     m.def("register_store_implementation", &register_python_store,

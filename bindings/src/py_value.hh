@@ -9,6 +9,7 @@
 
 #include <nix/expr/eval.hh>
 #include <nix/expr/value.hh>
+#include <nix/store/store-api.hh>
 
 #include "py_eval.hh"
 
@@ -52,6 +53,10 @@ struct PyValue {
 
     PyValue auto_call();
     PyValue call(PyValue arg);
+    nanobind::dict build(
+        std::shared_ptr<nix::Store> build_store = nullptr,
+        nix::BuildMode build_mode = nix::bmNormal,
+        std::shared_ptr<nix::Store> eval_store = nullptr);
 
     std::string repr();
 

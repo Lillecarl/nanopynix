@@ -18,6 +18,7 @@ service EvalService {
   rpc TypeName(TypeNameRequest) returns (TypeNameResponse);
   rpc AutoCall(AutoCallRequest) returns (nix.common.ValueHandle);
   rpc Call(CallRequest) returns (nix.common.ValueHandle);
+  rpc Build(BuildRequest) returns (BuildResponse);
   rpc LockFlake(LockFlakeRequest) returns (nix.common.LockedFlake);
   rpc CallLockedFlake(CallLockedFlakeRequest) returns (nix.common.ValueHandle);
   rpc WriteLockFile(WriteLockFileRequest) returns (WriteLockFileResponse);
@@ -101,6 +102,17 @@ message AutoCallRequest {
 message CallRequest {
   int64 handle = 1;
   repeated nix.common.CallArg args = 2;
+}
+
+message BuildRequest {
+  int64 handle = 1;
+  int32 build_mode = 2;
+  int64 build_store_handle = 3;
+}
+message BuildResponse {
+  string drv_path = 1;
+  map<string, string> outputs = 2;
+  repeated nix.common.BuildResult results = 3;
 }
 
 message LockFlakeRequest {

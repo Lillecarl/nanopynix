@@ -7,6 +7,7 @@ import "common.proto";
 service StoreService {
   rpc GetUri(GetUriRequest) returns (GetUriResponse);
   rpc GetStoreDir(GetStoreDirRequest) returns (GetStoreDirResponse);
+  rpc GetStoreDirs(GetStoreDirsRequest) returns (StoreDirs);
   rpc IsValidPath(IsValidPathRequest) returns (IsValidPathResponse);
   rpc ParseStorePath(ParseStorePathRequest) returns (nix.common.StorePath);
   rpc QueryPathInfo(QueryPathInfoRequest) returns (nix.common.PathInfo);
@@ -48,6 +49,19 @@ message GetStoreDirRequest {
 }
 message GetStoreDirResponse {
   string dir = 1;
+}
+
+message GetStoreDirsRequest {
+  int64 store_handle = 100;
+}
+message StoreDirs {
+  string store_dir = 1;
+  string uri = 2;
+  optional string root_dir = 3;
+  optional string state_dir = 4;
+  optional string log_dir = 5;
+  optional string real_store_dir = 6;
+  optional string build_dir = 7;
 }
 
 message IsValidPathRequest {

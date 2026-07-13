@@ -168,7 +168,7 @@ static int get_verbosity() {
 NB_MODULE(nanopynix_util, m) {
     m.doc() = "nanopynix: Nix util bindings (settings, init)";
 
-    m.def("init_libstore", &nix::initLibStore,
+    m.def("init_libstore", &nix::initLibStore, nb::call_guard<nb::gil_scoped_release>(),
           "load_config"_a = true,
           "Initialize the Nix store library.");
 

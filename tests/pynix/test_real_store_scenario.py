@@ -22,7 +22,17 @@ async def test_scenario_starts_with_empty_temporary_store(pynix_store_scenario):
     assert scenario.local_log_path is None
 
 
-@pytest.mark.dependency(name="scenario:add-file", depends=["scenario:store"])
+@pytest.mark.dependency(name="scenario:store-dirs", depends=["scenario:store"])
+async def test_scenario_verifies_temporary_store_dirs(pynix_store_scenario, request: pytest.FixtureRequest):
+    scenario = pynix_store_scenario
+
+    dirs = await scenario.assert_temp_store_dirs(test_name=request.node.nodeid)
+
+    assert dirs["storeDir"] == "/nix/store"
+    assert dirs["rootDir"] == str(scenario.store_root)
+
+
+@pytest.mark.dependency(name="scenario:add-file", depends=["scenario:store-dirs"])
 async def test_scenario_adds_file_with_pynix(pynix_store_scenario, request: pytest.FixtureRequest):
     scenario = pynix_store_scenario
 
@@ -32,7 +42,7 @@ async def test_scenario_adds_file_with_pynix(pynix_store_scenario, request: pyte
     assert scenario.physical_path(text_path).read_text() == "scenario-message\n"
 
 
-@pytest.mark.dependency(name="scenario:build-hello", depends=["scenario:store"])
+@pytest.mark.dependency(name="scenario:build-hello", depends=["scenario:store-dirs"])
 async def test_scenario_adds_local_package_with_pynix(pynix_store_scenario, request: pytest.FixtureRequest):
     scenario = pynix_store_scenario
 
@@ -95,3 +105,46 @@ async def test_scenario_reuses_paths_for_follow_up_store_queries(
     )
     entries = json.loads(stdout)
     assert {"name": "bin", "type": "directory"} in entries["entries"]
+
+
+@pytest.mark.dependency(name="scenario:build-nixpkgs-hello", depends=["scenario:store-dirs"])
+async def test_scenario_builds_nixpkgs_hello_from_file(pynix_store_scenario, request: pytest.FixtureRequest):
+    scenario = pynix_store_scenario
+
+    hello_path = await scenario.build_nixpkgs_package("hello", test_name=request.node.nodeid)
+
+    assert hello_path.startswith("/nix/store/")
+    hello_bin = scenario.physical_path(hello_path) / "bin" / "hello"
+    assert hello_bin.exists()
+
+
+@pytest.mark.dependency(name="scenario:build-flake-hello", depends=["scenario:store-dirs"])
+async def test_scenario_builds_flake_hello(pynix_store_scenario, request: pytest.FixtureRequest):
+    scenario = pynix_store_scenario
+
+    hello_path = await scenario.build_flake_hello(test_name=request.node.nodeid)
+
+    assert hello_path.startswith("/nix/store/")
+    hello_bin = scenario.physical_path(hello_path) / "bin" / "hello"
+    assert hello_bin.exists()
+
+
+@pytest.mark.dependency(name="scenario:build-hello-unfree", depends=["scenario:build-nixpkgs-hello"])
+async def test_scenario_builds_hello_unfree_locally_and_forwards_logs(
+    pynix_store_scenario,
+    request: pytest.FixtureRequest,
+):
+    scenario = pynix_store_scenario
+
+    hello_unfree_path = await scenario.build_nixpkgs_package("hello-unfree", test_name=request.node.nodeid)
+
+    assert hello_unfree_path.startswith("/nix/store/")
+    assert "example-unfree-package" in hello_unfree_path
+    assert scenario.physical_path(hello_unfree_path).exists()
+    assert scenario.last_logs is not None
+    assert any(
+        entry.get("event") == "nix log"
+        and isinstance(entry.get("message"), str)
+        and "building derivation" in entry["message"]
+        for entry in scenario.last_logs
+    )

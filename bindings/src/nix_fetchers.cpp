@@ -34,6 +34,7 @@ struct PyInput {
     }
 
     std::optional<std::string> get_fingerprint(nix::Store &store) const {
+        nb::gil_scoped_release release;
         return input.getFingerprint(store);
     }
 };
@@ -46,14 +47,24 @@ static PyInput input_from_url(const std::string &url) {
     // Use default fetch settings (global nix::settings provides this)
     // but Input::fromURL needs fetchers::Settings — we create a local one
     nix::fetchers::Settings fetchSettings;
-    return PyInput(nix::fetchers::Input::fromURL(fetchSettings, url));
+    nix::fetchers::Input input;
+    {
+        nb::gil_scoped_release release;
+        input = nix::fetchers::Input::fromURL(fetchSettings, url);
+    }
+    return PyInput(std::move(input));
 }
 
 static PyInput input_from_attrs(const std::map<std::string, std::string> &attrs) {
     nix::fetchers::Attrs a;
     for (auto &[k, v] : attrs) a[k] = v;
     nix::fetchers::Settings fetchSettings;
-    return PyInput(nix::fetchers::Input::fromAttrs(fetchSettings, std::move(a)));
+    nix::fetchers::Input input;
+    {
+        nb::gil_scoped_release release;
+        input = nix::fetchers::Input::fromAttrs(fetchSettings, std::move(a));
+    }
+    return PyInput(std::move(input));
 }
 
 // =========================================================================

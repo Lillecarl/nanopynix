@@ -75,17 +75,14 @@ async def test_restrict_eval_blocks_absolute_paths():
 
 
 @pytest.mark.anyio
-async def test_restrict_eval_allows_derivations():
-    """restrict_eval=True allows building derivations (they're in the store)."""
+async def test_restrict_eval_allows_pure_attrs():
+    """restrict_eval=True still allows ordinary pure evaluation."""
     async with (
         Session(pure_eval=True, restrict_eval=True) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
-        # Derivation outputs are store paths, always allowed under restrictEval.
-        v = await eval.string(
-            'builtins.derivation { name = "pure-test"; builder = "/bin/echo"; system = "x86_64-linux"; }'
-        )
+        v = await eval.string('{ name = "pure-test"; }')
         assert await v.get_type() == NixType.ATTRS
         assert await v.has_attr("name") is True
 

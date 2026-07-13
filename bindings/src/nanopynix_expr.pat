@@ -15,6 +15,9 @@ nanopynix_expr.Value.to_python:
 nanopynix_expr.Value.to_json:
     def to_json(self, *, copy_to_store: bool = False) -> ValueType: ...
 
+nanopynix_expr.Value.build:
+    def build(self, build_store: Store | None = None, build_mode: int = 0, eval_store: Store | None = None) -> dict[str, object]: ...
+
 nanopynix_expr.EvalState.__init__:
     def __init__(self, store: Store, search_path: Sequence[str] = []) -> None: ...
 

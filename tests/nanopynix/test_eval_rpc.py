@@ -330,21 +330,15 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active():
         drv = await eval.string(
             """
             let
-              script = builtins.derivation {
-                name = "nanopynix-build-value-script";
-                system = builtins.currentSystem;
-                builder = "/bin/sh";
-                args = [
-                  "-c"
-                  "printf '%s\\n' 'echo hello > $out' > $out"
-                ];
-              };
+              pkgs = import <nixpkgs> {};
             in
-              builtins.derivation {
-                name = "nanopynix-build-value-test";
-                system = builtins.currentSystem;
-                builder = "/bin/sh";
-                args = [ "${script}" ];
+              pkgs.stdenvNoCC.mkDerivation {
+                pname = "nanopynix-build-value-test";
+                version = "1";
+                dontUnpack = true;
+                installPhase = ''
+                  echo hello > "$out"
+                '';
               }
             """
         )
@@ -368,21 +362,15 @@ async def test_evaluated_derivation_can_build_with_explicit_build_store():
         drv = await eval.string(
             """
             let
-              script = builtins.derivation {
-                name = "nanopynix-build-value-script";
-                system = builtins.currentSystem;
-                builder = "/bin/sh";
-                args = [
-                  "-c"
-                  "printf '%s\\n' 'echo explicit > $out' > $out"
-                ];
-              };
+              pkgs = import <nixpkgs> {};
             in
-              builtins.derivation {
-                name = "nanopynix-build-value-explicit-store-test";
-                system = builtins.currentSystem;
-                builder = "/bin/sh";
-                args = [ "${script}" ];
+              pkgs.stdenvNoCC.mkDerivation {
+                pname = "nanopynix-build-value-explicit-store-test";
+                version = "1";
+                dontUnpack = true;
+                installPhase = ''
+                  echo explicit > "$out"
+                '';
               }
             """
         )
