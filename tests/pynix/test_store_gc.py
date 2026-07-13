@@ -264,6 +264,41 @@ async def test_store_ls_lists_directory_from_temporary_store(tmp_path, monkeypat
     }
 
 
+async def test_store_diff_closures_reports_added_removed_and_size_delta(tmp_path, monkeypatch, capsys):
+    before_path = "/nix/store/00000000000000000000000000000000-before"
+    after_path = "/nix/store/11111111111111111111111111111111-after"
+    common_path = "/nix/store/22222222222222222222222222222222-common"
+    old_path = "/nix/store/33333333333333333333333333333333-old"
+    new_path = "/nix/store/44444444444444444444444444444444-new"
+    _install_fake_nanopynix(
+        monkeypatch=monkeypatch,
+        store_root=tmp_path / "store-root",
+        closures={
+            before_path: [common_path, old_path],
+            after_path: [common_path, new_path],
+        },
+        nar_sizes={
+            common_path: 10,
+            old_path: 4,
+            new_path: 7,
+        },
+    )
+
+    cmd = Pynix.parse(["store", "diff-closures", before_path, after_path])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data == {
+        "added": [{"narSize": 7, "path": new_path}],
+        "after": after_path,
+        "afterNarSize": 17,
+        "before": before_path,
+        "beforeNarSize": 14,
+        "narSizeDelta": 3,
+        "removed": [{"narSize": 4, "path": old_path}],
+    }
+
+
 async def test_optimise_empty_local_store(tmp_path, capsys):
     cmd = Pynix.parse(["store", "optimise", "--store", f"local?root={tmp_path}"])
     await cmd.astart()
@@ -280,12 +315,28 @@ async def test_verify_empty_local_store(tmp_path, capsys):
     assert data == {"errors": False}
 
 
-def _install_fake_nanopynix(*, monkeypatch: pytest.MonkeyPatch, store_root: Path) -> None:
+def _install_fake_nanopynix(
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    store_root: Path,
+    closures: dict[str, list[str]] | None = None,
+    nar_sizes: dict[str, int] | None = None,
+) -> None:
     import pynix.store as store_module
 
     monkeypatch.setattr(store_module, "prepare_sys_path", lambda: None)
     monkeypatch.setattr(store_module, "forward_nix_logs", _noop_forward_nix_logs)
-    monkeypatch.setitem(sys.modules, "nanopynix", SimpleNamespace(Session=lambda: _FakeSession(store_root)))
+    monkeypatch.setitem(
+        sys.modules,
+        "nanopynix",
+        SimpleNamespace(
+            Session=lambda: _FakeSession(
+                store_root,
+                closures=closures or {},
+                nar_sizes=nar_sizes or {},
+            )
+        ),
+    )
 
 
 @asynccontextmanager
@@ -294,8 +345,10 @@ async def _noop_forward_nix_logs(session: Any, *, print_build_logs: bool = False
 
 
 class _FakeSession:
-    def __init__(self, store_root: Path) -> None:
+    def __init__(self, store_root: Path, *, closures: dict[str, list[str]], nar_sizes: dict[str, int]) -> None:
         self._store_root = store_root
+        self._closures = closures
+        self._nar_sizes = nar_sizes
 
     async def __aenter__(self) -> _FakeSession:
         return self
@@ -304,7 +357,7 @@ class _FakeSession:
         return None
 
     def store(self, store_uri: str) -> _FakeStore:
-        return _FakeStore(self._store_root, store_uri)
+        return _FakeStore(self._store_root, store_uri, closures=self._closures, nar_sizes=self._nar_sizes)
 
     async def log_stream(self) -> AsyncIterator[None]:
         if False:
@@ -312,9 +365,18 @@ class _FakeSession:
 
 
 class _FakeStore:
-    def __init__(self, store_root: Path, store_uri: str) -> None:
+    def __init__(
+        self,
+        store_root: Path,
+        store_uri: str,
+        *,
+        closures: dict[str, list[str]],
+        nar_sizes: dict[str, int],
+    ) -> None:
         self._store_root = store_root
         self._store_uri = store_uri
+        self._closures = closures
+        self._nar_sizes = nar_sizes
 
     async def __aenter__(self) -> _FakeStore:
         return self
@@ -326,7 +388,13 @@ class _FakeStore:
         return SimpleNamespace(dir="/nix/store")
 
     async def query_path_info(self, request: Any) -> SimpleNamespace:
+        if request.path in self._nar_sizes:
+            return SimpleNamespace(nar_size=self._nar_sizes[request.path])
         physical_path = self._store_root / request.path.removeprefix("/")
         if not physical_path.exists():
             raise FileNotFoundError(request.path)
-        return SimpleNamespace()
+        return SimpleNamespace(nar_size=physical_path.stat().st_size)
+
+    async def compute_fs_closure(self, request: Any) -> SimpleNamespace:
+        paths = self._closures[request.path]
+        return SimpleNamespace(paths=[SimpleNamespace(base_name=path.removeprefix("/nix/store/")) for path in paths])
