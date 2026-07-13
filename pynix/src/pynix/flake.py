@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
-from typing import override
+import json
+import sys
+from typing import Any, override
 
 import structlog
 from clypi import Command, Positional, arg
@@ -51,6 +53,28 @@ class Show(Command):
             tree = Tree(f"[bold]{self.flake_ref}[/bold]")
             await _build_tree(tree, outputs, NixType)
             console.print(tree)
+
+
+class Metadata(Command):
+    """Show locked flake metadata"""
+
+    flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.' or 'nixpkgs').")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
+
+    @override
+    async def run(self) -> None:
+        await _print_flake_metadata(self.flake_ref, store_uri=self.store)
+
+
+class Info(Command):
+    """Alias for flake metadata"""
+
+    flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.' or 'nixpkgs').")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
+
+    @override
+    async def run(self) -> None:
+        await _print_flake_metadata(self.flake_ref, store_uri=self.store)
 
 
 def _navigate(root, attrpath: str):
@@ -120,7 +144,64 @@ def _format_attr(name: str, nix_type, nix_type_enum) -> str:
     return f"[green]{name}[/green]: [dim]<{nix_type.name.lower()}>[/dim]"
 
 
+async def _print_flake_metadata(flake_ref: str, *, store_uri: str) -> None:
+    prepare_sys_path()
+    import nanopynix
+
+    async with (
+        nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
+        forward_nix_logs(nix),
+        nix.store(store_uri) as store,
+        nix.eval(store) as session,
+    ):
+        locked = await session.lock_flake(flake_ref, write_lock_file=False)
+        try:
+            _print_json(_locked_flake_to_json(flake_ref, locked))
+        finally:
+            await locked.release()
+
+
+def _locked_flake_to_json(flake_ref: str, locked: Any) -> dict[str, Any]:
+    return {
+        "resolvedRef": flake_ref,
+        "description": locked.description,
+        "inputs": {
+            name: _locked_input_to_json(input_)
+            for name, input_ in sorted(locked.inputs.items(), key=lambda item: item[0])
+        },
+    }
+
+
+def _locked_input_to_json(input_: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "isFlake": input_.is_flake,
+        "follows": list(input_.follows),
+    }
+    attrs = input_.attrs
+    if attrs is not None:
+        result["attrs"] = {
+            name: _attrs_value_to_json(value)
+            for name, value in sorted(attrs.entries.items(), key=lambda item: item[0])
+        }
+    return result
+
+
+def _attrs_value_to_json(value: Any) -> str | int | bool | None:
+    if value.bool_value is not None:
+        return value.bool_value
+    if value.int_value is not None:
+        return value.int_value
+    if value.string_value is not None:
+        return value.string_value
+    return None
+
+
+def _print_json(obj: object) -> None:
+    sys.stdout.write(json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False))
+    sys.stdout.write("\n")
+
+
 class Flake(Command):
     """Inspect and manage Nix flakes"""
 
-    subcommand: Show
+    subcommand: Show | Metadata | Info
