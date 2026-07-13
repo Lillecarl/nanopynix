@@ -48,6 +48,14 @@ from nanopynix.models import (
 )
 from nanopynix.nix import LogCapture, Nix, Session
 from nanopynix.primops import from_yaml, from_yaml11, from_yaml11_stream, from_yaml_stream, to_yaml, yaml_primops
+from nanopynix.settings import (
+    NixSettingMetadata,
+    NixSettings,
+    NixSettingsEnv,
+    SettingsDrift,
+    check_settings_model_drift,
+    list_settings_metadata,
+)
 from nanopynix.store import StoreHandle
 from nanopynix.types import NixArg, NixDeepValue, NixValue
 from nanopynix_expr import EvalState, Value, eval_file, init_libexpr, register_primop
@@ -76,6 +84,9 @@ __all__ = [
     "NixAssertionError",
     "NixCoercionError",
     "NixError",
+    "NixSettingMetadata",
+    "NixSettings",
+    "NixSettingsEnv",
     "NixType",
     "NixTypeError",
     "NixValue",
@@ -85,6 +96,7 @@ __all__ = [
     "RestrictedPathError",
     "ResultType",
     "Session",
+    "SettingsDrift",
     "Store",
     "StoreError",
     "StoreHandle",
@@ -102,6 +114,7 @@ __all__ = [
     "WorkerBusyError",
     "WorkerDiedError",
     "WrongNixTypeError",
+    "check_settings_model_drift",
     "enable_experimental_feature",
     "eval_file",
     "from_yaml",
@@ -119,6 +132,7 @@ __all__ = [
     "input_from_url",
     "install_logger",
     "list_settings",
+    "list_settings_metadata",
     "lock_flake",
     "open_store",
     "parse_flake_ref",

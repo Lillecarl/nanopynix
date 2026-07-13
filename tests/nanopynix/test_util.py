@@ -38,6 +38,16 @@ class TestSettings:
         # keep-going should appear after we set it above
         assert "keep-going" in settings
 
+    def test_list_settings_metadata_includes_known(self):
+        metadata = nanopynix.list_settings_metadata()
+        assert "keep-going" in metadata
+        assert isinstance(metadata["keep-going"].description, str)
+
+    def test_settings_model_matches_registered_nix_settings(self):
+        drift = nanopynix.check_settings_model_drift()
+        assert drift.missing == []
+        assert drift.extra == []
+
 
 class TestExperimentalFeatures:
     def test_enable_flakes(self):

@@ -14,6 +14,7 @@ dependencies = [
   "grpclib-transports",
   "janus",
   "pydantic",
+  "pydantic-settings",
   "pyyaml",
   "strip-ansi",
 ]
