@@ -9,7 +9,7 @@ import pytest
 import nanopynix
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser: pytest.Parser):
     parser.addoption(
         "--run-temp-store-builds",
         action="store_true",
@@ -24,14 +24,14 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
         "live_gc: test performs destructive live Nix garbage collection",
     )
 
 
-def pytest_runtest_setup(item):
+def pytest_runtest_setup(item: pytest.Item):
     if "live_gc" not in item.keywords:
         return
     if item.config.getoption("--run-live-gc") or os.environ.get("NANOPYNIX_RUN_LIVE_GC") == "1":

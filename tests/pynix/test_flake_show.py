@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from pynix import Pynix
 
 
-async def test_flake_show_root(capsys, git_flake):
+async def test_flake_show_root(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
     cmd = Pynix.parse(["flake", "show", str(git_flake), "--store", "auto"])
     await cmd.astart()
     captured = capsys.readouterr()
@@ -13,7 +16,7 @@ async def test_flake_show_root(capsys, git_flake):
     assert "greeting" in captured.out
 
 
-async def test_flake_show_with_hash_attrpath(capsys, git_flake):
+async def test_flake_show_with_hash_attrpath(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
     cmd = Pynix.parse(["flake", "show", f"{git_flake}#hello"])
     await cmd.astart()
     captured = capsys.readouterr()
@@ -21,7 +24,7 @@ async def test_flake_show_with_hash_attrpath(capsys, git_flake):
     assert "greeting" not in captured.out
 
 
-async def test_flake_metadata_json_does_not_write_lock_file(capsys, git_flake):
+async def test_flake_metadata_json_does_not_write_lock_file(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
     lock_file = git_flake / "flake.lock"
     assert not lock_file.exists()
 
@@ -35,7 +38,7 @@ async def test_flake_metadata_json_does_not_write_lock_file(capsys, git_flake):
     assert not lock_file.exists()
 
 
-async def test_flake_info_aliases_metadata(capsys, git_flake):
+async def test_flake_info_aliases_metadata(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
     cmd = Pynix.parse(["flake", "info", str(git_flake), "--store", "auto"])
     await cmd.astart()
     captured = capsys.readouterr()

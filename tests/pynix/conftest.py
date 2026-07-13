@@ -23,7 +23,7 @@ from structlog.exceptions import DropEvent
 from pynix import Pynix
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Generator
+    from collections.abc import AsyncIterator, Callable, Generator
 
     from structlog.typing import EventDict, WrappedLogger
 
@@ -502,7 +502,7 @@ def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
     old_session = nanopynix.Session
 
     class VerboseSession(old_session):
-        def __init__(self, *args, **kwargs) -> None:
+        def __init__(self, *args: object, **kwargs: object) -> None:
             kwargs.setdefault("verbosity", verbosity)
             super().__init__(*args, **kwargs)
 
@@ -558,7 +558,7 @@ def _rmtree_force(path: Path) -> None:
         with contextlib.suppress(FileNotFoundError):
             p.chmod(mode)
 
-    def onexc(function, exc_path_str, _excinfo) -> None:
+    def onexc(function: Callable[..., object], exc_path_str: str, _excinfo: BaseException) -> None:
         exc_path = Path(exc_path_str)
         try:
             parent = exc_path.parent

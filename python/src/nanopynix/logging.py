@@ -41,9 +41,9 @@ class LogCollector:
     """
 
     def __init__(self, maxsize: int = 10_000) -> None:
-        self._maxsize = maxsize
-        self._queue = janus.Queue(maxsize=maxsize)
-        self._enqueued = 0
+        self._maxsize: int = maxsize
+        self._queue: janus.Queue[Any] = janus.Queue(maxsize=maxsize)
+        self._enqueued: int = 0
 
     # ── callback (thread-safe, called from C++ on any GIL thread) ──
 
