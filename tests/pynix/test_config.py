@@ -28,3 +28,13 @@ async def test_config_check(capsys):
     await cmd.astart()
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"ok": True}
+
+
+async def test_config_current_system(capsys):
+    cmd = Pynix.parse(["config", "current-system"])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert set(data) == {"currentSystem"}
+    assert isinstance(data["currentSystem"], str)
+    assert data["currentSystem"]
