@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from pynix import Pynix
 
 
@@ -16,7 +14,6 @@ def _parse_json_output(out: str) -> object:
     return json.loads("".join(lines))
 
 
-@pytest.mark.anyio
 async def test_eval_expr(capsys):
     cmd = Pynix.parse(["eval", "--expr", "1 + 1"])
     await cmd.astart()
@@ -24,7 +21,6 @@ async def test_eval_expr(capsys):
     assert _parse_json_output(captured.out) == 2
 
 
-@pytest.mark.anyio
 async def test_eval_string(capsys):
     cmd = Pynix.parse(["eval", "--expr", '"hello"'])
     await cmd.astart()
@@ -32,7 +28,6 @@ async def test_eval_string(capsys):
     assert _parse_json_output(captured.out) == "hello"
 
 
-@pytest.mark.anyio
 async def test_eval_file(tmp_path, capsys):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; b = true; c = [ 1 2 3 ]; }")
@@ -42,7 +37,6 @@ async def test_eval_file(tmp_path, capsys):
     assert _parse_json_output(captured.out) == {"a": 1, "b": True, "c": [1, 2, 3]}
 
 
-@pytest.mark.anyio
 async def test_eval_json_sorted_keys(capsys):
     cmd = Pynix.parse(["eval", "--expr", "{ z = 1; a = 2; }"])
     await cmd.astart()

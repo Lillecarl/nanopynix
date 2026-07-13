@@ -38,7 +38,6 @@ async def _init_git_flake(flake_dir: Path) -> None:
         await proc.wait()
 
 
-@pytest.mark.anyio
 async def test_show_file(tmp_path, capsys):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("""
@@ -63,7 +62,6 @@ async def test_show_file(tmp_path, capsys):
     assert "out" in drv["outputs"]
 
 
-@pytest.mark.anyio
 async def test_show_file_with_attrpath(tmp_path, capsys):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("""
@@ -84,7 +82,6 @@ async def test_show_file_with_attrpath(tmp_path, capsys):
     assert result[drv_path]["name"] == "nested-hello"
 
 
-@pytest.mark.anyio
 async def test_show_flake(capsys):
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
@@ -100,7 +97,6 @@ async def test_show_flake(capsys):
     assert "out" in drv["outputs"]
 
 
-@pytest.mark.anyio
 async def test_show_flake_greeting_is_not_derivation(capsys):
     with tempfile.TemporaryDirectory() as d:
         flake_dir = Path(d)
@@ -112,7 +108,6 @@ async def test_show_flake_greeting_is_not_derivation(capsys):
     assert "value is not a derivation" in captured.out
 
 
-@pytest.mark.anyio
 async def test_show_missing_both_errors(capsys):
     cmd = Pynix.parse(["derivation", "show"])
     with pytest.raises(SystemExit):
@@ -121,7 +116,6 @@ async def test_show_missing_both_errors(capsys):
     assert "either --file or --flake is required" in captured.out
 
 
-@pytest.mark.anyio
 async def test_show_both_file_and_flake_errors(tmp_path, capsys):
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{}")

@@ -7,7 +7,6 @@ import pytest
 from pynix import Pynix
 
 
-@pytest.mark.anyio
 async def test_path_info(capsys):
     cmd = Pynix.parse(["path-info", "/nix/store/zh1ijdhb6gng1509b1zrilb6xlzx60j6-bash-5.3p9"])
     await cmd.astart()
@@ -21,7 +20,6 @@ async def test_path_info(capsys):
     assert "/nix/store/zh1ijdhb6gng1509b1zrilb6xlzx60j6-bash-5.3p9" in result["references"]
 
 
-@pytest.mark.anyio
 async def test_path_info_nonexistent(capsys):
     cmd = Pynix.parse(["path-info", "/nix/store/deadbeef-nonexistent"])
     with pytest.raises(SystemExit):
