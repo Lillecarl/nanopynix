@@ -58,8 +58,12 @@ async def populated_store(
         env=env,
     )
     hello_path = stdout.decode().strip().splitlines()[-1]
+    text_file = store_root / "message.txt"
+    text_file.write_text("temporary-store-message\n")
+    text_stdout = await _run("nix", "store", "add-file", "--store", store_url, str(text_file))
+    text_path = text_stdout.decode().strip().splitlines()[-1]
     try:
-        yield {"store_url": store_url, "hello_path": hello_path}
+        yield {"store_url": store_url, "hello_path": hello_path, "text_path": text_path}
     finally:
         _rmtree_force(store_root)
 
