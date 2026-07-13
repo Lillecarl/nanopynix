@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from typing import TypeAlias
-
 from nanopynix_proto.nix.common import LogLevel
 
-LogLevelInput: TypeAlias = LogLevel | int | str
+type LogLevelInput = LogLevel | int | str
 
 _LOG_LEVEL_NAMES: dict[str, LogLevel] = {
     "error": LogLevel.ERROR,
@@ -39,8 +37,7 @@ def normalize_log_level(value: LogLevelInput) -> LogLevel:
         key = key[4:]
     elif key.startswith("lvl"):
         key = key[3:]
-    if key.startswith("log_level_"):
-        key = key[10:]
+    key = key.removeprefix("log_level_")
 
     try:
         return _LOG_LEVEL_NAMES[key]

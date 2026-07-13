@@ -24,13 +24,13 @@ from typing import TYPE_CHECKING, Any
 
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
+import nanopynix_expr
 from nanopynix._pool import _WorkerManager
 from nanopynix._session import EvalSession
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.settings import NixSettings, normalize_nix_settings
 from nanopynix.store import StoreHandle
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
-import nanopynix_expr
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence

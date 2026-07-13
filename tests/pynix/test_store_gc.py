@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
 
 import pytest
 
@@ -109,7 +111,9 @@ async def test_compute_fs_closure(populated_store: dict[str, str], capsys):
 
 
 async def test_query_missing(populated_store: dict[str, str], capsys):
-    cmd = Pynix.parse(["store", "query-missing", populated_store["hello_path"], "--store", populated_store["store_url"]])
+    cmd = Pynix.parse(
+        ["store", "query-missing", populated_store["hello_path"], "--store", populated_store["store_url"]]
+    )
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -185,7 +189,9 @@ async def test_query_substitutable_paths(populated_store: dict[str, str], capsys
 
 
 async def test_add_temp_root(populated_store: dict[str, str], capsys):
-    cmd = Pynix.parse(["store", "add-temp-root", populated_store["hello_path"], "--store", populated_store["store_url"]])
+    cmd = Pynix.parse(
+        ["store", "add-temp-root", populated_store["hello_path"], "--store", populated_store["store_url"]]
+    )
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -365,7 +371,7 @@ def _install_fake_nanopynix(
 
 
 @asynccontextmanager
-async def _noop_forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncIterator[None]:
+async def _noop_forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncIterator[None]:  # noqa: ARG001 -- matches real forward_nix_logs signature
     yield
 
 

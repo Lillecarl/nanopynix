@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 _RESULT_BUILD_LOG_LINE = 101
 _RESULT_POST_BUILD_LOG_LINE = 107
@@ -51,7 +53,9 @@ async def _forward_nix_logs(session: Any, *, print_build_logs: bool) -> None:
         result_type, result_message = _result_event(event)
         if result_type in {_RESULT_BUILD_LOG_LINE, _RESULT_POST_BUILD_LOG_LINE}:
             if print_build_logs:
-                logger.info("nix build log", message=result_message, request_id=event.request_id, result_type=result_type)
+                logger.info(
+                    "nix build log", message=result_message, request_id=event.request_id, result_type=result_type
+                )
             continue
         if event.action == "error":
             logger.error("nix log", message=message, action=event.action, request_id=event.request_id)

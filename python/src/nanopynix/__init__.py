@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from nanopynix_proto.nix.common import LogLevel
 from strip_ansi import strip_ansi
 
 from nanopynix._pool import WorkerBusyError, WorkerDiedError
@@ -66,7 +67,6 @@ from nanopynix.settings import (
 from nanopynix.store import StoreHandle
 from nanopynix.types import NixArg, NixDeepValue, NixValue
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
-from nanopynix_proto.nix.common import LogLevel
 from nanopynix_expr import EvalState, Value, eval_file, init_libexpr, register_primop
 from nanopynix_fetchers import input_from_attrs, input_from_url
 from nanopynix_flake import get_flake, lock_flake, parse_flake_ref
@@ -148,12 +148,13 @@ __all__ = [
     "input_from_attrs",
     "input_from_url",
     "install_logger",
-    "list_settings",
     "list_eval_settings_metadata",
     "list_fetch_settings_metadata",
     "list_flake_settings_metadata",
+    "list_settings",
     "list_settings_metadata",
     "lock_flake",
+    "normalize_log_level",
     "open_store",
     "parse_flake_ref",
     "register_primop",
@@ -161,7 +162,6 @@ __all__ = [
     "set_setting",
     "set_verbosity",
     "strip_ansi",
-    "normalize_log_level",
     "to_yaml",
     "yaml_primops",
 ]

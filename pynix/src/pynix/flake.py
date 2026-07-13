@@ -180,8 +180,7 @@ def _locked_input_to_json(input_: Any) -> dict[str, Any]:
     attrs = input_.attrs
     if attrs is not None:
         result["attrs"] = {
-            name: _attrs_value_to_json(value)
-            for name, value in sorted(attrs.entries.items(), key=lambda item: item[0])
+            name: _attrs_value_to_json(value) for name, value in sorted(attrs.entries.items(), key=lambda item: item[0])
         }
     return result
 

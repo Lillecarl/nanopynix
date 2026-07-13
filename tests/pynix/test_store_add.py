@@ -47,7 +47,9 @@ async def test_pynix_store_add_path_imports_directory(empty_store: dict[str, Pat
     (source / "share").mkdir(parents=True)
     (source / "share" / "message").write_text("pynix-add-path\n")
 
-    cmd = Pynix.parse(["store", "add-path", str(source), "--name", "custom-dir", "--store", str(empty_store["store_url"])])
+    cmd = Pynix.parse(
+        ["store", "add-path", str(source), "--name", "custom-dir", "--store", str(empty_store["store_url"])]
+    )
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
