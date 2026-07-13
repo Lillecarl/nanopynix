@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path  # noqa: TC003
-from typing import override
+from typing import TYPE_CHECKING, Any, override
 
 import structlog
 from clypi import Command, arg
 from rich.console import Console
+
+if TYPE_CHECKING:
+    from nanopynix._session import ValueProxy
 
 from pynix._util import forward_nix_logs, prepare_sys_path
 
@@ -98,7 +101,7 @@ class BuildTargetError(RuntimeError):
     pass
 
 
-async def _navigate(root, attrpath: str, *, attrs_type):
+async def _navigate(root: ValueProxy, attrpath: str, *, attrs_type: int) -> ValueProxy:
     for part in attrpath.split("."):
         actual = await root.get_type()
         if actual != attrs_type:
@@ -112,7 +115,7 @@ async def _navigate(root, attrpath: str, *, attrs_type):
     return root
 
 
-async def _evaluate_build_target(command: Build, session, *, attrs_type):
+async def _evaluate_build_target(command: Build, session: Any, *, attrs_type: int) -> ValueProxy:
     if command.file is not None:
         root = await (await session.file(str(command.file))).auto_call()
         if command.attrpath is not None:

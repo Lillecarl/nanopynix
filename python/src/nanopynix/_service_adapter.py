@@ -51,7 +51,7 @@ def _install_generated_service_methods(
     missing = sorted(expected - actual)
     extra = sorted(actual - expected)
     if missing or extra:
-        details = []
+        details: list[str] = []
         if missing:
             details.append(f"missing {method_prefix} methods: {', '.join(missing)}")
         if extra:
@@ -84,7 +84,7 @@ def _make_service_forwarder(
 
         async def _forward_nix(self: GeneratedServiceAdapterMixin, message: Message) -> Message:
             executor: Any = _resolve_attr(self, nix_executor_attr)
-            raw = await executor.run(lambda: self._nanobind_rpc_call(binding_method_name, message))
+            raw = await executor.run(lambda: self._nanobind_rpc_call(binding_method_name, message))  # type: ignore[reportPrivateUsage] -- cross-class RPC dispatch
             if isinstance(raw, response_type):
                 return raw
             if isinstance(raw, Mapping):
@@ -95,7 +95,7 @@ def _make_service_forwarder(
         return _forward_nix
 
     async def _forward(self: GeneratedServiceAdapterMixin, message: Message) -> Message:
-        raw = self._nanobind_rpc_call(binding_method_name, message)
+        raw = self._nanobind_rpc_call(binding_method_name, message)  # type: ignore[reportPrivateUsage] -- cross-class RPC dispatch
         if isinstance(raw, response_type):
             return raw
         if isinstance(raw, Mapping):
@@ -112,7 +112,7 @@ def _resolve_attr(obj: Any, attr_path: str) -> Any:
     return obj
 
 
-def _proto_shape(value: Any) -> Any:
+def _proto_shape(value: object) -> Any:
     """Normalize nanobind containers into proto-shaped plain Python data."""
     if isinstance(value, Mapping):
         return {str(k): _proto_shape(v) for k, v in value.items()}

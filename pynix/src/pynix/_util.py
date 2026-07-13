@@ -5,7 +5,7 @@ import contextlib
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
@@ -78,11 +78,10 @@ def _result_event(event: Any) -> tuple[int | None, str | None]:
     if len(args) < 2 or not isinstance(args[1], int):
         return None, None
     result_type = args[1]
-    fields = args[2] if len(args) > 2 else []
+    fields: list[Any] = cast(list[Any], args[2]) if len(args) > 2 else []
     message = None
-    if isinstance(fields, list):
-        for field in reversed(fields):
-            if isinstance(field, str):
-                message = field
-                break
+    for field in reversed(fields):
+        if isinstance(field, str):
+            message = field
+            break
     return result_type, message

@@ -19,7 +19,7 @@ from nanopynix_proto.nix.common import (
 )
 from nanopynix_proto.nix.eval import EvalServiceBase
 
-from nanopynix._pool import _RPC_TIMEOUT
+from nanopynix._pool import _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
 from nanopynix._rpc_proxy import RpcProxyMixin
 from nanopynix.exceptions import (
     EvalSessionClosedError,
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from betterproto2 import Message
     from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
-    from nanopynix._pool import ReservedWorker, _WorkerManager
+    from nanopynix._pool import ReservedWorker, _WorkerManager  # type: ignore[reportPrivateUsage] -- cross-class access
     from nanopynix.store import StoreHandle
     from nanopynix_store import BuildMode as BuildModeType
 
@@ -116,7 +116,7 @@ class _EvalOwner:
     active: _ActiveFlag | None = None
 
     def owns(self, value: ValueProxy) -> bool:
-        return value._ctx.owner.token is self.token
+        return value._ctx.owner.token is self.token  # type: ignore[reportPrivateUsage] -- cross-class access
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -147,12 +147,12 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
 
     async def _rpc_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
-        method = getattr(self._rw._eval_stub, method_name)
+        method = getattr(self._rw._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
         return await self._rw.call(method(message, timeout=_RPC_TIMEOUT))
 
     async def _store_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
-        method = getattr(self._rw._store_stub, method_name)
+        method = getattr(self._rw._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
         return await self._rw.call(method(message, timeout=_RPC_TIMEOUT))
 
 
@@ -464,7 +464,7 @@ class ValueProxy:
     def _build_store_handle(self, store: StoreHandle | None) -> int:
         if store is None:
             return self._ctx.store_handle
-        if store._session_id != self._ctx.session_id:
+        if store._session_id != self._ctx.session_id:  # type: ignore[reportPrivateUsage] -- cross-class access
             raise ValueError("StoreHandle belongs to a different session")
         return store.store_handle
 
@@ -902,7 +902,7 @@ class EvalSession:
         )
 
     def _locked_flake_id(self, locked: LockedFlakeHandle) -> int:
-        if locked._session is not self:
+        if locked._session is not self:  # type: ignore[reportPrivateUsage] -- cross-class access
             raise ForeignValueError("cannot use a LockedFlakeHandle from another EvalSession")
         return locked.handle
 

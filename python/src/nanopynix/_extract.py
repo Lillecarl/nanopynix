@@ -7,7 +7,7 @@ Input/FlakeRef/LockedFlake still need explicit extraction.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nanopynix_proto.nix import common as common_pb
 
@@ -23,7 +23,7 @@ def _attrs_value(v: Any) -> common_pb.AttrsValue:
     return common_pb.AttrsValue(string_value=str(v))
 
 
-def store_path(sp, /) -> common_pb.StorePath:
+def store_path(sp: Any, /) -> common_pb.StorePath:
     """Extract a L1 StorePath to a proto StorePath message."""
     return common_pb.StorePath(base_name=sp.to_string())
 
@@ -38,13 +38,13 @@ def _attrs_map(d: dict[str, Any]) -> common_pb.AttrsMap:  # type: ignore[reportU
     return common_pb.AttrsMap(entries={k: _attrs_value(v) for k, v in d.items()})
 
 
-def input_attrs(inp, /) -> dict[str, common_pb.AttrsValue]:
+def input_attrs(inp: Any, /) -> dict[str, common_pb.AttrsValue]:
     """Extract L1 Input.to_attrs() to ``dict[str, AttrsValue]``."""
     raw = inp.to_attrs()
     return {str(k): _attrs_value(v) for k, v in raw.items()}
 
 
-def flake_ref_attrs(fr, /) -> dict[str, common_pb.AttrsValue]:
+def flake_ref_attrs(fr: Any, /) -> dict[str, common_pb.AttrsValue]:
     """Extract L1 FlakeRef.to_attrs() to ``dict[str, AttrsValue]``."""
     return input_attrs(fr)  # to_attrs() has the same shape on both types
 
@@ -72,7 +72,7 @@ def locked_input(li_dict: dict[str, Any], /) -> common_pb.LockedInput:
     return common_pb.LockedInput(attrs=attrs, is_flake=is_flake, follows=follows)
 
 
-def locked_flake(lf, /) -> common_pb.LockedFlake:
+def locked_flake(lf: Any, /) -> common_pb.LockedFlake:
     """Extract a L1 LockedFlake to a proto LockedFlake message."""
     inputs: dict[str, common_pb.LockedInput] = {}
     lf_inputs = lf.inputs()
