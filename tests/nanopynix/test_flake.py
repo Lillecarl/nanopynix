@@ -1,6 +1,11 @@
 """Tests for nanopynix_flake (FlakeRef, parse_flake_ref, lock_flake, get_flake, call_flake, eval_flake)."""
 
+from __future__ import annotations
+
+from pathlib import Path
 import subprocess
+
+import pytest
 
 import nanopynix
 import nanopynix_flake
@@ -38,21 +43,21 @@ class TestParseFlakeRef:
 
 
 class TestLockFlake:
-    def test_lock_flake_nixpkgs(self, eval_state, tmp_path):
+    def test_lock_flake_nixpkgs(self, eval_state: nanopynix.EvalState, tmp_path: Path):
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))
         locked = nanopynix.lock_flake(eval_state, ref)
         desc = locked.description()
         assert isinstance(desc, str)
 
-    def test_lock_flake_inputs(self, eval_state, tmp_path):
+    def test_lock_flake_inputs(self, eval_state: nanopynix.EvalState, tmp_path: Path):
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))
         locked = nanopynix.lock_flake(eval_state, ref)
         inputs = locked.inputs()
         assert isinstance(inputs, dict)
 
-    def test_lock_flake_repr(self, eval_state, tmp_path):
+    def test_lock_flake_repr(self, eval_state: nanopynix.EvalState, tmp_path: Path):
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))
         locked = nanopynix.lock_flake(eval_state, ref)
@@ -61,7 +66,7 @@ class TestLockFlake:
 
 
 class TestGetFlake:
-    def test_get_flake(self, eval_state, tmp_path):
+    def test_get_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path):
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))
         resolved = nanopynix.get_flake(eval_state, ref)
@@ -69,7 +74,7 @@ class TestGetFlake:
 
 
 class TestCallFlake:
-    def test_call_flake(self, eval_state, tmp_path):
+    def test_call_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path):
         """call_flake evaluates a locked flake's outputs."""
         (tmp_path / "flake.nix").write_text("""
         {
@@ -94,7 +99,7 @@ class TestCallFlake:
 
 
 class TestEvalFlake:
-    def test_eval_flake(self, eval_state, tmp_path):
+    def test_eval_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path):
         """eval_flake locks and evaluates a flake in one step."""
         (tmp_path / "flake.nix").write_text("""
         {
@@ -115,7 +120,7 @@ class TestEvalFlake:
         count = outputs.attr_get("count")
         assert count.as_int() == 7
 
-    def test_eval_flake_writes_lock_file(self, eval_state, tmp_path):
+    def test_eval_flake_writes_lock_file(self, eval_state: nanopynix.EvalState, tmp_path: Path):
         """eval_flake with write_lock_file=True creates flake.lock."""
         dep_dir = tmp_path / "dep"
         dep_dir.mkdir()
@@ -139,7 +144,7 @@ class TestEvalFlake:
         nanopynix_flake.eval_flake(eval_state, str(tmp_path), write_lock_file=True)
         assert (tmp_path / "flake.lock").exists()
 
-    def test_eval_flake_no_write_lock_file(self, eval_state, tmp_path):
+    def test_eval_flake_no_write_lock_file(self, eval_state: nanopynix.EvalState, tmp_path: Path):
         """eval_flake with write_lock_file=False does NOT create flake.lock."""
         _init_git_flake(tmp_path)
         assert not (tmp_path / "flake.lock").exists()
@@ -148,7 +153,7 @@ class TestEvalFlake:
 
 
 class TestWriteLockFile:
-    def test_write_lock_file(self, eval_state, tmp_path):
+    def test_write_lock_file(self, eval_state: nanopynix.EvalState, tmp_path: Path):
         """lock_flake with write_lock_file=False, then write_lock_file() persists."""
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))

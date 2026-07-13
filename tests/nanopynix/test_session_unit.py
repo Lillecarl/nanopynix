@@ -6,6 +6,7 @@ No Nix daemon needed — exercises error paths and edge cases.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -936,7 +937,7 @@ class TestReservedWorker:
 
 
 class TestWorkerOomScore:
-    def test_write_oom_score_adj_clamps_value(self, tmp_path):
+    def test_write_oom_score_adj_clamps_value(self, tmp_path: Path):
         proc_dir = tmp_path / "123"
         proc_dir.mkdir()
 
@@ -944,7 +945,7 @@ class TestWorkerOomScore:
 
         assert (proc_dir / "oom_score_adj").read_text() == "1000\n"
 
-    def test_worker_start_sets_base_oom_score(self, monkeypatch):
+    def test_worker_start_sets_base_oom_score(self, monkeypatch: pytest.MonkeyPatch):
         calls: list[tuple[int, int]] = []
         monkeypatch.setattr(
             pool_module,
@@ -958,7 +959,7 @@ class TestWorkerOomScore:
         assert manager._worker_pid == 1234
         assert calls == [(1234, 500)]
 
-    async def test_reserved_worker_score_is_restored_on_release(self, monkeypatch):
+    async def test_reserved_worker_score_is_restored_on_release(self, monkeypatch: pytest.MonkeyPatch):
         calls: list[tuple[int, int]] = []
         monkeypatch.setattr(
             pool_module,
