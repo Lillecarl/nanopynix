@@ -424,6 +424,41 @@ class Ls(Command):
             sys.stdout.write("\n")
 
 
+class DiffClosures(Command):
+    """Compare two filesystem closures"""
+
+    before: Positional[str] = arg(help="Original store path.")
+    after: Positional[str] = arg(help="New store path.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+            before = await _closure_path_infos(store, self.before)
+            after = await _closure_path_infos(store, self.after)
+
+        before_paths = set(before)
+        after_paths = set(after)
+        added = sorted(after_paths - before_paths)
+        removed = sorted(before_paths - after_paths)
+        before_size = sum(before.values())
+        after_size = sum(after.values())
+        _print_json(
+            {
+                "before": self.before,
+                "after": self.after,
+                "added": [{"path": path, "narSize": after[path]} for path in added],
+                "removed": [{"path": path, "narSize": before[path]} for path in removed],
+                "beforeNarSize": before_size,
+                "afterNarSize": after_size,
+                "narSizeDelta": after_size - before_size,
+            }
+        )
+
+
 class Optimise(Command):
     """Optimise store disk usage by hard-linking duplicate files"""
 
@@ -480,6 +515,7 @@ class Store(Command):
         | EnsurePath
         | Cat
         | Ls
+        | DiffClosures
         | Optimise
         | Verify
     )
@@ -554,3 +590,13 @@ def _directory_entry_to_json(path: Path) -> dict[str, object]:
     else:
         result["type"] = "unknown"
     return result
+
+
+async def _closure_path_infos(store: Any, path: str) -> dict[str, int]:
+    response = await store.compute_fs_closure(ComputeFsClosureRequest(path=path))
+    infos: dict[str, int] = {}
+    for store_path in response.paths:
+        path_string = _format_store_path(store_path.base_name)
+        info = await store.query_path_info(QueryPathInfoRequest(path=path_string))
+        infos[path_string] = info.nar_size
+    return infos
