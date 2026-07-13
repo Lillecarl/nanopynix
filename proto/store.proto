@@ -23,6 +23,13 @@ service StoreService {
   rpc BuildDerivation(BuildDerivationRequest) returns (nix.common.BuildResult);
   rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (nix.common.StorePath);
   rpc AddTempRoot(AddTempRootRequest) returns (AddTempRootResponse);
+  rpc FindRoots(FindRootsRequest) returns (FindRootsResponse);
+  rpc CollectGarbage(CollectGarbageRequest) returns (CollectGarbageResponse);
+  rpc AddPermRoot(AddPermRootRequest) returns (AddPermRootResponse);
+  rpc AddIndirectRoot(AddIndirectRootRequest) returns (AddIndirectRootResponse);
+  rpc EnsurePath(EnsurePathRequest) returns (EnsurePathResponse);
+  rpc OptimiseStore(OptimiseStoreRequest) returns (OptimiseStoreResponse);
+  rpc VerifyStore(VerifyStoreRequest) returns (VerifyStoreResponse);
 }
 
 message GetUriRequest {
@@ -130,3 +137,70 @@ message AddTempRootRequest {
   int64 store_handle = 100;
 }
 message AddTempRootResponse {}
+
+message FindRootsRequest {
+  bool censor = 1;
+  int64 store_handle = 100;
+}
+message GCRoot {
+  string link = 1;
+  nix.common.StorePath path = 2;
+}
+message FindRootsResponse {
+  repeated GCRoot roots = 1;
+}
+
+enum GCAction {
+  GC_ACTION_UNSPECIFIED = 0;
+  GC_ACTION_RETURN_LIVE = 1;
+  GC_ACTION_RETURN_DEAD = 2;
+  GC_ACTION_DELETE_DEAD = 3;
+  GC_ACTION_DELETE_SPECIFIC = 4;
+}
+
+message CollectGarbageRequest {
+  GCAction action = 1;
+  bool ignore_liveness = 2;
+  repeated string paths_to_delete = 3;
+  uint64 max_freed = 4;
+  int64 store_handle = 100;
+}
+message CollectGarbageResponse {
+  repeated string paths = 1;
+  uint64 bytes_freed = 2;
+}
+
+message AddPermRootRequest {
+  string store_path = 1;
+  string gc_root = 2;
+  int64 store_handle = 100;
+}
+message AddPermRootResponse {
+  string path = 1;
+}
+
+message AddIndirectRootRequest {
+  string path = 1;
+  int64 store_handle = 100;
+}
+message AddIndirectRootResponse {}
+
+message EnsurePathRequest {
+  string path = 1;
+  int64 store_handle = 100;
+}
+message EnsurePathResponse {}
+
+message OptimiseStoreRequest {
+  int64 store_handle = 100;
+}
+message OptimiseStoreResponse {}
+
+message VerifyStoreRequest {
+  bool check_contents = 1;
+  bool repair = 2;
+  int64 store_handle = 100;
+}
+message VerifyStoreResponse {
+  bool errors = 1;
+}

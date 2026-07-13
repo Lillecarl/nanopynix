@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_proto.nix.store import StoreServiceBase
 
@@ -83,7 +83,8 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
     async def _rpc_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
         if self._store_handle:
-            message.store_handle = self._store_handle
+            message_any = cast(Any, message)
+            message_any.store_handle = self._store_handle
         method = getattr(self._pool._store_stub, method_name)
         return await self._store_call(method(message, timeout=_RPC_TIMEOUT))
 

@@ -1,13 +1,21 @@
 """Integration tests for the L2 Store facade via Session."""
 
+import pytest
 from nanopynix_proto.nix.common import StorePath as StorePathProto
 from nanopynix_proto.nix.store import (
+    AddIndirectRootRequest,
+    AddPermRootRequest,
     AddTempRootRequest,
+    CollectGarbageRequest,
     ComputeFsClosureRequest,
+    EnsurePathRequest,
+    FindRootsRequest,
     FollowLinksToStorePathRequest,
+    GcAction,
     GetStoreDirRequest,
     GetUriRequest,
     IsValidPathRequest,
+    OptimiseStoreRequest,
     ParseStorePathRequest,
     QueryAllValidPathsRequest,
     QueryDerivationOutputsRequest,
@@ -17,6 +25,7 @@ from nanopynix_proto.nix.store import (
     QueryReferrersRequest,
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
+    VerifyStoreRequest,
 )
 
 from nanopynix import MissingInfo, PathInfo, Session, StorePath
@@ -171,3 +180,59 @@ async def test_add_temp_root():
         if paths:
             path = StorePath(paths[0])
             await store.add_temp_root(AddTempRootRequest(path=path.to_string))
+
+
+async def test_find_roots():
+    async with Session() as session, session.store() as store:
+        roots = (await store.find_roots(FindRootsRequest(censor=True))).roots
+        assert isinstance(roots, list)
+        for root in roots[:10]:
+            assert isinstance(root.link, str)
+            assert isinstance(root.path, StorePathProto)
+
+
+async def test_collect_garbage_return_dead_does_not_delete():
+    async with Session() as session, session.store() as store:
+        result = await store.collect_garbage(CollectGarbageRequest(action=GcAction.RETURN_DEAD))
+        assert isinstance(result.paths, list)
+        assert result.bytes_freed == 0
+
+
+@pytest.mark.live_gc
+async def test_collect_garbage_delete_dead_live_store_requires_opt_in():
+    async with Session() as session, session.store() as store:
+        result = await store.collect_garbage(CollectGarbageRequest(action=GcAction.DELETE_DEAD, max_freed=1))
+        assert isinstance(result.paths, list)
+
+
+async def test_add_perm_root_and_indirect_root(tmp_path):
+    async with Session() as session, session.store() as store:
+        paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
+        if paths:
+            path = StorePath(paths[0])
+            root_path = tmp_path / "nanopynix-gc-root"
+            response = await store.add_perm_root(
+                AddPermRootRequest(store_path=path.to_string, gc_root=str(root_path))
+            )
+            assert response.path == str(root_path)
+            assert root_path.is_symlink()
+            await store.add_indirect_root(AddIndirectRootRequest(path=str(root_path)))
+
+
+async def test_ensure_path():
+    async with Session() as session, session.store() as store:
+        paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
+        if paths:
+            path = StorePath(paths[0])
+            await store.ensure_path(EnsurePathRequest(path=path.to_string))
+
+
+async def test_optimise_store_on_empty_local_store(tmp_path):
+    async with Session() as session, session.store(f"local?root={tmp_path}") as store:
+        await store.optimise_store(OptimiseStoreRequest())
+
+
+async def test_verify_store_on_empty_local_store(tmp_path):
+    async with Session() as session, session.store(f"local?root={tmp_path}") as store:
+        response = await store.verify_store(VerifyStoreRequest(check_contents=False, repair=False))
+        assert response.errors is False

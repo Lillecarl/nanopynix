@@ -1,11 +1,36 @@
 """Shared fixtures for nanopynix tests."""
 
 import atexit
+import os
 from typing import Protocol, cast
 
 import pytest
 
 import nanopynix
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-live-gc",
+        action="store_true",
+        default=False,
+        help="run tests that perform destructive live Nix garbage collection",
+    )
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "live_gc: test performs destructive live Nix garbage collection",
+    )
+
+
+def pytest_runtest_setup(item):
+    if "live_gc" not in item.keywords:
+        return
+    if item.config.getoption("--run-live-gc") or os.environ.get("NANOPYNIX_RUN_LIVE_GC") == "1":
+        return
+    pytest.skip("destructive live GC test; pass --run-live-gc or NANOPYNIX_RUN_LIVE_GC=1 to run")
 
 
 @pytest.fixture(scope="session", autouse=True)

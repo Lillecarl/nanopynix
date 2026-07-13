@@ -5,8 +5,13 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/typing.h>
 
+#include <limits>
+
 #include <nix/store/store-api.hh>
 #include <nix/store/store-open.hh>
+#include <nix/store/gc-store.hh>
+#include <nix/store/indirect-root-store.hh>
+#include <nix/store/local-fs-store.hh>
 #include <nix/store/names.hh>
 #include <nix/store/path.hh>
 #include <nix/store/derived-path.hh>
@@ -43,6 +48,12 @@ static nb::dict store_path_to_dict(const nix::StorePath &sp) {
 static nb::list store_paths_to_dict_list(const nix::StorePathSet &paths) {
     nb::list result;
     for (auto &p : paths) result.append(store_path_to_dict(p));
+    return result;
+}
+
+static nb::list string_set_to_list(const nix::StringSet &values) {
+    nb::list result;
+    for (auto &value : values) result.append(value);
     return result;
 }
 
@@ -186,6 +197,10 @@ static bool request_bool(const nb::dict &request, const char *key) {
     return nb::cast<bool>(request[nb::str(key)]);
 }
 
+static uint64_t request_uint64(const nb::dict &request, const char *key) {
+    return nb::cast<uint64_t>(request[nb::str(key)]);
+}
+
 static nix::StorePath request_store_path(nix::Store &s, const nb::dict &request, const char *key) {
     auto path = request_string(request, key);
     if (!path.empty() && path[0] != '/') path = s.config.storeDir_ + "/" + path;
@@ -254,6 +269,74 @@ static nb::list query_substitutable_paths(nix::Store &s, const std::vector<nix::
     nix::StorePathSet ps(paths.begin(), paths.end());
     auto subs = s.querySubstitutablePaths(ps);
     return store_paths_to_dict_list(subs);
+}
+
+// --- GC / roots / maintenance ---
+
+static nix::GcStore &require_gc_store(nix::Store &s) {
+    auto *store = dynamic_cast<nix::GcStore *>(&s);
+    if (store == nullptr)
+        throw nix::Error("store '%s' does not support garbage collection", s.config.getHumanReadableURI());
+    return *store;
+}
+
+static nix::LocalFSStore &require_local_fs_store(nix::Store &s) {
+    auto *store = dynamic_cast<nix::LocalFSStore *>(&s);
+    if (store == nullptr)
+        throw nix::Error("store '%s' does not support local filesystem roots", s.config.getHumanReadableURI());
+    return *store;
+}
+
+static nix::IndirectRootStore &require_indirect_root_store(nix::Store &s) {
+    auto *store = dynamic_cast<nix::IndirectRootStore *>(&s);
+    if (store == nullptr)
+        throw nix::Error("store '%s' does not support indirect roots", s.config.getHumanReadableURI());
+    return *store;
+}
+
+static nix::GCAction gc_action_from_int(int action) {
+    switch (action) {
+        case 1: return nix::GCAction::gcReturnLive;
+        case 2: return nix::GCAction::gcReturnDead;
+        case 3: return nix::GCAction::gcDeleteDead;
+        case 4: return nix::GCAction::gcDeleteSpecific;
+        default: return nix::GCAction::gcReturnDead;
+    }
+}
+
+static nb::list find_roots(nix::Store &s, bool censor) {
+    auto roots = require_gc_store(s).findRoots(censor);
+    nb::list result;
+    for (auto &[target, links] : roots) {
+        for (auto &link : links) {
+            nb::dict root;
+            root["link"] = link;
+            root["path"] = store_path_to_dict(target);
+            result.append(root);
+        }
+    }
+    return result;
+}
+
+static nb::dict collect_garbage(
+        nix::Store &s,
+        nix::GCAction action,
+        bool ignore_liveness,
+        const std::vector<nix::StorePath> &paths_to_delete,
+        uint64_t max_freed) {
+    nix::GCOptions options;
+    options.action = action;
+    options.ignoreLiveness = ignore_liveness;
+    options.pathsToDelete = nix::StorePathSet(paths_to_delete.begin(), paths_to_delete.end());
+    options.maxFreed = max_freed;
+
+    nix::GCResults results;
+    require_gc_store(s).collectGarbage(options, results);
+
+    nb::dict d;
+    d["paths"] = string_set_to_list(results.paths);
+    d["bytes_freed"] = nb::int_(results.bytesFreed);
+    return d;
 }
 
 // --- Build ---
@@ -491,6 +574,53 @@ static nb::dict store_add_temp_root(nix::Store &s, const nb::dict &request) {
     return nb::dict();
 }
 
+static nb::dict store_find_roots(nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    d["roots"] = find_roots(s, request_bool(request, "censor"));
+    return d;
+}
+
+static nb::dict store_collect_garbage(nix::Store &s, const nb::dict &request) {
+    return collect_garbage(
+        s,
+        gc_action_from_int(nb::cast<int>(request[nb::str("action")])),
+        request_bool(request, "ignore_liveness"),
+        request_store_paths(s, request, "paths_to_delete"),
+        request_uint64(request, "max_freed"));
+}
+
+static nb::dict store_add_perm_root(nix::Store &s, const nb::dict &request) {
+    auto root = require_local_fs_store(s).addPermRoot(
+        request_store_path(s, request, "store_path"),
+        request_string(request, "gc_root"));
+    nb::dict d;
+    d["path"] = root.string();
+    return d;
+}
+
+static nb::dict store_add_indirect_root(nix::Store &s, const nb::dict &request) {
+    require_indirect_root_store(s).addIndirectRoot(request_string(request, "path"));
+    return nb::dict();
+}
+
+static nb::dict store_ensure_path(nix::Store &s, const nb::dict &request) {
+    s.ensurePath(request_store_path(s, request, "path"));
+    return nb::dict();
+}
+
+static nb::dict store_optimise_store(nix::Store &s, const nb::dict &) {
+    s.optimiseStore();
+    return nb::dict();
+}
+
+static nb::dict store_verify_store(nix::Store &s, const nb::dict &request) {
+    nb::dict d;
+    d["errors"] = s.verifyStore(
+        request_bool(request, "check_contents"),
+        request_bool(request, "repair") ? nix::Repair : nix::NoRepair);
+    return d;
+}
+
 // =========================================================================
 // Store bindings
 // =========================================================================
@@ -533,6 +663,36 @@ static void bind_store(nb::module_ &m) {
         .def("query_substitutable_paths", &query_substitutable_paths, "paths"_a)
         // GC
         .def("add_temp_root", [](nix::Store &s, const nix::StorePath &p) { s.addTempRoot(p); }, "path"_a)
+        .def("find_roots", &find_roots, "censor"_a = true)
+        .def(
+            "collect_garbage",
+            &collect_garbage,
+            "action"_a,
+            "ignore_liveness"_a = false,
+            "paths_to_delete"_a = std::vector<nix::StorePath>{},
+            "max_freed"_a = std::numeric_limits<uint64_t>::max())
+        .def(
+            "add_perm_root",
+            [](nix::Store &s, const nix::StorePath &store_path, const std::string &gc_root) {
+                return require_local_fs_store(s).addPermRoot(store_path, gc_root).string();
+            },
+            "store_path"_a,
+            "gc_root"_a)
+        .def(
+            "add_indirect_root",
+            [](nix::Store &s, const std::string &path) {
+                require_indirect_root_store(s).addIndirectRoot(path);
+            },
+            "path"_a)
+        .def("ensure_path", [](nix::Store &s, const nix::StorePath &p) { s.ensurePath(p); }, "path"_a)
+        .def("optimise_store", [](nix::Store &s) { s.optimiseStore(); })
+        .def(
+            "verify_store",
+            [](nix::Store &s, bool check_contents, bool repair) {
+                return s.verifyStore(check_contents, repair ? nix::Repair : nix::NoRepair);
+            },
+            "check_contents"_a = false,
+            "repair"_a = false)
         // Proto-shaped StoreService RPC entrypoints
         .def("store_get_uri", &store_get_uri, "request"_a)
         .def("store_get_store_dir", &store_get_store_dir, "request"_a)
@@ -555,7 +715,14 @@ static void bind_store(nb::module_ &m) {
         .def("store_read_derivation", &store_read_derivation, "request"_a)
         .def("store_build_derivation", &store_build_derivation, "request"_a)
         .def("store_follow_links_to_store_path", &store_follow_links_to_store_path, "request"_a)
-        .def("store_add_temp_root", &store_add_temp_root, "request"_a);
+        .def("store_add_temp_root", &store_add_temp_root, "request"_a)
+        .def("store_find_roots", &store_find_roots, "request"_a)
+        .def("store_collect_garbage", &store_collect_garbage, "request"_a)
+        .def("store_add_perm_root", &store_add_perm_root, "request"_a)
+        .def("store_add_indirect_root", &store_add_indirect_root, "request"_a)
+        .def("store_ensure_path", &store_ensure_path, "request"_a)
+        .def("store_optimise_store", &store_optimise_store, "request"_a)
+        .def("store_verify_store", &store_verify_store, "request"_a);
 }
 
 // =========================================================================
@@ -567,6 +734,12 @@ NB_MODULE(nanopynix_store, m) {
         .value("Normal", nix::BuildMode::bmNormal)
         .value("Repair", nix::BuildMode::bmRepair)
         .value("Check", nix::BuildMode::bmCheck);
+
+    nb::enum_<nix::GCAction>(m, "GCAction")
+        .value("ReturnLive", nix::GCAction::gcReturnLive)
+        .value("ReturnDead", nix::GCAction::gcReturnDead)
+        .value("DeleteDead", nix::GCAction::gcDeleteDead)
+        .value("DeleteSpecific", nix::GCAction::gcDeleteSpecific);
 
     m.def("open_store", &open_store_uri, "uri"_a);
     m.def("open_store", &open_store_default);
