@@ -9,13 +9,20 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nanopynix_proto.nix.store import (
+    AddIndirectRootRequest,
+    AddPermRootRequest,
     AddTempRootRequest,
     BuildPathsWithResultsRequest,
+    CollectGarbageRequest,
     ComputeFsClosureRequest,
+    EnsurePathRequest,
+    FindRootsRequest,
     FollowLinksToStorePathRequest,
+    GcAction,
     GetStoreDirRequest,
     GetUriRequest,
     IsValidPathRequest,
+    OptimiseStoreRequest,
     ParseStorePathRequest,
     QueryAllValidPathsRequest,
     QueryDerivationOutputsRequest,
@@ -26,6 +33,7 @@ from nanopynix_proto.nix.store import (
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
     ReadDerivationRequest,
+    VerifyStoreRequest,
 )
 
 from nanopynix.store import StoreHandle as Store
@@ -55,6 +63,13 @@ def _make_stub_mock() -> MagicMock:
     stub.build_derivation = AsyncMock()
     stub.follow_links_to_store_path = AsyncMock()
     stub.add_temp_root = AsyncMock()
+    stub.find_roots = AsyncMock()
+    stub.collect_garbage = AsyncMock()
+    stub.add_perm_root = AsyncMock()
+    stub.add_indirect_root = AsyncMock()
+    stub.ensure_path = AsyncMock()
+    stub.optimise_store = AsyncMock()
+    stub.verify_store = AsyncMock()
     stub.fetch_from_url = AsyncMock()
     stub.fetch_from_attrs = AsyncMock()
     return stub
@@ -144,6 +159,19 @@ def _mock_missing_info(**overrides):
     mi.download_size = overrides.get("download_size", 0)
     mi.nar_size = overrides.get("nar_size", 0)
     return mi
+
+
+def _mock_find_roots_response(roots=None):
+    response = MagicMock()
+    response.roots = roots or []
+    return response
+
+
+def _mock_collect_garbage_response(**overrides):
+    response = MagicMock()
+    response.paths = overrides.get("paths", [])
+    response.bytes_freed = overrides.get("bytes_freed", 0)
+    return response
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -321,6 +349,51 @@ class TestGC:
         pool._store_stub.add_temp_root.return_value = MagicMock()
         await store.add_temp_root(AddTempRootRequest(path="/nix/store/aaa-foo"))
         pool._store_stub.add_temp_root.assert_awaited_once()
+
+    async def test_find_roots(self, store, pool):
+        pool._store_stub.find_roots.return_value = _mock_find_roots_response()
+        result = await store.find_roots(FindRootsRequest(censor=True))
+        assert result.roots == []
+        pool._store_stub.find_roots.assert_awaited_once()
+
+    async def test_collect_garbage_dry_run(self, store, pool):
+        pool._store_stub.collect_garbage.return_value = _mock_collect_garbage_response(
+            paths=["/nix/store/aaa-foo"],
+            bytes_freed=0,
+        )
+        result = await store.collect_garbage(CollectGarbageRequest(action=GcAction.RETURN_DEAD))
+        assert result.paths == ["/nix/store/aaa-foo"]
+        assert result.bytes_freed == 0
+        pool._store_stub.collect_garbage.assert_awaited_once()
+
+    async def test_add_perm_root(self, store, pool):
+        pool._store_stub.add_perm_root.return_value = MagicMock(path="/tmp/root")
+        result = await store.add_perm_root(
+            AddPermRootRequest(store_path="/nix/store/aaa-foo", gc_root="/tmp/root")
+        )
+        assert result.path == "/tmp/root"
+        pool._store_stub.add_perm_root.assert_awaited_once()
+
+    async def test_add_indirect_root(self, store, pool):
+        pool._store_stub.add_indirect_root.return_value = MagicMock()
+        await store.add_indirect_root(AddIndirectRootRequest(path="/tmp/root"))
+        pool._store_stub.add_indirect_root.assert_awaited_once()
+
+    async def test_ensure_path(self, store, pool):
+        pool._store_stub.ensure_path.return_value = MagicMock()
+        await store.ensure_path(EnsurePathRequest(path="/nix/store/aaa-foo"))
+        pool._store_stub.ensure_path.assert_awaited_once()
+
+    async def test_optimise_store(self, store, pool):
+        pool._store_stub.optimise_store.return_value = MagicMock()
+        await store.optimise_store(OptimiseStoreRequest())
+        pool._store_stub.optimise_store.assert_awaited_once()
+
+    async def test_verify_store(self, store, pool):
+        pool._store_stub.verify_store.return_value = MagicMock(errors=False)
+        result = await store.verify_store(VerifyStoreRequest(check_contents=False, repair=False))
+        assert result.errors is False
+        pool._store_stub.verify_store.assert_awaited_once()
 
 
 # ════════════════════════════════════════════════════════════════════

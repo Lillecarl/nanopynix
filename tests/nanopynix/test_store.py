@@ -122,6 +122,37 @@ class TestStore:
         store.add_temp_root(sp)
         # Should not raise
 
+    def test_find_roots(self, store):
+        roots = store.find_roots(censor=True)
+        assert isinstance(roots, list)
+        for root in roots[:10]:
+            assert isinstance(root["link"], str)
+            assert isinstance(root["path"], dict)
+
+    def test_collect_garbage_return_dead_does_not_delete(self, store):
+        result = store.collect_garbage(nanopynix_store.GCAction.ReturnDead)
+        assert isinstance(result["paths"], list)
+        assert result["bytes_freed"] == 0
+
+    def test_add_perm_root_and_indirect_root(self, store, tmp_path):
+        sp = _bash_sp()
+        root = tmp_path / "nanopynix-gc-root"
+        result = store.add_perm_root(sp, str(root))
+        assert result == str(root)
+        assert root.is_symlink()
+        store.add_indirect_root(str(root))
+
+    def test_ensure_path(self, store):
+        store.ensure_path(_bash_sp())
+
+    def test_optimise_store_empty_local_store(self, tmp_path):
+        store = nanopynix_store.open_store(f"local?root={tmp_path}")
+        store.optimise_store()
+
+    def test_verify_store_empty_local_store(self, tmp_path):
+        store = nanopynix_store.open_store(f"local?root={tmp_path}")
+        assert store.verify_store(check_contents=False, repair=False) is False
+
 
 class TestBuildResult:
     def test_success_repr(self, store):
