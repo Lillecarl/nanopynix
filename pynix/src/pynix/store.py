@@ -60,13 +60,10 @@ class PrintRoots(Command):
             resp = await store.find_roots(FindRootsRequest())
             roots: list[dict[str, object]] = []
             for root in resp.roots:
-                path = root.path
-                if path is None:
-                    continue
                 roots.append(
                     {
                         "link": root.link,
-                        "path": _format_store_path(path.base_name),
+                        "path": root.path,
                     }
                 )
             _print_json({"roots": roots})
@@ -174,8 +171,8 @@ class FollowLinksToStorePath(Command):
         import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
-            path = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path=self.path))
-            _print_json({"path": _format_store_path(path.base_name)})
+            response = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path=self.path))
+            _print_json({"path": response.path})
 
 
 class ComputeFsClosure(Command):
@@ -219,12 +216,12 @@ class QueryMissing(Command):
             raise SystemExit("query-missing requires at least one path")
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
-            resp = await store.query_missing(QueryMissingRequest(paths=self.paths))
+            resp = await store.query_missing(QueryMissingRequest(derived_paths=self.paths))
             _print_json(
                 {
-                    "willBuild": [_format_store_path(path.base_name) for path in resp.will_build],
-                    "willSubstitute": [_format_store_path(path.base_name) for path in resp.will_substitute],
-                    "unknown": [_format_store_path(path.base_name) for path in resp.unknown],
+                    "willBuild": list(resp.will_build),
+                    "willSubstitute": list(resp.will_substitute),
+                    "unknown": list(resp.unknown),
                     "downloadSize": resp.download_size,
                     "narSize": resp.nar_size,
                 }
@@ -375,7 +372,7 @@ class PathFromHashPart(Command):
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=self.hash_part))
-            path = _format_store_path(resp.path.base_name) if resp.path is not None else None
+            path = resp.path
             _print_json({"path": path})
 
 
@@ -608,10 +605,6 @@ class Store(Command):
     )
 
 
-def _format_store_path(base_name: str) -> str:
-    return f"/nix/store/{base_name}"
-
-
 def _json_dumps(obj: object) -> str:
     return json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False)
 
@@ -621,8 +614,8 @@ def _print_json(obj: object) -> None:
     sys.stdout.write("\n")
 
 
-def _print_paths(paths: Iterable[Any]) -> None:
-    _print_json({"paths": [_format_store_path(path.base_name) for path in paths]})
+def _print_paths(paths: Iterable[str]) -> None:
+    _print_json({"paths": list(paths)})
 
 
 def _store_dirs_to_json(dirs: Any) -> dict[str, str | None]:
@@ -658,7 +651,7 @@ async def _add_to_store(
             response = await store.add_to_store(
                 AddToStoreRequest(path=path, name=name, method=method, hash_algo=hash_algo)
             )
-        _print_json({"path": _format_store_path(response.base_name)})
+        _print_json({"path": response.path})
 
 
 async def _resolve_local_store_path(store: Any, store_uri: str, path: str) -> Path:
@@ -718,7 +711,7 @@ async def _closure_path_infos(store: Any, path: str) -> dict[str, int]:
     response = await store.compute_fs_closure(ComputeFsClosureRequest(path=path))
     infos: dict[str, int] = {}
     for store_path in response.paths:
-        path_string = _format_store_path(store_path.base_name)
+        path_string = store_path
         info = await store.query_path_info(QueryPathInfoRequest(path=path_string))
         infos[path_string] = info.nar_size
     return infos

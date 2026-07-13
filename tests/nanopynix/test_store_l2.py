@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nanopynix_proto.nix.common import StorePath as StorePathProto
 from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddPermRootRequest,
@@ -80,9 +79,8 @@ async def test_parse_store_path():
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
                 path = StorePath(paths[0])
-                sp = await store.parse_store_path(ParseStorePathRequest(path=path.to_string))
-                assert isinstance(sp, StorePathProto)
-                assert path.to_string == StorePath(sp).to_string
+                response = await store.parse_store_path(ParseStorePathRequest(path=str(path)))
+                assert response.path == str(path)
 
 
 async def test_is_valid_path():
@@ -92,7 +90,7 @@ async def test_is_valid_path():
             valid_paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if valid_paths:
                 path = StorePath(valid_paths[0])
-                response = await store.is_valid_path(IsValidPathRequest(path=path.to_string))
+                response = await store.is_valid_path(IsValidPathRequest(path=str(path)))
                 assert response.valid
 
 
@@ -103,9 +101,9 @@ async def test_query_path_info():
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
                 path = StorePath(paths[0])
-                pi = await store.query_path_info(QueryPathInfoRequest(path=path.to_string))
+                pi = await store.query_path_info(QueryPathInfoRequest(path=str(path)))
                 assert isinstance(pi, PathInfo)
-                assert isinstance(pi.path, StorePathProto)
+                assert isinstance(pi.path, str)
                 assert pi.nar_size >= 0
 
 
@@ -117,8 +115,7 @@ async def test_query_path_from_hash_part():
             if paths:
                 hp = StorePath(paths[0]).hash_part
                 response = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=hp))
-                sp = response.path
-                assert isinstance(sp, StorePathProto)
+                assert isinstance(response.path, str)
 
 
 async def test_compute_fs_closure():
@@ -128,10 +125,10 @@ async def test_compute_fs_closure():
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
                 path = StorePath(paths[0])
-                closure = (await store.compute_fs_closure(ComputeFsClosureRequest(path=path.to_string))).paths
+                closure = (await store.compute_fs_closure(ComputeFsClosureRequest(path=str(path)))).paths
                 assert isinstance(closure, list)
                 assert len(closure) >= 1  # type: ignore[reportUnknownArgumentType] -- generated protobuf paths field is list[Unknown]
-                assert all(isinstance(sp, StorePathProto) for sp in closure)
+                assert all(isinstance(sp, str) for sp in closure)
 
 
 async def test_query_missing():
@@ -139,9 +136,20 @@ async def test_query_missing():
         store: Any
         async with session.store() as store:
             mi = await store.query_missing(
-                QueryMissingRequest(paths=["/nix/store/00000000000000000000000000000000-nonexistent-1.0"])
+                QueryMissingRequest(derived_paths=["/nix/store/00000000000000000000000000000000-nonexistent-1.0"])
             )
             assert isinstance(mi, MissingInfo)
+
+
+async def test_query_missing_accepts_serialized_derived_path():
+    async with Session() as session:
+        store: Any
+        async with session.store() as store:
+            paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
+            derivation = next((path for path in paths if StorePath(path).is_derivation), None)
+            if derivation is not None:
+                result = await store.query_missing(QueryMissingRequest(derived_paths=[f"{derivation}^out"]))
+                assert isinstance(result, MissingInfo)
 
 
 async def test_query_derived_outputs():
@@ -152,7 +160,7 @@ async def test_query_derived_outputs():
             drvs = [path for path in (StorePath(path) for path in paths) if path.is_derivation]
             if drvs:
                 outputs = (
-                    await store.query_derivation_outputs(QueryDerivationOutputsRequest(path=drvs[0].to_string))
+                    await store.query_derivation_outputs(QueryDerivationOutputsRequest(path=str(drvs[0])))
                 ).paths
                 assert isinstance(outputs, list)
 
@@ -164,7 +172,7 @@ async def test_query_valid_derivers():
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
                 path = StorePath(paths[0])
-                derivers = (await store.query_valid_derivers(QueryValidDeriversRequest(path=path.to_string))).paths
+                derivers = (await store.query_valid_derivers(QueryValidDeriversRequest(path=str(path)))).paths
                 assert isinstance(derivers, list)
 
 
@@ -175,7 +183,7 @@ async def test_query_referrers():
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
                 path = StorePath(paths[0])
-                refs = (await store.query_referrers(QueryReferrersRequest(path=path.to_string))).paths
+                refs = (await store.query_referrers(QueryReferrersRequest(path=str(path)))).paths
                 assert isinstance(refs, list)
 
 
@@ -186,7 +194,7 @@ async def test_query_substitutable_paths():
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
                 path = StorePath(paths[0])
-                subs = (await store.query_substitutable_paths(QuerySubstitutablePathsRequest(paths=[path.to_string]))).paths
+                subs = (await store.query_substitutable_paths(QuerySubstitutablePathsRequest(paths=[str(path)]))).paths
                 assert isinstance(subs, list)
 
 
@@ -196,8 +204,8 @@ async def test_follow_links_to_store_path():
         async with session.store() as store:
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
-                sp = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path="/run/current-system"))
-                assert isinstance(sp, StorePathProto)
+                response = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path="/run/current-system"))
+                assert isinstance(response.path, str)
 
 
 async def test_store_path_str_and_model_roundtrip():
@@ -209,7 +217,7 @@ async def test_store_path_str_and_model_roundtrip():
             if paths:
                 sp = StorePath(paths[0])
                 assert StorePath(sp) is sp
-                assert (await store.is_valid_path(IsValidPathRequest(path=sp.to_string))).valid is True
+                assert (await store.is_valid_path(IsValidPathRequest(path=str(sp)))).valid is True
 
 
 async def test_add_temp_root():
@@ -219,7 +227,7 @@ async def test_add_temp_root():
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
                 path = StorePath(paths[0])
-                await store.add_temp_root(AddTempRootRequest(path=path.to_string))
+                await store.add_temp_root(AddTempRootRequest(path=str(path)))
 
 
 async def test_find_roots():
@@ -230,7 +238,7 @@ async def test_find_roots():
             assert isinstance(roots, list)
             for root in roots[:10]:
                 assert isinstance(root.link, str)
-                assert isinstance(root.path, StorePathProto)
+                assert isinstance(root.path, str)
 
 
 async def test_collect_garbage_return_dead_does_not_delete():
@@ -259,7 +267,7 @@ async def test_add_perm_root_and_indirect_root(tmp_path: Path):
             if paths:
                 path = StorePath(paths[0])
                 root_path = tmp_path / "nanopynix-gc-root"
-                response = await store.add_perm_root(AddPermRootRequest(store_path=path.to_string, gc_root=str(root_path)))
+                response = await store.add_perm_root(AddPermRootRequest(store_path=str(path), gc_root=str(root_path)))
                 assert response.path == str(root_path)
                 assert root_path.is_symlink()
                 await store.add_indirect_root(AddIndirectRootRequest(path=str(root_path)))
@@ -272,7 +280,7 @@ async def test_ensure_path():
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
                 path = StorePath(paths[0])
-                await store.ensure_path(EnsurePathRequest(path=path.to_string))
+                await store.ensure_path(EnsurePathRequest(path=str(path)))
 
 
 async def test_optimise_store_on_empty_local_store(tmp_path: Path):

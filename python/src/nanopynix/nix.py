@@ -101,7 +101,7 @@ class Session:
             settings=NixSettings(max_jobs=4),
         ) as session:
             async with session.store() as store:
-                info = await store.query_path_info(QueryPathInfoRequest(path=sp.to_string))
+                info = await store.query_path_info(QueryPathInfoRequest(path=str(sp)))
     """
 
     def __init__(
@@ -148,9 +148,9 @@ class Session:
             from nanopynix_proto.nix.store import BuildDerivationRequest, QueryPathInfoRequest
 
             async with session.store() as store:
-                info = await store.query_path_info(QueryPathInfoRequest(path=sp.to_string))
+                info = await store.query_path_info(QueryPathInfoRequest(path=str(sp)))
                 drv = await store.build_derivation(
-                    BuildDerivationRequest(path=sp.to_string, build_mode=mode)
+                    BuildDerivationRequest(path=str(sp), build_mode=mode)
                 )
 
         The handle carries this session's ID — passing it to

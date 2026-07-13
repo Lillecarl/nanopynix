@@ -1,8 +1,8 @@
 """Convert L1 nanobind objects to proto messages.
 
 After the 2026-07-05 C++ boundary refactor, most L1 types (PathInfo,
-BuildResult, MissingInfo) return nb::dict directly.  Only StorePath and
-Input/FlakeRef/LockedFlake still need explicit extraction.
+BuildResult, MissingInfo) return nb::dict directly. Input, FlakeRef, and
+LockedFlake still need explicit extraction.
 """
 
 from __future__ import annotations
@@ -21,16 +21,6 @@ def _attrs_value(v: Any) -> common_pb.AttrsValue:
     if isinstance(v, int):
         return common_pb.AttrsValue(int_value=v)
     return common_pb.AttrsValue(string_value=str(v))
-
-
-def store_path(sp: Any, /) -> common_pb.StorePath:
-    """Extract a L1 StorePath to a proto StorePath message."""
-    return common_pb.StorePath(base_name=sp.to_string())
-
-
-def store_path_str(s: str, /) -> common_pb.StorePath:
-    """Extract the basename from a raw store path string."""
-    return common_pb.StorePath(base_name=s.rstrip("/").rsplit("/", 1)[-1])
 
 
 def _attrs_map(d: dict[str, Any]) -> common_pb.AttrsMap:  # type: ignore[reportUnusedFunction] -- kept as a util for future callers

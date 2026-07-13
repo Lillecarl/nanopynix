@@ -95,8 +95,7 @@ class TestStore:
         assert len(info["nar_hash"]) > 0
         refs = info["references"]
         assert isinstance(refs, list)
-        # path is a proto-shaped dict with only the stored StorePath basename.
-        assert info["path"]["base_name"] == sp.to_string()
+        assert info["path"] == f"{store.get_store_dir()}/{sp.to_string()}"
         assert info["nar_size"] > 0
 
     def test_query_path_from_hash_part(self, store: Any):
@@ -134,7 +133,7 @@ class TestStore:
         assert isinstance(roots, list)
         for root in roots[:10]:
             assert isinstance(root["link"], str)
-            assert isinstance(root["path"], dict)
+            assert isinstance(root["path"], str)
 
     def test_collect_garbage_return_dead_does_not_delete(self, store: Any):
         result = store.collect_garbage(nanopynix_store.GCAction.ReturnDead)
@@ -189,7 +188,7 @@ class TestPathInfo:
         info = store.query_path_info(sp)
         # deriver may be None for non-derivation outputs
         deriver = info["deriver"]
-        assert deriver is None or isinstance(deriver, dict)
+        assert deriver is None or isinstance(deriver, str)
 
 
 class TestOpenStore:

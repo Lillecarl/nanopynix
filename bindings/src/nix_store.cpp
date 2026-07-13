@@ -41,19 +41,13 @@ using namespace nb::literals;
 // Helpers — convert Nix types to nb::dict for Pydantic validation
 // =========================================================================
 
-static nb::dict store_path_to_dict(const std::string &to_string) {
-    nb::dict d;
-    d["base_name"] = to_string;
-    return d;
+static std::string store_path_to_string(nix::Store &s, const nix::StorePath &sp) {
+    return s.printStorePath(sp);
 }
 
-static nb::dict store_path_to_dict(const nix::StorePath &sp) {
-    return store_path_to_dict(std::string(sp.to_string()));
-}
-
-static nb::list store_paths_to_dict_list(const nix::StorePathSet &paths) {
+static nb::list store_paths_to_string_list(nix::Store &s, const nix::StorePathSet &paths) {
     nb::list result;
-    for (auto &p : paths) result.append(store_path_to_dict(p));
+    for (auto &p : paths) result.append(store_path_to_string(s, p));
     return result;
 }
 
@@ -121,13 +115,13 @@ static nb::dict build_result_from_br(const nix::BuildResult &br) {
     return build_result_to_dict("", false, "unknown", "");
 }
 
-static nb::dict path_info_to_dict(const nix::ValidPathInfo &info) {
+static nb::dict path_info_to_dict(nix::Store &s, const nix::ValidPathInfo &info) {
     nb::dict d;
-    d["path"] = store_path_to_dict(info.path);
+    d["path"] = store_path_to_string(s, info.path);
 
     // references — list of store path dicts
     nb::list refs;
-    for (auto &r : info.references) refs.append(store_path_to_dict(r));
+    for (auto &r : info.references) refs.append(store_path_to_string(s, r));
     d["references"] = refs;
 
     d["nar_hash"] = info.narHash.to_string(nix::HashFormat::SRI, true);
@@ -139,7 +133,7 @@ static nb::dict path_info_to_dict(const nix::ValidPathInfo &info) {
         d["registration_time"] = nb::none();
 
     if (info.deriver)
-        d["deriver"] = store_path_to_dict(*info.deriver);
+        d["deriver"] = store_path_to_string(s, *info.deriver);
     else
         d["deriver"] = nb::none();
 
@@ -241,7 +235,7 @@ static nb::dict query_path_info(nix::Store &s, const nix::StorePath &path) {
         nb::gil_scoped_release release;
         info.emplace(s.queryPathInfo(path));
     }
-    return path_info_to_dict(**info);
+    return path_info_to_dict(s, **info);
 }
 
 // --- Closures ---
@@ -253,7 +247,7 @@ static nb::list compute_fs_closure(nix::Store &s, const nix::StorePath &path,
         nb::gil_scoped_release release;
         s.computeFSClosure(path, out, flip, include_outputs, include_derivers);
     }
-    return store_paths_to_dict_list(out);
+    return store_paths_to_string_list(s, out);
 }
 
 // --- MissingInfo ---
@@ -269,21 +263,41 @@ static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path)
     return nix::DerivedPath::Opaque{path};
 }
 
-static nb::dict query_missing(nix::Store &s, const std::vector<nix::StorePath> &paths) {
-    nix::DerivedPaths dps;
-    for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
+static nix::DerivedPaths request_derived_paths(nix::Store &s, const nb::dict &request, const char *key) {
+    std::vector<std::string> raw = nb::cast<std::vector<std::string>>(request[nb::str(key)]);
+    nix::DerivedPaths paths;
+    paths.reserve(raw.size());
+    for (auto &path : raw) {
+        if (!path.empty() && path[0] != '/') path = s.config.storeDir_ + "/" + path;
+        // A plain derivation path has historically meant all of its outputs.
+        // A ^ separator opts into Nix's canonical DerivedPath representation.
+        if (path.contains('^'))
+            paths.push_back(nix::DerivedPath::parse(s.config, path));
+        else
+            paths.push_back(derived_path_for_build_input(s.parseStorePath(path)));
+    }
+    return paths;
+}
+
+static nb::dict query_missing(nix::Store &s, const nix::DerivedPaths &paths) {
     nix::MissingPaths m;
     {
         nb::gil_scoped_release release;
-        m = s.queryMissing(dps);
+        m = s.queryMissing(paths);
     }
     nb::dict d;
-    d["will_build"] = store_paths_to_dict_list(m.willBuild);
-    d["will_substitute"] = store_paths_to_dict_list(m.willSubstitute);
-    d["unknown"] = store_paths_to_dict_list(m.unknown);
+    d["will_build"] = store_paths_to_string_list(s, m.willBuild);
+    d["will_substitute"] = store_paths_to_string_list(s, m.willSubstitute);
+    d["unknown"] = store_paths_to_string_list(s, m.unknown);
     d["download_size"] = nb::int_(m.downloadSize);
     d["nar_size"] = nb::int_(m.narSize);
     return d;
+}
+
+static nb::dict query_missing_store_paths(nix::Store &s, const std::vector<nix::StorePath> &paths) {
+    nix::DerivedPaths derived_paths;
+    for (auto &path : paths) derived_paths.push_back(derived_path_for_build_input(path));
+    return query_missing(s, derived_paths);
 }
 
 // --- Collective queries ---
@@ -294,7 +308,7 @@ static nb::list query_derivation_outputs(nix::Store &s, const nix::StorePath &pa
         nb::gil_scoped_release release;
         paths = s.queryDerivationOutputs(path);
     }
-    return store_paths_to_dict_list(paths);
+    return store_paths_to_string_list(s, paths);
 }
 static nb::list query_valid_derivers(nix::Store &s, const nix::StorePath &path) {
     nix::StorePathSet paths;
@@ -302,7 +316,7 @@ static nb::list query_valid_derivers(nix::Store &s, const nix::StorePath &path) 
         nb::gil_scoped_release release;
         paths = s.queryValidDerivers(path);
     }
-    return store_paths_to_dict_list(paths);
+    return store_paths_to_string_list(s, paths);
 }
 static nb::list query_all_valid_paths(nix::Store &s) {
     nix::StorePathSet paths;
@@ -310,7 +324,7 @@ static nb::list query_all_valid_paths(nix::Store &s) {
         nb::gil_scoped_release release;
         paths = s.queryAllValidPaths();
     }
-    return store_paths_to_dict_list(paths);
+    return store_paths_to_string_list(s, paths);
 }
 static nb::list query_referrers(nix::Store &s, const nix::StorePath &path) {
     nix::StorePathSet refs;
@@ -318,7 +332,7 @@ static nb::list query_referrers(nix::Store &s, const nix::StorePath &path) {
         nb::gil_scoped_release release;
         s.queryReferrers(path, refs);
     }
-    return store_paths_to_dict_list(refs);
+    return store_paths_to_string_list(s, refs);
 }
 static nb::list query_substitutable_paths(nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::StorePathSet ps(paths.begin(), paths.end());
@@ -327,7 +341,7 @@ static nb::list query_substitutable_paths(nix::Store &s, const std::vector<nix::
         nb::gil_scoped_release release;
         subs = s.querySubstitutablePaths(ps);
     }
-    return store_paths_to_dict_list(subs);
+    return store_paths_to_string_list(s, subs);
 }
 
 // --- GC / roots / maintenance ---
@@ -407,7 +421,7 @@ static nb::list find_roots(nix::Store &s, bool censor) {
         for (auto &link : links) {
             nb::dict root;
             root["link"] = link;
-            root["path"] = store_path_to_dict(target);
+            root["path"] = store_path_to_string(s, target);
             result.append(root);
         }
     }
@@ -457,6 +471,21 @@ static nb::list build_paths_with_results(
     return out;
 }
 
+static nb::list build_derived_paths_with_results(
+        nix::Store &s,
+        const nix::DerivedPaths &paths,
+        nix::BuildMode buildMode = nix::bmNormal,
+        std::shared_ptr<nix::Store> evalStore = nullptr) {
+    std::vector<nix::KeyedBuildResult> results;
+    {
+        nb::gil_scoped_release release;
+        results = s.buildPathsWithResults(paths, buildMode, evalStore);
+    }
+    nb::list out;
+    for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
+    return out;
+}
+
 static nb::list build_for_humans(
         nix::Store &s,
         const std::vector<nix::StorePath> &paths,
@@ -477,6 +506,20 @@ static nb::list build_for_humans(
     nb::list out;
     for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
     return out;
+}
+
+static nb::list build_derived_paths_for_humans(
+        nix::Store &s,
+        const nix::DerivedPaths &paths,
+        nix::BuildMode buildMode = nix::bmNormal,
+        std::shared_ptr<nix::Store> evalStore = nullptr) {
+    try {
+        return build_derived_paths_with_results(s, paths, buildMode, evalStore);
+    } catch (nix::Error &e) {
+        nix::logger->logEI(nix::lvlError, e.info());
+        e.addTrace({}, "while building paths for build_for_humans");
+        throw;
+    }
 }
 
 static void build_paths(
@@ -638,7 +681,9 @@ static nb::dict store_is_valid_path(nix::Store &s, const nb::dict &request) {
 }
 
 static nb::dict store_parse_store_path(nix::Store &s, const nb::dict &request) {
-    return store_path_to_dict(request_store_path(s, request, "path"));
+    nb::dict d;
+    d["path"] = store_path_to_string(s, request_store_path(s, request, "path"));
+    return d;
 }
 
 static nb::dict store_query_path_info(nix::Store &s, const nb::dict &request) {
@@ -654,7 +699,7 @@ static nb::dict store_query_path_from_hash_part(
         path = s.queryPathFromHashPart(hash_part);
     }
     nb::dict d;
-    if (path) d["path"] = store_path_to_dict(*path);
+    if (path) d["path"] = store_path_to_string(s, *path);
     else d["path"] = nb::none();
     return d;
 }
@@ -672,7 +717,7 @@ static nb::dict store_compute_fs_closure(
 }
 
 static nb::dict store_query_missing(nix::Store &s, const nb::dict &request) {
-    return query_missing(s, request_store_paths(s, request, "paths"));
+    return query_missing(s, request_derived_paths(s, request, "derived_paths"));
 }
 
 static nb::dict store_query_derivation_outputs(
@@ -714,9 +759,9 @@ static nb::dict store_build_paths_with_results(
         std::shared_ptr<nix::Store> evalStore = nullptr) {
     auto build_mode = static_cast<nix::BuildMode>(nb::cast<int>(request[nb::str("build_mode")]));
     nb::dict d;
-    d["results"] = build_paths_with_results(
+    d["results"] = build_derived_paths_with_results(
         s,
-        request_store_paths(s, request, "paths"),
+        request_derived_paths(s, request, "derived_paths"),
         build_mode,
         evalStore);
     return d;
@@ -728,9 +773,9 @@ static nb::dict store_build_for_humans(
         std::shared_ptr<nix::Store> evalStore = nullptr) {
     auto build_mode = static_cast<nix::BuildMode>(nb::cast<int>(request[nb::str("build_mode")]));
     nb::dict d;
-    d["results"] = build_for_humans(
+    d["results"] = build_derived_paths_for_humans(
         s,
-        request_store_paths(s, request, "paths"),
+        request_derived_paths(s, request, "derived_paths"),
         build_mode,
         evalStore);
     return d;
@@ -755,7 +800,9 @@ static nb::dict store_follow_links_to_store_path(
         nb::gil_scoped_release release;
         path.emplace(s.followLinksToStorePath(input_path));
     }
-    return store_path_to_dict(*path);
+    nb::dict d;
+    d["path"] = store_path_to_string(s, *path);
+    return d;
 }
 
 static nb::dict store_add_temp_root(nix::Store &s, const nb::dict &request) {
@@ -859,7 +906,9 @@ static nb::dict store_add_to_store(nix::Store &s, const nb::dict &request) {
         nb::gil_scoped_release release;
         path.emplace(s.addToStoreSlow(name, source_path, method, hash_algo, {}).path);
     }
-    return store_path_to_dict(*path);
+    nb::dict d;
+    d["path"] = store_path_to_string(s, *path);
+    return d;
 }
 
 static nb::dict store_compute_store_path(nix::Store &s, const nb::dict &request) {
@@ -872,7 +921,9 @@ static nb::dict store_compute_store_path(nix::Store &s, const nb::dict &request)
         nb::gil_scoped_release release;
         path.emplace(s.computeStorePath(name, source_path, method, hash_algo, {}).first);
     }
-    return store_path_to_dict(*path);
+    nb::dict d;
+    d["path"] = store_path_to_string(s, *path);
+    return d;
 }
 
 // =========================================================================
@@ -918,7 +969,7 @@ static void bind_store(nb::module_ &m) {
         // Closures
         .def("compute_fs_closure", &compute_fs_closure,
              "path"_a, "flip_direction"_a = false, "include_outputs"_a = false, "include_derivers"_a = false)
-        .def("query_missing", &query_missing, "paths"_a)
+        .def("query_missing", &query_missing_store_paths, "paths"_a)
         // Derivations
         .def("query_derivation_outputs", &query_derivation_outputs, "path"_a)
         .def("query_valid_derivers", &query_valid_derivers, "path"_a)

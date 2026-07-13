@@ -17,65 +17,40 @@ from nanopynix._extract import (
     input_attrs,
     locked_flake,
     locked_input,
-    store_path,
-    store_path_str,
 )
 from nanopynix.models import StorePath
 
 # ════════════════════════════════════════════════════════════════════
-# store_path_str — pure string parsing
+# StorePath wrapper
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_store_path_str_basic():
-    sp = StorePath(store_path_str("00000000000000000000000000000000-bash-5.2"))
+def test_store_path_wrapper_basic():
+    sp = StorePath("/nix/store/00000000000000000000000000000000-bash-5.2")
     assert sp.base_name == "00000000000000000000000000000000-bash-5.2"
-    assert sp.to_string == "00000000000000000000000000000000-bash-5.2"
+    assert str(sp) == "/nix/store/00000000000000000000000000000000-bash-5.2"
     assert sp.hash_part == "00000000000000000000000000000000"
     assert sp.name == "bash-5.2"
 
 
-def test_store_path_str_single_dash_name():
-    sp = StorePath(store_path_str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"))
+def test_store_path_wrapper_single_dash_name():
+    sp = StorePath("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo")
     assert sp.hash_part == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     assert sp.name == "foo"
 
 
-def test_store_path_str_multiple_dashes():
-    sp = StorePath(store_path_str("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-python3.13-nanopynix-0.1.0"))
+def test_store_path_wrapper_multiple_dashes():
+    sp = StorePath("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-python3.13-nanopynix-0.1.0")
     assert sp.hash_part == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     assert sp.name == "python3.13-nanopynix-0.1.0"
 
 
-def test_store_path_str_accepts_unvalidated_basename():
-    assert store_path_str("justaname").base_name == "justaname"
+def test_store_path_wrapper_accepts_unvalidated_basename():
+    assert StorePath("justaname").base_name == "justaname"
 
 
-def test_store_path_str_accepts_empty_basename():
-    assert store_path_str("").base_name == ""
-
-
-# ════════════════════════════════════════════════════════════════════
-# store_path — from C++ StorePath object
-# ════════════════════════════════════════════════════════════════════
-
-
-def test_store_path_from_cpp():
-    sp = nanopynix_store.StorePath("00000000000000000000000000000000-foo-1.0")
-    converted = StorePath(store_path(sp))
-    assert converted.base_name == "00000000000000000000000000000000-foo-1.0"
-    assert converted.to_string == "00000000000000000000000000000000-foo-1.0"
-    assert converted.hash_part == "00000000000000000000000000000000"
-    assert converted.name == "foo-1.0"
-
-
-def test_store_path_from_store_parse(store: Any):
-    sp = store.parse_store_path(store.get_store_dir() + "/00000000000000000000000000000000-hello")
-    converted = StorePath(store_path(sp))
-    assert converted.base_name == "00000000000000000000000000000000-hello"
-    assert converted.to_string == "00000000000000000000000000000000-hello"
-    assert converted.hash_part == "00000000000000000000000000000000"
-    assert converted.name == "hello"
+def test_store_path_wrapper_accepts_empty_basename():
+    assert StorePath("").base_name == ""
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -88,14 +63,13 @@ def test_path_info_from_real_path(store: Any):
     path_strs = store.query_all_valid_paths()
     if not path_strs:
         return
-    # query_all_valid_paths returns list of dicts now
     first = path_strs[0]
-    sp = nanopynix_store.StorePath(first["base_name"])
+    sp = nanopynix_store.StorePath(Path(first).name)
     result = store.query_path_info(sp)  # returns dict
 
     assert isinstance(result, dict)
     assert "path" in result
-    assert "base_name" in result["path"]
+    assert result["path"] == first
     assert isinstance(result["nar_hash"], str)
     assert result["nar_hash"]
     assert isinstance(result["nar_size"], int)
@@ -103,19 +77,19 @@ def test_path_info_from_real_path(store: Any):
     assert isinstance(result["ultimate"], bool)
     assert isinstance(result["references"], list)
     for ref in result["references"]:  # type: ignore[reportUnknownVariableType] -- result from nanobind
-        assert "base_name" in ref
+        assert isinstance(ref, str)
 
 
 def test_path_info_deriver_none(store: Any):
     """A non-derivation path should have deriver=None."""
     path_strs = store.query_all_valid_paths()
     for d in path_strs:
-        sp = nanopynix_store.StorePath(d["base_name"])
+        sp = nanopynix_store.StorePath(Path(d).name)
         if not sp.is_derivation():
             result = store.query_path_info(sp)
             assert "deriver" in result
             if result["deriver"] is not None:
-                assert "base_name" in result["deriver"]
+                assert isinstance(result["deriver"], str)
             break
     else:
         return

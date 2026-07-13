@@ -428,4 +428,4 @@ class _FakeStore:
 
     async def compute_fs_closure(self, request: Any) -> SimpleNamespace:
         paths = self._closures[request.path]
-        return SimpleNamespace(paths=[SimpleNamespace(base_name=path.removeprefix("/nix/store/")) for path in paths])
+        return SimpleNamespace(paths=paths)

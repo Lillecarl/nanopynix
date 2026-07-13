@@ -9,21 +9,21 @@ service StoreService {
   rpc GetStoreDir(GetStoreDirRequest) returns (GetStoreDirResponse);
   rpc GetStoreDirs(GetStoreDirsRequest) returns (StoreDirs);
   rpc IsValidPath(IsValidPathRequest) returns (IsValidPathResponse);
-  rpc ParseStorePath(ParseStorePathRequest) returns (nix.common.StorePath);
+  rpc ParseStorePath(ParseStorePathRequest) returns (ParseStorePathResponse);
   rpc QueryPathInfo(QueryPathInfoRequest) returns (nix.common.PathInfo);
   rpc QueryPathFromHashPart(QueryPathFromHashPartRequest) returns (QueryPathFromHashPartResponse);
-  rpc ComputeFsClosure(ComputeFsClosureRequest) returns (nix.common.StorePathList);
+  rpc ComputeFsClosure(ComputeFsClosureRequest) returns (PathsResponse);
   rpc QueryMissing(QueryMissingRequest) returns (nix.common.MissingInfo);
-  rpc QueryDerivationOutputs(QueryDerivationOutputsRequest) returns (nix.common.StorePathList);
-  rpc QueryValidDerivers(QueryValidDeriversRequest) returns (nix.common.StorePathList);
-  rpc QueryAllValidPaths(QueryAllValidPathsRequest) returns (nix.common.StorePathList);
-  rpc QueryReferrers(QueryReferrersRequest) returns (nix.common.StorePathList);
-  rpc QuerySubstitutablePaths(QuerySubstitutablePathsRequest) returns (nix.common.StorePathList);
+  rpc QueryDerivationOutputs(QueryDerivationOutputsRequest) returns (PathsResponse);
+  rpc QueryValidDerivers(QueryValidDeriversRequest) returns (PathsResponse);
+  rpc QueryAllValidPaths(QueryAllValidPathsRequest) returns (PathsResponse);
+  rpc QueryReferrers(QueryReferrersRequest) returns (PathsResponse);
+  rpc QuerySubstitutablePaths(QuerySubstitutablePathsRequest) returns (PathsResponse);
   rpc BuildPathsWithResults(BuildPathsWithResultsRequest) returns (nix.common.BuildResultList);
   rpc BuildForHumans(BuildPathsWithResultsRequest) returns (nix.common.BuildResultList);
   rpc ReadDerivation(ReadDerivationRequest) returns (nix.common.Derivation);
   rpc BuildDerivation(BuildDerivationRequest) returns (nix.common.BuildResult);
-  rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (nix.common.StorePath);
+  rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (FollowLinksToStorePathResponse);
   rpc AddTempRoot(AddTempRootRequest) returns (AddTempRootResponse);
   rpc FindRoots(FindRootsRequest) returns (FindRootsResponse);
   rpc CollectGarbage(CollectGarbageRequest) returns (CollectGarbageResponse);
@@ -33,8 +33,8 @@ service StoreService {
   rpc OptimiseStore(OptimiseStoreRequest) returns (OptimiseStoreResponse);
   rpc VerifyStore(VerifyStoreRequest) returns (VerifyStoreResponse);
   rpc GetBuildLog(GetBuildLogRequest) returns (GetBuildLogResponse);
-  rpc AddToStore(AddToStoreRequest) returns (nix.common.StorePath);
-  rpc ComputeStorePath(ComputeStorePathRequest) returns (nix.common.StorePath);
+  rpc AddToStore(AddToStoreRequest) returns (AddToStoreResponse);
+  rpc ComputeStorePath(ComputeStorePathRequest) returns (ComputeStorePathResponse);
 }
 
 message GetUriRequest {
@@ -76,6 +76,13 @@ message ParseStorePathRequest {
   string path = 1;
   int64 store_handle = 100;
 }
+message ParseStorePathResponse {
+  string path = 1;
+}
+
+message PathsResponse {
+  repeated string paths = 1;
+}
 
 message QueryPathInfoRequest {
   string path = 1;
@@ -87,7 +94,7 @@ message QueryPathFromHashPartRequest {
   int64 store_handle = 100;
 }
 message QueryPathFromHashPartResponse {
-  optional nix.common.StorePath path = 1;
+  optional string path = 1;
 }
 
 message ComputeFsClosureRequest {
@@ -99,7 +106,8 @@ message ComputeFsClosureRequest {
 }
 
 message QueryMissingRequest {
-  repeated string paths = 1;
+  // Canonical Nix DerivedPath strings, using ^ as the output separator.
+  repeated string derived_paths = 1;
   int64 store_handle = 100;
 }
 
@@ -128,7 +136,8 @@ message QuerySubstitutablePathsRequest {
 }
 
 message BuildPathsWithResultsRequest {
-  repeated string paths = 1;
+  // Canonical Nix DerivedPath strings, using ^ as the output separator.
+  repeated string derived_paths = 1;
   int32 build_mode = 2;
   int64 eval_store_handle = 3;
   int64 store_handle = 100;
@@ -149,6 +158,9 @@ message FollowLinksToStorePathRequest {
   string path = 1;
   int64 store_handle = 100;
 }
+message FollowLinksToStorePathResponse {
+  string path = 1;
+}
 
 message AddTempRootRequest {
   string path = 1;
@@ -162,7 +174,7 @@ message FindRootsRequest {
 }
 message GCRoot {
   string link = 1;
-  nix.common.StorePath path = 2;
+  string path = 2;
 }
 message FindRootsResponse {
   repeated GCRoot roots = 1;
@@ -238,6 +250,9 @@ message AddToStoreRequest {
   string hash_algo = 4;
   int64 store_handle = 100;
 }
+message AddToStoreResponse {
+  string path = 1;
+}
 
 message ComputeStorePathRequest {
   string path = 1;
@@ -245,4 +260,7 @@ message ComputeStorePathRequest {
   string method = 3;
   string hash_algo = 4;
   int64 store_handle = 100;
+}
+message ComputeStorePathResponse {
+  string path = 1;
 }
