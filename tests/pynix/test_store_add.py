@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from nanopynix_proto.nix.store import AddToStoreRequest, ComputeStorePathRequest
 
 from pynix import Pynix
 
 
-async def test_nanopynix_add_to_store_imports_file(empty_store: dict[str, Path | str], tmp_path: Path):
+async def test_nanopynix_add_to_store_imports_file(empty_store: dict[str, str | Path | object], tmp_path: Path):
     import nanopynix
 
     source = tmp_path / "message.txt"
@@ -26,9 +27,9 @@ async def test_nanopynix_add_to_store_imports_file(empty_store: dict[str, Path |
 
 
 async def test_pynix_store_add_file_imports_and_can_be_read(
-    empty_store: dict[str, Path | str],
+    empty_store: dict[str, str | Path | object],
     tmp_path: Path,
-    capsys,
+    capsys: pytest.CaptureFixture[str],
 ):
     source = tmp_path / "message.txt"
     source.write_text("pynix-add-file\n")
@@ -42,7 +43,7 @@ async def test_pynix_store_add_file_imports_and_can_be_read(
     assert _physical_store_path(empty_store, data["path"]).read_text() == "pynix-add-file\n"
 
 
-async def test_pynix_store_add_path_imports_directory(empty_store: dict[str, Path | str], tmp_path: Path, capsys):
+async def test_pynix_store_add_path_imports_directory(empty_store: dict[str, str | Path | object], tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     source = tmp_path / "source-dir"
     (source / "share").mkdir(parents=True)
     (source / "share" / "message").write_text("pynix-add-path\n")
@@ -58,7 +59,7 @@ async def test_pynix_store_add_path_imports_directory(empty_store: dict[str, Pat
     assert (_physical_store_path(empty_store, data["path"]) / "share" / "message").read_text() == "pynix-add-path\n"
 
 
-async def test_pynix_store_add_dry_run_does_not_import(empty_store: dict[str, Path | str], tmp_path: Path, capsys):
+async def test_pynix_store_add_dry_run_does_not_import(empty_store: dict[str, str | Path | object], tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     source = tmp_path / "message.txt"
     source.write_text("dry-run\n")
 
@@ -82,7 +83,7 @@ async def test_pynix_store_add_dry_run_does_not_import(empty_store: dict[str, Pa
     assert not _physical_store_path(empty_store, data["path"]).exists()
 
 
-def _physical_store_path(empty_store: dict[str, Path | str], store_path: str) -> Path:
+def _physical_store_path(empty_store: dict[str, str | Path | object], store_path: str) -> Path:
     store_root = empty_store["store_root"]
     if not isinstance(store_root, Path):
         raise TypeError("empty_store['store_root'] must be a Path")

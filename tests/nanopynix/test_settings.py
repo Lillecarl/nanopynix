@@ -6,6 +6,7 @@ import anyio
 import pytest
 from pydantic import ValidationError
 
+import nanopynix
 from nanopynix import Session
 from nanopynix.settings import (
     NixEvalSettings,

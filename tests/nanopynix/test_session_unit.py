@@ -289,16 +289,16 @@ class TestEvalSessionLifecycle:
 
 
 class TestSessionEvalFacade:
-    def _session(self):
+    def _session(self) -> Session:
         session = object.__new__(Session)
-        session._manager = _mock_pool()
+        session._manager = _mock_pool()  # type: ignore[reportPrivateUsage]
         session._session_id = "session-id"
         return session
 
     def _store(self, session_id: str = "session-id", handle: int = 42) -> StoreHandle:
         store = StoreHandle(_mock_pool(), "mock", session_id)
-        store._active = True
-        store._store_handle = handle
+        store._active = True  # type: ignore[reportPrivateUsage]
+        store._store_handle = handle  # type: ignore[reportPrivateUsage]
         return store
 
     def test_eval_uses_explicit_store_handle(self):
@@ -307,7 +307,7 @@ class TestSessionEvalFacade:
 
         eval_session = session.eval(store)
 
-        assert eval_session._store_handle == 123
+        assert eval_session._store_handle == 123  # type: ignore[reportPrivateUsage]
 
     def test_eval_rejects_foreign_store(self):
         session = self._session()
@@ -330,7 +330,7 @@ class TestSessionEvalFacade:
 
 
 class TestValueProxyLifecycle:
-    def _worker(self):
+    def _worker(self) -> MagicMock:
         return _mock_reserved_worker()
 
     def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
@@ -338,7 +338,7 @@ class TestValueProxyLifecycle:
 
     def _proxy(
         self,
-        worker,
+        worker: MagicMock,
         handle: int,
         typ: NixType | str | None,
         *,
@@ -645,8 +645,8 @@ class TestValueProxyLifecycle:
         w = self._worker()
         w._eval_stub.build.return_value = _mock_build_response()
         build_store = StoreHandle(_mock_pool(), "mock", "session-id")
-        build_store._active = True
-        build_store._store_handle = 456
+        build_store._active = True  # type: ignore[reportPrivateUsage]
+        build_store._store_handle = 456  # type: ignore[reportPrivateUsage]
         ctx = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123, session_id="session-id")
         vp = ctx.value(1, "attrs")
 
@@ -661,8 +661,8 @@ class TestValueProxyLifecycle:
     async def test_build_rejects_foreign_build_store(self):
         w = self._worker()
         build_store = StoreHandle(_mock_pool(), "mock", "other-session")
-        build_store._active = True
-        build_store._store_handle = 456
+        build_store._active = True  # type: ignore[reportPrivateUsage]
+        build_store._store_handle = 456  # type: ignore[reportPrivateUsage]
         ctx = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123, session_id="session-id")
         vp = ctx.value(1, "attrs")
 
@@ -732,10 +732,10 @@ class TestValueProxyLifecycle:
 
 
 class TestValueListBounds:
-    def _worker(self):
+    def _worker(self) -> MagicMock:
         return _mock_reserved_worker()
 
-    def _list(self, worker, length: int = 2) -> ValueList:
+    def _list(self, worker: MagicMock, length: int = 2) -> ValueList:
         ctx = _EvalProxyContext(EvalProxy(worker), _EvalOwner(_EvalOwnerToken()), None)
         return ValueList(ctx, _ResolvedValue(1, NixType.LIST), length)
 
@@ -773,7 +773,7 @@ class TestValueListBounds:
 class TestLazyChildProxy:
     """Verify child proxies resolve via attr/list_get, not parent force."""
 
-    def _worker(self):
+    def _worker(self) -> MagicMock:
         return _mock_reserved_worker()
 
     def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
@@ -781,7 +781,7 @@ class TestLazyChildProxy:
 
     def _child_proxy(
         self,
-        worker,
+        worker: MagicMock,
         parent: ValueProxy | _ResolvedValue,
         selector: str | int,
         *,
@@ -988,7 +988,7 @@ class TestLogStreamRequestId:
     """Verify Session.log_stream() correctly maps worker wire format to LogEvent."""
 
     @staticmethod
-    def _events_to_log_stream(events: list):
+    def _events_to_log_stream(events: list[Any]):
         """Return an async generator that yields the given events."""
 
         async def _gen():
@@ -998,7 +998,7 @@ class TestLogStreamRequestId:
         return _gen()
 
     @staticmethod
-    def _proto_log_event(request_id: int, action: str, args: list, result_type: int | None = None) -> LogEventProto:
+    def _proto_log_event(request_id: int, action: str, args: list[Any], result_type: int | None = None) -> LogEventProto:
         import json as _json
 
         le = MagicMock(spec=LogEventProto)
@@ -1023,7 +1023,7 @@ class TestLogStreamRequestId:
                 ]
             )
         )
-        session._manager = manager
+        session._manager = manager  # type: ignore[reportPrivateUsage]
 
         events = [e async for e in session.log_stream()]
 
@@ -1057,7 +1057,7 @@ class TestLogStreamRequestId:
                 ]
             )
         )
-        session._manager = manager
+        session._manager = manager  # type: ignore[reportPrivateUsage]
 
         events = [e async for e in session.log_stream()]
         assert len(events) == 1
@@ -1068,11 +1068,11 @@ class TestLogCapture:
     async def test_capture_records_typed_events(self):
         session = object.__new__(Session)
         manager = _WorkerManager()
-        session._manager = manager
+        session._manager = manager  # type: ignore[reportPrivateUsage]
 
         async with session.capture_logs() as logs:
-            manager._log_bus.emit(self._proto_log_event(4, "msg", [3, "hello"]))
-            manager._log_bus.emit(self._proto_log_event(4, "result", [1, 100], result_type=100))
+            manager._log_bus.emit(self._proto_log_event(4, "msg", [3, "hello"]))  # type: ignore[reportPrivateUsage]
+            manager._log_bus.emit(self._proto_log_event(4, "result", [1, 100], result_type=100))  # type: ignore[reportPrivateUsage]
 
         assert [event.action for event in logs.events] == ["msg", "result"]
         assert logs.events[0].request_id == 4
@@ -1082,18 +1082,18 @@ class TestLogCapture:
     async def test_capture_unsubscribes_on_exit(self):
         session = object.__new__(Session)
         manager = _WorkerManager()
-        session._manager = manager
+        session._manager = manager  # type: ignore[reportPrivateUsage]
 
         async with session.capture_logs() as logs:
-            manager._log_bus.emit(self._proto_log_event(1, "msg", ["inside"]))
+            manager._log_bus.emit(self._proto_log_event(1, "msg", ["inside"]))  # type: ignore[reportPrivateUsage]
 
-        manager._log_bus.emit(self._proto_log_event(1, "msg", ["outside"]))
+        manager._log_bus.emit(self._proto_log_event(1, "msg", ["outside"]))  # type: ignore[reportPrivateUsage]
 
         assert len(logs.events) == 1
         assert logs.events[0].args == ["inside"]
 
     @staticmethod
-    def _proto_log_event(request_id: int, action: str, args: list, result_type: int | None = None) -> LogEventProto:
+    def _proto_log_event(request_id: int, action: str, args: list[Any], result_type: int | None = None) -> LogEventProto:
         import json as _json
 
         le = MagicMock(spec=LogEventProto)
