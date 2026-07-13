@@ -10,6 +10,7 @@
   nanopynix,
   pynix,
   pytest,
+  pytest-dependency,
   anyio,
   sphinx,
   myst-parser,
@@ -26,6 +27,7 @@ let
       nanopynix
       pynix
       pytest
+      pytest-dependency
       anyio
       sphinx
       myst-parser

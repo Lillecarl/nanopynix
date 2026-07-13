@@ -620,7 +620,7 @@ class TestValueProxyLifecycle:
         build_request = w._store_stub.build_for_humans.call_args.args[0]
         assert build_request.paths == ["/nix/store/aaa-demo.drv"]
         assert build_request.build_mode == BuildMode.Normal.value
-        assert build_request.eval_store_handle == 123
+        assert build_request.eval_store_handle == 0
         assert build_request.store_handle == 123
         w._store_stub.build_paths_with_results.assert_not_awaited()
         w._store_stub.build_derivation.assert_not_awaited()
@@ -656,7 +656,7 @@ class TestValueProxyLifecycle:
         build_request = w._store_stub.build_for_humans.call_args.args[0]
         assert build_request.paths == ["/nix/store/aaa-demo.drv"]
         assert build_request.build_mode == BuildMode.Check.value
-        assert build_request.eval_store_handle == 123
+        assert build_request.eval_store_handle == 0
         assert build_request.store_handle == 123
         w._store_stub.build_paths_with_results.assert_not_awaited()
         w._store_stub.build_derivation.assert_not_awaited()

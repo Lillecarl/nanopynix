@@ -496,12 +496,13 @@ class ValueProxy:
             BuildPathsWithResultsRequest,
         )
 
+        eval_store_handle = 0 if build_store_handle == self._ctx.store_handle else self._ctx.store_handle
         build_results = await self._ctx.proxy._store_proxy_call(
             "build_for_humans",
             BuildPathsWithResultsRequest(
                 paths=[drv_path],
                 build_mode=build_mode,
-                eval_store_handle=self._ctx.store_handle,
+                eval_store_handle=eval_store_handle,
                 store_handle=build_store_handle,
             ),
         )
