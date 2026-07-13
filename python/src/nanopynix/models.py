@@ -82,40 +82,26 @@ from nanopynix_proto.nix.common import (
     ScalarValue as ScalarValue,
 )
 from nanopynix_proto.nix.common import (
-    StorePath as _StorePath,
-)
-from nanopynix_proto.nix.common import (
     ValueHandle as ValueHandle,
 )
 from strip_ansi import strip_ansi as _strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 # ══════════════════════════════════════════════════════════════════════════
-# Helper: extract the StorePath basename
-# ══════════════════════════════════════════════════════════════════════════
-
-
-def _store_path_base_name(value: str) -> str:
-    return value.rstrip("/").rsplit("/", 1)[-1]
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Extension subclasses — add helper methods on top of proto-generated types.
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class StorePathExt(_StorePath):
-    """Extension of proto StorePath with ``is_derivation`` and string constructor."""
-
-    _ = _StorePath._betterproto
-    _betterproto_meta = _StorePath._betterproto_meta
+class StorePath(str):
+    """A store path string with parsed Nix store-path properties."""
 
     HashLen = 32
     MaxPathLen = 211
 
-    def __new__(cls, value: str | _StorePath | None = None, **data: Any) -> StorePathExt:
-        if isinstance(value, cls) and not data:
+    def __new__(cls, value: str) -> StorePath:
+        if isinstance(value, cls):
             return value
-        return super().__new__(cls)
+        return super().__new__(cls, value)
+
+    @property
+    def base_name(self) -> str:
+        """The final path component of this store path."""
+        return self.rstrip("/").rsplit("/", 1)[-1]
 
     @property
     def hash_part(self) -> str:
@@ -130,30 +116,9 @@ class StorePathExt(_StorePath):
         return self.base_name[self.HashLen + 1 :]
 
     @property
-    def to_string(self) -> str:
-        """The store path basename."""
-        return self.base_name
-
-    @property
     def is_derivation(self) -> bool:
         """True if this path ends with .drv."""
         return self.name.endswith(".drv")
-
-    def __init__(self, value: str | _StorePath | None = None, **data: Any) -> None:
-        if isinstance(value, _StorePath):
-            if data:
-                raise TypeError("StorePath accepts either a proto StorePath or explicit fields, not both")
-            if value is self:
-                return
-            data = {"base_name": value.base_name}
-            super().__init__(**data)
-            return
-        if value is not None:
-            if data:
-                raise TypeError("StorePath accepts either a path string or explicit fields, not both")
-            data = {"base_name": _store_path_base_name(value)}
-        super().__init__(**data)
-
 
 class LogEventExt(_LogEventProto):
     """Extension of proto LogEvent with ``message``, ``message_without_ansi``, and ``args``."""
@@ -215,7 +180,6 @@ class LogEventExt(_LogEventProto):
 # ══════════════════════════════════════════════════════════════════════════
 
 LogEvent = LogEventExt
-StorePath = StorePathExt
 
 # ══════════════════════════════════════════════════════════════════════════
 # NixType enum patch — add from_string classmethod

@@ -21,8 +21,8 @@ async def test_nanopynix_add_to_store_imports_file(empty_store: dict[str, str | 
         )
         added = await store.add_to_store(AddToStoreRequest(path=str(source), method="flat", hash_algo="sha256"))
 
-    assert added.base_name == computed.base_name
-    physical_path = _physical_store_path(empty_store, f"/nix/store/{added.base_name}")
+    assert added.path == computed.path
+    physical_path = _physical_store_path(empty_store, added.path)
     assert physical_path.read_text() == "nanopynix-add-file\n"
 
 

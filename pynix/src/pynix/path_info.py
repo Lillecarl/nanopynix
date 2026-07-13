@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, override
+from typing import override
 
 import structlog
 from clypi import Command, Positional, arg
@@ -37,19 +37,15 @@ class PathInfo(Command):
                 console.print(f"[red]Error:[/red] {exc}")
                 raise SystemExit(1) from exc
             result = {
-                "path": _store_path_str(info.path) if info.path else self.path,
+                "path": info.path or self.path,
                 "narHash": info.nar_hash,
                 "narSize": info.nar_size,
-                "references": [_store_path_str(r) for r in info.references],
+                "references": list(info.references),
                 "registrationTime": info.registration_time,
                 "ultimate": info.ultimate,
                 "ca": info.ca,
             }
             if info.deriver is not None:
-                result["deriver"] = _store_path_str(info.deriver)
+                result["deriver"] = info.deriver
             sys.stdout.write(json.dumps(result, sort_keys=True, indent=2))
             sys.stdout.write("\n")
-
-
-def _store_path_str(sp: Any) -> str:
-    return f"/nix/store/{sp.base_name}"

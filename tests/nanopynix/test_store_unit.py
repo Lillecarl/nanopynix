@@ -18,13 +18,16 @@ from nanopynix_proto.nix.store import (
     AddPermRootRequest,
     AddTempRootRequest,
     AddToStoreRequest,
+    AddToStoreResponse,
     BuildPathsWithResultsRequest,
     CollectGarbageRequest,
     ComputeFsClosureRequest,
     ComputeStorePathRequest,
+    ComputeStorePathResponse,
     EnsurePathRequest,
     FindRootsRequest,
     FollowLinksToStorePathRequest,
+    FollowLinksToStorePathResponse,
     GcAction,
     GetBuildLogRequest,
     GetStoreDirRequest,
@@ -32,6 +35,7 @@ from nanopynix_proto.nix.store import (
     IsValidPathRequest,
     OptimiseStoreRequest,
     ParseStorePathRequest,
+    ParseStorePathResponse,
     QueryAllValidPathsRequest,
     QueryDerivationOutputsRequest,
     QueryMissingRequest,
@@ -211,25 +215,25 @@ class TestIdentity:
         pool._store_stub.get_build_log.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
 
     async def test_add_to_store_injects_store_handle(self, store: Store, pool: MagicMock):
-        pool._store_stub.add_to_store.return_value = _mock_store_path("aaa-added", "aaa", "added")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool._store_stub.add_to_store.return_value = AddToStoreResponse(path="/nix/store/aaa-added")  # type: ignore[reportPrivateUsage] -- test accesses private stub
         store._store_handle = 123  # type: ignore[reportPrivateUsage] -- test injects store handle directly
         request = AddToStoreRequest(path="/tmp/source", name="source", method="nar", hash_algo="sha256")
 
         result = await store.add_to_store(request)
 
-        assert result.to_string == "aaa-added"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
+        assert result.path == "/nix/store/aaa-added"
         pool._store_stub.add_to_store.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
         sent = pool._store_stub.add_to_store.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args; await_args may be None
         assert sent.store_handle == 123
 
     async def test_compute_store_path_injects_store_handle(self, store: Store, pool: MagicMock):
-        pool._store_stub.compute_store_path.return_value = _mock_store_path("bbb-added", "bbb", "added")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool._store_stub.compute_store_path.return_value = ComputeStorePathResponse(path="/nix/store/bbb-added")  # type: ignore[reportPrivateUsage] -- test accesses private stub
         store._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly
         request = ComputeStorePathRequest(path="/tmp/source", method="flat", hash_algo="sha256")
 
         result = await store.compute_store_path(request)
 
-        assert result.to_string == "bbb-added"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
+        assert result.path == "/nix/store/bbb-added"
         pool._store_stub.compute_store_path.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
         sent = pool._store_stub.compute_store_path.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args; await_args may be None
         assert sent.store_handle == 456
@@ -242,9 +246,9 @@ class TestIdentity:
 
 class TestStorePathCoercion:
     async def test_parse_store_path_returns_proto(self, store: Store, pool: MagicMock):
-        pool._store_stub.parse_store_path.return_value = _mock_store_path("aaa-bbb", "aaa", "bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool._store_stub.parse_store_path.return_value = ParseStorePathResponse(path="/nix/store/aaa-bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
         result = await store.parse_store_path(ParseStorePathRequest(path="/nix/store/aaa-bbb"))
-        assert result.to_string == "aaa-bbb"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
+        assert result.path == "/nix/store/aaa-bbb"
 
     async def test_is_valid_path_accepts_str(self, store: Store, pool: MagicMock):
         pool._store_stub.is_valid_path.return_value = MagicMock(valid=True)  # type: ignore[reportPrivateUsage] -- test accesses private stub
@@ -258,9 +262,9 @@ class TestStorePathCoercion:
         assert result.valid is True
 
     async def test_follow_links_returns_storepath(self, store: Store, pool: MagicMock):
-        pool._store_stub.follow_links_to_store_path.return_value = _mock_store_path("aaa-bbb", "aaa", "bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool._store_stub.follow_links_to_store_path.return_value = FollowLinksToStorePathResponse(path="/nix/store/aaa-bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
         result = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path="/some/link"))
-        assert result.to_string == "aaa-bbb"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
+        assert result.path == "/nix/store/aaa-bbb"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -281,11 +285,11 @@ class TestPathInfo:
 
     async def test_query_path_from_hash_part_found(self, store: Store, pool: MagicMock):
         pool._store_stub.query_path_from_hash_part.return_value = MagicMock(  # type: ignore[reportPrivateUsage] -- test accesses private stub
-            path=_mock_store_path("aaa-foo", "aaa", "foo")
+            path="/nix/store/aaa-foo"
         )
         result = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part="aaa"))
         assert result.path is not None
-        assert result.path.to_string == "aaa-foo"  # type: ignore[attr-defined] -- generated StorePath protocol type omits StorePathExt.to_string
+        assert result.path == "/nix/store/aaa-foo"
 
     async def test_query_path_from_hash_part_not_found(self, store: Store, pool: MagicMock):
         pool._store_stub.query_path_from_hash_part.return_value = MagicMock(path=None)  # type: ignore[reportPrivateUsage] -- test accesses private stub
@@ -309,7 +313,7 @@ class TestClosures:
     async def test_query_missing_coerces_list(self, store: Store, pool: MagicMock):
         pool._store_stub.query_missing.return_value = _mock_missing_info()  # type: ignore[reportPrivateUsage] -- test accesses private stub
         sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
-        result = await store.query_missing(QueryMissingRequest(paths=[sp.to_string, "/nix/store/bbb-bar"]))
+        result = await store.query_missing(QueryMissingRequest(derived_paths=[sp.to_string, "/nix/store/bbb-bar"]))
         assert isinstance(result, MagicMock)
 
 
@@ -368,7 +372,7 @@ class TestBuild:
         pool._store_stub.build_paths_with_results.return_value = _mock_build_result_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
             [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="built")]
         )
-        result = await store.build_paths_with_results(BuildPathsWithResultsRequest(paths=["/nix/store/aaa.drv"]))
+        result = await store.build_paths_with_results(BuildPathsWithResultsRequest(derived_paths=["/nix/store/aaa.drv"]))
         assert len(result.results) == 1
         assert result.results[0].success is True
 
@@ -376,7 +380,7 @@ class TestBuild:
         pool._store_stub.build_for_humans.return_value = _mock_build_result_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
             [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="substituted")]
         )
-        result = await store.build_for_humans(BuildPathsWithResultsRequest(paths=["/nix/store/aaa.drv"]))
+        result = await store.build_for_humans(BuildPathsWithResultsRequest(derived_paths=["/nix/store/aaa.drv"]))
         assert len(result.results) == 1
         assert result.results[0].status == "substituted"
 
