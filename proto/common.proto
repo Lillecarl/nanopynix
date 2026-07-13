@@ -33,6 +33,17 @@ enum ResultType {
   RESULT_TYPE_FETCH_STATUS = 108;
 }
 
+enum LogLevel {
+  ERROR = 0;
+  WARN = 1;
+  NOTICE = 2;
+  INFO = 3;
+  TALKATIVE = 4;
+  CHATTY = 5;
+  DEBUG = 6;
+  VOMIT = 7;
+}
+
 // ── Core messages ──────────────────────────────────
 
 message StorePath {

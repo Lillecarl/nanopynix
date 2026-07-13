@@ -16,7 +16,7 @@ logger = structlog.get_logger("pynix.build")
 
 _DEFAULT_SUBSTITUTERS = "https://cache.nixos.org/"
 _DEFAULT_TRUSTED_PUBLIC_KEYS = "cache.nixos.org-1:NCHdD59X431o0gWfe6E3gSxWeQa73p0i1d94vQxFh9s="
-_DEFAULT_VERBOSITY = 2
+_DEFAULT_VERBOSITY = "notice"
 
 
 class Build(Command):
@@ -40,7 +40,7 @@ class Build(Command):
     eval_store: str | None = arg(None, help="Store URI to evaluate with. Defaults to --store.")
     substituters: str = arg(_DEFAULT_SUBSTITUTERS, help="Space-separated substituter URLs.")
     trusted_public_keys: str = arg(_DEFAULT_TRUSTED_PUBLIC_KEYS, help="Space-separated substituter public keys.")
-    verbosity: int = arg(_DEFAULT_VERBOSITY, help="Nix log verbosity, 0=error through 7=vomit.")
+    verbosity: str = arg(_DEFAULT_VERBOSITY, help="Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7.")
     print_build_logs: bool = arg(False, help="Print build log lines to stderr.")
 
     @override
@@ -59,7 +59,7 @@ class Build(Command):
             substituters=self.substituters.split(),
             trusted_public_keys=self.trusted_public_keys.split(),
         )
-        async with nanopynix.Session(settings=settings, verbosity=self.verbosity) as nix:
+        async with nanopynix.Session(settings=settings, verbosity=nanopynix.normalize_log_level(self.verbosity)) as nix:
             async with forward_nix_logs(nix, print_build_logs=self.print_build_logs):
                 if self.eval_store is None:
                     async with nix.store(self.store) as store:

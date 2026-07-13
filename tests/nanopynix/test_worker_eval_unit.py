@@ -25,7 +25,6 @@ def test_eval_state_binds_to_first_requested_store_handle(monkeypatch):
     import nanopynix._worker_eval as worker_eval
 
     monkeypatch.setattr(worker_eval.nanopynix_expr, "EvalState", _FakeEvalState)
-    monkeypatch.setattr(worker_eval.nanopynix_expr, "parse_nix_path", lambda: ["nixpkgs=/tmp/nixpkgs"])
 
     handles = HandleRegistry()
     second_handle = handles.allocate("second-store", "store")
@@ -34,6 +33,7 @@ def test_eval_state_binds_to_first_requested_store_handle(monkeypatch):
         eval_state=None,
         eval_store_handle=None,
         handles=handles,
+        nix_path=["nixpkgs=/tmp/nixpkgs"],
     )
     handler = EvalServiceHandler(state)
 

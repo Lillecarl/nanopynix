@@ -28,7 +28,7 @@ import sys
 import traceback
 from typing import TYPE_CHECKING, Any, cast
 
-from nanopynix_proto.nix.common import LogEvent
+from nanopynix_proto.nix.common import LogEvent, LogLevel
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
     CloseStoreResponse,
@@ -130,6 +130,7 @@ class WorkerState:
         self.executor: Any = None
         self.rpc_bridge: Any = None
         self.eval_store_handle: int | None = None
+        self.nix_path: list[str] = []
 
 
 # ── WorkerService handler ────────────────────────────────────────────
@@ -146,7 +147,6 @@ class WorkerServiceHandler(WorkerServiceBase):
         """Bootstrap Nix: configure, init libstore/libexpr, open store."""
         try:
             settings = dict(message.settings)
-            verbosity = settings.pop("__nanopynix_verbosity", None)
             # Apply config file path before init
             if message.nix_conf is not None:
                 os.environ["NIX_USER_CONF_FILES"] = message.nix_conf
@@ -159,7 +159,7 @@ class WorkerServiceHandler(WorkerServiceBase):
                 nanopynix_util.enable_experimental_feature(f)
 
             nanopynix_util.init_libstore(load_config=False)
-            nanopynix_util.set_verbosity(int(verbosity) if verbosity is not None else 2)
+            nanopynix_util.set_verbosity(int(message.verbosity if message.verbosity is not None else LogLevel.NOTICE))
             nanopynix_expr.init_libexpr()
 
             if message.pure_eval is not None:
@@ -168,6 +168,7 @@ class WorkerServiceHandler(WorkerServiceBase):
                 nanopynix_expr._set_restrict_eval(message.restrict_eval)
             if message.allowed_uris:
                 nanopynix_expr._set_allowed_uris(message.allowed_uris)
+            self._state.nix_path = list(message.nix_path)
 
             # Convert proto PrimOpSpec list to the raw-dict format
             primops_raw = [

@@ -32,6 +32,20 @@ def test_parse_nix_path_simple(monkeypatch):
     assert result[1] == f"bar={b}"
 
 
+def test_parse_nix_path_explicit_value_without_env(monkeypatch):
+    """parse_nix_path can parse a supplied NIX_PATH value outside the worker."""
+    import nanopynix_expr
+
+    monkeypatch.delenv("NIX_PATH", raising=False)
+    with tempfile.TemporaryDirectory() as d:
+        a = str(Path(d) / "a")
+        b = str(Path(d) / "b")
+        Path(a).mkdir(parents=True)
+        Path(b).mkdir(parents=True)
+        result = nanopynix_expr.parse_nix_path(f"foo={a}:bar={b}")
+    assert result == [f"foo={a}", f"bar={b}"]
+
+
 def test_parse_nix_path_url_style():
     """parse_nix_path handles URL-style entries (scheme://...) without splitting on colons."""
     import nanopynix_expr
