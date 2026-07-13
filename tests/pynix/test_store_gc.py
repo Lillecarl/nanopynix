@@ -65,6 +65,15 @@ async def test_path_from_hash_part(populated_store: dict[str, str], capsys):
     assert data["path"] == f"/nix/store/{store_path}"
 
 
+async def test_store_info(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(["store", "info", "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["uri"] == "local://"
+    assert data["storeDir"] == "/nix/store"
+
+
 async def test_is_valid_path(populated_store: dict[str, str], capsys):
     store_path = populated_store["hello_path"]
     cmd = Pynix.parse(["store", "is-valid-path", store_path, "--store", populated_store["store_url"]])
@@ -72,6 +81,16 @@ async def test_is_valid_path(populated_store: dict[str, str], capsys):
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert data == {"path": store_path, "valid": True}
+
+
+async def test_follow_links_to_store_path(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(
+        ["store", "follow-links-to-store-path", populated_store["hello_path"], "--store", populated_store["store_url"]]
+    )
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data == {"path": populated_store["hello_path"]}
 
 
 async def test_compute_fs_closure(populated_store: dict[str, str], capsys):
@@ -152,6 +171,39 @@ async def test_query_substitutable_paths(populated_store: dict[str, str], capsys
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert isinstance(data["paths"], list)
+
+
+async def test_add_temp_root(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(["store", "add-temp-root", populated_store["hello_path"], "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data == {"path": populated_store["hello_path"], "added": True}
+
+
+async def test_add_perm_root_and_indirect_root(populated_store: dict[str, str], tmp_path, capsys):
+    root_path = tmp_path / "pynix-gc-root"
+    cmd = Pynix.parse(
+        [
+            "store",
+            "add-perm-root",
+            populated_store["hello_path"],
+            str(root_path),
+            "--store",
+            populated_store["store_url"],
+        ]
+    )
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data == {"path": populated_store["hello_path"], "gcRoot": str(root_path)}
+    assert root_path.is_symlink()
+
+    cmd = Pynix.parse(["store", "add-indirect-root", str(root_path), "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data == {"path": str(root_path), "added": True}
 
 
 async def test_ensure_path(populated_store: dict[str, str], capsys):
