@@ -129,15 +129,15 @@ def _effective_settings_for_log() -> dict[str, str | None]:
 def _install_worker_diagnostics(collector: LogCollector) -> None:
     def _dump_worker_diagnostics(signum: int, _frame: Any) -> None:
         timestamp = time.monotonic()
-        print(
+        print(  # noqa: T201 -- SIGUSR1 signal handler; logging framework may be unsafe to call from signal context
             f"\n=== nanopynix worker diagnostics signal={signum} monotonic={timestamp:.6f} ===",
             file=sys.stderr,
             flush=True,
         )
-        print(f"log_collector={collector.stats()}", file=sys.stderr, flush=True)
-        print("python_threads:", file=sys.stderr, flush=True)
+        print(f"log_collector={collector.stats()}", file=sys.stderr, flush=True)  # noqa: T201 -- same signal-handler reason
+        print("python_threads:", file=sys.stderr, flush=True)  # noqa: T201 -- same signal-handler reason
         faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
-        print("=== end nanopynix worker diagnostics ===", file=sys.stderr, flush=True)
+        print("=== end nanopynix worker diagnostics ===", file=sys.stderr, flush=True)  # noqa: T201 -- same signal-handler reason
 
     signal.signal(signal.SIGUSR1, _dump_worker_diagnostics)
 

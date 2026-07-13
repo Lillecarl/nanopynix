@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, overload
+
 from nanopynix_proto.nix.common import (
     CallArg,
     CallArgAttrs,
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from nanopynix._pool import ReservedWorker, _WorkerManager
     from nanopynix.store import StoreHandle
     from nanopynix_store import BuildMode as BuildModeType
+
 
 def _scalar_to_pyval(scalar: ScalarValue | None) -> JsonScalar:
     """Convert a proto ScalarValue to a Python JSON-scalar."""
@@ -494,7 +496,9 @@ class ValueProxy:
             )
         )
         if not build_response.results:
-            raise StoreError("StoreError", f"build returned no result for evaluated derivation {build_response.drv_path}")
+            raise StoreError(
+                "StoreError", f"build returned no result for evaluated derivation {build_response.drv_path}"
+            )
         result = build_response.results[0]
         if not result.success:
             msg = result.error_msg or f"failed to build evaluated derivation {build_response.drv_path}"

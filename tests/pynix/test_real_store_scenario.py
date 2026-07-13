@@ -6,7 +6,7 @@ import pytest
 
 pytestmark = pytest.mark.dependency(scope="module")
 
-# TODO: add a separate substituted-path scenario and a separate
+# TODO: add a separate substituted-path scenario and a separate  # noqa: TD002, TD003
 # eval_store=auto + build_store=temp scenario. The shared fixture intentionally
 # uses a single temp store for eval and build until that path is robust.
 
@@ -64,7 +64,10 @@ async def test_scenario_builds_local_derivation_and_forwards_logs(
     assert log_path.startswith("/nix/store/")
     assert scenario.physical_path(log_path).read_text() == "log-output\n"
     assert scenario.last_logs is not None
-    assert any(entry.get("event") == "nix build log" and entry.get("message") == "pynix-log-line" for entry in scenario.last_logs)
+    assert any(
+        entry.get("event") == "nix build log" and entry.get("message") == "pynix-log-line"
+        for entry in scenario.last_logs
+    )
 
 
 @pytest.mark.dependency(

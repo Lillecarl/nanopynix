@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
+from anyio import Path
 
 from pynix import Pynix
 
@@ -31,7 +31,7 @@ async def test_build_file_derivation(tmp_path, capsys):
     data = json.loads(captured.out)
     out_path = data["outputs"]["out"]
     assert "pynix-build-file-test" in out_path
-    assert Path(out_path).read_text() == "built-from-file\n"
+    assert await Path(out_path).read_text() == "built-from-file\n"
 
 
 async def test_build_file_derivation_attrpath(tmp_path, capsys):
@@ -70,7 +70,7 @@ async def test_build_file_derivation_attrpath(tmp_path, capsys):
     data = json.loads(captured.out)
     out_path = data["outputs"]["out"]
     assert "pynix-build-attr-test" in out_path
-    assert Path(out_path).read_text() == "built-from-attr\n"
+    assert await Path(out_path).read_text() == "built-from-attr\n"
 
 
 async def test_build_file_auto_calls_defaulted_lambda_before_attrpath(tmp_path, capsys):
@@ -96,7 +96,7 @@ async def test_build_file_auto_calls_defaulted_lambda_before_attrpath(tmp_path, 
     data = json.loads(captured.out)
     out_path = data["outputs"]["out"]
     assert "pynix-build-autocall-test" in out_path
-    assert Path(out_path).read_text() == "built-from-autocall\n"
+    assert await Path(out_path).read_text() == "built-from-autocall\n"
 
 
 async def test_build_missing_attrpath_errors_before_build(tmp_path, capsys):
@@ -135,7 +135,7 @@ async def test_build_flake_derivation(capsys, git_flake):
     data = json.loads(captured.out)
     out_path = data["outputs"]["out"]
     assert "test-hello" in out_path
-    assert Path(out_path).read_text() == "hi\n"
+    assert await Path(out_path).read_text() == "hi\n"
 
 
 async def test_build_missing_input_errors(capsys):

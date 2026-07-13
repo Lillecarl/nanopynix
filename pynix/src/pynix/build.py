@@ -41,7 +41,10 @@ class Build(Command):
     eval_store: str | None = arg(None, help="Store URI to evaluate with. Defaults to --store.")
     substituters: str = arg(_DEFAULT_SUBSTITUTERS, help="Space-separated substituter URLs.")
     trusted_public_keys: str = arg(_DEFAULT_TRUSTED_PUBLIC_KEYS, help="Space-separated substituter public keys.")
-    verbosity: str = arg(_DEFAULT_VERBOSITY, help="Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7.")
+    verbosity: str = arg(
+        _DEFAULT_VERBOSITY,
+        help="Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7.",
+    )
     print_build_logs: bool = arg(False, help="Print build log lines to stderr.")
 
     @override
@@ -60,31 +63,33 @@ class Build(Command):
             substituters=self.substituters.split(),
             trusted_public_keys=self.trusted_public_keys.split(),
         )
-        async with nanopynix.Session(settings=settings, verbosity=nanopynix.normalize_log_level(self.verbosity)) as nix:
-            async with forward_nix_logs(nix, print_build_logs=self.print_build_logs):
-                try:
-                    if self.eval_store is None:
-                        async with nix.store(self.store) as store:
-                            async with nix.eval(store) as session:
-                                logger.info("pynix build evaluating target")
-                                root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
-                                logger.info("pynix build target evaluated")
-                                outputs = await root.build()
-                            logger.info("pynix build finished")
-                    else:
-                        async with (
-                            nix.store(self.eval_store) as eval_store,
-                            nix.store(self.store) as build_store,
-                        ):
-                            async with nix.eval(eval_store) as session:
-                                logger.info("pynix build evaluating target")
-                                root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
-                                logger.info("pynix build target evaluated")
-                                outputs = await root.build(store=build_store)
-                            logger.info("pynix build finished")
-                except BuildTargetError as exc:
-                    error_console.print(f"[red]Error:[/red] {exc}")
-                    raise SystemExit(1) from exc
+        async with (
+            nanopynix.Session(settings=settings, verbosity=nanopynix.normalize_log_level(self.verbosity)) as nix,
+            forward_nix_logs(nix, print_build_logs=self.print_build_logs),
+        ):
+            try:
+                if self.eval_store is None:
+                    async with nix.store(self.store) as store:
+                        async with nix.eval(store) as session:
+                            logger.info("pynix build evaluating target")
+                            root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
+                            logger.info("pynix build target evaluated")
+                            outputs = await root.build()
+                        logger.info("pynix build finished")
+                else:
+                    async with (
+                        nix.store(self.eval_store) as eval_store,
+                        nix.store(self.store) as build_store,
+                    ):
+                        async with nix.eval(eval_store) as session:
+                            logger.info("pynix build evaluating target")
+                            root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
+                            logger.info("pynix build target evaluated")
+                            outputs = await root.build(store=build_store)
+                        logger.info("pynix build finished")
+            except BuildTargetError as exc:
+                error_console.print(f"[red]Error:[/red] {exc}")
+                raise SystemExit(1) from exc
 
         _print_json({"outputs": outputs})
 

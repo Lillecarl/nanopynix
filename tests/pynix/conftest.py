@@ -6,23 +6,26 @@ import faulthandler
 import io
 import json
 import os
-import signal
 import shutil
+import signal
 import stat
 import tempfile
-from collections.abc import AsyncIterator, Iterator
 from contextlib import redirect_stderr, redirect_stdout
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 import structlog
 from structlog.exceptions import DropEvent
-from structlog.typing import EventDict, WrappedLogger
 
 from pynix import Pynix
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Iterator
+
+    from structlog.typing import EventDict, WrappedLogger
 
 _CURRENT_PYNIX_TEST: ContextVar[str] = ContextVar("_CURRENT_PYNIX_TEST", default="unknown")
 _DEFAULT_TEST_NIX_VERBOSITY = 5
@@ -83,12 +86,15 @@ class PynixStoreScenario:
         stderr = io.StringIO()
         self._append_log_record({"event": "pynix command start", "test": test_name, "args": args})
         before = len(self.live_log.entries_for(test_name))
-        with _patched_environ({"NIX_PATH": f"nixpkgs={self.nixpkgs_path}"}):
-            with _pynix_configure_logging_noop():
-                with _pynix_test_context(test_name):
-                    with redirect_stdout(stdout), redirect_stderr(stderr):
-                        cmd = Pynix.parse(args)
-                        await cmd.astart()
+        with (
+            _patched_environ({"NIX_PATH": f"nixpkgs={self.nixpkgs_path}"}),
+            _pynix_configure_logging_noop(),
+            _pynix_test_context(test_name),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            cmd = Pynix.parse(args)
+            await cmd.astart()
         self.last_stdout = stdout.getvalue()
         self.last_stderr = stderr.getvalue()
         self.last_logs = [dict(entry) for entry in self.live_log.entries_for(test_name)[before:]]
@@ -134,7 +140,9 @@ class PynixStoreScenario:
     async def add_text_file(self, contents: str = "temporary-store-message\n", *, test_name: str = "unknown") -> str:
         source = self.work_root / "message.txt"
         source.write_text(contents)
-        data = await self.run_pynix_json(["store", "add-file", str(source), "--store", self.store_url], test_name=test_name)
+        data = await self.run_pynix_json(
+            ["store", "add-file", str(source), "--store", self.store_url], test_name=test_name
+        )
         if not isinstance(data, dict):
             raise TypeError("store add-file must produce an object")
         self.text_path = _require_str(data, "path")
@@ -296,18 +304,11 @@ def repo_root() -> Path:
 def pynix_live_log(
     request: pytest.FixtureRequest,
     tmp_path_factory: pytest.TempPathFactory,
-) -> PynixLiveLog:
+) -> Iterator[PynixLiveLog]:
     log_dir = tmp_path_factory.mktemp("pynix-live-logs")
     stack_file = (log_dir / "pynix-manager-stacks.log").open("a")
     with contextlib.suppress(RuntimeError, ValueError):
         faulthandler.register(signal.SIGUSR2, file=stack_file, all_threads=True)
-
-    def cleanup() -> None:
-        with contextlib.suppress(RuntimeError, ValueError):
-            faulthandler.unregister(signal.SIGUSR2)
-        stack_file.close()
-
-    request.addfinalizer(cleanup)
     log = PynixLiveLog(path=log_dir / "pynix-structlog.jsonl", stack_path=log_dir / "pynix-manager-stacks.log")
     terminal = request.config.pluginmanager.get_plugin("terminalreporter")
     if terminal is not None:
@@ -319,7 +320,10 @@ def pynix_live_log(
         terminal.write_line(f"PYNIX MANAGER STACKS: {log.stack_path}")
         terminal.write_line(f"kill -USR2 {os.getpid()}")
         terminal.write_line("================================================================")
-    return log
+    yield log
+    with contextlib.suppress(RuntimeError, ValueError):
+        faulthandler.unregister(signal.SIGUSR2)
+    stack_file.close()
 
 
 @pytest.fixture(autouse=True)
@@ -333,15 +337,14 @@ def _capture_pynix_test_structlog(
     old_config = structlog.get_config()
     token = _CURRENT_PYNIX_TEST.set(test_name)
     pynix_live_log.append({"event": "pytest test start", "test": test_name})
-    with _pynix_configure_logging_noop():
-        with _nanopynix_default_verbosity(verbosity):
-            structlog.configure(processors=[pynix_live_log.capture])
-            try:
-                yield
-            finally:
-                pynix_live_log.append({"event": "pytest test finish", "test": test_name})
-                structlog.configure(**old_config)
-                _CURRENT_PYNIX_TEST.reset(token)
+    with _pynix_configure_logging_noop(), _nanopynix_default_verbosity(verbosity):
+        structlog.configure(processors=[pynix_live_log.capture])
+        try:
+            yield
+        finally:
+            pynix_live_log.append({"event": "pytest test finish", "test": test_name})
+            structlog.configure(**old_config)
+            _CURRENT_PYNIX_TEST.reset(token)
 
 
 @pytest.fixture(scope="module")
@@ -551,27 +554,30 @@ def _require_present(value: str | None, field_name: str) -> str:
 
 
 def _rmtree_force(path: Path) -> None:
-    def onexc(function, exc_path, excinfo) -> None:
+    def _chmod_force(p: Path, mode: int) -> None:
+        with contextlib.suppress(FileNotFoundError):
+            p.chmod(mode)
+
+    def onexc(function, exc_path_str, _excinfo) -> None:
+        exc_path = Path(exc_path_str)
         try:
-            parent = os.path.dirname(exc_path)
-            if parent:
-                os.chmod(parent, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
-            os.chmod(exc_path, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
+            parent = exc_path.parent
+            if str(parent) != ".":
+                parent.chmod(stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
+            exc_path.chmod(stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
             function(exc_path)
         except FileNotFoundError:
             pass
 
-    for root, dirs, files in os.walk(path):
+    for root_str, dirs, files in os.walk(path):
+        root = Path(root_str)
         for name in dirs:
-            child = os.path.join(root, name)
-            if not os.path.islink(child):
-                with contextlib.suppress(FileNotFoundError):
-                    os.chmod(child, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
+            child = root / name
+            if not child.is_symlink():
+                _chmod_force(child, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
         for name in files:
-            child = os.path.join(root, name)
-            if not os.path.islink(child):
-                with contextlib.suppress(FileNotFoundError):
-                    os.chmod(child, stat.S_IWUSR | stat.S_IREAD)
-        with contextlib.suppress(FileNotFoundError):
-            os.chmod(root, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
+            child = root / name
+            if not child.is_symlink():
+                _chmod_force(child, stat.S_IWUSR | stat.S_IREAD)
+        _chmod_force(root, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
     shutil.rmtree(path, ignore_errors=False, onexc=onexc)

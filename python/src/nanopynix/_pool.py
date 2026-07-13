@@ -26,8 +26,8 @@ from nanopynix.exceptions import from_response
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
 
-    from nanopynix_proto.nix.eval import EvalServiceStub
     from nanopynix_proto.nix.common import LogLevel
+    from nanopynix_proto.nix.eval import EvalServiceStub
     from nanopynix_proto.nix.store import StoreServiceStub
     from nanopynix_proto.nix.worker import WorkerServiceStub
 

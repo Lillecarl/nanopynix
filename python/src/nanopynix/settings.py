@@ -6,7 +6,7 @@ import json
 import os
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 DEFAULT_EXPERIMENTAL_FEATURES = ("flakes", "nix-command")
-SettingsSurface: TypeAlias = Literal["global", "eval", "fetch", "flake"]
+type SettingsSurface = Literal["global", "eval", "fetch", "flake"]
 
 
 def _alias(field_name: str) -> str:
@@ -311,11 +311,7 @@ def check_settings_model_drift(
 
 
 def check_all_settings_model_drift(*, include_optional: bool = False) -> dict[str, SettingsDrift]:
-    surfaces: tuple[SettingsSurface, ...]
-    if include_optional:
-        surfaces = ("global", "eval", "fetch", "flake")
-    else:
-        surfaces = ("global",)
+    surfaces: tuple[SettingsSurface, ...] = ("global", "eval", "fetch", "flake") if include_optional else ("global",)
     return {surface: check_settings_model_drift(surface=surface) for surface in surfaces}
 
 

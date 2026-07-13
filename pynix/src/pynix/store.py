@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, override
+from typing import TYPE_CHECKING, Any, override
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 from urllib.parse import parse_qs, urlparse
 
 import structlog
@@ -14,9 +16,9 @@ from nanopynix_proto.nix.store import (
     AddPermRootRequest,
     AddTempRootRequest,
     AddToStoreRequest,
-    ComputeStorePathRequest,
     CollectGarbageRequest,
     ComputeFsClosureRequest,
+    ComputeStorePathRequest,
     EnsurePathRequest,
     FindRootsRequest,
     FollowLinksToStorePathRequest,
@@ -29,8 +31,8 @@ from nanopynix_proto.nix.store import (
     QueryAllValidPathsRequest,
     QueryDerivationOutputsRequest,
     QueryMissingRequest,
-    QueryPathInfoRequest,
     QueryPathFromHashPartRequest,
+    QueryPathInfoRequest,
     QueryReferrersRequest,
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
@@ -570,9 +572,7 @@ class Verify(Command):
         import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
-            resp = await store.verify_store(
-                VerifyStoreRequest(check_contents=self.check_contents, repair=self.repair)
-            )
+            resp = await store.verify_store(VerifyStoreRequest(check_contents=self.check_contents, repair=self.repair))
             _print_json({"errors": resp.errors})
 
 
@@ -606,7 +606,6 @@ class Store(Command):
         | Optimise
         | Verify
     )
-
 
 
 def _format_store_path(base_name: str) -> str:
