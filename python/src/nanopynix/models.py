@@ -87,7 +87,7 @@ from nanopynix_proto.nix.common import (
 from nanopynix_proto.nix.common import (
     ValueHandle as ValueHandle,
 )
-from strip_ansi import strip_ansi as _strip_ansi
+from strip_ansi import strip_ansi as _strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 # ══════════════════════════════════════════════════════════════════════════
 # Helper: extract the StorePath basename
@@ -171,7 +171,7 @@ class LogEventExt(_LogEventProto):
         super().__init__(**kwargs)
 
     @property
-    def args(self) -> list:
+    def args(self) -> list[Any]:
         """Parsed args from the JSON ``args_json`` field."""
         return json.loads(self.args_json) if self.args_json else []
 
@@ -241,7 +241,7 @@ def _nix_type_from_string(_cls: type, value: str) -> NixType:
     return _STR_TO_NIX.get(value, NixType.UNSPECIFIED)
 
 
-NixType.from_string = classmethod(_nix_type_from_string)  # type: ignore[attr-defined]
+NixType.from_string = classmethod(_nix_type_from_string)  # type: ignore[attr-defined] -- proto-generated enum; attribute is dynamic
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]

@@ -107,7 +107,7 @@ def _mock_build_response(
     )
 
 
-def _mock_force_value_remote(handle: int = 3, type_str: str = "int") -> MagicMock:
+def _mock_force_value_remote(handle: int = 3, type_str: str = "int") -> MagicMock:  # type: ignore[reportUnusedFunction] -- kept for future test scenarios
     """Return a ForceValue proto mock with remote_value."""
     fv = MagicMock()
     fv.scalar = None
@@ -289,7 +289,7 @@ class TestEvalSessionLifecycle:
 
 class TestSessionEvalFacade:
     def _session(self):
-        session = Session.__new__(Session)  # type: ignore[attr-defined]
+        session = object.__new__(Session)
         session._manager = _mock_pool()
         session._session_id = "session-id"
         return session
@@ -1011,7 +1011,7 @@ class TestLogStreamRequestId:
         """Worker emits LogEvent proto — log_stream produces valid LogEvent."""
         from nanopynix.nix import Session
 
-        session = Session.__new__(Session)
+        session = object.__new__(Session)
         manager = MagicMock()
         manager.log_stream = MagicMock(
             return_value=self._events_to_log_stream(
@@ -1046,7 +1046,7 @@ class TestLogStreamRequestId:
         """None sentinel from log_stream is skipped."""
         from nanopynix.nix import Session
 
-        session = Session.__new__(Session)
+        session = object.__new__(Session)
         manager = MagicMock()
         manager.log_stream = MagicMock(
             return_value=self._events_to_log_stream(
@@ -1065,7 +1065,7 @@ class TestLogStreamRequestId:
 
 class TestLogCapture:
     async def test_capture_records_typed_events(self):
-        session = Session.__new__(Session)  # type: ignore[attr-defined]
+        session = object.__new__(Session)
         manager = _WorkerManager()
         session._manager = manager
 
@@ -1079,7 +1079,7 @@ class TestLogCapture:
         assert logs.events[1].result_type == 100
 
     async def test_capture_unsubscribes_on_exit(self):
-        session = Session.__new__(Session)  # type: ignore[attr-defined]
+        session = object.__new__(Session)
         manager = _WorkerManager()
         session._manager = manager
 

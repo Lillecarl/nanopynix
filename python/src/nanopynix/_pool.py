@@ -100,7 +100,7 @@ class _LogBus:
     """
 
     def __init__(self) -> None:
-        self._subscribers: list = []
+        self._subscribers: list[Callable[[object], None]] = []
 
     def subscribe(self, callback) -> _Subscription:
         self._subscribers.append(callback)
@@ -369,7 +369,7 @@ class _WorkerManager:
 
     async def log_stream(self) -> AsyncIterator[object]:
         """Async iterator over log events."""
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue[object] = asyncio.Queue()
 
         def _on_event(event: object) -> None:
             q.put_nowait(event)

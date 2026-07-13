@@ -17,9 +17,10 @@ Usage::
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from nanopynix_proto.nix.common import NixType
-from strip_ansi import strip_ansi
+from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 # ════════════════════════════════════════════════════════════════════
 # Exception hierarchy
@@ -36,7 +37,7 @@ class NixError(RuntimeError):
         info: ErrorInfo dict (traces, suggestions, level, etc.) or None.
     """
 
-    def __init__(self, error_type: str, msg: str, *, raw: str = "", info: dict | None = None) -> None:
+    def __init__(self, error_type: str, msg: str, *, raw: str = "", info: dict[str, Any] | None = None) -> None:
         self.error_type = error_type
         self.msg = msg
         self.raw = raw
@@ -142,7 +143,7 @@ class NixCoercionError(EvalProxyError, ValueError):
 
 # Tuples of (regex, Python class, error_type_name).
 # Ordered: more specific patterns first.
-_CLASSIFIERS: list[tuple[re.Pattern, type[NixError], str]] = [
+_CLASSIFIERS: list[tuple[re.Pattern[str], type[NixError], str]] = [
     # ── Eval errors ──────────────────────────────────────────────
     (re.compile(r"undefined variable"), UndefinedVarError, "UndefinedVarError"),
     (re.compile(r"infinite recursion"), InfiniteRecursionError, "InfiniteRecursionError"),
@@ -189,7 +190,7 @@ def _classify(msg: str, fallback_type: str) -> tuple[type[NixError], str]:
     return NixError, fallback_type
 
 
-def from_response(error_type: str, msg: str, *, raw: str = "", info: dict | None = None) -> NixError:
+def from_response(error_type: str, msg: str, *, raw: str = "", info: dict[str, Any] | None = None) -> NixError:
     """Factory: create the right NixError subclass from a worker error response.
 
     Called by ``_pool.py`` when it receives an ``{"type":"error",...}`` response.

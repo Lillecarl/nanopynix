@@ -9,7 +9,7 @@ for the worker subprocess and an async interface for the Nix manager client.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import janus
 
@@ -69,9 +69,9 @@ class LogCollector:
 
     # ── sync drain (for the worker subprocess) ─────────────────────
 
-    def drain(self) -> list:
+    def drain(self) -> list[Any]:
         """Return all currently pending events without blocking."""
-        events: list = []
+        events: list[Any] = []
         try:
             while True:
                 events.append(self._queue.sync_q.get_nowait())
@@ -81,7 +81,7 @@ class LogCollector:
 
     # ── async stream (for the Nix manager client) ──────────────────
 
-    async def stream(self) -> AsyncIterator:
+    async def stream(self) -> AsyncIterator[Any]:
         """Yield events as they arrive.
 
         Terminates either on a ``None`` sentinel or when the queue is

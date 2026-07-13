@@ -23,7 +23,7 @@ from structlog.exceptions import DropEvent
 from pynix import Pynix
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator, Generator
 
     from structlog.typing import EventDict, WrappedLogger
 
@@ -327,7 +327,7 @@ def pynix_live_log(
 
 
 @pytest.fixture(autouse=True)
-def _capture_pynix_test_structlog(
+def _capture_pynix_test_structlog(  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     request: pytest.FixtureRequest,
     pynix_live_log: PynixLiveLog,
 ) -> Iterator[None]:
@@ -470,7 +470,7 @@ async def _run(*args: str, env: dict[str, str] | None = None) -> bytes:
 
 
 @contextlib.contextmanager
-def _patched_environ(values: dict[str, str]) -> Iterator[None]:
+def _patched_environ(values: dict[str, str]) -> Generator[None, None, None]:
     old_values: dict[str, str | None] = {key: os.environ.get(key) for key in values}
     os.environ.update(values)
     try:
@@ -484,7 +484,7 @@ def _patched_environ(values: dict[str, str]) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _pynix_configure_logging_noop() -> Iterator[None]:
+def _pynix_configure_logging_noop() -> Generator[None, None, None]:
     import pynix._util as pynix_util
 
     old_configure_logging = pynix_util.configure_logging
@@ -496,7 +496,7 @@ def _pynix_configure_logging_noop() -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _nanopynix_default_verbosity(verbosity: int) -> Iterator[None]:
+def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
     import nanopynix
 
     old_session = nanopynix.Session
@@ -514,7 +514,7 @@ def _nanopynix_default_verbosity(verbosity: int) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _pynix_test_context(test_name: str) -> Iterator[None]:
+def _pynix_test_context(test_name: str) -> Generator[None, None, None]:
     token = _CURRENT_PYNIX_TEST.set(test_name)
     try:
         yield

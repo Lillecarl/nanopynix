@@ -1,10 +1,11 @@
 # ruff: noqa: F401
+# pyright: reportUnusedImport=false
 """nanopynix — nanobind-based Python bindings for Nix."""
 
 from __future__ import annotations
 
 from nanopynix_proto.nix.common import LogLevel
-from strip_ansi import strip_ansi
+from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from nanopynix._pool import WorkerBusyError, WorkerDiedError
 from nanopynix._session import EvalSession, LockedFlakeHandle, ValueAttrs, ValueList, ValueProxy

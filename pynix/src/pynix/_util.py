@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 _RESULT_BUILD_LOG_LINE = 101
 _RESULT_POST_BUILD_LOG_LINE = 107
@@ -34,7 +34,7 @@ def configure_logging() -> None:
 
 
 @asynccontextmanager
-async def forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncIterator[None]:
+async def forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncGenerator[None, None]:
     configure_logging()
     task = asyncio.create_task(_forward_nix_logs(session, print_build_logs=print_build_logs))
     try:

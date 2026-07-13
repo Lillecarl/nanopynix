@@ -33,7 +33,7 @@ def store_path_str(s: str, /) -> common_pb.StorePath:
     return common_pb.StorePath(base_name=s.rstrip("/").rsplit("/", 1)[-1])
 
 
-def _attrs_map(d: dict[str, Any]) -> common_pb.AttrsMap:
+def _attrs_map(d: dict[str, Any]) -> common_pb.AttrsMap:  # type: ignore[reportUnusedFunction] -- kept as a util for future callers
     """Convert a ``dict[str, bool|int|str]`` to an AttrsMap proto."""
     return common_pb.AttrsMap(entries={k: _attrs_value(v) for k, v in d.items()})
 
@@ -49,7 +49,7 @@ def flake_ref_attrs(fr, /) -> dict[str, common_pb.AttrsValue]:
     return input_attrs(fr)  # to_attrs() has the same shape on both types
 
 
-def locked_input(li_dict: dict, /) -> common_pb.LockedInput:
+def locked_input(li_dict: dict[str, Any], /) -> common_pb.LockedInput:
     """Extract a dict from LockedFlake.inputs values to LockedInput proto."""
     is_flake: bool = bool(li_dict.get("is_flake", True))
 
