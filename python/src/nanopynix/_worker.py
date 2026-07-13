@@ -368,18 +368,18 @@ async def run_worker(
 
     # Cleanup after transport closes
     worker_state: WorkerState = cast(WorkerServiceHandler, handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
-    collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if collector is not None:
-        collector.close()  # type: ignore[reportUnknownMemberType]
-    log_task = worker_state.log_task  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        collector.close()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
+    log_task = worker_state.log_task  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if log_task is not None:
-        log_task.cancel()  # type: ignore[reportUnknownMemberType]
+        log_task.cancel()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
         with contextlib.suppress(asyncio.CancelledError):
             await log_task
-    if worker_state.rpc_bridge is not None:
-        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType]
-    if worker_state.executor is not None:
-        worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType]
+    if worker_state.rpc_bridge is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
+        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
+    if worker_state.executor is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
+        worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
 
 
 # ── Stdio entry point (console_script / ``python -m nanopynix._worker``) ──
@@ -403,18 +403,18 @@ async def _stdio_main() -> None:
 
     # Cleanup after transport closes
     worker_state: WorkerState = cast(WorkerServiceHandler, handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
-    collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if collector is not None:
-        collector.close()  # type: ignore[reportUnknownMemberType]
-    log_task = worker_state.log_task  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        collector.close()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
+    log_task = worker_state.log_task  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if log_task is not None:
-        log_task.cancel()  # type: ignore[reportUnknownMemberType]
+        log_task.cancel()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
         with contextlib.suppress(asyncio.CancelledError):
             await log_task
-    if worker_state.rpc_bridge is not None:
-        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType]
-    if worker_state.executor is not None:
-        worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType]
+    if worker_state.rpc_bridge is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
+        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
+    if worker_state.executor is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
+        worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
 
 
 if __name__ == "__main__":

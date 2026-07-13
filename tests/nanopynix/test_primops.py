@@ -119,14 +119,14 @@ class TestCallableToNixFunction:
 
     def test_value_from_python_lambda(self, eval_state: nanopynix.EvalState) -> None:
         """value_from_python converts a lambda to a Nix primop value."""
-        v = eval_state.value_from_python(lambda x: x * 3)  # type: ignore[reportUnknownMemberType]  # EvalState nanobind extension without stubs
-        result = v.call(eval_state.eval_string("5"))  # type: ignore[reportUnknownMemberType]  # NixValue from nanobind
-        assert result.as_int() == 15  # type: ignore[reportUnknownMemberType]  # NixValue from nanobind
+        v = eval_state.value_from_python(lambda x: x * 3)  # type: ignore[reportUnknownMemberType] -- EvalState nanobind extension without stubs
+        result = v.call(eval_state.eval_string("5"))  # type: ignore[reportUnknownMemberType] -- NixValue from nanobind
+        assert result.as_int() == 15  # type: ignore[reportUnknownMemberType] -- NixValue from nanobind
 
     def test_value_from_python_dict_with_lambda(self, eval_state: nanopynix.EvalState) -> None:
         """value_from_python converts a dict with a lambda → attrset with Nix function."""
-        v = eval_state.value_from_python({"add_one": lambda x: x + 1})  # type: ignore[reportUnknownMemberType]  # EvalState nanobind extension
-        assert v.is_attrs()  # type: ignore[reportUnknownMemberType]  # NixValue from nanobind
-        fn = v.attr_get("add_one")  # type: ignore[reportUnknownMemberType]  # NixValue from nanobind
-        result = fn.call(eval_state.eval_string("41"))  # type: ignore[reportUnknownMemberType]  # NixValue from nanobind
-        assert result.as_int() == 42  # type: ignore[reportUnknownMemberType]  # NixValue from nanobind
+        v = eval_state.value_from_python({"add_one": lambda x: x + 1})  # type: ignore[reportUnknownMemberType] -- EvalState nanobind extension
+        assert v.is_attrs()  # type: ignore[reportUnknownMemberType] -- NixValue from nanobind
+        fn = v.attr_get("add_one")  # type: ignore[reportUnknownMemberType] -- NixValue from nanobind
+        result = fn.call(eval_state.eval_string("41"))  # type: ignore[reportUnknownMemberType] -- NixValue from nanobind
+        assert result.as_int() == 42  # type: ignore[reportUnknownMemberType] -- NixValue from nanobind

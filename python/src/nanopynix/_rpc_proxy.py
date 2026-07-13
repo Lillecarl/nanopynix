@@ -36,7 +36,7 @@ class RpcProxyMixin:
 
 def _make_forwarder(method_name: str) -> Callable[[RpcProxyMixin, Message], Coroutine[Any, Any, Any]]:
     async def _forward(self: RpcProxyMixin, message: Message) -> Any:
-        return await self._rpc_proxy_call(method_name, message)
+        return await self._rpc_proxy_call(method_name, message)  # type: ignore[reportPrivateUsage] -- called through module-level forwarder that acts as method
 
     _forward.__name__ = method_name
     return _forward
