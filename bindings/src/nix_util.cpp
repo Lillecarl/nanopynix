@@ -47,6 +47,12 @@ static std::string list_settings_metadata_json() {
     return nix::globalConfig.toJSON().dump();
 }
 
+static std::string current_system() {
+    auto evalSystem = get_setting("eval-system");
+    if (evalSystem && !evalSystem->empty()) return *evalSystem;
+    return nix::settings.thisSystem.get();
+}
+
 static void enable_experimental_feature(const std::string &name) {
     auto feature = nix::parseExperimentalFeature(name);
     if (!feature)
@@ -170,6 +176,8 @@ NB_MODULE(nanopynix_util, m) {
     m.def("get_setting", &get_setting, "name"_a);
     m.def("list_settings", &list_settings);
     m.def("list_settings_metadata_json", &list_settings_metadata_json);
+    m.def("current_system", &current_system,
+          "Return the effective system used by builtins.currentSystem.");
     m.def("enable_experimental_feature", &enable_experimental_feature, "name"_a,
           "Enable an experimental Nix feature (e.g. 'flakes', 'nix-command')");
 

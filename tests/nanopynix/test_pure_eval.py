@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nanopynix import NixType, Session
+from nanopynix import NixType, Session, current_system
 from nanopynix.exceptions import EvalError
 
 
@@ -37,6 +37,16 @@ async def test_impure_allows_impure_builtins():
 
         system = await eval.string("builtins.currentSystem")
         assert isinstance(await system.force(), str)
+
+
+async def test_current_system_binding_matches_builtin_default():
+    async with (
+        Session(pure_eval=False) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        system = await eval.string("builtins.currentSystem")
+        assert await system.force() == current_system()
 
 
 @pytest.mark.anyio
