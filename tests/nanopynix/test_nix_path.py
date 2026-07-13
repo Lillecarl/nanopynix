@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 
@@ -48,15 +47,12 @@ def test_parse_nix_path_explicit_value_without_env(monkeypatch: pytest.MonkeyPat
     assert result == [f"foo={a}", f"bar={b}"]  # type: ignore[reportUnknownVariableType] -- result type unknown from C++ extension
 
 
-def test_parse_nix_path_url_style() -> None:
+def test_parse_nix_path_url_style(monkeypatch: pytest.MonkeyPatch) -> None:
     """parse_nix_path handles URL-style entries (scheme://...) without splitting on colons."""
     import nanopynix_expr
 
-    os.environ["NIX_PATH"] = "nixpkgs=https://github.com/NixOS/nixpkgs/archive/master.tar.gz"
-    try:
-        result = nanopynix_expr.parse_nix_path()  # type: ignore[reportUnknownMemberType] -- nanopynix_expr C++ extension without stubs
-    finally:
-        del os.environ["NIX_PATH"]
+    monkeypatch.setenv("NIX_PATH", "nixpkgs=https://github.com/NixOS/nixpkgs/archive/master.tar.gz")
+    result = nanopynix_expr.parse_nix_path()  # type: ignore[reportUnknownMemberType] -- nanopynix_expr C++ extension without stubs
     assert len(result) == 1  # type: ignore[reportUnknownVariableType] -- result type unknown from C++ extension
     assert "://" in result[0]  # type: ignore[reportUnknownMemberType] -- result from C++ extension
     assert "nixpkgs=" in result[0]  # type: ignore[reportUnknownMemberType] -- result from C++ extension
