@@ -31,6 +31,7 @@ service StoreService {
   rpc EnsurePath(EnsurePathRequest) returns (EnsurePathResponse);
   rpc OptimiseStore(OptimiseStoreRequest) returns (OptimiseStoreResponse);
   rpc VerifyStore(VerifyStoreRequest) returns (VerifyStoreResponse);
+  rpc GetBuildLog(GetBuildLogRequest) returns (GetBuildLogResponse);
 }
 
 message GetUriRequest {
@@ -204,4 +205,12 @@ message VerifyStoreRequest {
 }
 message VerifyStoreResponse {
   bool errors = 1;
+}
+
+message GetBuildLogRequest {
+  string path = 1;
+  int64 store_handle = 100;
+}
+message GetBuildLogResponse {
+  optional string log = 1;
 }

@@ -11,16 +11,6 @@ from pathlib import Path
 
 import pytest
 
-
-def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption(
-        "--run-temp-store-builds",
-        action="store_true",
-        default=False,
-        help="run tests that build into temporary Nix stores",
-    )
-
-
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -62,8 +52,28 @@ async def populated_store(
     text_file.write_text("temporary-store-message\n")
     text_stdout = await _run("nix", "store", "add-file", "--store", store_url, str(text_file))
     text_path = text_stdout.decode().strip().splitlines()[-1]
+    log_nix_file = store_root / "log-test.nix"
+    log_nix_file.write_text("""
+    builtins.derivation {
+      name = "pynix-log-test";
+      system = builtins.currentSystem;
+      builder = "/bin/sh";
+      args = [ "-c" "echo pynix-log-line >&2; echo log-output > $out" ];
+    }
+    """)
+    log_stdout = await _run(
+        "nix",
+        "build",
+        "--no-link",
+        "--print-out-paths",
+        "--store",
+        store_url,
+        "--file",
+        str(log_nix_file),
+    )
+    log_path = log_stdout.decode().strip().splitlines()[-1]
     try:
-        yield {"store_url": store_url, "hello_path": hello_path, "text_path": text_path}
+        yield {"store_url": store_url, "hello_path": hello_path, "text_path": text_path, "log_path": log_path}
     finally:
         _rmtree_force(store_root)
 
