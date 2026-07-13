@@ -38,10 +38,22 @@ class Check(Command):
         _print_json({"ok": True})
 
 
+class CurrentSystem(Command):
+    """Show the effective system used by builtins.currentSystem"""
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        nanopynix.init_libstore(load_config=True)
+        _print_json({"currentSystem": nanopynix.current_system()})
+
+
 class Config(Command):
     """Inspect Nix configuration"""
 
-    subcommand: Show | Check
+    subcommand: Show | Check | CurrentSystem
 
 
 def _print_json(obj: object) -> None:
