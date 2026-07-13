@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_proto.nix.store import StoreServiceBase
 
-from nanopynix._pool import _RPC_TIMEOUT, WorkerBusyError, _grpc_call
+from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
+from nanopynix._pool import WorkerBusyError, _grpc_call
 from nanopynix._rpc_proxy import RpcProxyMixin
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         from nanopynix_proto.nix.worker import OpenStoreRequest
 
         resp = await self._pool.call(
-            self._pool._worker_stub.open_store(OpenStoreRequest(uri=self._uri), timeout=_RPC_TIMEOUT)
+            self._pool._worker_stub.open_store(OpenStoreRequest(uri=self._uri), timeout=_RPC_TIMEOUT)  # type: ignore[reportPrivateUsage] -- cross-class access
         )
         self._store_handle = resp.store_handle
         self._active = True
@@ -44,7 +45,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
         with contextlib.suppress(Exception):
             await self._pool.call(
-                self._pool._worker_stub.close_store(
+                self._pool._worker_stub.close_store(  # type: ignore[reportPrivateUsage] -- cross-class access
                     CloseStoreRequest(store_handle=self._store_handle),
                     timeout=_RPC_TIMEOUT,
                 )
@@ -83,7 +84,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         if self._store_handle:
             message_any = cast("Any", message)
             message_any.store_handle = self._store_handle
-        method = getattr(self._pool._store_stub, method_name)
+        method = getattr(self._pool._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
         return await self._store_call(method(message, timeout=_RPC_TIMEOUT))
 
 

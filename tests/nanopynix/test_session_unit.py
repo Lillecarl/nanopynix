@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
-import nanopynix._pool as pool_module
+import nanopynix._pool as pool_module  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 from nanopynix import (
     BuildMode,
     EvalSessionClosedError,
@@ -25,18 +25,20 @@ from nanopynix import (
     ValueReleasedError,
     WrongNixTypeError,
 )
-from nanopynix._pool import _RPC_TIMEOUT, ReservedWorker, _WorkerManager
+from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- test accesses pool private constants
+from nanopynix._pool import ReservedWorker, _WorkerManager as _WorkerManager  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 from nanopynix._session import (
     EvalProxy,
     EvalSession,
     ValueList,
     ValueProxy,
-    _EvalOwner,
-    _EvalOwnerToken,
-    _EvalProxyContext,
-    _ResolvedValue,
+    _EvalOwner as _EvalOwner,  # type: ignore[reportPrivateUsage] -- test mocks
+    _EvalOwnerToken as _EvalOwnerToken,  # type: ignore[reportPrivateUsage] -- test mocks
+    _EvalProxyContext as _EvalProxyContext,  # type: ignore[reportPrivateUsage] -- test mocks
+    _ResolvedValue as _ResolvedValue,  # type: ignore[reportPrivateUsage] -- test mocks
 )
 from nanopynix.models import LogEvent
+from nanopynix.nix import Session
 from nanopynix.store import StoreHandle
 
 # ════════════════════════════════════════════════════════════════════
@@ -247,7 +249,7 @@ class TestEvalSessionLifecycle:
         assert isinstance(root, ValueProxy)
         assert root.handle == 1
         assert root.nix_type == NixType.ATTRS
-        request = rw._eval_stub.eval_file.call_args.args[0]
+        request = rw._eval_stub.eval_file.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
         assert request.store_handle == 1
 
     async def test_string_after_enter(self):
@@ -260,7 +262,7 @@ class TestEvalSessionLifecycle:
         await session.__aenter__()
         root = await session.string("42 + 1")
         assert root.nix_type == NixType.INT
-        request = rw._eval_stub.eval_string.call_args.args[0]
+        request = rw._eval_stub.eval_string.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
         assert request.store_handle == 99
 
     async def test_timeout_override(self):
@@ -272,7 +274,7 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.string("42", timeout=5.0)
-        call_kwargs = rw._eval_stub.eval_string.call_args[1]
+        call_kwargs = rw._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript]
         assert call_kwargs["timeout"] == _RPC_TIMEOUT
 
     async def test_timeout_falls_back_to_session_default(self):
@@ -284,7 +286,7 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.string("42")  # no override
-        call_kwargs = rw._eval_stub.eval_string.call_args[1]
+        call_kwargs = rw._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript]
         assert call_kwargs["timeout"] == _RPC_TIMEOUT
 
 
@@ -613,7 +615,7 @@ class TestValueProxyLifecycle:
 
         assert result == {"out": "/nix/store/aaa-demo"}
         w._eval_stub.build.assert_awaited_once()
-        build_request = w._eval_stub.build.call_args.args[0]
+        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
         assert build_request.handle == 1
         assert build_request.build_mode == BuildMode.Normal.value
         assert build_request.build_store_handle == 0
@@ -633,7 +635,7 @@ class TestValueProxyLifecycle:
 
         assert result == {"out": "/nix/store/aaa-demo"}
         w._eval_stub.build.assert_awaited_once()
-        build_request = w._eval_stub.build.call_args.args[0]
+        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
         assert build_request.handle == 1
         assert build_request.build_mode == BuildMode.Check.value
         assert build_request.build_store_handle == 0
@@ -653,7 +655,7 @@ class TestValueProxyLifecycle:
         result = await vp.build(store=build_store)
 
         assert result == {"out": "/nix/store/aaa-demo"}
-        build_request = w._eval_stub.build.call_args.args[0]
+        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
         assert build_request.handle == 1
         assert build_request.build_store_handle == 456
         w._store_stub.build_for_humans.assert_not_awaited()
@@ -867,7 +869,7 @@ class TestLazyChildProxy:
 
         await cp.force(timeout=10.0)
 
-        assert w._eval_stub.attr.call_args[1]["timeout"] == _RPC_TIMEOUT
+        assert w._eval_stub.attr.call_args[1]["timeout"] == _RPC_TIMEOUT  # type: ignore[reportUnknownMemberType, reportOptionalSubscript]
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -941,7 +943,7 @@ class TestWorkerOomScore:
         proc_dir = tmp_path / "123"
         proc_dir.mkdir()
 
-        pool_module._write_oom_score_adj(123, 2000, proc_root=tmp_path)
+        pool_module._write_oom_score_adj(123, 2000, proc_root=tmp_path)  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 
         assert (proc_dir / "oom_score_adj").read_text() == "1000\n"
 
@@ -952,11 +954,11 @@ class TestWorkerOomScore:
             "_write_oom_score_adj",
             lambda pid, value: calls.append((pid, value)),
         )
-        manager = _WorkerManager(worker_oom_score_adj=500)
+        manager = _WorkerManager(worker_oom_score_adj=500)  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 
-        manager._on_worker_process_start(MagicMock(pid=1234))
+        manager._on_worker_process_start(MagicMock(pid=1234))  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 
-        assert manager._worker_pid == 1234
+        assert manager._worker_pid == 1234  # type: ignore[reportPrivateUsage] -- test accesses pool internals
         assert calls == [(1234, 500)]
 
     async def test_reserved_worker_score_is_restored_on_release(self, monkeypatch: pytest.MonkeyPatch):
@@ -966,12 +968,12 @@ class TestWorkerOomScore:
             "_write_oom_score_adj",
             lambda pid, value: calls.append((pid, value)),
         )
-        manager = _WorkerManager(
+        manager = _WorkerManager(  # type: ignore[reportPrivateUsage] -- test accesses pool internals
             worker_oom_score_adj=500,
             reserved_worker_oom_score_adj=250,
         )
-        manager._channel = cast("Any", object())
-        manager._worker_pid = 1234
+        manager._channel = cast("Any", object())  # type: ignore[reportPrivateUsage] -- test accesses pool internals
+        manager._worker_pid = 1234  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 
         worker = await manager.reserve()
         await worker.release()
@@ -1104,5 +1106,4 @@ class TestLogCapture:
         return le
 
 
-# Need to import Session for TestLogCapture
-from nanopynix.nix import Session  # noqa: E402
+# Session is imported at the top of the module

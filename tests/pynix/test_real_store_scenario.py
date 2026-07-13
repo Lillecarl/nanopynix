@@ -43,7 +43,7 @@ async def test_scenario_adds_file_with_pynix(pynix_store_scenario: PynixStoreSce
     text_path = await scenario.add_text_file("scenario-message\n", test_name=request.node.nodeid)
 
     assert text_path.startswith("/nix/store/")
-    assert scenario.physical_path(text_path).read_text() == "scenario-message\n"
+    assert scenario.physical_path(text_path).read_text() == "scenario-message\n"  # type: ignore[reportUnknownMemberType]  # physical_path() return type not traced through fixture chain
 
 
 @pytest.mark.dependency(name="scenario:build-hello", depends=["scenario:store-dirs"])
@@ -53,7 +53,7 @@ async def test_scenario_adds_local_package_with_pynix(pynix_store_scenario: Pyni
     hello_path = await scenario.build_hello(test_name=request.node.nodeid)
 
     assert hello_path.startswith("/nix/store/")
-    assert (scenario.physical_path(hello_path) / "bin" / "hello").exists()
+    assert (scenario.physical_path(hello_path) / "bin" / "hello").exists()  # type: ignore[reportUnknownMemberType]  # physical_path() return type not traced through fixture chain
 
 
 @pytest.mark.dependency(name="scenario:build-local-log", depends=["scenario:build-hello"])
@@ -66,10 +66,10 @@ async def test_scenario_builds_local_derivation_and_forwards_logs(
     log_path = await scenario.build_local_log_derivation(test_name=request.node.nodeid)
 
     assert log_path.startswith("/nix/store/")
-    assert scenario.physical_path(log_path).read_text() == "log-output\n"
+    assert scenario.physical_path(log_path).read_text() == "log-output\n"  # type: ignore[reportUnknownMemberType]  # physical_path() return type not traced through fixture chain
     assert scenario.last_logs is not None
     assert any(
-        entry.get("event") == "nix build log" and entry.get("message") == "pynix-log-line"
+        entry.get("event") == "nix build log" and entry.get("message") == "pynix-log-line"  # type: ignore[reportUnknownMemberType]  # entry type unresolved through fixture chain
         for entry in scenario.last_logs
     )
 
@@ -121,8 +121,8 @@ async def test_scenario_builds_nixpkgs_hello_from_file(pynix_store_scenario: Pyn
     hello_path = await scenario.build_nixpkgs_package("hello", test_name=request.node.nodeid)
 
     assert hello_path.startswith("/nix/store/")
-    hello_bin = scenario.physical_path(hello_path) / "bin" / "hello"
-    assert hello_bin.exists()
+    hello_bin = scenario.physical_path(hello_path) / "bin" / "hello"  # type: ignore[reportUnknownMemberType]  # physical_path() return type not traced through fixture chain
+    assert hello_bin.exists()  # type: ignore[reportUnknownMemberType]  # physical_path() return type not traced through fixture chain
 
 
 @pytest.mark.dependency(name="scenario:build-flake-hello", depends=["scenario:store-dirs"])
@@ -132,8 +132,8 @@ async def test_scenario_builds_flake_hello(pynix_store_scenario: PynixStoreScena
     hello_path = await scenario.build_flake_hello(test_name=request.node.nodeid)
 
     assert hello_path.startswith("/nix/store/")
-    hello_bin = scenario.physical_path(hello_path) / "bin" / "hello"
-    assert hello_bin.exists()
+    hello_bin = scenario.physical_path(hello_path) / "bin" / "hello"  # type: ignore[reportUnknownMemberType]  # physical_path() return type not traced through fixture chain
+    assert hello_bin.exists()  # type: ignore[reportUnknownMemberType]  # physical_path() return type not traced through fixture chain
 
 
 @pytest.mark.dependency(name="scenario:build-hello-unfree", depends=["scenario:build-nixpkgs-hello"])
@@ -147,11 +147,11 @@ async def test_scenario_builds_hello_unfree_locally_and_forwards_logs(
 
     assert hello_unfree_path.startswith("/nix/store/")
     assert "example-unfree-package" in hello_unfree_path
-    assert scenario.physical_path(hello_unfree_path).exists()
+    assert scenario.physical_path(hello_unfree_path).exists()  # type: ignore[reportUnknownMemberType]  # physical_path() return type not traced through fixture chain
     assert scenario.last_logs is not None
     assert any(
-        entry.get("event") == "nix log"
+        entry.get("event") == "nix log"  # type: ignore[reportUnknownMemberType]  # entry type unresolved through fixture chain
         and isinstance(entry.get("message"), str)
-        and "building derivation" in entry["message"]
+        and "building derivation" in entry["message"]  # type: ignore[reportUnknownMemberType]  # entry type from fixture chain
         for entry in scenario.last_logs
     )

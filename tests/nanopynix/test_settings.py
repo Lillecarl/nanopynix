@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -43,7 +44,7 @@ def test_nix_settings_rejects_unknown_fields() -> None:
         NixSettings.model_validate({"not-a-nix-setting": True})
 
 
-def test_nix_settings_file_path(tmp_path) -> None:
+def test_nix_settings_file_path(tmp_path: Path) -> None:
     config = tmp_path / "nix.conf"
     config.write_text("max-jobs = 8\nkeep-going = false\n")
 
@@ -53,7 +54,7 @@ def test_nix_settings_file_path(tmp_path) -> None:
     assert settings.keep_going is False
 
 
-def test_nix_settings_env_reads_pynix_prefixed_values(monkeypatch) -> None:
+def test_nix_settings_env_reads_pynix_prefixed_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PYNIX_NIX_MAX_JOBS", "3")
     monkeypatch.setenv("PYNIX_NIX_KEEP_GOING", "true")
 
@@ -113,7 +114,7 @@ def test_optional_settings_drift_is_not_checked_by_default() -> None:
 def test_session_defaults_to_flakes_and_nix_command() -> None:
     session = Session()
 
-    assert session._manager._settings["experimental-features"] == "flakes nix-command"
+    assert session._manager._settings["experimental-features"] == "flakes nix-command"  # type: ignore[reportPrivateUsage]  # intentional test of internal Session state
 
 
 def test_session_rejects_raw_settings_dict() -> None:

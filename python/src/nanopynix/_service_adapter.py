@@ -45,11 +45,11 @@ def _install_generated_service_methods(
     method_prefix: str,
     nix_executor_attr: str | None,
 ) -> None:
-    expected = _service_method_names(service_base)
-    actual = {name.removeprefix(method_prefix) for name in binding_method_names}
+    expected: set[str] = _service_method_names(service_base)
+    actual: set[str] = {name.removeprefix(method_prefix) for name in binding_method_names}
 
-    missing = sorted(expected - actual)
-    extra = sorted(actual - expected)
+    missing: list[str] = sorted(expected - actual)
+    extra: list[str] = sorted(actual - expected)
     if missing or extra:
         details: list[str] = []
         if missing:
