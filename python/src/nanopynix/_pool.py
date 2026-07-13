@@ -102,13 +102,13 @@ class _LogBus:
     def __init__(self) -> None:
         self._subscribers: list[Callable[[object], None]] = []
 
-    def subscribe(self, callback) -> _Subscription:
+    def subscribe(self, callback: Callable[..., None]) -> _Subscription:
         self._subscribers.append(callback)
         return _Subscription(self, callback)
 
     def _unsubscribe(self, sub: _Subscription) -> None:
         with contextlib.suppress(ValueError):
-            self._subscribers.remove(sub._callback)
+            self._subscribers.remove(sub._callback)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
 
     def emit(self, event: object) -> None:
         if not self._subscribers:
@@ -125,12 +125,12 @@ class _Subscription:
 
     __slots__ = ("_bus", "_callback")
 
-    def __init__(self, bus: _LogBus, callback) -> None:
+    def __init__(self, bus: _LogBus, callback: Callable[..., None]) -> None:
         self._bus = bus
         self._callback = callback
 
     def unsubscribe(self) -> None:
-        self._bus._unsubscribe(self)
+        self._bus._unsubscribe(self)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -156,11 +156,11 @@ class ReservedWorker:
 
     @property
     def _eval_stub(self):
-        return self._manager._eval_stub
+        return self._manager._eval_stub  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
 
     @property
     def _store_stub(self):
-        return self._manager._store_stub
+        return self._manager._store_stub  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
 
     async def call(self, coro: Any) -> Any:
         """Await one reserved-worker RPC with gRPC error conversion."""
@@ -174,7 +174,7 @@ class ReservedWorker:
         """Return the worker to the manager.  Idempotent — safe to call twice."""
         if not self._released:
             self._released = True
-            self._manager._release()
+            self._manager._release()  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -384,7 +384,7 @@ class _WorkerManager:
         finally:
             sub.unsubscribe()
 
-    def subscribe(self, callback) -> _Subscription:
+    def subscribe(self, callback: Callable[..., None]) -> _Subscription:
         """Subscribe a callback to all log events.
 
         Callback receives ``LogEvent`` proto messages from the worker.

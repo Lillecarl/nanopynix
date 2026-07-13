@@ -198,11 +198,11 @@ class WorkerServiceHandler(WorkerServiceBase):
             nanopynix_expr.init_libexpr()
 
             if message.pure_eval is not None:
-                nanopynix_expr._set_pure_eval(message.pure_eval)
+                nanopynix_expr._set_pure_eval(message.pure_eval)  # type: ignore[reportPrivateUsage] -- nanopynix_expr module-level functions
             if message.restrict_eval is not None:
-                nanopynix_expr._set_restrict_eval(message.restrict_eval)
+                nanopynix_expr._set_restrict_eval(message.restrict_eval)  # type: ignore[reportPrivateUsage] -- nanopynix_expr module-level functions
             if message.allowed_uris:
-                nanopynix_expr._set_allowed_uris(message.allowed_uris)
+                nanopynix_expr._set_allowed_uris(message.allowed_uris)  # type: ignore[reportPrivateUsage] -- nanopynix_expr module-level functions
             self._state.nix_path = list(message.nix_path)
             if self._state.collector is not None:
                 self._state.collector.callback(

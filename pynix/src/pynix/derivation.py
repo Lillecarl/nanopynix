@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path  # noqa: TC003
-from typing import override
+from typing import TYPE_CHECKING, Any, override
 
 import structlog
 from clypi import Command, arg
 from nanopynix_proto.nix.store import ReadDerivationRequest
 from rich.console import Console
+
+if TYPE_CHECKING:
+    from nanopynix._session import ValueProxy
+    from nanopynix_proto.nix.store import ReadDerivationRequest
 
 from pynix._util import forward_nix_logs, prepare_sys_path
 
@@ -81,13 +85,13 @@ class Show(Command):
             sys.stdout.write("\n")
 
     @staticmethod
-    def _navigate(root, attrpath: str):
+    def _navigate(root: ValueProxy, attrpath: str) -> ValueProxy:
         for part in attrpath.split("."):
             root = root.attr(part)
         return root
 
     @staticmethod
-    async def _get_drv_path(value) -> str:
+    async def _get_drv_path(value: ValueProxy) -> str:
         if not await value.has_attr("type"):
             console.print("[red]Error:[/red] value is not a derivation")
             raise SystemExit(1)
@@ -102,7 +106,7 @@ class Show(Command):
         return drv_path
 
     @staticmethod
-    def _derivation_to_dict(derivation) -> dict[str, object]:
+    def _derivation_to_dict(derivation: Any) -> dict[str, object]:
         return {
             "name": derivation.name,
             "system": derivation.system,

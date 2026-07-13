@@ -58,7 +58,7 @@ class PrintRoots(Command):
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.find_roots(FindRootsRequest())
-            roots = []
+            roots: list[dict[str, object]] = []
             for root in resp.roots:
                 path = root.path
                 if path is None:

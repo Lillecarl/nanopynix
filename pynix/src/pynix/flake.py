@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sys
-from typing import Any, override
+from typing import TYPE_CHECKING, Any, override
 
 import structlog
 from clypi import Command, Positional, arg
@@ -11,6 +11,11 @@ from rich.console import Console
 from rich.tree import Tree
 
 from pynix._util import forward_nix_logs, prepare_sys_path
+
+if TYPE_CHECKING:
+    from nanopynix._session import ValueProxy
+
+    from nanopynix_proto.nix.common import NixType
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -77,13 +82,13 @@ class Info(Command):
         await _print_flake_metadata(self.flake_ref, store_uri=self.store)
 
 
-def _navigate(root, attrpath: str):
+def _navigate(root: ValueProxy, attrpath: str) -> ValueProxy:
     for part in attrpath.split("."):
         root = root.attr(part)
     return root
 
 
-async def _build_tree(tree: Tree, value, nix_type_enum, *, depth: int = 0) -> None:
+async def _build_tree(tree: Tree, value: ValueProxy, nix_type_enum: type[NixType], *, depth: int = 0) -> None:
     if depth > 6:
         tree.add("[dim]<...>[/dim]")
         return
@@ -122,7 +127,7 @@ async def _build_tree(tree: Tree, value, nix_type_enum, *, depth: int = 0) -> No
         tree.add(f"[dim]{nix_type.name.lower()}[/dim]")
 
 
-def _format_attr(name: str, nix_type, nix_type_enum) -> str:
+def _format_attr(name: str, nix_type: int, nix_type_enum: type[NixType]) -> str:
     if nix_type == nix_type_enum.ATTRS:
         return f"[cyan]{name}[/cyan]"
     if nix_type == nix_type_enum.LIST:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import override
+from typing import Any, override
 
 import structlog
 from clypi import Command, Positional, arg
@@ -51,5 +51,5 @@ class PathInfo(Command):
             sys.stdout.write("\n")
 
 
-def _store_path_str(sp) -> str:
+def _store_path_str(sp: Any) -> str:
     return f"/nix/store/{sp.base_name}"
