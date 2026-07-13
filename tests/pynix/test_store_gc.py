@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator, AsyncIterator
     from pathlib import Path
 
 import pytest
@@ -371,7 +371,7 @@ def _install_fake_nanopynix(
 
 
 @asynccontextmanager
-async def _noop_forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncIterator[None]:  # noqa: ARG001 -- matches real forward_nix_logs signature
+async def _noop_forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncGenerator[None, None]:  # noqa: ARG001 -- matches real forward_nix_logs signature
     yield
 
 

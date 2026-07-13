@@ -40,7 +40,7 @@ def pytest_runtest_setup(item):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _init():
+def _init():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Initialize libstore, enable flakes (needed by fetchers/flake tests)."""
     nanopynix.init_libstore(load_config=False)
 
@@ -64,7 +64,7 @@ def init_expr():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _register_test_primops():
+def _register_test_primops():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Register all test primops before EvalState is created."""
     nanopynix.register_primop("test_add_one", 1, ["x"], "increment by 1", lambda x: x + 1)
     nanopynix.register_primop("test_add", 2, ["x", "y"], "add two ints", lambda x, y: x + y)
@@ -131,14 +131,14 @@ def eval_state(store, init_expr, _register_test_primops):  # noqa: ARG001
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _enable_flakes():
+def _enable_flakes():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Enable flakes experimental feature for all tests."""
     nanopynix.enable_experimental_feature("flakes")
     nanopynix.enable_experimental_feature("nix-command")
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _cleanup_primops():
+def _cleanup_primops():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Clear C++ primop registry at process exit to avoid segfault
     when nb::object destructors fire after Python finalization."""
     import nanopynix_expr

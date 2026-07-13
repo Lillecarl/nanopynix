@@ -805,9 +805,13 @@ class EvalSession:
             try:
                 from nanopynix_proto.nix.eval import ReleaseAllRequest
 
-                await self._proxy.release_all(ReleaseAllRequest())  # type: ignore[union-attr]
+                if self._proxy is None:
+                    return
+                await self._proxy.release_all(ReleaseAllRequest())
             finally:
-                self._proxy.deactivate()  # type: ignore[union-attr]
+                if self._proxy is None:
+                    return
+                self._proxy.deactivate()
                 await self._rw.release()
                 self._rw = None
                 self._proxy = None

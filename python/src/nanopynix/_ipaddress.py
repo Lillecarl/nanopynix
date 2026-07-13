@@ -22,7 +22,7 @@ def _address_to_dict(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> dic
     }
     if isinstance(addr, ipaddress.IPv4Address):
         d["isBroadcast"] = addr.is_multicast
-    elif isinstance(addr, ipaddress.IPv6Address):
+    else:
         d["isSiteLocal"] = addr.is_site_local
         d["ipv4Mapped"] = str(addr.ipv4_mapped) if addr.ipv4_mapped else None
     return d
@@ -51,7 +51,7 @@ def _network_to_dict(net: ipaddress.IPv4Network | ipaddress.IPv6Network) -> dict
     }
     if isinstance(net, ipaddress.IPv4Network):
         d["broadcastAddress"] = str(net.broadcast_address)
-    elif isinstance(net, ipaddress.IPv6Network):
+    else:
         d["isSiteLocal"] = net.is_site_local
     return d
 

@@ -273,9 +273,8 @@ def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None
         return NixSettings()
     if isinstance(settings, NixSettings):
         return settings
-    if isinstance(settings, str | os.PathLike):
+    else:
         return NixSettings.from_file(settings)
-    raise TypeError("settings must be a NixSettings instance, an anyio.Path/path-like config file, or None")
 
 
 def list_settings_metadata() -> dict[str, NixSettingMetadata]:
