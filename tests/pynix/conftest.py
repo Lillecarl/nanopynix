@@ -507,7 +507,7 @@ def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
 
     old_session = nanopynix.Session
 
-    class VerboseSession(old_session):  # type: ignore[reportUnknownBaseType] -- old_session is a C++ nanobind type, no stubs
+    class VerboseSession(old_session):
         def __init__(self, *args: object, **kwargs: object) -> None:
             kwargs.setdefault("verbosity", verbosity)
             super().__init__(*args, **kwargs)
@@ -516,7 +516,7 @@ def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
     try:
         yield
     finally:
-        nanopynix.Session = old_session  # type: ignore[reportUnknownMemberType] -- nanopynix has no stubs
+        nanopynix.Session = old_session
 
 
 @contextlib.contextmanager

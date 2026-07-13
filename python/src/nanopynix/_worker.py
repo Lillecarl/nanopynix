@@ -51,6 +51,8 @@ import nanopynix_util
 from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix._handle_registry import HandleRegistry
 from nanopynix._worker_eval import EvalServiceHandler
+from nanopynix._worker_nix import NixThreadExecutor
+from nanopynix._worker_primop import ThreadedRpcPrimopBridge
 from nanopynix._worker_store import StoreServiceHandler
 from nanopynix.logging import LogCollector
 from nanopynix.models import PrimOpSpec
@@ -162,8 +164,8 @@ class WorkerState:
         self.collector: LogCollector | None = None
         self.log_task: asyncio.Task[None] | None = None
         self.handles: HandleRegistry = HandleRegistry()
-        self.executor: Any = None
-        self.rpc_bridge: Any = None
+        self.executor: NixThreadExecutor | None = None
+        self.rpc_bridge: ThreadedRpcPrimopBridge | None = None
         self.eval_store_handle: int | None = None
         self.nix_path: list[str] = []
 
@@ -237,7 +239,7 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
         assert self._state.executor is not None  # set by worker_service_factory before init
-        store_handle, uri, store_dir = await self._state.executor.run(self._open_store, message.uri)  # type: ignore[reportUnknownMemberType] -- executor is Any, no stubs for NixThreadExecutor
+        store_handle, uri, store_dir = await self._state.executor.run(self._open_store, message.uri)
         return OpenStoreResponse(
             store_handle=store_handle,
             uri=uri,
@@ -258,7 +260,7 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
         assert self._state.executor is not None  # set by worker_service_factory before init
-        await self._state.executor.run(self._state.handles.release, message.store_handle)  # type: ignore[reportUnknownMemberType] -- executor is Any, no stubs for NixThreadExecutor
+        await self._state.executor.run(self._state.handles.release, message.store_handle)
         return CloseStoreResponse()
 
     async def subscribe_logs(self, message: SubscribeLogsRequest) -> AsyncIterator[LogEvent]:
@@ -289,9 +291,9 @@ class WorkerServiceHandler(WorkerServiceBase):
         if collector is not None:
             collector.close()
         if self._state.rpc_bridge is not None:
-            self._state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- rpc_bridge is Any, no stubs for ThreadedRpcPrimopBridge
+            self._state.rpc_bridge.stop()
         if self._state.executor is not None:
-            self._state.executor.shutdown(wait=False)  # type: ignore[reportUnknownMemberType] -- executor is Any, no stubs for NixThreadExecutor
+            self._state.executor.shutdown(wait=False)
         return ShutdownResponse()
 
 
@@ -319,16 +321,12 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
     state = WorkerState()
     state.collector = collector
 
-    from nanopynix._worker_nix import NixThreadExecutor
-
-    state.executor = NixThreadExecutor()  # type: ignore[reportUnknownVariableType] -- NixThreadExecutor has no type stubs
+    state.executor = NixThreadExecutor()
 
     if backchannel is not None:
-        from nanopynix._worker_primop import ThreadedRpcPrimopBridge  # type: ignore[reportPrivateUsage] -- internal module, required for primop bridge
-
         loop = asyncio.get_running_loop()
-        bridge = ThreadedRpcPrimopBridge(backchannel, loop)  # type: ignore[reportUnknownVariableType] -- ThreadedRpcPrimopBridge has no type stubs
-        bridge.start()  # type: ignore[reportUnknownMemberType] -- bridge is Any, no stubs
+        bridge = ThreadedRpcPrimopBridge(backchannel, loop)
+        bridge.start()
         state.rpc_bridge = bridge
 
     return cast(

@@ -1,15 +1,12 @@
 """Typed Nix configuration models."""
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# nanopynix_* C++ nanobind extension calls lack type stubs.
-
 from __future__ import annotations
 
 import json
 import os
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -154,6 +151,7 @@ class NixSettings(BaseModel):
     def from_file(cls, path: os.PathLike[str] | str) -> NixSettings:
         config_path = Path(os.fspath(path))
         text = config_path.read_text()
+        raw: object
         if config_path.suffix == ".json":
             raw = json.loads(text)
         elif config_path.suffix == ".toml":
@@ -321,7 +319,8 @@ def check_all_settings_model_drift(*, include_optional: bool = False) -> dict[st
 def _settings_metadata_from_raw(raw: object) -> dict[str, NixSettingMetadata]:
     if not isinstance(raw, dict):
         raise TypeError("Nix returned non-object settings metadata")
-    return {str(key): NixSettingMetadata.model_validate(value) for key, value in raw.items()}  # type: ignore[reportUnknownArgumentType] -- raw is dict[Any, Any] from nanobind JSON
+    typed_raw = cast("dict[str, object]", raw)
+    return {key: NixSettingMetadata.model_validate(value) for key, value in typed_raw.items()}
 
 
 def _metadata_for_surface(surface: SettingsSurface) -> dict[str, NixSettingMetadata]:
@@ -365,7 +364,9 @@ def _render_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, dict):
-        return " ".join(f"{key}={item}" for key, item in value.items())
+        typed_value = cast("dict[object, object]", value)
+        return " ".join(f"{key}={item}" for key, item in typed_value.items())
     if isinstance(value, list):
-        return " ".join(str(item) for item in value)  # type: ignore[reportUnknownArgumentType] -- value is list[Unknown] from Any input
+        typed_value = cast("list[object]", value)
+        return " ".join(str(item) for item in typed_value)
     return str(value)
