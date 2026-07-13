@@ -8,7 +8,7 @@ import structlog
 from clypi import Command, Positional, arg
 from rich.console import Console
 
-from pynix._util import prepare_sys_path
+from pynix._util import forward_nix_logs, prepare_sys_path
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -30,7 +30,7 @@ class PathInfo(Command):
 
         import nanopynix
 
-        async with nanopynix.Session() as nix, nix.store(self.store) as store:
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             try:
                 info: PathInfoProto = await store.query_path_info(QueryPathInfoRequest(path=self.path))
             except Exception as exc:

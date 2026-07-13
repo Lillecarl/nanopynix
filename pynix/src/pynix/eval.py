@@ -9,7 +9,7 @@ import structlog
 from clypi import Command, arg
 from rich.console import Console
 
-from pynix._util import prepare_sys_path
+from pynix._util import forward_nix_logs, prepare_sys_path
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -40,7 +40,12 @@ class Eval(Command):
             expr = sys.stdin.read()
             logger.info("reading expression from stdin")
 
-        async with nanopynix.Session() as nix, nix.store(self.store) as store, nix.eval(store) as session:
+        async with (
+            nanopynix.Session() as nix,
+            forward_nix_logs(nix),
+            nix.store(self.store) as store,
+            nix.eval(store) as session,
+        ):
             root = await session.string(expr)
             value = await root.force_json()
             result = json.dumps(value, sort_keys=True, indent=2)
