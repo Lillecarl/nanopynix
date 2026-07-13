@@ -17,7 +17,6 @@ from . import wire
 from .config import ExternalUnixStoreSpec, HTTPBinaryCacheSpec, LocalSocketStoreSpec, PynixdSettings
 from .context import PynixdContext
 from .http_server import PynixdHttpServer
-from .nix_config import merge_builder_frontend
 from .reverse_client import ReverseInitiator
 from .reverse_server import start_reverse_acceptor
 from .scheduler import Scheduler
@@ -123,8 +122,6 @@ class Server:
             stores[StoreId("local")] = spec.to_store(str(StoreId("local")))
 
         local_store = stores[StoreId("local")]
-        if isinstance(local_store, LocalStore):
-            self._configure_builder_frontend(local_store, settings.unix_path)
 
         existing_http_urls = {
             store.url.rstrip("/") for store in stores.values() if isinstance(store, HTTPBinaryCacheStore)
@@ -172,35 +169,6 @@ class Server:
         self.https_bound_port: int | None = None
         self._started = False
         self._done_event = anyio.Event()
-
-    @staticmethod
-    def _configure_builder_frontend(local_store: LocalStore, unix_path: Path | None) -> None:
-        if unix_path is None:
-            return
-
-        user_config = local_store.nix_config
-        merged = merge_builder_frontend(user_config, unix_path)
-        rendered = merged.to_nix_conf()
-        extra_env = dict(local_store.extra_env)
-        existing = extra_env.get("NIX_CONFIG")
-        if user_config is not None and existing is not None:
-            existing_stripped = existing.strip()
-            if existing_stripped in {
-                user_config.to_nix_conf().strip(),
-                user_config.to_nix_config_env().strip(),
-            }:
-                existing = None
-        extra_env["NIX_CONFIG"] = f"{existing}\n{rendered}" if existing else rendered
-        local_store.nix_config = merged
-        local_store.extra_env = extra_env
-
-        log.info(
-            "builder_frontend_configured",
-            store_id=local_store.store_id,
-            unix_path=str(unix_path),
-            max_jobs=merged.max_jobs,
-            builders=merged.builders,
-        )
 
     @staticmethod
     def _ensure_unix_socket_parent(socket_path: Path) -> None:

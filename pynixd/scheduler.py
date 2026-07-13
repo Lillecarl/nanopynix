@@ -25,7 +25,7 @@ import structlog
 from anyio import to_thread
 
 from . import metrics
-from .allocator import BuildAllocator, TelemetryStoreRanker
+from .allocator import BuildAllocator, RankedStore, TelemetryStoreRanker
 from .build_queue import BuildQueue, QueuedBuild
 from .exceptions import BackendError, InfrastructureError, ResourceExhaustedError
 from .serde import LogNext, QueryValidPathsRequest
@@ -319,12 +319,21 @@ class Scheduler:
                 override_in_flight=override_in_flight,
             )
 
-            if not ranked and not self._has_compatible_store(build, build_features):
+            local_store = self.local_store
+            local_is_fallback = (
+                not ranked
+                and local_store.is_healthy
+                and not local_store.draining
+                and not build.is_blacklisted(local_store.store_id)
+                and local_store.supports_derivation(build.request.derivation.platform, build_features)
+            )
+
+            if not ranked and not local_is_fallback and not self._has_compatible_store(build, build_features):
                 await self._fail_no_compatible_store(build, build_features)
                 continue
 
-            if ranked:
-                rs = next(iter(ranked))
+            if ranked or local_is_fallback:
+                rs = next(iter(ranked)) if ranked else RankedStore(local_store.store_id, 0.0, local_store)
                 log.debug(
                     "build_assigned_to_store",
                     build_id=build.build_id,

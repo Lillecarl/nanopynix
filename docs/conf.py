@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 project = "pynixd"
-copyright = "2025, Carl Andersson"
+copyright = "2025, Carl Andersson"  # noqa: A001 - required Sphinx config name
 author = "Carl Andersson"
 
 extensions = [

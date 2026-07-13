@@ -199,9 +199,10 @@ class QueuedBuild:
         """Send raw bytes to a subscriber, removing it on failure."""
         try:
             await sub.send_raw(raw)
-            return None
         except (OSError, BrokenPipeError, ConnectionResetError):
             return sub
+        else:
+            return None
 
     async def post_log_bytes(self, raw: bytes) -> None:
         """Fan out raw log bytes to all subscribers via TaskGroup.

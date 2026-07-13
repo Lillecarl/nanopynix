@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, cast
 import anyio
 import pytest
 
-from pynixd.derived_path import DerivedPath
 from pynixd.goals.engine import GoalEngine
 from pynixd.goals.goal import Goal
 from pynixd.goals.requests import BuildPathsWithResultsGoal
@@ -16,8 +15,8 @@ from pynixd.goals.results import GoalResult, goal_failure, goal_success
 from pynixd.serde import (
     BuildMode,
     BuildPathsRequest,
-    BuildPathsWithResultsResponse,
     BuildPathsWithResultsRequest,
+    BuildPathsWithResultsResponse,
     BuildResultStatus,
 )
 from pynixd.serde import DerivedPath as SerdeDerivedPath
@@ -26,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from pynixd.connection import ClientConn
+    from pynixd.derived_path import DerivedPath
 
 
 class FakeEnsureGoal(Goal[GoalResult]):

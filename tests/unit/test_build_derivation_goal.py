@@ -10,7 +10,6 @@ import pytest
 
 from pynixd.connection import ClientConn
 from pynixd.goals.build_derivation import BuildDerivationGoal
-from pynixd.goals.engine import GoalEngine
 from pynixd.serde import (
     BasicDerivation,
     BuildDerivationRequest,
@@ -25,6 +24,7 @@ from pynixd.wire import BytesWriter
 
 if TYPE_CHECKING:
     from pynixd.context import PynixdContext
+    from pynixd.goals.engine import GoalEngine
 
 
 class FakeScheduler:

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from pynixd.goals.engine import GoalEngine
 from pynixd.goals.goal import ExecutionGoal, Goal
+
+if TYPE_CHECKING:
+    from pynixd.goals.engine import GoalEngine
 
 
 @dataclass

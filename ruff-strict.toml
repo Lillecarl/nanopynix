@@ -95,7 +95,6 @@ ignore = [
 # annotations, forcing pervasive # noqa: TC001 noise.
 #
 [lint.flake8-type-checking]
-quote-annotations = true
 runtime-evaluated-base-classes = ["pynixd.serde.wire_message.WireModel"]
 # ═══════════════════════════════════════════════════════════════
 # END SHARED
