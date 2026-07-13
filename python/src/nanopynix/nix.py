@@ -36,6 +36,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
     from os import PathLike
 
+    from nanopynix._pool import _Subscription  # type: ignore[reportPrivateUsage] -- type of _WorkerManager.subscribe result
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,7 +51,7 @@ class LogCapture:
 
     def __init__(self, manager: _WorkerManager) -> None:
         self._manager = manager
-        self._sub: Any = None
+        self._sub: _Subscription | None = None
         self.events: list[LogEvent] = []
 
     async def __aenter__(self) -> LogCapture:
@@ -64,7 +66,7 @@ class LogCapture:
 
     async def __aexit__(self, *args: object) -> None:
         if self._sub is not None:
-            self._sub.unsubscribe()  # type: ignore[reportUnknownMemberType] -- subscription handle type from worker manager, no stubs
+            self._sub.unsubscribe()
             self._sub = None
 
 
