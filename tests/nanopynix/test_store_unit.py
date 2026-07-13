@@ -12,9 +12,11 @@ from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddPermRootRequest,
     AddTempRootRequest,
+    AddToStoreRequest,
     BuildPathsWithResultsRequest,
     CollectGarbageRequest,
     ComputeFsClosureRequest,
+    ComputeStorePathRequest,
     EnsurePathRequest,
     FindRootsRequest,
     FollowLinksToStorePathRequest,
@@ -73,6 +75,8 @@ def _make_stub_mock() -> MagicMock:
     stub.optimise_store = AsyncMock()
     stub.verify_store = AsyncMock()
     stub.get_build_log = AsyncMock()
+    stub.add_to_store = AsyncMock()
+    stub.compute_store_path = AsyncMock()
     stub.fetch_from_url = AsyncMock()
     stub.fetch_from_attrs = AsyncMock()
     return stub
@@ -200,6 +204,30 @@ class TestIdentity:
         result = await store.get_build_log(GetBuildLogRequest(path="/nix/store/aaa-bbb"))
         assert result.log == "hello log\n"
         pool._store_stub.get_build_log.assert_awaited_once()
+
+    async def test_add_to_store_injects_store_handle(self, store, pool):
+        pool._store_stub.add_to_store.return_value = _mock_store_path("aaa-added", "aaa", "added")
+        store._store_handle = 123
+        request = AddToStoreRequest(path="/tmp/source", name="source", method="nar", hash_algo="sha256")
+
+        result = await store.add_to_store(request)
+
+        assert result.to_string == "aaa-added"
+        pool._store_stub.add_to_store.assert_awaited_once()
+        sent = pool._store_stub.add_to_store.await_args.args[0]
+        assert sent.store_handle == 123
+
+    async def test_compute_store_path_injects_store_handle(self, store, pool):
+        pool._store_stub.compute_store_path.return_value = _mock_store_path("bbb-added", "bbb", "added")
+        store._store_handle = 456
+        request = ComputeStorePathRequest(path="/tmp/source", method="flat", hash_algo="sha256")
+
+        result = await store.compute_store_path(request)
+
+        assert result.to_string == "bbb-added"
+        pool._store_stub.compute_store_path.assert_awaited_once()
+        sent = pool._store_stub.compute_store_path.await_args.args[0]
+        assert sent.store_handle == 456
 
 
 # ════════════════════════════════════════════════════════════════════

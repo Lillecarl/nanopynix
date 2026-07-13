@@ -13,6 +13,8 @@ from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddPermRootRequest,
     AddTempRootRequest,
+    AddToStoreRequest,
+    ComputeStorePathRequest,
     CollectGarbageRequest,
     ComputeFsClosureRequest,
     EnsurePathRequest,
@@ -424,6 +426,70 @@ class Ls(Command):
             sys.stdout.write("\n")
 
 
+class Add(Command):
+    """Add a file or directory to a Nix store"""
+
+    path: Positional[str] = arg(help="Filesystem path to add.")
+    name: str | None = arg(None, short="n", help="Override the store path name component.")
+    mode: str = arg("nar", help="Content-addressing method: nar, flat, or git.")
+    hash_algo: str = arg("sha256", help="Hash algorithm to use.")
+    dry_run: bool = arg(False, help="Compute the store path without adding the content.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+
+    @override
+    async def run(self) -> None:
+        await _add_to_store(
+            path=self.path,
+            name=self.name,
+            method=self.mode,
+            hash_algo=self.hash_algo,
+            dry_run=self.dry_run,
+            store_uri=self.store,
+        )
+
+
+class AddFile(Command):
+    """Add a single file to a Nix store"""
+
+    path: Positional[str] = arg(help="Filesystem path to add.")
+    name: str | None = arg(None, short="n", help="Override the store path name component.")
+    hash_algo: str = arg("sha256", help="Hash algorithm to use.")
+    dry_run: bool = arg(False, help="Compute the store path without adding the content.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+
+    @override
+    async def run(self) -> None:
+        await _add_to_store(
+            path=self.path,
+            name=self.name,
+            method="flat",
+            hash_algo=self.hash_algo,
+            dry_run=self.dry_run,
+            store_uri=self.store,
+        )
+
+
+class AddPath(Command):
+    """Add a path to a Nix store using NAR ingestion"""
+
+    path: Positional[str] = arg(help="Filesystem path to add.")
+    name: str | None = arg(None, short="n", help="Override the store path name component.")
+    hash_algo: str = arg("sha256", help="Hash algorithm to use.")
+    dry_run: bool = arg(False, help="Compute the store path without adding the content.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+
+    @override
+    async def run(self) -> None:
+        await _add_to_store(
+            path=self.path,
+            name=self.name,
+            method="nar",
+            hash_algo=self.hash_algo,
+            dry_run=self.dry_run,
+            store_uri=self.store,
+        )
+
+
 class DiffClosures(Command):
     """Compare two filesystem closures"""
 
@@ -515,6 +581,9 @@ class Store(Command):
         | EnsurePath
         | Cat
         | Ls
+        | Add
+        | AddFile
+        | AddPath
         | DiffClosures
         | Optimise
         | Verify
@@ -537,6 +606,30 @@ def _print_json(obj: object) -> None:
 
 def _print_paths(paths: Iterable[Any]) -> None:
     _print_json({"paths": [_format_store_path(path.base_name) for path in paths]})
+
+
+async def _add_to_store(
+    *,
+    path: str,
+    name: str | None,
+    method: str,
+    hash_algo: str,
+    dry_run: bool,
+    store_uri: str,
+) -> None:
+    prepare_sys_path()
+    import nanopynix
+
+    async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(store_uri) as store:
+        if dry_run:
+            response = await store.compute_store_path(
+                ComputeStorePathRequest(path=path, name=name, method=method, hash_algo=hash_algo)
+            )
+        else:
+            response = await store.add_to_store(
+                AddToStoreRequest(path=path, name=name, method=method, hash_algo=hash_algo)
+            )
+        _print_json({"path": _format_store_path(response.base_name)})
 
 
 async def _resolve_local_store_path(store: Any, store_uri: str, path: str) -> Path:
