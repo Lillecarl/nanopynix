@@ -14,6 +14,8 @@
 #include <nix/fetchers/fetchers.hh>
 #include <nix/store/store-api.hh>
 
+#include <nlohmann/json.hpp>
+
 #include "attrs_util.hh"
 
 #include "py_value.hh"
@@ -224,6 +226,10 @@ NB_MODULE(nanopynix_flake, m) {
           "write_lock_file"_a = true,
           nb::keep_alive<0, 1>(),
           "Lock and evaluate a flake, returning its outputs as a Value");
+    m.def("list_flake_settings_metadata_json", []() {
+        nix::flake::Settings flakeSettings;
+        return flakeSettings.toJSON().dump();
+    });
 
     bind_flake_ref(m);
     bind_locked_flake(m);

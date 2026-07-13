@@ -10,6 +10,8 @@
 #include <nix/fetchers/attrs.hh>
 #include <nix/store/store-api.hh>
 
+#include <nlohmann/json.hpp>
+
 #include "attrs_util.hh"
 
 namespace nb = nanobind;
@@ -78,6 +80,10 @@ NB_MODULE(nanopynix_fetchers, m) {
           "Create an Input from a URL (e.g. 'github:NixOS/nixpkgs')");
     m.def("input_from_attrs", &input_from_attrs, "attrs"_a,
           "Create an Input from a dict of attributes");
+    m.def("list_fetch_settings_metadata_json", []() {
+        nix::fetchers::Settings fetchSettings;
+        return fetchSettings.toJSON().dump();
+    });
 
     bind_input(m);
 }

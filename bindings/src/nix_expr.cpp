@@ -659,6 +659,11 @@ NB_MODULE(nanopynix_expr, m) {
         auto entries = nix::EvalSettings::parseNixPath(env);
         return {entries.begin(), entries.end()};
     });
+    m.def("list_eval_settings_metadata_json", []() {
+        bool readOnlyMode = false;
+        nix::EvalSettings evalSettings{readOnlyMode};
+        return evalSettings.toJSON().dump();
+    });
     m.def("eval_file", &eval_file_impl, "state"_a, "path"_a);
     m.def("register_primop", &register_primop,
           "name"_a, "arity"_a, "arg_names"_a, "doc"_a, "callback"_a,

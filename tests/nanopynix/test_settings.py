@@ -8,9 +8,13 @@ from pydantic import ValidationError
 
 from nanopynix import Session
 from nanopynix.settings import (
+    NixEvalSettings,
+    NixFetchSettings,
+    NixFlakeSettings,
     NixSettingMetadata,
     NixSettings,
     NixSettingsEnv,
+    check_all_settings_model_drift,
     check_settings_model_drift,
 )
 
@@ -69,6 +73,40 @@ def test_settings_drift_reports_missing_and_extra() -> None:
     assert "new-from-nix" in drift.missing
     assert "show-trace" in drift.extra
     assert not drift.ok
+
+
+def test_eval_settings_accepts_nix_aliases() -> None:
+    settings = NixEvalSettings.model_validate(
+        {
+            "allow-import-from-derivation": False,
+            "debugger-on-warn": True,
+            "nix-path": ["nixpkgs=/tmp/nixpkgs"],
+        }
+    )
+
+    assert settings.allow_import_from_derivation is False
+    assert settings.debugger_on_warn is True
+    assert settings.nix_path == ["nixpkgs=/tmp/nixpkgs"]
+
+
+def test_fetch_settings_accepts_string_map() -> None:
+    settings = NixFetchSettings.model_validate({"access-tokens": {"github.com": "token"}, "warn-dirty": False})
+
+    assert settings.access_tokens == {"github.com": "token"}
+    assert settings.warn_dirty is False
+
+
+def test_flake_settings_accepts_nix_aliases() -> None:
+    settings = NixFlakeSettings.model_validate({"accept-flake-config": True, "use-registries": False})
+
+    assert settings.accept_flake_config is True
+    assert settings.use_registries is False
+
+
+def test_optional_settings_drift_is_not_checked_by_default() -> None:
+    drift = check_all_settings_model_drift()
+
+    assert set(drift) == {"global"}
 
 
 def test_session_defaults_to_flakes_and_nix_command() -> None:

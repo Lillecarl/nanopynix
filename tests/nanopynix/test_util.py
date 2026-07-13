@@ -48,6 +48,13 @@ class TestSettings:
         assert drift.missing == []
         assert drift.extra == []
 
+    def test_optional_settings_models_match_their_surfaces(self):
+        drift = nanopynix.check_all_settings_model_drift(include_optional=True)
+        assert set(drift) == {"global", "eval", "fetch", "flake"}
+        for surface_drift in drift.values():
+            assert surface_drift.missing == []
+            assert surface_drift.extra == []
+
 
 class TestExperimentalFeatures:
     def test_enable_flakes(self):
