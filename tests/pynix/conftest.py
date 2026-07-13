@@ -501,10 +501,10 @@ def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
 
     old_session = nanopynix.Session  # type: ignore[reportUnknownMemberType]  # nanopynix C++/nanobind extension without full stubs
 
-    class VerboseSession(old_session):  # type: ignore[reportUnknownVariableType]  # old_session type unknown from C++ extension
+    class VerboseSession(old_session):  # type: ignore[reportUnknownVariableType, reportUnknownBaseType]  # old_session type unknown from C++ extension
         def __init__(self, *args: object, **kwargs: object) -> None:
             kwargs.setdefault("verbosity", verbosity)
-            super().__init__(*args, **kwargs)
+            super().__init__(*args, **kwargs)  # type: ignore[reportUnknownMemberType]  # super() base is C++ nanobind type, no stubs
 
     nanopynix.Session = VerboseSession  # type: ignore[reportUnknownMemberType]  # nanopynix has no stubs
     try:

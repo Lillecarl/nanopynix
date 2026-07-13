@@ -17,7 +17,7 @@ _JsonValue = TypeAdapter(JsonValue)
 
 
 def _yaml12_loader() -> type[Any]:
-    class Loader(yaml.SafeLoader):
+    class Loader(yaml.SafeLoader):  # type: ignore[reportUnknownBaseType]  # PyYAML stubs may be incomplete
         pass
 
     legacy_tags = {
@@ -25,22 +25,22 @@ def _yaml12_loader() -> type[Any]:
         "tag:yaml.org,2002:float",
         "tag:yaml.org,2002:int",
     }
-    Loader.yaml_implicit_resolvers = {
+    Loader.yaml_implicit_resolvers = {  # type: ignore[reportUnknownMemberType]  # yaml_implicit_resolvers class attribute not in stubs
         ch: [(tag, regexp) for tag, regexp in resolvers if tag not in legacy_tags]
-        for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+        for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()  # type: ignore[reportUnknownMemberType]  # yaml_implicit_resolvers not in stubs
     }
 
-    Loader.add_implicit_resolver(
+    Loader.add_implicit_resolver(  # type: ignore[reportUnknownMemberType]  # yaml.Loader methods may not have complete stubs
         "tag:yaml.org,2002:bool",
         re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
         list("tTfF"),
     )
-    Loader.add_implicit_resolver(
+    Loader.add_implicit_resolver(  # type: ignore[reportUnknownMemberType]  # yaml.Loader methods may not have complete stubs
         "tag:yaml.org,2002:int",
         re.compile(r"^[-+]?(?:[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$"),
         list("-+0123456789"),
     )
-    Loader.add_implicit_resolver(
+    Loader.add_implicit_resolver(  # type: ignore[reportUnknownMemberType]  # yaml.Loader methods may not have complete stubs
         "tag:yaml.org,2002:float",
         re.compile(
             r"""^(?:[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+]?[0-9]+)?
@@ -51,7 +51,7 @@ def _yaml12_loader() -> type[Any]:
         ),
         list("-+0123456789."),
     )
-    Loader.add_constructor("tag:yaml.org,2002:int", _construct_yaml12_int)
+    Loader.add_constructor("tag:yaml.org,2002:int", _construct_yaml12_int)  # type: ignore[reportUnknownMemberType]  # yaml.Loader methods may not have complete stubs
     return Loader
 
 
@@ -94,7 +94,7 @@ def _parse_error_message(exc: Exception) -> str:
         return str(exc)
     if mark is None:
         return str(problem)
-    return f"{problem} at line {mark.line + 1}, column {mark.column + 1}"
+    return f"{problem} at line {mark.line + 1}, column {mark.column + 1}"  # type: ignore[reportUnknownMemberType]  # mark is Any from getattr on yaml exception
 
 
 def from_yaml(source: str) -> JsonValue:

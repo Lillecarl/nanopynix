@@ -60,7 +60,7 @@ def _install_generated_service_methods(
 
     for method_name in sorted(expected):
         method = getattr(service_base, method_name)
-        response_type = get_type_hints(method)["return"]
+        response_type: type[Message] = get_type_hints(method)["return"]  # type: ignore[reportArgumentType]  # method is Any from getattr on service_base
         setattr(
             cls,
             method_name,
@@ -88,7 +88,7 @@ def _make_service_forwarder(
             if isinstance(raw, response_type):
                 return raw
             if isinstance(raw, Mapping):
-                return response_type.from_dict(_proto_shape(raw))
+                return response_type.from_dict(_proto_shape(raw))  # type: ignore[reportUnknownMemberType]  # betterproto2 Message stubs may be incomplete
             raise TypeError(f"{binding_method_name} returned {type(raw).__name__}, expected proto-shaped mapping")
 
         _forward_nix.__name__ = method_name
@@ -99,7 +99,7 @@ def _make_service_forwarder(
         if isinstance(raw, response_type):
             return raw
         if isinstance(raw, Mapping):
-            return response_type.from_dict(_proto_shape(raw))
+            return response_type.from_dict(_proto_shape(raw))  # type: ignore[reportUnknownMemberType]  # betterproto2 Message stubs may be incomplete
         raise TypeError(f"{binding_method_name} returned {type(raw).__name__}, expected proto-shaped mapping")
 
     _forward.__name__ = method_name

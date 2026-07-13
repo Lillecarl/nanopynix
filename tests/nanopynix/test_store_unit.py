@@ -219,7 +219,7 @@ class TestIdentity:
 
         assert result.to_string == "aaa-added"
         pool._store_stub.add_to_store.assert_awaited_once()  # type: ignore[reportPrivateUsage]  # test accesses private stub
-        sent = pool._store_stub.add_to_store.await_args.args[0]  # type: ignore[reportPrivateUsage]  # test inspects stub call args
+        sent = pool._store_stub.add_to_store.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript]  # test inspects stub call args; await_args may be None
         assert sent.store_handle == 123
 
     async def test_compute_store_path_injects_store_handle(self, store: Store, pool: MagicMock):
@@ -231,7 +231,7 @@ class TestIdentity:
 
         assert result.to_string == "bbb-added"
         pool._store_stub.compute_store_path.assert_awaited_once()  # type: ignore[reportPrivateUsage]  # test accesses private stub
-        sent = pool._store_stub.compute_store_path.await_args.args[0]  # type: ignore[reportPrivateUsage]  # test inspects stub call args
+        sent = pool._store_stub.compute_store_path.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript]  # test inspects stub call args; await_args may be None
         assert sent.store_handle == 456
 
 

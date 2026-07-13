@@ -69,7 +69,8 @@ async def test_scenario_builds_local_derivation_and_forwards_logs(
     assert scenario.physical_path(log_path).read_text() == "log-output\n"  # type: ignore[reportUnknownMemberType]  # physical_path() return type not traced through fixture chain
     assert scenario.last_logs is not None
     assert any(
-        entry.get("event") == "nix build log" and entry.get("message") == "pynix-log-line"  # type: ignore[reportUnknownMemberType]  # entry type unresolved through fixture chain
+        entry.get("event") == "nix build log"  # type: ignore[reportUnknownMemberType]  # entry type unresolved through fixture chain
+        and entry.get("message") == "pynix-log-line"  # type: ignore[reportUnknownMemberType]  # entry type unresolved through fixture chain
         for entry in scenario.last_logs
     )
 
@@ -151,7 +152,7 @@ async def test_scenario_builds_hello_unfree_locally_and_forwards_logs(
     assert scenario.last_logs is not None
     assert any(
         entry.get("event") == "nix log"  # type: ignore[reportUnknownMemberType]  # entry type unresolved through fixture chain
-        and isinstance(entry.get("message"), str)
+        and isinstance(entry.get("message"), str)  # type: ignore[reportUnknownMemberType]  # entry type unresolved through fixture chain
         and "building derivation" in entry["message"]  # type: ignore[reportUnknownMemberType]  # entry type from fixture chain
         for entry in scenario.last_logs
     )

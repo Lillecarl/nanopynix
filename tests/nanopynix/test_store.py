@@ -1,5 +1,8 @@
 """Tests for nanopynix_store (StorePath, Store, BuildResult, PathInfo)."""
 
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# nanopynix_store is a C++ nanobind extension without type stubs.
+
 from __future__ import annotations
 
 import os
@@ -9,7 +12,7 @@ from typing import Any
 import nanopynix_store
 
 
-def _bash_sp():
+def _bash_sp() -> nanopynix_store.StorePath:
     """Return a StorePath for the system bash binary.  Requires NixOS."""
     bash = os.readlink("/run/current-system/sw/bin/bash")  # noqa: PTH115
     bash_basename = bash.split("/nix/store/")[1].split("/")[0]

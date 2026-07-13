@@ -3,6 +3,9 @@
 No Nix daemon needed — exercises error paths and edge cases.
 """
 
+# pyright: reportPrivateUsage=false
+# The entire file exercises pool/session internals via mock access.
+
 from __future__ import annotations
 
 import asyncio
@@ -294,7 +297,7 @@ class TestSessionEvalFacade:
     def _session(self) -> Session:
         session = object.__new__(Session)
         session._manager = _mock_pool()  # type: ignore[reportPrivateUsage]
-        session._session_id = "session-id"
+        session._session_id = "session-id"  # type: ignore[reportPrivateUsage]
         return session
 
     def _store(self, session_id: str = "session-id", handle: int = 42) -> StoreHandle:
@@ -895,14 +898,14 @@ class TestReservedWorker:
         manager = MagicMock(spec=_WorkerManager)
         manager._eval_stub = _make_eval_stub()
         rw = ReservedWorker(manager)
-        assert rw._eval_stub is manager._eval_stub
+        assert rw._eval_stub is manager._eval_stub  # type: ignore[reportPrivateUsage] -- cross-class access in test
 
     async def test_store_stub_property_delegates(self):
         """ReservedWorker._store_stub delegates to manager._store_stub."""
         manager = MagicMock(spec=_WorkerManager)
         manager._store_stub = MagicMock()
         rw = ReservedWorker(manager)
-        assert rw._store_stub is manager._store_stub
+        assert rw._store_stub is manager._store_stub  # type: ignore[reportPrivateUsage] -- cross-class access in test
 
     async def test_call_serializes_reserved_worker_rpcs(self):
         """Concurrent calls through one reserved worker run one at a time."""
