@@ -50,6 +50,7 @@ struct PyValue {
     bool has_attr(const std::string &name) const;
     PyValue attr_get(const std::string &name) const;
 
+    PyValue auto_call();
     PyValue call(PyValue arg);
 
     std::string repr();

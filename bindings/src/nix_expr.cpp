@@ -127,6 +127,15 @@ PyValue PyValue::attr_get(const std::string &name) const {
     throw std::runtime_error("attribute '" + name + "' not found");
 }
 
+PyValue PyValue::auto_call() {
+    auto *es = evalState();
+    auto *result = es->allocValue();
+    auto attrs = es->buildBindings(0);
+    es->autoCallFunction(*attrs.alreadySorted(), *checkedValue(), *result);
+    es->forceValue(*result, nix::noPos);
+    return PyValue(result, eval, eval_alive);
+}
+
 PyValue PyValue::call(PyValue arg) {
     auto *es = evalState();
     auto *result = es->allocValue();
@@ -612,6 +621,7 @@ static void bind_value(nb::module_ &m) {
         .def("attr_names", &PyValue::attr_names)
         .def("has_attr", &PyValue::has_attr, "name"_a)
         .def("attr_get", &PyValue::attr_get, "name"_a, nb::keep_alive<0, 1>())
+        .def("auto_call", &PyValue::auto_call, nb::keep_alive<0, 1>())
         .def("call", &PyValue::call, "arg"_a, nb::keep_alive<0, 1>())
         .def("to_python", &PyValue::to_python)
         .def("to_json", &PyValue::to_json, "copy_to_store"_a = false)

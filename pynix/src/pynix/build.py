@@ -12,6 +12,7 @@ from rich.console import Console
 from pynix._util import forward_nix_logs, prepare_sys_path
 
 console = Console()
+error_console = Console(stderr=True)
 logger = structlog.get_logger("pynix.build")
 
 _DEFAULT_SUBSTITUTERS = "https://cache.nixos.org/"
@@ -49,10 +50,10 @@ class Build(Command):
         import nanopynix
 
         if self.file is None and self.flake is None:
-            console.print("[red]Error:[/red] either --file or --flake is required")
+            error_console.print("[red]Error:[/red] either --file or --flake is required")
             raise SystemExit(1)
         if self.file is not None and self.flake is not None:
-            console.print("[red]Error:[/red] --file and --flake are mutually exclusive")
+            error_console.print("[red]Error:[/red] --file and --flake are mutually exclusive")
             raise SystemExit(1)
 
         settings = nanopynix.NixSettingsEnv(
@@ -61,48 +62,64 @@ class Build(Command):
         )
         async with nanopynix.Session(settings=settings, verbosity=nanopynix.normalize_log_level(self.verbosity)) as nix:
             async with forward_nix_logs(nix, print_build_logs=self.print_build_logs):
-                if self.eval_store is None:
-                    async with nix.store(self.store) as store:
-                        async with nix.eval(store) as session:
+                try:
+                    if self.eval_store is None:
+                        async with nix.store(self.store) as store:
+                            async with nix.eval(store) as session:
+                                logger.info("pynix build evaluating target")
+                                root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
+                                logger.info("pynix build target evaluated")
+                                outputs = await root.build(store=store)
+                                logger.info("pynix build finished")
+                    else:
+                        async with (
+                            nix.store(self.eval_store) as eval_store,
+                            nix.store(self.store) as build_store,
+                            nix.eval(eval_store) as session,
+                        ):
                             logger.info("pynix build evaluating target")
-                            root = await _evaluate_build_target(self, session)
+                            root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
                             logger.info("pynix build target evaluated")
-                            outputs = await root.build(store=store)
+                            outputs = await root.build(store=build_store)
                             logger.info("pynix build finished")
-                else:
-                    async with (
-                        nix.store(self.eval_store) as eval_store,
-                        nix.store(self.store) as build_store,
-                        nix.eval(eval_store) as session,
-                    ):
-                        logger.info("pynix build evaluating target")
-                        root = await _evaluate_build_target(self, session)
-                        logger.info("pynix build target evaluated")
-                        outputs = await root.build(store=build_store)
-                        logger.info("pynix build finished")
+                except BuildTargetError as exc:
+                    error_console.print(f"[red]Error:[/red] {exc}")
+                    raise SystemExit(1) from exc
 
         _print_json({"outputs": outputs})
 
 
-def _navigate(root, attrpath: str):
+class BuildTargetError(RuntimeError):
+    pass
+
+
+async def _navigate(root, attrpath: str, *, attrs_type):
     for part in attrpath.split("."):
+        actual = await root.get_type()
+        if actual != attrs_type:
+            raise BuildTargetError(f"cannot select attribute {part!r} from {actual.name.lower()} value")
+        if not await root.has_attr(part):
+            names = await root.attr_names()
+            available = ", ".join(names[:10])
+            suffix = "" if len(names) <= 10 else f", ... ({len(names)} total)"
+            raise BuildTargetError(f"attribute {part!r} not found; available attributes: {available}{suffix}")
         root = root.attr(part)
     return root
 
 
-async def _evaluate_build_target(command: Build, session):
+async def _evaluate_build_target(command: Build, session, *, attrs_type):
     if command.file is not None:
-        root = await session.file(str(command.file))
+        root = await (await session.file(str(command.file))).auto_call()
         if command.attrpath is not None:
-            root = _navigate(root, command.attrpath)
+            root = await _navigate(root, command.attrpath, attrs_type=attrs_type)
         return root
     if command.flake is None:
-        console.print("[red]Error:[/red] either --file or --flake is required")
+        error_console.print("[red]Error:[/red] either --file or --flake is required")
         raise SystemExit(1)
     base_ref, _, flake_attr = command.flake.partition("#")
     root = await session.eval_flake(base_ref)
     if flake_attr:
-        root = _navigate(root, flake_attr)
+        root = await _navigate(root, flake_attr, attrs_type=attrs_type)
     return root
 
 
