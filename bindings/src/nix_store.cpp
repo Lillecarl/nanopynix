@@ -647,10 +647,11 @@ static nb::dict store_query_path_info(nix::Store &s, const nb::dict &request) {
 
 static nb::dict store_query_path_from_hash_part(
         nix::Store &s, const nb::dict &request) {
+    auto hash_part = request_string(request, "hash_part");
     std::optional<nix::StorePath> path;
     {
         nb::gil_scoped_release release;
-        path = s.queryPathFromHashPart(request_string(request, "hash_part"));
+        path = s.queryPathFromHashPart(hash_part);
     }
     nb::dict d;
     if (path) d["path"] = store_path_to_dict(*path);
@@ -748,10 +749,11 @@ static nb::dict store_build_derivation(nix::Store &s, const nb::dict &request) {
 
 static nb::dict store_follow_links_to_store_path(
         nix::Store &s, const nb::dict &request) {
+    auto input_path = request_string(request, "path");
     std::optional<nix::StorePath> path;
     {
         nb::gil_scoped_release release;
-        path.emplace(s.followLinksToStorePath(request_string(request, "path")));
+        path.emplace(s.followLinksToStorePath(input_path));
     }
     return store_path_to_dict(*path);
 }

@@ -71,6 +71,7 @@ def _validate_document(value: Any, builtin: str) -> JsonValue:
         result: JsonValue = _JsonValue.validate_python(value)  # type: ignore[reportUnknownVariableType] -- TypeAdapter returns Any
     except ValidationError as exc:
         raise ValueError(f"{builtin}: YAML document is not JSON-compatible: {exc}") from exc
+    return result
 
 
 def _validate_documents(values: Iterable[Any], builtin: str) -> list[JsonValue]:

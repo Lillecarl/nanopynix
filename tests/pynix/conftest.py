@@ -355,7 +355,7 @@ def _capture_pynix_test_structlog(  # type: ignore[reportUnusedFunction] -- pyte
 
 @pytest.fixture(scope="module")
 async def nixpkgs_path(repo_root: Path) -> str:
-    stdout = await _run("nix", "eval", "--raw", "--file", str(repo_root), "pkgs.path")
+    stdout = await _run("nix", "eval", "--impure", "--raw", "--file", str(repo_root), "pkgs.path")
     return stdout.decode().strip()
 
 
