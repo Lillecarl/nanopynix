@@ -6,12 +6,15 @@ import json
 import os
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+import nanopynix_expr
+import nanopynix_fetchers
+import nanopynix_flake
 import nanopynix_util
 
 if TYPE_CHECKING:
@@ -19,6 +22,7 @@ if TYPE_CHECKING:
 
 
 DEFAULT_EXPERIMENTAL_FEATURES = ("flakes", "nix-command")
+SettingsSurface: TypeAlias = Literal["global", "eval", "fetch", "flake"]
 
 
 def _alias(field_name: str) -> str:
@@ -185,6 +189,73 @@ class NixSettings(BaseModel):
         return dict(self._iter_set())
 
 
+class NixEvalSettings(BaseModel):
+    """Eval-specific Nix settings not applied through the global store settings path."""
+
+    model_config = ConfigDict(
+        alias_generator=_alias,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    allow_import_from_derivation: bool | None = None
+    allow_unsafe_native_code_during_evaluation: bool | None = None
+    allowed_uris: list[str] | None = None
+    abort_on_warn: bool | None = None
+    debugger_on_trace: bool | None = None
+    debugger_on_warn: bool | None = None
+    eval_attrset_update_layer_rhs_threshold: int | None = None
+    eval_cache: bool | None = None
+    eval_profile_file: str | None = None
+    eval_profiler: str | None = None
+    eval_profiler_frequency: int | None = None
+    eval_system: str | None = None
+    ignore_try: bool | None = None
+    lint_absolute_path_literals: str | None = None
+    lint_short_path_literals: str | None = None
+    lint_url_literals: str | None = None
+    max_call_depth: int | None = None
+    nix_path: list[str] | None = None
+    pure_eval: bool | None = None
+    restrict_eval: bool | None = None
+    trace_function_calls: bool | None = None
+    trace_import_from_derivation: bool | None = None
+    trace_verbose: bool | None = None
+    warn_short_path_literals: bool | None = None
+
+
+class NixFetchSettings(BaseModel):
+    """Fetcher-specific Nix settings."""
+
+    model_config = ConfigDict(
+        alias_generator=_alias,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    access_tokens: dict[str, str] | None = None
+    allow_dirty: bool | None = None
+    allow_dirty_locks: bool | None = None
+    flake_registry: str | None = None
+    tarball_ttl: int | None = None
+    trust_tarballs_from_git_forges: bool | None = None
+    warn_dirty: bool | None = None
+
+
+class NixFlakeSettings(BaseModel):
+    """Flake-specific Nix settings."""
+
+    model_config = ConfigDict(
+        alias_generator=_alias,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    accept_flake_config: bool | None = None
+    commit_lock_file_summary: str | None = None
+    use_registries: bool | None = None
+
+
 class NixSettingsEnv(NixSettings, BaseSettings):
     """Environment-backed Nix settings for command-line tools."""
 
@@ -209,15 +280,73 @@ def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None
 
 def list_settings_metadata() -> dict[str, NixSettingMetadata]:
     raw = json.loads(nanopynix_util.list_settings_metadata_json())
+    return _settings_metadata_from_raw(raw)
+
+
+def list_eval_settings_metadata() -> dict[str, NixSettingMetadata]:
+    raw = json.loads(nanopynix_expr.list_eval_settings_metadata_json())
+    return _settings_metadata_from_raw(raw)
+
+
+def list_fetch_settings_metadata() -> dict[str, NixSettingMetadata]:
+    raw = json.loads(nanopynix_fetchers.list_fetch_settings_metadata_json())
+    return _settings_metadata_from_raw(raw)
+
+
+def list_flake_settings_metadata() -> dict[str, NixSettingMetadata]:
+    raw = json.loads(nanopynix_flake.list_flake_settings_metadata_json())
+    return _settings_metadata_from_raw(raw)
+
+
+def check_settings_model_drift(
+    metadata: Mapping[str, NixSettingMetadata] | None = None,
+    *,
+    surface: SettingsSurface = "global",
+) -> SettingsDrift:
+    if metadata is None:
+        metadata = _metadata_for_surface(surface)
+    known = set(metadata.keys())
+    model = {_alias(name) for name in _model_for_surface(surface).model_fields}
+    return SettingsDrift(missing=sorted(known - model), extra=sorted(model - known))
+
+
+def check_all_settings_model_drift(*, include_optional: bool = False) -> dict[str, SettingsDrift]:
+    surfaces: tuple[SettingsSurface, ...]
+    if include_optional:
+        surfaces = ("global", "eval", "fetch", "flake")
+    else:
+        surfaces = ("global",)
+    return {surface: check_settings_model_drift(surface=surface) for surface in surfaces}
+
+
+def _settings_metadata_from_raw(raw: object) -> dict[str, NixSettingMetadata]:
     if not isinstance(raw, dict):
         raise TypeError("Nix returned non-object settings metadata")
     return {key: NixSettingMetadata.model_validate(value) for key, value in raw.items()}
 
 
-def check_settings_model_drift(metadata: Mapping[str, NixSettingMetadata] | None = None) -> SettingsDrift:
-    known = set((metadata or list_settings_metadata()).keys())
-    model = {_alias(name) for name in NixSettings.model_fields}
-    return SettingsDrift(missing=sorted(known - model), extra=sorted(model - known))
+def _metadata_for_surface(surface: SettingsSurface) -> dict[str, NixSettingMetadata]:
+    if surface == "global":
+        return list_settings_metadata()
+    if surface == "eval":
+        return list_eval_settings_metadata()
+    if surface == "fetch":
+        return list_fetch_settings_metadata()
+    if surface == "flake":
+        return list_flake_settings_metadata()
+    raise ValueError(f"unknown settings surface: {surface}")
+
+
+def _model_for_surface(surface: SettingsSurface) -> type[BaseModel]:
+    if surface == "global":
+        return NixSettings
+    if surface == "eval":
+        return NixEvalSettings
+    if surface == "fetch":
+        return NixFetchSettings
+    if surface == "flake":
+        return NixFlakeSettings
+    raise ValueError(f"unknown settings surface: {surface}")
 
 
 def _parse_nix_conf(text: str) -> dict[str, str]:
@@ -236,6 +365,8 @@ def _parse_nix_conf(text: str) -> dict[str, str]:
 def _render_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, dict):
+        return " ".join(f"{key}={item}" for key, item in value.items())
     if isinstance(value, list):
         return " ".join(str(item) for item in value)
     return str(value)
