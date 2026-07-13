@@ -236,9 +236,137 @@ static nb::list compute_fs_closure(nix::Store &s, const nix::StorePath &path,
 
 // --- MissingInfo ---
 
+static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path) {
+    if (path.isDerivation()) {
+        return nix::DerivedPath::Built{
+            .drvPath = nix::make_ref<const nix::SingleDerivedPath>(
+                nix::SingleDerivedPath::Opaque{path}),
+            .outputs = nix::OutputsSpec::All{},
+        };
+    }
+    return nix::DerivedPath::Opaque{path};
+}
+
+static nix::StorePathSet known_output_paths_from_eval_store(
+        nix::Store &s,
+        const nix::DerivedPaths &paths,
+        const std::shared_ptr<nix::Store> &evalStore) {
+    auto &store = evalStore ? *evalStore : s;
+    nix::StorePathSet outputPaths;
+
+    for (const auto &path : paths) {
+        std::visit(nix::overloaded{
+            [&](const nix::DerivedPath::Opaque &) {},
+            [&](const nix::DerivedPath::Built &built) {
+                auto drvPath = built.drvPath->getBaseStorePath();
+                if (!store.isValidPath(drvPath))
+                    return;
+                for (auto &[outputName, pathOpt] : store.queryStaticPartialDerivationOutputMap(drvPath)) {
+                    if (pathOpt)
+                        outputPaths.insert(*pathOpt);
+                }
+            },
+        }, path.raw());
+    }
+
+    return outputPaths;
+}
+
+static bool all_valid_paths(nix::Store &s, const nix::StorePathSet &paths) {
+    for (auto &path : paths)
+        if (!s.isValidPath(path))
+            return false;
+    return true;
+}
+
+static nb::list successful_build_results_for_targets(
+        nix::Store &s,
+        const nix::DerivedPaths &paths,
+        const std::string &status) {
+    nb::list out;
+    for (const auto &path : paths) {
+        std::visit(nix::overloaded{
+            [&](const nix::DerivedPath::Opaque &opaque) {
+                out.append(build_result_to_dict(s.printStorePath(opaque.path), true, status, ""));
+            },
+            [&](const nix::DerivedPath::Built &built) {
+                auto drvPath = s.printStorePath(built.drvPath->getBaseStorePath()) + "^*";
+                out.append(build_result_to_dict(drvPath, true, status, ""));
+            },
+        }, path.raw());
+    }
+    return out;
+}
+
+static void copy_target_drvs_from_eval_store(
+        nix::Store &s,
+        const nix::DerivedPaths &paths,
+        const std::shared_ptr<nix::Store> &evalStore) {
+    if (!evalStore || evalStore.get() == &s)
+        return;
+
+    for (const auto &path : paths) {
+        std::visit(nix::overloaded{
+            [&](const nix::DerivedPath::Opaque &) {},
+            [&](const nix::DerivedPath::Built &built) {
+                auto drvPath = built.drvPath->getBaseStorePath();
+                if (evalStore->isValidPath(drvPath))
+                    nix::copyStorePath(*evalStore, s, drvPath);
+            },
+        }, path.raw());
+    }
+}
+
+static void add_store_path_if_present(
+        const nix::StoreDirConfig &store,
+        nix::StorePathSet &out,
+        const std::string &path) {
+    try {
+        out.insert(store.toStorePath(path).first);
+    } catch (nix::Error &) {
+        // Not every derivation field is a store path; ignore ordinary strings.
+    }
+}
+
+static nix::StorePathSet build_input_paths_from_eval_store(
+        nix::Store &s,
+        const nix::DerivedPaths &paths,
+        const std::shared_ptr<nix::Store> &evalStore) {
+    auto &store = evalStore ? *evalStore : s;
+    nix::StorePathSet inputPaths;
+
+    for (const auto &path : paths) {
+        std::visit(nix::overloaded{
+            [&](const nix::DerivedPath::Opaque &) {},
+            [&](const nix::DerivedPath::Built &built) {
+                auto drvPath = built.drvPath->getBaseStorePath();
+                if (!store.isValidPath(drvPath))
+                    return;
+                auto drv = store.readDerivation(drvPath);
+                add_store_path_if_present(store, inputPaths, drv.builder);
+                for (auto &inputSrc : drv.inputSrcs)
+                    inputPaths.insert(inputSrc);
+                for (auto &[inputDrv, inputNode] : drv.inputDrvs.map) {
+                    if (!store.isValidPath(inputDrv))
+                        continue;
+                    for (auto &[outputName, pathOpt] : store.queryStaticPartialDerivationOutputMap(inputDrv)) {
+                        if (!pathOpt)
+                            continue;
+                        auto outputs = static_cast<nix::StringSet>(inputNode.value);
+                        if (outputs.empty() || outputs.contains(outputName))
+                            inputPaths.insert(*pathOpt);
+                    }
+                }
+            },
+        }, path.raw());
+    }
+
+    return inputPaths;
+}
+
 static nb::dict query_missing(nix::Store &s, const std::vector<nix::StorePath> &paths) {
     nix::DerivedPaths dps;
-    for (auto &p : paths) dps.push_back(nix::DerivedPath{nix::DerivedPath::Opaque{p}});
+    for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
     auto m = s.queryMissing(dps);
     nb::dict d;
     d["will_build"] = store_paths_to_dict_list(m.willBuild);
@@ -341,17 +469,6 @@ static nb::dict collect_garbage(
 
 // --- Build ---
 
-static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path) {
-    if (path.isDerivation()) {
-        return nix::DerivedPath::Built{
-            .drvPath = nix::make_ref<const nix::SingleDerivedPath>(
-                nix::SingleDerivedPath::Opaque{path}),
-            .outputs = nix::OutputsSpec::All{},
-        };
-    }
-    return nix::DerivedPath::Opaque{path};
-}
-
 static nb::list build_paths_with_results(
         nix::Store &s,
         const std::vector<nix::StorePath> &paths,
@@ -360,6 +477,59 @@ static nb::list build_paths_with_results(
     nix::DerivedPaths dps;
     for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
     auto results = s.buildPathsWithResults(dps, buildMode, evalStore);
+    nb::list out;
+    for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
+    return out;
+}
+
+static nb::list build_for_humans(
+        nix::Store &s,
+        const std::vector<nix::StorePath> &paths,
+        nix::BuildMode buildMode = nix::bmNormal,
+        std::shared_ptr<nix::Store> evalStore = nullptr) {
+    nix::DerivedPaths dps;
+    for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
+
+    nix::StorePathSet knownOutputs;
+    try {
+        knownOutputs = known_output_paths_from_eval_store(s, dps, evalStore);
+    } catch (nix::Error &e) {
+        e.addTrace({}, "while discovering build_for_humans output paths");
+        throw;
+    }
+    bool knownOutputsWereValid = !knownOutputs.empty() && all_valid_paths(s, knownOutputs);
+    if (!knownOutputs.empty() && !knownOutputsWereValid) {
+        try {
+            s.substitutePaths(knownOutputs);
+        } catch (nix::Error &) {
+            // Fall back to an actual build below if substitutes are unavailable.
+        }
+    }
+    if (!knownOutputs.empty() && all_valid_paths(s, knownOutputs))
+        return successful_build_results_for_targets(
+            s,
+            dps,
+            knownOutputsWereValid ? "already-valid" : "substituted");
+
+    copy_target_drvs_from_eval_store(s, dps, evalStore);
+    auto inputPaths = build_input_paths_from_eval_store(s, dps, evalStore);
+    if (!inputPaths.empty())
+        s.substitutePaths(inputPaths);
+    try {
+        auto missing = s.queryMissing(dps);
+        if (!missing.willSubstitute.empty())
+            s.substitutePaths(missing.willSubstitute);
+    } catch (nix::Error &) {
+        // Some eval-store derivations reference input .drv paths that are not valid
+        // in that eval store. Let buildPathsWithResults handle the eval/build split.
+    }
+    std::vector<nix::KeyedBuildResult> results;
+    try {
+        results = s.buildPathsWithResults(dps, buildMode, evalStore);
+    } catch (nix::Error &e) {
+        e.addTrace({}, "while building paths for build_for_humans");
+        throw;
+    }
     nb::list out;
     for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
     return out;
@@ -553,6 +723,20 @@ static nb::dict store_build_paths_with_results(
     return d;
 }
 
+static nb::dict store_build_for_humans(
+        nix::Store &s,
+        const nb::dict &request,
+        std::shared_ptr<nix::Store> evalStore = nullptr) {
+    auto build_mode = static_cast<nix::BuildMode>(nb::cast<int>(request[nb::str("build_mode")]));
+    nb::dict d;
+    d["results"] = build_for_humans(
+        s,
+        request_store_paths(s, request, "paths"),
+        build_mode,
+        evalStore);
+    return d;
+}
+
 static nb::dict store_read_derivation(nix::Store &s, const nb::dict &request) {
     return read_derivation(s, request_store_path(s, request, "path"));
 }
@@ -644,6 +828,12 @@ static void bind_store(nb::module_ &m) {
             "paths"_a,
             "build_mode"_a = nix::bmNormal,
             "eval_store"_a = nullptr)
+        .def(
+            "build_for_humans",
+            &build_for_humans,
+            "paths"_a,
+            "build_mode"_a = nix::bmNormal,
+            "eval_store"_a = nullptr)
         .def("read_derivation", &read_derivation, "drv_path"_a)
         .def("build_derivation", &build_derivation, "drv_path"_a, "build_mode"_a)
         // Path info
@@ -710,6 +900,11 @@ static void bind_store(nb::module_ &m) {
         .def(
             "store_build_paths_with_results",
             &store_build_paths_with_results,
+            "request"_a,
+            "eval_store"_a = nullptr)
+        .def(
+            "store_build_for_humans",
+            &store_build_for_humans,
             "request"_a,
             "eval_store"_a = nullptr)
         .def("store_read_derivation", &store_read_derivation, "request"_a)

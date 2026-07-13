@@ -10,6 +10,9 @@ from typing import Any
 
 import structlog
 
+_RESULT_BUILD_LOG_LINE = 101
+_RESULT_POST_BUILD_LOG_LINE = 107
+
 
 def prepare_sys_path() -> None:
     cwd = str(Path.cwd())
@@ -28,9 +31,9 @@ def configure_logging() -> None:
 
 
 @asynccontextmanager
-async def forward_nix_logs(session: Any) -> AsyncIterator[None]:
+async def forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncIterator[None]:
     configure_logging()
-    task = asyncio.create_task(_forward_nix_logs(session))
+    task = asyncio.create_task(_forward_nix_logs(session, print_build_logs=print_build_logs))
     try:
         yield
     finally:
@@ -39,10 +42,15 @@ async def forward_nix_logs(session: Any) -> AsyncIterator[None]:
             await task
 
 
-async def _forward_nix_logs(session: Any) -> None:
+async def _forward_nix_logs(session: Any, *, print_build_logs: bool) -> None:
     logger = structlog.get_logger("pynix.nix")
     async for event in session.log_stream():
         message = event.message_without_ansi
+        result_type, result_message = _result_event(event)
+        if result_type in {_RESULT_BUILD_LOG_LINE, _RESULT_POST_BUILD_LOG_LINE}:
+            if print_build_logs:
+                logger.info("nix build log", message=result_message, request_id=event.request_id, result_type=result_type)
+            continue
         if event.action == "error":
             logger.error("nix log", message=message, action=event.action, request_id=event.request_id)
         elif event.action == "warn":
@@ -55,3 +63,20 @@ async def _forward_nix_logs(session: Any) -> None:
                 request_id=event.request_id,
                 result_type=event.result_type.name if event.result_type else None,
             )
+
+
+def _result_event(event: Any) -> tuple[int | None, str | None]:
+    if event.action != "result":
+        return None, None
+    args = event.args
+    if len(args) < 2 or not isinstance(args[1], int):
+        return None, None
+    result_type = args[1]
+    fields = args[2] if len(args) > 2 else []
+    message = None
+    if isinstance(fields, list):
+        for field in reversed(fields):
+            if isinstance(field, str):
+                message = field
+                break
+    return result_type, message

@@ -47,7 +47,7 @@ class StoreServiceHandler(
         raise RuntimeError(f"missing checked nanobind store method: {binding_method_name}")
 
     def _extra_binding_args(self, binding_method_name: str, request: dict[str, Any]) -> tuple[Any, ...]:
-        if binding_method_name != "store_build_paths_with_results":
+        if binding_method_name not in {"store_build_paths_with_results", "store_build_for_humans"}:
             return ()
         eval_store_handle = request.pop("eval_store_handle", 0)
         eval_store = self._get_store(eval_store_handle) if eval_store_handle else None
