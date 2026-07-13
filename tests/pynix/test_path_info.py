@@ -7,7 +7,7 @@ import pytest
 from pynix import Pynix
 
 
-async def test_path_info(capsys):
+async def test_path_info(capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(["path-info", "/nix/store/zh1ijdhb6gng1509b1zrilb6xlzx60j6-bash-5.3p9", "--store", "auto"])
     await cmd.astart()
     captured = capsys.readouterr()
@@ -20,7 +20,7 @@ async def test_path_info(capsys):
     assert "/nix/store/zh1ijdhb6gng1509b1zrilb6xlzx60j6-bash-5.3p9" in result["references"]
 
 
-async def test_path_info_nonexistent(capsys):
+async def test_path_info_nonexistent(capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(["path-info", "/nix/store/deadbeef-nonexistent"])
     with pytest.raises(SystemExit):
         await cmd.astart()
