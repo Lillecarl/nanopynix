@@ -13,7 +13,7 @@ def _bash_store_path() -> str:
 
 
 async def test_print_roots(capsys):
-    cmd = Pynix.parse(["store", "gc", "print-roots"])
+    cmd = Pynix.parse(["store", "gc", "print-roots", "--store", "auto"])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -26,7 +26,7 @@ async def test_print_roots(capsys):
 
 
 async def test_print_alive(capsys):
-    cmd = Pynix.parse(["store", "gc", "print-alive"])
+    cmd = Pynix.parse(["store", "gc", "print-alive", "--store", "auto"])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -37,7 +37,7 @@ async def test_print_alive(capsys):
 
 
 async def test_print_dead_dry_run(capsys):
-    cmd = Pynix.parse(["store", "gc", "print-dead"])
+    cmd = Pynix.parse(["store", "gc", "print-dead", "--store", "auto"])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)

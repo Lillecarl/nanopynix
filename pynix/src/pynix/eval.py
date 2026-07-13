@@ -14,12 +14,15 @@ from pynix._util import prepare_sys_path
 logger = structlog.get_logger(__name__)
 console = Console()
 
+_DEFAULT_STORE = "auto"
+
 
 class Eval(Command):
     """Evaluate a Nix expression and print the result as JSON"""
 
     expr: str | None = arg(None, help="Nix expression to evaluate. Reads from stdin if not provided.")
     file: Path | None = arg(None, help="Read expression from file instead of an argument or stdin.", short="f")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
 
     @override
     async def run(self) -> None:
@@ -37,8 +40,9 @@ class Eval(Command):
             expr = sys.stdin.read()
             logger.info("reading expression from stdin")
 
-        async with nanopynix.Session() as nix, nix.store() as store, nix.eval(store) as session:
+        async with nanopynix.Session() as nix, nix.store(self.store) as store, nix.eval(store) as session:
             root = await session.string(expr)
             value = await root.force_json()
             result = json.dumps(value, sort_keys=True, indent=2)
-            console.print(result)
+            sys.stdout.write(result)
+            sys.stdout.write("\n")

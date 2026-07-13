@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path  # noqa: TC003
 from typing import override
 
@@ -13,6 +14,8 @@ from pynix._util import prepare_sys_path
 
 logger = structlog.get_logger(__name__)
 console = Console()
+
+_DEFAULT_STORE = "auto"
 
 
 class Show(Command):
@@ -37,6 +40,7 @@ class Show(Command):
         None,
         help="Flake reference (e.g. '.#hello').  The attrpath after '#' selects the derivation.",
     )
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -50,14 +54,19 @@ class Show(Command):
             console.print("[red]Error:[/red] --file and --flake are mutually exclusive")
             raise SystemExit(1)
 
-        async with nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix, nix.store() as store:
+        async with (
+            nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
+            nix.store(self.store) as store,
+        ):
             async with nix.eval(store) as session:
                 if self.file is not None:
                     root = await session.file(str(self.file))
                     if self.attrpath is not None:
                         root = self._navigate(root, self.attrpath)
                 else:
-                    assert self.flake is not None
+                    if self.flake is None:
+                        console.print("[red]Error:[/red] either --file or --flake is required")
+                        raise SystemExit(1)
                     base_ref, _, flake_attr = self.flake.partition("#")
                     root = await session.eval_flake(base_ref)
                     if flake_attr:
@@ -67,7 +76,8 @@ class Show(Command):
 
             derivation = await store.read_derivation(ReadDerivationRequest(path=drv_path))
             result = {drv_path: self._derivation_to_dict(derivation)}
-            console.print(json.dumps(result, sort_keys=True, indent=2))
+            sys.stdout.write(json.dumps(result, sort_keys=True, indent=2))
+            sys.stdout.write("\n")
 
     @staticmethod
     def _navigate(root, attrpath: str):
