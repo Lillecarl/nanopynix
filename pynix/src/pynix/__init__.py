@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from clypi import Command
 
+from pynix._util import configure_logging
 from pynix.build import Build  # noqa: TC001
 from pynix.derivation import Derivation  # noqa: TC001
 from pynix.eval import Eval  # noqa: TC001
@@ -17,6 +18,7 @@ class Pynix(Command):
 
 
 def main() -> None:
+    configure_logging()
     cmd = Pynix.parse()
     cmd.start()
 

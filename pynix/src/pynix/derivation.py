@@ -10,7 +10,7 @@ from clypi import Command, arg
 from nanopynix_proto.nix.store import ReadDerivationRequest
 from rich.console import Console
 
-from pynix._util import prepare_sys_path
+from pynix._util import forward_nix_logs, prepare_sys_path
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -56,6 +56,7 @@ class Show(Command):
 
         async with (
             nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
+            forward_nix_logs(nix),
             nix.store(self.store) as store,
         ):
             async with nix.eval(store) as session:

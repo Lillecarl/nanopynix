@@ -8,7 +8,7 @@ from typing import override
 from clypi import Command, arg
 from rich.console import Console
 
-from pynix._util import prepare_sys_path
+from pynix._util import forward_nix_logs, prepare_sys_path
 
 console = Console()
 
@@ -47,6 +47,7 @@ class Build(Command):
 
         async with (
             nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
+            forward_nix_logs(nix),
             nix.store(self.eval_store) as eval_store,
             nix.store(self.store) as build_store,
             nix.eval(eval_store) as session,

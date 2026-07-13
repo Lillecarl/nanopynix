@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
 from pynix import Pynix
 
 
-def _bash_store_path() -> str:
-    return os.readlink("/run/current-system/sw/bin/bash").split("/nix/store/")[1].split("/")[0]
+def _store_path_basename(path: str) -> str:
+    return path.split("/nix/store/", 1)[1]
 
 
-async def test_print_roots(capsys):
-    cmd = Pynix.parse(["store", "gc", "print-roots", "--store", "auto"])
+async def test_print_roots(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(["store", "gc", "print-roots", "--store", populated_store["store_url"]])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -25,8 +24,8 @@ async def test_print_roots(capsys):
         assert root["path"].startswith("/nix/store/")
 
 
-async def test_print_alive(capsys):
-    cmd = Pynix.parse(["store", "gc", "print-alive", "--store", "auto"])
+async def test_print_alive(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(["store", "gc", "print-alive", "--store", populated_store["store_url"]])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -36,8 +35,8 @@ async def test_print_alive(capsys):
         assert path.startswith("/nix/store/")
 
 
-async def test_print_dead_dry_run(capsys):
-    cmd = Pynix.parse(["store", "gc", "print-dead", "--store", "auto"])
+async def test_print_dead_dry_run(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(["store", "gc", "print-dead", "--store", populated_store["store_url"]])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -56,19 +55,108 @@ def test_print_dead_help(capsys):
     assert "--rip" in captured.out
 
 
-async def test_path_from_hash_part(capsys):
-    store_path = _bash_store_path()
+async def test_path_from_hash_part(populated_store: dict[str, str], capsys):
+    store_path = _store_path_basename(populated_store["hello_path"])
     hash_part = store_path.split("-", 1)[0]
-    cmd = Pynix.parse(["store", "path-from-hash-part", hash_part])
+    cmd = Pynix.parse(["store", "path-from-hash-part", hash_part, "--store", populated_store["store_url"]])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert data["path"] == f"/nix/store/{store_path}"
 
 
-async def test_ensure_path(capsys):
-    store_path = f"/nix/store/{_bash_store_path()}"
-    cmd = Pynix.parse(["store", "ensure-path", store_path])
+async def test_is_valid_path(populated_store: dict[str, str], capsys):
+    store_path = populated_store["hello_path"]
+    cmd = Pynix.parse(["store", "is-valid-path", store_path, "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data == {"path": store_path, "valid": True}
+
+
+async def test_compute_fs_closure(populated_store: dict[str, str], capsys):
+    store_path = populated_store["hello_path"]
+    cmd = Pynix.parse(["store", "compute-fs-closure", store_path, "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert store_path in data["paths"]
+
+
+async def test_query_missing(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(["store", "query-missing", populated_store["hello_path"], "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["unknown"] == []
+    assert data["willBuild"] == []
+    assert data["willSubstitute"] == []
+    assert isinstance(data["downloadSize"], int)
+    assert isinstance(data["narSize"], int)
+
+
+async def test_query_derivation_outputs(tmp_path, capsys):
+    nix_file = tmp_path / "test.nix"
+    nix_file.write_text("""
+    builtins.derivation {
+      name = "query-outputs";
+      system = builtins.currentSystem;
+      builder = "/bin/sh";
+      args = [ "-c" "echo hi > $out" ];
+    }
+    """)
+    show = Pynix.parse(["derivation", "show", "--file", str(nix_file)])
+    await show.astart()
+    captured = capsys.readouterr()
+    drv_path = next(iter(json.loads(captured.out)))
+
+    cmd = Pynix.parse(["store", "query-derivation-outputs", drv_path, "--store", "auto"])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert len(data["paths"]) == 1
+    assert data["paths"][0].startswith("/nix/store/")
+
+
+async def test_query_valid_derivers(populated_store: dict[str, str], capsys):
+    store_path = populated_store["hello_path"]
+    cmd = Pynix.parse(["store", "query-valid-derivers", store_path, "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert isinstance(data["paths"], list)
+
+
+async def test_list_valid_paths(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(["store", "list-valid-paths", "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert populated_store["hello_path"] in data["paths"]
+
+
+async def test_query_referrers(populated_store: dict[str, str], capsys):
+    store_path = populated_store["hello_path"]
+    cmd = Pynix.parse(["store", "query-referrers", store_path, "--store", populated_store["store_url"]])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert isinstance(data["paths"], list)
+
+
+async def test_query_substitutable_paths(populated_store: dict[str, str], capsys):
+    cmd = Pynix.parse(
+        ["store", "query-substitutable-paths", populated_store["hello_path"], "--store", populated_store["store_url"]]
+    )
+    await cmd.astart()
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert isinstance(data["paths"], list)
+
+
+async def test_ensure_path(populated_store: dict[str, str], capsys):
+    store_path = populated_store["hello_path"]
+    cmd = Pynix.parse(["store", "ensure-path", store_path, "--store", populated_store["store_url"]])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)

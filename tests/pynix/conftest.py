@@ -1,10 +1,55 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
+import shutil
+import stat
 import tempfile
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(scope="session")
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(scope="module")
+async def nixpkgs_path(repo_root: Path) -> str:
+    stdout = await _run("nix", "eval", "--raw", "--file", str(repo_root), "pkgs.path")
+    return stdout.decode().strip()
+
+
+@pytest.fixture(scope="module")
+async def populated_store(
+    repo_root: Path,
+    nixpkgs_path: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[dict[str, str]]:
+    store_root = tmp_path_factory.mktemp("pynix-store")
+    store_url = f"local?root={store_root}"
+    env = os.environ.copy()
+    env["NIX_PATH"] = f"nixpkgs={nixpkgs_path}"
+    stdout = await _run(
+        "nix",
+        "build",
+        "--no-link",
+        "--print-out-paths",
+        "--store",
+        store_url,
+        "--file",
+        str(repo_root),
+        "pkgs.hello",
+        env=env,
+    )
+    hello_path = stdout.decode().strip().splitlines()[-1]
+    try:
+        yield {"store_url": store_url, "hello_path": hello_path}
+    finally:
+        _rmtree_force(store_root)
 
 
 @pytest.fixture
@@ -37,3 +82,43 @@ async def git_flake():
             )
             await proc.wait()
         yield flake_dir
+
+
+async def _run(*args: str, env: dict[str, str] | None = None) -> bytes:
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"{' '.join(args)} failed with exit code {proc.returncode}\n"
+            f"stdout:\n{stdout.decode(errors='replace')}\n"
+            f"stderr:\n{stderr.decode(errors='replace')}"
+        )
+    return stdout
+
+
+def _rmtree_force(path: Path) -> None:
+    def onexc(function, exc_path, excinfo) -> None:
+        try:
+            parent = os.path.dirname(exc_path)
+            if parent:
+                os.chmod(parent, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
+            os.chmod(exc_path, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
+            function(exc_path)
+        except FileNotFoundError:
+            pass
+
+    for root, dirs, files in os.walk(path):
+        for name in dirs:
+            with contextlib.suppress(FileNotFoundError):
+                os.chmod(os.path.join(root, name), stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
+        for name in files:
+            with contextlib.suppress(FileNotFoundError):
+                os.chmod(os.path.join(root, name), stat.S_IWUSR | stat.S_IREAD)
+        with contextlib.suppress(FileNotFoundError):
+            os.chmod(root, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
+    shutil.rmtree(path, ignore_errors=False, onexc=onexc)
