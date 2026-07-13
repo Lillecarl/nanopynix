@@ -8,8 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
-import pytest  # noqa: F401 -- used for fixture type annotations
-
 import nanopynix
 import nanopynix_flake
 

@@ -4,6 +4,8 @@
 # nanopynix / nanopynix_fetchers are C++ nanobind extensions without type stubs.
 # Fixture store parameter and variable types from extension calls are unresolvable.
 
+from typing import Any
+
 import nanopynix
 import nanopynix_fetchers
 

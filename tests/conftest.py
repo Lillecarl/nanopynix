@@ -2,7 +2,7 @@
 
 import atexit
 import os
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import pytest
 
