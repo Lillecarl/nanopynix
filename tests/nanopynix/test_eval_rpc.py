@@ -533,7 +533,7 @@ async def test_eval_concurrent_sessions(tmp_path: Path):
             nix.store() as store,
             nix.eval(store) as session,
         ):
-            root = await session.file(path)  # type: ignore[reportUnknownMemberType] -- session from nanobind
+            root = await session.file(path)
             v = root.attr("val")
             return await v.force()
 
