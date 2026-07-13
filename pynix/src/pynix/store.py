@@ -8,11 +8,17 @@ from typing import Any, override
 import structlog
 from clypi import Command, Positional, arg
 from nanopynix_proto.nix.store import (
+    AddIndirectRootRequest,
+    AddPermRootRequest,
+    AddTempRootRequest,
     CollectGarbageRequest,
     ComputeFsClosureRequest,
     EnsurePathRequest,
     FindRootsRequest,
+    FollowLinksToStorePathRequest,
     GcAction,
+    GetStoreDirRequest,
+    GetUriRequest,
     IsValidPathRequest,
     OptimiseStoreRequest,
     QueryAllValidPathsRequest,
@@ -100,6 +106,22 @@ class Gc(Command):
     subcommand: PrintRoots | PrintDead | PrintAlive
 
 
+class Info(Command):
+    """Show store metadata"""
+
+    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+            uri = await store.get_uri(GetUriRequest())
+            store_dir = await store.get_store_dir(GetStoreDirRequest())
+            _print_json({"uri": uri.uri, "storeDir": store_dir.dir})
+
+
 class IsValidPath(Command):
     """Check whether a store path is valid"""
 
@@ -114,6 +136,22 @@ class IsValidPath(Command):
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.is_valid_path(IsValidPathRequest(path=self.path))
             _print_json({"path": self.path, "valid": resp.valid})
+
+
+class FollowLinksToStorePath(Command):
+    """Resolve symlinks to a store path"""
+
+    path: Positional[str] = arg(help="Filesystem path to resolve.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+            path = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path=self.path))
+            _print_json({"path": _format_store_path(path.base_name)})
 
 
 class ComputeFsClosure(Command):
@@ -251,6 +289,55 @@ class QuerySubstitutablePaths(Command):
             _print_paths(resp.paths)
 
 
+class AddTempRoot(Command):
+    """Add a temporary GC root for this command's store session"""
+
+    path: Positional[str] = arg(help="Store path to root temporarily.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+            await store.add_temp_root(AddTempRootRequest(path=self.path))
+            _print_json({"path": self.path, "added": True})
+
+
+class AddPermRoot(Command):
+    """Add a permanent GC root symlink"""
+
+    path: Positional[str] = arg(help="Store path to root.")
+    gc_root: Positional[str] = arg(help="GC root symlink to create.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+            resp = await store.add_perm_root(AddPermRootRequest(store_path=self.path, gc_root=self.gc_root))
+            _print_json({"path": self.path, "gcRoot": resp.path})
+
+
+class AddIndirectRoot(Command):
+    """Register an indirect GC root"""
+
+    path: Positional[str] = arg(help="GC root path to register.")
+    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+
+    @override
+    async def run(self) -> None:
+        prepare_sys_path()
+        import nanopynix
+
+        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+            await store.add_indirect_root(AddIndirectRootRequest(path=self.path))
+            _print_json({"path": self.path, "added": True})
+
+
 class PathFromHashPart(Command):
     """Resolve a store path from its hash prefix"""
 
@@ -323,7 +410,9 @@ class Store(Command):
 
     subcommand: (
         Gc
+        | Info
         | IsValidPath
+        | FollowLinksToStorePath
         | ComputeFsClosure
         | QueryMissing
         | QueryDerivationOutputs
@@ -331,6 +420,9 @@ class Store(Command):
         | ListValidPaths
         | QueryReferrers
         | QuerySubstitutablePaths
+        | AddTempRoot
+        | AddPermRoot
+        | AddIndirectRoot
         | PathFromHashPart
         | EnsurePath
         | Optimise

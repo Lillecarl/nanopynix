@@ -114,11 +114,15 @@ def _rmtree_force(path: Path) -> None:
 
     for root, dirs, files in os.walk(path):
         for name in dirs:
-            with contextlib.suppress(FileNotFoundError):
-                os.chmod(os.path.join(root, name), stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
+            child = os.path.join(root, name)
+            if not os.path.islink(child):
+                with contextlib.suppress(FileNotFoundError):
+                    os.chmod(child, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
         for name in files:
-            with contextlib.suppress(FileNotFoundError):
-                os.chmod(os.path.join(root, name), stat.S_IWUSR | stat.S_IREAD)
+            child = os.path.join(root, name)
+            if not os.path.islink(child):
+                with contextlib.suppress(FileNotFoundError):
+                    os.chmod(child, stat.S_IWUSR | stat.S_IREAD)
         with contextlib.suppress(FileNotFoundError):
             os.chmod(root, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
     shutil.rmtree(path, ignore_errors=False, onexc=onexc)
