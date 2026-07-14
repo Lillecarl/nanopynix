@@ -42,7 +42,7 @@ struct PyInput {
 #elif NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
         return input.getFingerprint(store);
 #else
-        return input.getFingerprint(nix::ref<nix::Store>(store.shared_from_this()));
+        return input.getFingerprint(store);
 #endif
     }
 };

@@ -87,7 +87,12 @@ static nb::list string_set_to_list(const nix::StringSet &values) {
 }
 
 #if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+#define NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS 0
 #else
+#define NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS 1
+#endif
+
+#if NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS
 static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
     switch (s) {
@@ -190,6 +195,7 @@ static nb::dict build_result_from_br(const nix::BuildResult &br) {
     return build_result_to_dict("", result.success(), build_status_str(result.status), result.errorMsg);
 }
 #endif
+#undef NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS
 
 static nb::dict path_info_to_dict(nix::Store &s, const nix::ValidPathInfo &info) {
     nb::dict d;
