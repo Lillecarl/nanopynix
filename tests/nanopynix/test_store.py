@@ -192,6 +192,7 @@ class TestPathInfo:
 
 
 class TestOpenStore:
+    @pytest.mark.skipif(os.environ.get("GITHUB_ACTIONS") == "true", reason="cannot access daemon in GHA")
     def test_open_store_daemon(self):
         store = nanopynix_store.open_store()
         assert isinstance(store, nanopynix_store.Store)
