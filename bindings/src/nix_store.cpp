@@ -34,7 +34,7 @@
 
 #include <nanopynix/nix_compat_config.hh>
 
-#if !NANOPYNIX_HAVE_MAKE_FS_SOURCE_ACCESSOR
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
 #include <nix/util/posix-source-accessor.hh>
 #endif
 
@@ -43,7 +43,7 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-#if NANOPYNIX_HAVE_GLOBAL_GC_ACTION
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
 using NixGCAction = nix::GCAction;
 constexpr auto gcReturnLive = nix::GCAction::gcReturnLive;
 constexpr auto gcReturnDead = nix::GCAction::gcReturnDead;
@@ -59,7 +59,7 @@ constexpr auto gcDeleteSpecific = nix::GCOptions::gcDeleteSpecific;
 
 template<typename Path>
 static std::string nix_path_to_string(const Path &path) {
-#if NANOPYNIX_PATH_IS_STRING
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
     return path;
 #else
     return path.string();
@@ -86,7 +86,7 @@ static nb::list string_set_to_list(const nix::StringSet &values) {
     return result;
 }
 
-#if NANOPYNIX_HAVE_BUILD_RESULT_SUM
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
 static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
     switch (s) {
@@ -471,7 +471,7 @@ static std::string request_store_add_name(const nb::dict &request) {
 }
 
 static nix::SourcePath request_source_path(const nb::dict &request) {
-#if NANOPYNIX_HAVE_MAKE_FS_SOURCE_ACCESSOR
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_35
     return nix::SourcePath(nix::makeFSSourceAccessor(
         std::filesystem::absolute(std::filesystem::path(request_string(request, "path")))));
 #else
@@ -517,7 +517,7 @@ static nb::dict collect_garbage(
     nix::GCOptions options;
     options.action = action;
     options.ignoreLiveness = ignore_liveness;
-#if NANOPYNIX_GC_PATHS_IS_VARIANT
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_35
     if (paths_to_delete.empty()) {
         options.pathsToDelete = nix::GCOptions::WholeStore{};
     } else {

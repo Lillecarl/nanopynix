@@ -37,11 +37,7 @@ struct PyInput {
 
     std::optional<std::string> get_fingerprint(nix::Store &store) const {
         nb::gil_scoped_release release;
-#if NANOPYNIX_FETCHER_FINGERPRINT_TAKES_STORE_REF
         return input.getFingerprint(store);
-#else
-        return input.getFingerprint(nix::ref<nix::Store>(store.shared_from_this()));
-#endif
     }
 };
 

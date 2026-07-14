@@ -28,7 +28,7 @@ struct PyStoreImpl : public nix::Store {
     PyStoreImpl(nix::ref<const nix::StoreConfig> config, nb::object py_store,
                 std::shared_ptr<nix::Store> underlying = {});
 
-#if NANOPYNIX_HAVE_STORE_ANCHOR
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_35
     void anchor() override;
 #endif
 
@@ -42,7 +42,7 @@ struct PyStoreImpl : public nix::Store {
 
     void queryRealisationUncached(
         const nix::DrvOutput & id,
-#if NANOPYNIX_HAVE_UNKEYED_REALISATION
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
         nix::Callback<std::shared_ptr<const nix::UnkeyedRealisation>> callback
 #else
         nix::Callback<std::shared_ptr<const nix::Realisation>> callback
@@ -69,7 +69,7 @@ struct PyStoreImpl : public nix::Store {
     void registerDrvOutput(const nix::Realisation & output) override;
 
     nix::ref<nix::SourceAccessor> getFSAccessor(bool requireValidPath = true) override;
-#if NANOPYNIX_HAVE_PATH_FS_ACCESSOR
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
     std::shared_ptr<nix::SourceAccessor> getFSAccessor(const nix::StorePath & path, bool requireValidPath = true) override;
 #endif
 
