@@ -70,8 +70,9 @@ check_cxx_source_compiles(
   "
   #include <optional>
   #include <string>
+  #include <type_traits>
   #include <nix/expr/eval.hh>
-  nix::PrimOp value{.doc = std::optional<std::string>{}};
+  static_assert(std::is_same_v<decltype(nix::PrimOp::doc), std::optional<std::string>>);
   int main() {}
   "
   NANOPYNIX_PRIMOP_DOC_IS_OPTIONAL
@@ -101,8 +102,9 @@ check_cxx_source_compiles(
   #include <nix/store/path-info.hh>
   #include <nix/store/store-api.hh>
   #include <nix/util/hash.hh>
-  nix::UnkeyedValidPathInfo value(
-    std::declval<const nix::StoreDirConfig &>(), nix::Hash::dummy);
+  static_assert(requires (const nix::StoreDirConfig & config, nix::Hash hash) {
+    nix::UnkeyedValidPathInfo(config, hash);
+  });
   int main() {}
   "
   NANOPYNIX_PATH_INFO_NEEDS_STORE_CONFIG
@@ -154,8 +156,9 @@ check_cxx_source_compiles(
 )
 check_cxx_source_compiles(
   "
+  #include <string_view>
   #include <nix/flake/lockfile.hh>
-  auto path = nix::flake::NonEmptyInputAttrPath::parse(\"nixpkgs\");
+  static_assert(requires { nix::flake::NonEmptyInputAttrPath::parse(std::string_view{}); });
   int main() {}
   "
   NANOPYNIX_HAVE_NONEMPTY_INPUT_ATTR_PATH

@@ -671,7 +671,11 @@ static void python_to_value(
         v.mkFloat(nb::cast<double>(obj));
     } else if (nb::isinstance<nb::str>(obj)) {
         auto s = nb::cast<std::string>(obj);
+#if NANOPYNIX_HAVE_EVALSTATE_MEM
+        v.mkString(s, state.mem);
+#else
         v.mkString(s);
+#endif
     } else if (nb::isinstance<nb::list>(obj)) {
         auto pyList = nb::cast<nb::list>(obj);
         auto builder = state.buildList(pyList.size());
