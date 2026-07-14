@@ -12,6 +12,8 @@
 #include <nix/util/logging.hh>
 #include <nix/util/url.hh>
 
+#include "nix_compat.hh"
+
 #include <memory>
 #include <nlohmann/json.hpp>
 
@@ -136,25 +138,37 @@ public:
 };
 
 static void install_logger(nb::object cb) {
-    nix::logger = std::make_unique<PyLogger>(std::move(cb));
+    nanopynix::nix_compat::install_logger(std::make_unique<PyLogger>(std::move(cb)));
 }
 
 static void remove_logger() {
-    nix::logger = nix::makeSimpleLogger();
+    nanopynix::nix_compat::restore_simple_logger();
 }
 
 static void set_logger_request_id(int64_t id) {
-    auto *pl = dynamic_cast<PyLogger *>(nix::logger.get());
+    auto *pl = dynamic_cast<PyLogger *>(nanopynix::nix_compat::logger());
     if (pl) pl->set_request_id(id);
 }
 
 static int64_t get_logger_request_id() {
-    auto *pl = dynamic_cast<PyLogger *>(nix::logger.get());
+    auto *pl = dynamic_cast<PyLogger *>(nanopynix::nix_compat::logger());
     return pl ? pl->request_id() : 0;
 }
 
 static void _log_test(const std::string & msg) {
-    nix::logger->log(nix::lvlInfo, msg);
+    nanopynix::nix_compat::logger()->log(nix::lvlInfo, msg);
+}
+
+static nb::dict build_info() {
+    nb::dict capabilities;
+    capabilities["logger_unique_ptr"] = bool(NANOPYNIX_NIX_LOGGER_IS_UNIQUE_PTR);
+    capabilities["build_result_sum"] = bool(NANOPYNIX_HAVE_BUILD_RESULT_SUM);
+    capabilities["eval_state_mem"] = bool(NANOPYNIX_HAVE_EVALSTATE_MEM);
+
+    nb::dict info;
+    info["nix_version"] = NANOPYNIX_NIX_VERSION;
+    info["capabilities"] = std::move(capabilities);
+    return info;
 }
 
 static void set_verbosity(int lvl) {
@@ -171,6 +185,8 @@ NB_MODULE(nanopynix_util, m) {
     m.def("init_libstore", &nix::initLibStore, nb::call_guard<nb::gil_scoped_release>(),
           "load_config"_a = true,
           "Initialize the Nix store library.");
+    m.def("build_info", &build_info,
+          "Return the Nix version and compile-time compatibility capabilities for this extension.");
 
     m.def("set_setting", &set_setting, "name"_a, "value"_a);
     m.def("get_setting", &get_setting, "name"_a);
