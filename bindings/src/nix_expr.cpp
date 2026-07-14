@@ -31,7 +31,7 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-#if NANOPYNIX_HAVE_BUILD_RESULT_SUM
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
 static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
     switch (s) {
@@ -671,7 +671,7 @@ static void python_to_value(
         v.mkFloat(nb::cast<double>(obj));
     } else if (nb::isinstance<nb::str>(obj)) {
         auto s = nb::cast<std::string>(obj);
-#if NANOPYNIX_HAVE_EVALSTATE_MEM
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
         v.mkString(s, state.mem);
 #else
         v.mkString(s);
@@ -744,12 +744,12 @@ static void python_to_value(
                 .name = anon_name,
                 .args = arg_names,
                 .arity = static_cast<size_t>(arity),
-#if NANOPYNIX_PRIMOP_DOC_IS_OPTIONAL
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
                 .doc = std::nullopt,
 #else
                 .doc = nullptr,
 #endif
-#if NANOPYNIX_PRIMOP_USES_IMPL
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
                 .impl = impl,
 #else
                 .fun = impl,
@@ -827,7 +827,7 @@ static void register_primop(
     const std::string &doc,
     nb::object callback)
 {
-#if !NANOPYNIX_HAVE_DYNAMIC_PRIMOP_REGISTRATION
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
     throw std::runtime_error(
         "register_primop is unsupported by Nix " NANOPYNIX_NIX_VERSION
         ": this Nix version has a fixed-capacity builtin attribute set");
@@ -847,12 +847,12 @@ static void register_primop(
         .name = name,
         .args = arg_names,
         .arity = static_cast<size_t>(arity),
-#if NANOPYNIX_PRIMOP_DOC_IS_OPTIONAL
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
         .doc = registered.doc.empty() ? std::optional<std::string>{} : std::optional<std::string>{registered.doc},
 #else
         .doc = registered.doc.empty() ? nullptr : registered.doc.c_str(),
 #endif
-#if NANOPYNIX_PRIMOP_USES_IMPL
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
         .impl = impl,
 #else
         .fun = impl,

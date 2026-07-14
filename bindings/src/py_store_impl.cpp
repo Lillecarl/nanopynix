@@ -27,7 +27,7 @@ PyStoreImpl::PyStoreImpl(nix::ref<const nix::StoreConfig> config, nb::object py_
     clearPathInfoCache();
 }
 
-#if NANOPYNIX_HAVE_STORE_ANCHOR
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_35
 void PyStoreImpl::anchor() {}
 #endif
 
@@ -53,7 +53,7 @@ void PyStoreImpl::queryPathInfoUncached(
             auto d = nb::cast<nb::dict>(result);
             auto info = std::make_shared<nix::ValidPathInfo>(
                 nix::StorePath(path.to_string()),
-#if NANOPYNIX_PATH_INFO_NEEDS_STORE_CONFIG
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
                 nix::UnkeyedValidPathInfo(
                     static_cast<const nix::StoreDirConfig &>(*this), nix::Hash::dummy)
 #else
@@ -87,7 +87,7 @@ void PyStoreImpl::queryPathInfoUncached(
 
 void PyStoreImpl::queryRealisationUncached(
     const nix::DrvOutput & id,
-#if NANOPYNIX_HAVE_UNKEYED_REALISATION
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
     nix::Callback<std::shared_ptr<const nix::UnkeyedRealisation>> callback
 #else
     nix::Callback<std::shared_ptr<const nix::Realisation>> callback
@@ -131,7 +131,7 @@ nix::ref<nix::SourceAccessor> PyStoreImpl::getFSAccessor(bool requireValidPath) 
     return nix::make_ref<nix::MemorySourceAccessor>();
 }
 
-#if NANOPYNIX_HAVE_PATH_FS_ACCESSOR
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
 std::shared_ptr<nix::SourceAccessor> PyStoreImpl::getFSAccessor(const nix::StorePath & path, bool requireValidPath) {
     if (underlying) return underlying->getFSAccessor(path, requireValidPath);
     return nullptr;
@@ -187,7 +187,7 @@ void PyStoreImpl::optimiseStore() {
 PyStoreConfig::PyStoreConfig(
     std::string_view scheme, std::string_view authority, const Params & params,
     std::string name, std::string doc, nix::StringSet schemes, nb::object factory)
-#if NANOPYNIX_STORE_CONFIG_NEEDS_PATH_TYPE
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_35
     : StoreConfig(params, nix::StoreConfig::FilePathType::Unix)
 #else
     : StoreConfig(params)

@@ -161,10 +161,12 @@ static void _log_test(const std::string & msg) {
 
 static nb::dict build_info() {
     nb::dict capabilities;
-    capabilities["logger_unique_ptr"] = bool(NANOPYNIX_NIX_LOGGER_IS_UNIQUE_PTR);
-    capabilities["build_result_sum"] = bool(NANOPYNIX_HAVE_BUILD_RESULT_SUM);
-    capabilities["eval_state_mem"] = bool(NANOPYNIX_HAVE_EVALSTATE_MEM);
-    capabilities["dynamic_primop_registration"] = bool(NANOPYNIX_HAVE_DYNAMIC_PRIMOP_REGISTRATION);
+    capabilities["logger_unique_ptr"] =
+        NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
+        && NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35;
+    capabilities["build_result_sum"] = NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32;
+    capabilities["eval_state_mem"] = NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32;
+    capabilities["dynamic_primop_registration"] = NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32;
 
     nb::dict info;
     info["nix_version"] = NANOPYNIX_NIX_VERSION;
@@ -228,7 +230,7 @@ NB_MODULE(nanopynix_util, m) {
           "s"_a,
           "Percent-decode string per RFC 3986.");
     m.def("fix_git_url", [](const std::string &url) -> std::string {
-#if NANOPYNIX_FIX_GIT_URL_RETURNS_URL
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
             return nix::fixGitURL(url).to_string();
 #else
             auto normalized = nix::fixGitURL(url);

@@ -71,7 +71,7 @@ struct PyLockedFlake {
                 nix::CanonPath(relPath),
                 lockFileStr + "\n",
                 std::nullopt);
-#if NANOPYNIX_HAVE_SOURCE_PATH_INVALIDATE_CACHE
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32 && NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
             locked->flake.lockFilePath().invalidateCache();
 #endif
         }
@@ -113,7 +113,7 @@ static PyLockedFlake lock_flake(
     }
 
     for (const auto &input : input_updates) {
-#if NANOPYNIX_HAVE_NONEMPTY_INPUT_ATTR_PATH
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
         auto path = nix::flake::NonEmptyInputAttrPath::parse(input);
         if (!path)
             throw std::runtime_error(
