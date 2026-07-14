@@ -27,6 +27,10 @@ PyStoreImpl::PyStoreImpl(nix::ref<const nix::StoreConfig> config, nb::object py_
     clearPathInfoCache();
 }
 
+#if NANOPYNIX_HAVE_STORE_ANCHOR
+void PyStoreImpl::anchor() {}
+#endif
+
 bool PyStoreImpl::isValidPathUncached(const nix::StorePath & path) {
     nb::gil_scoped_acquire gil;
     if (py_has_method(py_store, "is_valid_path_uncached"))
@@ -183,7 +187,11 @@ void PyStoreImpl::optimiseStore() {
 PyStoreConfig::PyStoreConfig(
     std::string_view scheme, std::string_view authority, const Params & params,
     std::string name, std::string doc, nix::StringSet schemes, nb::object factory)
+#if NANOPYNIX_STORE_CONFIG_NEEDS_PATH_TYPE
+    : StoreConfig(params, nix::StoreConfig::FilePathType::Unix)
+#else
     : StoreConfig(params)
+#endif
     , py_factory(std::move(factory))
     , _name(std::move(name))
     , _doc(std::move(doc))

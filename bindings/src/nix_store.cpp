@@ -30,9 +30,13 @@
 #include <nix/util/error.hh>
 #include <nix/util/file-system.hh>
 #include <nix/util/logging.hh>
-#include <nix/util/posix-source-accessor.hh>
+#include <nix/util/source-accessor.hh>
 
 #include <nanopynix/nix_compat_config.hh>
+
+#if !NANOPYNIX_HAVE_MAKE_FS_SOURCE_ACCESSOR
+#include <nix/util/posix-source-accessor.hh>
+#endif
 
 #include "py_store_impl.hh"
 
@@ -467,8 +471,13 @@ static std::string request_store_add_name(const nb::dict &request) {
 }
 
 static nix::SourcePath request_source_path(const nb::dict &request) {
+#if NANOPYNIX_HAVE_MAKE_FS_SOURCE_ACCESSOR
+    return nix::SourcePath(nix::makeFSSourceAccessor(
+        std::filesystem::absolute(std::filesystem::path(request_string(request, "path")))));
+#else
     return nix::PosixSourceAccessor::createAtRoot(
         nix::makeParentCanonical(std::filesystem::path(request_string(request, "path"))));
+#endif
 }
 
 static NixGCAction gc_action_from_int(int action) {
@@ -508,7 +517,17 @@ static nb::dict collect_garbage(
     nix::GCOptions options;
     options.action = action;
     options.ignoreLiveness = ignore_liveness;
+#if NANOPYNIX_GC_PATHS_IS_VARIANT
+    if (paths_to_delete.empty()) {
+        options.pathsToDelete = nix::GCOptions::WholeStore{};
+    } else {
+        options.pathsToDelete = nix::GCOptions::SpecificPaths{
+            .paths = nix::StorePathSet(paths_to_delete.begin(), paths_to_delete.end()),
+        };
+    }
+#else
     options.pathsToDelete = nix::StorePathSet(paths_to_delete.begin(), paths_to_delete.end());
+#endif
     options.maxFreed = max_freed;
 
     nix::GCResults results;
