@@ -8,10 +8,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import nanopynix
 import nanopynix_fetchers  # L1 Input
 import nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
 import nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
-import nanopynix
 from nanopynix._extract import (
     flake_ref_attrs,
     input_attrs,
@@ -208,18 +208,9 @@ def test_locked_input_follows_multiple():
 
 def test_locked_flake_shape(eval_state: nanopynix.EvalState, tmp_path: Path):
     """lock_flake returns a LockedFlake, extract yields expected dict shape."""
-    import subprocess
+    from _git import init_flake_repo
 
-    (tmp_path / "flake.nix").write_text("""
-    {
-        outputs = { ... }: {
-            hello = "world";
-        };
-    }
-    """)
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+    init_flake_repo(tmp_path, r'hello = "world";')
 
     fr = nanopynix_flake.parse_flake_ref(str(tmp_path))
     lf = nanopynix_flake.lock_flake(

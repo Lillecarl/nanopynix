@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _git import init_flake_repo
 from anyio import Path as AnyioPath
 from nanopynix_proto.nix.store import GetUriRequest
 
@@ -556,18 +557,7 @@ async def test_eval_concurrent_sessions(tmp_path: Path):
 
 def _init_git_flake(tmp_path: Path, outputs_body: str):
     """Create a temp flake with a git repo for RPC testing."""
-    (tmp_path / "flake.nix").write_text(f"""
-    {{
-        outputs = {{ ... }}: {{
-            {outputs_body}
-        }};
-    }}
-    """)
-    import subprocess
-
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+    init_flake_repo(tmp_path, outputs_body)
 
 
 async def test_eval_flake(tmp_path: Path):
