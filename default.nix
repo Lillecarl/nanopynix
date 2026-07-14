@@ -70,6 +70,9 @@ let
     hasLibs.success && hasLibs.value
   ) pkgs.nixVersions;
   nanopynix-nixVersions = pkgs.lib.mapAttrs (_: nix: nanopynixForNix nix) nixVersions;
+  nanopynix-nixVersions-tests = pkgs.callPackage ./nix/nix-version-tests.nix {
+    inherit nanopynix-nixVersions;
+  };
   clypi = python3Packages.callPackage ./nix/clypi.nix { };
   pynix = mkPynix nanopynix;
 
@@ -84,6 +87,7 @@ in
     shell
     nanopynix
     nanopynix-nixVersions
+    nanopynix-nixVersions-tests
     nanopynix-bindings
     nanopynix-proto
     pynix

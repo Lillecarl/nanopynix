@@ -24,7 +24,12 @@
       packages = forAllSystems (
         system:
         {
-          inherit (eachDefNix.${system}) nanopynix-bindings nanopynix pynix;
+          inherit (eachDefNix.${system})
+            nanopynix-bindings
+            nanopynix
+            nanopynix-nixVersions-tests
+            pynix
+            ;
         }
         // lib.mapAttrs' (
           nixVersion: nanopynix: lib.nameValuePair "nanopynix-${nixVersion}" nanopynix
