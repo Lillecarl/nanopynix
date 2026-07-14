@@ -33,6 +33,12 @@ def test_nix_settings_render_python_field_names() -> None:
     }
 
 
+def test_nix_settings_renders_explicit_empty_string() -> None:
+    settings = NixSettings(build_users_group="")
+
+    assert settings.to_worker_settings()["build-users-group"] == ""
+
+
 def test_nix_settings_accepts_nix_aliases() -> None:
     settings = NixSettings.model_validate({"max-jobs": 2, "trusted-public-keys": ["cache-key"]})
 

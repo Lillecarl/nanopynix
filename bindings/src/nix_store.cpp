@@ -498,6 +498,8 @@ static NixGCAction gc_action_from_int(int action) {
 }
 
 static nb::list find_roots(nix::Store &s, bool censor) {
+    // Nix 2.34.7 creates non-PID temp-root filenames but still parses every
+    // temp-root filename with std::stoi. See https://github.com/NixOS/nix/issues/16138.
     nix::Roots roots;
     {
         nb::gil_scoped_release release;

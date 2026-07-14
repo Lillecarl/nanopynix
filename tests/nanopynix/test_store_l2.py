@@ -36,7 +36,13 @@ from nanopynix_proto.nix.store import (
     VerifyStoreRequest,
 )
 
-from nanopynix import MissingInfo, PathInfo, Session, StorePath
+from nanopynix import MissingInfo, PathInfo, Session, StorePath, build_info
+
+
+NIX_GC_ROOTS_BUG = pytest.mark.skipif(
+    build_info()["nix_version"].startswith(("2.31.", "2.34.")),
+    reason="Nix 2.31 and 2.34 findRoots/collectGarbage crash on nonnumeric temproots filenames; https://github.com/NixOS/nix/issues/16138",
+)
 
 
 async def test_open_close():
@@ -234,8 +240,9 @@ async def test_add_temp_root():
                 await store.add_temp_root(AddTempRootRequest(path=str(path)))
 
 
-async def test_find_roots():
-    async with Session() as session:
+@NIX_GC_ROOTS_BUG
+async def test_find_roots(tmp_path: Path):
+    async with Session(store_uri=f"local?root={tmp_path}") as session:
         store: Any
         async with session.store() as store:
             roots = (await store.find_roots(FindRootsRequest(censor=True))).roots
@@ -245,8 +252,9 @@ async def test_find_roots():
                 assert isinstance(root.path, str)
 
 
-async def test_collect_garbage_return_dead_does_not_delete():
-    async with Session() as session:
+@NIX_GC_ROOTS_BUG
+async def test_collect_garbage_return_dead_does_not_delete(tmp_path: Path):
+    async with Session(store_uri=f"local?root={tmp_path}") as session:
         store: Any
         async with session.store() as store:
             result = await store.collect_garbage(CollectGarbageRequest(action=GcAction.RETURN_DEAD))

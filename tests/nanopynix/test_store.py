@@ -12,8 +12,14 @@ from typing import Any
 
 import pytest
 
+import nanopynix
 import nanopynix_store
 
+
+NIX_GC_ROOTS_BUG = pytest.mark.skipif(
+    nanopynix.build_info()["nix_version"].startswith(("2.31.", "2.34.")),
+    reason="Nix 2.31 and 2.34 findRoots/collectGarbage crash on nonnumeric temproots filenames; https://github.com/NixOS/nix/issues/16138",
+)
 
 def _nix_sp() -> nanopynix_store.StorePath:
     """Return a StorePath for the system bash binary.  Requires NixOS."""
@@ -133,14 +139,18 @@ class TestStore:
         store.add_temp_root(sp)
         # Should not raise
 
-    def test_find_roots(self, store: Any):
+    @NIX_GC_ROOTS_BUG
+    def test_find_roots(self, tmp_path: Path):
+        store = nanopynix_store.open_store(f"local?root={tmp_path}")
         roots = store.find_roots(censor=True)
         assert isinstance(roots, list)
         for root in roots[:10]:
             assert isinstance(root["link"], str)
             assert isinstance(root["path"], str)
 
-    def test_collect_garbage_return_dead_does_not_delete(self, store: Any):
+    @NIX_GC_ROOTS_BUG
+    def test_collect_garbage_return_dead_does_not_delete(self, tmp_path: Path):
+        store = nanopynix_store.open_store(f"local?root={tmp_path}")
         result = store.collect_garbage(nanopynix_store.GCAction.ReturnDead)
         assert isinstance(result["paths"], list)
         assert result["bytes_freed"] == 0

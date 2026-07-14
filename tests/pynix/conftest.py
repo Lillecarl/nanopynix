@@ -96,6 +96,7 @@ class PynixStoreScenario:
         with (
             _patched_environ({"NIX_PATH": f"nixpkgs={self.nixpkgs_path}"}),
             _pynix_configure_logging_noop(),
+            _nanopynix_isolated_store(self.store_root),
             _pynix_test_context(test_name),
             redirect_stdout(stdout),
             redirect_stderr(stderr),
@@ -225,7 +226,13 @@ class PynixStoreScenario:
         self.local_log_stderr = self.last_stderr
         return self.local_log_path
 
-    async def build_nixpkgs_package(self, attrpath: str, *, test_name: str = "unknown") -> str:
+    async def build_nixpkgs_package(
+        self,
+        attrpath: str,
+        *,
+        test_name: str = "unknown",
+        verbosity: str = "0",
+    ) -> str:
         if attrpath == "hello-unfree":
             pkgs_nix_file = self.work_root / "pkgs-allow-unfree-default.nix"
             pkgs_nix_file.write_text("""
@@ -246,7 +253,7 @@ class PynixStoreScenario:
                 "--store",
                 self.store_url,
                 "--verbosity",
-                "0",
+                verbosity,
                 "--print-build-logs",
             ],
             test_name=test_name,
@@ -521,6 +528,44 @@ def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
             super().__init__(*args, **kwargs)
 
     nanopynix.Session = VerboseSession
+    try:
+        yield
+    finally:
+        nanopynix.Session = old_session
+
+
+@contextlib.contextmanager
+def _nanopynix_isolated_store(store_root: Path) -> Generator[None, None, None]:
+    import nanopynix
+
+    old_session = nanopynix.Session
+    build_dir = store_root / "nix" / "var" / "nix" / "builds"
+
+    class IsolatedStoreSession(old_session):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            kwargs.setdefault("load_config", False)
+            settings = kwargs.get("settings")
+            if isinstance(settings, nanopynix.NixSettings):
+                kwargs["settings"] = settings.model_copy(
+                    update={
+                        "build_dir": str(build_dir),
+                        "build_users_group": "",
+                        "require_drop_supplementary_groups": False,
+                        "sandbox": "true",
+                        "sandbox_fallback": False,
+                    }
+                )
+            elif settings is None:
+                kwargs["settings"] = nanopynix.NixSettings(
+                    build_dir=str(build_dir),
+                    build_users_group="",
+                    require_drop_supplementary_groups=False,
+                    sandbox="true",
+                    sandbox_fallback=False,
+                )
+            super().__init__(*args, **kwargs)
+
+    nanopynix.Session = IsolatedStoreSession
     try:
         yield
     finally:

@@ -216,7 +216,7 @@ class NixSettings(BaseModel):
                 version = nanopynix_util.build_info()["nix_version"]
                 raise ValueError(f"{_alias(name)} requires Nix {minimum} or newer (running {version})")
             rendered = _render_value(value)
-            if rendered == "":
+            if rendered == "" and not isinstance(value, str):
                 continue
             yield _alias(name), rendered
 

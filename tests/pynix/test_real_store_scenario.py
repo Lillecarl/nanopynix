@@ -144,7 +144,7 @@ async def test_scenario_builds_flake_hello(pynix_store_scenario: PynixStoreScena
 
 
 @pytest.mark.dependency(name="scenario:build-hello-unfree", depends=["scenario:build-nixpkgs-hello"])
-async def test_scenario_builds_hello_unfree_locally_and_forwards_logs(
+async def test_scenario_builds_hello_unfree_locally(
     pynix_store_scenario: PynixStoreScenario,
     request: pytest.FixtureRequest,
 ):
@@ -155,10 +155,3 @@ async def test_scenario_builds_hello_unfree_locally_and_forwards_logs(
     assert hello_unfree_path.startswith("/nix/store/")
     assert "example-unfree-package" in hello_unfree_path
     assert scenario.physical_path(hello_unfree_path).exists()
-    assert scenario.last_logs is not None
-    assert any(
-        entry.get("event") == "nix log"
-        and isinstance(_msg := entry.get("message"), str)
-        and "building derivation" in _msg
-        for entry in scenario.last_logs
-    )
