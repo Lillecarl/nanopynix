@@ -207,3 +207,21 @@ class TestOpenStore:
         store = nanopynix_store.open_store(f"local?root={tmp_path}")
         assert isinstance(store, nanopynix_store.Store)
         assert store.get_uri().startswith("local")
+
+    @pytest.mark.skipif(os.environ.get("GITHUB_ACTIONS") == "true", reason="local store layout differs in GHA")
+    def test_open_store_uri_local_initializes_store_layout(self, tmp_path: Path):
+        root = tmp_path / "local-store"
+        store = nanopynix_store.open_store(f"local?root={root}")
+
+        dirs = store.get_store_dirs()
+        assert dirs == {
+            "store_dir": "/nix/store",
+            "uri": store.get_uri(),
+            "root_dir": str(root),
+            "state_dir": str(root / "nix" / "var" / "nix"),
+            "log_dir": str(root / "nix" / "var" / "log" / "nix"),
+            "real_store_dir": str(root / "nix" / "store"),
+            "build_dir": str(root / "nix" / "var" / "nix" / "builds"),
+        }
+        assert (root / "nix" / "store").is_dir()
+        assert (root / "nix" / "var" / "nix" / "db" / "db.sqlite").is_file()

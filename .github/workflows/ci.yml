@@ -24,7 +24,7 @@ jobs:
         run: nix build .#nanopynix-all-tests --print-build-logs --print-out-paths
 
       - name: Test all supported Nix versions
-        run: nix run .#nanopynix-all-tests --print-build-logs -- --verbose --tb=short  -rsxXfE --run-temp-store-builds
+        run: nix run .#nanopynix-all-tests --print-build-logs -- --verbose --tb=short -x -rsxXfE --run-temp-store-builds
 
   update-lockfile:
     if: github.event_name == 'schedule'
@@ -50,7 +50,7 @@ jobs:
         run: nix build .#nanopynix-all-tests --print-build-logs --print-out-paths
 
       - name: Test all supported Nix versions
-        run: nix run .#nanopynix-all-tests --print-build-logs -- --verbose --tb=short  -rsxXfE --run-temp-store-builds
+        run: nix run .#nanopynix-all-tests --print-build-logs -- --verbose --tb=short -x -rsxXfE --run-temp-store-builds
 
       - uses: step-security/git-auto-commit-action@v7
         with:
