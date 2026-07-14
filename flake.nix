@@ -15,15 +15,21 @@
       eachDefNix = forAllSystems (
         system:
         import ./. {
-          inherit system;
+          inherit inputs system;
           pkgs = inputs.self.legacyPackages.${system};
         }
       );
     in
     {
-      packages = forAllSystems (system: {
-        inherit (eachDefNix.${system}) nanopynix-bindings nanopynix pynix;
-      });
+      packages = forAllSystems (
+        system:
+        {
+          inherit (eachDefNix.${system}) nanopynix-bindings nanopynix pynix;
+        }
+        // lib.mapAttrs' (
+          nixVersion: nanopynix: lib.nameValuePair "nanopynix-${nixVersion}" nanopynix
+        ) eachDefNix.${system}.nanopynix-nixVersions
+      );
       checks = forAllSystems (system: {
         pynix = eachDefNix.${system}.pynix;
       });
