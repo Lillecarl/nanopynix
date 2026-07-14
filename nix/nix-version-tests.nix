@@ -2,6 +2,7 @@
   lib,
   writeShellApplication,
   nanopynix-nixVersions,
+  nixpkgs,
 }:
 let
   uniqueNanopynixVersions = lib.foldl' (
@@ -13,7 +14,8 @@ let
     if versions ? ${outputPathHash} then
       versions
     else
-      versions // {
+      versions
+      // {
         ${outputPathHash} = {
           inherit nixVersion nanopynix;
         };
@@ -22,8 +24,9 @@ let
 in
 writeShellApplication {
   name = "nanopynix-nix-version-tests";
-  text = lib.concatStringsSep "\n" (
-    lib.mapAttrsToList (_: { nixVersion, nanopynix }: ''
+  text = lib.concatLines (
+    [ "export NIX_PATH=nixpkgs=${nixpkgs}" ]
+    ++ lib.mapAttrsToList (_: { nixVersion, nanopynix }: ''
       echo "==> Testing nanopynix against ${nixVersion}"
       ${nanopynix.passthru.tests}/bin/nanopynix-tests "$@"
     '') uniqueNanopynixVersions
