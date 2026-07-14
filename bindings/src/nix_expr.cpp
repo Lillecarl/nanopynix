@@ -31,7 +31,8 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+#else
 static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
     switch (s) {
@@ -671,10 +672,10 @@ static void python_to_value(
         v.mkFloat(nb::cast<double>(obj));
     } else if (nb::isinstance<nb::str>(obj)) {
         auto s = nb::cast<std::string>(obj);
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
-        v.mkString(s, state.mem);
-#else
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
         v.mkString(s);
+#else
+        v.mkString(s, state.mem);
 #endif
     } else if (nb::isinstance<nb::list>(obj)) {
         auto pyList = nb::cast<nb::list>(obj);
@@ -744,15 +745,15 @@ static void python_to_value(
                 .name = anon_name,
                 .args = arg_names,
                 .arity = static_cast<size_t>(arity),
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
-                .doc = std::nullopt,
-#else
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
                 .doc = nullptr,
-#endif
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
-                .impl = impl,
 #else
+                .doc = std::nullopt,
+#endif
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
                 .fun = impl,
+#else
+                .impl = impl,
 #endif
             }));
 
@@ -847,15 +848,15 @@ static void register_primop(
         .name = name,
         .args = arg_names,
         .arity = static_cast<size_t>(arity),
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
-        .doc = registered.doc.empty() ? std::optional<std::string>{} : std::optional<std::string>{registered.doc},
-#else
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
         .doc = registered.doc.empty() ? nullptr : registered.doc.c_str(),
-#endif
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
-        .impl = impl,
 #else
+        .doc = registered.doc.empty() ? std::optional<std::string>{} : std::optional<std::string>{registered.doc},
+#endif
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
         .fun = impl,
+#else
+        .impl = impl,
 #endif
     };
 

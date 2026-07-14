@@ -20,8 +20,9 @@ pkg_check_modules(NIX_STORE REQUIRED nix-store)
 pkg_check_modules(NIX_EXPR REQUIRED nix-expr)
 
 # Nix's C++ bindings are a release stream, not an independent feature matrix.
-# 2.31 is the oldest supported API; 2.32 and 2.35 are compatibility cutoffs.
-# Newer releases intentionally select the final, latest source branch.
+# Compatibility uses ordered release bands: < 2.32, < 2.35, then the latest
+# default branch. New releases therefore select the final source branch unless
+# an API is deliberately assigned another cutoff.
 string(REGEX MATCH "^([0-9]+)\\.([0-9]+)" _nix_version_match "${NIX_STORE_VERSION}")
 if(NOT _nix_version_match)
   message(FATAL_ERROR "Cannot parse nix-store version: ${NIX_STORE_VERSION}")

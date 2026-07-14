@@ -43,18 +43,18 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
-using NixGCAction = nix::GCAction;
-constexpr auto gcReturnLive = nix::GCAction::gcReturnLive;
-constexpr auto gcReturnDead = nix::GCAction::gcReturnDead;
-constexpr auto gcDeleteDead = nix::GCAction::gcDeleteDead;
-constexpr auto gcDeleteSpecific = nix::GCAction::gcDeleteSpecific;
-#else
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
 using NixGCAction = nix::GCOptions::GCAction;
 constexpr auto gcReturnLive = nix::GCOptions::gcReturnLive;
 constexpr auto gcReturnDead = nix::GCOptions::gcReturnDead;
 constexpr auto gcDeleteDead = nix::GCOptions::gcDeleteDead;
 constexpr auto gcDeleteSpecific = nix::GCOptions::gcDeleteSpecific;
+#else
+using NixGCAction = nix::GCAction;
+constexpr auto gcReturnLive = nix::GCAction::gcReturnLive;
+constexpr auto gcReturnDead = nix::GCAction::gcReturnDead;
+constexpr auto gcDeleteDead = nix::GCAction::gcDeleteDead;
+constexpr auto gcDeleteSpecific = nix::GCAction::gcDeleteSpecific;
 #endif
 
 template<typename Path>
@@ -86,7 +86,8 @@ static nb::list string_set_to_list(const nix::StringSet &values) {
     return result;
 }
 
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+#else
 static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
     switch (s) {
@@ -471,12 +472,12 @@ static std::string request_store_add_name(const nb::dict &request) {
 }
 
 static nix::SourcePath request_source_path(const nb::dict &request) {
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_35
-    return nix::SourcePath(nix::makeFSSourceAccessor(
-        std::filesystem::absolute(std::filesystem::path(request_string(request, "path")))));
-#else
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
     return nix::PosixSourceAccessor::createAtRoot(
         nix::makeParentCanonical(std::filesystem::path(request_string(request, "path"))));
+#else
+    return nix::SourcePath(nix::makeFSSourceAccessor(
+        std::filesystem::absolute(std::filesystem::path(request_string(request, "path")))));
 #endif
 }
 
@@ -517,7 +518,9 @@ static nb::dict collect_garbage(
     nix::GCOptions options;
     options.action = action;
     options.ignoreLiveness = ignore_liveness;
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_35
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
+    options.pathsToDelete = nix::StorePathSet(paths_to_delete.begin(), paths_to_delete.end());
+#else
     if (paths_to_delete.empty()) {
         options.pathsToDelete = nix::GCOptions::WholeStore{};
     } else {
@@ -525,8 +528,6 @@ static nb::dict collect_garbage(
             .paths = nix::StorePathSet(paths_to_delete.begin(), paths_to_delete.end()),
         };
     }
-#else
-    options.pathsToDelete = nix::StorePathSet(paths_to_delete.begin(), paths_to_delete.end());
 #endif
     options.maxFreed = max_freed;
 
