@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-
-import pytest
 from pathlib import Path
 
+import pytest
 from anyio import Path as AnyioPath
+from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from pynix import Pynix
 
@@ -125,7 +125,7 @@ async def test_build_missing_attrpath_errors_before_build(tmp_path: Path, capsys
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "attribute 'missing' not found" in captured.err
+    assert "attribute 'missing' not found" in strip_ansi(captured.err)
 
 
 async def test_build_flake_derivation(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
