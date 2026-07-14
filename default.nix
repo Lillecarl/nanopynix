@@ -1,5 +1,8 @@
+let
+  flake = (import ./nix/compat.nix);
+in
 {
-  inputs ? (import ./nix/compat.nix).inputs,
+  inputs ? flake.inputs,
   system ? builtins.currentSystem,
   pkgs ? inputs.nixpkgs.legacyPackages.${system},
 }:
@@ -24,6 +27,28 @@ let
       grpclib-transports
       ;
   };
+  nanopynixForNix =
+    nix:
+    let
+      nanopynix-bindings = python3Packages.callPackage ./bindings/package.nix {
+        inherit nix;
+      };
+    in
+    python3Packages.callPackage ./python/package.nix {
+      inherit
+        nanopynix-bindings
+        nanopynix-proto
+        grpclib-transports
+        ;
+    };
+  nixVersions = pkgs.lib.filterAttrs (
+    _: nix:
+    let
+      hasLibs = builtins.tryEval (nix ? libs);
+    in
+    hasLibs.success && hasLibs.value
+  ) pkgs.nixVersions;
+  nanopynix-nixVersions = pkgs.lib.mapAttrs (_: nix: nanopynixForNix nix) nixVersions;
   clypi = python3Packages.callPackage ./nix/clypi.nix { };
   pynix = python3Packages.callPackage ./pynix/package.nix { inherit nanopynix clypi; };
 
@@ -32,10 +57,12 @@ let
   };
 in
 {
+  inherit flake;
   inherit
     pkgs
     shell
     nanopynix
+    nanopynix-nixVersions
     nanopynix-bindings
     nanopynix-proto
     pynix
