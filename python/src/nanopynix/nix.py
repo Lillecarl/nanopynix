@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
@@ -36,7 +37,9 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
     from os import PathLike
 
-    from nanopynix._pool import _Subscription  # type: ignore[reportPrivateUsage] -- type of _WorkerManager.subscribe result
+    from nanopynix._pool import (
+        _Subscription,  # type: ignore[reportPrivateUsage] -- type of _WorkerManager.subscribe result
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +111,8 @@ class Session:
         self,
         *,
         store_uri: str = "auto",
-        nix_conf: str | None = "/etc/nix/nix.conf",
+        nix_conf: Path | None = None,
+        load_config: bool = True,
         settings: NixSettings | PathLike[str] | str | None = None,
         experimental_features: list[str] | None = None,
         verbosity: LogLevelInput | None = None,
@@ -122,12 +126,18 @@ class Session:
         reserved_worker_oom_score_adj: int | None = None,
         runtime_settings: NanopynixSettings | None = None,
     ) -> None:
+        if nix_conf is not None:
+            if not isinstance(nix_conf, Path):
+                raise TypeError("nix_conf must be a pathlib.Path or None")
+            if not nix_conf.exists():
+                raise FileNotFoundError(nix_conf)
         nix_settings = normalize_nix_settings(settings).with_experimental_features(experimental_features)
         nanopynix_settings = runtime_settings or NanopynixSettings()
         worker_settings = nix_settings.to_worker_settings()
         self._manager = _WorkerManager(
             store_uri=store_uri,
             nix_conf=nix_conf,
+            load_config=load_config,
             settings=worker_settings,
             experimental_features=[],
             verbosity=normalize_log_level(verbosity) if verbosity is not None else None,

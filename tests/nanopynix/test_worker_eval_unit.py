@@ -8,6 +8,10 @@ from typing import Any
 import pytest
 
 from nanopynix._handle_registry import HandleRegistry  # type: ignore[reportPrivateUsage] -- test imports private module
+from nanopynix._worker import (  # type: ignore[reportPrivateUsage] -- test imports private module
+    WorkerServiceHandler,
+    WorkerState,
+)
 from nanopynix._worker_eval import EvalServiceHandler  # type: ignore[reportPrivateUsage] -- test imports private module
 
 
@@ -19,6 +23,33 @@ class _FakeEvalState:
 
     def release_exported_value(self, value: Any) -> None:
         self.released.append(value)
+
+
+class _FakeStore:
+    def get_uri(self) -> str:
+        return "local"
+
+    def get_store_dir(self) -> str:
+        return "/nix/store"
+
+
+def test_worker_opens_auto_store_with_explicit_auto_uri(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test verifies worker store dispatch
+
+    opened_uris: list[str] = []
+
+    def _open_store(uri: str) -> _FakeStore:
+        opened_uris.append(uri)
+        return _FakeStore()
+
+    monkeypatch.setattr(worker.nanopynix_store, "open_store", _open_store)
+    handler = WorkerServiceHandler(WorkerState())
+
+    _handle, uri, store_dir = handler._open_store("auto")  # type: ignore[reportPrivateUsage] -- test verifies worker store dispatch
+
+    assert opened_uris == ["auto"]
+    assert uri == "local"
+    assert store_dir == "/nix/store"
 
 
 def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.MonkeyPatch):

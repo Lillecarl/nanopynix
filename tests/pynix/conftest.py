@@ -26,6 +26,7 @@ import pytest
 import structlog
 from structlog.exceptions import DropEvent
 
+import pynix
 from pynix import Pynix
 
 if TYPE_CHECKING:
@@ -100,6 +101,10 @@ class PynixStoreScenario:
             redirect_stderr(stderr),
         ):
             cmd = Pynix.parse(args)
+            # Parsing may configure structlog through Pynix's public re-export.
+            # Reinstall the test collector before the command starts forwarding
+            # Nix logs, so JSON command output remains machine-readable.
+            structlog.configure(processors=[self.live_log.capture])
             await cmd.astart()
         self.last_stdout = stdout.getvalue()
         self.last_stderr = stderr.getvalue()
@@ -494,11 +499,14 @@ def _pynix_configure_logging_noop() -> Generator[None, None, None]:
     import pynix._util as pynix_util
 
     old_configure_logging = pynix_util.configure_logging
+    old_public_configure_logging = pynix.configure_logging
     pynix_util.configure_logging = lambda: None
+    pynix.configure_logging = lambda: None
     try:
         yield
     finally:
         pynix_util.configure_logging = old_configure_logging
+        pynix.configure_logging = old_public_configure_logging
 
 
 @contextlib.contextmanager

@@ -198,14 +198,18 @@ async def test_query_substitutable_paths():
                 assert isinstance(subs, list)
 
 
-async def test_follow_links_to_store_path():
+async def test_follow_links_to_store_path(tmp_path: Path):
     async with Session() as session:
         store: Any
         async with session.store() as store:
             paths = (await store.query_all_valid_paths(QueryAllValidPathsRequest())).paths
             if paths:
-                response = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path="/run/current-system"))
-                assert isinstance(response.path, str)
+                target = paths[0]
+                link = tmp_path / "store-path"
+                link.symlink_to(target)
+
+                response = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path=str(link)))
+                assert response.path == target
 
 
 async def test_store_path_str_and_model_roundtrip():

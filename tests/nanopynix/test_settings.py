@@ -10,13 +10,13 @@ from pydantic import ValidationError
 # import nanopynix
 from nanopynix import Session
 from nanopynix.settings import (
+    NanopynixSettings,
     NixEvalSettings,
     NixFetchSettings,
     NixFlakeSettings,
     NixSettingMetadata,
     NixSettings,
     NixSettingsEnv,
-    NanopynixSettings,
     check_all_settings_model_drift,
     check_settings_model_drift,
 )
@@ -132,6 +132,28 @@ def test_session_defaults_to_flakes_and_nix_command() -> None:
     session = Session()
 
     assert session._manager._settings["experimental-features"] == "flakes nix-command"  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
+    assert session._manager._nix_conf is None  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
+    assert session._manager._load_config  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
+
+
+def test_session_config_options(tmp_path: Path) -> None:
+    nix_conf = tmp_path / "nix.conf"
+    nix_conf.touch()
+
+    session = Session(nix_conf=nix_conf, load_config=False)
+
+    assert session._manager._nix_conf == nix_conf  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
+    assert not session._manager._load_config  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
+
+
+def test_session_rejects_missing_nix_conf(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        Session(nix_conf=tmp_path / "missing-nix.conf")
+
+
+def test_session_rejects_string_nix_conf() -> None:
+    with pytest.raises(TypeError, match="pathlib.Path"):
+        Session(nix_conf="/etc/nix/nix.conf")  # type: ignore[arg-type] -- validates the public runtime boundary
 
 
 def test_session_rejects_raw_settings_dict() -> None:
