@@ -8,6 +8,19 @@ import nanopynix_store
 import nanopynix_util
 
 
+def test_build_info_reports_compile_time_compatibility() -> None:
+    info = nanopynix_util.build_info()
+
+    assert isinstance(info["nix_version"], str)
+    assert info["nix_version"]
+    assert set(info["capabilities"]) == {
+        "logger_unique_ptr",
+        "build_result_sum",
+        "eval_state_mem",
+    }
+    assert all(isinstance(value, bool) for value in info["capabilities"].values())
+
+
 class TestCurrentSystem:
     def test_current_system_is_non_empty(self):
         assert nanopynix_util.current_system()
