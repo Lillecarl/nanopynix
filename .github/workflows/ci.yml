@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: nixbuild/nix-quick-install-action@v35
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: jujutsu
+      - name: Test all supported Nix versions
+        run: jj st &>/dev/null && nix run --print-build-logs .#nanopynix-nixVersions-tests
+
+  update-lockfile:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: nixbuild/nix-quick-install-action@v35
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: jujutsu
+      - name: Update flake inputs
+        run: nix flake update
+      - name: Test all supported Nix versions
+        run: jj st &>/dev/null && nix run --print-build-logs .#nanopynix-nixVersions-tests
+      - name: Commit updated inputs
+        run: |
+          if git diff --quiet -- flake.lock; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flake.lock
+          git commit -m "flake: update inputs"
+          git push origin HEAD:main
