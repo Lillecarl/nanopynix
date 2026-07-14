@@ -3,24 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-import subprocess
+
+from _git import commit_files, init_flake_repo, init_repo
 
 import nanopynix
 import nanopynix_flake
 
 
 def _init_git_flake(tmp_path: Path, outputs_body: str = "val = 1;") -> None:
-    """Create a temp flake with a git repo so Nix can evaluate it."""
-    (tmp_path / "flake.nix").write_text(f"""
-    {{
-        outputs = {{ ... }}: {{
-            {outputs_body}
-        }};
-    }}
-    """)
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+    init_flake_repo(tmp_path, outputs_body)
 
 
 class TestParseFlakeRef:
@@ -74,17 +65,7 @@ class TestGetFlake:
 class TestCallFlake:
     def test_call_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
         """call_flake evaluates a locked flake's outputs."""
-        (tmp_path / "flake.nix").write_text("""
-        {
-            outputs = { ... }: {
-                hello = "world";
-                num = 42;
-            };
-        }
-        """)
-        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+        init_flake_repo(tmp_path, r'hello = "world"; num = 42;')
         ref = nanopynix.parse_flake_ref(str(tmp_path))
         locked = nanopynix.lock_flake(eval_state, ref, write_lock_file=False)
         outputs = nanopynix_flake.call_flake(eval_state, locked)
@@ -99,17 +80,7 @@ class TestCallFlake:
 class TestEvalFlake:
     def test_eval_flake(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
         """eval_flake locks and evaluates a flake in one step."""
-        (tmp_path / "flake.nix").write_text("""
-        {
-            outputs = { ... }: {
-                greeting = "hi";
-                count = 7;
-            };
-        }
-        """)
-        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+        init_flake_repo(tmp_path, r'greeting = "hi"; count = 7;')
         outputs = nanopynix_flake.eval_flake(eval_state, str(tmp_path), write_lock_file=False)
         outputs.force()
         assert outputs.type_name() == "attrs"
@@ -122,21 +93,20 @@ class TestEvalFlake:
         """eval_flake with write_lock_file=True creates flake.lock."""
         dep_dir = tmp_path / "dep"
         dep_dir.mkdir()
-        _init_git_flake(dep_dir)
+        init_flake_repo(dep_dir)
 
         (tmp_path / "flake.nix").write_text(
-            """
-        {
-            inputs.dep.url = "DIR";
-            outputs = { self, dep, ... }: {
+            f"""
+        {{
+            inputs.dep.url = "{dep_dir}";
+            outputs = {{ self, dep, ... }}: {{
                 val = 1;
-            };
-        }
-        """.replace("DIR", str(dep_dir))
+            }};
+        }}
+        """
         )
-        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "add", "flake.nix"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+        repo = init_repo(tmp_path)
+        commit_files(repo, tmp_path / "flake.nix")
 
         assert not (tmp_path / "flake.lock").exists()
         nanopynix_flake.eval_flake(eval_state, str(tmp_path), write_lock_file=True)

@@ -13,6 +13,7 @@
   # nixpkgs test deps
   pytest-dependency,
   anyio,
+  pygit2,
   # cool deps
   nanopynix-bindings ? callPackage ../bindings/package.nix { },
   nanopynix-proto ? callPackage ../proto/package.nix { },
@@ -24,6 +25,7 @@ buildPythonPackage (
     nativeCheckInputs = [
       pytest-dependency
       anyio
+      pygit2
     ];
   in
   {
