@@ -1,7 +1,7 @@
 # Useful commands
 - direnv exec . timeout 60 pytest tests
 - direnv exec . pyright
-- direnv exec . ruff
+- direnv exec . ruff check --fix
 - jj st &>/dev/null && nix build .#nanopynix-nixVersions-tests --no-link --print-out-paths --print-build-logs # jj st tracks all files in Git which is required when doing flake builds.
 
 # Version control
