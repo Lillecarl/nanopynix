@@ -1,8 +1,9 @@
 {
   lib,
-  writeShellApplication,
   nanopynix-nixVersions,
   nixpkgs,
+  writeShellApplication,
+  gitMinimal,
 }:
 let
   uniqueNanopynixVersions = lib.foldl' (
@@ -24,6 +25,9 @@ let
 in
 writeShellApplication {
   name = "nanopynix-nix-version-tests";
+  runtimeInputs = [
+    gitMinimal
+  ];
   text = lib.concatLines (
     [ "export NIX_PATH=nixpkgs=${nixpkgs}" ]
     ++ lib.mapAttrsToList (_: { nixVersion, nanopynix }: ''
