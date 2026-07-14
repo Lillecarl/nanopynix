@@ -19,27 +19,48 @@ let
   nanopynix-proto = python3Packages.callPackage ./proto/package.nix {
     inherit betterproto2 betterproto2-compiler;
   };
-  nanopynix-bindings = python3Packages.callPackage ./bindings/package.nix { };
-  nanopynix = python3Packages.callPackage ./python/package.nix {
-    inherit
-      nanopynix-bindings
-      nanopynix-proto
-      grpclib-transports
-      ;
-  };
-  nanopynixForNix =
+  mkNanopynixBindings = nix: python3Packages.callPackage ./bindings/package.nix { inherit nix; };
+  mkNanopynix =
     nix:
-    let
-      nanopynix-bindings = python3Packages.callPackage ./bindings/package.nix {
-        inherit nix;
-      };
-    in
     python3Packages.callPackage ./python/package.nix {
+      nanopynix-bindings = mkNanopynixBindings nix;
       inherit
-        nanopynix-bindings
         nanopynix-proto
         grpclib-transports
         ;
+    };
+  mkPynix = nanopynix: python3Packages.callPackage ./pynix/package.nix { inherit nanopynix clypi; };
+  mkNanopynixTests =
+    {
+      nix,
+      nanopynix,
+    }:
+    python3Packages.callPackage ./nix/tests.nix {
+      inherit clypi nix nanopynix;
+      flakeCompatishSrc = inputs.flake-compatish;
+      grpclibTransportsSrc = inputs.grpclib-transports;
+      pynix = mkPynix nanopynix;
+    };
+  withTests =
+    {
+      nix,
+      nanopynix,
+    }:
+    nanopynix.overrideAttrs (old: {
+      passthru = old.passthru or { } // {
+        tests = mkNanopynixTests { inherit nix nanopynix; };
+      };
+    });
+  nanopynix = withTests {
+    nix = pkgs.nix;
+    nanopynix = mkNanopynix pkgs.nix;
+  };
+  nanopynix-bindings = mkNanopynixBindings pkgs.nix;
+  nanopynixForNix =
+    nix:
+    withTests {
+      nanopynix = mkNanopynix nix;
+      inherit nix;
     };
   nixVersions = pkgs.lib.filterAttrs (
     _: nix:
@@ -50,7 +71,7 @@ let
   ) pkgs.nixVersions;
   nanopynix-nixVersions = pkgs.lib.mapAttrs (_: nix: nanopynixForNix nix) nixVersions;
   clypi = python3Packages.callPackage ./nix/clypi.nix { };
-  pynix = python3Packages.callPackage ./pynix/package.nix { inherit nanopynix clypi; };
+  pynix = mkPynix nanopynix;
 
   shell = python3Packages.callPackage ./nix/shell.nix {
     inherit nanopynix pynix;
