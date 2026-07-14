@@ -10,8 +10,6 @@
   nanopynix,
   pynix,
   pytest,
-  pytest-dependency,
-  anyio,
   sphinx,
   myst-parser,
   furo,
@@ -23,13 +21,10 @@ let
     ++ nanopynix.nativeBuildInputs
     ++ nanopynix.passthru.testInputs
     ++ pynix.dependencies
-    ++ pynix.nativeBuildInputs
     ++ [
       nanopynix
       pynix
       pytest
-      pytest-dependency
-      anyio
       sphinx
       myst-parser
       furo
