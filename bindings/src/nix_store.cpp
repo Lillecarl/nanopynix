@@ -32,10 +32,35 @@
 #include <nix/util/logging.hh>
 #include <nix/util/posix-source-accessor.hh>
 
+#include <nanopynix/nix_compat_config.hh>
+
 #include "py_store_impl.hh"
 
 namespace nb = nanobind;
 using namespace nb::literals;
+
+#if NANOPYNIX_HAVE_GLOBAL_GC_ACTION
+using NixGCAction = nix::GCAction;
+constexpr auto gcReturnLive = nix::GCAction::gcReturnLive;
+constexpr auto gcReturnDead = nix::GCAction::gcReturnDead;
+constexpr auto gcDeleteDead = nix::GCAction::gcDeleteDead;
+constexpr auto gcDeleteSpecific = nix::GCAction::gcDeleteSpecific;
+#else
+using NixGCAction = nix::GCOptions::GCAction;
+constexpr auto gcReturnLive = nix::GCOptions::gcReturnLive;
+constexpr auto gcReturnDead = nix::GCOptions::gcReturnDead;
+constexpr auto gcDeleteDead = nix::GCOptions::gcDeleteDead;
+constexpr auto gcDeleteSpecific = nix::GCOptions::gcDeleteSpecific;
+#endif
+
+template<typename Path>
+static std::string nix_path_to_string(const Path &path) {
+#if NANOPYNIX_PATH_IS_STRING
+    return path;
+#else
+    return path.string();
+#endif
+}
 
 // =========================================================================
 // Helpers — convert Nix types to nb::dict for Pydantic validation
@@ -57,6 +82,7 @@ static nb::list string_set_to_list(const nix::StringSet &values) {
     return result;
 }
 
+#if NANOPYNIX_HAVE_BUILD_RESULT_SUM
 static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
     switch (s) {
@@ -114,6 +140,51 @@ static nb::dict build_result_from_br(const nix::BuildResult &br) {
         return build_result_to_dict("", false, build_failure_status_str(failure->status), failure->msg());
     return build_result_to_dict("", false, "unknown", "");
 }
+#else
+static nb::dict build_result_to_dict(const std::string &drv_path, bool success,
+                                      const std::string &status, const std::string &error_msg) {
+    nb::dict d;
+    d["drv_path"] = drv_path;
+    d["success"] = success;
+    d["status"] = status;
+    d["error_msg"] = error_msg;
+    return d;
+}
+
+static std::string build_status_str(nix::BuildResult::Status s) {
+    using enum nix::BuildResult::Status;
+    switch (s) {
+        case Built: return "built";
+        case Substituted: return "substituted";
+        case AlreadyValid: return "already-valid";
+        case ResolvesToAlreadyValid: return "resolves-to-already-valid";
+        case PermanentFailure: return "permanent-failure";
+        case InputRejected: return "input-rejected";
+        case OutputRejected: return "output-rejected";
+        case TransientFailure: return "transient-failure";
+        case CachedFailure: return "cached-failure";
+        case TimedOut: return "timed-out";
+        case MiscFailure: return "misc-failure";
+        case DependencyFailed: return "dependency-failed";
+        case LogLimitExceeded: return "log-limit-exceeded";
+        case NotDeterministic: return "not-deterministic";
+        case NoSubstituters: return "no-substituters";
+    }
+    return "unknown";
+}
+
+static nb::dict build_result_from_kbr(const nix::KeyedBuildResult &kbr,
+                                       const nix::StoreDirConfig &store) {
+    auto result = static_cast<nix::BuildResult>(kbr);
+    return build_result_to_dict(kbr.path.to_string(store), result.success(),
+                                build_status_str(result.status), result.errorMsg);
+}
+
+static nb::dict build_result_from_br(const nix::BuildResult &br) {
+    auto result = br;
+    return build_result_to_dict("", result.success(), build_status_str(result.status), result.errorMsg);
+}
+#endif
 
 static nb::dict path_info_to_dict(nix::Store &s, const nix::ValidPathInfo &info) {
     nb::dict d;
@@ -400,13 +471,13 @@ static nix::SourcePath request_source_path(const nb::dict &request) {
         nix::makeParentCanonical(std::filesystem::path(request_string(request, "path"))));
 }
 
-static nix::GCAction gc_action_from_int(int action) {
+static NixGCAction gc_action_from_int(int action) {
     switch (action) {
-        case 1: return nix::GCAction::gcReturnLive;
-        case 2: return nix::GCAction::gcReturnDead;
-        case 3: return nix::GCAction::gcDeleteDead;
-        case 4: return nix::GCAction::gcDeleteSpecific;
-        default: return nix::GCAction::gcReturnDead;
+        case 1: return gcReturnLive;
+        case 2: return gcReturnDead;
+        case 3: return gcDeleteDead;
+        case 4: return gcDeleteSpecific;
+        default: return gcReturnDead;
     }
 }
 
@@ -430,7 +501,7 @@ static nb::list find_roots(nix::Store &s, bool censor) {
 
 static nb::dict collect_garbage(
         nix::Store &s,
-        nix::GCAction action,
+        NixGCAction action,
         bool ignore_liveness,
         const std::vector<nix::StorePath> &paths_to_delete,
         uint64_t max_freed) {
@@ -647,14 +718,14 @@ static nb::dict store_dirs_to_dict(nix::Store &s) {
         auto &config = local_fs_store->config;
         auto root_dir = config.rootDir.get();
         if (root_dir)
-            d["root_dir"] = root_dir->string();
-        d["state_dir"] = config.stateDir.get().string();
-        d["log_dir"] = config.logDir.get().string();
-        d["real_store_dir"] = config.realStoreDir.get().string();
+            d["root_dir"] = nix_path_to_string(*root_dir);
+        d["state_dir"] = nix_path_to_string(config.stateDir.get());
+        d["log_dir"] = nix_path_to_string(config.logDir.get());
+        d["real_store_dir"] = nix_path_to_string(config.realStoreDir.get());
     }
 
     if (auto *local_store = dynamic_cast<nix::LocalStore *>(&s)) {
-        d["build_dir"] = local_store->config->getBuildDir().string();
+        d["build_dir"] = nix_path_to_string(local_store->config->getBuildDir());
     }
 
     return d;
@@ -991,7 +1062,7 @@ static void bind_store(nb::module_ &m) {
         .def(
             "add_perm_root",
             [](nix::Store &s, const nix::StorePath &store_path, const std::string &gc_root) {
-                return require_local_fs_store(s).addPermRoot(store_path, gc_root).string();
+                return nix_path_to_string(require_local_fs_store(s).addPermRoot(store_path, gc_root));
             },
             nb::call_guard<nb::gil_scoped_release>(),
             "store_path"_a,
@@ -1066,11 +1137,11 @@ NB_MODULE(nanopynix_store, m) {
         .value("Repair", nix::BuildMode::bmRepair)
         .value("Check", nix::BuildMode::bmCheck);
 
-    nb::enum_<nix::GCAction>(m, "GCAction")
-        .value("ReturnLive", nix::GCAction::gcReturnLive)
-        .value("ReturnDead", nix::GCAction::gcReturnDead)
-        .value("DeleteDead", nix::GCAction::gcDeleteDead)
-        .value("DeleteSpecific", nix::GCAction::gcDeleteSpecific);
+    nb::enum_<NixGCAction>(m, "GCAction")
+        .value("ReturnLive", gcReturnLive)
+        .value("ReturnDead", gcReturnDead)
+        .value("DeleteDead", gcDeleteDead)
+        .value("DeleteSpecific", gcDeleteSpecific);
 
     m.def("open_store", &open_store_uri, "uri"_a);
     m.def("open_store", &open_store_default);

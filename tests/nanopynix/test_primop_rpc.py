@@ -5,8 +5,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nanopynix.models import PrimOpSpec
 from nanopynix.nix import Session
+
+
+pytestmark = pytest.mark.required_nix_version("2.32", None)
 
 
 def _rpc_double(x: int) -> int:

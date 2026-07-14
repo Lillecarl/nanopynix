@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     from nanopynix._session import NixDeepValue
 
 
+pytestmark = pytest.mark.required_nix_version("2.32", None)
+
+
 def _as_dict(v: NixDeepValue) -> dict[str, NixDeepValue]:
     assert isinstance(v, dict)
     return v

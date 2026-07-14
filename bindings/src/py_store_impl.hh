@@ -11,6 +11,8 @@
 #include <nix/util/ref.hh>
 #include <nix/util/source-accessor.hh>
 
+#include <nanopynix/nix_compat_config.hh>
+
 namespace nb = nanobind;
 
 /**
@@ -36,7 +38,12 @@ struct PyStoreImpl : public nix::Store {
 
     void queryRealisationUncached(
         const nix::DrvOutput & id,
-        nix::Callback<std::shared_ptr<const nix::UnkeyedRealisation>> callback) noexcept override;
+#if NANOPYNIX_HAVE_UNKEYED_REALISATION
+        nix::Callback<std::shared_ptr<const nix::UnkeyedRealisation>> callback
+#else
+        nix::Callback<std::shared_ptr<const nix::Realisation>> callback
+#endif
+        ) noexcept override;
 
     std::optional<nix::StorePath> queryPathFromHashPart(const std::string & hashPart) override;
 
@@ -58,7 +65,9 @@ struct PyStoreImpl : public nix::Store {
     void registerDrvOutput(const nix::Realisation & output) override;
 
     nix::ref<nix::SourceAccessor> getFSAccessor(bool requireValidPath = true) override;
+#if NANOPYNIX_HAVE_PATH_FS_ACCESSOR
     std::shared_ptr<nix::SourceAccessor> getFSAccessor(const nix::StorePath & path, bool requireValidPath = true) override;
+#endif
 
     std::optional<nix::TrustedFlag> isTrustedClient() override;
 

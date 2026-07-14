@@ -164,6 +164,7 @@ static nb::dict build_info() {
     capabilities["logger_unique_ptr"] = bool(NANOPYNIX_NIX_LOGGER_IS_UNIQUE_PTR);
     capabilities["build_result_sum"] = bool(NANOPYNIX_HAVE_BUILD_RESULT_SUM);
     capabilities["eval_state_mem"] = bool(NANOPYNIX_HAVE_EVALSTATE_MEM);
+    capabilities["dynamic_primop_registration"] = bool(NANOPYNIX_HAVE_DYNAMIC_PRIMOP_REGISTRATION);
 
     nb::dict info;
     info["nix_version"] = NANOPYNIX_NIX_VERSION;
@@ -227,7 +228,14 @@ NB_MODULE(nanopynix_util, m) {
           "s"_a,
           "Percent-decode string per RFC 3986.");
     m.def("fix_git_url", [](const std::string &url) -> std::string {
+#if NANOPYNIX_FIX_GIT_URL_RETURNS_URL
             return nix::fixGitURL(url).to_string();
+#else
+            auto normalized = nix::fixGitURL(url);
+            if (normalized.starts_with("git+"))
+                normalized.erase(0, 4);
+            return normalized;
+#endif
           },
           "url"_a,
           "Normalize SCP-style and git+https:// URLs to proper URL format.");
