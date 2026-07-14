@@ -76,6 +76,7 @@ in
     nanopynix
     nanopynix-bindings
     pynix
+    tests
     ;
 
   inherit
