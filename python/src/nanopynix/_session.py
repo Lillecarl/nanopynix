@@ -132,10 +132,11 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
     serializing all eval RPCs under the worker's exclusive lease.
     """
 
-    __slots__ = ("_active", "_rw")
+    __slots__ = ("_active", "_rpc_timeout", "_rw")
 
-    def __init__(self, rw: ReservedWorker) -> None:
+    def __init__(self, rw: ReservedWorker, rpc_timeout: float = _RPC_TIMEOUT) -> None:
         self._rw = rw
+        self._rpc_timeout = rpc_timeout
         self._active = True
 
     def _check_active(self) -> None:
@@ -148,12 +149,12 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
     async def _rpc_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
         method = getattr(self._rw._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
-        return await self._rw.call(method(message, timeout=_RPC_TIMEOUT))
+        return await self._rw.call(method(message, timeout=self._rpc_timeout))
 
     async def _store_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
         method = getattr(self._rw._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
-        return await self._rw.call(method(message, timeout=_RPC_TIMEOUT))
+        return await self._rw.call(method(message, timeout=self._rpc_timeout))
 
 
 @dataclass(frozen=True)
@@ -759,7 +760,7 @@ class EvalSession:
     invalid after ``__aexit__`` — their RPC methods raise ``EvalSessionClosedError``.
     """
 
-    __slots__ = ("_active", "_ctx", "_manager", "_owner", "_proxy", "_rw", "_session_id", "_store_handle", "_timeout")
+    __slots__ = ("_active", "_ctx", "_manager", "_owner", "_proxy", "_rpc_timeout", "_rw", "_session_id", "_store_handle", "_timeout")
 
     def __init__(
         self,
@@ -767,6 +768,7 @@ class EvalSession:
         store_handle: int = 1,
         timeout: float | None = None,
         session_id: str = "",
+        rpc_timeout: float = _RPC_TIMEOUT,
     ) -> None:
         self._manager = manager
         self._store_handle = store_handle
@@ -774,6 +776,7 @@ class EvalSession:
         self._rw: ReservedWorker | None = None
         self._proxy: EvalProxy | None = None
         self._timeout = timeout
+        self._rpc_timeout = rpc_timeout
         self._active: list[bool] = [False]
         self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
         self._ctx: _EvalProxyContext | None = None
@@ -789,7 +792,7 @@ class EvalSession:
         if self._rw is not None:
             return
         self._rw = await self._manager.reserve(timeout=self._timeout)
-        self._proxy = EvalProxy(self._rw)
+        self._proxy = EvalProxy(self._rw, self._rpc_timeout)
         self._ctx = _EvalProxyContext(
             self._proxy,
             self._owner,

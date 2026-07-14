@@ -306,6 +306,15 @@ class NixSettingsEnv(NixSettings, BaseSettings):
     )
 
 
+class NanopynixSettings(BaseSettings):
+    """Runtime settings for nanopynix itself, never forwarded to Nix."""
+
+    model_config = SettingsConfigDict(env_prefix="NANOPYNIX_", extra="forbid")
+
+    rpc_timeout: float = Field(default=300.0, gt=0)
+    shutdown_timeout: float = Field(default=5.0, gt=0)
+
+
 def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None) -> NixSettings:
     if settings is None:
         return NixSettings()

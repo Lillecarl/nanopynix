@@ -207,6 +207,8 @@ class _WorkerManager:
         allowed_uris: Sequence[str] | None = None,
         worker_oom_score_adj: int | None = None,
         reserved_worker_oom_score_adj: int | None = None,
+        rpc_timeout: float = _RPC_TIMEOUT,
+        shutdown_timeout: float = 5.0,
     ) -> None:
         self._store_uri = store_uri
         self._nix_conf = nix_conf
@@ -221,6 +223,8 @@ class _WorkerManager:
         self._allowed_uris = list(allowed_uris) if allowed_uris else []
         self._worker_oom_score_adj = worker_oom_score_adj
         self._reserved_worker_oom_score_adj = reserved_worker_oom_score_adj
+        self.rpc_timeout = rpc_timeout
+        self._shutdown_timeout = shutdown_timeout
         self._worker_pid: int | None = None
         self._channel = None
         self._worker_service_stub: WorkerServiceStub | None = None
@@ -293,7 +297,7 @@ class _WorkerManager:
                 verbosity=self._verbosity,
                 nix_path=self._nix_path,
             ),
-            timeout=_RPC_TIMEOUT,
+            timeout=self.rpc_timeout,
         )
         if init_response.status != "ok":
             raise RuntimeError(f"Worker init failed: {init_response.status}")
@@ -305,7 +309,7 @@ class _WorkerManager:
                 from nanopynix_proto.nix.worker import ShutdownRequest
 
                 try:
-                    await self._worker_stub.shutdown(ShutdownRequest(), timeout=5.0)
+                    await self._worker_stub.shutdown(ShutdownRequest(), timeout=self._shutdown_timeout)
                 except (TimeoutError, GRPCError, StreamTerminatedError, ConnectionError, asyncio.CancelledError):
                     logger.debug("worker shutdown failed (expected during teardown)", exc_info=True)
         finally:
