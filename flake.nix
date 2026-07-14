@@ -21,22 +21,9 @@
       );
     in
     {
-      packages = forAllSystems (
-        system:
-        {
-          inherit (eachDefNix.${system})
-            nanopynix-bindings
-            nanopynix
-            nanopynix-nixVersions-tests
-            pynix
-            ;
-        }
-        // lib.mapAttrs' (
-          nixVersion: nanopynix: lib.nameValuePair "nanopynix-${nixVersion}" nanopynix
-        ) eachDefNix.${system}.nanopynix-nixVersions
-      );
-      checks = forAllSystems (system: {
-        pynix = eachDefNix.${system}.pynix;
+      packages = forAllSystems (system: lib.filterAttrs (_: v: lib.isDerivation v) eachDefNix.${system});
+      devShells = forAllSystems (system: {
+        default = eachDefNix.${system}.shell;
       });
       legacyPackages = forAllSystems (system: inputs.nixpkgs.legacyPackages.${system});
     };

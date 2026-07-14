@@ -1,38 +1,34 @@
 {
   lib,
-  nanopynix-nixVersions,
+  nanopynixVersions,
   nixpkgs,
   writeShellApplication,
-  gitMinimal,
 }:
 let
-  uniqueNanopynixVersions = lib.foldl' (
-    versions: nixVersion:
-    let
-      nanopynix = nanopynix-nixVersions.${nixVersion};
-      outputPathHash = builtins.hashString "sha256" (toString nanopynix);
-    in
-    if versions ? ${outputPathHash} then
-      versions
-    else
-      versions
-      // {
-        ${outputPathHash} = {
-          inherit nixVersion nanopynix;
-        };
-      }
-  ) { } (lib.attrNames nanopynix-nixVersions);
+  tests = lib.pipe nanopynixVersions [
+    lib.attrsToList
+    (lib.map (x: x.value))
+    (lib.map (x: {
+      nixVersion = x.nix.version;
+      nanopynixVersion = x.nanopynix.version;
+      command = lib.getExe x.tests;
+    }))
+  ];
 in
 writeShellApplication {
   name = "nanopynix-nix-version-tests";
-  runtimeInputs = [
-    gitMinimal
-  ];
   text = lib.concatLines (
     [ "export NIX_PATH=nixpkgs=${nixpkgs}" ]
-    ++ lib.mapAttrsToList (_: { nixVersion, nanopynix }: ''
-      echo "==> Testing nanopynix against ${nixVersion}"
-      ${nanopynix.passthru.tests}/bin/nanopynix-tests "$@"
-    '') uniqueNanopynixVersions
+    ++ lib.map (
+      {
+        nixVersion,
+        nanopynixVersion,
+        command,
+      }:
+      ''
+        echo "==> Testing nanopynix ${nanopynixVersion} against Nix ${nixVersion}"
+        ${command} "$@"
+      ''
+    ) tests
   );
 }

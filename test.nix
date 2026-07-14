@@ -25,18 +25,19 @@ let
     nix:
     lib.makeScope
       (
-        extra:
+        self:
         lib.callPackageWith (
           pkgs
           // python3Packages
           // {
             inherit
+              nix
               nanopynix-proto
               grpclib-transports
               clypi
               ;
           }
-          // extra
+          // self
         )
       )
       (self: {
@@ -61,8 +62,8 @@ let
   ];
 
   nanopynix-all-tests = pkgs.callPackage ./nix/nix-version-tests.nix {
-    nanopynixVersions = nanopynixVersions;
-    inherit (inputs) nixpkgs;
+    inherit nanopynixVersions;
+    inherit (inputs) nixpkgs; # sets NIX_PATH
   };
 
   shell = python3Packages.callPackage ./nix/shell.nix {

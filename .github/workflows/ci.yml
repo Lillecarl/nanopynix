@@ -21,10 +21,10 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Build all supported Nix versions
-        run: nix build .#nanopynix-nixVersions-tests --print-build-logs --print-out-paths
+        run: nix build .#nanopynix-all-tests --print-build-logs --print-out-paths
 
       - name: Test all supported Nix versions
-        run: nix run .#nanopynix-nixVersions-tests --print-build-logs -- --verbose --tb=short  -rsxXfE
+        run: nix run .#nanopynix-all-tests --print-build-logs -- --verbose --tb=short  -rsxXfE --run-temp-store-builds
 
   update-lockfile:
     if: github.event_name == 'schedule'
@@ -47,10 +47,10 @@ jobs:
         run: nix flake update
 
       - name: Build all supported Nix versions
-        run: nix build .#nanopynix-nixVersions-tests --print-build-logs --print-out-paths
+        run: nix build .#nanopynix-all-tests --print-build-logs --print-out-paths
 
       - name: Test all supported Nix versions
-        run: nix run .#nanopynix-nixVersions-tests --print-build-logs -- --verbose --tb=short  -rsxXfE
+        run: nix run .#nanopynix-all-tests --print-build-logs -- --verbose --tb=short  -rsxXfE --run-temp-store-builds
 
       - uses: step-security/git-auto-commit-action@v7
         with:
