@@ -16,6 +16,7 @@ from nanopynix.settings import (
     NixSettingMetadata,
     NixSettings,
     NixSettingsEnv,
+    NanopynixSettings,
     check_all_settings_model_drift,
     check_settings_model_drift,
 )
@@ -62,6 +63,22 @@ def test_nix_settings_env_reads_pynix_prefixed_values(monkeypatch: pytest.Monkey
 
     assert settings.max_jobs == 3
     assert settings.keep_going is True
+
+
+def test_nanopynix_settings_env_reads_runtime_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NANOPYNIX_RPC_TIMEOUT", "30")
+    monkeypatch.setenv("NANOPYNIX_SHUTDOWN_TIMEOUT", "10")
+
+    settings = NanopynixSettings()
+
+    assert settings.rpc_timeout == 30
+    assert settings.shutdown_timeout == 10
+
+
+def test_session_uses_nanopynix_rpc_timeout() -> None:
+    session = Session(runtime_settings=NanopynixSettings(rpc_timeout=12))
+
+    assert session._manager.rpc_timeout == 12  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
 
 
 def test_settings_drift_reports_missing_and_extra() -> None:

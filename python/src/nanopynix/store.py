@@ -20,10 +20,11 @@ if TYPE_CHECKING:
 class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreServiceBase):
     """Session-bound proxy for the generated ``StoreService`` request/response API."""
 
-    __slots__ = ("_active", "_pool", "_session_id", "_store_handle", "_uri")
+    __slots__ = ("_active", "_pool", "_rpc_timeout", "_session_id", "_store_handle", "_uri")
 
-    def __init__(self, pool: _WorkerManager, uri: str, session_id: str) -> None:
+    def __init__(self, pool: _WorkerManager, uri: str, session_id: str, rpc_timeout: float = _RPC_TIMEOUT) -> None:
         self._pool = pool
+        self._rpc_timeout = rpc_timeout
         self._uri = uri
         self._session_id = session_id
         self._store_handle: int = 0
@@ -34,7 +35,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         from nanopynix_proto.nix.worker import OpenStoreRequest
 
         resp = await self._pool.call(
-            self._pool._worker_stub.open_store(OpenStoreRequest(uri=self._uri), timeout=_RPC_TIMEOUT)  # type: ignore[reportPrivateUsage] -- cross-class access
+            self._pool._worker_stub.open_store(OpenStoreRequest(uri=self._uri), timeout=self._rpc_timeout)  # type: ignore[reportPrivateUsage] -- cross-class access
         )
         self._store_handle = resp.store_handle
         self._active = True
@@ -47,7 +48,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
             await self._pool.call(
                 self._pool._worker_stub.close_store(  # type: ignore[reportPrivateUsage] -- cross-class access
                     CloseStoreRequest(store_handle=self._store_handle),
-                    timeout=_RPC_TIMEOUT,
+                    timeout=self._rpc_timeout,
                 )
             )
         self._active = False
@@ -85,7 +86,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
             message_any = cast("Any", message)
             message_any.store_handle = self._store_handle
         method = getattr(self._pool._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
-        return await self._store_call(method(message, timeout=_RPC_TIMEOUT))
+        return await self._store_call(method(message, timeout=self._rpc_timeout))
 
 
 # Backward-compatible alias

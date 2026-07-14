@@ -28,7 +28,7 @@ import nanopynix_expr
 from nanopynix._pool import _WorkerManager  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
 from nanopynix._session import EvalSession
 from nanopynix.models import LogEvent, PrimOpSpec
-from nanopynix.settings import NixSettings, normalize_nix_settings
+from nanopynix.settings import NanopynixSettings, NixSettings, normalize_nix_settings
 from nanopynix.store import StoreHandle
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
@@ -120,8 +120,10 @@ class Session:
         allowed_uris: Sequence[str] | None = None,
         worker_oom_score_adj: int | None = None,
         reserved_worker_oom_score_adj: int | None = None,
+        runtime_settings: NanopynixSettings | None = None,
     ) -> None:
         nix_settings = normalize_nix_settings(settings).with_experimental_features(experimental_features)
+        nanopynix_settings = runtime_settings or NanopynixSettings()
         worker_settings = nix_settings.to_worker_settings()
         self._manager = _WorkerManager(
             store_uri=store_uri,
@@ -137,6 +139,8 @@ class Session:
             allowed_uris=allowed_uris,
             worker_oom_score_adj=worker_oom_score_adj,
             reserved_worker_oom_score_adj=reserved_worker_oom_score_adj,
+            rpc_timeout=nanopynix_settings.rpc_timeout,
+            shutdown_timeout=nanopynix_settings.shutdown_timeout,
         )
         self._session_id = uuid.uuid4().hex
 
@@ -156,7 +160,7 @@ class Session:
         The handle carries this session's ID — passing it to
         ``Eval`` from a different session raises ``ValueError``.
         """
-        return StoreHandle(self._manager, uri, self._session_id)
+        return StoreHandle(self._manager, uri, self._session_id, self._manager.rpc_timeout)
 
     async def open(self) -> None:
         """Spawn the worker subprocess."""
@@ -226,7 +230,12 @@ class Session:
         """
         if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
             raise ValueError("StoreHandle belongs to a different session")
-        return EvalSession(self._manager, store.store_handle, session_id=self._session_id)
+        return EvalSession(
+            self._manager,
+            store.store_handle,
+            session_id=self._session_id,
+            rpc_timeout=self._manager.rpc_timeout,
+        )
 
 
 # Backward-compatible alias
