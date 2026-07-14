@@ -29,6 +29,31 @@ def _alias(field_name: str) -> str:
     return field_name.replace("_", "-")
 
 
+def _nix_version_tuple(version: str) -> tuple[int, ...]:
+    parsed: list[int] = []
+    for part in version.split("."):
+        digits = "".join(character for character in part if character.isdigit())
+        if not digits:
+            break
+        parsed.append(int(digits))
+    return tuple(parsed)
+
+
+def _nix_version_at_least(version: str, minimum: str) -> bool:
+    actual = _nix_version_tuple(version)
+    expected = _nix_version_tuple(minimum)
+    width = max(len(actual), len(expected))
+    return actual + (0,) * (width - len(actual)) >= expected + (0,) * (width - len(expected))
+
+
+def _field_is_supported(field: Any) -> bool:
+    extras = field.json_schema_extra or {}
+    minimum = extras.get("nix_version_min")
+    if minimum is None:
+        return True
+    return _nix_version_at_least(nanopynix_util.build_info()["nix_version"], minimum)
+
+
 class NixSettingMetadata(BaseModel):
     """Metadata exported by Nix for one registered setting."""
 
@@ -83,12 +108,20 @@ class NixSettings(BaseModel):
     external_builders: list[str] | None = None
     extra_platforms: list[str] | None = None
     fallback: bool | None = None
+    filetransfer_retry_attempts: int | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
+    filetransfer_retry_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
+    filetransfer_retry_delay_rate_limited: int | None = Field(
+        default=None, json_schema_extra={"nix_version_min": "2.35"}
+    )
+    filetransfer_retry_jitter: bool | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
+    filetransfer_retry_max_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
     filter_syscalls: bool | None = None
     fsync_metadata: bool | None = None
     fsync_store_paths: bool | None = None
     gc_reserved_space: int | None = None
     hashed_mirrors: list[str] | None = None
     http2: bool | None = None
+    http3: bool | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
     http_connections: int | None = None
     id_count: int | None = None
     ignored_acls: list[str] | None = None
@@ -174,10 +207,14 @@ class NixSettings(BaseModel):
         return self.model_copy(update={"experimental_features": merged})
 
     def _iter_set(self) -> Iterator[tuple[str, str]]:
-        for name in type(self).model_fields:
+        for name, field in type(self).model_fields.items():
             value = getattr(self, name)
             if value is None:
                 continue
+            if not _field_is_supported(field):
+                minimum = field.json_schema_extra["nix_version_min"]
+                version = nanopynix_util.build_info()["nix_version"]
+                raise ValueError(f"{_alias(name)} requires Nix {minimum} or newer (running {version})")
             rendered = _render_value(value)
             if rendered == "":
                 continue
@@ -307,8 +344,14 @@ def check_settings_model_drift(
     if metadata is None:
         metadata = _metadata_for_surface(surface)
     known = set(metadata.keys())
-    model = {_alias(name) for name in _model_for_surface(surface).model_fields}
-    return SettingsDrift(missing=sorted(known - model), extra=sorted(model - known))
+    model_type = _model_for_surface(surface)
+    model = {
+        _alias(name)
+        for name, field in model_type.model_fields.items()
+        if _field_is_supported(field)
+    }
+    registered_aliases = {alias for setting in metadata.values() for alias in setting.aliases}
+    return SettingsDrift(missing=sorted(known - model), extra=sorted(model - known - registered_aliases))
 
 
 def check_all_settings_model_drift(*, include_optional: bool = False) -> dict[str, SettingsDrift]:

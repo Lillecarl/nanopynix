@@ -148,11 +148,50 @@ check_cxx_source_compiles(
 )
 check_cxx_source_compiles(
   "
+  #include <nix/store/gc-store.hh>
+  static_assert(requires { typename nix::GCOptions::SpecificPaths; });
+  int main() {}
+  "
+  NANOPYNIX_GC_PATHS_IS_VARIANT
+)
+check_cxx_source_compiles(
+  "
+  #include <nix/store/store-api.hh>
+  class StoreAnchorProbe : public nix::Store {
+    void anchor() override {}
+  };
+  int main() {}
+  "
+  NANOPYNIX_HAVE_STORE_ANCHOR
+)
+check_cxx_source_compiles(
+  "
+  #include <nix/store/store-api.hh>
+  class StoreConfigProbe : public nix::StoreConfig {
+  public:
+    StoreConfigProbe(const Params & params)
+      : StoreConfig(params, FilePathType::Unix) {}
+  };
+  int main() {}
+  "
+  NANOPYNIX_STORE_CONFIG_NEEDS_PATH_TYPE
+)
+check_cxx_source_compiles(
+  "
   #include <nix/util/source-path.hh>
   static_assert(requires (const nix::SourcePath & path) { path.invalidateCache(); });
   int main() {}
   "
   NANOPYNIX_HAVE_SOURCE_PATH_INVALIDATE_CACHE
+)
+check_cxx_source_compiles(
+  "
+  #include <filesystem>
+  #include <nix/util/source-accessor.hh>
+  static_assert(requires (const std::filesystem::path & path) { nix::makeFSSourceAccessor(path); });
+  int main() {}
+  "
+  NANOPYNIX_HAVE_MAKE_FS_SOURCE_ACCESSOR
 )
 check_cxx_source_compiles(
   "

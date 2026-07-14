@@ -28,6 +28,10 @@ struct PyStoreImpl : public nix::Store {
     PyStoreImpl(nix::ref<const nix::StoreConfig> config, nb::object py_store,
                 std::shared_ptr<nix::Store> underlying = {});
 
+#if NANOPYNIX_HAVE_STORE_ANCHOR
+    void anchor() override;
+#endif
+
     // --- pure virtuals ---
 
     bool isValidPathUncached(const nix::StorePath & path) override;
