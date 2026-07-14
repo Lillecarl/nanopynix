@@ -71,8 +71,12 @@ struct PyLockedFlake {
                 nix::CanonPath(relPath),
                 lockFileStr + "\n",
                 std::nullopt);
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32 && NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+            // SourcePath did not expose a cache invalidation hook yet.
+#elif NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
             locked->flake.lockFilePath().invalidateCache();
+#else
+            // SourcePath cache invalidation was removed in Nix 2.35.
 #endif
         }
     }
@@ -113,16 +117,16 @@ static PyLockedFlake lock_flake(
     }
 
     for (const auto &input : input_updates) {
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_32
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+        if (input.empty())
+            throw std::runtime_error("input path cannot be empty: '" + input + "'");
+        lockFlags.inputUpdates.insert(nix::flake::parseInputAttrPath(input));
+#else
         auto path = nix::flake::NonEmptyInputAttrPath::parse(input);
         if (!path)
             throw std::runtime_error(
                 "input path cannot be empty: '" + input + "'");
         lockFlags.inputUpdates.insert(*path);
-#else
-        if (input.empty())
-            throw std::runtime_error("input path cannot be empty: '" + input + "'");
-        lockFlags.inputUpdates.insert(nix::flake::parseInputAttrPath(input));
 #endif
     }
 
