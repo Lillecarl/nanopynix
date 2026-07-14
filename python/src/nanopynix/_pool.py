@@ -195,7 +195,8 @@ class _WorkerManager:
         self,
         *,
         store_uri: str = "auto",
-        nix_conf: str | None = "/etc/nix/nix.conf",
+        nix_conf: Path | None = None,
+        load_config: bool = True,
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
         verbosity: LogLevel | None = None,
@@ -212,6 +213,7 @@ class _WorkerManager:
     ) -> None:
         self._store_uri = store_uri
         self._nix_conf = nix_conf
+        self._load_config = load_config
         self._settings = settings or {}
         self._features = experimental_features or []
         self._verbosity = verbosity
@@ -287,7 +289,8 @@ class _WorkerManager:
         init_response = await self._worker_stub.init(
             InitRequest(
                 store_uri=self._store_uri,
-                nix_conf=self._nix_conf,
+                nix_conf=str(self._nix_conf) if self._nix_conf is not None else None,
+                load_config=self._load_config,
                 settings=self._settings,
                 experimental_features=self._features,
                 primops=proto_primops,

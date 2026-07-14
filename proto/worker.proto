@@ -23,6 +23,7 @@ message InitRequest {
   repeated string allowed_uris = 8;
   optional nix.common.LogLevel verbosity = 9;
   repeated string nix_path = 10;
+  bool load_config = 11;
 }
 
 message InitResponse {

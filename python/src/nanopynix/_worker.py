@@ -60,7 +60,9 @@ from nanopynix.models import PrimOpSpec
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
-    from grpclib._typing import IServable  # type: ignore[reportPrivateUsage] -- private import required by grpclib protobuf service binding
+    from grpclib._typing import (
+        IServable,  # type: ignore[reportPrivateUsage] -- private import required by grpclib protobuf service binding
+    )
     from grpclib_transports import WorkerBackchannel
 
 # Re-export for the multiprocessing runner in _pool.py
@@ -70,21 +72,6 @@ __all__ = ["main", "run_worker", "worker_service_factory"]
 # SubscribeLogs stream, and the active manager->worker call. EvalSession still
 # serializes Nix eval RPCs at the ReservedWorker boundary.
 _WORKER_MAX_CONCURRENCY = 3
-
-_DIAGNOSTIC_SETTINGS = (
-    "http-connections",
-    "max-jobs",
-    "build-dir",
-    "substitute",
-    "substituters",
-    "trusted-public-keys",
-    "builders",
-    "builders-use-substitutes",
-    "sandbox",
-    "system",
-    "system-features",
-)
-
 
 # ── Primop registration ──────────────────────────────────────────────
 
@@ -110,7 +97,9 @@ def _register_primops(
         if spec.rpc:
             if rpc_bridge is None:
                 raise RuntimeError(f"RPC primop {spec.name!r} registered without backchannel")
-            from nanopynix._worker_primop import rpc_primop_callback_factory as rpc_primop_callback_factory  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
+            from nanopynix._worker_primop import (
+                rpc_primop_callback_factory as rpc_primop_callback_factory,  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
+            )
 
             callback = rpc_primop_callback_factory(rpc_bridge, spec.name, spec.arity)
         else:
@@ -122,10 +111,6 @@ def _register_primops(
             spec.doc,
             callback,
         )
-
-
-def _effective_settings_for_log() -> dict[str, str | None]:
-    return {name: nanopynix_util.get_setting(name) for name in _DIAGNOSTIC_SETTINGS}
 
 
 def _install_worker_diagnostics(collector: LogCollector) -> None:
@@ -195,7 +180,7 @@ class WorkerServiceHandler(WorkerServiceBase):
             for f in message.experimental_features:
                 nanopynix_util.enable_experimental_feature(f)
 
-            nanopynix_util.init_libstore(load_config=False)
+            nanopynix_util.init_libstore(load_config=message.load_config)
             nanopynix_util.set_verbosity(int(message.verbosity if message.verbosity is not None else LogLevel.NOTICE))
             nanopynix_expr.init_libexpr()
 
@@ -206,14 +191,6 @@ class WorkerServiceHandler(WorkerServiceBase):
             if message.allowed_uris:
                 nanopynix_expr._set_allowed_uris(message.allowed_uris)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
             self._state.nix_path = list(message.nix_path)
-            if self._state.collector is not None:
-                self._state.collector.callback(
-                    0,
-                    "msg",
-                    int(LogLevel.DEBUG),
-                    "worker effective settings "
-                    f"settings={_effective_settings_for_log()} nix_path={self._state.nix_path}",
-                )
 
             # Convert proto PrimOpSpec list to the raw-dict format
             primops_raw = [
@@ -247,15 +224,8 @@ class WorkerServiceHandler(WorkerServiceBase):
         )
 
     def _open_store(self, uri: str) -> tuple[int, str, str]:
-        store = nanopynix_store.open_store() if uri == "auto" else nanopynix_store.open_store(uri)
+        store = nanopynix_store.open_store(uri)
         handle = self._state.handles.allocate(store, "store")
-        if self._state.collector is not None:
-            self._state.collector.callback(
-                0,
-                "msg",
-                int(LogLevel.DEBUG),
-                f"worker open_store handle={handle} uri={store.get_uri()} dirs={store.get_store_dirs()}",
-            )
         return handle, store.get_uri(), store.get_store_dir()
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
@@ -316,7 +286,6 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
     nanopynix_util.install_logger(collector.callback)
     with contextlib.suppress(RuntimeError, ValueError):
         _install_worker_diagnostics(collector)
-    collector.callback(0, "msg", int(LogLevel.DEBUG), f"nanopynix worker pid={os.getpid()} diagnostics=SIGUSR1")
 
     state = WorkerState()
     state.collector = collector
