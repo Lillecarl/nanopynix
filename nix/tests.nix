@@ -17,7 +17,7 @@
   pynix,
 }:
 let
-  pythonEnv = python.withPackages (_: [
+  pythonEnv = python.withPackages (_: nanopynix.passthru.testInputs [
     nanopynix
     pynix
     pytest

@@ -21,6 +21,7 @@ let
     pp:
     nanopynix.dependencies
     ++ nanopynix.nativeBuildInputs
+    ++ nanopynix.passthru.testInputs
     ++ pynix.dependencies
     ++ pynix.nativeBuildInputs
     ++ [
