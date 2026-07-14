@@ -16,6 +16,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <nanopynix/nix_compat_config.hh>
+
 #include "attrs_util.hh"
 
 #include "py_value.hh"
@@ -69,7 +71,9 @@ struct PyLockedFlake {
                 nix::CanonPath(relPath),
                 lockFileStr + "\n",
                 std::nullopt);
+#if NANOPYNIX_HAVE_SOURCE_PATH_INVALIDATE_CACHE
             locked->flake.lockFilePath().invalidateCache();
+#endif
         }
     }
 };
@@ -109,11 +113,17 @@ static PyLockedFlake lock_flake(
     }
 
     for (const auto &input : input_updates) {
+#if NANOPYNIX_HAVE_NONEMPTY_INPUT_ATTR_PATH
         auto path = nix::flake::NonEmptyInputAttrPath::parse(input);
         if (!path)
             throw std::runtime_error(
                 "input path cannot be empty: '" + input + "'");
         lockFlags.inputUpdates.insert(*path);
+#else
+        if (input.empty())
+            throw std::runtime_error("input path cannot be empty: '" + input + "'");
+        lockFlags.inputUpdates.insert(nix::flake::parseInputAttrPath(input));
+#endif
     }
 
     std::unique_ptr<nix::flake::LockedFlake> locked;

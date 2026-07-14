@@ -6,6 +6,10 @@ Primops are registered in conftest.py before the session EvalState is created.
 from __future__ import annotations
 
 import nanopynix
+import pytest
+
+
+pytestmark = pytest.mark.required_nix_version("2.32", None)
 
 
 class TestRegisterPrimop:

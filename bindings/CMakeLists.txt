@@ -19,6 +19,15 @@ pkg_check_modules(NIX_UTIL REQUIRED nix-util)
 pkg_check_modules(NIX_STORE REQUIRED nix-store)
 pkg_check_modules(NIX_EXPR REQUIRED nix-expr)
 
+# Nix 2.31 builds the complete builtin attribute set with a fixed capacity of
+# 128 entries. It cannot safely accept arbitrary externally registered primops:
+# overflowing that internal capacity aborts when EvalState is constructed.
+if(NIX_EXPR_VERSION VERSION_LESS "2.32")
+  set(NANOPYNIX_HAVE_DYNAMIC_PRIMOP_REGISTRATION 0)
+else()
+  set(NANOPYNIX_HAVE_DYNAMIC_PRIMOP_REGISTRATION 1)
+endif()
+
 set(CMAKE_REQUIRED_INCLUDES ${NIX_UTIL_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_EXPR_INCLUDE_DIRS})
 set(CMAKE_REQUIRED_FLAGS "-std=c++23")
 include(CheckCXXSourceCompiles)
@@ -48,6 +57,108 @@ check_cxx_source_compiles(
   int main() {}
   "
   NANOPYNIX_HAVE_EVALSTATE_MEM
+)
+check_cxx_source_compiles(
+  "
+  #include <nix/expr/eval.hh>
+  static_assert(requires (nix::PrimOp op) { op.impl; });
+  int main() {}
+  "
+  NANOPYNIX_PRIMOP_USES_IMPL
+)
+check_cxx_source_compiles(
+  "
+  #include <optional>
+  #include <string>
+  #include <nix/expr/eval.hh>
+  nix::PrimOp value{.doc = std::optional<std::string>{}};
+  int main() {}
+  "
+  NANOPYNIX_PRIMOP_DOC_IS_OPTIONAL
+)
+check_cxx_source_compiles(
+  "
+  #include <memory>
+  #include <nix/store/realisation.hh>
+  std::shared_ptr<const nix::UnkeyedRealisation> value;
+  int main() {}
+  "
+  NANOPYNIX_HAVE_UNKEYED_REALISATION
+)
+check_cxx_source_compiles(
+  "
+  #include <memory>
+  #include <nix/store/store-api.hh>
+  static_assert(requires (nix::Store & store, const nix::StorePath & path) {
+    store.getFSAccessor(path, true);
+  });
+  int main() {}
+  "
+  NANOPYNIX_HAVE_PATH_FS_ACCESSOR
+)
+check_cxx_source_compiles(
+  "
+  #include <nix/store/path-info.hh>
+  #include <nix/store/store-api.hh>
+  #include <nix/util/hash.hh>
+  nix::UnkeyedValidPathInfo value(
+    std::declval<const nix::StoreDirConfig &>(), nix::Hash::dummy);
+  int main() {}
+  "
+  NANOPYNIX_PATH_INFO_NEEDS_STORE_CONFIG
+)
+check_cxx_source_compiles(
+  "
+  #include <nix/fetchers/fetchers.hh>
+  #include <nix/store/store-api.hh>
+  static_assert(requires (const nix::fetchers::Input & input, nix::Store & store) {
+    input.getFingerprint(store);
+  });
+  int main() {}
+  "
+  NANOPYNIX_FETCHER_FINGERPRINT_TAKES_STORE_REF
+)
+check_cxx_source_compiles(
+  "
+  #include <nix/util/url.hh>
+  static_assert(requires { nix::fixGitURL(\"git@example.org:repo\").to_string(); });
+  int main() {}
+  "
+  NANOPYNIX_FIX_GIT_URL_RETURNS_URL
+)
+check_cxx_source_compiles(
+  "
+  #include <string>
+  #include <type_traits>
+  #include <nix/util/types.hh>
+  static_assert(std::is_same_v<nix::Path, std::string>);
+  int main() {}
+  "
+  NANOPYNIX_PATH_IS_STRING
+)
+check_cxx_source_compiles(
+  "
+  #include <nix/store/gc-store.hh>
+  nix::GCAction value;
+  int main() {}
+  "
+  NANOPYNIX_HAVE_GLOBAL_GC_ACTION
+)
+check_cxx_source_compiles(
+  "
+  #include <nix/util/source-path.hh>
+  static_assert(requires (const nix::SourcePath & path) { path.invalidateCache(); });
+  int main() {}
+  "
+  NANOPYNIX_HAVE_SOURCE_PATH_INVALIDATE_CACHE
+)
+check_cxx_source_compiles(
+  "
+  #include <nix/flake/lockfile.hh>
+  auto path = nix::flake::NonEmptyInputAttrPath::parse(\"nixpkgs\");
+  int main() {}
+  "
+  NANOPYNIX_HAVE_NONEMPTY_INPUT_ATTR_PATH
 )
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/nanopynix")

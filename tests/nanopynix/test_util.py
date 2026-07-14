@@ -1,6 +1,7 @@
 """Tests for nanopynix_util (settings, init, experimental features)."""
 
 import nanopynix
+import pytest
 
 
 class TestInitLibstore:
@@ -43,11 +44,13 @@ class TestSettings:
         assert "keep-going" in metadata
         assert isinstance(metadata["keep-going"].description, str)
 
+    @pytest.mark.required_nix_version("2.32", None)
     def test_settings_model_matches_registered_nix_settings(self):
         drift = nanopynix.check_settings_model_drift()
         assert drift.missing == []
         assert drift.extra == []
 
+    @pytest.mark.required_nix_version("2.32", None)
     def test_optional_settings_models_match_their_surfaces(self):
         drift = nanopynix.check_all_settings_model_drift(include_optional=True)
         assert set(drift) == {"global", "eval", "fetch", "flake"}

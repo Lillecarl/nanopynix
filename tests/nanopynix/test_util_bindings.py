@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+import nanopynix
 import nanopynix_store
 import nanopynix_util
 
@@ -17,8 +18,21 @@ def test_build_info_reports_compile_time_compatibility() -> None:
         "logger_unique_ptr",
         "build_result_sum",
         "eval_state_mem",
+        "dynamic_primop_registration",
     }
     assert all(isinstance(value, bool) for value in info["capabilities"].values())
+
+
+def test_build_info_is_available_from_nanopynix() -> None:
+    assert nanopynix.build_info() == nanopynix_util.build_info()
+
+
+def test_unsupported_primop_registration_fails_early() -> None:
+    if nanopynix.build_info()["capabilities"]["dynamic_primop_registration"]:
+        pytest.skip("linked Nix supports dynamic primop registration")
+
+    with pytest.raises(RuntimeError, match="fixed-capacity builtin attribute set"):
+        nanopynix.register_primop("unsupported", 1, ["value"], "", lambda value: value)
 
 
 class TestCurrentSystem:

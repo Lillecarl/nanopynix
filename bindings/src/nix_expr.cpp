@@ -24,11 +24,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include <nanopynix/nix_compat_config.hh>
+
 #include "py_value.hh"
 
 namespace nb = nanobind;
 using namespace nb::literals;
 
+#if NANOPYNIX_HAVE_BUILD_RESULT_SUM
 static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
     switch (s) {
@@ -82,6 +85,50 @@ static nb::dict build_result_from_kbr(
         return build_result_to_dict(path, false, build_failure_status_str(failure->status), failure->msg());
     return build_result_to_dict(path, false, "unknown", "");
 }
+#else
+static nb::dict build_result_to_dict(
+        const std::string &drv_path,
+        bool success,
+        const std::string &status,
+        const std::string &error_msg) {
+    nb::dict d;
+    d["drv_path"] = drv_path;
+    d["success"] = success;
+    d["status"] = status;
+    d["error_msg"] = error_msg;
+    return d;
+}
+
+static std::string build_status_str(nix::BuildResult::Status s) {
+    using enum nix::BuildResult::Status;
+    switch (s) {
+        case Built: return "built";
+        case Substituted: return "substituted";
+        case AlreadyValid: return "already-valid";
+        case ResolvesToAlreadyValid: return "resolves-to-already-valid";
+        case PermanentFailure: return "permanent-failure";
+        case InputRejected: return "input-rejected";
+        case OutputRejected: return "output-rejected";
+        case TransientFailure: return "transient-failure";
+        case CachedFailure: return "cached-failure";
+        case TimedOut: return "timed-out";
+        case MiscFailure: return "misc-failure";
+        case DependencyFailed: return "dependency-failed";
+        case LogLimitExceeded: return "log-limit-exceeded";
+        case NotDeterministic: return "not-deterministic";
+        case NoSubstituters: return "no-substituters";
+    }
+    return "unknown";
+}
+
+static nb::dict build_result_from_kbr(
+        const nix::KeyedBuildResult &kbr,
+        const nix::StoreDirConfig &store) {
+    auto result = static_cast<nix::BuildResult>(kbr);
+    return build_result_to_dict(kbr.path.to_string(store), result.success(),
+                                build_status_str(result.status), result.errorMsg);
+}
+#endif
 
 // =========================================================================
 // PyValue out-of-line method implementations
@@ -118,7 +165,12 @@ bool PyValue::is_thunk()    const { return checkedValue()->type() == nix::nThunk
 
 int64_t PyValue::as_int() const { return static_cast<int64_t>(checkedValue()->integer()); }
 double PyValue::as_float() const { return checkedValue()->fpoint(); }
-bool PyValue::as_bool() const { return checkedValue()->boolean(); }
+bool PyValue::as_bool() const {
+    auto *value = checkedValue();
+    if (value->type() == nix::nNull)
+        return false;
+    return value->boolean();
+}
 
 std::string PyValue::as_string() const {
     auto *v = checkedValue();
@@ -311,7 +363,9 @@ PyValue PyEvalState::eval_string(const std::string &expr, const std::string &pat
 }
 
 PyValue PyEvalState::alloc_value() {
-    return PyValue(state->allocValue(), this, alive);
+    auto *value = state->allocValue();
+    value->mkNull();
+    return PyValue(value, this, alive);
 }
 
 // ── Handle management ─────────────────────────────────────────
@@ -585,6 +639,7 @@ static void py_primop_bridge(
 struct PyPrimOpCallback {
     nb::object func;
     int arity;
+    std::string doc;
 };
 
 static std::map<std::string, PyPrimOpCallback> &py_primop_registry() {
@@ -616,7 +671,7 @@ static void python_to_value(
         v.mkFloat(nb::cast<double>(obj));
     } else if (nb::isinstance<nb::str>(obj)) {
         auto s = nb::cast<std::string>(obj);
-        v.mkString(s, state.mem);
+        v.mkString(s);
     } else if (nb::isinstance<nb::list>(obj)) {
         auto pyList = nb::cast<nb::list>(obj);
         auto builder = state.buildList(pyList.size());
@@ -672,7 +727,7 @@ static void python_to_value(
                 arg_names.push_back("x" + std::to_string(i + 1));
 
             auto &reg = py_primop_registry();
-            reg[anon_name] = PyPrimOpCallback{std::move(obj), arity};
+            reg[anon_name] = PyPrimOpCallback{std::move(obj), arity, ""};
 
             auto impl = [anon_name, arity](
                 nix::EvalState &st, const nix::PosIdx pos,
@@ -685,8 +740,16 @@ static void python_to_value(
                 .name = anon_name,
                 .args = arg_names,
                 .arity = static_cast<size_t>(arity),
+#if NANOPYNIX_PRIMOP_DOC_IS_OPTIONAL
                 .doc = std::nullopt,
+#else
+                .doc = nullptr,
+#endif
+#if NANOPYNIX_PRIMOP_USES_IMPL
                 .impl = impl,
+#else
+                .fun = impl,
+#endif
             }));
 
             v.mkPrimOp(anon.get());
@@ -760,9 +823,15 @@ static void register_primop(
     const std::string &doc,
     nb::object callback)
 {
+#if !NANOPYNIX_HAVE_DYNAMIC_PRIMOP_REGISTRATION
+    throw std::runtime_error(
+        "register_primop is unsupported by Nix " NANOPYNIX_NIX_VERSION
+        ": this Nix version has a fixed-capacity builtin attribute set");
+#else
     // Store callback in registry
     auto &reg = py_primop_registry();
-    reg[name] = PyPrimOpCallback{callback, arity};
+    auto [it, _] = reg.insert_or_assign(name, PyPrimOpCallback{callback, arity, doc});
+    auto &registered = it->second;
 
     // Create the C++ PrimOp
     auto impl = [name, arity](nix::EvalState &state, const nix::PosIdx pos,
@@ -774,13 +843,22 @@ static void register_primop(
         .name = name,
         .args = arg_names,
         .arity = static_cast<size_t>(arity),
-        .doc = doc.empty() ? std::optional<std::string>{} : std::optional<std::string>{doc},
+#if NANOPYNIX_PRIMOP_DOC_IS_OPTIONAL
+        .doc = registered.doc.empty() ? std::optional<std::string>{} : std::optional<std::string>{registered.doc},
+#else
+        .doc = registered.doc.empty() ? nullptr : registered.doc.c_str(),
+#endif
+#if NANOPYNIX_PRIMOP_USES_IMPL
         .impl = impl,
+#else
+        .fun = impl,
+#endif
     };
 
     // Register globally
     nix::RegisterPrimOp r(std::move(*p));
     delete p;
+#endif
 }
 
 // =========================================================================

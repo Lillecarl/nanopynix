@@ -2,6 +2,7 @@
 
 import atexit
 import os
+import re
 from typing import Any, Protocol, cast
 
 import pytest
@@ -29,6 +30,45 @@ def pytest_configure(config: pytest.Config):
         "markers",
         "live_gc: test performs destructive live Nix garbage collection",
     )
+    config.addinivalue_line(
+        "markers",
+        "required_nix_version(min, max): require linked Nix in [min, max); use None for no bound",
+    )
+
+
+def _nix_version_tuple(value: str) -> tuple[int, ...]:
+    match = re.match(r"(\d+(?:\.\d+)*)", value)
+    if match is None:
+        raise ValueError(f"cannot parse linked Nix version: {value!r}")
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def _version_at_least(actual: tuple[int, ...], required: tuple[int, ...]) -> bool:
+    width = max(len(actual), len(required))
+    return actual + (0,) * (width - len(actual)) >= required + (0,) * (width - len(required))
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    actual = _nix_version_tuple(nanopynix.build_info()["nix_version"])
+    for item in items:
+        marker = item.get_closest_marker("required_nix_version")
+        if marker is None:
+            continue
+        if marker.kwargs or len(marker.args) != 2:
+            raise pytest.UsageError(
+                "required_nix_version requires exactly two positional arguments: min, max"
+            )
+
+        minimum, maximum = marker.args
+        if minimum is not None and not isinstance(minimum, str):
+            raise pytest.UsageError("required_nix_version min must be a string or None")
+        if maximum is not None and not isinstance(maximum, str):
+            raise pytest.UsageError("required_nix_version max must be a string or None")
+
+        if minimum is not None and not _version_at_least(actual, _nix_version_tuple(minimum)):
+            item.add_marker(pytest.mark.skip(reason=f"requires Nix >= {minimum}"))
+        if maximum is not None and _version_at_least(actual, _nix_version_tuple(maximum)):
+            item.add_marker(pytest.mark.skip(reason=f"requires Nix < {maximum}"))
 
 
 def pytest_runtest_setup(item: pytest.Item):
@@ -66,6 +106,8 @@ def init_expr() -> None:
 @pytest.fixture(scope="session", autouse=True)
 def _register_test_primops():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Register all test primops before EvalState is created."""
+    if not nanopynix.build_info()["capabilities"]["dynamic_primop_registration"]:
+        return
     nanopynix.register_primop("test_add_one", 1, ["x"], "increment by 1", lambda x: x + 1)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     nanopynix.register_primop("test_add", 2, ["x", "y"], "add two ints", lambda x, y: x + y)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     nanopynix.register_primop("test_shout", 1, ["s"], "uppercase a string", lambda s: s.upper())  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix

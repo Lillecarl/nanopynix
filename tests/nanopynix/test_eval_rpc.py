@@ -25,6 +25,8 @@ from nanopynix import (
     yaml_primops,
 )
 
+requires_dynamic_primops = pytest.mark.required_nix_version("2.32", None)
+
 
 async def test_eval_file_simple(tmp_path: Path):
     """session.file returns a ValueProxy, force_deep() resolves to Python dict."""
@@ -391,6 +393,7 @@ async def test_evaluated_derivation_can_build_with_explicit_build_store():
         assert await AnyioPath(outputs["out"]).read_text() == "explicit\n"
 
 
+@requires_dynamic_primops
 async def test_worker_yaml_primops():
     """Importable worker primops parse and render YAML during eval."""
     async with (
@@ -414,6 +417,7 @@ async def test_worker_yaml_primops():
         assert "name: demo" in text
 
 
+@requires_dynamic_primops
 async def test_worker_yaml_primops_parse_yaml12_modes():
     """fromYAML uses modern YAML mode syntax instead of YAML 1.1 octal literals."""
     async with (
@@ -429,6 +433,7 @@ async def test_worker_yaml_primops_parse_yaml12_modes():
         }
 
 
+@requires_dynamic_primops
 async def test_worker_yaml_primops_parse_yaml11_modes():
     """fromYAML11 keeps legacy YAML 1.1 octal parsing for old manifests."""
     async with (
@@ -440,6 +445,7 @@ async def test_worker_yaml_primops_parse_yaml11_modes():
         assert await parsed.force_deep() == {"mode": 292, "truth": True}
 
 
+@requires_dynamic_primops
 async def test_worker_from_yaml_root_list_is_single_document():
     """A root list is still one YAML document, not a document stream."""
     async with (
@@ -451,6 +457,7 @@ async def test_worker_from_yaml_root_list_is_single_document():
         assert await parsed.force_deep() == ["a", "b"]
 
 
+@requires_dynamic_primops
 async def test_worker_from_yaml_rejects_document_stream():
     """fromYAML requires exactly one document; streams use fromYAMLStream."""
     async with (
@@ -466,6 +473,7 @@ async def test_worker_from_yaml_rejects_document_stream():
         assert "Python primop" not in message
 
 
+@requires_dynamic_primops
 async def test_worker_from_yaml_parse_error_is_descriptive():
     """YAML parse failures include builtin and source location context."""
     async with (
@@ -481,6 +489,7 @@ async def test_worker_from_yaml_parse_error_is_descriptive():
         assert "Python primop" not in message
 
 
+@requires_dynamic_primops
 async def test_worker_yaml_stream_primops():
     """YAML stream helpers handle Kubernetes multi-document manifests."""
     async with (
@@ -505,6 +514,7 @@ async def test_worker_yaml_stream_primops():
         assert "kind: Service" in text
 
 
+@requires_dynamic_primops
 async def test_worker_to_yaml_rejects_functions():
     """toYAML is JSON-compatible data only; nested functions must not stringify."""
     async with (
