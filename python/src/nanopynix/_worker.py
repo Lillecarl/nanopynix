@@ -166,46 +166,18 @@ class WorkerServiceHandler(WorkerServiceBase):
         self._state = state
 
     async def init(self, message: InitRequest) -> InitResponse:
-        """Bootstrap Nix: configure, init libstore/libexpr, open store."""
+        """Bootstrap Nix without splitting its global state across threads."""
         try:
             settings = dict(message.settings)
-            # Apply config file path before init
+            # These environment variables must be in place before libstore
+            # reads configuration. They are process state, not Nix state.
             if message.nix_conf is not None:
                 os.environ["NIX_USER_CONF_FILES"] = message.nix_conf
             if settings:
                 os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
 
-            for k, v in settings.items():
-                nanopynix_util.set_setting(k, v)
-            for f in message.experimental_features:
-                nanopynix_util.enable_experimental_feature(f)
-
-            nanopynix_util.init_libstore(load_config=message.load_config)
-            nanopynix_util.set_verbosity(int(message.verbosity if message.verbosity is not None else LogLevel.NOTICE))
-            nanopynix_expr.init_libexpr()
-
-            if message.pure_eval is not None:
-                nanopynix_expr._set_pure_eval(message.pure_eval)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
-            if message.restrict_eval is not None:
-                nanopynix_expr._set_restrict_eval(message.restrict_eval)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
-            if message.allowed_uris:
-                nanopynix_expr._set_allowed_uris(message.allowed_uris)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
-            self._state.nix_path = list(message.nix_path)
-
-            # Convert proto PrimOpSpec list to the raw-dict format
-            primops_raw = [
-                {
-                    "name": p.name,
-                    "arity": p.arity,
-                    "args": list(p.args),
-                    "doc": p.doc,
-                    "import_path": p.import_path,
-                    "rpc": p.rpc,
-                }
-                for p in message.primops
-            ]
-            assert self._state.rpc_bridge is not None  # set by worker_service_factory before init
-            _register_primops(primops_raw, rpc_bridge=self._state.rpc_bridge)
+            assert self._state.executor is not None  # set by worker_service_factory before init
+            await self._state.executor.run(self._init_nix, message, settings)
 
             return InitResponse(status="ok")
 
@@ -213,6 +185,39 @@ class WorkerServiceHandler(WorkerServiceBase):
             traceback.print_exc(file=sys.stderr)
             # Re-raise so the gRPC framework propagates the error.
             raise
+
+    def _init_nix(self, message: InitRequest, settings: dict[str, str]) -> None:
+        """Run every Nix C++ initialization operation on the Nix thread."""
+        for k, v in settings.items():
+            nanopynix_util.set_setting(k, v)
+        for feature in message.experimental_features:
+            nanopynix_util.enable_experimental_feature(feature)
+
+        nanopynix_util.init_libstore(load_config=message.load_config)
+        nanopynix_util.set_verbosity(int(message.verbosity if message.verbosity is not None else LogLevel.NOTICE))
+        nanopynix_expr.init_libexpr()
+
+        if message.pure_eval is not None:
+            nanopynix_expr._set_pure_eval(message.pure_eval)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
+        if message.restrict_eval is not None:
+            nanopynix_expr._set_restrict_eval(message.restrict_eval)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
+        if message.allowed_uris:
+            nanopynix_expr._set_allowed_uris(message.allowed_uris)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
+        self._state.nix_path = list(message.nix_path)
+
+        primops_raw = [
+            {
+                "name": p.name,
+                "arity": p.arity,
+                "args": list(p.args),
+                "doc": p.doc,
+                "import_path": p.import_path,
+                "rpc": p.rpc,
+            }
+            for p in message.primops
+        ]
+        assert self._state.rpc_bridge is not None  # set by worker_service_factory before init
+        _register_primops(primops_raw, rpc_bridge=self._state.rpc_bridge)
 
     async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
         assert self._state.executor is not None  # set by worker_service_factory before init

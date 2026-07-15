@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -13,6 +14,7 @@ from nanopynix._worker import (  # type: ignore[reportPrivateUsage] -- test impo
     WorkerState,
 )
 from nanopynix._worker_eval import EvalServiceHandler  # type: ignore[reportPrivateUsage] -- test imports private module
+from nanopynix._worker_nix import NixThreadExecutor  # type: ignore[reportPrivateUsage] -- test verifies thread confinement
 
 
 class _FakeEvalState:
@@ -50,6 +52,53 @@ def test_worker_opens_auto_store_with_explicit_auto_uri(monkeypatch: pytest.Monk
     assert opened_uris == ["auto"]
     assert uri == "local"
     assert store_dir == "/nix/store"
+
+
+@pytest.mark.anyio
+async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test verifies worker thread confinement
+
+    initialized_on: list[int] = []
+
+    def record(*_args: object, **_kwargs: object) -> None:
+        initialized_on.append(threading.get_ident())
+
+    monkeypatch.setattr(worker.nanopynix_util, "set_setting", record)
+    monkeypatch.setattr(worker.nanopynix_util, "enable_experimental_feature", record)
+    monkeypatch.setattr(worker.nanopynix_util, "init_libstore", record)
+    monkeypatch.setattr(worker.nanopynix_util, "set_verbosity", record)
+    monkeypatch.setattr(worker.nanopynix_expr, "init_libexpr", record)
+    monkeypatch.setattr(worker.nanopynix_expr, "_set_pure_eval", record)
+    monkeypatch.setattr(worker.nanopynix_expr, "_set_restrict_eval", record)
+    monkeypatch.setattr(worker.nanopynix_expr, "_set_allowed_uris", record)
+    monkeypatch.setattr(worker, "_register_primops", record)
+
+    state = WorkerState()
+    state.executor = NixThreadExecutor()
+    state.rpc_bridge = object()  # type: ignore[assignment] -- only presence matters to the initialization path
+    handler = WorkerServiceHandler(state)
+    message = SimpleNamespace(
+        settings={"sandbox": "false"},
+        nix_conf=None,
+        experimental_features=["flakes"],
+        load_config=False,
+        verbosity=None,
+        pure_eval=True,
+        restrict_eval=True,
+        allowed_uris=["https://example.test"],
+        nix_path=["nixpkgs=/tmp/nixpkgs"],
+        primops=[],
+    )
+
+    try:
+        response = await handler.init(message)
+    finally:
+        state.executor.shutdown()
+
+    assert response.status == "ok"
+    assert initialized_on
+    assert all(thread_id != threading.get_ident() for thread_id in initialized_on)
+    assert state.nix_path == ["nixpkgs=/tmp/nixpkgs"]
 
 
 def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.MonkeyPatch):
