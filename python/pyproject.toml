@@ -20,10 +20,14 @@ dependencies = [
   "strip-ansi",
   "setproctitle",
 ]
+
 classifiers = [
   "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
   "Programming Language :: Python :: 3",
 ]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-dependency", "anyio", "pygit2"]
 
 [project.scripts]
 nanopynix-worker = "nanopynix._worker:main"

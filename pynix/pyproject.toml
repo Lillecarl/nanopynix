@@ -12,5 +12,8 @@ dependencies = ["nanopynix", "clypi", "prompt-toolkit", "rich", "structlog"]
 [project.scripts]
 pynix = "pynix:main"
 
+[project.optional-dependencies]
+test = ["nanopynix[test]"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/pynix"]

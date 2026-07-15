@@ -7,7 +7,7 @@
   nix,
   cmake,
   ninja,
-  scikit-build-core,
+  renderPyproject,
 }:
 
 let
@@ -21,77 +21,80 @@ let
     }
   );
 in
+let
+  attrs = renderPyproject {
+    projectRoot = ./.;
+    inherit python;
+  };
+in
+buildPythonPackage (
+  attrs
+  // {
 
-buildPythonPackage {
-  pname = "nanopynix-bindings";
-  version = "0.1.0";
-  pyproject = true;
+    src = lib.cleanSource ./.;
 
-  src = lib.cleanSource ./.;
-
-  build-system = [
-    cmake
-    ninja
-    scikit-build-core
-  ];
-
-  nativeBuildInputs = [
-    pkg-config
-  ];
-  buildInputs =
-    let
-      recursivePropagation =
-        derivations:
-        lib.concatMap (
-          x:
-          if x.buildInputs or null != null then
-            [ x ] ++ x.buildInputs ++ recursivePropagation x.buildInputs
-          else
-            [ ]
-        ) derivations;
-    in
-    [
-      nanobind2_13
-    ]
-    ++ lib.pipe nix.libs [
-      lib.attrsToList
-      (lib.map ({ value, ... }: value))
-      recursivePropagation
-      lib.unique
+    build-system = attrs.build-system ++ [
+      cmake
+      ninja
     ];
 
-  dontUseCmakeConfigure = true;
+    nativeBuildInputs = [
+      pkg-config
+    ];
+    buildInputs =
+      let
+        recursivePropagation =
+          derivations:
+          lib.concatMap (
+            x:
+            if x.buildInputs or null != null then
+              [ x ] ++ x.buildInputs ++ recursivePropagation x.buildInputs
+            else
+              [ ]
+          ) derivations;
+      in
+      [
+        nanobind2_13
+      ]
+      ++ lib.pipe nix.libs [
+        lib.attrsToList
+        (lib.map ({ value, ... }: value))
+        recursivePropagation
+        lib.unique
+      ];
 
-  cmakeFlags = [
-    "-Dnanobind_ROOT=${nanobind2_13}/${python.sitePackages}/nanobind/cmake"
-    "-DPython_EXECUTABLE=${python}/bin/python"
-  ];
+    dontUseCmakeConfigure = true;
 
-  postInstall = ''
-    _site="$out/${python.sitePackages}"
-    for mod in nanopynix_util nanopynix_store nanopynix_expr nanopynix_fetchers nanopynix_flake nanopynix_main; do
-      _pat=""
-      if [ -f "src/$mod.pat" ]; then
-        _pat="-p src/$mod.pat"
-      fi
-      PYTHONPATH="$_site:$PYTHONPATH" \
-        ${python}/bin/python -m nanobind.stubgen -m "$mod" $_pat -O "$_site"
-    done
-    touch "$_site/py.typed"
-  '';
+    cmakeFlags = [
+      "-Dnanobind_ROOT=${nanobind2_13}/${python.sitePackages}/nanobind/cmake"
+      "-DPython_EXECUTABLE=${python}/bin/python"
+    ];
 
-  pythonImportsCheck = [
-    "nanopynix_util"
-    "nanopynix_store"
-    "nanopynix_expr"
-    "nanopynix_fetchers"
-    "nanopynix_flake"
-    "nanopynix_main"
-  ];
+    postInstall = ''
+      _site="$out/${python.sitePackages}"
+      for mod in nanopynix_util nanopynix_store nanopynix_expr nanopynix_fetchers nanopynix_flake nanopynix_main; do
+        _pat=""
+        if [ -f "src/$mod.pat" ]; then
+          _pat="-p src/$mod.pat"
+        fi
+        PYTHONPATH="$_site:$PYTHONPATH" \
+          ${python}/bin/python -m nanobind.stubgen -m "$mod" $_pat -O "$_site"
+      done
+      touch "$_site/py.typed"
+    '';
 
-  meta = with lib; {
-    description = "nanobind-based Python bindings for Nix (compiled extensions)";
-    license = licenses.lgpl21Plus;
-    platforms = platforms.unix;
-  };
-}
+    pythonImportsCheck = [
+      "nanopynix_util"
+      "nanopynix_store"
+      "nanopynix_expr"
+      "nanopynix_fetchers"
+      "nanopynix_flake"
+      "nanopynix_main"
+    ];
+
+    meta = attrs.meta // {
+      license = lib.licenses.lgpl21Plus;
+      platforms = lib.platforms.unix;
+    };
+  }
+)
