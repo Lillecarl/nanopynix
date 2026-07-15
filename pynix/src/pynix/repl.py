@@ -231,11 +231,10 @@ async def _run_repl_loop(
 
 def _print_error(exc: NixError | ReplRunError) -> None:
     """Print a REPL error, preserving Nix's ANSI diagnostics."""
-    message = f"error: {exc}"
     if isinstance(exc, NixError):
-        print_formatted_text(ANSI(message))
+        print_formatted_text(ANSI(exc.msg))
     else:
-        print_formatted_text(message)
+        print_formatted_text(f"error: {exc}")
 
 
 async def _load_initial_target(repl: ReplSession, target: EvaluationTarget) -> list[str]:
