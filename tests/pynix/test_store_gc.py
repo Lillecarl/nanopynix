@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -356,8 +355,8 @@ def _install_fake_nanopynix(
 ) -> None:
     monkeypatch.setattr(store_module, "prepare_sys_path", lambda: None)
     monkeypatch.setattr(store_module, "forward_nix_logs", _noop_forward_nix_logs)
-    monkeypatch.setitem(
-        sys.modules,
+    monkeypatch.setattr(
+        store_module,
         "nanopynix",
         SimpleNamespace(
             Session=lambda: _FakeSession(
