@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
     from nanopynix._session import ValueProxy
 
+import nanopynix
+
 from pynix._util import forward_nix_logs, prepare_sys_path
 from pynix.target import (
     EvaluationTarget,
@@ -47,7 +49,6 @@ class Show(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         target = EvaluationTarget.from_command(self)
         try:

@@ -8,6 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from _git import init_flake_repo
+
 import nanopynix
 import nanopynix_fetchers  # L1 Input
 import nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
@@ -208,8 +210,6 @@ def test_locked_input_follows_multiple():
 
 def test_locked_flake_shape(eval_state: nanopynix.EvalState, tmp_path: Path):
     """lock_flake returns a LockedFlake, extract yields expected dict shape."""
-    from _git import init_flake_repo
-
     init_flake_repo(tmp_path, r'hello = "world";')
 
     fr = nanopynix_flake.parse_flake_ref(str(tmp_path))

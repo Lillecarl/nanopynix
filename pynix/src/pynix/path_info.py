@@ -8,6 +8,10 @@ import structlog
 from clypi import Command, Positional, arg
 from rich.console import Console
 
+import nanopynix
+from nanopynix_proto.nix.common import PathInfo as PathInfoProto  # noqa: TC002
+from nanopynix_proto.nix.store import QueryPathInfoRequest
+
 from pynix._util import forward_nix_logs, prepare_sys_path
 
 logger = structlog.get_logger(__name__)
@@ -25,10 +29,6 @@ class PathInfo(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        from nanopynix_proto.nix.common import PathInfo as PathInfoProto  # noqa: TC002
-        from nanopynix_proto.nix.store import QueryPathInfoRequest
-
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             try:

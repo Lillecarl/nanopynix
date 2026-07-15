@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import nanopynix
 import pytest
 from nanopynix_proto.nix.store import AddToStoreRequest, ComputeStorePathRequest
 
@@ -10,8 +11,6 @@ from pynix import Pynix
 
 
 async def test_nanopynix_add_to_store_imports_file(empty_store: dict[str, str | Path | object], tmp_path: Path):
-    import nanopynix
-
     source = tmp_path / "message.txt"
     source.write_text("nanopynix-add-file\n")
 

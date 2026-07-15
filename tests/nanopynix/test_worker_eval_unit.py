@@ -16,6 +16,9 @@ from nanopynix._worker import (  # type: ignore[reportPrivateUsage] -- test impo
 from nanopynix._worker_eval import EvalServiceHandler  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix._worker_nix import NixThreadExecutor  # type: ignore[reportPrivateUsage] -- test verifies thread confinement
 
+import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
+import nanopynix._worker_eval as worker_eval  # type: ignore[reportPrivateUsage] -- test imports private module
+
 
 class _FakeEvalState:
     def __init__(self, store: object, nix_path: list[str]) -> None:
@@ -36,8 +39,6 @@ class _FakeStore:
 
 
 def test_worker_opens_auto_store_with_explicit_auto_uri(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test verifies worker store dispatch
-
     opened_uris: list[str] = []
 
     def _open_store(uri: str) -> _FakeStore:
@@ -55,8 +56,6 @@ def test_worker_opens_auto_store_with_explicit_auto_uri(monkeypatch: pytest.Monk
 
 
 def test_worker_factory_sets_worker_title(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test verifies worker process setup
-
     titled: list[None] = []
     monkeypatch.setattr(worker, "set_worker_title", lambda: titled.append(None) or "quiet-otter")
     monkeypatch.setattr(worker.nanopynix_util, "install_logger", lambda _callback: None)
@@ -67,8 +66,6 @@ def test_worker_factory_sets_worker_title(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test verifies worker naming behavior
-
     titles: list[str] = []
     monkeypatch.setattr(worker, "set_process_title", lambda title, **_kwargs: titles.append(title))
 
@@ -97,8 +94,6 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
 
 @pytest.mark.anyio
 async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test verifies worker thread confinement
-
     initialized_on: list[int] = []
 
     def record(*_args: object, **_kwargs: object) -> None:
@@ -143,8 +138,6 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
 
 
 def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.MonkeyPatch):
-    import nanopynix._worker_eval as worker_eval  # type: ignore[reportPrivateUsage] -- test imports private module
-
     monkeypatch.setattr(worker_eval.nanopynix_expr, "EvalState", _FakeEvalState)
 
     handles = HandleRegistry()

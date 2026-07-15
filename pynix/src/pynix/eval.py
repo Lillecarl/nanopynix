@@ -9,6 +9,8 @@ import structlog
 from clypi import Command, arg
 from rich.console import Console
 
+import nanopynix
+
 from pynix._util import forward_nix_logs, prepare_sys_path
 from pynix.target import (
     EvaluationTarget,
@@ -37,7 +39,6 @@ class Eval(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         target = EvaluationTarget.from_command(self)
         try:

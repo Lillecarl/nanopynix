@@ -53,7 +53,12 @@ from nanopynix._handle_registry import HandleRegistry
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._worker_eval import EvalServiceHandler
 from nanopynix._worker_nix import NixThreadExecutor
+from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
+from grpclib_transports.protocol import DEFAULT_TUNING
+from grpclib_transports.stdio import serve_stdio
+
 from nanopynix._worker_primop import ThreadedRpcPrimopBridge
+from nanopynix._worker_primop import rpc_primop_callback_factory as rpc_primop_callback_factory  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
 from nanopynix._worker_store import StoreServiceHandler
 from nanopynix.logging import LogCollector
 from nanopynix.models import PrimOpSpec
@@ -98,10 +103,6 @@ def _register_primops(
         if spec.rpc:
             if rpc_bridge is None:
                 raise RuntimeError(f"RPC primop {spec.name!r} registered without backchannel")
-            from nanopynix._worker_primop import (
-                rpc_primop_callback_factory as rpc_primop_callback_factory,  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
-            )
-
             callback = rpc_primop_callback_factory(rpc_bridge, spec.name, spec.arity)
         else:
             callback = _import_callable(spec.import_path)
@@ -342,8 +343,6 @@ async def run_worker(
     Called by the forkserver child process via ``_run_multiprocessing_worker``
     in grpclib_transports.
     """
-    from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
-    from grpclib_transports.protocol import DEFAULT_TUNING
 
     tuning = tuning or DEFAULT_TUNING
     handlers = worker_service_factory()
@@ -384,8 +383,6 @@ def main() -> None:
 
 
 async def _stdio_main() -> None:
-    from grpclib_transports.stdio import serve_stdio
-
     handlers = worker_service_factory()
     await serve_stdio(handlers, max_concurrency=_WORKER_MAX_CONCURRENCY)
 

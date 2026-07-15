@@ -66,6 +66,8 @@ select = [
   "TD",
   # flake8-logging
   "LOG",
+  # pylint — import should be at top-level
+  "PLC0415",
 ]
 
 ignore = [
@@ -86,6 +88,9 @@ ignore = [
   # "eval" used as variable name for eval sessions
   "A001",
 ]
+
+[lint.per-file-ignores]
+"tests/**" = ["SLF001"]
 
 [lint.isort]
 known-first-party = [

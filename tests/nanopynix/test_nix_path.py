@@ -6,12 +6,11 @@ import tempfile
 from pathlib import Path
 
 import pytest
+import nanopynix_expr
 
 
 def test_parse_nix_path_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """_parse_nix_path returns [] when NIX_PATH is unset."""
-    import nanopynix_expr
-
     monkeypatch.delenv("NIX_PATH", raising=False)
     result = nanopynix_expr.parse_nix_path()
     assert result == []
@@ -19,8 +18,6 @@ def test_parse_nix_path_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_parse_nix_path_simple(monkeypatch: pytest.MonkeyPatch) -> None:
     """parse_nix_path splits colon-separated prefix=path entries."""
-    import nanopynix_expr
-
     with tempfile.TemporaryDirectory() as d:
         a = str(Path(d) / "a")
         b = str(Path(d) / "b")
@@ -35,8 +32,6 @@ def test_parse_nix_path_simple(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_parse_nix_path_explicit_value_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """parse_nix_path can parse a supplied NIX_PATH value outside the worker."""
-    import nanopynix_expr
-
     monkeypatch.delenv("NIX_PATH", raising=False)
     with tempfile.TemporaryDirectory() as d:
         a = str(Path(d) / "a")
@@ -49,8 +44,6 @@ def test_parse_nix_path_explicit_value_without_env(monkeypatch: pytest.MonkeyPat
 
 def test_parse_nix_path_url_style(monkeypatch: pytest.MonkeyPatch) -> None:
     """parse_nix_path handles URL-style entries (scheme://...) without splitting on colons."""
-    import nanopynix_expr
-
     monkeypatch.setenv("NIX_PATH", "nixpkgs=https://github.com/NixOS/nixpkgs/archive/master.tar.gz")
     result = nanopynix_expr.parse_nix_path()
     assert len(result) == 1

@@ -8,6 +8,7 @@ from typing import Any, Protocol, cast
 import pytest
 
 import nanopynix
+import nanopynix_expr
 
 
 def pytest_addoption(parser: pytest.Parser):
@@ -183,8 +184,6 @@ def _enable_flakes():  # type: ignore[reportUnusedFunction] -- pytest autouse fi
 def _cleanup_primops():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Clear C++ primop registry at process exit to avoid segfault
     when nb::object destructors fire after Python finalization."""
-    import nanopynix_expr
-
     class _PrimopRegistryModule(Protocol):
         def _cleanup_primop_registry(self) -> None: ...
 

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 import pytest
 
+import pynix.store as store_module
 from pynix import Pynix
 
 
@@ -353,8 +354,6 @@ def _install_fake_nanopynix(
     closures: dict[str, list[str]] | None = None,
     nar_sizes: dict[str, int] | None = None,
 ) -> None:
-    import pynix.store as store_module
-
     monkeypatch.setattr(store_module, "prepare_sys_path", lambda: None)
     monkeypatch.setattr(store_module, "forward_nix_logs", _noop_forward_nix_logs)
     monkeypatch.setitem(

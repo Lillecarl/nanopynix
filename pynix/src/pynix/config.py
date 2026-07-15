@@ -6,6 +6,8 @@ from typing import override
 
 from clypi import Command, arg
 
+import nanopynix
+
 from pynix._util import prepare_sys_path
 
 
@@ -17,7 +19,6 @@ class Show(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         nanopynix.init_libstore(load_config=True)
         if self.setting is not None:
@@ -32,7 +33,6 @@ class Check(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         nanopynix.init_libstore(load_config=True)
         _print_json({"ok": True})
@@ -44,7 +44,6 @@ class CurrentSystem(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         nanopynix.init_libstore(load_config=True)
         _print_json({"currentSystem": nanopynix.current_system()})

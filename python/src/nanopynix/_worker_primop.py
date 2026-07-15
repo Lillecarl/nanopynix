@@ -19,7 +19,9 @@ import asyncio
 import concurrent.futures
 from typing import TYPE_CHECKING, Any
 
+from betterproto2 import which_one_of
 from nanopynix_proto.nix.common import NullValue, ScalarValue
+from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
 if TYPE_CHECKING:
     from grpclib_transports import WorkerBackchannel
@@ -46,8 +48,6 @@ def _python_to_scalar_value(value: Any) -> ScalarValue:
 def _scalar_value_to_python(sv: ScalarValue | None) -> Any:
     if sv is None:
         return None
-    from betterproto2 import which_one_of
-
     kind = which_one_of(sv, "kind")[0]
     if kind == "string_value":
         return sv.string_value
@@ -81,8 +81,6 @@ class ThreadedRpcPrimopBridge:
             self._task = None
 
     async def _dispatch_loop(self) -> None:
-        from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
-
         while True:
             name, args, future = await self._queue.get()
             try:
