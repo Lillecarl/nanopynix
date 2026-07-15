@@ -24,7 +24,7 @@ def _nix_sp() -> nanopynix_store.StorePath:
     """Return a StorePath for the system bash binary.  Requires NixOS."""
     nix_bin = which("nix")
     assert isinstance(nix_bin, str)
-    nix = Path(nix_bin).readlink()
+    nix = Path(nix_bin).resolve()
     nix_basename = str(nix).split("/nix/store/")[1].split("/")[0]
     return nanopynix_store.StorePath(nix_basename)
 

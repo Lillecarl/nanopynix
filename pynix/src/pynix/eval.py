@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import TYPE_CHECKING, override
+from pathlib import Path  # noqa: TC003 -- clypi evaluates annotations at runtime, Path must be importable
+from typing import override
 
 import structlog
 from clypi import Command, arg
@@ -18,9 +19,6 @@ from pynix.target import (
     file_option,
     flake_option,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 logger = structlog.get_logger(__name__)
 console = Console()
