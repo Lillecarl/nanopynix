@@ -12,11 +12,13 @@ dependencies = [
   "nanopynix-bindings",
   "nanopynix-proto",
   "grpclib-transports",
+  "coolname",
   "janus",
   "pydantic",
   "pydantic-settings",
   "pyyaml",
   "strip-ansi",
+  "setproctitle",
 ]
 classifiers = [
   "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
