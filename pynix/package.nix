@@ -4,6 +4,7 @@
   hatchling,
   nanopynix,
   clypi,
+  prompt-toolkit,
   rich,
   structlog,
 }:
@@ -22,6 +23,7 @@ buildPythonApplication {
   dependencies = [
     nanopynix
     clypi
+    prompt-toolkit
     rich
     structlog
   ];

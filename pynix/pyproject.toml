@@ -7,7 +7,7 @@ name = "pynix"
 version = "0.1.0"
 description = "End-to-end harness that consumes nanopynix as a library dependency"
 requires-python = ">=3.10"
-dependencies = ["nanopynix", "clypi", "rich", "structlog"]
+dependencies = ["nanopynix", "clypi", "prompt-toolkit", "rich", "structlog"]
 
 [project.scripts]
 pynix = "pynix:main"
