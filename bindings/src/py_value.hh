@@ -40,6 +40,8 @@ struct PyValue {
 
     void force();
     void force_deep();
+    std::string realise_string();
+    std::vector<std::string> realise_argv();
 
     nanobind::object to_python();
     nanobind::object to_json(bool copy_to_store = false);

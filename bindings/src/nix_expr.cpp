@@ -23,6 +23,7 @@
 #include <nix/store/derived-path.hh>
 #include <nix/util/experimental-features.hh>
 #include <nix/util/logging.hh>
+#include <nix/util/util.hh>
 
 #include <nlohmann/json.hpp>
 
@@ -203,6 +204,38 @@ void PyValue::force_deep() {
         nb::gil_scoped_release release;
         es->forceValueDeep(*checkedValue());
     }
+}
+
+std::string PyValue::realise_string() {
+    auto *es = evalState();
+    if (es == nullptr) throw std::runtime_error("value has no evaluation state");
+    nb::gil_scoped_release release;
+    return es->realiseString(*checkedValue(), nullptr, true, nix::noPos);
+}
+
+std::vector<std::string> PyValue::realise_argv() {
+    auto *es = evalState();
+    if (es == nullptr) throw std::runtime_error("value has no evaluation state");
+    nb::gil_scoped_release release;
+
+    auto *value = checkedValue();
+    es->forceList(*value, nix::noPos, "while evaluating the argument passed to :exec");
+
+    nix::NixStringContext context;
+    std::vector<std::string> argv;
+    for (auto *element : value->listView()) {
+        argv.emplace_back(es->coerceToString(
+            nix::noPos,
+            *element,
+            context,
+            "while evaluating an element of the argument passed to :exec",
+            false,
+            false).toOwned());
+    }
+    auto rewrites = es->realiseContext(context);
+    for (auto &argument : argv)
+        argument = nix::rewriteStrings(argument, rewrites);
+    return argv;
 }
 
 // to_python and to_json are implemented below.
@@ -1086,6 +1119,8 @@ static void bind_value(nb::module_ &m) {
         .def("as_string", &PyValue::as_string)
         .def("force", &PyValue::force)
         .def("force_deep", &PyValue::force_deep)
+        .def("realise_string", &PyValue::realise_string)
+        .def("realise_argv", &PyValue::realise_argv)
         .def("list_length", &PyValue::list_length)
         .def("list_get", &PyValue::list_get, "idx"_a, nb::keep_alive<0, 1>())
         .def("attr_names", &PyValue::attr_names)

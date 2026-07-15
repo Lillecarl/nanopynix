@@ -47,6 +47,10 @@ from nanopynix_proto.nix.eval import (
     ReplAddAttrsRequest,
     ReplAddAttrsResponse,
     ReplLoadFileRequest,
+    RealiseArgvRequest,
+    RealiseArgvResponse,
+    RealiseStringRequest,
+    RealiseStringResponse,
     TypeNameRequest,
     TypeNameResponse,
     WriteLockFileRequest,
@@ -262,6 +266,18 @@ class EvalServiceHandler(EvalServiceBase):
 
         value = self._resolve(message.handle)
         return ForceJsonResponse(json=_json.dumps(value.to_json(copy_to_store=message.copy_to_store)))
+
+    async def realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
+        return await self._state.executor.run(self._do_realise_string, message)
+
+    def _do_realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
+        return RealiseStringResponse(value=self._resolve(message.handle).realise_string())
+
+    async def realise_argv(self, message: RealiseArgvRequest) -> RealiseArgvResponse:
+        return await self._state.executor.run(self._do_realise_argv, message)
+
+    def _do_realise_argv(self, message: RealiseArgvRequest) -> RealiseArgvResponse:
+        return RealiseArgvResponse(argv=self._resolve(message.handle).realise_argv())
 
     async def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
         return await self._state.executor.run(self._do_attr, message)

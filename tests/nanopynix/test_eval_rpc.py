@@ -119,6 +119,23 @@ async def test_eval_string():
         assert await root.force() == 43
 
 
+async def test_eval_realise_command_values_preserves_string_context():
+    """Realising strings and argv uses Nix's context-aware coercion path."""
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        string = await eval.string('builtins.toFile "nanopynix-realise-string" "contents"')
+        realised_path = await string.realise_string()
+        assert Path(realised_path).read_text() == "contents"
+
+        argv_value = await eval.string('[ "echo" (builtins.toFile "nanopynix-realise-argv" "argument") ]')
+        argv = await argv_value.realise_argv()
+        assert argv[0] == "echo"
+        assert Path(argv[1]).read_text() == "argument"
+
+
 async def test_repl_session_persists_bindings(tmp_path: Path):
     """ReplSession evaluates expressions and files in one persistent Nix scope."""
     nix_file = tmp_path / "uses-binding.nix"

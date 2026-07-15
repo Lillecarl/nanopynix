@@ -14,6 +14,8 @@ service EvalService {
   rpc Force(ForceRequest) returns (nix.common.ForceValue);
   rpc ForceDeep(ForceDeepRequest) returns (nix.common.DeepValue);
   rpc ForceJson(ForceJsonRequest) returns (ForceJsonResponse);
+  rpc RealiseString(RealiseStringRequest) returns (RealiseStringResponse);
+  rpc RealiseArgv(RealiseArgvRequest) returns (RealiseArgvResponse);
   rpc Attr(AttrRequest) returns (nix.common.ValueHandle);
   rpc ListGet(ListGetRequest) returns (nix.common.ValueHandle);
   rpc ListLength(ListLengthRequest) returns (ListLengthResponse);
@@ -85,6 +87,20 @@ message ForceJsonRequest {
 }
 message ForceJsonResponse {
   string json = 1;
+}
+
+message RealiseStringRequest {
+  int64 handle = 1;
+}
+message RealiseStringResponse {
+  string value = 1;
+}
+
+message RealiseArgvRequest {
+  int64 handle = 1;
+}
+message RealiseArgvResponse {
+  repeated string argv = 1;
 }
 
 message AttrRequest {
