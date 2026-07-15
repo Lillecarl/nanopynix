@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shlex
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
@@ -19,6 +20,7 @@ from prompt_toolkit.shortcuts import print_formatted_text
 
 import nanopynix
 from nanopynix.exceptions import NixError
+from nanopynix.verbosity import normalize_log_level
 from pynix._util import forward_nix_logs, prepare_sys_path
 from pynix.target import (
     EvaluationTarget,
@@ -62,6 +64,7 @@ _COMMANDS = {
     ":shell": "Realise a Nix string and execute it with the shell",
     ":t": "Show an expression's Nix type",
     ":type": "Show an expression's Nix type",
+    ":verbosity": "Show or set Nix log verbosity",
     ":?": "Show this help",
 }
 _NIX_IDENTIFIER = re.compile(r"(?P<path>(?:[A-Za-z_][A-Za-z0-9_'-]*\.)*[A-Za-z_][A-Za-z0-9_'-]*\.?)$")
@@ -80,6 +83,7 @@ _HELP = """Commands:
   :shell <expr>           Realise a Nix string and execute it with the shell
   :r, :reload            Reload files and flakes
   :t, :type <expr>       Show an expression's Nix type
+  :verbosity [level]      Show or set Nix log verbosity (0-7 or a level name)
   :q, :quit              Exit the REPL
   :?, :help              Show this help"""
 
@@ -177,6 +181,14 @@ async def _run_repl_loop(
             return
         if command in {":help", ":?"}:
             print_formatted_text(_HELP)
+            continue
+        if command == ":verbosity":
+            try:
+                verbosity = await (repl.get_verbosity() if not argument else repl.set_verbosity(normalize_log_level(argument)))
+            except (TypeError, ValueError) as exc:
+                print_formatted_text(f"error: {exc}")
+            else:
+                print_formatted_text(f"{verbosity.name.lower()} ({int(verbosity)})")
             continue
 
         try:
@@ -389,28 +401,26 @@ class Repl(Command):
             print_formatted_text(f"error: {exc}")
             raise SystemExit(1) from exc
 
-        async with (
-            nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
-            forward_nix_logs(nix),
-            nix.store(self.store) as store,
-            nix.repl(store) as repl,
-        ):
-            prompt: PromptSession[str] = PromptSession(completer=_ReplCompleter(repl), complete_while_typing=True)
+        async with nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix:
             with patch_stdout():
-                try:
-                    initial_loaded = await _load_initial_target(repl, target)
-                except EvaluationTargetError as exc:
-                    print_formatted_text(f"error: {exc}")
-                    raise SystemExit(1) from exc
-                initial_sources: list[tuple[str, str]] = []
-                if target.file is not None:
-                    initial_sources.append((":load", str(target.file)))
-                elif target.flake is not None:
-                    initial_sources.append((":load-flake", target.flake))
-                await _run_repl_loop(
-                    repl,
-                    prompt,
-                    initial_loaded=initial_loaded,
-                    initial_sources=initial_sources,
-                    line_editors=repl.line_editors,
-                )
+                async with forward_nix_logs(nix, log_file=sys.stdout), nix.store(self.store) as store, nix.repl(store) as repl:
+                    prompt: PromptSession[str] = PromptSession(
+                        completer=_ReplCompleter(repl), complete_while_typing=True
+                    )
+                    try:
+                        initial_loaded = await _load_initial_target(repl, target)
+                    except EvaluationTargetError as exc:
+                        print_formatted_text(f"error: {exc}")
+                        raise SystemExit(1) from exc
+                    initial_sources: list[tuple[str, str]] = []
+                    if target.file is not None:
+                        initial_sources.append((":load", str(target.file)))
+                    elif target.flake is not None:
+                        initial_sources.append((":load-flake", target.flake))
+                    await _run_repl_loop(
+                        repl,
+                        prompt,
+                        initial_loaded=initial_loaded,
+                        initial_sources=initial_sources,
+                        line_editors=repl.line_editors,
+                    )

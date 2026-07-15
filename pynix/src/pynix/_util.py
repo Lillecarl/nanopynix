@@ -5,7 +5,7 @@ import contextlib
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
 import structlog
 
@@ -23,9 +23,9 @@ def prepare_sys_path() -> None:
     configure_logging()
 
 
-def configure_logging() -> None:
+def configure_logging(*, file: TextIO | None = None) -> None:
     structlog.configure(
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        logger_factory=structlog.PrintLoggerFactory(file=file or sys.stderr),
         processors=[
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.KeyValueRenderer(sort_keys=True),
@@ -34,8 +34,14 @@ def configure_logging() -> None:
 
 
 @asynccontextmanager
-async def forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncGenerator[None]:
-    configure_logging()
+async def forward_nix_logs(
+    session: Any, *, print_build_logs: bool = False, log_file: TextIO | None = None
+) -> AsyncGenerator[None]:
+    old_config = structlog.get_config()
+    if log_file is None:
+        configure_logging()
+    else:
+        configure_logging(file=log_file)
     task = asyncio.create_task(_forward_nix_logs(session, print_build_logs=print_build_logs))
     try:
         yield
@@ -44,6 +50,7 @@ async def forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> A
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        structlog.configure(**old_config)
 
 
 async def _forward_nix_logs(session: Any, *, print_build_logs: bool) -> None:
@@ -51,6 +58,8 @@ async def _forward_nix_logs(session: Any, *, print_build_logs: bool) -> None:
     async for event in session.log_stream():
         message = event.message_without_ansi
         result_type, result_message = _result_event(event)
+        if event.action == "stop" or (event.action == "result" and result_message is None):
+            continue
         if result_type in {_RESULT_BUILD_LOG_LINE, _RESULT_POST_BUILD_LOG_LINE}:
             if print_build_logs:
                 logger.info(

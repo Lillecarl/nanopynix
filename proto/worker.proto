@@ -8,6 +8,8 @@ service WorkerService {
   rpc Init(InitRequest) returns (InitResponse);
   rpc OpenStore(OpenStoreRequest) returns (OpenStoreResponse);
   rpc CloseStore(CloseStoreRequest) returns (CloseStoreResponse);
+  rpc GetVerbosity(GetVerbosityRequest) returns (GetVerbosityResponse);
+  rpc SetVerbosity(SetVerbosityRequest) returns (SetVerbosityResponse);
   rpc SubscribeLogs(SubscribeLogsRequest) returns (stream nix.common.LogEvent);
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
@@ -47,6 +49,18 @@ message CloseStoreRequest {
   int64 store_handle = 1;
 }
 message CloseStoreResponse {}
+
+message GetVerbosityRequest {}
+message GetVerbosityResponse {
+  nix.common.LogLevel verbosity = 1;
+}
+
+message SetVerbosityRequest {
+  nix.common.LogLevel verbosity = 1;
+}
+message SetVerbosityResponse {
+  nix.common.LogLevel verbosity = 1;
+}
 
 message ShutdownRequest {}
 message ShutdownResponse {}

@@ -38,10 +38,14 @@ from nanopynix_proto.nix.common import LogEvent, LogLevel
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
     CloseStoreResponse,
+    GetVerbosityRequest,
+    GetVerbosityResponse,
     InitRequest,
     InitResponse,
     OpenStoreRequest,
     OpenStoreResponse,
+    SetVerbosityRequest,
+    SetVerbosityResponse,
     ShutdownRequest,
     ShutdownResponse,
     SubscribeLogsRequest,
@@ -250,6 +254,24 @@ class WorkerServiceHandler(WorkerServiceBase):
         self._state.handles.release(store_handle)
         if self._state.named_store_uris.pop(store_handle, None) is not None:
             self._update_store_title()
+
+    async def get_verbosity(self, message: GetVerbosityRequest) -> GetVerbosityResponse:
+        """Return the worker's current Nix logger verbosity."""
+        del message
+        assert self._state.executor is not None  # set by worker_service_factory before init
+        verbosity = await self._state.executor.run(nanopynix_util.get_verbosity)
+        return GetVerbosityResponse(verbosity=LogLevel(verbosity))
+
+    async def set_verbosity(self, message: SetVerbosityRequest) -> SetVerbosityResponse:
+        """Update Nix logger verbosity on the Nix thread."""
+        assert self._state.executor is not None  # set by worker_service_factory before init
+        verbosity = await self._state.executor.run(self._set_verbosity, message.verbosity)
+        return SetVerbosityResponse(verbosity=LogLevel(verbosity))
+
+    @staticmethod
+    def _set_verbosity(verbosity: LogLevel) -> int:
+        nanopynix_util.set_verbosity(int(verbosity))
+        return nanopynix_util.get_verbosity()
 
     def _update_store_title(self) -> None:
         subname = " ".join(self._state.named_store_uris.values()) or self._state.worker_subname

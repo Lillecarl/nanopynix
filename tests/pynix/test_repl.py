@@ -9,6 +9,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from nanopynix_proto.nix.common import LogLevel
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import ANSI
@@ -89,6 +90,7 @@ class _Repl:
         self.loaded_files: list[str] = []
         self.file_cache_resets = 0
         self.value: _Value | _RunValue | _CommandValue | _EditValue = _Value()
+        self.verbosity = LogLevel.NOTICE
 
     async def line(self, text: str) -> _Value | None:
         self.lines.append(text)
@@ -103,6 +105,13 @@ class _Repl:
 
     async def reset_file_cache(self) -> None:
         self.file_cache_resets += 1
+
+    async def get_verbosity(self) -> LogLevel:
+        return self.verbosity
+
+    async def set_verbosity(self, verbosity: LogLevel) -> LogLevel:
+        self.verbosity = verbosity
+        return verbosity
 
     async def string(self, _expr: str) -> _Value | _RunValue | _CommandValue | _EditValue:
         return self.value
@@ -177,6 +186,16 @@ async def test_repl_last_loaded_includes_initial_target(monkeypatch: Any) -> Non
     await _run_repl_loop(repl, _Prompt([":ll", ":quit"]), initial_loaded=["flake", "pkgs"])  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
 
     assert output == [_HELP, "flake pkgs"]
+
+
+async def test_repl_verbosity_shows_and_updates_nix_log_level(monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+    repl = _Repl()
+
+    await _run_repl_loop(repl, _Prompt([":verbosity", ":verbosity debug", ":verbosity", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+
+    assert output == [_HELP, "notice (2)", "debug (6)", "debug (6)"]
 
 
 def test_repl_preserves_nix_error_ansi(monkeypatch: Any) -> None:
