@@ -8,18 +8,21 @@ from typing import Any
 
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
+from prompt_toolkit.formatted_text import ANSI
 from pynix.repl import (
     _HELP,
     Repl,
     _derivation_name_part,
     _load_initial_target,
     _main_program,
+    _print_error,
     _ReplCompleter,
     _run_derivation,
     _run_repl_loop,
 )
 from pynix.target import EvaluationTarget
 
+from nanopynix.exceptions import NixError
 from pynix import Pynix
 
 
@@ -161,6 +164,16 @@ async def test_repl_last_loaded_includes_initial_target(monkeypatch: Any) -> Non
     await _run_repl_loop(repl, _Prompt([":ll", ":quit"]), initial_loaded=["flake", "pkgs"])
 
     assert output == [_HELP, "flake pkgs"]
+
+
+def test_repl_preserves_nix_error_ansi(monkeypatch: Any) -> None:
+    output: list[object] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+
+    _print_error(NixError("EvalError", "\x1b[31mboom\x1b[0m"))
+
+    assert len(output) == 1
+    assert isinstance(output[0], ANSI)
 
 
 async def test_repl_run_prefers_meta_main_program(tmp_path: Path, monkeypatch: Any) -> None:

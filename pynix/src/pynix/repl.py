@@ -13,6 +13,7 @@ from clypi import Command, arg
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import print_formatted_text
 
@@ -205,7 +206,16 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any, *, initial_loaded: list
             if value is not None:
                 print_formatted_text(json.dumps(await value.force_json(), indent=2, sort_keys=True))
         except (NixError, ReplRunError) as exc:
-            print_formatted_text(f"error: {exc}")
+            _print_error(exc)
+
+
+def _print_error(exc: NixError | ReplRunError) -> None:
+    """Print a REPL error, preserving Nix's ANSI diagnostics."""
+    message = f"error: {exc}"
+    if isinstance(exc, NixError):
+        print_formatted_text(ANSI(message))
+    else:
+        print_formatted_text(message)
 
 
 async def _load_initial_target(repl: ReplSession, target: EvaluationTarget) -> list[str]:
