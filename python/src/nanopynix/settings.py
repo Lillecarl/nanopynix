@@ -148,6 +148,12 @@ class NixSettings(BaseModel):
     narinfo_cache_negative_ttl: int | None = None
     narinfo_cache_positive_ttl: int | None = None
     netrc_file: str | None = None
+    nix_shell_always_looks_for_shell_nix: bool | None = Field(
+        default=None, json_schema_extra={"nix_version_min": "2.24"}
+    )
+    nix_shell_shebang_arguments_relative_to_script: bool | None = Field(
+        default=None, json_schema_extra={"nix_version_min": "2.24"}
+    )
     plugin_files: list[str] | None = None
     post_build_hook: str | None = None
     pre_build_hook: str | None = None
@@ -357,6 +363,15 @@ def check_settings_model_drift(
 ) -> SettingsDrift:
     if metadata is None:
         metadata = _metadata_for_surface(surface)
+    if surface == "global":
+        # globalConfig aggregates every registered Config instance, including
+        # the evaluator, fetcher, and flake-specific settings.  Those have
+        # dedicated Python models and must not be reported as missing from
+        # NixSettings.
+        non_global_settings = set(list_eval_settings_metadata())
+        non_global_settings.update(list_fetch_settings_metadata())
+        non_global_settings.update(list_flake_settings_metadata())
+        metadata = {name: setting for name, setting in metadata.items() if name not in non_global_settings}
     known = set(metadata.keys())
     model_type = _model_for_surface(surface)
     model = {
