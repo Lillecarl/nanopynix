@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path  # noqa: TC003
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 import structlog
@@ -13,6 +13,14 @@ if TYPE_CHECKING:
     from nanopynix._session import ValueProxy
 
 from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix.target import (
+    EvaluationTarget,
+    EvaluationTargetError,
+    attr_option,
+    evaluate_target,
+    file_option,
+    flake_option,
+)
 
 console = Console()
 error_console = Console(stderr=True)
@@ -26,20 +34,9 @@ _DEFAULT_VERBOSITY = "notice"
 class Build(Command):
     """Build a Nix derivation value"""
 
-    file: Path | None = arg(
-        None,
-        short="f",
-        help="Evaluate FILE. Use --attrpath to select a derivation inside it.",
-    )
-    attrpath: str | None = arg(
-        None,
-        short="A",
-        help="Dot-separated attribute path to the derivation.",
-    )
-    flake: str | None = arg(
-        None,
-        help="Flake reference (e.g. '.#hello'). The attrpath after '#' selects the derivation.",
-    )
+    file: Path | None = file_option()
+    attr: str | None = attr_option()
+    flake: str | None = flake_option()
     store: str = arg("auto", help="Store URI to build with.")
     eval_store: str | None = arg(None, help="Store URI to evaluate with. Defaults to --store.")
     substituters: str = arg(_DEFAULT_SUBSTITUTERS, help="Space-separated substituter URLs.")
@@ -55,12 +52,12 @@ class Build(Command):
         prepare_sys_path()
         import nanopynix
 
-        if self.file is None and self.flake is None:
-            error_console.print("[red]Error:[/red] either --file or --flake is required")
-            raise SystemExit(1)
-        if self.file is not None and self.flake is not None:
-            error_console.print("[red]Error:[/red] --file and --flake are mutually exclusive")
-            raise SystemExit(1)
+        target = EvaluationTarget.from_command(self)
+        try:
+            target.validate(required=True)
+        except EvaluationTargetError as exc:
+            error_console.print(f"[red]Error:[/red] {exc}")
+            raise SystemExit(1) from exc
 
         settings = nanopynix.NixSettingsEnv(
             substituters=self.substituters.split(),
@@ -75,7 +72,7 @@ class Build(Command):
                     async with nix.store(self.store) as store:
                         async with nix.eval(store) as session:
                             logger.info("pynix build evaluating target")
-                            root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
+                            root = await _evaluate_build_target(target, session)
                             logger.info("pynix build target evaluated")
                             outputs = await root.build()
                         logger.info("pynix build finished")
@@ -86,7 +83,7 @@ class Build(Command):
                     ):
                         async with nix.eval(eval_store) as session:
                             logger.info("pynix build evaluating target")
-                            root = await _evaluate_build_target(self, session, attrs_type=nanopynix.NixType.ATTRS)
+                            root = await _evaluate_build_target(target, session)
                             logger.info("pynix build target evaluated")
                             outputs = await root.build(store=build_store)
                         logger.info("pynix build finished")
@@ -97,38 +94,15 @@ class Build(Command):
         _print_json({"outputs": outputs})
 
 
-class BuildTargetError(RuntimeError):
+async def _evaluate_build_target(target: EvaluationTarget, session: Any) -> ValueProxy:
+    try:
+        return await evaluate_target(target, session, auto_call_file=True)
+    except EvaluationTargetError as exc:
+        raise BuildTargetError(str(exc)) from exc
+
+
+class BuildTargetError(EvaluationTargetError):
     pass
-
-
-async def _navigate(root: ValueProxy, attrpath: str, *, attrs_type: int) -> ValueProxy:
-    for part in attrpath.split("."):
-        actual = await root.get_type()
-        if actual != attrs_type:
-            raise BuildTargetError(f"cannot select attribute {part!r} from {actual.name.lower()} value")
-        if not await root.has_attr(part):
-            names = await root.attr_names()
-            available = ", ".join(names[:10])
-            suffix = "" if len(names) <= 10 else f", ... ({len(names)} total)"
-            raise BuildTargetError(f"attribute {part!r} not found; available attributes: {available}{suffix}")
-        root = root.attr(part)
-    return root
-
-
-async def _evaluate_build_target(command: Build, session: Any, *, attrs_type: int) -> ValueProxy:
-    if command.file is not None:
-        root = await (await session.file(str(command.file))).auto_call()
-        if command.attrpath is not None:
-            root = await _navigate(root, command.attrpath, attrs_type=attrs_type)
-        return root
-    if command.flake is None:
-        error_console.print("[red]Error:[/red] either --file or --flake is required")
-        raise SystemExit(1)
-    base_ref, _, flake_attr = command.flake.partition("#")
-    root = await session.eval_flake(base_ref)
-    if flake_attr:
-        root = await _navigate(root, flake_attr, attrs_type=attrs_type)
-    return root
 
 
 def _print_json(obj: object) -> None:

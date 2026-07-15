@@ -36,7 +36,7 @@ async def test_build_file_derivation(tmp_path: Path, capsys: pytest.CaptureFixtu
     assert await AnyioPath(out_path).read_text() == "built-from-file\n"
 
 
-async def test_build_file_derivation_attrpath(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+async def test_build_file_derivation_attr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "build-test.nix"
     nix_file.write_text("""
     let
@@ -58,7 +58,7 @@ async def test_build_file_derivation_attrpath(tmp_path: Path, capsys: pytest.Cap
             "build",
             "--file",
             str(nix_file),
-            "--attrpath",
+            "--attr",
             "package",
             "--store",
             "auto",
@@ -75,7 +75,7 @@ async def test_build_file_derivation_attrpath(tmp_path: Path, capsys: pytest.Cap
     assert await AnyioPath(out_path).read_text() == "built-from-attr\n"
 
 
-async def test_build_file_auto_calls_defaulted_lambda_before_attrpath(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+async def test_build_file_auto_calls_defaulted_lambda_before_attr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "default.nix"
     nix_file.write_text("""
     { pkgs ? import <nixpkgs> {}, name ? "pynix-build-autocall-test" }:
@@ -90,7 +90,7 @@ async def test_build_file_auto_calls_defaulted_lambda_before_attrpath(tmp_path: 
       };
     }
     """)
-    cmd = Pynix.parse(["build", "--file", str(nix_file), "--attrpath", "package"])
+    cmd = Pynix.parse(["build", "--file", str(nix_file), "--attr", "package"])
 
     await cmd.astart()
 
@@ -101,7 +101,7 @@ async def test_build_file_auto_calls_defaulted_lambda_before_attrpath(tmp_path: 
     assert await AnyioPath(out_path).read_text() == "built-from-autocall\n"
 
 
-async def test_build_missing_attrpath_errors_before_build(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+async def test_build_missing_attr_errors_before_build(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "build-test.nix"
     nix_file.write_text("""
     let
@@ -118,7 +118,7 @@ async def test_build_missing_attrpath_errors_before_build(tmp_path: Path, capsys
       };
     }
     """)
-    cmd = Pynix.parse(["build", "--file", str(nix_file), "--attrpath", "missing"])
+    cmd = Pynix.parse(["build", "--file", str(nix_file), "--attr", "missing"])
 
     with pytest.raises(SystemExit):
         await cmd.astart()

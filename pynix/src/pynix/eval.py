@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path  # noqa: TC003
+from pathlib import Path
 from typing import override
 
 import structlog
@@ -10,6 +10,14 @@ from clypi import Command, arg
 from rich.console import Console
 
 from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix.target import (
+    EvaluationTarget,
+    EvaluationTargetError,
+    attr_option,
+    evaluate_target,
+    file_option,
+    flake_option,
+)
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -21,7 +29,9 @@ class Eval(Command):
     """Evaluate a Nix expression and print the result as JSON"""
 
     expr: str | None = arg(None, help="Nix expression to evaluate. Reads from stdin if not provided.")
-    file: Path | None = arg(None, help="Read expression from file instead of an argument or stdin.", short="f")
+    file: Path | None = file_option()
+    attr: str | None = attr_option()
+    flake: str | None = flake_option()
     store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
 
     @override
@@ -29,10 +39,17 @@ class Eval(Command):
         prepare_sys_path()
         import nanopynix
 
-        expr: str
-        if self.file is not None:
-            expr = self.file.read_text()
-            logger.info("reading expression from file", file=str(self.file))
+        target = EvaluationTarget.from_command(self)
+        try:
+            target.validate()
+        except EvaluationTargetError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise SystemExit(1) from exc
+        if target.file is not None or target.flake is not None:
+            if self.expr is not None:
+                console.print("[red]Error:[/red] expression argument cannot be combined with --file or --flake")
+                raise SystemExit(1)
+            expr = None
         elif self.expr is not None:
             expr = self.expr
             logger.info("reading expression from argument")
@@ -46,7 +63,11 @@ class Eval(Command):
             nix.store(self.store) as store,
             nix.eval(store) as session,
         ):
-            root = await session.string(expr)
+            try:
+                root = await evaluate_target(target, session, auto_call_file=True) if expr is None else await session.string(expr)
+            except EvaluationTargetError as exc:
+                console.print(f"[red]Error:[/red] {exc}")
+                raise SystemExit(1) from exc
             value = await root.force_json()
             result = json.dumps(value, sort_keys=True, indent=2)
             sys.stdout.write(result)

@@ -40,6 +40,17 @@ async def test_eval_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> 
     assert _parse_json_output(captured.out) == {"a": 1, "b": True, "c": [1, 2, 3]}
 
 
+async def test_eval_file_attr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    nix_file = tmp_path / "test.nix"
+    nix_file.write_text("{ nested = { answer = 42; }; }")
+    cmd = Pynix.parse(["eval", "--file", str(nix_file), "--attr", "nested"])
+
+    await cmd.astart()
+
+    captured = capsys.readouterr()
+    assert _parse_json_output(captured.out) == {"answer": 42}
+
+
 async def test_eval_json_sorted_keys(capsys: pytest.CaptureFixture[str]) -> None:
     cmd = Pynix.parse(["eval", "--expr", "{ z = 1; a = 2; }"])
     await cmd.astart()

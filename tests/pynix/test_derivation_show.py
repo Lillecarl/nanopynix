@@ -73,7 +73,7 @@ async def test_show_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> 
     assert "out" in drv["outputs"]
 
 
-async def test_show_file_with_attrpath(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+async def test_show_file_with_attr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("""
     let
@@ -90,7 +90,7 @@ async def test_show_file_with_attrpath(tmp_path: Path, capsys: pytest.CaptureFix
       };
     }
     """)
-    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), "--attrpath", "hello"])
+    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), "--attr", "hello"])
     await cmd.astart()
     captured = capsys.readouterr()
     result = json.loads(captured.out)

@@ -8,17 +8,19 @@ from typing import Any
 
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
-
-from pynix import Pynix
 from pynix.repl import (
-    Repl,
     _HELP,
-    _ReplCompleter,
+    Repl,
     _derivation_name_part,
+    _load_initial_target,
     _main_program,
+    _ReplCompleter,
     _run_derivation,
     _run_repl_loop,
 )
+from pynix.target import EvaluationTarget
+
+from pynix import Pynix
 
 
 class _Prompt:
@@ -139,6 +141,17 @@ async def test_repl_load_command_uses_repl_load_file(monkeypatch: Any) -> None:
     assert output == [_HELP, "Added 1 variables: answer"]
 
 
+async def test_repl_loads_file_target_into_initial_scope(monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+    repl = _Repl()
+
+    await _load_initial_target(repl, EvaluationTarget(file=Path("default.nix"), attr=None, flake=None))  # type: ignore[arg-type] -- narrow REPL fake
+
+    assert repl.loaded_files == ["default.nix"]
+    assert output == ["Added 1 variables: answer"]
+
+
 async def test_repl_run_prefers_meta_main_program(tmp_path: Path, monkeypatch: Any) -> None:
     output: list[str] = []
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
@@ -226,3 +239,11 @@ async def test_repl_completion_uses_commands_scope_and_attrsets() -> None:
 
 def test_repl_is_a_pynix_subcommand() -> None:
     assert isinstance(Pynix.parse(["repl"]).subcommand, Repl)
+
+
+def test_repl_accepts_file_and_attr_options() -> None:
+    command = Pynix.parse(["repl", "--file", "default.nix", "--attr", "pkgs"])
+
+    assert isinstance(command.subcommand, Repl)
+    assert command.subcommand.file == Path("default.nix")
+    assert command.subcommand.attr == "pkgs"
