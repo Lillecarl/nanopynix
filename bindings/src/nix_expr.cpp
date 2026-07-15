@@ -25,6 +25,9 @@
 #include <nix/util/logging.hh>
 #include <nix/util/util.hh>
 
+#include <algorithm>
+#include <unordered_set>
+
 #include <nlohmann/json.hpp>
 
 #include <nanopynix/nix_compat_config.hh>
@@ -589,6 +592,24 @@ std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
     }
     repl_static_env->sort();
     repl_static_env->deduplicate();
+    return names;
+}
+
+std::vector<std::string> PyEvalState::repl_scope_names() const {
+    if (repl_env == nullptr || !repl_static_env)
+        throw std::runtime_error("REPL scope is not active");
+
+    nb::gil_scoped_release release;
+    std::unordered_set<std::string> seen;
+    std::vector<std::string> names;
+    for (std::shared_ptr<const nix::StaticEnv> env = repl_static_env; env != nullptr; env = env->up) {
+        for (const auto &[symbol, _displacement] : env->vars) {
+            auto name = std::string(state->symbols[symbol]);
+            if (seen.insert(name).second)
+                names.push_back(std::move(name));
+        }
+    }
+    std::sort(names.begin(), names.end());
     return names;
 }
 
@@ -1161,6 +1182,7 @@ static void bind_eval_state(nb::module_ &m) {
         .def("repl_process_line", &PyEvalState::repl_process_line,
              "line"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
         .def("repl_add_attrs", &PyEvalState::repl_add_attrs, "attrs"_a)
+        .def("repl_scope_names", &PyEvalState::repl_scope_names)
         .def("alloc_value", &PyEvalState::alloc_value, nb::keep_alive<0, 1>())
         // Handle management (worker-internal, exported for RPC dispatch)
         // The Python HandleRegistry owns handle allocation; C++ manages GC refs.

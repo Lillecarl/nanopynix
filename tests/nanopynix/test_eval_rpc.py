@@ -151,6 +151,20 @@ async def test_repl_session_persists_bindings(tmp_path: Path):
         assert await (await repl.file(str(nix_file))).force() == 42
 
 
+async def test_repl_session_scope_names_include_bindings_and_base_scope():
+    """Completion can discover both REPL bindings and Nix's base identifiers."""
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.repl(store) as repl,
+    ):
+        assert await repl.line("completionAnswer = 42") is None
+        names = await repl.scope_names()
+
+    assert "completionAnswer" in names
+    assert "builtins" in names
+
+
 async def test_repl_session_file_uses_nix_lookup_path(tmp_path: Path):
     """REPL file evaluation uses the same Nix path resolver as ``:load``."""
     expressions = tmp_path / "expressions"

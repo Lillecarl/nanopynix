@@ -11,6 +11,7 @@ service EvalService {
   rpc ReplLoadFile(ReplLoadFileRequest) returns (nix.common.ValueHandle);
   rpc ReplProcessLine(ReplProcessLineRequest) returns (ReplProcessLineResponse);
   rpc ReplAddAttrs(ReplAddAttrsRequest) returns (ReplAddAttrsResponse);
+  rpc ReplScopeNames(ReplScopeNamesRequest) returns (ReplScopeNamesResponse);
   rpc Force(ForceRequest) returns (nix.common.ForceValue);
   rpc ForceDeep(ForceDeepRequest) returns (nix.common.DeepValue);
   rpc ForceJson(ForceJsonRequest) returns (ForceJsonResponse);
@@ -70,6 +71,11 @@ message ReplAddAttrsRequest {
   int64 handle = 1;
 }
 message ReplAddAttrsResponse {
+  repeated string names = 1;
+}
+
+message ReplScopeNamesRequest {}
+message ReplScopeNamesResponse {
   repeated string names = 1;
 }
 
