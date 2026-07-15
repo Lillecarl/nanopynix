@@ -1,69 +1,38 @@
 {
   lib,
   callPackage,
-  # build
   buildPythonPackage,
-  hatchling,
-  # nixpkgs deps
-  coolname,
-  janus,
-  pydantic,
-  pydantic-settings,
-  pyyaml,
-  strip-ansi,
-  setproctitle,
-  # nixpkgs test deps
-  pytest-dependency,
-  anyio,
-  pygit2,
   # cool deps
   nanopynix-bindings ? callPackage ../bindings/package.nix { },
   nanopynix-proto ? callPackage ../proto/package.nix { },
   grpclib-transports,
+  python,
+  renderPyproject,
 }:
+let
+  attrs = renderPyproject {
+    projectRoot = ./.;
+    inherit python;
+    pythonPackages = python.pkgs // {
+      "nanopynix-bindings" = nanopynix-bindings;
+      "nanopynix-proto" = nanopynix-proto;
+      "grpclib-transports" = grpclib-transports;
+    };
+  };
+in
 buildPythonPackage (
-  finalAttrs:
-  let
-    nativeCheckInputs = [
-      pytest-dependency
-      anyio
-      pygit2
-    ];
-  in
-  {
-    pname = "nanopynix";
-    version = "0.1.0";
-    pyproject = true;
+  attrs
+  // {
 
     src = lib.cleanSource ./.;
-
-    build-system = [
-      hatchling
-    ];
-
-    dependencies = [
-      nanopynix-bindings
-      nanopynix-proto
-      grpclib-transports
-      coolname
-      janus
-      pydantic
-      pydantic-settings
-      pyyaml
-      strip-ansi
-      setproctitle
-    ];
-    inherit nativeCheckInputs;
 
     pythonImportsCheck = [
       "nanopynix"
     ];
 
-    meta = with lib; {
-      description = "nanobind-based Python bindings for Nix";
-      license = licenses.lgpl21Plus;
-      platforms = platforms.unix;
+    meta = attrs.meta // {
+      license = lib.licenses.lgpl21Plus;
+      platforms = lib.platforms.unix;
     };
-    passthru.testInputs = nativeCheckInputs;
   }
 )

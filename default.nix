@@ -9,6 +9,36 @@ in
 let
   inherit (pkgs) lib python3Packages;
 
+  pyproject-nix = import "${inputs.pyproject-nix}" { inherit lib; };
+
+  renderPyproject =
+    {
+      projectRoot,
+      python,
+      pythonPackages ? python.pkgs,
+    }:
+    (pyproject-nix.lib.project.loadPyproject { inherit projectRoot; }).renderers.buildPythonPackage {
+      inherit python pythonPackages;
+    };
+
+  renderEditablePyproject =
+    {
+      projectRoot,
+      root,
+      python,
+      pythonPackages ? python.pkgs,
+      extras ? [ ],
+    }:
+    (pyproject-nix.lib.project.loadPyproject { inherit projectRoot; }).renderers.mkPythonEditablePackage
+      {
+        inherit
+          root
+          python
+          pythonPackages
+          extras
+          ;
+      };
+
   inherit (pkgs.callPackage inputs.grpclib-transports { })
     grpclib-transports
     betterproto2
@@ -16,7 +46,7 @@ let
     ;
 
   nanopynix-proto = python3Packages.callPackage ./proto/package.nix {
-    inherit betterproto2 betterproto2-compiler;
+    inherit betterproto2 betterproto2-compiler renderPyproject;
   };
 
   clypi = python3Packages.callPackage ./nix/clypi.nix { };
@@ -34,6 +64,9 @@ let
               nanopynix-proto
               grpclib-transports
               clypi
+              pyproject-nix
+              renderPyproject
+              renderEditablePyproject
               ;
           }
           // extra
@@ -44,6 +77,7 @@ let
         nanopynix-bindings = self.callPackage ./bindings/package.nix { };
         nanopynix = self.callPackage ./python/package.nix { };
         pynix = self.callPackage ./pynix/package.nix { };
+        shell = self.callPackage ./nix/shell.nix { };
         tests = self.callPackage ./nix/tests.nix {
           inherit (inputs) nixpkgs;
         };
@@ -65,9 +99,6 @@ let
     inherit (inputs) nixpkgs;
   };
 
-  shell = python3Packages.callPackage ./nix/shell.nix {
-    inherit (nanopynixVersions.stable) nanopynix pynix;
-  };
 in
 {
   inherit (pkgs) lib;
@@ -76,17 +107,18 @@ in
     nanopynix
     nanopynix-bindings
     pynix
+    shell
     tests
     ;
 
   inherit
     flake
     pkgs
-    shell
     nanopynixVersions
     nanopynix-all-tests
     nanopynix-proto
     clypi
     grpclib-transports
+    pyproject-nix
     ;
 }

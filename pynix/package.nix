@@ -1,35 +1,28 @@
 {
   lib,
   buildPythonApplication,
-  hatchling,
   nanopynix,
   clypi,
-  prompt-toolkit,
-  rich,
-  structlog,
+  python,
+  renderPyproject,
 }:
-
-buildPythonApplication {
-  pname = "pynix";
-  version = "0.1.0";
-  pyproject = true;
-
-  src = lib.cleanSource ./.;
-
-  build-system = [
-    hatchling
-  ];
-
-  dependencies = [
-    nanopynix
-    clypi
-    prompt-toolkit
-    rich
-    structlog
-  ];
-
-  meta = with lib; {
-    description = "End-to-end harness that consumes nanopynix as a library dependency";
-    platforms = platforms.unix;
+let
+  attrs = renderPyproject {
+    projectRoot = ./.;
+    inherit python;
+    pythonPackages = python.pkgs // {
+      inherit nanopynix clypi;
+    };
   };
-}
+in
+buildPythonApplication (
+  attrs
+  // {
+
+    src = lib.cleanSource ./.;
+
+    meta = attrs.meta // {
+      platforms = lib.platforms.unix;
+    };
+  }
+)
