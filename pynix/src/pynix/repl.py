@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
 import json
-from pathlib import Path
 import re
-from typing import TYPE_CHECKING, Any, override
+from collections.abc import Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast, override
 
 from clypi import Command, arg
 from prompt_toolkit import PromptSession
@@ -18,6 +18,14 @@ from prompt_toolkit.shortcuts import print_formatted_text
 
 from nanopynix.exceptions import NixError
 from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix.target import (
+    EvaluationTarget,
+    EvaluationTargetError,
+    attr_option,
+    file_option,
+    flake_option,
+    load_repl_target,
+)
 
 if TYPE_CHECKING:
     from nanopynix import ReplSession
@@ -200,6 +208,15 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any) -> None:
             print_formatted_text(f"error: {exc}")
 
 
+async def _load_initial_target(repl: ReplSession, target: EvaluationTarget) -> None:
+    """Load a command-line target into the persistent REPL scope."""
+    if target.file is None and target.flake is None:
+        return
+    value = await load_repl_target(target, repl)
+    names = await repl.add_attrs(value)
+    print_formatted_text(f"Added {len(names)} variables: {' '.join(names)}")
+
+
 class ReplRunError(RuntimeError):
     """A command could not be selected or started by the REPL."""
 
@@ -295,18 +312,34 @@ class Repl(Command):
     """Open an interactive Nix evaluation session."""
 
     store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
+    file: Path | None = file_option()
+    attr: str | None = attr_option()
+    flake: str | None = flake_option()
 
     @override
     async def run(self) -> None:
         prepare_sys_path()
         import nanopynix
 
+        target = EvaluationTarget.from_command(self)
+        try:
+            target.validate()
+        except EvaluationTargetError as exc:
+            print_formatted_text(f"error: {exc}")
+            raise SystemExit(1) from exc
+
         async with (
-            nanopynix.Session() as nix,
+            nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
             forward_nix_logs(nix),
             nix.store(self.store) as store,
             nix.repl(store) as repl,
         ):
-            prompt = PromptSession(completer=_ReplCompleter(repl), complete_while_typing=True)
+            repl = cast("ReplSession", repl)
+            prompt: PromptSession[str] = PromptSession(completer=_ReplCompleter(repl), complete_while_typing=True)
             with patch_stdout():
+                try:
+                    await _load_initial_target(repl, target)
+                except EvaluationTargetError as exc:
+                    print_formatted_text(f"error: {exc}")
+                    raise SystemExit(1) from exc
                 await _run_repl_loop(repl, prompt)

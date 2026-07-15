@@ -248,7 +248,7 @@ class PynixStoreScenario:
                 "build",
                 "--file",
                 str(pkgs_nix_file),
-                "--attrpath",
+                "--attr",
                 build_attrpath,
                 "--store",
                 self.store_url,

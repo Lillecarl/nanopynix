@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path  # noqa: TC003
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 import structlog
@@ -11,10 +11,19 @@ from nanopynix_proto.nix.store import ReadDerivationRequest
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from nanopynix._session import ValueProxy
     from nanopynix_proto.nix.store import ReadDerivationRequest
 
+    from nanopynix._session import ValueProxy
+
 from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix.target import (
+    EvaluationTarget,
+    EvaluationTargetError,
+    attr_option,
+    evaluate_target,
+    file_option,
+    flake_option,
+)
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -26,24 +35,13 @@ class Show(Command):
     """Show the contents of a Nix derivation
 
     Examples:
-      pynix derivation show --file default.nix --attrpath hello
+      pynix derivation show --file default.nix --attr hello
       pynix derivation show --flake .#hello
       pynix derivation show --flake nixpkgs#python3Packages.requests"""
 
-    file: Path | None = arg(
-        None,
-        short="f",
-        help="Evaluate FILE.  Use --attrpath to select a derivation inside it.",
-    )
-    attrpath: str | None = arg(
-        None,
-        short="A",
-        help="Dot-separated attribute path to the derivation (e.g. 'python3Packages.requests').",
-    )
-    flake: str | None = arg(
-        None,
-        help="Flake reference (e.g. '.#hello').  The attrpath after '#' selects the derivation.",
-    )
+    file: Path | None = file_option()
+    attr: str | None = attr_option()
+    flake: str | None = flake_option()
     store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
 
     @override
@@ -51,12 +49,12 @@ class Show(Command):
         prepare_sys_path()
         import nanopynix
 
-        if self.file is None and self.flake is None:
-            console.print("[red]Error:[/red] either --file or --flake is required")
-            raise SystemExit(1)
-        if self.file is not None and self.flake is not None:
-            console.print("[red]Error:[/red] --file and --flake are mutually exclusive")
-            raise SystemExit(1)
+        target = EvaluationTarget.from_command(self)
+        try:
+            target.validate(required=True)
+        except EvaluationTargetError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise SystemExit(1) from exc
 
         async with (
             nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
@@ -64,18 +62,11 @@ class Show(Command):
             nix.store(self.store) as store,
         ):
             async with nix.eval(store) as session:
-                if self.file is not None:
-                    root = await session.file(str(self.file))
-                    if self.attrpath is not None:
-                        root = self._navigate(root, self.attrpath)
-                else:
-                    if self.flake is None:
-                        console.print("[red]Error:[/red] either --file or --flake is required")
-                        raise SystemExit(1)
-                    base_ref, _, flake_attr = self.flake.partition("#")
-                    root = await session.eval_flake(base_ref)
-                    if flake_attr:
-                        root = self._navigate(root, flake_attr)
+                try:
+                    root = await evaluate_target(target, session, auto_call_file=True)
+                except EvaluationTargetError as exc:
+                    console.print(f"[red]Error:[/red] {exc}")
+                    raise SystemExit(1) from exc
 
                 drv_path = await self._get_drv_path(root)
 
@@ -83,12 +74,6 @@ class Show(Command):
             result = {drv_path: self._derivation_to_dict(derivation)}
             sys.stdout.write(json.dumps(result, sort_keys=True, indent=2))
             sys.stdout.write("\n")
-
-    @staticmethod
-    def _navigate(root: ValueProxy, attrpath: str) -> ValueProxy:
-        for part in attrpath.split("."):
-            root = root.attr(part)
-        return root
 
     @staticmethod
     async def _get_drv_path(value: ValueProxy) -> str:
