@@ -233,6 +233,7 @@ async def test_repl_completion_uses_commands_scope_and_attrsets() -> None:
 
     assert await complete(":lo") == [":load", ":load-flake"]
     assert await complete("ans") == ["answer"]
+    assert await complete("pkgs.") == ["hello", "hello-unfree", "world"]
     assert await complete("pkgs.hel") == ["hello", "hello-unfree"]
     assert completer._repl.value.released  # type: ignore[reportPrivateUsage] -- verifies temporary value lifetime
 
