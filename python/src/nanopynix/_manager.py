@@ -10,6 +10,7 @@ import grpclib
 from betterproto2 import grpclib as betterproto2_grpclib
 from grpclib.const import Cardinality, Handler, Status
 from nanopynix_proto.nix.common import LogEvent, NullValue, ScalarValue
+from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -73,8 +74,6 @@ class ManagerPrimopServiceBase(betterproto2_grpclib.ServiceBase):
         await stream.send_message(response)
 
     def __mapping__(self) -> dict[str, Handler]:
-        from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
-
         return {
             _CALL_ROUTE: Handler(
                 self.__rpc_call,
@@ -126,8 +125,6 @@ class ManagerPrimopServiceHandler(ManagerPrimopServiceBase):
             self._registry[name] = callback
 
     async def call(self, request: CallPrimopRequest) -> CallPrimopResponse:
-        from nanopynix_proto.nix.manager import CallPrimopResponse
-
         func = self._registry.get(request.name)
         if func is None:
             raise grpclib.GRPCError(Status.NOT_FOUND, f"primop {request.name!r} not registered")

@@ -10,6 +10,7 @@ from nanopynix_proto.nix.store import StoreServiceBase
 from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
 from nanopynix._pool import WorkerBusyError, _grpc_call  # type: ignore[reportPrivateUsage] -- cross-module internal utility
 from nanopynix._rpc_proxy import RpcProxyMixin
+from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
 if TYPE_CHECKING:
     from betterproto2 import Message
@@ -38,8 +39,6 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
     async def open(self) -> None:
         """Open a store on the worker and activate the handle."""
-        from nanopynix_proto.nix.worker import OpenStoreRequest
-
         resp = await self._pool.call(
             self._pool._worker_stub.open_store(  # type: ignore[reportPrivateUsage] -- cross-class access
                 OpenStoreRequest(uri=self._uri), timeout=self._rpc_timeout
@@ -50,8 +49,6 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
     async def close(self) -> None:
         """Close the store on the worker and deactivate the handle."""
-        from nanopynix_proto.nix.worker import CloseStoreRequest
-
         with contextlib.suppress(Exception):
             await self._pool.call(
                 self._pool._worker_stub.close_store(  # type: ignore[reportPrivateUsage] -- cross-class access

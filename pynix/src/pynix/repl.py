@@ -19,6 +19,7 @@ from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import print_formatted_text
 
+import nanopynix
 from nanopynix.exceptions import NixError
 from pynix._util import forward_nix_logs, prepare_sys_path
 from pynix.target import (
@@ -378,7 +379,6 @@ class Repl(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         target = EvaluationTarget.from_command(self)
         try:

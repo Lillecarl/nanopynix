@@ -26,7 +26,9 @@ import pytest
 import structlog
 from structlog.exceptions import DropEvent
 
+import nanopynix
 import pynix
+import pynix._util as pynix_util
 from pynix import Pynix
 
 if TYPE_CHECKING:
@@ -503,8 +505,6 @@ def _patched_environ(values: dict[str, str]) -> Generator[None, None, None]:
 
 @contextlib.contextmanager
 def _pynix_configure_logging_noop() -> Generator[None, None, None]:
-    import pynix._util as pynix_util
-
     old_configure_logging = pynix_util.configure_logging
     old_public_configure_logging = pynix.configure_logging
     pynix_util.configure_logging = lambda: None
@@ -518,8 +518,6 @@ def _pynix_configure_logging_noop() -> Generator[None, None, None]:
 
 @contextlib.contextmanager
 def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
-    import nanopynix
-
     old_session = nanopynix.Session
 
     class VerboseSession(old_session):
@@ -536,8 +534,6 @@ def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
 
 @contextlib.contextmanager
 def _nanopynix_isolated_store(store_root: Path) -> Generator[None, None, None]:
-    import nanopynix
-
     old_session = nanopynix.Session
     build_dir = store_root / "nix" / "var" / "nix" / "builds"
 

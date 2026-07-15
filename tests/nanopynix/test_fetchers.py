@@ -8,6 +8,7 @@ from typing import Any
 
 import nanopynix
 import nanopynix_fetchers
+import pytest
 
 
 class TestInputFromURL:
@@ -38,8 +39,6 @@ class TestInputFromURL:
         assert r.startswith("Input(")
 
     def test_invalid_url_raises(self):
-        import pytest
-
         with pytest.raises(RuntimeError):
             nanopynix.input_from_url("not-a-valid-scheme:foo")
 
@@ -68,8 +67,6 @@ class TestInputFromAttrs:
         assert out["repo"] == "nixpkgs"
 
     def test_empty_attrs_raises(self):
-        import pytest
-
         with pytest.raises(RuntimeError):
             nanopynix.input_from_attrs({})
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import nanopynix
+import pytest
 
 
 class TestEvalString:
@@ -73,15 +74,11 @@ class TestEvalAttrs:
         assert x.as_int() == 42
 
     def test_attr_get_missing_raises(self, eval_state: nanopynix.EvalState):
-        import pytest
-
         v = eval_state.eval_string("{ x = 1; }")
         with pytest.raises(RuntimeError, match="attribute 'y' not found"):
             v.attr_get("y")
 
     def test_attr_get_on_non_attrs_raises(self, eval_state: nanopynix.EvalState):
-        import pytest
-
         v = eval_state.eval_string("1")
         with pytest.raises(RuntimeError, match="not an attribute set"):
             v.attr_get("x")
@@ -100,8 +97,6 @@ class TestEvalList:
         assert v.list_get(2).as_int() == 30
 
     def test_list_get_out_of_range_raises(self, eval_state: nanopynix.EvalState):
-        import pytest
-
         v = eval_state.eval_string("[10 20 30]")
         with pytest.raises(IndexError, match="out of range"):
             v.list_get(3)

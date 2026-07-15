@@ -48,6 +48,7 @@ from nanopynix_proto.nix.store import (
     VerifyStoreRequest,
 )
 
+import nanopynix
 from nanopynix.store import StoreHandle as Store
 
 
@@ -453,6 +454,4 @@ class TestGC:
 
 async def test_store_alias_is_bound():
     """nanopynix.Store is a backward-compatible alias for StoreHandle."""
-    import nanopynix
-
     assert nanopynix.Store is nanopynix.StoreHandle

@@ -338,8 +338,6 @@ class TestLogEvent:
 
 class TestResultType:
     def test_values_match_nix(self):
-        from nanopynix.models import ResultType
-
         assert ResultType.FILE_LINKED == 100
         assert ResultType.BUILD_LOG_LINE == 101
         assert ResultType.UNTRUSTED_PATH == 102
@@ -351,8 +349,6 @@ class TestResultType:
         assert ResultType.FETCH_STATUS == 108
 
     def test_is_int_enum(self):
-        from nanopynix.models import ResultType
-
         assert isinstance(ResultType.CORRUPTED_PATH, int)
         assert isinstance(ResultType.CORRUPTED_PATH, ResultType)
 

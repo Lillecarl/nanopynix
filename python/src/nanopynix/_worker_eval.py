@@ -7,6 +7,7 @@ loop and dispatch synchronously — the event loop never blocks on Nix.
 
 from __future__ import annotations
 
+import json as _json
 from typing import Any
 
 from nanopynix_proto.nix import common as common_pb
@@ -284,8 +285,6 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_force_json, message)
 
     def _do_force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
-        import json as _json
-
         value = self._resolve(message.handle)
         return ForceJsonResponse(json=_json.dumps(value.to_json(copy_to_store=message.copy_to_store)))
 

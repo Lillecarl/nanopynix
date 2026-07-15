@@ -28,8 +28,6 @@ class TestSettings:
         assert nanopynix.get_setting("max-jobs") == "4"
 
     def test_set_setting_unknown_raises(self):
-        import pytest
-
         with pytest.raises(RuntimeError, match="unknown setting"):
             nanopynix.set_setting("not-a-real-setting-xyz", "value")
 
@@ -65,8 +63,6 @@ class TestExperimentalFeatures:
         # Should not raise
 
     def test_enable_unknown_raises(self):
-        import pytest
-
         with pytest.raises(RuntimeError, match="unknown experimental feature"):
             nanopynix.enable_experimental_feature("not-a-real-feature-xyz")
 

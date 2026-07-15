@@ -20,16 +20,21 @@ from typing import TYPE_CHECKING, Any
 
 from grpclib.exceptions import GRPCError, StreamTerminatedError
 
+from grpclib_transports.multiprocessing import multiprocessing_worker_with_backchannel
+from grpclib_transports.protocol import DEFAULT_TUNING
+
+from nanopynix._manager import ManagerPrimopServiceHandler
 from nanopynix._worker import worker_service_factory
 from nanopynix.exceptions import from_response
+from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
+from nanopynix_proto.nix.eval import EvalServiceStub
+from nanopynix_proto.nix.store import StoreServiceStub
+from nanopynix_proto.nix.worker import InitRequest, ShutdownRequest, SubscribeLogsRequest, WorkerServiceStub
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
 
     from nanopynix_proto.nix.common import LogLevel
-    from nanopynix_proto.nix.eval import EvalServiceStub
-    from nanopynix_proto.nix.store import StoreServiceStub
-    from nanopynix_proto.nix.worker import WorkerServiceStub
 
     from nanopynix.models import PrimOpSpec
 
@@ -242,13 +247,6 @@ class _WorkerManager:
 
     async def open(self) -> None:
         """Spawn the worker via multiprocessing forkserver and initialise Nix."""
-        from grpclib_transports.multiprocessing import multiprocessing_worker_with_backchannel
-        from nanopynix_proto.nix.eval import EvalServiceStub
-        from nanopynix_proto.nix.store import StoreServiceStub
-        from nanopynix_proto.nix.worker import InitRequest, WorkerServiceStub
-
-        from nanopynix._manager import ManagerPrimopServiceHandler
-
         self._stack = contextlib.AsyncExitStack()
 
         self._primop_handler = ManagerPrimopServiceHandler()
@@ -269,9 +267,6 @@ class _WorkerManager:
         self._store_service_stub = StoreServiceStub(self._channel)
         self._eval_service_stub = EvalServiceStub(self._channel)
         self._log_task = asyncio.create_task(self._forward_worker_logs(), name="nanopynix-worker-logs")
-
-        # Convert PrimOpSpec to proto
-        from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
 
         proto_primops = [
             PrimOpSpecPB(
@@ -309,8 +304,6 @@ class _WorkerManager:
         """Shut down the worker."""
         try:
             if self._worker_service_stub is not None:
-                from nanopynix_proto.nix.worker import ShutdownRequest
-
                 try:
                     await self._worker_stub.shutdown(ShutdownRequest(), timeout=self._shutdown_timeout)
                 except (TimeoutError, GRPCError, StreamTerminatedError, ConnectionError, asyncio.CancelledError):
@@ -400,8 +393,6 @@ class _WorkerManager:
         return self._log_bus.subscribe(callback)
 
     async def _forward_worker_logs(self) -> None:
-        from nanopynix_proto.nix.worker import SubscribeLogsRequest
-
         try:
             async for event in self._worker_stub.subscribe_logs(SubscribeLogsRequest()):
                 self._log_bus.emit(event)

@@ -12,11 +12,13 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+import json as _json
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
+from nanopynix_proto.nix.common import DeepAttrs, DeepValue, ScalarValue
 
 import nanopynix._pool as pool_module
 from nanopynix import (
@@ -871,8 +873,6 @@ class TestLazyChildProxy:
         """force_deep resolves child then deep-forces it."""
         w = self._worker()
         w._eval_stub.attr.return_value = _mock_value_handle(5, "attrs")
-        from nanopynix_proto.nix.common import DeepAttrs, DeepValue, ScalarValue
-
         deep_val = DeepValue(
             attrs=DeepAttrs(
                 entries={
@@ -1040,8 +1040,6 @@ class TestLogStreamRequestId:
 
     @staticmethod
     def _proto_log_event(request_id: int, action: str, args: list[Any], result_type: int | None = None) -> LogEventProto:
-        import json as _json
-
         le = MagicMock(spec=LogEventProto)
         le.request_id = request_id
         le.action = action
@@ -1051,8 +1049,6 @@ class TestLogStreamRequestId:
 
     async def test_worker_request_id_mapped_correctly(self):
         """Worker emits LogEvent proto — log_stream produces valid LogEvent."""
-        from nanopynix.nix import Session
-
         session = object.__new__(Session)
         manager = MagicMock()
         manager.log_stream = MagicMock(
@@ -1086,8 +1082,6 @@ class TestLogStreamRequestId:
 
     async def test_none_sentinel_skipped(self):
         """None sentinel from log_stream is skipped."""
-        from nanopynix.nix import Session
-
         session = object.__new__(Session)
         manager = MagicMock()
         manager.log_stream = MagicMock(
@@ -1135,14 +1129,9 @@ class TestLogCapture:
 
     @staticmethod
     def _proto_log_event(request_id: int, action: str, args: list[Any], result_type: int | None = None) -> LogEventProto:
-        import json as _json
-
         le = MagicMock(spec=LogEventProto)
         le.request_id = request_id
         le.action = action
         le.args_json = _json.dumps(args)
         le.result_type = result_type
         return le
-
-
-# Session is imported at the top of the module

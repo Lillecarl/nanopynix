@@ -39,6 +39,8 @@ from nanopynix_proto.nix.store import (
     VerifyStoreRequest,
 )
 
+import nanopynix
+
 from pynix._util import forward_nix_logs, prepare_sys_path
 
 logger = structlog.get_logger(__name__)
@@ -54,7 +56,6 @@ class PrintRoots(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.find_roots(FindRootsRequest())
@@ -82,7 +83,6 @@ class PrintDead(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         action = GcAction.DELETE_DEAD if self.rip else GcAction.RETURN_DEAD
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
@@ -98,7 +98,6 @@ class PrintAlive(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.collect_garbage(CollectGarbageRequest(action=GcAction.RETURN_LIVE))
@@ -119,7 +118,6 @@ class Info(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             uri = await store.get_uri(GetUriRequest())
@@ -136,7 +134,6 @@ class Dirs(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             dirs = await store.get_store_dirs(GetStoreDirsRequest())
@@ -152,7 +149,6 @@ class IsValidPath(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.is_valid_path(IsValidPathRequest(path=self.path))
@@ -168,7 +164,6 @@ class FollowLinksToStorePath(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             response = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path=self.path))
@@ -187,7 +182,6 @@ class ComputeFsClosure(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.compute_fs_closure(
@@ -210,7 +204,6 @@ class QueryMissing(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         if not self.paths:
             raise SystemExit("query-missing requires at least one path")
@@ -237,7 +230,6 @@ class QueryDerivationOutputs(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.query_derivation_outputs(QueryDerivationOutputsRequest(path=self.path))
@@ -253,7 +245,6 @@ class QueryValidDerivers(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.query_valid_derivers(QueryValidDeriversRequest(path=self.path))
@@ -268,7 +259,6 @@ class ListValidPaths(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.query_all_valid_paths(QueryAllValidPathsRequest())
@@ -284,7 +274,6 @@ class QueryReferrers(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.query_referrers(QueryReferrersRequest(path=self.path))
@@ -300,7 +289,6 @@ class QuerySubstitutablePaths(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         if not self.paths:
             raise SystemExit("query-substitutable-paths requires at least one path")
@@ -319,7 +307,6 @@ class AddTempRoot(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             await store.add_temp_root(AddTempRootRequest(path=self.path))
@@ -336,7 +323,6 @@ class AddPermRoot(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.add_perm_root(AddPermRootRequest(store_path=self.path, gc_root=self.gc_root))
@@ -352,7 +338,6 @@ class AddIndirectRoot(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             await store.add_indirect_root(AddIndirectRootRequest(path=self.path))
@@ -368,7 +353,6 @@ class PathFromHashPart(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=self.hash_part))
@@ -385,7 +369,6 @@ class EnsurePath(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             await store.ensure_path(EnsurePathRequest(path=self.path))
@@ -401,7 +384,6 @@ class Cat(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resolved = await _resolve_local_store_path(store, self.store, self.path)
@@ -422,7 +404,6 @@ class Ls(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resolved = await _resolve_local_store_path(store, self.store, self.path)
@@ -516,7 +497,6 @@ class DiffClosures(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             before = await _closure_path_infos(store, self.before)
@@ -549,7 +529,6 @@ class Optimise(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             await store.optimise_store(OptimiseStoreRequest())
@@ -566,7 +545,6 @@ class Verify(Command):
     @override
     async def run(self) -> None:
         prepare_sys_path()
-        import nanopynix
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.verify_store(VerifyStoreRequest(check_contents=self.check_contents, repair=self.repair))
@@ -640,7 +618,6 @@ async def _add_to_store(
     store_uri: str,
 ) -> None:
     prepare_sys_path()
-    import nanopynix
 
     async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(store_uri) as store:
         if dry_run:

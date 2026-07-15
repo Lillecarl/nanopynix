@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, overload
 
+import json as _json
+
 from nanopynix_proto.nix.common import (
     CallArg,
     CallArgAttrs,
@@ -17,8 +19,44 @@ from nanopynix_proto.nix.common import (
     RemoteCallArg,
     ScalarValue,
 )
-from nanopynix_proto.nix.eval import EvalServiceBase
+from nanopynix_proto.nix.eval import (
+    AttrNamesRequest,
+    AttrRequest,
+    AutoCallRequest,
+    BeginReplRequest,
+    BuildRequest,
+    CallLockedFlakeRequest,
+    CallRequest,
+    EditLocationRequest,
+    EvalFileRequest,
+    EvalFlakeRequest,
+    EvalServiceBase,
+    EvalStringRequest,
+    ForceDeepRequest,
+    ForceJsonRequest,
+    ForceRequest,
+    GetFlakeRequest,
+    HasAttrRequest,
+    ListGetRequest,
+    ListLengthRequest,
+    LockFlakeRequest,
+    RealiseArgvRequest,
+    RealiseStringRequest,
+    ReleaseAllRequest,
+    ReleaseLockedFlakeRequest,
+    ReleaseRequest,
+    ReplAddAttrsRequest,
+    ReplLoadFileRequest,
+    ReplProcessLineRequest,
+    ReplScopeNamesRequest,
+    ResetFileCacheRequest,
+    TypeNameRequest,
+    UpdateInputsList,
+    WriteLockFileRequest,
+)
 
+import nanopynix_store
+from nanopynix_store import BuildMode
 from nanopynix._pool import _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
 from nanopynix._rpc_proxy import RpcProxyMixin
 from nanopynix.exceptions import (
@@ -261,12 +299,8 @@ class ValueProxy:
         else:
             parent = lazy.parent
         if isinstance(lazy.selector, str):
-            from nanopynix_proto.nix.eval import AttrRequest
-
             handle = await self._ctx.proxy.attr(AttrRequest(handle=parent.handle, name=lazy.selector))
         else:
-            from nanopynix_proto.nix.eval import ListGetRequest
-
             handle = await self._ctx.proxy.list_get(ListGetRequest(handle=parent.handle, index=lazy.selector))
         self._state = _ResolvedValue(handle=handle.handle, nix_type=_parse_nix_type(handle.type))
 
@@ -275,8 +309,6 @@ class ValueProxy:
         cached = self._state.nix_type
         if cached not in (None, NixType.THUNK, NixType.UNSPECIFIED):
             return cached
-        from nanopynix_proto.nix.eval import TypeNameRequest
-
         resp = await self._ctx.proxy.type_name(TypeNameRequest(handle=self.handle))
         resolved_type = _parse_nix_type(resp.type) or NixType.UNSPECIFIED
         self._state = _ResolvedValue(handle=self.handle, nix_type=resolved_type)
@@ -330,8 +362,6 @@ class ValueProxy:
         if typ == NixType.FUNCTION:
             return self
         # scalar — delegate to worker
-        from nanopynix_proto.nix.eval import ForceRequest
-
         result = await self._ctx.proxy.force(ForceRequest(handle=self.handle))
         return self._decode_force_value(result)
 
@@ -421,8 +451,6 @@ class ValueProxy:
     async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
         """Recursive Nix force. Functions remain remote callable ValueProxy objects."""
         await self._ensure_resolved(timeout=timeout)
-        from nanopynix_proto.nix.eval import ForceDeepRequest
-
         result = await self._ctx.proxy.force_deep(ForceDeepRequest(handle=self.handle))
         return self._decode_deep_value(result)
 
@@ -442,36 +470,26 @@ class ValueProxy:
                 rendered as literal filesystem paths.
         """
         await self._ensure_resolved(timeout=timeout)
-        from nanopynix_proto.nix.eval import ForceJsonRequest
-
         resp = await self._ctx.proxy.force_json(
             ForceJsonRequest(handle=self.handle, copy_to_store=copy_to_store),
         )
-        import json as _json
-
         return _json.loads(resp.json)
 
     async def realise_string(self, *, timeout: float | None = None) -> str:
         """Coerce this value to a string and realise its Nix string context."""
         await self._ensure_resolved(timeout=timeout)
-        from nanopynix_proto.nix.eval import RealiseStringRequest
-
         response = await self._ctx.proxy.realise_string(RealiseStringRequest(handle=self.handle))
         return response.value
 
     async def realise_argv(self, *, timeout: float | None = None) -> list[str]:
         """Coerce a Nix list to argv and realise all of its string contexts."""
         await self._ensure_resolved(timeout=timeout)
-        from nanopynix_proto.nix.eval import RealiseArgvRequest
-
         response = await self._ctx.proxy.realise_argv(RealiseArgvRequest(handle=self.handle))
         return list(response.argv)
 
     async def edit_location(self, *, timeout: float | None = None) -> tuple[str, int]:
         """Return the physical file path and line Nix would open for this value."""
         await self._ensure_resolved(timeout=timeout)
-        from nanopynix_proto.nix.eval import EditLocationRequest
-
         response = await self._ctx.proxy.edit_location(EditLocationRequest(handle=self.handle))
         return response.path, response.line
 
@@ -495,8 +513,6 @@ class ValueProxy:
         return store.store_handle
 
     def _build_mode_value(self, build_mode: BuildModeType | int | None) -> int:
-        from nanopynix_store import BuildMode
-
         if build_mode is None:
             return BuildMode.Normal.value
         if isinstance(build_mode, int):
@@ -510,8 +526,6 @@ class ValueProxy:
         *,
         timeout: float | None,
     ) -> dict[str, str]:
-        from nanopynix_proto.nix.eval import BuildRequest
-
         await self._ensure_resolved(timeout=timeout)
         request_build_store_handle = 0 if build_store_handle == self._ctx.store_handle else build_store_handle
         build_response = await self._ctx.proxy.build(
@@ -548,22 +562,16 @@ class ValueProxy:
 
     async def list_length(self, *, timeout: float | None = None) -> int:
         await self._ensure_resolved(timeout=timeout)
-        from nanopynix_proto.nix.eval import ListLengthRequest
-
         resp = await self._ctx.proxy.list_length(ListLengthRequest(handle=self.handle))
         return resp.length
 
     async def attr_names(self, *, timeout: float | None = None) -> list[str]:
         await self._ensure_resolved(timeout=timeout)
-        from nanopynix_proto.nix.eval import AttrNamesRequest
-
         resp = await self._ctx.proxy.attr_names(AttrNamesRequest(handle=self.handle))
         return resp.names
 
     async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         await self._ensure_resolved(timeout=timeout)
-        from nanopynix_proto.nix.eval import HasAttrRequest
-
         resp = await self._ctx.proxy.has_attr(HasAttrRequest(handle=self.handle, name=name))
         return resp.has
 
@@ -573,16 +581,12 @@ class ValueProxy:
         if actual != NixType.FUNCTION:
             raise WrongNixTypeError(expected=NixType.FUNCTION, actual=actual)
         call_args = [await self._encode_call_arg(arg, timeout=timeout) for arg in args]
-        from nanopynix_proto.nix.eval import CallRequest
-
         result = await self._ctx.proxy.call(CallRequest(handle=self.handle, args=call_args))
         return self._ctx.value(result.handle, result.type)
 
     async def auto_call(self, *, timeout: float | None = None) -> ValueProxy:
         """Apply Nix top-level auto-call semantics to a function value."""
         await self._ensure_resolved(timeout=timeout)
-        from nanopynix_proto.nix.eval import AutoCallRequest
-
         result = await self._ctx.proxy.auto_call(AutoCallRequest(handle=self.handle))
         return self._ctx.value(result.handle, result.type)
 
@@ -599,8 +603,6 @@ class ValueProxy:
             self._released = True
             return
         self._check_active()
-        from nanopynix_proto.nix.eval import ReleaseRequest
-
         await self._ctx.proxy.release(ReleaseRequest(handle=self.handle))
         self._released = True
 
@@ -661,16 +663,12 @@ class ValueAttrs:
     async def force(self, name: str, *, timeout: float | None = None) -> NixValue:
         """Force a single attribute and return its value."""
         self._check_active()
-        from nanopynix_proto.nix.eval import AttrRequest
-
         result = await self._ctx.proxy.attr(AttrRequest(handle=self._value.handle, name=name))
         proxy = self._ctx.value(result.handle, result.type)
         return await proxy.force()
 
     async def release(self) -> None:
         self._check_active()
-        from nanopynix_proto.nix.eval import ReleaseRequest
-
         await self._ctx.proxy.release(ReleaseRequest(handle=self._value.handle))
         self._released = True
 
@@ -730,16 +728,12 @@ class ValueList:
         """Force a single element and return its value."""
         self._check_active()
         self._check_index(idx)
-        from nanopynix_proto.nix.eval import ListGetRequest
-
         result = await self._ctx.proxy.list_get(ListGetRequest(handle=self._value.handle, index=idx))
         proxy = self._ctx.value(result.handle, result.type)
         return await proxy.force()
 
     async def release(self) -> None:
         self._check_active()
-        from nanopynix_proto.nix.eval import ReleaseRequest
-
         await self._ctx.proxy.release(ReleaseRequest(handle=self._value.handle))
         self._released = True
 
@@ -849,8 +843,6 @@ class EvalSession:
             return
         try:
             if proxy is not None:
-                from nanopynix_proto.nix.eval import ReleaseAllRequest
-
                 await proxy.release_all(ReleaseAllRequest())
         finally:
             if proxy is not None:
@@ -873,14 +865,10 @@ class EvalSession:
         return ctx
 
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
-        from nanopynix_proto.nix.eval import EvalFileRequest
-
         handle = await self._ensure_proxy().eval_file(EvalFileRequest(path=path, store_handle=self._store_handle))
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
-        from nanopynix_proto.nix.eval import EvalStringRequest
-
         handle = await self._ensure_proxy().eval_string(
             EvalStringRequest(expr=expr, source_name=path, store_handle=self._store_handle)
         )
@@ -905,8 +893,6 @@ class EvalSession:
         ``write_lock_file=False``, the lock is updated in memory only; call
         ``await locked.write_lock_file()`` later to persist it.
         """
-        from nanopynix_proto.nix.eval import LockFlakeRequest, UpdateInputsList
-
         proxy = self._ensure_proxy()
         if update_inputs is True:
             locked = await proxy.lock_flake(
@@ -956,8 +942,6 @@ class EvalSession:
         ``LockedFlake`` from a prior ``lock_flake()`` call.  This allows
         evaluating with an updated lock that hasn't been written to disk yet.
         """
-        from nanopynix_proto.nix.eval import CallLockedFlakeRequest
-
         result = await self._ensure_proxy().call_locked_flake(
             CallLockedFlakeRequest(handle=self._locked_flake_id(locked))
         )
@@ -970,13 +954,9 @@ class EvalSession:
         call.  The lock file is written to the flake's own directory — for a
         temp flake this is the temp directory, never a real path.
         """
-        from nanopynix_proto.nix.eval import WriteLockFileRequest
-
         await self._ensure_proxy().write_lock_file(WriteLockFileRequest(handle=self._locked_flake_id(locked)))
 
     async def release_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
-        from nanopynix_proto.nix.eval import ReleaseLockedFlakeRequest
-
         await self._ensure_proxy().release_locked_flake(ReleaseLockedFlakeRequest(handle=self._locked_flake_id(locked)))
 
     async def eval_flake(
@@ -995,8 +975,6 @@ class EvalSession:
         For more control (e.g. updating locks in memory before evaluating),
         use ``lock_flake()`` + ``eval_locked_flake()`` instead.
         """
-        from nanopynix_proto.nix.eval import EvalFlakeRequest
-
         handle = await self._ensure_proxy().eval_flake(
             EvalFlakeRequest(
                 ref=ref,
@@ -1007,8 +985,6 @@ class EvalSession:
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def get_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> FlakeRef:
-        from nanopynix_proto.nix.eval import GetFlakeRequest
-
         ref_str = ref if isinstance(ref, str) else str(ref)
         return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str, store_handle=self._store_handle))
 
@@ -1028,8 +1004,6 @@ class ReplSession(EvalSession):
     async def open(self) -> None:
         await super().open()
         try:
-            from nanopynix_proto.nix.eval import BeginReplRequest
-
             await self._ensure_proxy().begin_repl(BeginReplRequest(store_handle=self._store_handle))
         except BaseException:
             await self.close()
@@ -1041,8 +1015,6 @@ class ReplSession(EvalSession):
         A binding such as ``x = 1`` returns ``None``. An expression returns a
         session-bound :class:`ValueProxy`.
         """
-        from nanopynix_proto.nix.eval import ReplProcessLineRequest
-
         response = await self._ensure_proxy().repl_process_line(
             ReplProcessLineRequest(line=text, source_name=path, store_handle=self._store_handle)
         )
@@ -1059,8 +1031,6 @@ class ReplSession(EvalSession):
         Nix auto-calls a top-level function with its default arguments before
         returning the resulting attribute set for :meth:`add_attrs`.
         """
-        from nanopynix_proto.nix.eval import ReplLoadFileRequest
-
         handle = await self._ensure_proxy().repl_load_file(
             ReplLoadFileRequest(path=path, store_handle=self._store_handle)
         )
@@ -1071,20 +1041,14 @@ class ReplSession(EvalSession):
         if not self._owner.owns(value):
             raise ForeignValueError("cannot add attributes from another EvalSession")
         await value._ensure_resolved(timeout=timeout)  # type: ignore[reportPrivateUsage] -- session owns the value context
-        from nanopynix_proto.nix.eval import ReplAddAttrsRequest
-
         response = await self._ensure_proxy().repl_add_attrs(ReplAddAttrsRequest(handle=value.handle))
         return response.names
 
     async def scope_names(self, *, timeout: float | None = None) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
-        from nanopynix_proto.nix.eval import ReplScopeNamesRequest
-
         response = await self._ensure_proxy().repl_scope_names(ReplScopeNamesRequest())
         return response.names
 
     async def reset_file_cache(self, *, timeout: float | None = None) -> None:
         """Discard parsed file cache entries before reloading REPL sources."""
-        from nanopynix_proto.nix.eval import ResetFileCacheRequest
-
         await self._ensure_proxy().reset_file_cache(ResetFileCacheRequest())
