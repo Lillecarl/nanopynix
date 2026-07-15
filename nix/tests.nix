@@ -33,7 +33,7 @@ writeShellApplication {
     cd ${lib.cleanSource ../.}
     export PYTHONNOUSERSITE=1
     export NIX_PATH=nixpkgs=${nixpkgs}
-    exec python -m pytest -p no:cacheprovider tests "$@"
+    exec python -m pytest -p no:cacheprovider "$@"
   '';
   passthru = { inherit pythonEnv pythonDeps; };
 }

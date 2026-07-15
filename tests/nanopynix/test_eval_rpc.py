@@ -45,6 +45,32 @@ async def test_eval_file_simple(tmp_path: Path):
         assert result == {"a": 1, "b": "hello", "c": True}
 
 
+async def test_eval_file_directory_loads_default_nix(tmp_path: Path):
+    """A directory expression path resolves to its default.nix."""
+    (tmp_path / "default.nix").write_text("42")
+
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        assert await (await eval.file(str(tmp_path))).force() == 42
+
+
+async def test_eval_file_uses_nix_lookup_path(tmp_path: Path):
+    """Expression paths use Nix's ``lookupFileArg`` search-path resolver."""
+    expressions = tmp_path / "expressions"
+    expressions.mkdir()
+    (expressions / "default.nix").write_text("42")
+
+    async with (
+        Session(nix_path=[f"example={expressions}"]) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        assert await (await eval.file("<example>")).force() == 42
+
+
 async def test_eval_attr_navigation(tmp_path: Path):
     """Navigate into an attrset via .attr(), then force."""
     nix_file = tmp_path / "test.nix"
@@ -106,6 +132,48 @@ async def test_repl_session_persists_bindings(tmp_path: Path):
         assert await repl.line("x = 41") is None
         assert await (await repl.string("x + 1")).force() == 42
         assert await (await repl.file(str(nix_file))).force() == 42
+
+
+async def test_repl_session_file_uses_nix_lookup_path(tmp_path: Path):
+    """REPL file evaluation uses the same Nix path resolver as ``:load``."""
+    expressions = tmp_path / "expressions"
+    expressions.mkdir()
+    (expressions / "default.nix").write_text("x + 1")
+
+    async with (
+        Session(nix_path=[f"example={expressions}"]) as session,
+        session.store() as store,
+        session.repl(store) as repl,
+    ):
+        assert await repl.line("x = 41") is None
+        assert await (await repl.file("<example>")).force() == 42
+
+
+async def test_repl_session_load_file_autocalls_top_level_function(tmp_path: Path):
+    """``load_file`` matches ``nix repl :load`` top-level auto-calling."""
+    (tmp_path / "default.nix").write_text("{ value ? 41 }: { answer = value + 1; }")
+
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.repl(store) as repl,
+    ):
+        loaded = await repl.load_file(str(tmp_path))
+        assert await loaded.attr("answer").force() == 42
+        assert await repl.add_attrs(loaded) == ["answer"]
+        assert await (await repl.string("answer")).force() == 42
+
+
+async def test_repl_session_adds_attrs_to_scope():
+    """ReplSession can merge an evaluated attrset into its lexical scope."""
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.repl(store) as repl,
+    ):
+        names = await repl.add_attrs(await repl.string("{ answer = 42; }"))
+        assert names == ["answer"]
+        assert await (await repl.string("answer")).force() == 42
 
 
 async def test_eval_attr_names(tmp_path: Path):

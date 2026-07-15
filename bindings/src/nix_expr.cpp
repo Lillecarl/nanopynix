@@ -18,6 +18,7 @@
 #include <nix/expr/attr-set.hh>
 #include <nix/expr/primops.hh>
 #include <nix/expr/value-to-json.hh>
+#include <nix/cmd/common-eval-args.hh>
 #include <nix/store/build-result.hh>
 #include <nix/store/derived-path.hh>
 #include <nix/util/experimental-features.hh>
@@ -412,10 +413,27 @@ PyValue PyEvalState::repl_eval_file(const std::string &path) {
     nix::Value *v;
     {
         nb::gil_scoped_release release;
-        auto sourcePath = state->rootPath(nix::CanonPath(path));
+        auto sourcePath = nix::resolveExprPath(nix::lookupFileArg(*state, path));
         auto *parsedExpr = state->parseExprFromFile(sourcePath, repl_static_env);
         v = state->allocValue();
         parsedExpr->eval(*state, *repl_env, *v);
+    }
+    return PyValue(v, this, alive);
+}
+
+PyValue PyEvalState::repl_load_file(const std::string &path) {
+    if (repl_env == nullptr || !repl_static_env)
+        throw std::runtime_error("REPL scope is not active");
+
+    nix::Value *v;
+    {
+        nb::gil_scoped_release release;
+        auto sourcePath = nix::lookupFileArg(*state, path);
+        auto *loaded = state->allocValue();
+        state->evalFile(sourcePath, *loaded);
+        auto autoArgs = state->buildBindings(0);
+        v = state->allocValue();
+        state->autoCallFunction(*autoArgs.finish(), *loaded, *v);
     }
     return PyValue(v, this, alive);
 }
@@ -518,6 +536,29 @@ std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, c
 #endif
 }
 
+std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
+    if (repl_env == nullptr || !repl_static_env)
+        throw std::runtime_error("REPL scope is not active");
+
+    nb::gil_scoped_release release;
+    auto *value = attrs.checkedValue();
+    state->forceAttrs(*value, nix::noPos, "while evaluating an attribute set to be merged in the REPL scope");
+    auto *bindings = value->attrs();
+    if (repl_displ + bindings->size() >= 32768)
+        throw std::runtime_error("REPL environment is full");
+
+    std::vector<std::string> names;
+    names.reserve(bindings->size());
+    for (auto &attr : *bindings) {
+        repl_static_env->vars.emplace_back(attr.name, repl_displ);
+        repl_env->values[repl_displ++] = attr.value;
+        names.emplace_back(state->symbols[attr.name]);
+    }
+    repl_static_env->sort();
+    repl_static_env->deduplicate();
+    return names;
+}
+
 PyValue PyEvalState::alloc_value() {
     auto *value = state->allocValue();
     value->mkNull();
@@ -567,7 +608,7 @@ PyValue PyEvalState::eval_file(const std::string &path) {
     nix::Value *v;
     {
         nb::gil_scoped_release release;
-        auto sourcePath = state->rootPath(nix::CanonPath(path));
+        auto sourcePath = nix::lookupFileArg(*state, path);
         v = state->allocValue();
         state->evalFile(sourcePath, *v);
     }
@@ -1081,8 +1122,10 @@ static void bind_eval_state(nb::module_ &m) {
         .def("repl_eval_string", &PyEvalState::repl_eval_string,
              "expr"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
         .def("repl_eval_file", &PyEvalState::repl_eval_file, "path"_a, nb::keep_alive<0, 1>())
+        .def("repl_load_file", &PyEvalState::repl_load_file, "path"_a, nb::keep_alive<0, 1>())
         .def("repl_process_line", &PyEvalState::repl_process_line,
              "line"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
+        .def("repl_add_attrs", &PyEvalState::repl_add_attrs, "attrs"_a)
         .def("alloc_value", &PyEvalState::alloc_value, nb::keep_alive<0, 1>())
         // Handle management (worker-internal, exported for RPC dispatch)
         // The Python HandleRegistry owns handle allocation; C++ manages GC refs.
