@@ -32,6 +32,9 @@ jobs:
       - name: Build all supported Nix versions
         run: nix build .#nanopynix-all-tests --out-link result --print-build-logs --print-out-paths
 
+      - name: Verify test runner closure after build
+        run: nix store verify --recursive --no-trust "$(readlink -f result)"
+
       - name: Enable Nix sandbox namespaces
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -39,7 +42,10 @@ jobs:
           unshare --user --map-root-user --mount --pid --fork --mount-proc true
 
       - name: Test all supported Nix versions
-        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 ./result/bin/nanopynix-nix-version-tests --verbose --tb=short -x -rsxXfE --run-temp-store-builds
+        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 ./result/bin/nanopynix-nix-version-tests --verbose --tb=short -x -rsxXfE --run-temp-store-builds
+
+      - name: Verify test runner closure after tests
+        run: nix store verify --recursive --no-trust "$(readlink -f result)"
 
   update-lockfile:
     if: github.event_name == 'schedule'
@@ -73,6 +79,9 @@ jobs:
       - name: Build all supported Nix versions
         run: nix build .#nanopynix-all-tests --out-link result --print-build-logs --print-out-paths
 
+      - name: Verify test runner closure after build
+        run: nix store verify --recursive --no-trust "$(readlink -f result)"
+
       - name: Enable Nix sandbox namespaces
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -80,7 +89,10 @@ jobs:
           unshare --user --map-root-user --mount --pid --fork --mount-proc true
 
       - name: Test all supported Nix versions
-        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 ./result/bin/nanopynix-nix-version-tests --verbose --tb=short -x -rsxXfE --run-temp-store-builds
+        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 ./result/bin/nanopynix-nix-version-tests --verbose --tb=short -x -rsxXfE --run-temp-store-builds
+
+      - name: Verify test runner closure after tests
+        run: nix store verify --recursive --no-trust "$(readlink -f result)"
 
       - uses: step-security/git-auto-commit-action@v7
         with:
