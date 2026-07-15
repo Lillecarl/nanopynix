@@ -135,6 +135,7 @@ class Session:
                 raise FileNotFoundError(nix_conf)
         nix_settings = normalize_nix_settings(settings).with_experimental_features(experimental_features)
         nanopynix_settings = runtime_settings or NanopynixSettings()
+        self.runtime_settings = nanopynix_settings
         worker_settings = nix_settings.to_worker_settings()
         self._manager = _WorkerManager(
             store_uri=store_uri,
@@ -268,6 +269,7 @@ class Session:
             store.store_handle,
             session_id=self._session_id,
             rpc_timeout=self._manager.rpc_timeout,
+            line_editors=self.runtime_settings.line_editors,
         )
 
 

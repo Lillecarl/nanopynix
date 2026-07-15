@@ -13,6 +13,7 @@
 #include <nix/expr/eval.hh>
 #include <nix/expr/eval-error.hh>
 #include <nix/expr/eval-gc.hh>
+#include <nix/expr/attr-path.hh>
 #include <nix/expr/get-drvs.hh>
 #include <nix/expr/value.hh>
 #include <nix/expr/attr-set.hh>
@@ -239,6 +240,42 @@ std::vector<std::string> PyValue::realise_argv() {
     for (auto &argument : argv)
         argument = nix::rewriteStrings(argument, rewrites);
     return argv;
+}
+
+nb::dict PyValue::edit_location() {
+    std::optional<nix::SourcePath> source_path;
+    uint32_t line = 0;
+    {
+        nb::gil_scoped_release release;
+        auto *es = evalState();
+        if (es == nullptr) throw std::runtime_error("value has no evaluation state");
+        auto *value = checkedValue();
+        if (value->type() == nix::nPath || value->type() == nix::nString) {
+            nix::NixStringContext context;
+            source_path = es->coerceToPath(nix::noPos, *value, context, "while evaluating the filename to edit");
+        } else if (value->isLambda()) {
+            auto pos = es->positions[value->lambda().fun->pos];
+            if (auto path = std::get_if<nix::SourcePath>(&pos.origin)) {
+                source_path = *path;
+                line = pos.line;
+            } else {
+                throw nix::Error("selected function cannot be shown in an editor");
+            }
+        } else {
+            auto location = nix::findPackageFilename(*es, *value, "selected value");
+            source_path = std::move(location.first);
+            line = location.second;
+        }
+    }
+    if (!source_path)
+        throw std::runtime_error("could not determine source location");
+    auto physical_path = source_path->getPhysicalPath();
+    if (!physical_path)
+        throw nix::Error("cannot open '%s' in an editor because it has no physical path", *source_path);
+    nb::dict result;
+    result["path"] = physical_path->string();
+    result["line"] = line;
+    return result;
 }
 
 // to_python and to_json are implemented below.
@@ -472,6 +509,10 @@ PyValue PyEvalState::repl_load_file(const std::string &path) {
         state->autoCallFunction(*autoArgs.finish(), *loaded, *v);
     }
     return PyValue(v, this, alive);
+}
+
+void PyEvalState::reset_file_cache() {
+    state->resetFileCache();
 }
 
 std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, const std::string &path) {
@@ -1142,6 +1183,7 @@ static void bind_value(nb::module_ &m) {
         .def("force_deep", &PyValue::force_deep)
         .def("realise_string", &PyValue::realise_string)
         .def("realise_argv", &PyValue::realise_argv)
+        .def("edit_location", &PyValue::edit_location)
         .def("list_length", &PyValue::list_length)
         .def("list_get", &PyValue::list_get, "idx"_a, nb::keep_alive<0, 1>())
         .def("attr_names", &PyValue::attr_names)
@@ -1183,6 +1225,7 @@ static void bind_eval_state(nb::module_ &m) {
              "line"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
         .def("repl_add_attrs", &PyEvalState::repl_add_attrs, "attrs"_a)
         .def("repl_scope_names", &PyEvalState::repl_scope_names)
+        .def("reset_file_cache", &PyEvalState::reset_file_cache)
         .def("alloc_value", &PyEvalState::alloc_value, nb::keep_alive<0, 1>())
         // Handle management (worker-internal, exported for RPC dispatch)
         // The Python HandleRegistry owns handle allocation; C++ manages GC refs.

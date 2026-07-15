@@ -195,6 +195,23 @@ async def test_repl_session_load_file_autocalls_top_level_function(tmp_path: Pat
         assert await (await repl.string("answer")).force() == 42
 
 
+async def test_repl_session_edit_location_uses_function_source(tmp_path: Path):
+    """edit_location() resolves a lambda to its physical source file and line."""
+    nix_file = tmp_path / "function.nix"
+    nix_file.write_text("argument: argument\n")
+
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.repl(store) as repl,
+    ):
+        value = await repl.file(str(nix_file))
+        path, line = await value.edit_location()
+
+    assert Path(path) == nix_file
+    assert line == 1
+
+
 async def test_repl_session_adds_attrs_to_scope():
     """ReplSession can merge an evaluated attrset into its lexical scope."""
     async with (

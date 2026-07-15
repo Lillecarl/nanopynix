@@ -13,6 +13,7 @@ from pynix.repl import (
     _HELP,
     Repl,
     _derivation_name_part,
+    _editor_argv,
     _load_initial_target,
     _main_program,
     _print_error,
@@ -74,11 +75,17 @@ class _CommandValue:
         return self._command
 
 
+class _EditValue:
+    async def edit_location(self) -> tuple[str, int]:
+        return "/tmp/source.nix", 42
+
+
 class _Repl:
     def __init__(self) -> None:
         self.lines: list[str] = []
         self.loaded_files: list[str] = []
-        self.value: _Value | _RunValue | _CommandValue = _Value()
+        self.file_cache_resets = 0
+        self.value: _Value | _RunValue | _CommandValue | _EditValue = _Value()
 
     async def line(self, text: str) -> _Value | None:
         self.lines.append(text)
@@ -91,7 +98,10 @@ class _Repl:
     async def add_attrs(self, _value: _Value) -> list[str]:
         return ["answer"]
 
-    async def string(self, _expr: str) -> _Value | _RunValue | _CommandValue:
+    async def reset_file_cache(self) -> None:
+        self.file_cache_resets += 1
+
+    async def string(self, _expr: str) -> _Value | _RunValue | _CommandValue | _EditValue:
         return self.value
 
 
@@ -174,6 +184,42 @@ def test_repl_preserves_nix_error_ansi(monkeypatch: Any) -> None:
 
     assert len(output) == 1
     assert isinstance(output[0], ANSI)
+
+
+def test_editor_argv_only_includes_line_for_line_aware_editors(monkeypatch: Any) -> None:
+    monkeypatch.setenv("EDITOR", "hx --health")
+    assert _editor_argv("/tmp/source.nix", 42, ("hx",)) == ["hx", "--health", "+42", "/tmp/source.nix"]
+
+    monkeypatch.setenv("EDITOR", "cat")
+    assert _editor_argv("/tmp/source.nix", 42, ("hx",)) == ["cat", "/tmp/source.nix"]
+
+
+async def test_repl_edit_reloads_initial_sources(monkeypatch: Any) -> None:
+    output: list[str] = []
+    edited: list[_EditValue] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+
+    async def edit(value: _EditValue, line_editors: tuple[str, ...]) -> int:
+        edited.append(value)
+        assert line_editors == ("hx",)
+        return 0
+
+    monkeypatch.setattr("pynix.repl._edit", edit)
+    repl = _Repl()
+    value = _EditValue()
+    repl.value = value
+
+    await _run_repl_loop(
+        repl,
+        _Prompt([":edit target", ":quit"]),
+        initial_sources=[(":load", "default.nix")],
+        line_editors=("hx",),
+    )
+
+    assert edited == [value]
+    assert repl.file_cache_resets == 1
+    assert repl.loaded_files == ["default.nix"]
+    assert output == [_HELP, "Added 1 variables: answer"]
 
 
 async def test_repl_run_prefers_meta_main_program(tmp_path: Path, monkeypatch: Any) -> None:
