@@ -8,16 +8,17 @@ from typing import Any
 
 import pytest
 
+import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
+import nanopynix._worker_eval as worker_eval  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix._handle_registry import HandleRegistry  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix._worker import (  # type: ignore[reportPrivateUsage] -- test imports private module
     WorkerServiceHandler,
     WorkerState,
 )
 from nanopynix._worker_eval import EvalServiceHandler  # type: ignore[reportPrivateUsage] -- test imports private module
-from nanopynix._worker_nix import NixThreadExecutor  # type: ignore[reportPrivateUsage] -- test verifies thread confinement
-
-import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
-import nanopynix._worker_eval as worker_eval  # type: ignore[reportPrivateUsage] -- test imports private module
+from nanopynix._worker_nix import (
+    NixThreadExecutor,  # type: ignore[reportPrivateUsage] -- test verifies thread confinement
+)
 
 
 class _FakeEvalState:

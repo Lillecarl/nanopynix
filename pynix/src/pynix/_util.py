@@ -34,7 +34,7 @@ def configure_logging() -> None:
 
 
 @asynccontextmanager
-async def forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncGenerator[None, None]:
+async def forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncGenerator[None]:
     configure_logging()
     task = asyncio.create_task(_forward_nix_logs(session, print_build_logs=print_build_logs))
     try:
@@ -78,7 +78,7 @@ def _result_event(event: Any) -> tuple[int | None, str | None]:
     if len(args) < 2 or not isinstance(args[1], int):
         return None, None
     result_type = args[1]
-    fields: list[Any] = cast(list[Any], args[2]) if len(args) > 2 else []
+    fields: list[Any] = cast("list[Any]", args[2]) if len(args) > 2 else []
     message = None
     for field in reversed(fields):
         if isinstance(field, str):

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
-import pytest
-
 import pynix
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_main_identifies_pynix_manager(monkeypatch: pytest.MonkeyPatch) -> None:

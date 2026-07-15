@@ -84,7 +84,10 @@ from nanopynix_proto.nix.common import (
 from nanopynix_proto.nix.common import (
     ValueHandle as ValueHandle,
 )
-from strip_ansi import strip_ansi as _strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
+from strip_ansi import (
+    strip_ansi as _strip_ansi,  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
+)
+
 
 # ══════════════════════════════════════════════════════════════════════════
 class StorePath(str):

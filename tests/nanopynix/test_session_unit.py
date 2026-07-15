@@ -10,15 +10,14 @@ No Nix daemon needed — exercises error paths and edge cases.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
-from types import SimpleNamespace
 import json as _json
-from typing import Any, cast
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from nanopynix_proto.nix.common import DeepAttrs, DeepValue, ScalarValue
+from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
 import nanopynix._pool as pool_module
 from nanopynix import (
@@ -32,21 +31,33 @@ from nanopynix import (
     WrongNixTypeError,
 )
 from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT
-from nanopynix._pool import ReservedWorker, _WorkerManager as _WorkerManager
+from nanopynix._pool import ReservedWorker
+from nanopynix._pool import _WorkerManager as _WorkerManager
 from nanopynix._session import (
     EvalProxy,
     EvalSession,
     ReplSession,
     ValueList,
     ValueProxy,
+)
+from nanopynix._session import (
     _EvalOwner as _EvalOwner,
+)
+from nanopynix._session import (
     _EvalOwnerToken as _EvalOwnerToken,
+)
+from nanopynix._session import (
     _EvalProxyContext as _EvalProxyContext,
+)
+from nanopynix._session import (
     _ResolvedValue as _ResolvedValue,
 )
 from nanopynix.models import LogEvent
 from nanopynix.nix import Session
 from nanopynix.store import StoreHandle
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ════════════════════════════════════════════════════════════════════
 # Helpers

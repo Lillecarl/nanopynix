@@ -6,12 +6,11 @@ from typing import override
 
 import structlog
 from clypi import Command, Positional, arg
+from nanopynix_proto.nix.common import PathInfo as PathInfoProto  # noqa: TC002
+from nanopynix_proto.nix.store import QueryPathInfoRequest
 from rich.console import Console
 
 import nanopynix
-from nanopynix_proto.nix.common import PathInfo as PathInfoProto  # noqa: TC002
-from nanopynix_proto.nix.store import QueryPathInfoRequest
-
 from pynix._util import forward_nix_logs, prepare_sys_path
 
 logger = structlog.get_logger(__name__)

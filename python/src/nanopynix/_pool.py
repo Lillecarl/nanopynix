@@ -19,17 +19,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grpclib.exceptions import GRPCError, StreamTerminatedError
-
 from grpclib_transports.multiprocessing import multiprocessing_worker_with_backchannel
-from grpclib_transports.protocol import DEFAULT_TUNING
-
-from nanopynix._manager import ManagerPrimopServiceHandler
-from nanopynix._worker import worker_service_factory
-from nanopynix.exceptions import from_response
 from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
 from nanopynix_proto.nix.eval import EvalServiceStub
 from nanopynix_proto.nix.store import StoreServiceStub
 from nanopynix_proto.nix.worker import InitRequest, ShutdownRequest, SubscribeLogsRequest, WorkerServiceStub
+
+from nanopynix._manager import ManagerPrimopServiceHandler
+from nanopynix._worker import worker_service_factory
+from nanopynix.exceptions import from_response
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence

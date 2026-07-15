@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from pynix import Pynix
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 async def test_flake_show_root(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:

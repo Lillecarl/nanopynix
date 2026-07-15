@@ -2,7 +2,6 @@ from __future__ import annotations
 
 # pyright: reportUnknownMemberType=false
 # nanopynix / nanopynix_proto are C++ nanobind extensions without type stubs.
-
 import contextlib
 import json
 import sys
@@ -11,17 +10,16 @@ from typing import TYPE_CHECKING, Any, override
 
 import structlog
 from clypi import Command, Positional, arg
+from nanopynix_proto.nix.common import NixType
 from rich.console import Console
 from rich.tree import Tree
 
 import nanopynix
-
 from pynix._util import forward_nix_logs, prepare_sys_path
 
 if TYPE_CHECKING:
-    from nanopynix._session import ValueProxy
 
-    from nanopynix_proto.nix.common import NixType
+    from nanopynix._session import ValueProxy
 
 logger = structlog.get_logger(__name__)
 console = Console()

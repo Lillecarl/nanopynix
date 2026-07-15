@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
 import nanopynix_expr
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_parse_nix_path_empty(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -7,14 +7,12 @@ import json
 import os
 import re
 import shlex
-from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
 from clypi import Command, arg
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
-from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import print_formatted_text
@@ -32,6 +30,10 @@ from pynix.target import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from prompt_toolkit.document import Document
+
     from nanopynix import ReplSession
 
 _DEFAULT_STORE = "auto"

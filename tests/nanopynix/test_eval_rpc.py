@@ -128,12 +128,12 @@ async def test_eval_realise_command_values_preserves_string_context():
     ):
         string = await eval.string('builtins.toFile "nanopynix-realise-string" "contents"')
         realised_path = await string.realise_string()
-        assert Path(realised_path).read_text() == "contents"
+        assert await AnyioPath(realised_path).read_text() == "contents"
 
         argv_value = await eval.string('[ "echo" (builtins.toFile "nanopynix-realise-argv" "argument") ]')
         argv = await argv_value.realise_argv()
         assert argv[0] == "echo"
-        assert Path(argv[1]).read_text() == "argument"
+        assert await AnyioPath(argv[1]).read_text() == "argument"
 
 
 async def test_repl_session_persists_bindings(tmp_path: Path):

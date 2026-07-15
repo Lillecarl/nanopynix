@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from pynix import Pynix
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 def _parse_json_output(out: str) -> object:

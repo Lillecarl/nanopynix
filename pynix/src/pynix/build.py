@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 import structlog
@@ -10,10 +9,11 @@ from clypi import Command, arg
 from rich.console import Console
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from nanopynix._session import ValueProxy
 
 import nanopynix
-
 from pynix._util import forward_nix_logs, prepare_sys_path
 from pynix.target import (
     EvaluationTarget,

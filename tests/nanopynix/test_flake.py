@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from _git import commit_files, init_flake_repo, init_repo
 
 import nanopynix
 import nanopynix_flake
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _init_git_flake(tmp_path: Path, outputs_body: str = "val = 1;") -> None:

@@ -1,7 +1,8 @@
 """Tests for nanopynix_util (settings, init, experimental features)."""
 
-import nanopynix
 import pytest
+
+import nanopynix
 
 
 class TestInitLibstore:

@@ -40,7 +40,6 @@ from nanopynix_proto.nix.store import (
 )
 
 import nanopynix
-
 from pynix._util import forward_nix_logs, prepare_sys_path
 
 logger = structlog.get_logger(__name__)
@@ -59,14 +58,13 @@ class PrintRoots(Command):
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             resp = await store.find_roots(FindRootsRequest())
-            roots: list[dict[str, object]] = []
-            for root in resp.roots:
-                roots.append(
-                    {
-                        "link": root.link,
-                        "path": root.path,
-                    }
-                )
+            roots = [
+                {
+                    "link": root.link,
+                    "path": root.path,
+                }
+                for root in resp.roots
+            ]
             _print_json({"roots": roots})
 
 

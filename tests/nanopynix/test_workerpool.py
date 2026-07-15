@@ -99,4 +99,4 @@ async def test_idle_timeout_resets_with_activity():
 
 async def _collect(nix: Nix, events: list[LogEvent]) -> None:
     async for event in nix.log_stream():
-        events.append(event)
+        events.append(event)  # noqa: PERF401

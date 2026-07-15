@@ -25,7 +25,6 @@ from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
 if TYPE_CHECKING:
     from grpclib_transports import WorkerBackchannel
-    from nanopynix_proto.nix.manager import CallPrimopResponse
 
 _CALL_ROUTE = "/nix.manager.ManagerPrimopService/Call"
 _RPC_TIMEOUT = 300.0

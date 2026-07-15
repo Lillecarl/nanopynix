@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, override
 
 import structlog
 from clypi import Command, arg
 from rich.console import Console
 
 import nanopynix
-
 from pynix._util import forward_nix_logs, prepare_sys_path
 from pynix.target import (
     EvaluationTarget,
@@ -20,6 +18,9 @@ from pynix.target import (
     file_option,
     flake_option,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = structlog.get_logger(__name__)
 console = Console()

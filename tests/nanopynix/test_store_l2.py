@@ -6,8 +6,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from nanopynix_proto.nix.store import (
@@ -38,6 +37,8 @@ from nanopynix_proto.nix.store import (
 
 from nanopynix import MissingInfo, PathInfo, Session, StorePath, build_info
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 NIX_GC_ROOTS_BUG = pytest.mark.skipif(
     build_info()["nix_version"].startswith(("2.31.", "2.34.")),
