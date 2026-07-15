@@ -6,8 +6,19 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.document import Document
+
 from pynix import Pynix
-from pynix.repl import Repl, _HELP, _derivation_name_part, _main_program, _run_derivation, _run_repl_loop
+from pynix.repl import (
+    Repl,
+    _HELP,
+    _ReplCompleter,
+    _derivation_name_part,
+    _main_program,
+    _run_derivation,
+    _run_repl_loop,
+)
 
 
 class _Prompt:
@@ -76,6 +87,30 @@ class _Repl:
         return ["answer"]
 
     async def string(self, _expr: str) -> _Value | _RunValue | _CommandValue:
+        return self.value
+
+
+class _CompletionValue:
+    def __init__(self, names: list[str]) -> None:
+        self._names = names
+        self.released = False
+
+    async def attr_names(self) -> list[str]:
+        return self._names
+
+    async def release(self) -> None:
+        self.released = True
+
+
+class _CompletionRepl:
+    def __init__(self) -> None:
+        self.value = _CompletionValue(["hello", "hello-unfree", "world"])
+
+    async def scope_names(self) -> list[str]:
+        return ["answer", "builtins", "pkgs"]
+
+    async def string(self, expression: str) -> _CompletionValue:
+        assert expression == "pkgs"
         return self.value
 
 
@@ -174,6 +209,19 @@ async def test_repl_run_warns_when_using_pname(monkeypatch: Any) -> None:
         "derivation has no meta.mainProgram; using pname 'fallback-program'",
     )
     assert _derivation_name_part("apache-httpd-2.0.48") == "apache-httpd"
+
+
+async def test_repl_completion_uses_commands_scope_and_attrsets() -> None:
+    completer = _ReplCompleter(_CompletionRepl())  # type: ignore[arg-type] -- narrow completion fake
+
+    async def complete(text: str) -> list[str]:
+        document = Document(text, cursor_position=len(text))
+        return [item.text async for item in completer.get_completions_async(document, CompleteEvent())]
+
+    assert await complete(":lo") == [":load", ":load-flake"]
+    assert await complete("ans") == ["answer"]
+    assert await complete("pkgs.hel") == ["hello", "hello-unfree"]
+    assert completer._repl.value.released  # type: ignore[reportPrivateUsage] -- verifies temporary value lifetime
 
 
 def test_repl_is_a_pynix_subcommand() -> None:

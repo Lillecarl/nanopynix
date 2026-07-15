@@ -47,6 +47,8 @@ from nanopynix_proto.nix.eval import (
     ReplAddAttrsRequest,
     ReplAddAttrsResponse,
     ReplLoadFileRequest,
+    ReplScopeNamesRequest,
+    ReplScopeNamesResponse,
     RealiseArgvRequest,
     RealiseArgvResponse,
     RealiseStringRequest,
@@ -243,6 +245,12 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_repl_add_attrs(self, message: ReplAddAttrsRequest) -> ReplAddAttrsResponse:
         return ReplAddAttrsResponse(names=self._get_es().repl_add_attrs(self._resolve(message.handle)))
+
+    async def repl_scope_names(self, message: ReplScopeNamesRequest) -> ReplScopeNamesResponse:
+        return await self._state.executor.run(self._do_repl_scope_names, message)
+
+    def _do_repl_scope_names(self, message: ReplScopeNamesRequest) -> ReplScopeNamesResponse:
+        return ReplScopeNamesResponse(names=self._get_es().repl_scope_names())
 
     async def force(self, message: ForceRequest) -> common_pb.ForceValue:
         return await self._state.executor.run(self._do_force, message)

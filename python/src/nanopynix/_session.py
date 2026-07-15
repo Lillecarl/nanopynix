@@ -1043,3 +1043,10 @@ class ReplSession(EvalSession):
 
         response = await self._ensure_proxy().repl_add_attrs(ReplAddAttrsRequest(handle=value.handle))
         return response.names
+
+    async def scope_names(self, *, timeout: float | None = None) -> list[str]:
+        """Return the identifiers visible in this REPL's lexical scope."""
+        from nanopynix_proto.nix.eval import ReplScopeNamesRequest
+
+        response = await self._ensure_proxy().repl_scope_names(ReplScopeNamesRequest())
+        return response.names

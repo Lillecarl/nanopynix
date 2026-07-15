@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 import json
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING, Any, override
 
 from clypi import Command, arg
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.document import Document
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import print_formatted_text
 
@@ -20,6 +24,31 @@ if TYPE_CHECKING:
 
 _DEFAULT_STORE = "auto"
 _PROMPT = "pynix> "
+_COMMANDS = {
+    ":a": "Add an attribute set to scope",
+    ":add": "Add an attribute set to scope",
+    ":b": "Build a derivation",
+    ":build": "Build a derivation",
+    ":exec": "Realise a Nix argv list and execute it",
+    ":help": "Show this help",
+    ":l": "Load a Nix file into scope",
+    ":lf": "Load flake outputs into scope",
+    ":ll": "Show the most recently loaded names",
+    ":load": "Load a Nix file into scope",
+    ":load-flake": "Load flake outputs into scope",
+    ":p": "Evaluate and print an expression",
+    ":print": "Evaluate and print an expression",
+    ":q": "Exit the REPL",
+    ":quit": "Exit the REPL",
+    ":r": "Reload files and flakes",
+    ":reload": "Reload files and flakes",
+    ":run": "Build a derivation and run its main program",
+    ":shell": "Realise a Nix string and execute it with the shell",
+    ":t": "Show an expression's Nix type",
+    ":type": "Show an expression's Nix type",
+    ":?": "Show this help",
+}
+_NIX_IDENTIFIER = re.compile(r"(?P<path>(?:[A-Za-z_][A-Za-z0-9_'-]*\.)*[A-Za-z_][A-Za-z0-9_'-]*)$")
 _HELP = """Commands:
   <expr>                 Evaluate and print an expression
   <name> = <expr>        Bind an expression to a name
@@ -36,6 +65,51 @@ _HELP = """Commands:
   :t, :type <expr>       Show an expression's Nix type
   :q, :quit              Exit the REPL
   :?, :help              Show this help"""
+
+
+class _ReplCompleter(Completer):
+    """Complete REPL commands and names from the current Nix lexical scope."""
+
+    def __init__(self, repl: ReplSession) -> None:
+        self._repl = repl
+
+    def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
+        """Prompt-toolkit requires this synchronous hook even for async completion."""
+        del document, complete_event
+        return ()
+
+    async def get_completions_async(self, document: Document, complete_event: CompleteEvent):
+        del complete_event
+        before_cursor = document.text_before_cursor
+        command, separator, _argument = before_cursor.partition(" ")
+        if not separator and command.startswith(":"):
+            for name, description in _COMMANDS.items():
+                if name.startswith(command):
+                    yield Completion(name, start_position=-len(command), display_meta=description)
+            return
+
+        match = _NIX_IDENTIFIER.search(before_cursor)
+        if match is None:
+            return
+        path = match.group("path")
+        prefix, dot, partial = path.rpartition(".")
+        if dot:
+            candidates = await self._attr_names(prefix)
+        else:
+            candidates = await self._repl.scope_names()
+        for name in candidates:
+            if name.startswith(partial):
+                yield Completion(name, start_position=-len(partial))
+
+    async def _attr_names(self, expression: str) -> list[str]:
+        try:
+            value = await self._repl.string(expression)
+            try:
+                return await value.attr_names()
+            finally:
+                await value.release()
+        except NixError:
+            return []
 
 
 async def _run_repl_loop(repl: ReplSession, prompt: Any) -> None:
@@ -227,12 +301,12 @@ class Repl(Command):
         prepare_sys_path()
         import nanopynix
 
-        prompt = PromptSession()
         async with (
             nanopynix.Session() as nix,
             forward_nix_logs(nix),
             nix.store(self.store) as store,
             nix.repl(store) as repl,
         ):
+            prompt = PromptSession(completer=_ReplCompleter(repl), complete_while_typing=True)
             with patch_stdout():
                 await _run_repl_loop(repl, prompt)
