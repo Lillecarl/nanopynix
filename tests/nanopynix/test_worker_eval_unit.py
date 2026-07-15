@@ -54,6 +54,47 @@ def test_worker_opens_auto_store_with_explicit_auto_uri(monkeypatch: pytest.Monk
     assert store_dir == "/nix/store"
 
 
+def test_worker_factory_sets_worker_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test verifies worker process setup
+
+    titled: list[None] = []
+    monkeypatch.setattr(worker, "set_worker_title", lambda: titled.append(None) or "quiet-otter")
+    monkeypatch.setattr(worker.nanopynix_util, "install_logger", lambda _callback: None)
+
+    worker.worker_service_factory()
+
+    assert titled == [None]
+
+
+def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test verifies worker naming behavior
+
+    titles: list[str] = []
+    monkeypatch.setattr(worker, "set_process_title", lambda title, **_kwargs: titles.append(title))
+
+    class Store:
+        def __init__(self, uri: str) -> None:
+            self.uri = uri
+
+        def get_uri(self) -> str:
+            return self.uri
+
+        def get_store_dir(self) -> str:
+            return "/nix/store"
+
+    monkeypatch.setattr(worker.nanopynix_store, "open_store", lambda uri: Store(uri))
+    state = WorkerState()
+    state.worker_subname = "quiet-otter"
+    handler = WorkerServiceHandler(state)
+
+    first, _uri, _store_dir = handler._open_store("local")  # type: ignore[reportPrivateUsage] -- test verifies worker store tracking
+    second, _uri, _store_dir = handler._open_store("daemon")  # type: ignore[reportPrivateUsage] -- test verifies worker store tracking
+    handler._close_store(first)  # type: ignore[reportPrivateUsage] -- test verifies worker store tracking
+    handler._close_store(second)  # type: ignore[reportPrivateUsage] -- test verifies worker store tracking
+
+    assert titles == ["local", "local daemon", "daemon", "quiet-otter"]
+
+
 @pytest.mark.anyio
 async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test verifies worker thread confinement

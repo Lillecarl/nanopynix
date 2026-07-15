@@ -5,11 +5,13 @@
   buildPythonPackage,
   hatchling,
   # nixpkgs deps
+  coolname,
   janus,
   pydantic,
   pydantic-settings,
   pyyaml,
   strip-ansi,
+  setproctitle,
   # nixpkgs test deps
   pytest-dependency,
   anyio,
@@ -43,11 +45,13 @@ buildPythonPackage (
       nanopynix-bindings
       nanopynix-proto
       grpclib-transports
+      coolname
       janus
       pydantic
       pydantic-settings
       pyyaml
       strip-ansi
+      setproctitle
     ];
     inherit nativeCheckInputs;
 

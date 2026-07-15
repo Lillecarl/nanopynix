@@ -22,7 +22,13 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
     __slots__ = ("_active", "_pool", "_rpc_timeout", "_session_id", "_store_handle", "_uri")
 
-    def __init__(self, pool: _WorkerManager, uri: str, session_id: str, rpc_timeout: float = _RPC_TIMEOUT) -> None:
+    def __init__(
+        self,
+        pool: _WorkerManager,
+        uri: str,
+        session_id: str,
+        rpc_timeout: float = _RPC_TIMEOUT,
+    ) -> None:
         self._pool = pool
         self._rpc_timeout = rpc_timeout
         self._uri = uri
@@ -35,7 +41,9 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         from nanopynix_proto.nix.worker import OpenStoreRequest
 
         resp = await self._pool.call(
-            self._pool._worker_stub.open_store(OpenStoreRequest(uri=self._uri), timeout=self._rpc_timeout)  # type: ignore[reportPrivateUsage] -- cross-class access
+            self._pool._worker_stub.open_store(  # type: ignore[reportPrivateUsage] -- cross-class access
+                OpenStoreRequest(uri=self._uri), timeout=self._rpc_timeout
+            )
         )
         self._store_handle = resp.store_handle
         self._active = True

@@ -27,6 +27,7 @@ from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
 import nanopynix_expr
 from nanopynix._pool import _WorkerManager  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
+from nanopynix._process_title import set_manager_title
 from nanopynix._session import EvalSession
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.settings import NanopynixSettings, NixSettings, normalize_nix_settings
@@ -126,6 +127,7 @@ class Session:
         reserved_worker_oom_score_adj: int | None = None,
         runtime_settings: NanopynixSettings | None = None,
     ) -> None:
+        set_manager_title()
         if nix_conf is not None:
             if not isinstance(nix_conf, Path):
                 raise TypeError("nix_conf must be a pathlib.Path or None")
@@ -168,9 +170,15 @@ class Session:
                 )
 
         The handle carries this session's ID — passing it to
-        ``Eval`` from a different session raises ``ValueError``.
+        ``Eval`` from a different session raises ``ValueError``. Opening the
+        handle adds its URI to the worker's process title.
         """
-        return StoreHandle(self._manager, uri, self._session_id, self._manager.rpc_timeout)
+        return StoreHandle(
+            self._manager,
+            uri,
+            self._session_id,
+            self._manager.rpc_timeout,
+        )
 
     async def open(self) -> None:
         """Spawn the worker subprocess."""

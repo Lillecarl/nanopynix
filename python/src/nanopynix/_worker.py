@@ -50,6 +50,7 @@ import nanopynix_store
 import nanopynix_util
 from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix._handle_registry import HandleRegistry
+from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._worker_eval import EvalServiceHandler
 from nanopynix._worker_nix import NixThreadExecutor
 from nanopynix._worker_primop import ThreadedRpcPrimopBridge
@@ -153,6 +154,8 @@ class WorkerState:
         self.rpc_bridge: ThreadedRpcPrimopBridge | None = None
         self.eval_store_handle: int | None = None
         self.nix_path: list[str] = []
+        self.worker_subname: str = "worker"
+        self.named_store_uris: dict[int, str] = {}
 
 
 # ── WorkerService handler ────────────────────────────────────────────
@@ -231,12 +234,24 @@ class WorkerServiceHandler(WorkerServiceBase):
     def _open_store(self, uri: str) -> tuple[int, str, str]:
         store = nanopynix_store.open_store(uri)
         handle = self._state.handles.allocate(store, "store")
-        return handle, store.get_uri(), store.get_store_dir()
+        store_uri = store.get_uri()
+        self._state.named_store_uris[handle] = store_uri
+        self._update_store_title()
+        return handle, store_uri, store.get_store_dir()
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
         assert self._state.executor is not None  # set by worker_service_factory before init
-        await self._state.executor.run(self._state.handles.release, message.store_handle)
+        await self._state.executor.run(self._close_store, message.store_handle)
         return CloseStoreResponse()
+
+    def _close_store(self, store_handle: int) -> None:
+        self._state.handles.release(store_handle)
+        if self._state.named_store_uris.pop(store_handle, None) is not None:
+            self._update_store_title()
+
+    def _update_store_title(self) -> None:
+        subname = " ".join(self._state.named_store_uris.values()) or self._state.worker_subname
+        set_process_title(subname, project_name="nanopynix")
 
     async def subscribe_logs(self, message: SubscribeLogsRequest) -> AsyncIterator[LogEvent]:
         """Server-streaming RPC — yield log events as they arrive."""
@@ -293,6 +308,7 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
         _install_worker_diagnostics(collector)
 
     state = WorkerState()
+    state.worker_subname = set_worker_title()
     state.collector = collector
 
     state.executor = NixThreadExecutor()
