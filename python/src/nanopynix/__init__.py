@@ -9,7 +9,7 @@ from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- str
 
 from nanopynix._pool import WorkerBusyError, WorkerDiedError
 from nanopynix._process_title import set_manager_title as set_manager_title
-from nanopynix._session import EvalSession, LockedFlakeHandle, ValueAttrs, ValueList, ValueProxy
+from nanopynix._session import EvalSession, LockedFlakeHandle, ReplSession, ValueAttrs, ValueList, ValueProxy
 from nanopynix.exceptions import (
     EvalError,
     EvalProxyError,
@@ -95,6 +95,7 @@ Store = StoreHandle
 __all__ = [
     "BuildMode",
     "build_info",
+    "EvalSession",
     "LockedFlakeHandle",
     "LogLevel",
     "LogLevelInput",
@@ -115,6 +116,7 @@ __all__ = [
     "PathInfo",
     "PrimOpSpec",
     "RestrictedPathError",
+    "ReplSession",
     "ResultType",
     "Session",
     "SettingsDrift",

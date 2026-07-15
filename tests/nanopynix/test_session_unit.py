@@ -34,6 +34,7 @@ from nanopynix._pool import ReservedWorker, _WorkerManager as _WorkerManager
 from nanopynix._session import (
     EvalProxy,
     EvalSession,
+    ReplSession,
     ValueList,
     ValueProxy,
     _EvalOwner as _EvalOwner,
@@ -55,6 +56,8 @@ def _make_eval_stub() -> MagicMock:
     stub = MagicMock()
     stub.eval_file = AsyncMock()
     stub.eval_string = AsyncMock()
+    stub.begin_repl = AsyncMock()
+    stub.repl_process_line = AsyncMock()
     stub.force = AsyncMock()
     stub.force_deep = AsyncMock()
     stub.force_json = AsyncMock()
@@ -292,6 +295,38 @@ class TestEvalSessionLifecycle:
         await session.string("42")  # no override
         call_kwargs = rw._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
         assert call_kwargs["timeout"] == _RPC_TIMEOUT
+
+
+class TestReplSession:
+    async def test_open_starts_repl_scope_and_line_returns_expression_value(self):
+        pool = _mock_pool()
+        rw = _mock_reserved_worker()
+        rw._eval_stub.repl_process_line.return_value = SimpleNamespace(
+            is_binding=False,
+            value=_mock_value_handle(7, "int"),
+        )
+        pool.reserve.return_value = rw
+
+        session = ReplSession(pool, store_handle=99)
+        await session.open()
+        result = await session.line("x + 1")
+
+        rw._eval_stub.begin_repl.assert_awaited_once()
+        begin_request = rw._eval_stub.begin_repl.call_args.args[0]
+        assert begin_request.store_handle == 99
+        assert isinstance(result, ValueProxy)
+        assert result.handle == 7
+
+    async def test_line_returns_none_for_binding(self):
+        pool = _mock_pool()
+        rw = _mock_reserved_worker()
+        rw._eval_stub.repl_process_line.return_value = SimpleNamespace(is_binding=True)
+        pool.reserve.return_value = rw
+
+        session = ReplSession(pool)
+        await session.open()
+
+        assert await session.line("x = 1") is None
 
 
 class TestSessionEvalFacade:

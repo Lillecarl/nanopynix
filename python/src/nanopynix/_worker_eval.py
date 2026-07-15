@@ -15,6 +15,8 @@ from nanopynix_proto.nix.eval import (
     AttrNamesResponse,
     AttrRequest,
     AutoCallRequest,
+    BeginReplRequest,
+    BeginReplResponse,
     BuildRequest,
     BuildResponse,
     CallLockedFlakeRequest,
@@ -40,6 +42,8 @@ from nanopynix_proto.nix.eval import (
     ReleaseLockedFlakeResponse,
     ReleaseRequest,
     ReleaseResponse,
+    ReplProcessLineRequest,
+    ReplProcessLineResponse,
     TypeNameRequest,
     TypeNameResponse,
     WriteLockFileRequest,
@@ -191,13 +195,35 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_eval_file, message)
 
     def _do_eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
-        return self._export(self._get_es(message.store_handle).eval_file(message.path))
+        es = self._get_es(message.store_handle)
+        value = es.repl_eval_file(message.path) if es.repl_active() else es.eval_file(message.path)
+        return self._export(value)
 
     async def eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
         return await self._state.executor.run(self._do_eval_string, message)
 
     def _do_eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
-        return self._export(self._get_es(message.store_handle).eval_string(message.expr, message.source_name))
+        es = self._get_es(message.store_handle)
+        value = es.repl_eval_string(message.expr, message.source_name) if es.repl_active() else es.eval_string(
+            message.expr, message.source_name
+        )
+        return self._export(value)
+
+    async def begin_repl(self, message: BeginReplRequest) -> BeginReplResponse:
+        return await self._state.executor.run(self._do_begin_repl, message)
+
+    def _do_begin_repl(self, message: BeginReplRequest) -> BeginReplResponse:
+        self._get_es(message.store_handle).begin_repl()
+        return BeginReplResponse()
+
+    async def repl_process_line(self, message: ReplProcessLineRequest) -> ReplProcessLineResponse:
+        return await self._state.executor.run(self._do_repl_process_line, message)
+
+    def _do_repl_process_line(self, message: ReplProcessLineRequest) -> ReplProcessLineResponse:
+        value = self._get_es(message.store_handle).repl_process_line(message.line, message.source_name)
+        if value is None:
+            return ReplProcessLineResponse(is_binding=True)
+        return ReplProcessLineResponse(is_binding=False, value=self._export(value))
 
     async def force(self, message: ForceRequest) -> common_pb.ForceValue:
         return await self._state.executor.run(self._do_force, message)

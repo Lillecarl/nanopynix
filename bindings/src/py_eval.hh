@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,9 @@ struct PyEvalState {
     nix::EvalSettings evalSettings{_readOnlyMode};
     std::shared_ptr<nix::EvalState> state;
     std::shared_ptr<bool> alive = std::make_shared<bool>(true);
+    std::shared_ptr<nix::StaticEnv> repl_static_env;
+    nix::Env *repl_env = nullptr;
+    size_t repl_displ = 0;
 
     using EvalSettingsConfigurator = std::function<void(nix::EvalSettings &)>;
 
@@ -52,6 +56,11 @@ struct PyEvalState {
 
     PyValue eval_string(const std::string &expr, const std::string &path = "<string>");
     PyValue eval_file(const std::string &path);
+    void begin_repl();
+    bool repl_active() const;
+    PyValue repl_eval_string(const std::string &expr, const std::string &path = "<string>");
+    PyValue repl_eval_file(const std::string &path);
+    std::optional<PyValue> repl_process_line(const std::string &line, const std::string &path = "<string>");
     PyValue alloc_value();
 
     // ── Handle management ───────────────────────────────────────
