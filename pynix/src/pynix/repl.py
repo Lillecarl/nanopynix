@@ -56,7 +56,7 @@ _COMMANDS = {
     ":type": "Show an expression's Nix type",
     ":?": "Show this help",
 }
-_NIX_IDENTIFIER = re.compile(r"(?P<path>(?:[A-Za-z_][A-Za-z0-9_'-]*\.)*[A-Za-z_][A-Za-z0-9_'-]*)$")
+_NIX_IDENTIFIER = re.compile(r"(?P<path>(?:[A-Za-z_][A-Za-z0-9_'-]*\.)*[A-Za-z_][A-Za-z0-9_'-]*\.?)$")
 _HELP = """Commands:
   <expr>                 Evaluate and print an expression
   <name> = <expr>        Bind an expression to a name
