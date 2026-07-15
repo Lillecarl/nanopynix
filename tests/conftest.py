@@ -49,7 +49,7 @@ def _version_at_least(actual: tuple[int, ...], required: tuple[int, ...]) -> boo
     return actual + (0,) * (width - len(actual)) >= required + (0,) * (width - len(required))
 
 
-def pytest_collection_modifyitems(_config: pytest.Config, items: list[pytest.Item]) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: ARG001 -- hookspec signature requires config arg
     build_info: Any = nanopynix.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
     actual = _nix_version_tuple(build_info["nix_version"])
     for item in items:

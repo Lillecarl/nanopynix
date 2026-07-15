@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path  # noqa: TC003 -- clypi evaluates annotations at runtime, Path must be importable
 from typing import TYPE_CHECKING, Any, override
 
 import structlog
@@ -10,8 +11,6 @@ from nanopynix_proto.nix.store import ReadDerivationRequest
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from nanopynix._session import ValueProxy
 
 import nanopynix
