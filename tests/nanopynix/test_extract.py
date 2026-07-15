@@ -6,11 +6,10 @@ Needs C++ modules loaded but no Nix daemon.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from _git import init_flake_repo
 
-import nanopynix
 import nanopynix_fetchers  # L1 Input
 import nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
 import nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
@@ -21,6 +20,9 @@ from nanopynix._extract import (
     locked_input,
 )
 from nanopynix.models import StorePath
+
+if TYPE_CHECKING:
+    import nanopynix
 
 # ════════════════════════════════════════════════════════════════════
 # StorePath wrapper

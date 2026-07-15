@@ -31,6 +31,9 @@ import time
 import traceback
 from typing import TYPE_CHECKING, Any, cast
 
+from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
+from grpclib_transports.protocol import DEFAULT_TUNING
+from grpclib_transports.stdio import serve_stdio
 from nanopynix_proto.nix.common import LogEvent, LogLevel
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
@@ -53,12 +56,10 @@ from nanopynix._handle_registry import HandleRegistry
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._worker_eval import EvalServiceHandler
 from nanopynix._worker_nix import NixThreadExecutor
-from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
-from grpclib_transports.protocol import DEFAULT_TUNING
-from grpclib_transports.stdio import serve_stdio
-
 from nanopynix._worker_primop import ThreadedRpcPrimopBridge
-from nanopynix._worker_primop import rpc_primop_callback_factory as rpc_primop_callback_factory  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
+from nanopynix._worker_primop import (
+    rpc_primop_callback_factory as rpc_primop_callback_factory,  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
+)
 from nanopynix._worker_store import StoreServiceHandler
 from nanopynix.logging import LogCollector
 from nanopynix.models import PrimOpSpec
@@ -354,7 +355,7 @@ async def run_worker(
     )
 
     # Cleanup after transport closes
-    worker_state: WorkerState = cast(WorkerServiceHandler, handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
+    worker_state: WorkerState = cast("WorkerServiceHandler", handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
     collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if collector is not None:
         collector.close()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
@@ -387,7 +388,7 @@ async def _stdio_main() -> None:
     await serve_stdio(handlers, max_concurrency=_WORKER_MAX_CONCURRENCY)
 
     # Cleanup after transport closes
-    worker_state: WorkerState = cast(WorkerServiceHandler, handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
+    worker_state: WorkerState = cast("WorkerServiceHandler", handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
     collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if collector is not None:
         collector.close()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes

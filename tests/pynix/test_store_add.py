@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import nanopynix
-import pytest
 from nanopynix_proto.nix.store import AddToStoreRequest, ComputeStorePathRequest
 
+import nanopynix
 from pynix import Pynix
+
+if TYPE_CHECKING:
+    import pytest
 
 
 async def test_nanopynix_add_to_store_imports_file(empty_store: dict[str, str | Path | object], tmp_path: Path):

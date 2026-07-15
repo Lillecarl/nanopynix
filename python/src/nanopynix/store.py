@@ -6,16 +6,21 @@ import contextlib
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_proto.nix.store import StoreServiceBase
+from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
 from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
-from nanopynix._pool import WorkerBusyError, _grpc_call  # type: ignore[reportPrivateUsage] -- cross-module internal utility
+from nanopynix._pool import (  # type: ignore[reportPrivateUsage] -- cross-module internal utility
+    WorkerBusyError,
+    _grpc_call,
+)
 from nanopynix._rpc_proxy import RpcProxyMixin
-from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
 if TYPE_CHECKING:
     from betterproto2 import Message
 
-    from nanopynix._pool import _WorkerManager  # type: ignore[reportPrivateUsage] -- TYPE_CHECKING import of lifecycle type
+    from nanopynix._pool import (
+        _WorkerManager,  # type: ignore[reportPrivateUsage] -- TYPE_CHECKING import of lifecycle type
+    )
 
 
 class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreServiceBase):

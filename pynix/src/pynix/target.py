@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from clypi import arg
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from nanopynix._session import EvalSession, ReplSession, ValueProxy
 
 

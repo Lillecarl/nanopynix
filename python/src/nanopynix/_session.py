@@ -3,11 +3,10 @@
 
 from __future__ import annotations
 
+import json as _json
 from dataclasses import dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, overload
-
-import json as _json
 
 from nanopynix_proto.nix.common import (
     CallArg,
@@ -55,8 +54,6 @@ from nanopynix_proto.nix.eval import (
     WriteLockFileRequest,
 )
 
-import nanopynix_store
-from nanopynix_store import BuildMode
 from nanopynix._pool import _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
 from nanopynix._rpc_proxy import RpcProxyMixin
 from nanopynix.exceptions import (
@@ -70,6 +67,7 @@ from nanopynix.exceptions import (
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
 from nanopynix.settings import DEFAULT_LINE_EDITORS
+from nanopynix_store import BuildMode
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import pytest
 from pydantic import ValidationError
 
-# import nanopynix
 from nanopynix import Session
 from nanopynix.settings import (
     DEFAULT_LINE_EDITORS,
@@ -21,6 +19,9 @@ from nanopynix.settings import (
     check_all_settings_model_drift,
     check_settings_model_drift,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_nix_settings_render_python_field_names() -> None:
@@ -165,7 +166,7 @@ def test_session_rejects_missing_nix_conf(tmp_path: Path) -> None:
 
 
 def test_session_rejects_string_nix_conf() -> None:
-    with pytest.raises(TypeError, match="pathlib.Path"):
+    with pytest.raises(TypeError, match=r"pathlib\.Path"):
         Session(nix_conf="/etc/nix/nix.conf")  # type: ignore[arg-type] -- validates the public runtime boundary
 
 

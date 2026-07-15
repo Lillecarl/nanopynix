@@ -6,9 +6,10 @@
 
 from typing import Any
 
+import pytest
+
 import nanopynix
 import nanopynix_fetchers
-import pytest
 
 
 class TestInputFromURL:

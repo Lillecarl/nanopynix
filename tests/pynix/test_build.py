@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from anyio import Path as AnyioPath
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from pynix import Pynix
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 async def test_build_file_derivation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

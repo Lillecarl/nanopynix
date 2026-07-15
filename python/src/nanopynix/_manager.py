@@ -16,8 +16,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from grpclib.server import Stream
-    from nanopynix_proto.nix.manager import CallPrimopRequest as CallPrimopRequest
-    from nanopynix_proto.nix.manager import CallPrimopResponse as CallPrimopResponse
 
 _LOG_ROUTE = "/nix.manager.ManagerService/Log"
 _CALL_ROUTE = "/nix.manager.ManagerPrimopService/Call"

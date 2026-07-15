@@ -7,7 +7,6 @@ from typing import override
 from clypi import Command, arg
 
 import nanopynix
-
 from pynix._util import prepare_sys_path
 
 

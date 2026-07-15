@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import gc
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+import pytest
 
 import nanopynix
-import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestEvalString:

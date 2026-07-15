@@ -7,7 +7,6 @@ from clypi import Command, Positional, arg
 from nanopynix_proto.nix.store import GetBuildLogRequest
 
 import nanopynix
-
 from pynix._util import forward_nix_logs, prepare_sys_path
 
 _DEFAULT_STORE = "auto"

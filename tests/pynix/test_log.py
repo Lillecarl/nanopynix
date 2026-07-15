@@ -4,11 +4,15 @@
 
 from __future__ import annotations
 
-import pytest
-import nanopynix
+from typing import TYPE_CHECKING
+
 from nanopynix_proto.nix.store import GetBuildLogRequest
 
+import nanopynix
 from pynix import Pynix
+
+if TYPE_CHECKING:
+    import pytest
 
 
 async def test_nanopynix_store_get_build_log_from_populated_store(populated_store: dict[str, str]):

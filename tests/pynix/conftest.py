@@ -22,13 +22,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
+import pynix._util as pynix_util
 import pytest
 import structlog
 from structlog.exceptions import DropEvent
 
 import nanopynix
 import pynix
-import pynix._util as pynix_util
 from pynix import Pynix
 
 if TYPE_CHECKING:
@@ -490,7 +490,7 @@ async def _run(*args: str, env: dict[str, str] | None = None) -> bytes:
 
 
 @contextlib.contextmanager
-def _patched_environ(values: dict[str, str]) -> Generator[None, None, None]:
+def _patched_environ(values: dict[str, str]) -> Generator[None]:
     old_values: dict[str, str | None] = {key: os.environ.get(key) for key in values}
     os.environ.update(values)
     try:
@@ -504,7 +504,7 @@ def _patched_environ(values: dict[str, str]) -> Generator[None, None, None]:
 
 
 @contextlib.contextmanager
-def _pynix_configure_logging_noop() -> Generator[None, None, None]:
+def _pynix_configure_logging_noop() -> Generator[None]:
     old_configure_logging = pynix_util.configure_logging
     old_public_configure_logging = pynix.configure_logging
     pynix_util.configure_logging = lambda: None
@@ -517,7 +517,7 @@ def _pynix_configure_logging_noop() -> Generator[None, None, None]:
 
 
 @contextlib.contextmanager
-def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
+def _nanopynix_default_verbosity(verbosity: int) -> Generator[None]:
     old_session = nanopynix.Session
 
     class VerboseSession(old_session):
@@ -533,7 +533,7 @@ def _nanopynix_default_verbosity(verbosity: int) -> Generator[None, None, None]:
 
 
 @contextlib.contextmanager
-def _nanopynix_isolated_store(store_root: Path) -> Generator[None, None, None]:
+def _nanopynix_isolated_store(store_root: Path) -> Generator[None]:
     old_session = nanopynix.Session
     build_dir = store_root / "nix" / "var" / "nix" / "builds"
 
@@ -569,7 +569,7 @@ def _nanopynix_isolated_store(store_root: Path) -> Generator[None, None, None]:
 
 
 @contextlib.contextmanager
-def _pynix_test_context(test_name: str) -> Generator[None, None, None]:
+def _pynix_test_context(test_name: str) -> Generator[None]:
     token = _CURRENT_PYNIX_TEST.set(test_name)
     try:
         yield

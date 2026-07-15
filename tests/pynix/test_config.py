@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
-
-import pytest
+from typing import TYPE_CHECKING
 
 from pynix import Pynix
+
+if TYPE_CHECKING:
+    import pytest
 
 
 async def test_config_show(capsys: pytest.CaptureFixture[str]) -> None:
