@@ -30,6 +30,8 @@ _HELP = """Commands:
   :ll, :last-loaded      Show names from the most recent load
   :p, :print <expr>      Evaluate and print an expression
   :run <expr>             Build a derivation and run its main program
+  :exec <list>            Realise a Nix argv list and execute it
+  :shell <expr>           Realise a Nix string and execute it with the shell
   :r, :reload            Reload files and flakes
   :t, :type <expr>       Show an expression's Nix type
   :q, :quit              Exit the REPL
@@ -89,6 +91,12 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any) -> None:
             if command == ":run":
                 await _run_derivation(await repl.string(argument))
                 continue
+            if command == ":exec":
+                await _exec_argv(await (await repl.string(argument)).realise_argv())
+                continue
+            if command == ":shell":
+                await _shell(await (await repl.string(argument)).realise_string())
+                continue
             if command in {":a", ":add"}:
                 await add_attrs(await repl.string(argument))
                 continue
@@ -119,7 +127,7 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any) -> None:
 
 
 class ReplRunError(RuntimeError):
-    """A derivation could not be selected or started by ``:run``."""
+    """A command could not be selected or started by the REPL."""
 
 
 async def _run_derivation(value: Any) -> int:
@@ -129,9 +137,7 @@ async def _run_derivation(value: Any) -> int:
         print_formatted_text(f"warning: {warning}")
 
     outputs = await value.build()
-    out_path = outputs.get("out")
-    if out_path is None:
-        raise ReplRunError("derivation has no 'out' output to run")
+    out_path = _primary_output(outputs)
     program = Path(out_path) / "bin" / main_program
     try:
         process = await asyncio.create_subprocess_exec(str(program))
@@ -140,6 +146,41 @@ async def _run_derivation(value: Any) -> int:
     return_code = await process.wait()
     if return_code != 0:
         print_formatted_text(f"warning: {program} exited with status {return_code}")
+    return return_code
+
+
+async def _exec_argv(argv: list[str]) -> int:
+    """Execute a realised Nix argv list without shell parsing."""
+    if not argv:
+        raise ReplRunError(":exec command list is empty")
+    try:
+        process = await asyncio.create_subprocess_exec(*argv)
+    except OSError as exc:
+        raise ReplRunError(f"cannot run {argv[0]!r}: {exc.strerror}") from exc
+    return_code = await process.wait()
+    if return_code != 0:
+        print_formatted_text(f"warning: {argv[0]} exited with status {return_code}")
+    return return_code
+
+
+def _primary_output(outputs: dict[str, str]) -> str:
+    out_path = outputs.get("out")
+    if out_path is None:
+        raise ReplRunError("derivation has no 'out' output")
+    return out_path
+
+
+async def _shell(command: str) -> int:
+    """Execute a realised Nix string with the user's shell."""
+    if not command:
+        raise ReplRunError(":shell command is empty")
+    try:
+        process = await asyncio.create_subprocess_shell(command)
+    except OSError as exc:
+        raise ReplRunError(f"cannot start shell: {exc.strerror}") from exc
+    return_code = await process.wait()
+    if return_code != 0:
+        print_formatted_text(f"warning: shell exited with status {return_code}")
     return return_code
 
 

@@ -42,11 +42,27 @@ class _RunValue:
         return self._outputs
 
 
+class _CommandValue:
+    def __init__(self, *, argv: list[str] | None = None, command: str | None = None) -> None:
+        self._argv = argv
+        self._command = command
+
+    async def realise_argv(self) -> list[str]:
+        if self._argv is None:
+            raise AssertionError("unexpected :exec value")
+        return self._argv
+
+    async def realise_string(self) -> str:
+        if self._command is None:
+            raise AssertionError("unexpected :shell value")
+        return self._command
+
+
 class _Repl:
     def __init__(self) -> None:
         self.lines: list[str] = []
         self.loaded_files: list[str] = []
-        self.value: _Value | _RunValue = _Value()
+        self.value: _Value | _RunValue | _CommandValue = _Value()
 
     async def line(self, text: str) -> _Value | None:
         self.lines.append(text)
@@ -59,7 +75,7 @@ class _Repl:
     async def add_attrs(self, _value: _Value) -> list[str]:
         return ["answer"]
 
-    async def string(self, _expr: str) -> _Value | _RunValue:
+    async def string(self, _expr: str) -> _Value | _RunValue | _CommandValue:
         return self.value
 
 
@@ -119,6 +135,32 @@ async def test_repl_run_command_runs_evaluated_derivation(tmp_path: Path, monkey
     await _run_repl_loop(repl, _Prompt([":run package", ":quit"]))
 
     assert marker.read_text() == "ran\n"
+    assert output == [_HELP]
+
+
+async def test_repl_exec_runs_realised_argv_list(tmp_path: Path, monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+    marker = tmp_path / "exec-ran"
+    repl = _Repl()
+    repl.value = _CommandValue(argv=["/bin/sh", "-c", f"echo exec > {marker}"])
+
+    await _run_repl_loop(repl, _Prompt([":exec [ command ]", ":quit"]))
+
+    assert marker.read_text() == "exec\n"
+    assert output == [_HELP]
+
+
+async def test_repl_shell_runs_realised_string(tmp_path: Path, monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+    marker = tmp_path / "shell-ran"
+    repl = _Repl()
+    repl.value = _CommandValue(command=f"echo shell > {marker}")
+
+    await _run_repl_loop(repl, _Prompt([":shell command", ":quit"]))
+
+    assert marker.read_text() == "shell\n"
     assert output == [_HELP]
 
 

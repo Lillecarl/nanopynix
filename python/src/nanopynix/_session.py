@@ -450,6 +450,22 @@ class ValueProxy:
 
         return _json.loads(resp.json)
 
+    async def realise_string(self, *, timeout: float | None = None) -> str:
+        """Coerce this value to a string and realise its Nix string context."""
+        await self._ensure_resolved(timeout=timeout)
+        from nanopynix_proto.nix.eval import RealiseStringRequest
+
+        response = await self._ctx.proxy.realise_string(RealiseStringRequest(handle=self.handle))
+        return response.value
+
+    async def realise_argv(self, *, timeout: float | None = None) -> list[str]:
+        """Coerce a Nix list to argv and realise all of its string contexts."""
+        await self._ensure_resolved(timeout=timeout)
+        from nanopynix_proto.nix.eval import RealiseArgvRequest
+
+        response = await self._ctx.proxy.realise_argv(RealiseArgvRequest(handle=self.handle))
+        return list(response.argv)
+
     async def build(
         self,
         *,
