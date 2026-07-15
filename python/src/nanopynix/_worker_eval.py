@@ -44,6 +44,9 @@ from nanopynix_proto.nix.eval import (
     ReleaseResponse,
     ReplProcessLineRequest,
     ReplProcessLineResponse,
+    ReplAddAttrsRequest,
+    ReplAddAttrsResponse,
+    ReplLoadFileRequest,
     TypeNameRequest,
     TypeNameResponse,
     WriteLockFileRequest,
@@ -199,6 +202,12 @@ class EvalServiceHandler(EvalServiceBase):
         value = es.repl_eval_file(message.path) if es.repl_active() else es.eval_file(message.path)
         return self._export(value)
 
+    async def repl_load_file(self, message: ReplLoadFileRequest) -> common_pb.ValueHandle:
+        return await self._state.executor.run(self._do_repl_load_file, message)
+
+    def _do_repl_load_file(self, message: ReplLoadFileRequest) -> common_pb.ValueHandle:
+        return self._export(self._get_es(message.store_handle).repl_load_file(message.path))
+
     async def eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
         return await self._state.executor.run(self._do_eval_string, message)
 
@@ -224,6 +233,12 @@ class EvalServiceHandler(EvalServiceBase):
         if value is None:
             return ReplProcessLineResponse(is_binding=True)
         return ReplProcessLineResponse(is_binding=False, value=self._export(value))
+
+    async def repl_add_attrs(self, message: ReplAddAttrsRequest) -> ReplAddAttrsResponse:
+        return await self._state.executor.run(self._do_repl_add_attrs, message)
+
+    def _do_repl_add_attrs(self, message: ReplAddAttrsRequest) -> ReplAddAttrsResponse:
+        return ReplAddAttrsResponse(names=self._get_es().repl_add_attrs(self._resolve(message.handle)))
 
     async def force(self, message: ForceRequest) -> common_pb.ForceValue:
         return await self._state.executor.run(self._do_force, message)

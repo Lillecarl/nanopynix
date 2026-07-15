@@ -18,6 +18,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(NIX_UTIL REQUIRED nix-util)
 pkg_check_modules(NIX_STORE REQUIRED nix-store)
 pkg_check_modules(NIX_EXPR REQUIRED nix-expr)
+pkg_check_modules(NIX_CMD REQUIRED nix-cmd)
 
 # Nix's C++ bindings are a release stream, not an independent feature matrix.
 # Compatibility uses ordered release bands: < 2.32, < 2.35, then the latest
@@ -72,9 +73,9 @@ endif()
 if(BUILD_EXPR)
   nanobind_add_module(nanopynix_expr src/nix_expr.cpp)
   target_include_directories(nanopynix_expr PRIVATE
-    ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
+    ${NIX_CMD_INCLUDE_DIRS} ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
   target_link_libraries(nanopynix_expr PRIVATE
-    ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
+    ${NIX_CMD_LIBRARIES} ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
   target_compile_options(nanopynix_expr PRIVATE -std=c++23)
   nanopynix_target_uses_nix_compat(nanopynix_expr)
 endif()

@@ -1004,3 +1004,26 @@ class ReplSession(EvalSession):
         if response.is_binding:
             return None
         return self._proxy_context().value(response.value.handle, response.value.type)
+
+    async def load_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
+        """Load a Nix expression file as ``nix repl :load`` does.
+
+        Nix auto-calls a top-level function with its default arguments before
+        returning the resulting attribute set for :meth:`add_attrs`.
+        """
+        from nanopynix_proto.nix.eval import ReplLoadFileRequest
+
+        handle = await self._ensure_proxy().repl_load_file(
+            ReplLoadFileRequest(path=path, store_handle=self._store_handle)
+        )
+        return self._proxy_context().value(handle.handle, handle.type)
+
+    async def add_attrs(self, value: ValueProxy, *, timeout: float | None = None) -> list[str]:
+        """Add all attributes from ``value`` to this REPL's lexical scope."""
+        if not self._owner.owns(value):
+            raise ForeignValueError("cannot add attributes from another EvalSession")
+        await value._ensure_resolved(timeout=timeout)  # type: ignore[reportPrivateUsage] -- session owns the value context
+        from nanopynix_proto.nix.eval import ReplAddAttrsRequest
+
+        response = await self._ensure_proxy().repl_add_attrs(ReplAddAttrsRequest(handle=value.handle))
+        return response.names
