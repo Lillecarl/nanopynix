@@ -180,10 +180,12 @@ def test_repl_preserves_nix_error_ansi(monkeypatch: Any) -> None:
     output: list[object] = []
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
 
-    _print_error(NixError("EvalError", "\x1b[31mboom\x1b[0m"))
+    error = NixError("UndefinedVarError", "\x1b[31;1merror:\x1b[0m undefined variable 'll'")
+    _print_error(error)
 
     assert len(output) == 1
     assert isinstance(output[0], ANSI)
+    assert output[0].value == error.msg
 
 
 def test_editor_argv_only_includes_line_for_line_aware_editors(monkeypatch: Any) -> None:
