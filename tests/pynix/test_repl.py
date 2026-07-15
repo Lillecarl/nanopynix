@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 from pynix import Pynix
-from pynix.repl import Repl, _HELP, _run_repl_loop
+from pynix.repl import Repl, _HELP, _derivation_name_part, _main_program, _run_derivation, _run_repl_loop
 
 
 class _Prompt:
@@ -22,10 +23,30 @@ class _Value:
         return {"answer": 42}
 
 
+class _RunValue:
+    def __init__(self, attrs: dict[str, object], outputs: dict[str, str]) -> None:
+        self._attrs = attrs
+        self._outputs = outputs
+
+    async def has_attr(self, name: str) -> bool:
+        return name in self._attrs
+
+    def attr(self, name: str) -> _RunValue:
+        value = self._attrs[name]
+        return value if isinstance(value, _RunValue) else _RunValue({"value": value}, {})
+
+    async def force_json(self) -> object:
+        return self._attrs["value"]
+
+    async def build(self) -> dict[str, str]:
+        return self._outputs
+
+
 class _Repl:
     def __init__(self) -> None:
         self.lines: list[str] = []
         self.loaded_files: list[str] = []
+        self.value: _Value | _RunValue = _Value()
 
     async def line(self, text: str) -> _Value | None:
         self.lines.append(text)
@@ -37,6 +58,9 @@ class _Repl:
 
     async def add_attrs(self, _value: _Value) -> list[str]:
         return ["answer"]
+
+    async def string(self, _expr: str) -> _Value | _RunValue:
+        return self.value
 
 
 async def test_repl_loop_keeps_bindings_and_prints_expression_values(monkeypatch: Any) -> None:
@@ -62,6 +86,52 @@ async def test_repl_load_command_uses_repl_load_file(monkeypatch: Any) -> None:
 
     assert repl.loaded_files == ["."]
     assert output == [_HELP, "Added 1 variables: answer"]
+
+
+async def test_repl_run_prefers_meta_main_program(tmp_path: Path, monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+    out = tmp_path / "out"
+    program = out / "bin" / "actual-program"
+    program.parent.mkdir(parents=True)
+    marker = tmp_path / "ran"
+    program.write_text(f"#!/bin/sh\necho ran > {marker}\n")
+    program.chmod(0o755)
+    value = _RunValue({"meta": _RunValue({"mainProgram": "actual-program"}, {})}, {"out": str(out)})
+
+    assert await _run_derivation(value) == 0
+    assert marker.read_text() == "ran\n"
+    assert output == []
+
+
+async def test_repl_run_command_runs_evaluated_derivation(tmp_path: Path, monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+    out = tmp_path / "out"
+    program = out / "bin" / "run-me"
+    program.parent.mkdir(parents=True)
+    marker = tmp_path / "ran"
+    program.write_text(f"#!/bin/sh\necho ran > {marker}\n")
+    program.chmod(0o755)
+    repl = _Repl()
+    repl.value = _RunValue({"meta": _RunValue({"mainProgram": "run-me"}, {})}, {"out": str(out)})
+
+    await _run_repl_loop(repl, _Prompt([":run package", ":quit"]))
+
+    assert marker.read_text() == "ran\n"
+    assert output == [_HELP]
+
+
+async def test_repl_run_warns_when_using_pname(monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+    value = _RunValue({"pname": "fallback-program"}, {})
+
+    assert await _main_program(value) == (
+        "fallback-program",
+        "derivation has no meta.mainProgram; using pname 'fallback-program'",
+    )
+    assert _derivation_name_part("apache-httpd-2.0.48") == "apache-httpd"
 
 
 def test_repl_is_a_pynix_subcommand() -> None:
