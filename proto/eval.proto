@@ -7,6 +7,8 @@ import "common.proto";
 service EvalService {
   rpc EvalFile(EvalFileRequest) returns (nix.common.ValueHandle);
   rpc EvalString(EvalStringRequest) returns (nix.common.ValueHandle);
+  rpc BeginRepl(BeginReplRequest) returns (BeginReplResponse);
+  rpc ReplProcessLine(ReplProcessLineRequest) returns (ReplProcessLineResponse);
   rpc Force(ForceRequest) returns (nix.common.ForceValue);
   rpc ForceDeep(ForceDeepRequest) returns (nix.common.DeepValue);
   rpc ForceJson(ForceJsonRequest) returns (ForceJsonResponse);
@@ -38,6 +40,21 @@ message EvalStringRequest {
   string expr = 1;
   string source_name = 2;
   int64 store_handle = 3;
+}
+
+message BeginReplRequest {
+  int64 store_handle = 1;
+}
+message BeginReplResponse {}
+
+message ReplProcessLineRequest {
+  string line = 1;
+  string source_name = 2;
+  int64 store_handle = 3;
+}
+message ReplProcessLineResponse {
+  bool is_binding = 1;
+  nix.common.ValueHandle value = 2;
 }
 
 message ForceRequest {

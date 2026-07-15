@@ -93,6 +93,21 @@ async def test_eval_string():
         assert await root.force() == 43
 
 
+async def test_repl_session_persists_bindings(tmp_path: Path):
+    """ReplSession evaluates expressions and files in one persistent Nix scope."""
+    nix_file = tmp_path / "uses-binding.nix"
+    nix_file.write_text("x + 1")
+
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.repl(store) as repl,
+    ):
+        assert await repl.line("x = 41") is None
+        assert await (await repl.string("x + 1")).force() == 42
+        assert await (await repl.file(str(nix_file))).force() == 42
+
+
 async def test_eval_attr_names(tmp_path: Path):
     """attr_names() returns keys of an attrset (insertion order)."""
     nix_file = tmp_path / "test.nix"

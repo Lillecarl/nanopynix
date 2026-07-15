@@ -28,7 +28,7 @@ from nanopynix_proto.nix.common import LogEvent as LogEventProto
 import nanopynix_expr
 from nanopynix._pool import _WorkerManager  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
 from nanopynix._process_title import set_manager_title
-from nanopynix._session import EvalSession
+from nanopynix._session import EvalSession, ReplSession
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.settings import NanopynixSettings, NixSettings, normalize_nix_settings
 from nanopynix.store import StoreHandle
@@ -249,6 +249,21 @@ class Session:
         if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
             raise ValueError("StoreHandle belongs to a different session")
         return EvalSession(
+            self._manager,
+            store.store_handle,
+            session_id=self._session_id,
+            rpc_timeout=self._manager.rpc_timeout,
+        )
+
+    def repl(self, store: StoreHandle) -> ReplSession:
+        """Acquire the worker for a persistent Nix REPL session.
+
+        Bindings entered through :meth:`ReplSession.line` remain available
+        until the returned context manager exits.
+        """
+        if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
+            raise ValueError("StoreHandle belongs to a different session")
+        return ReplSession(
             self._manager,
             store.store_handle,
             session_id=self._session_id,

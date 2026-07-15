@@ -6,6 +6,7 @@
 #include <nanobind/stl/shared_ptr.h>
 
 #include <atomic>
+#include <cctype>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -367,6 +368,154 @@ PyValue PyEvalState::eval_string(const std::string &expr, const std::string &pat
         state->forceValue(*v, nix::noPos);
     }
     return PyValue(v, this, alive);
+}
+
+void PyEvalState::begin_repl() {
+    if (repl_env != nullptr)
+        throw std::runtime_error("REPL scope is already active");
+
+    constexpr size_t repl_env_size = 32768;
+    repl_static_env = std::make_shared<nix::StaticEnv>(nullptr, state->staticBaseEnv);
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+    repl_env = &state->allocEnv(repl_env_size);
+#else
+    repl_env = &state->mem.allocEnv(repl_env_size);
+#endif
+    repl_env->up = &state->baseEnv;
+    repl_displ = 0;
+}
+
+bool PyEvalState::repl_active() const {
+    return repl_env != nullptr;
+}
+
+PyValue PyEvalState::repl_eval_string(const std::string &expr, const std::string &path) {
+    if (repl_env == nullptr || !repl_static_env)
+        throw std::runtime_error("REPL scope is not active");
+
+    nix::Value *v;
+    {
+        nb::gil_scoped_release release;
+        auto *parsedExpr = state->parseExprFromString(
+            expr, state->rootPath(nix::CanonPath(path)), repl_static_env);
+        v = state->allocValue();
+        parsedExpr->eval(*state, *repl_env, *v);
+        state->forceValue(*v, nix::noPos);
+    }
+    return PyValue(v, this, alive);
+}
+
+PyValue PyEvalState::repl_eval_file(const std::string &path) {
+    if (repl_env == nullptr || !repl_static_env)
+        throw std::runtime_error("REPL scope is not active");
+
+    nix::Value *v;
+    {
+        nb::gil_scoped_release release;
+        auto sourcePath = state->rootPath(nix::CanonPath(path));
+        auto *parsedExpr = state->parseExprFromFile(sourcePath, repl_static_env);
+        v = state->allocValue();
+        parsedExpr->eval(*state, *repl_env, *v);
+    }
+    return PyValue(v, this, alive);
+}
+
+std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, const std::string &path) {
+    if (repl_env == nullptr || !repl_static_env)
+        throw std::runtime_error("REPL scope is not active");
+
+    nb::gil_scoped_release release;
+    auto basePath = state->rootPath(nix::CanonPath(path));
+
+    auto add_binding = [&](nix::Symbol symbol, nix::Expr *expr) {
+        if (repl_displ >= 32768)
+            throw std::runtime_error("REPL environment is full");
+        nix::Value &value(*state->allocValue());
+        value.mkThunk(repl_env, expr);
+        if (auto oldVar = repl_static_env->find(symbol); oldVar != repl_static_env->vars.end())
+            repl_static_env->vars.erase(oldVar);
+        repl_static_env->vars.emplace_back(symbol, repl_displ);
+        repl_static_env->sort();
+        repl_env->values[repl_displ++] = &value;
+    };
+
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+    // Nix 2.31 has no parseReplBindings(). Preserve the core REPL contract
+    // with simple identifier assignments; newer Nix versions use its full
+    // binding parser below (including inherit forms).
+    auto trim = [](std::string_view value) {
+        auto first = value.find_first_not_of(" \t\n\r");
+        if (first == std::string_view::npos)
+            return std::string_view{};
+        return value.substr(first, value.find_last_not_of(" \t\n\r") - first + 1);
+    };
+    auto is_identifier = [](std::string_view name) {
+        if (name.empty() || !(std::isalpha(static_cast<unsigned char>(name.front())) || name.front() == '_'))
+            return false;
+        for (char ch : name.substr(1)) {
+            if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '-' || ch == '\''))
+                return false;
+        }
+        return true;
+    };
+    size_t assignment = std::string::npos;
+    for (size_t i = 0; i < line.size(); ++i) {
+        if (line[i] != '=')
+            continue;
+        bool adjacentEquals = (i > 0 && line[i - 1] == '=') || (i + 1 < line.size() && line[i + 1] == '=');
+        if (!adjacentEquals) {
+            assignment = i;
+            break;
+        }
+    }
+    if (assignment != std::string::npos) {
+        auto name = trim(std::string_view(line).substr(0, assignment));
+        auto expression = trim(std::string_view(line).substr(assignment + 1));
+        if (!expression.empty() && expression.back() == ';')
+            expression = trim(expression.substr(0, expression.size() - 1));
+        if (is_identifier(name) && !expression.empty()) {
+            auto *parsedExpr = state->parseExprFromString(std::string(expression), basePath, repl_static_env);
+            add_binding(state->symbols.create(name), parsedExpr);
+            return std::nullopt;
+        }
+    }
+    auto *parsedExpr = state->parseExprFromString(line, basePath, repl_static_env);
+    auto *value = state->allocValue();
+    parsedExpr->eval(*state, *repl_env, *value);
+    state->forceValue(*value, nix::noPos);
+    return PyValue(value, this, alive);
+#else
+    nix::ExprAttrs *bindings = nullptr;
+    try {
+        bindings = state->parseReplBindings(line, basePath, repl_static_env);
+    } catch (nix::ParseError &) {
+        try {
+            bindings = state->parseReplBindings(line + ";", line, basePath, repl_static_env);
+        } catch (nix::ParseError &) {
+            auto *parsedExpr = state->parseExprFromString(line, basePath, repl_static_env);
+            auto *value = state->allocValue();
+            parsedExpr->eval(*state, *repl_env, *value);
+            state->forceValue(*value, nix::noPos);
+            return PyValue(value, this, alive);
+        }
+    }
+
+    auto *inheritEnv = bindings->inheritFromExprs
+        ? bindings->buildInheritFromEnv(*state, *repl_env)
+        : nullptr;
+    for (auto &[symbol, def] : *bindings->attrs) {
+        if (repl_displ >= 32768)
+            throw std::runtime_error("REPL environment is full");
+        nix::Value &value(*state->allocValue());
+        value.mkThunk(def.chooseByKind(repl_env, repl_env, inheritEnv), def.e);
+        if (auto oldVar = repl_static_env->find(symbol); oldVar != repl_static_env->vars.end())
+            repl_static_env->vars.erase(oldVar);
+        repl_static_env->vars.emplace_back(symbol, repl_displ);
+        repl_static_env->sort();
+        repl_env->values[repl_displ++] = &value;
+    }
+    return std::nullopt;
+#endif
 }
 
 PyValue PyEvalState::alloc_value() {
@@ -927,6 +1076,13 @@ static void bind_eval_state(nb::module_ &m) {
         .def("eval_string", &PyEvalState::eval_string,
              "expr"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
         .def("eval_file", &PyEvalState::eval_file, "path"_a, nb::keep_alive<0, 1>())
+        .def("begin_repl", &PyEvalState::begin_repl)
+        .def("repl_active", &PyEvalState::repl_active)
+        .def("repl_eval_string", &PyEvalState::repl_eval_string,
+             "expr"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
+        .def("repl_eval_file", &PyEvalState::repl_eval_file, "path"_a, nb::keep_alive<0, 1>())
+        .def("repl_process_line", &PyEvalState::repl_process_line,
+             "line"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
         .def("alloc_value", &PyEvalState::alloc_value, nb::keep_alive<0, 1>())
         // Handle management (worker-internal, exported for RPC dispatch)
         // The Python HandleRegistry owns handle allocation; C++ manages GC refs.

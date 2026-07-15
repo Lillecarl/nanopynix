@@ -971,3 +971,36 @@ class EvalSession:
 
         ref_str = ref if isinstance(ref, str) else str(ref)
         return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str, store_handle=self._store_handle))
+
+
+class ReplSession(EvalSession):
+    """An :class:`EvalSession` with a persistent Nix lexical scope.
+
+    Bindings submitted with :meth:`line` are available to later calls to
+    :meth:`string` and :meth:`file` until this context manager closes.
+    """
+
+    async def open(self) -> None:
+        await super().open()
+        try:
+            from nanopynix_proto.nix.eval import BeginReplRequest
+
+            await self._ensure_proxy().begin_repl(BeginReplRequest(store_handle=self._store_handle))
+        except BaseException:
+            await self.close()
+            raise
+
+    async def line(self, text: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy | None:
+        """Process one Nix REPL line.
+
+        A binding such as ``x = 1`` returns ``None``. An expression returns a
+        session-bound :class:`ValueProxy`.
+        """
+        from nanopynix_proto.nix.eval import ReplProcessLineRequest
+
+        response = await self._ensure_proxy().repl_process_line(
+            ReplProcessLineRequest(line=text, source_name=path, store_handle=self._store_handle)
+        )
+        if response.is_binding:
+            return None
+        return self._proxy_context().value(response.value.handle, response.value.type)
