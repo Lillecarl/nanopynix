@@ -14,6 +14,7 @@ from nanopynix_proto.nix.common import (
     CallArgList,
     DeepValue,
     ForceValue,
+    LogLevel,
     NullValue,
     RemoteCallArg,
     ScalarValue,
@@ -67,6 +68,7 @@ from nanopynix.exceptions import (
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
 from nanopynix.settings import DEFAULT_LINE_EDITORS
+from nanopynix.verbosity import LogLevelInput, normalize_log_level
 from nanopynix_store import BuildMode
 
 if TYPE_CHECKING:
@@ -832,6 +834,16 @@ class EvalSession:
             self._session_id,
         )
         self._active[0] = True
+
+    async def get_verbosity(self) -> LogLevel:
+        """Return the current Nix log verbosity while this eval session is open."""
+        self._ensure_proxy()
+        return await self._manager.get_verbosity()
+
+    async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
+        """Update Nix log verbosity while retaining this eval session's scope."""
+        self._ensure_proxy()
+        return await self._manager.set_verbosity(normalize_log_level(verbosity))
 
     async def close(self) -> None:
         self._active[0] = False

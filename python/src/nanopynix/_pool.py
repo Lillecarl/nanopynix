@@ -23,7 +23,14 @@ from grpclib_transports.multiprocessing import multiprocessing_worker_with_backc
 from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
 from nanopynix_proto.nix.eval import EvalServiceStub
 from nanopynix_proto.nix.store import StoreServiceStub
-from nanopynix_proto.nix.worker import InitRequest, ShutdownRequest, SubscribeLogsRequest, WorkerServiceStub
+from nanopynix_proto.nix.worker import (
+    GetVerbosityRequest,
+    InitRequest,
+    SetVerbosityRequest,
+    ShutdownRequest,
+    SubscribeLogsRequest,
+    WorkerServiceStub,
+)
 
 from nanopynix._manager import ManagerPrimopServiceHandler
 from nanopynix._worker import worker_service_factory
@@ -413,6 +420,20 @@ class _WorkerManager:
             _write_oom_score_adj(pid, value)
         except OSError:
             logger.debug("failed to set worker oom_score_adj", exc_info=True)
+
+    async def get_verbosity(self) -> LogLevel:
+        """Return the current worker-side Nix log verbosity."""
+        response = await _grpc_call(self._worker_stub.get_verbosity(GetVerbosityRequest(), timeout=self.rpc_timeout))
+        self._verbosity = response.verbosity
+        return response.verbosity
+
+    async def set_verbosity(self, verbosity: LogLevel) -> LogLevel:
+        """Set the worker-side Nix log verbosity."""
+        response = await _grpc_call(
+            self._worker_stub.set_verbosity(SetVerbosityRequest(verbosity=verbosity), timeout=self.rpc_timeout)
+        )
+        self._verbosity = response.verbosity
+        return response.verbosity
 
     @property
     def _worker_stub(self) -> WorkerServiceStub:

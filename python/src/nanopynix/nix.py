@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
+from nanopynix_proto.nix.common import LogLevel
 
 import nanopynix_expr
 from nanopynix._pool import _WorkerManager  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
@@ -216,6 +217,14 @@ class Session:
     def capture_logs(self) -> LogCapture:
         """Record typed log events during an async context block."""
         return LogCapture(self._manager)
+
+    async def get_verbosity(self) -> LogLevel:
+        """Return the worker-side Nix log verbosity."""
+        return await self._manager.get_verbosity()
+
+    async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
+        """Set the worker-side Nix log verbosity for this session."""
+        return await self._manager.set_verbosity(normalize_log_level(verbosity))
 
     def subscribe(self, callback: Any) -> Any:
         """Subscribe a callback to live log events.
