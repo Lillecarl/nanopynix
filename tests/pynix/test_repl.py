@@ -146,10 +146,21 @@ async def test_repl_loads_file_target_into_initial_scope(monkeypatch: Any) -> No
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _load_initial_target(repl, EvaluationTarget(file=Path("default.nix"), attr=None, flake=None))  # type: ignore[arg-type] -- narrow REPL fake
+    names = await _load_initial_target(repl, EvaluationTarget(file=Path("default.nix"), attr=None, flake=None))  # type: ignore[arg-type] -- narrow REPL fake
 
+    assert names == ["answer"]
     assert repl.loaded_files == ["default.nix"]
     assert output == ["Added 1 variables: answer"]
+
+
+async def test_repl_last_loaded_includes_initial_target(monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+    repl = _Repl()
+
+    await _run_repl_loop(repl, _Prompt([":ll", ":quit"]), initial_loaded=["flake", "pkgs"])
+
+    assert output == [_HELP, "flake pkgs"]
 
 
 async def test_repl_run_prefers_meta_main_program(tmp_path: Path, monkeypatch: Any) -> None:

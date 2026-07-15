@@ -120,10 +120,10 @@ class _ReplCompleter(Completer):
             return []
 
 
-async def _run_repl_loop(repl: ReplSession, prompt: Any) -> None:
+async def _run_repl_loop(repl: ReplSession, prompt: Any, *, initial_loaded: list[str] | None = None) -> None:
     """Read and evaluate lines until the user exits the REPL."""
     loaded: list[tuple[str, str]] = []
-    last_loaded: list[str] = []
+    last_loaded = list(initial_loaded or [])
 
     async def add_attrs(value: Any) -> list[str]:
         nonlocal last_loaded
@@ -208,13 +208,14 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any) -> None:
             print_formatted_text(f"error: {exc}")
 
 
-async def _load_initial_target(repl: ReplSession, target: EvaluationTarget) -> None:
+async def _load_initial_target(repl: ReplSession, target: EvaluationTarget) -> list[str]:
     """Load a command-line target into the persistent REPL scope."""
     if target.file is None and target.flake is None:
-        return
+        return []
     value = await load_repl_target(target, repl)
     names = await repl.add_attrs(value)
     print_formatted_text(f"Added {len(names)} variables: {' '.join(names)}")
+    return names
 
 
 class ReplRunError(RuntimeError):
@@ -338,8 +339,8 @@ class Repl(Command):
             prompt: PromptSession[str] = PromptSession(completer=_ReplCompleter(repl), complete_while_typing=True)
             with patch_stdout():
                 try:
-                    await _load_initial_target(repl, target)
+                    initial_loaded = await _load_initial_target(repl, target)
                 except EvaluationTargetError as exc:
                     print_formatted_text(f"error: {exc}")
                     raise SystemExit(1) from exc
-                await _run_repl_loop(repl, prompt)
+                await _run_repl_loop(repl, prompt, initial_loaded=initial_loaded)
