@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from coolname import generate_slug
+from coolname import generate_slug  # type: ignore[reportMissingTypeStubs] -- coolname has no PEP 561 stubs
 from setproctitle import setproctitle
 
 _manager_project_name = "nanopynix"

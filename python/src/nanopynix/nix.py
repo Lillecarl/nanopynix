@@ -129,7 +129,7 @@ class Session:
     ) -> None:
         set_manager_title()
         if nix_conf is not None:
-            if not isinstance(nix_conf, Path):
+            if not isinstance(nix_conf, Path):  # type: ignore[reportUnnecessaryIsInstance] -- runtime guard for untyped callers
                 raise TypeError("nix_conf must be a pathlib.Path or None")
             if not nix_conf.exists():
                 raise FileNotFoundError(nix_conf)

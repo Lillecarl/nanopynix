@@ -51,6 +51,10 @@ what to inspect next, then query `/tmp/pytest.log` for the full failure context.
 - Do not hide unexpected failures with `except Exception: pass`. Log unexpected
   exceptions. Use `contextlib.suppress(...)` only for expected ignored
   exceptions, with a comment explaining why they are safe to ignore.
+- Every lint or type-checker suppression must name the specific rule and give
+  an inline justification. Use the form
+  `# type: ignore[rule-name] -- reason` or `# noqa: RULE -- reason`; do not
+  use blanket or unexplained suppressions.
 
 # Banned patterns
 

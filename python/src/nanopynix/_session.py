@@ -999,6 +999,10 @@ class ReplSession(EvalSession):
         """Editor-name substrings that support Nix's ``+LINE`` argument."""
         return self._line_editors
 
+    async def __aenter__(self) -> ReplSession:
+        await self.open()
+        return self
+
     async def open(self) -> None:
         await super().open()
         try:

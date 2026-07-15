@@ -8,7 +8,7 @@ import os
 import re
 import shlex
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, override
 
 from clypi import Command, arg
 from prompt_toolkit import PromptSession
@@ -395,7 +395,6 @@ class Repl(Command):
             nix.store(self.store) as store,
             nix.repl(store) as repl,
         ):
-            repl = cast("ReplSession", repl)
             prompt: PromptSession[str] = PromptSession(completer=_ReplCompleter(repl), complete_while_typing=True)
             with patch_stdout():
                 try:
