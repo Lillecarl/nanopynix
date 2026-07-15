@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 def test_main_identifies_pynix_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str | None]] = []
     command = MagicMock()
-    monkeypatch.setattr(pynix, "set_manager_title", lambda name: calls.append(("title", name)))
+    monkeypatch.setattr(pynix, "set_manager_title", lambda name: calls.append(("title", name)))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
     monkeypatch.setattr(pynix, "configure_logging", lambda: calls.append(("logging", None)))
     monkeypatch.setattr(pynix.Pynix, "parse", lambda: command)
 

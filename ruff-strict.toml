@@ -66,6 +66,9 @@ select = [
   "TD",
   # flake8-logging
   "LOG",
+  # pygrep-hooks: require targeted type-checker and lint suppressions
+  "PGH003",
+  "PGH004",
   # pylint — import should be at top-level
   "PLC0415",
 ]

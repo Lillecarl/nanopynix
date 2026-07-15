@@ -16,7 +16,7 @@ import nanopynix
 import nanopynix_store
 
 NIX_GC_ROOTS_BUG = pytest.mark.skipif(
-    nanopynix.build_info()["nix_version"].startswith(("2.31.", "2.34.")),
+    nanopynix.build_info()["nix_version"].startswith(("2.31.", "2.34.")),  # type: ignore[reportUnknownArgumentType] -- build_info from C++ extension
     reason="Nix 2.31 and 2.34 findRoots/collectGarbage crash on nonnumeric temproots filenames; https://github.com/NixOS/nix/issues/16138",
 )
 

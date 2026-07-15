@@ -76,7 +76,7 @@ from nanopynix_flake import get_flake, lock_flake, parse_flake_ref
 from nanopynix_main import init_nix, init_plugins
 from nanopynix_store import BuildMode, open_store
 from nanopynix_util import (
-    build_info,
+    build_info,  # type: ignore[reportUnknownVariableType] -- C++ extension without type stubs
     current_system,
     enable_experimental_feature,
     get_setting,

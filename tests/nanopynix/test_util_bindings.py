@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 import nanopynix
@@ -10,11 +12,11 @@ import nanopynix_util
 
 
 def test_build_info_reports_compile_time_compatibility() -> None:
-    info = nanopynix_util.build_info()
+    info: Any = nanopynix_util.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
 
     assert isinstance(info["nix_version"], str)
     assert info["nix_version"]
-    assert set(info["capabilities"]) == {
+    assert set(info["capabilities"]) == {  # type: ignore[reportUnknownArgumentType] -- build_info keys are dynamic
         "logger_unique_ptr",
         "build_result_sum",
         "eval_state_mem",
@@ -24,15 +26,15 @@ def test_build_info_reports_compile_time_compatibility() -> None:
 
 
 def test_build_info_is_available_from_nanopynix() -> None:
-    assert nanopynix.build_info() == nanopynix_util.build_info()
+    assert nanopynix.build_info() == nanopynix_util.build_info()  # type: ignore[reportUnknownVariableType] -- build_info from C++ extension
 
 
 def test_unsupported_primop_registration_fails_early() -> None:
-    if nanopynix.build_info()["capabilities"]["dynamic_primop_registration"]:
+    if nanopynix.build_info()["capabilities"]["dynamic_primop_registration"]:  # type: ignore[reportUnknownMemberType, reportUnknownVariableType] -- build_info from C++ extension
         pytest.skip("linked Nix supports dynamic primop registration")
 
     with pytest.raises(RuntimeError, match="fixed-capacity builtin attribute set"):
-        nanopynix.register_primop("unsupported", 1, ["value"], "", lambda value: value)
+        nanopynix.register_primop("unsupported", 1, ["value"], "", lambda value: value)  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- primop callbacks receive Any from Nix
 
 
 class TestCurrentSystem:

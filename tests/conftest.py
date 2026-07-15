@@ -50,7 +50,8 @@ def _version_at_least(actual: tuple[int, ...], required: tuple[int, ...]) -> boo
 
 
 def pytest_collection_modifyitems(_config: pytest.Config, items: list[pytest.Item]) -> None:
-    actual = _nix_version_tuple(nanopynix.build_info()["nix_version"])
+    build_info: Any = nanopynix.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+    actual = _nix_version_tuple(build_info["nix_version"])
     for item in items:
         marker = item.get_closest_marker("required_nix_version")
         if marker is None:
@@ -107,7 +108,8 @@ def init_expr() -> None:
 @pytest.fixture(scope="session", autouse=True)
 def _register_test_primops():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Register all test primops before EvalState is created."""
-    if not nanopynix.build_info()["capabilities"]["dynamic_primop_registration"]:
+    build_info: Any = nanopynix.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+    if not build_info["capabilities"]["dynamic_primop_registration"]:
         return
     nanopynix.register_primop("test_add_one", 1, ["x"], "increment by 1", lambda x: x + 1)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     nanopynix.register_primop("test_add", 2, ["x", "y"], "add two ints", lambda x, y: x + y)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix

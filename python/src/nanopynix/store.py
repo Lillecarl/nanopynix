@@ -11,7 +11,7 @@ from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
 from nanopynix._pool import (  # type: ignore[reportPrivateUsage] -- cross-module internal utility
     WorkerBusyError,
-    _grpc_call,
+    _grpc_call,  # type: ignore[reportPrivateUsage] -- cross-module internal utility
 )
 from nanopynix._rpc_proxy import RpcProxyMixin
 

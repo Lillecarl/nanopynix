@@ -59,7 +59,7 @@ def test_worker_opens_auto_store_with_explicit_auto_uri(monkeypatch: pytest.Monk
 def test_worker_factory_sets_worker_title(monkeypatch: pytest.MonkeyPatch) -> None:
     titled: list[None] = []
     monkeypatch.setattr(worker, "set_worker_title", lambda: titled.append(None) or "quiet-otter")
-    monkeypatch.setattr(worker.nanopynix_util, "install_logger", lambda _callback: None)
+    monkeypatch.setattr(worker.nanopynix_util, "install_logger", lambda _callback: None)  # type: ignore[reportUnknownLambdaType] -- lambda receives Any from setattr
 
     worker.worker_service_factory()
 
@@ -68,7 +68,7 @@ def test_worker_factory_sets_worker_title(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> None:
     titles: list[str] = []
-    monkeypatch.setattr(worker, "set_process_title", lambda title, **_kwargs: titles.append(title))
+    monkeypatch.setattr(worker, "set_process_title", lambda title, **_kwargs: titles.append(title))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
 
     class Store:
         def __init__(self, uri: str) -> None:
@@ -80,7 +80,7 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
         def get_store_dir(self) -> str:
             return "/nix/store"
 
-    monkeypatch.setattr(worker.nanopynix_store, "open_store", lambda uri: Store(uri))
+    monkeypatch.setattr(worker.nanopynix_store, "open_store", lambda uri: Store(uri))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
     state = WorkerState()
     state.worker_subname = "quiet-otter"
     handler = WorkerServiceHandler(state)

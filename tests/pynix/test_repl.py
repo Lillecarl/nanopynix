@@ -1,5 +1,8 @@
 """Tests for the interactive pynix REPL loop."""
 
+# pyright: reportPrivateUsage=false
+# Tests intentionally access private symbols from pynix.repl
+
 from __future__ import annotations
 
 from collections import deque
@@ -9,7 +12,7 @@ from typing import Any
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import ANSI
-from pynix.repl import (
+from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentionally access private symbols
     _HELP,
     Repl,
     _derivation_name_part,
@@ -134,7 +137,7 @@ async def test_repl_loop_keeps_bindings_and_prints_expression_values(monkeypatch
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt(["answer = 42", "{ inherit answer; }", ":quit"]))
+    await _run_repl_loop(repl, _Prompt(["answer = 42", "{ inherit answer; }", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
 
     assert repl.lines == ["answer = 42", "{ inherit answer; }"]
     assert output == [
@@ -148,7 +151,7 @@ async def test_repl_load_command_uses_repl_load_file(monkeypatch: Any) -> None:
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt([":load .", ":quit"]))
+    await _run_repl_loop(repl, _Prompt([":load .", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
 
     assert repl.loaded_files == ["."]
     assert output == [_HELP, "Added 1 variables: answer"]
@@ -171,7 +174,7 @@ async def test_repl_last_loaded_includes_initial_target(monkeypatch: Any) -> Non
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt([":ll", ":quit"]), initial_loaded=["flake", "pkgs"])
+    await _run_repl_loop(repl, _Prompt([":ll", ":quit"]), initial_loaded=["flake", "pkgs"])  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
 
     assert output == [_HELP, "flake pkgs"]
 
@@ -212,7 +215,7 @@ async def test_repl_edit_reloads_initial_sources(monkeypatch: Any) -> None:
     repl.value = value
 
     await _run_repl_loop(
-        repl,
+        repl,  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
         _Prompt([":edit target", ":quit"]),
         initial_sources=[(":load", "default.nix")],
         line_editors=("hx",),
@@ -252,7 +255,7 @@ async def test_repl_run_command_runs_evaluated_derivation(tmp_path: Path, monkey
     repl = _Repl()
     repl.value = _RunValue({"meta": _RunValue({"mainProgram": "run-me"}, {})}, {"out": str(out)})
 
-    await _run_repl_loop(repl, _Prompt([":run package", ":quit"]))
+    await _run_repl_loop(repl, _Prompt([":run package", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
 
     assert marker.read_text() == "ran\n"
     assert output == [_HELP]
@@ -265,7 +268,7 @@ async def test_repl_exec_runs_realised_argv_list(tmp_path: Path, monkeypatch: An
     repl = _Repl()
     repl.value = _CommandValue(argv=["/bin/sh", "-c", f"echo exec > {marker}"])
 
-    await _run_repl_loop(repl, _Prompt([":exec [ command ]", ":quit"]))
+    await _run_repl_loop(repl, _Prompt([":exec [ command ]", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
 
     assert marker.read_text() == "exec\n"
     assert output == [_HELP]
@@ -278,7 +281,7 @@ async def test_repl_shell_runs_realised_string(tmp_path: Path, monkeypatch: Any)
     repl = _Repl()
     repl.value = _CommandValue(command=f"echo shell > {marker}")
 
-    await _run_repl_loop(repl, _Prompt([":shell command", ":quit"]))
+    await _run_repl_loop(repl, _Prompt([":shell command", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
 
     assert marker.read_text() == "shell\n"
     assert output == [_HELP]

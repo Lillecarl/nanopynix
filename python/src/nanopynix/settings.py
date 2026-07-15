@@ -48,11 +48,12 @@ def _nix_version_at_least(version: str, minimum: str) -> bool:
 
 
 def _field_is_supported(field: Any) -> bool:
-    extras = field.json_schema_extra or {}
-    minimum = extras.get("nix_version_min")
+    extras: dict[str, Any] = field.json_schema_extra or {}
+    minimum: Any = extras.get("nix_version_min")
     if minimum is None:
         return True
-    return _nix_version_at_least(nanopynix_util.build_info()["nix_version"], minimum)
+    build_info_result: Any = nanopynix_util.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+    return _nix_version_at_least(build_info_result["nix_version"], minimum)
 
 
 class NixSettingMetadata(BaseModel):
@@ -213,8 +214,10 @@ class NixSettings(BaseModel):
             if value is None:
                 continue
             if not _field_is_supported(field):
-                minimum = field.json_schema_extra["nix_version_min"]
-                version = nanopynix_util.build_info()["nix_version"]
+                extra: Any = field.json_schema_extra
+                minimum = extra["nix_version_min"]
+                build_info_result: Any = nanopynix_util.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+                version = build_info_result["nix_version"]
                 raise ValueError(f"{_alias(name)} requires Nix {minimum} or newer (running {version})")
             rendered = _render_value(value)
             if rendered == "" and not isinstance(value, str):
