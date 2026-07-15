@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 
 DEFAULT_EXPERIMENTAL_FEATURES = ("flakes", "nix-command")
+DEFAULT_LINE_EDITORS = ("emacs", "nano", "vim", "kak", "hx")
 type SettingsSurface = Literal["global", "eval", "fetch", "flake"]
 
 
@@ -313,6 +314,7 @@ class NanopynixSettings(BaseSettings):
 
     rpc_timeout: float = Field(default=300.0, gt=0)
     shutdown_timeout: float = Field(default=5.0, gt=0)
+    line_editors: list[str] = Field(default_factory=lambda: list(DEFAULT_LINE_EDITORS))
 
 
 def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None) -> NixSettings:

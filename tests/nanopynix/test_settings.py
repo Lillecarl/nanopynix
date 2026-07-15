@@ -10,6 +10,7 @@ from pydantic import ValidationError
 # import nanopynix
 from nanopynix import Session
 from nanopynix.settings import (
+    DEFAULT_LINE_EDITORS,
     NanopynixSettings,
     NixEvalSettings,
     NixFetchSettings,
@@ -74,11 +75,17 @@ def test_nix_settings_env_reads_pynix_prefixed_values(monkeypatch: pytest.Monkey
 def test_nanopynix_settings_env_reads_runtime_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NANOPYNIX_RPC_TIMEOUT", "30")
     monkeypatch.setenv("NANOPYNIX_SHUTDOWN_TIMEOUT", "10")
+    monkeypatch.setenv("NANOPYNIX_LINE_EDITORS", '["hx", "code"]')
 
     settings = NanopynixSettings()
 
     assert settings.rpc_timeout == 30
     assert settings.shutdown_timeout == 10
+    assert settings.line_editors == ["hx", "code"]
+
+
+def test_nanopynix_settings_defaults_line_editors() -> None:
+    assert NanopynixSettings().line_editors == list(DEFAULT_LINE_EDITORS)
 
 
 def test_session_uses_nanopynix_rpc_timeout() -> None:

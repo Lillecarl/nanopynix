@@ -64,6 +64,7 @@ struct PyEvalState {
     std::optional<PyValue> repl_process_line(const std::string &line, const std::string &path = "<string>");
     std::vector<std::string> repl_add_attrs(PyValue attrs);
     std::vector<std::string> repl_scope_names() const;
+    void reset_file_cache();
     PyValue alloc_value();
 
     // ── Handle management ───────────────────────────────────────

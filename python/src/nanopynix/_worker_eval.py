@@ -21,6 +21,8 @@ from nanopynix_proto.nix.eval import (
     BuildResponse,
     CallLockedFlakeRequest,
     CallRequest,
+    EditLocationRequest,
+    EditLocationResponse,
     EvalFileRequest,
     EvalFlakeRequest,
     EvalServiceBase,
@@ -36,23 +38,25 @@ from nanopynix_proto.nix.eval import (
     ListLengthRequest,
     ListLengthResponse,
     LockFlakeRequest,
+    RealiseArgvRequest,
+    RealiseArgvResponse,
+    RealiseStringRequest,
+    RealiseStringResponse,
     ReleaseAllRequest,
     ReleaseAllResponse,
     ReleaseLockedFlakeRequest,
     ReleaseLockedFlakeResponse,
     ReleaseRequest,
     ReleaseResponse,
-    ReplProcessLineRequest,
-    ReplProcessLineResponse,
     ReplAddAttrsRequest,
     ReplAddAttrsResponse,
     ReplLoadFileRequest,
+    ReplProcessLineRequest,
+    ReplProcessLineResponse,
     ReplScopeNamesRequest,
     ReplScopeNamesResponse,
-    RealiseArgvRequest,
-    RealiseArgvResponse,
-    RealiseStringRequest,
-    RealiseStringResponse,
+    ResetFileCacheRequest,
+    ResetFileCacheResponse,
     TypeNameRequest,
     TypeNameResponse,
     WriteLockFileRequest,
@@ -64,7 +68,9 @@ import nanopynix_flake
 from nanopynix._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._extract import locked_flake as _locked_flake
 from nanopynix._grpc_util import wrap_service_handlers
-from nanopynix._service_adapter import _proto_shape  # type: ignore[reportPrivateUsage] -- internal module registry pattern
+from nanopynix._service_adapter import (
+    _proto_shape,  # type: ignore[reportPrivateUsage] -- internal module registry pattern
+)
 
 _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
     "thunk": common_pb.NixType.THUNK,
@@ -252,6 +258,14 @@ class EvalServiceHandler(EvalServiceBase):
     def _do_repl_scope_names(self, message: ReplScopeNamesRequest) -> ReplScopeNamesResponse:
         return ReplScopeNamesResponse(names=self._get_es().repl_scope_names())
 
+    async def reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
+        return await self._state.executor.run(self._do_reset_file_cache, message)
+
+    def _do_reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
+        del message
+        self._get_es().reset_file_cache()
+        return ResetFileCacheResponse()
+
     async def force(self, message: ForceRequest) -> common_pb.ForceValue:
         return await self._state.executor.run(self._do_force, message)
 
@@ -286,6 +300,13 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_realise_argv(self, message: RealiseArgvRequest) -> RealiseArgvResponse:
         return RealiseArgvResponse(argv=self._resolve(message.handle).realise_argv())
+
+    async def edit_location(self, message: EditLocationRequest) -> EditLocationResponse:
+        return await self._state.executor.run(self._do_edit_location, message)
+
+    def _do_edit_location(self, message: EditLocationRequest) -> EditLocationResponse:
+        location = self._resolve(message.handle).edit_location()
+        return EditLocationResponse(path=location["path"], line=location["line"])
 
     async def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
         return await self._state.executor.run(self._do_attr, message)

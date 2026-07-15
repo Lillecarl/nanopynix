@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import shlex
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
@@ -38,6 +40,8 @@ _COMMANDS = {
     ":add": "Add an attribute set to scope",
     ":b": "Build a derivation",
     ":build": "Build a derivation",
+    ":e": "Open a value's source in $EDITOR",
+    ":edit": "Open a value's source in $EDITOR",
     ":exec": "Realise a Nix argv list and execute it",
     ":help": "Show this help",
     ":l": "Load a Nix file into scope",
@@ -63,6 +67,7 @@ _HELP = """Commands:
   <name> = <expr>        Bind an expression to a name
   :a, :add <expr>        Add an attrset's attributes to scope
   :b, :build <expr>      Build an evaluated derivation
+  :e, :edit <expr>       Open a package, function, path, or string in $EDITOR
   :l, :load <path>       Load a Nix file and add its attributes to scope
   :lf, :load-flake <ref> Load flake outputs into scope
   :ll, :last-loaded      Show names from the most recent load
@@ -121,9 +126,16 @@ class _ReplCompleter(Completer):
             return []
 
 
-async def _run_repl_loop(repl: ReplSession, prompt: Any, *, initial_loaded: list[str] | None = None) -> None:
+async def _run_repl_loop(
+    repl: ReplSession,
+    prompt: Any,
+    *,
+    initial_loaded: list[str] | None = None,
+    initial_sources: list[tuple[str, str]] | None = None,
+    line_editors: tuple[str, ...] = (),
+) -> None:
     """Read and evaluate lines until the user exits the REPL."""
-    loaded: list[tuple[str, str]] = []
+    loaded = list(initial_sources or [])
     last_loaded = list(initial_loaded or [])
 
     async def add_attrs(value: Any) -> list[str]:
@@ -136,6 +148,12 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any, *, initial_loaded: list
         value = await repl.string(expr)
         print_formatted_text(json.dumps(await value.force_json(), indent=2, sort_keys=True))
         return value
+
+    async def reload_sources() -> None:
+        await repl.reset_file_cache()
+        for load_command, source in loaded:
+            value = await (repl.load_file(source) if load_command == ":load" else repl.eval_flake(source))
+            await add_attrs(value)
 
     print_formatted_text(_HELP)
     while True:
@@ -171,6 +189,10 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any, *, initial_loaded: list
                 outputs = await value.build()
                 print_formatted_text(json.dumps(outputs, indent=2, sort_keys=True))
                 continue
+            if command in {":e", ":edit"}:
+                await _edit(await repl.string(argument), line_editors)
+                await reload_sources()
+                continue
             if command == ":run":
                 await _run_derivation(await repl.string(argument))
                 continue
@@ -195,9 +217,7 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any, *, initial_loaded: list
                 print_formatted_text(" ".join(last_loaded) if last_loaded else "nothing has been loaded")
                 continue
             if command in {":r", ":reload"}:
-                for load_command, source in loaded:
-                    value = await (repl.load_file(source) if load_command == ":load" else repl.eval_flake(source))
-                    await add_attrs(value)
+                await reload_sources()
                 continue
             if command.startswith(":"):
                 print_formatted_text(f"unknown command: {command}; try :help")
@@ -248,6 +268,35 @@ async def _run_derivation(value: Any) -> int:
     return_code = await process.wait()
     if return_code != 0:
         print_formatted_text(f"warning: {program} exited with status {return_code}")
+    return return_code
+
+
+def _editor_argv(path: str, line: int, line_editors: tuple[str, ...]) -> list[str]:
+    """Match Nix's ``editorFor`` argument construction with configured editors."""
+    editor = os.environ.get("EDITOR", "cat")
+    try:
+        argv = shlex.split(editor)
+    except ValueError as exc:
+        raise ReplRunError(f"cannot parse $EDITOR: {exc}") from exc
+    if not argv:
+        raise ReplRunError("$EDITOR is empty")
+    if line > 0 and any(name in editor for name in line_editors):
+        argv.append(f"+{line}")
+    argv.append(path)
+    return argv
+
+
+async def _edit(value: Any, line_editors: tuple[str, ...]) -> int:
+    """Open the Nix-selected source location for *value* in the user's editor."""
+    path, line = await value.edit_location()
+    argv = _editor_argv(path, line, line_editors)
+    try:
+        process = await asyncio.create_subprocess_exec(*argv)
+    except OSError as exc:
+        raise ReplRunError(f"cannot start editor {argv[0]!r}: {exc.strerror}") from exc
+    return_code = await process.wait()
+    if return_code != 0:
+        print_formatted_text(f"warning: editor exited with status {return_code}")
     return return_code
 
 
@@ -353,4 +402,15 @@ class Repl(Command):
                 except EvaluationTargetError as exc:
                     print_formatted_text(f"error: {exc}")
                     raise SystemExit(1) from exc
-                await _run_repl_loop(repl, prompt, initial_loaded=initial_loaded)
+                initial_sources: list[tuple[str, str]] = []
+                if target.file is not None:
+                    initial_sources.append((":load", str(target.file)))
+                elif target.flake is not None:
+                    initial_sources.append((":load-flake", target.flake))
+                await _run_repl_loop(
+                    repl,
+                    prompt,
+                    initial_loaded=initial_loaded,
+                    initial_sources=initial_sources,
+                    line_editors=repl.line_editors,
+                )

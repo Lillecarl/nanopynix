@@ -42,6 +42,7 @@ struct PyValue {
     void force_deep();
     std::string realise_string();
     std::vector<std::string> realise_argv();
+    nanobind::dict edit_location();
 
     nanobind::object to_python();
     nanobind::object to_json(bool copy_to_store = false);

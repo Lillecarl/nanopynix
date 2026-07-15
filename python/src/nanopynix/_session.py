@@ -31,6 +31,7 @@ from nanopynix.exceptions import (
     WrongNixTypeError,
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
+from nanopynix.settings import DEFAULT_LINE_EDITORS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -466,6 +467,14 @@ class ValueProxy:
         response = await self._ctx.proxy.realise_argv(RealiseArgvRequest(handle=self.handle))
         return list(response.argv)
 
+    async def edit_location(self, *, timeout: float | None = None) -> tuple[str, int]:
+        """Return the physical file path and line Nix would open for this value."""
+        await self._ensure_resolved(timeout=timeout)
+        from nanopynix_proto.nix.eval import EditLocationRequest
+
+        response = await self._ctx.proxy.edit_location(EditLocationRequest(handle=self.handle))
+        return response.path, response.line
+
     async def build(
         self,
         *,
@@ -776,7 +785,19 @@ class EvalSession:
     invalid after ``__aexit__`` — their RPC methods raise ``EvalSessionClosedError``.
     """
 
-    __slots__ = ("_active", "_ctx", "_manager", "_owner", "_proxy", "_rpc_timeout", "_rw", "_session_id", "_store_handle", "_timeout")
+    __slots__ = (
+        "_active",
+        "_ctx",
+        "_line_editors",
+        "_manager",
+        "_owner",
+        "_proxy",
+        "_rpc_timeout",
+        "_rw",
+        "_session_id",
+        "_store_handle",
+        "_timeout",
+    )
 
     def __init__(
         self,
@@ -785,6 +806,7 @@ class EvalSession:
         timeout: float | None = None,
         session_id: str = "",
         rpc_timeout: float = _RPC_TIMEOUT,
+        line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
     ) -> None:
         self._manager = manager
         self._store_handle = store_handle
@@ -793,6 +815,7 @@ class EvalSession:
         self._proxy: EvalProxy | None = None
         self._timeout = timeout
         self._rpc_timeout = rpc_timeout
+        self._line_editors = tuple(line_editors)
         self._active: list[bool] = [False]
         self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
         self._ctx: _EvalProxyContext | None = None
@@ -820,21 +843,22 @@ class EvalSession:
 
     async def close(self) -> None:
         self._active[0] = False
-        if self._rw is not None:
-            try:
+        rw = self._rw
+        proxy = self._proxy
+        if rw is None:
+            return
+        try:
+            if proxy is not None:
                 from nanopynix_proto.nix.eval import ReleaseAllRequest
 
-                if self._proxy is None:
-                    return
-                await self._proxy.release_all(ReleaseAllRequest())
-            finally:
-                if self._proxy is None:
-                    return
-                self._proxy.deactivate()
-                await self._rw.release()
-                self._rw = None
-                self._proxy = None
-                self._ctx = None
+                await proxy.release_all(ReleaseAllRequest())
+        finally:
+            if proxy is not None:
+                proxy.deactivate()
+            await rw.release()
+            self._rw = None
+            self._proxy = None
+            self._ctx = None
 
     def _ensure_proxy(self) -> EvalProxy:
         p = self._proxy
@@ -996,6 +1020,11 @@ class ReplSession(EvalSession):
     :meth:`string` and :meth:`file` until this context manager closes.
     """
 
+    @property
+    def line_editors(self) -> tuple[str, ...]:
+        """Editor-name substrings that support Nix's ``+LINE`` argument."""
+        return self._line_editors
+
     async def open(self) -> None:
         await super().open()
         try:
@@ -1019,7 +1048,10 @@ class ReplSession(EvalSession):
         )
         if response.is_binding:
             return None
-        return self._proxy_context().value(response.value.handle, response.value.type)
+        value = response.value
+        if value is None:
+            raise RuntimeError("worker returned an expression result without a value handle")
+        return self._proxy_context().value(value.handle, value.type)
 
     async def load_file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         """Load a Nix expression file as ``nix repl :load`` does.
@@ -1050,3 +1082,9 @@ class ReplSession(EvalSession):
 
         response = await self._ensure_proxy().repl_scope_names(ReplScopeNamesRequest())
         return response.names
+
+    async def reset_file_cache(self, *, timeout: float | None = None) -> None:
+        """Discard parsed file cache entries before reloading REPL sources."""
+        from nanopynix_proto.nix.eval import ResetFileCacheRequest
+
+        await self._ensure_proxy().reset_file_cache(ResetFileCacheRequest())

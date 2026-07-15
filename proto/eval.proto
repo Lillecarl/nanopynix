@@ -12,11 +12,13 @@ service EvalService {
   rpc ReplProcessLine(ReplProcessLineRequest) returns (ReplProcessLineResponse);
   rpc ReplAddAttrs(ReplAddAttrsRequest) returns (ReplAddAttrsResponse);
   rpc ReplScopeNames(ReplScopeNamesRequest) returns (ReplScopeNamesResponse);
+  rpc ResetFileCache(ResetFileCacheRequest) returns (ResetFileCacheResponse);
   rpc Force(ForceRequest) returns (nix.common.ForceValue);
   rpc ForceDeep(ForceDeepRequest) returns (nix.common.DeepValue);
   rpc ForceJson(ForceJsonRequest) returns (ForceJsonResponse);
   rpc RealiseString(RealiseStringRequest) returns (RealiseStringResponse);
   rpc RealiseArgv(RealiseArgvRequest) returns (RealiseArgvResponse);
+  rpc EditLocation(EditLocationRequest) returns (EditLocationResponse);
   rpc Attr(AttrRequest) returns (nix.common.ValueHandle);
   rpc ListGet(ListGetRequest) returns (nix.common.ValueHandle);
   rpc ListLength(ListLengthRequest) returns (ListLengthResponse);
@@ -79,6 +81,9 @@ message ReplScopeNamesResponse {
   repeated string names = 1;
 }
 
+message ResetFileCacheRequest {}
+message ResetFileCacheResponse {}
+
 message ForceRequest {
   int64 handle = 1;
 }
@@ -107,6 +112,14 @@ message RealiseArgvRequest {
 }
 message RealiseArgvResponse {
   repeated string argv = 1;
+}
+
+message EditLocationRequest {
+  int64 handle = 1;
+}
+message EditLocationResponse {
+  string path = 1;
+  uint32 line = 2;
 }
 
 message AttrRequest {
