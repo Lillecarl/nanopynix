@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 from clypi import Command, arg
@@ -27,6 +29,7 @@ _HELP = """Commands:
   :lf, :load-flake <ref> Load flake outputs into scope
   :ll, :last-loaded      Show names from the most recent load
   :p, :print <expr>      Evaluate and print an expression
+  :run <expr>             Build a derivation and run its main program
   :r, :reload            Reload files and flakes
   :t, :type <expr>       Show an expression's Nix type
   :q, :quit              Exit the REPL
@@ -83,6 +86,9 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any) -> None:
                 outputs = await value.build()
                 print_formatted_text(json.dumps(outputs, indent=2, sort_keys=True))
                 continue
+            if command == ":run":
+                await _run_derivation(await repl.string(argument))
+                continue
             if command in {":a", ":add"}:
                 await add_attrs(await repl.string(argument))
                 continue
@@ -108,8 +114,66 @@ async def _run_repl_loop(repl: ReplSession, prompt: Any) -> None:
             value = await repl.line(line)
             if value is not None:
                 print_formatted_text(json.dumps(await value.force_json(), indent=2, sort_keys=True))
-        except NixError as exc:
+        except (NixError, ReplRunError) as exc:
             print_formatted_text(f"error: {exc}")
+
+
+class ReplRunError(RuntimeError):
+    """A derivation could not be selected or started by ``:run``."""
+
+
+async def _run_derivation(value: Any) -> int:
+    """Build *value* and run it using Nix's derivation executable convention."""
+    main_program, warning = await _main_program(value)
+    if warning is not None:
+        print_formatted_text(f"warning: {warning}")
+
+    outputs = await value.build()
+    out_path = outputs.get("out")
+    if out_path is None:
+        raise ReplRunError("derivation has no 'out' output to run")
+    program = Path(out_path) / "bin" / main_program
+    try:
+        process = await asyncio.create_subprocess_exec(str(program))
+    except OSError as exc:
+        raise ReplRunError(f"cannot run {program}: {exc.strerror}") from exc
+    return_code = await process.wait()
+    if return_code != 0:
+        print_formatted_text(f"warning: {program} exited with status {return_code}")
+    return return_code
+
+
+async def _main_program(value: Any) -> tuple[str, str | None]:
+    """Select a derivation executable using the same order as ``nix run``."""
+    if await value.has_attr("meta"):
+        meta = value.attr("meta")
+        if await meta.has_attr("mainProgram"):
+            main_program = await meta.attr("mainProgram").force_json()
+            if not isinstance(main_program, str):
+                raise ReplRunError("derivation meta.mainProgram is not a string")
+            return main_program, None
+
+    if await value.has_attr("pname"):
+        pname = await value.attr("pname").force_json()
+        if not isinstance(pname, str):
+            raise ReplRunError("derivation pname is not a string")
+        return pname, f"derivation has no meta.mainProgram; using pname {pname!r}"
+
+    if not await value.has_attr("name"):
+        raise ReplRunError("derivation has neither meta.mainProgram, pname, nor name")
+    name = await value.attr("name").force_json()
+    if not isinstance(name, str):
+        raise ReplRunError("derivation name is not a string")
+    main_program = _derivation_name_part(name)
+    return main_program, f"derivation has no meta.mainProgram; using name {main_program!r}"
+
+
+def _derivation_name_part(name: str) -> str:
+    """Match Nix's ``DrvName(name).name`` split rule."""
+    for index, char in enumerate(name[:-1]):
+        if char == "-" and not name[index + 1].isalpha():
+            return name[:index]
+    return name
 
 
 class Repl(Command):
