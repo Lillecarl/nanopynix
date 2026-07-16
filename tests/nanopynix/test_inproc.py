@@ -47,7 +47,7 @@ async def test_inproc_value_rejects_use_after_eval_close() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_context_manager_releases_gc_reference() -> None:
+async def test_inproc_value_context_manager_releases_rooted_value() -> None:
     async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
         async with await eval_.string("{ answer = 42; }") as root:
             assert await (await root.attr("answer")).as_int() == 42

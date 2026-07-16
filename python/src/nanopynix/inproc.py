@@ -345,16 +345,15 @@ class EvalSession:
 
     async def string(self, expression: str, path: str = "<string>") -> Value:
         raw = await self._session.run(self._require_raw().eval_string, expression, path)
-        return await self._export_value(raw)
+        return self._track_value(raw)
 
     async def file(self, path: str) -> Value:
         raw = await self._session.run(self._require_raw().eval_file, path)
-        return await self._export_value(raw)
+        return self._track_value(raw)
 
-    async def _export_value(self, raw: Any) -> Value:
-        """Take Nix's GC reference before exposing a value to Python callers."""
-        exported = await self._session.run(self._require_raw()._export_pyvalue, raw)  # type: ignore[reportPrivateUsage] -- binding exports a stable GC-owned value
-        value = Value(self, exported)
+    def _track_value(self, raw: Any) -> Value:
+        """Track an L1 value, which owns its Nix ``RootValue`` directly."""
+        value = Value(self, raw)
         self._values.add(value)
         return value
 
@@ -372,11 +371,11 @@ class ReplSession:
 
     async def line(self, text: str, path: str = "<string>") -> Value | None:
         raw = await self._eval_session._session.run(self._eval_session._require_raw().repl_process_line, text, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return None if raw is None else await self._eval_session._export_value(raw)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
+        return None if raw is None else self._eval_session._track_value(raw)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def load_file(self, path: str) -> Value:
         raw = await self._eval_session._session.run(self._eval_session._require_raw().repl_load_file, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return await self._eval_session._export_value(raw)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
+        return self._eval_session._track_value(raw)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def add_attrs(self, value: Value) -> list[str]:
         raw_value = value._raw_for(self._eval_session)  # type: ignore[reportPrivateUsage] -- same-evaluator guard
@@ -387,9 +386,9 @@ class ReplSession:
 
 
 class Value:
-    """Async façade over an exported direct ``nanopynix_expr.Value`` pointer.
+    """Async façade over a direct ``nanopynix_expr.Value`` pointer.
 
-    Values hold a Nix GC reference until :meth:`close` is called. Use
+    The L1 wrapper owns Nix's ``RootValue`` until :meth:`close` is called. Use
     ``async with`` when a value has a bounded scope; closing the parent
     :class:`EvalSession` releases every remaining value automatically.
     """
@@ -406,13 +405,12 @@ class Value:
         await self.close()
 
     async def close(self) -> None:
-        """Release this value's Nix GC reference. This operation is idempotent."""
+        """Release this value's rooted L1 object. This operation is idempotent."""
         raw = self._raw
         self._raw = None
         self._eval_session._values.discard(self)  # type: ignore[reportPrivateUsage] -- evaluator owns exported value tracking
-        if raw is not None and self._eval_session._active:  # type: ignore[reportPrivateUsage] -- release requires a live EvalState
-            eval_raw = self._eval_session._require_raw()  # type: ignore[reportPrivateUsage] -- release requires the owning EvalState
-            await self._eval_session._session.run(eval_raw.release_exported_value, raw)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        if raw is not None:
+            await self._eval_session._session.run(raw._release)  # type: ignore[reportPrivateUsage] -- RootValue must detach on the Nix thread
 
     def _raw_for(self, eval_session: EvalSession) -> Any:
         self._eval_session._require_raw()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use
@@ -473,7 +471,7 @@ class Value:
     async def attr(self, name: str) -> Value:
         raw = self._raw_for(self._eval_session)
         child = await self._eval_session._session.run(raw.attr_get, name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return await self._eval_session._export_value(child)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
+        return self._eval_session._track_value(child)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def has_attr(self, name: str) -> bool:
         raw = self._raw_for(self._eval_session)
@@ -482,7 +480,7 @@ class Value:
     async def list_get(self, index: int) -> Value:
         raw = self._raw_for(self._eval_session)
         child = await self._eval_session._session.run(raw.list_get, index)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return await self._eval_session._export_value(child)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
+        return self._eval_session._track_value(child)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def attr_names(self) -> list[str]:
         raw = self._raw_for(self._eval_session)
@@ -496,12 +494,12 @@ class Value:
         raw = self._raw_for(self._eval_session)
         argument_raw = await self._argument_raw(argument)
         result = await self._eval_session._session.run(raw.call, argument_raw)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return await self._eval_session._export_value(result)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
+        return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def auto_call(self) -> Value:
         raw = self._raw_for(self._eval_session)
         result = await self._eval_session._session.run(raw.auto_call)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return await self._eval_session._export_value(result)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
+        return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def _argument_raw(self, argument: Value | Any) -> Any:
         if isinstance(argument, Value):

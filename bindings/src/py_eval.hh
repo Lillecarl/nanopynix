@@ -67,15 +67,6 @@ struct PyEvalState {
     void reset_file_cache();
     PyValue alloc_value();
 
-    // ── Handle management ───────────────────────────────────────
-
-    /// Take a GC reference on *v and return a PyValue wrapper.
-    /// The caller must eventually call release_exported_value() on the result.
-    PyValue export_value(nix::Value *v);
-
-    /// Release the GC reference held by an exported PyValue.
-    void release_exported_value(PyValue &pyv);
-
     /// Convert a JSON-compatible Python object into a Nix Value.
     PyValue value_from_python(nanobind::object obj);
 

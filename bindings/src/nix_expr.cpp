@@ -660,45 +660,6 @@ PyValue PyEvalState::alloc_value() {
     return PyValue(value, this, alive);
 }
 
-// ── Handle management ─────────────────────────────────────────
-
-/// Replicate nix_gc_incref / nix_gc_decref from the C API.
-/// Handles are allocated by the Python HandleRegistry; the C++ side
-/// only manages GC references to keep Value* alive while exported.
-#if NIX_USE_BOEHMGC
-#  include <boost/unordered/concurrent_flat_map.hpp>
-#  include <gc/gc_allocator.h>
-
-using RefCountMap = boost::concurrent_flat_map<
-    const void *,
-    unsigned int,
-    std::hash<const void *>,
-    std::equal_to<const void *>,
-    traceable_allocator<std::pair<const void * const, unsigned int>>>;
-
-static void _gc_incref(const void *p) {
-    static RefCountMap &map = *new RefCountMap();
-    map.insert_or_visit({p, 1}, [](auto &kv) { kv.second++; });
-}
-
-static void _gc_decref(const void *p) {
-    static RefCountMap &map = *new RefCountMap();
-    map.erase_if(p, [](auto &kv) { return !--kv.second; });
-}
-#else
-static void _gc_incref(const void *) {}
-static void _gc_decref(const void *) {}
-#endif
-
-PyValue PyEvalState::export_value(nix::Value *v) {
-    _gc_incref(v);
-    return PyValue(v, this, alive);
-}
-
-void PyEvalState::release_exported_value(PyValue &pyv) {
-    _gc_decref(pyv.value);
-}
-
 PyValue PyEvalState::eval_file(const std::string &path) {
     nix::Value *v;
     {
@@ -723,9 +684,9 @@ nix::EvalState *PyValue::evalState() const {
 
 nix::Value *PyValue::checkedValue() const {
     (void) evalState();
-    if (!value)
+    if (!root || !*root)
         throw std::runtime_error("Nix value has been released");
-    return value;
+    return *root;
 }
 
 // =========================================================================
@@ -1163,6 +1124,8 @@ static void register_primop(
 
 static void bind_value(nb::module_ &m) {
     nb::class_<PyValue>(m, "Value")
+        .def("_release", &PyValue::release,
+             "Release this wrapper's RootValue. Internal lifetime-management API.")
         .def("type", &PyValue::type_name)
         .def("type_name", &PyValue::type_name)
         .def("is_null", &PyValue::is_null)
@@ -1227,17 +1190,7 @@ static void bind_eval_state(nb::module_ &m) {
         .def("repl_scope_names", &PyEvalState::repl_scope_names)
         .def("reset_file_cache", &PyEvalState::reset_file_cache)
         .def("alloc_value", &PyEvalState::alloc_value, nb::keep_alive<0, 1>())
-        // Handle management (worker-internal, exported for RPC dispatch)
-        // The Python HandleRegistry owns handle allocation; C++ manages GC refs.
-        .def("export_value", &PyEvalState::export_value, "value"_a,
-             nb::keep_alive<0, 1>(),
-             "Take a GC reference on *value and return a PyValue wrapper.")
-        .def("release_exported_value", &PyEvalState::release_exported_value, "pyv"_a,
-             "Release the GC reference held by an exported PyValue.")
-        .def("value_from_python", &PyEvalState::value_from_python, "obj"_a, nb::keep_alive<0, 1>())
-        .def("_export_pyvalue", [](PyEvalState &es, PyValue &pyv) {
-            return es.export_value(pyv.checkedValue());
-        }, nb::keep_alive<0, 1>(), "pyv"_a);
+        .def("value_from_python", &PyEvalState::value_from_python, "obj"_a, nb::keep_alive<0, 1>());
 }
 
 // =========================================================================
