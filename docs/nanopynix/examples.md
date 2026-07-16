@@ -10,7 +10,7 @@ breaks one of these, CI fails — the examples can't silently go stale.
 Navigating attrsets and lists lazily, forcing scalars, and converting whole
 value trees to Python/JSON.
 
-```{literalinclude} examples/eval_example.py
+```{literalinclude} ../examples/eval_example.py
 :language: python
 ```
 
@@ -18,7 +18,7 @@ value trees to Python/JSON.
 
 Locking and evaluating a flake, then navigating its outputs.
 
-```{literalinclude} examples/flake_example.py
+```{literalinclude} ../examples/flake_example.py
 :language: python
 ```
 
@@ -26,7 +26,7 @@ Locking and evaluating a flake, then navigating its outputs.
 
 Path metadata, closures, and GC roots — all read-only store operations.
 
-```{literalinclude} examples/store_example.py
+```{literalinclude} ../examples/store_example.py
 :language: python
 ```
 
@@ -35,7 +35,7 @@ Path metadata, closures, and GC roots — all read-only store operations.
 Building `NixSettings`, rendering them as `nix.conf`, and comparing against
 Nix's live setting registry.
 
-```{literalinclude} examples/settings_example.py
+```{literalinclude} ../examples/settings_example.py
 :language: python
 ```
 
@@ -44,6 +44,11 @@ Nix's live setting registry.
 Registering a Python callable as a Nix builtin over the worker's RPC
 backchannel, plus the built-in YAML primops.
 
-```{literalinclude} examples/primops_example.py
+```{note}
+Requires Nix >= 2.32 — primop registration is broken on Nix 2.31 and isn't
+expected to be fixed there.
+```
+
+```{literalinclude} ../examples/primops_example.py
 :language: python
 ```
