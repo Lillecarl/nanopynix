@@ -13,7 +13,7 @@ jobs:
     outputs:
       versions: ${{ steps.versions.outputs.versions }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@main
 
       - uses: nixbuild/nix-quick-install-action@v35
 
@@ -30,7 +30,7 @@ jobs:
       matrix:
         version: ${{ fromJson(needs.matrix.outputs.versions) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@main
 
       - uses: nixbuild/nix-quick-install-action@v35
 
@@ -69,7 +69,7 @@ jobs:
     outputs:
       versions: ${{ steps.versions.outputs.versions }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@main
         with:
           ref: main
 
@@ -102,7 +102,7 @@ jobs:
       matrix:
         version: ${{ fromJson(needs.update-lockfile-prep.outputs.versions) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@main
         with:
           ref: main
 
@@ -148,7 +148,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@main
         with:
           ref: main
 
