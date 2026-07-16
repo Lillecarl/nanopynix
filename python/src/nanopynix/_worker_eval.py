@@ -68,7 +68,7 @@ import nanopynix_flake
 from nanopynix._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._extract import locked_flake as _locked_flake
 from nanopynix._grpc_util import wrap_service_handlers
-from nanopynix._local import LocalValue
+from nanopynix._local import LocalLockedFlake, LocalValue
 from nanopynix._service_adapter import (
     _proto_shape,  # type: ignore[reportPrivateUsage] -- internal module registry pattern
 )
@@ -142,7 +142,8 @@ class EvalServiceHandler(EvalServiceBase):
                 self._state.handles.release(handle)
             self._state.eval_state = None
             self._state.eval_store_handle = None
-        for handle, _resource in self._state.handles.iter_kind("locked_flake"):
+        for handle, locked_flake in self._state.handles.iter_kind("locked_flake"):
+            locked_flake.close()
             self._state.handles.release(handle)
 
     def _export(self, value: Any) -> common_pb.ValueHandle:
@@ -416,8 +417,7 @@ class EvalServiceHandler(EvalServiceBase):
     def _do_lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
         if self._state.collector is not None:
             self._state.collector.callback(0, "msg", 3, f"lock_flake: parsing ref '{message.ref}'")
-        es = self._get_es(message.store_handle).require_raw()
-        ref = nanopynix_flake.parse_flake_ref(message.ref)
+        es = self._get_es(message.store_handle)
 
         if message.update_all is not None:
             update_inputs: bool | list[str] = message.update_all
@@ -430,9 +430,8 @@ class EvalServiceHandler(EvalServiceBase):
             self._state.collector.callback(
                 0, "msg", 3, f"lock_flake: calling C++ lock_flake write_lock_file={message.write_lock_file}"
             )
-        lf = nanopynix_flake.lock_flake(
-            es,
-            ref,
+        lf = es.lock_flake(
+            message.ref,
             update_inputs=update_inputs,
             write_lock_file=message.write_lock_file,
         )
@@ -440,7 +439,7 @@ class EvalServiceHandler(EvalServiceBase):
             self._state.collector.callback(0, "msg", 3, "lock_flake: C++ lock_flake returned")
         handle = self._state.handles.allocate(lf, "locked_flake")
 
-        lf_pb = _locked_flake(lf)
+        lf_pb = _locked_flake(lf.require_raw())
         lf_pb.handle = handle
         return lf_pb
 
@@ -448,16 +447,15 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_call_locked_flake, message)
 
     def _do_call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
-        lf = self._state.handles.get_typed(message.handle, "locked_flake")
+        lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
         es = self._get_es()
-        pyv = nanopynix_flake.call_flake(es.require_raw(), lf)
-        return self._export(es.wrap_value(pyv))
+        return self._export(es.call_locked_flake(lf))
 
     async def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
         return await self._state.executor.run(self._do_write_lock_file, message)
 
     def _do_write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
-        lf = self._state.handles.get_typed(message.handle, "locked_flake")
+        lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
         lf.write_lock_file()
         return WriteLockFileResponse()
 
@@ -465,6 +463,8 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_release_locked_flake, message)
 
     def _do_release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
+        locked_flake: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
+        locked_flake.close()
         self._state.handles.release(message.handle)
         return ReleaseLockedFlakeResponse()
 
@@ -473,12 +473,7 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.store_handle)
-        pyv = nanopynix_flake.eval_flake(
-            es.require_raw(),
-            message.ref,
-            message.write_lock_file,
-        )
-        return self._export(es.wrap_value(pyv))
+        return self._export(es.eval_flake(message.ref, write_lock_file=message.write_lock_file))
 
     async def get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
         return await self._state.executor.run(self._do_get_flake, message)

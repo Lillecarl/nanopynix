@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+import nanopynix_flake
 from nanopynix._nix_core import NixCore
 
 if TYPE_CHECKING:
@@ -41,10 +42,13 @@ class LocalEvalState:
         self.raw: Any = raw
         self.store = store
         self._values: set[LocalValue] = set()
+        self._locked_flakes: set[LocalLockedFlake] = set()
 
     def close(self) -> None:
         for value in tuple(self._values):
             value.close()
+        for locked_flake in tuple(self._locked_flakes):
+            locked_flake.close()
         self.raw = None
 
     def require_raw(self) -> Any:
@@ -87,6 +91,32 @@ class LocalEvalState:
 
     def value_from_python(self, value: Any) -> LocalValue:
         return self.wrap_value(self.require_raw().value_from_python(_unwrap_local_values(value)))
+
+    def lock_flake(
+        self,
+        ref: str,
+        *,
+        update_inputs: bool | list[str],
+        write_lock_file: bool,
+    ) -> LocalLockedFlake:
+        raw = nanopynix_flake.lock_flake(
+            self.require_raw(),
+            nanopynix_flake.parse_flake_ref(ref),
+            update_inputs=update_inputs,
+            write_lock_file=write_lock_file,
+        )
+        locked_flake = LocalLockedFlake(self, raw)
+        self._locked_flakes.add(locked_flake)
+        return locked_flake
+
+    def call_locked_flake(self, locked_flake: LocalLockedFlake) -> LocalValue:
+        return self.wrap_value(nanopynix_flake.call_flake(self.require_raw(), locked_flake.require_raw()))
+
+    def eval_flake(self, ref: str, *, write_lock_file: bool) -> LocalValue:
+        return self.wrap_value(nanopynix_flake.eval_flake(self.require_raw(), ref, write_lock_file))
+
+    def discard_locked_flake(self, locked_flake: LocalLockedFlake) -> None:
+        self._locked_flakes.discard(locked_flake)
 
 
 class LocalValue:
@@ -177,6 +207,27 @@ class LocalValue:
             build_mode,
             None if eval_store is None else eval_store.require_raw(),
         )
+
+
+class LocalLockedFlake:
+    """One in-memory locked flake, confined to its owning Nix thread."""
+
+    def __init__(self, eval_state: LocalEvalState, raw: Any) -> None:
+        self._eval_state = eval_state
+        self._raw: Any = raw
+
+    def close(self) -> None:
+        self._raw = None
+        self._eval_state.discard_locked_flake(self)
+
+    def require_raw(self) -> Any:
+        self._eval_state.require_raw()
+        if self._raw is None:
+            raise RuntimeError("local locked flake has been released")
+        return self._raw
+
+    def write_lock_file(self) -> None:
+        self.require_raw().write_lock_file()
 
 
 def _unwrap_local_values(value: Any) -> Any:
