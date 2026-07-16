@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -40,9 +41,12 @@ html_theme = "furo"
 # and numeric ranges (e.g. "0-7") that must not be typographically mangled.
 smartquotes = False
 
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
-}
+# The Nix-built nanopynix-docs package (nix/docs.nix) builds hermetically —
+# no network access — so it sets NANOPYNIX_DOCS_OFFLINE to skip intersphinx
+# rather than fail trying to fetch docs.python.org's inventory.
+intersphinx_mapping = (
+    {} if os.environ.get("NANOPYNIX_DOCS_OFFLINE") else {"python": ("https://docs.python.org/3", None)}
+)
 
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"

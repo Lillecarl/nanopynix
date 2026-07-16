@@ -81,6 +81,7 @@ let
         tests = self.callPackage ./nix/tests.nix {
           inherit (inputs) nixpkgs;
         };
+        nanopynix-docs = self.callPackage ./nix/docs.nix { };
       });
 
   dedupeVersions = pkgs.callPackage ./nix/dedupe-nix-versions.nix { };
@@ -124,6 +125,7 @@ in
     pynix
     shell
     tests
+    nanopynix-docs
     ;
 
   inherit

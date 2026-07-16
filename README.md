@@ -1,6 +1,6 @@
 # nanopynix
 
-[![Documentation Status](https://readthedocs.org/projects/nanopynix/badge/?version=latest)](https://nanopynix.readthedocs.io/en/latest/?badge=latest)
+[![Documentation](https://img.shields.io/badge/docs-lillecarl.github.io-blue)](https://lillecarl.github.io/nanopynix/)
 [![codecov](https://codecov.io/gh/Lillecarl/nanopynix/graph/badge.svg)](https://codecov.io/gh/Lillecarl/nanopynix)
 
 nanobind-based Python bindings for Nix.
@@ -25,7 +25,7 @@ async with nanopynix.Session(config={"max-jobs": "4"}) as session:
 Open multiple `Session` instances to run differently configured Nix instances in
 parallel.
 
-[Documentation](https://nanopynix.readthedocs.io/)
+[Documentation](https://lillecarl.github.io/nanopynix/)
 
 ---
 
