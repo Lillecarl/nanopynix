@@ -8,7 +8,7 @@ from nanopynix.protocols import AsyncLockedFlake, AsyncValue
 
 if TYPE_CHECKING:
     from nanopynix._session import LockedFlakeHandle, ValueProxy
-    from nanopynix.inproc import Value
+    from nanopynix.inproc import LockedFlake, Value
 
 
 def _accept_async_value(value: AsyncValue) -> None:
@@ -24,7 +24,9 @@ def test_protocol_static_conformance() -> None:
     if TYPE_CHECKING:
         value_proxy = cast(ValueProxy, None)
         inproc_value = cast(Value, None)
+        inproc_locked_flake = cast(LockedFlake, None)
         locked_flake = cast(LockedFlakeHandle, None)
         _accept_async_value(value_proxy)
         _accept_async_value(inproc_value)
+        _accept_async_locked_flake(inproc_locked_flake)
         _accept_async_locked_flake(locked_flake)

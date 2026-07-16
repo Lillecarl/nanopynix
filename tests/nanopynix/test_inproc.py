@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from _git import init_flake_repo
 
 from nanopynix import inproc
 
@@ -64,3 +67,22 @@ async def test_inproc_eval_close_releases_values_left_open() -> None:
         await eval_.close()
         with pytest.raises(inproc.InprocSessionClosedError):
             await value.force()
+
+
+@pytest.mark.anyio
+async def test_inproc_locked_flake_facade(tmp_path: Path) -> None:
+    init_flake_repo(tmp_path, "value = 42;")
+
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
+        locked = await eval_.lock_flake(str(tmp_path), write_lock_file=False)
+        assert not (tmp_path / "flake.lock").exists()
+        assert isinstance(locked.description, str)
+
+        outputs = await locked.eval()
+        assert await (await outputs.attr("value")).as_int() == 42
+
+        await locked.write_lock_file()
+        assert (tmp_path / "flake.lock").exists()
+        await locked.release()
+        with pytest.raises(inproc.InprocLockedFlakeReleasedError):
+            await locked.eval()

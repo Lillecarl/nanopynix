@@ -10,16 +10,18 @@ from __future__ import annotations
 
 import asyncio
 import os
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
-from nanopynix._local import LocalEvalState, LocalRuntime, LocalStore, LocalValue
+from nanopynix._extract import locked_flake as _locked_flake_proto
+from nanopynix._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._nix_executor import NixThreadExecutor
 from nanopynix.logging import LogCollector
-from nanopynix.models import LogEvent
+from nanopynix.models import LockedInput, LogEvent
 from nanopynix.settings import NixSettings, normalize_nix_settings
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
@@ -52,6 +54,10 @@ class InprocEvalBusyError(RuntimeError):
 
 class InprocValueReleasedError(RuntimeError):
     """Raised when an in-process value is used after its explicit release."""
+
+
+class InprocLockedFlakeReleasedError(RuntimeError):
+    """Raised when an in-process locked flake is used after release."""
 
 
 class _LogSubscription:
@@ -313,6 +319,7 @@ class EvalSession:
         self._store = store
         self._local: LocalEvalState | None = None
         self._active = False
+        self._locked_flakes: set[LockedFlake] = set()
 
     async def __aenter__(self) -> EvalSession:
         await self.open()
@@ -331,6 +338,8 @@ class EvalSession:
         self._active = True
 
     async def close(self) -> None:
+        for locked_flake in tuple(self._locked_flakes):
+            await locked_flake.release()
         local = self._local
         self._local = None
         self._active = False
@@ -365,6 +374,34 @@ class EvalSession:
         await self._session.run(raw.begin_repl)
         return ReplSession(self)
 
+    async def lock_flake(
+        self,
+        ref: str,
+        *,
+        update_inputs: bool | list[str] = False,
+        write_lock_file: bool = True,
+    ) -> LockedFlake:
+        """Lock a flake, optionally retaining the lock only in memory."""
+        local = await self._session.run(
+            partial(
+                self._require_local().lock_flake,
+                ref,
+                update_inputs=update_inputs,
+                write_lock_file=write_lock_file,
+            )
+        )
+        proto = await self._session.run(_locked_flake_proto, local.require_raw())
+        locked_flake = LockedFlake(self, local, proto.description, proto.inputs)
+        self._locked_flakes.add(locked_flake)
+        return locked_flake
+
+    async def eval_flake(self, ref: str, *, write_lock_file: bool = True) -> Value:
+        """Lock and evaluate a flake in one step."""
+        local = await self._session.run(
+            partial(self._require_local().eval_flake, ref, write_lock_file=write_lock_file)
+        )
+        return self._track_value(local)
+
 
 class ReplSession:
     """Persistent REPL scope backed by its parent direct ``EvalState``."""
@@ -386,6 +423,47 @@ class ReplSession:
 
     async def scope_names(self) -> list[str]:
         return await self._eval_session._session.run(self._eval_session._require_raw().repl_scope_names)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+
+
+class LockedFlake:
+    """Async façade over one thread-confined in-memory flake lock."""
+
+    def __init__(
+        self,
+        eval_session: EvalSession,
+        local: LocalLockedFlake,
+        description: str,
+        inputs: dict[str, LockedInput],
+    ) -> None:
+        self._eval_session = eval_session
+        self._local: LocalLockedFlake | None = local
+        self.description = description
+        self.inputs = inputs
+
+    def _local_for(self) -> LocalLockedFlake:
+        self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- parent owns local evaluator lifetime
+        if self._local is None:
+            raise InprocLockedFlakeReleasedError("LockedFlake has been released")
+        return self._local
+
+    async def eval(self) -> Value:
+        session = self._eval_session._session  # type: ignore[reportPrivateUsage] -- parent owns the sole Nix executor
+        evaluator = self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- parent owns the local evaluator
+        local = await session.run(
+            evaluator.call_locked_flake,
+            self._local_for(),
+        )
+        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+
+    async def write_lock_file(self) -> None:
+        await self._eval_session._session.run(self._local_for().write_lock_file)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+
+    async def release(self) -> None:
+        local = self._local
+        self._local = None
+        self._eval_session._locked_flakes.discard(self)  # type: ignore[reportPrivateUsage] -- evaluator owns facade lifetime tracking
+        if local is not None:
+            await self._eval_session._session.run(local.close)  # type: ignore[reportPrivateUsage] -- local lock must be released on the Nix thread
 
 
 class Value:
@@ -522,8 +600,10 @@ __all__ = [
     "EvalSession",
     "GCAction",
     "InprocEvalBusyError",
+    "InprocLockedFlakeReleasedError",
     "InprocSessionClosedError",
     "InprocValueReleasedError",
+    "LockedFlake",
     "RawEvalState",
     "RawStore",
     "RawValue",
