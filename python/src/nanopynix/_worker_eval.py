@@ -68,6 +68,7 @@ import nanopynix_flake
 from nanopynix._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._extract import locked_flake as _locked_flake
 from nanopynix._grpc_util import wrap_service_handlers
+from nanopynix._local import LocalValue
 from nanopynix._service_adapter import (
     _proto_shape,  # type: ignore[reportPrivateUsage] -- internal module registry pattern
 )
@@ -136,17 +137,18 @@ class EvalServiceHandler(EvalServiceBase):
     def _reset(self) -> None:
         es = self._state.eval_state
         if es is not None:
-            for handle, _resource in self._state.handles.iter_kind("value"):
+            for handle, value in self._state.handles.iter_kind("value"):
+                value.close()
                 self._state.handles.release(handle)
             self._state.eval_state = None
             self._state.eval_store_handle = None
         for handle, _resource in self._state.handles.iter_kind("locked_flake"):
             self._state.handles.release(handle)
 
-    def _export(self, pyv: Any) -> common_pb.ValueHandle:
+    def _export(self, value: Any) -> common_pb.ValueHandle:
         self._get_es()
-        handle = self._state.handles.allocate(pyv, "value")
-        type_name = pyv.type_name()
+        handle = self._state.handles.allocate(value, "value")
+        type_name = value.type_name()
         nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
         return common_pb.ValueHandle(handle=handle, type=nix_type)
 
@@ -208,7 +210,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_eval_file, message)
 
     def _do_eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
-        es = self._get_es(message.store_handle).require_raw()
+        es = self._get_es(message.store_handle)
         value = es.repl_eval_file(message.path) if es.repl_active() else es.eval_file(message.path)
         return self._export(value)
 
@@ -222,7 +224,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_eval_string, message)
 
     def _do_eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
-        es = self._get_es(message.store_handle).require_raw()
+        es = self._get_es(message.store_handle)
         value = es.repl_eval_string(message.expr, message.source_name) if es.repl_active() else es.eval_string(
             message.expr, message.source_name
         )
@@ -364,7 +366,9 @@ class EvalServiceHandler(EvalServiceBase):
         fn = self._resolve(message.handle)
         result = fn
         for arg in message.args:
-            result = result.call(es.value_from_python(self._call_arg_to_python(arg, es)))
+            argument = self._call_arg_to_python(arg, es)
+            value = argument if isinstance(argument, LocalValue) else es.value_from_python(argument)
+            result = result.call(value)
         return self._export(result)
 
     async def build(self, message: BuildRequest) -> BuildResponse:
@@ -389,9 +393,9 @@ class EvalServiceHandler(EvalServiceBase):
                 f"eval_store={'separate' if eval_store is not None else 'none'} build_mode={message.build_mode}",
             )
         raw = value.build(
-            None if build_store is None else build_store.require_raw(),
+            build_store,
             message.build_mode,
-            None if eval_store is None else eval_store.require_raw(),
+            eval_store,
         )
         if self._state.collector is not None:
             shaped = _proto_shape(raw)
@@ -445,8 +449,9 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
         lf = self._state.handles.get_typed(message.handle, "locked_flake")
-        pyv = nanopynix_flake.call_flake(self._get_es().require_raw(), lf)
-        return self._export(pyv)
+        es = self._get_es()
+        pyv = nanopynix_flake.call_flake(es.require_raw(), lf)
+        return self._export(es.wrap_value(pyv))
 
     async def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
         return await self._state.executor.run(self._do_write_lock_file, message)
@@ -467,12 +472,13 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_eval_flake, message)
 
     def _do_eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
+        es = self._get_es(message.store_handle)
         pyv = nanopynix_flake.eval_flake(
-            self._get_es(message.store_handle).require_raw(),
+            es.require_raw(),
             message.ref,
             message.write_lock_file,
         )
-        return self._export(pyv)
+        return self._export(es.wrap_value(pyv))
 
     async def get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
         return await self._state.executor.run(self._do_get_flake, message)
@@ -486,6 +492,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_release, message)
 
     def _do_release(self, message: ReleaseRequest) -> ReleaseResponse:
+        self._resolve(message.handle).close()
         self._state.handles.release(message.handle)
         return ReleaseResponse()
 
