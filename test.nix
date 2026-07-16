@@ -50,6 +50,8 @@ let
         };
       });
 
+  dedupeVersions = pkgs.callPackage ./nix/dedupe-nix-versions.nix { };
+
   nanopynixVersions = lib.pipe pkgs.nixVersions [
     (lib.filterAttrs (
       _: nix:
@@ -61,16 +63,21 @@ let
     (lib.mapAttrs (_: nix: nanopynixForNix nix))
   ];
 
-  nanopynixVersionNames = builtins.attrNames nanopynixVersions;
+  # Deduped view of nanopynixVersions used for test exposure/CI, so aliased
+  # names (e.g. `stable`/`latest`) don't produce redundant test jobs. Note
+  # `nanopynixVersions.stable` below is still the full, non-deduped set.
+  nanopynixTestVersions = dedupeVersions nanopynixVersions;
+
+  nanopynixVersionNames = builtins.attrNames nanopynixTestVersions;
 
   # Per-version test runners, exposed individually as `nanopynix-tests-<name>`
   # flake packages so CI can build/run each Nix version in its own job.
   nanopynixVersionTests = lib.mapAttrs' (
     name: value: lib.nameValuePair "nanopynix-tests-${name}" value.tests
-  ) nanopynixVersions;
+  ) nanopynixTestVersions;
 
   nanopynix-all-tests = pkgs.callPackage ./nix/nix-version-tests.nix {
-    inherit nanopynixVersions;
+    nanopynixVersions = nanopynixTestVersions;
     inherit (inputs) nixpkgs; # sets NIX_PATH
   };
 
