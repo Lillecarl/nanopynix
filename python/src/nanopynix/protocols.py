@@ -42,4 +42,29 @@ class AsyncLockedFlake(Protocol):
     async def release(self) -> None: ...
 
 
-__all__ = ["AsyncLockedFlake", "AsyncValue"]
+class AsyncEvalSession(Protocol):
+    """The common asynchronous evaluation and flake interface."""
+
+    async def __aenter__(self) -> Self: ...
+
+    async def __aexit__(self, *args: object) -> None: ...
+
+    async def close(self) -> None: ...
+
+    async def file(self, path: str, /) -> AsyncValue: ...
+
+    async def string(self, expr: str, path: str = "<string>", /) -> AsyncValue: ...
+
+    async def lock_flake(
+        self,
+        ref: str,
+        /,
+        *,
+        update_inputs: bool | list[str] = False,
+        write_lock_file: bool = True,
+    ) -> AsyncLockedFlake: ...
+
+    async def eval_flake(self, ref: str, /, *, write_lock_file: bool = True) -> AsyncValue: ...
+
+
+__all__ = ["AsyncEvalSession", "AsyncLockedFlake", "AsyncValue"]
