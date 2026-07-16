@@ -10,6 +10,7 @@ import pytest
 
 import nanopynix
 import nanopynix_expr
+import nanopynix_util
 
 _COVERAGE_SITECUSTOMIZE_DIR = str(Path(__file__).resolve().parent / "_coverage_subprocess")
 
@@ -104,6 +105,11 @@ def pytest_runtest_setup(item: pytest.Item):
 @pytest.fixture(scope="session", autouse=True)
 def _init():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Initialize libstore, enable flakes (needed by fetchers/flake tests)."""
+    # Tests intentionally avoid host nix.conf.  Configure local builds for the
+    # single-user CI installation before libstore receives its default nixbld
+    # build-users-group setting.
+    nanopynix_util.set_setting("build-users-group", "")
+    nanopynix_util.set_setting("require-drop-supplementary-groups", "false")
     nanopynix.init_libstore(load_config=False)
 
 
