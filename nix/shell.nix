@@ -8,6 +8,7 @@
   clang-tools,
   taplo,
   treefmt,
+  actionlint,
   nanopynix-bindings,
   nanopynix-proto,
   grpclib-transports,
@@ -68,5 +69,6 @@ mkShell {
     clang-tools
     taplo
     treefmt
+    actionlint
   ];
 }
