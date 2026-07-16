@@ -20,6 +20,7 @@ from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentiona
     _editor_argv,
     _load_initial_target,
     _main_program,
+    _NixLexer,
     _print_error,
     _ReplCompleter,
     _run_derivation,
@@ -327,9 +328,24 @@ async def test_repl_completion_uses_commands_scope_and_attrsets() -> None:
 
     assert await complete(":lo") == [":load", ":load-flake"]
     assert await complete("ans") == ["answer"]
+    assert await complete(':shell "${') == ["answer", "builtins", "pkgs"]
     assert await complete("pkgs.") == ["hello", "hello-unfree", "world"]
     assert await complete("pkgs.hel") == ["hello", "hello-unfree"]
+    assert await complete(':shell "${pk') == ["pkgs"]
+    assert await complete(':shell "${pkgs.hel') == ["hello", "hello-unfree"]
+    assert await complete(':shell "${pkgs.') == ["hello", "hello-unfree", "world"]
     assert completer._repl.value.released  # type: ignore[reportPrivateUsage] -- verifies temporary value lifetime
+
+
+def test_repl_tree_sitter_lexer_highlights_nix_expression() -> None:
+    document = Document(':shell let x = 1; in "${x}"')
+
+    fragments = _NixLexer().lex_document(document)(0)
+
+    assert ("class:nix.keyword", "let") in fragments
+    assert ("class:nix.number", "1") in fragments
+    assert ("class:nix.punctuation", "${") in fragments
+    assert ("class:nix.string", '"') in fragments
 
 
 def test_repl_is_a_pynix_subcommand() -> None:
