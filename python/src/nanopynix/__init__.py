@@ -56,6 +56,7 @@ from nanopynix.protocols import (
     AsyncEvalSession,
     AsyncLockedFlake,
     AsyncReplSession,
+    AsyncStore,
     AsyncValue,
     AsyncVerbosityController,
 )
@@ -102,6 +103,7 @@ __all__ = [
     "BuildMode",
     "AsyncLockedFlake",
     "AsyncReplSession",
+    "AsyncStore",
     "AsyncValue",
     "AsyncVerbosityController",
     "AsyncEvalSession",
