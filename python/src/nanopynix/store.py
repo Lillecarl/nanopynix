@@ -7,14 +7,24 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_proto.nix.common import PathInfo
 from nanopynix_proto.nix.store import (
+    AddIndirectRootRequest,
+    AddPermRootRequest,
+    AddTempRootRequest,
+    AddToStoreRequest,
     CollectGarbageRequest,
     ComputeFsClosureRequest,
+    ComputeStorePathRequest,
+    EnsurePathRequest,
+    FindRootsRequest,
     FollowLinksToStorePathRequest,
     GcAction,
+    GcRoot,
     GetBuildLogRequest,
     GetStoreDirRequest,
+    GetStoreDirsRequest,
     GetUriRequest,
     IsValidPathRequest,
+    OptimiseStoreRequest,
     ParseStorePathRequest,
     QueryAllValidPathsRequest,
     QueryDerivationOutputsRequest,
@@ -25,7 +35,9 @@ from nanopynix_proto.nix.store import (
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
     ReadDerivationRequest,
+    StoreDirs,
     StoreServiceBase,
+    VerifyStoreRequest,
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
@@ -276,3 +288,66 @@ class Store:
             paths=[StorePath(p) for p in response.paths],
             bytes_freed=response.bytes_freed,
         )
+
+    async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
+        """Return the garbage collector roots."""
+        response = await self.rpc.find_roots(FindRootsRequest(censor=censor))
+        return list(response.roots)
+
+    async def store_dirs(self) -> StoreDirs:
+        """Return this store's full set of configured directories."""
+        return await self.rpc.get_store_dirs(GetStoreDirsRequest())
+
+    async def add_temp_root(self, path: str | StorePath, /) -> None:
+        """Add a temporary GC root for this store session."""
+        await self.rpc.add_temp_root(AddTempRootRequest(path=str(path)))
+
+    async def add_perm_root(self, path: str | StorePath, gc_root: str, /) -> str:
+        """Add a permanent GC root symlink and return its resolved path."""
+        response = await self.rpc.add_perm_root(AddPermRootRequest(store_path=str(path), gc_root=gc_root))
+        return response.path
+
+    async def add_indirect_root(self, path: str, /) -> None:
+        """Register an indirect GC root."""
+        await self.rpc.add_indirect_root(AddIndirectRootRequest(path=path))
+
+    async def ensure_path(self, path: str | StorePath, /) -> None:
+        """Ensure a store path is valid, substituting it if available."""
+        await self.rpc.ensure_path(EnsurePathRequest(path=str(path)))
+
+    async def optimise_store(self) -> None:
+        """Optimise store disk usage by hard-linking duplicate files."""
+        await self.rpc.optimise_store(OptimiseStoreRequest())
+
+    async def verify_store(self, *, check_contents: bool = False, repair: bool = False) -> bool:
+        """Verify store integrity, returning whether errors were found."""
+        response = await self.rpc.verify_store(VerifyStoreRequest(check_contents=check_contents, repair=repair))
+        return response.errors
+
+    async def compute_store_path(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+        method: str = "nar",
+        hash_algo: str = "sha256",
+    ) -> StorePath:
+        """Compute the store path content-addressing ``path`` without adding it."""
+        response = await self.rpc.compute_store_path(
+            ComputeStorePathRequest(path=path, name=name, method=method, hash_algo=hash_algo)
+        )
+        return StorePath(response.path)
+
+    async def add_to_store(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+        method: str = "nar",
+        hash_algo: str = "sha256",
+    ) -> StorePath:
+        """Add a file or directory to this store."""
+        response = await self.rpc.add_to_store(
+            AddToStoreRequest(path=path, name=name, method=method, hash_algo=hash_algo)
+        )
+        return StorePath(response.path)
