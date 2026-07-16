@@ -130,7 +130,7 @@ class EvalServiceHandler(EvalServiceBase):
             return
         if self._state.eval_state is not None:
             raise RuntimeError("eval session is already bound to a different store")
-        self._state.eval_state = self._state.nix_core.open_eval_state(store, self._state.nix_path)
+        self._state.eval_state = self._state.runtime.open_eval_state(store, self._state.nix_path)
         self._state.eval_store_handle = store_handle
 
     def _reset(self) -> None:
@@ -208,7 +208,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_eval_file, message)
 
     def _do_eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
-        es = self._get_es(message.store_handle)
+        es = self._get_es(message.store_handle).require_raw()
         value = es.repl_eval_file(message.path) if es.repl_active() else es.eval_file(message.path)
         return self._export(value)
 
@@ -222,7 +222,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_eval_string, message)
 
     def _do_eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
-        es = self._get_es(message.store_handle)
+        es = self._get_es(message.store_handle).require_raw()
         value = es.repl_eval_string(message.expr, message.source_name) if es.repl_active() else es.eval_string(
             message.expr, message.source_name
         )
@@ -388,7 +388,11 @@ class EvalServiceHandler(EvalServiceBase):
                 f"handle={message.handle} build_store_handle={message.build_store_handle or 'eval'} "
                 f"eval_store={'separate' if eval_store is not None else 'none'} build_mode={message.build_mode}",
             )
-        raw = value.build(build_store, message.build_mode, eval_store)
+        raw = value.build(
+            None if build_store is None else build_store.require_raw(),
+            message.build_mode,
+            None if eval_store is None else eval_store.require_raw(),
+        )
         if self._state.collector is not None:
             shaped = _proto_shape(raw)
             self._state.collector.callback(
@@ -408,7 +412,7 @@ class EvalServiceHandler(EvalServiceBase):
     def _do_lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
         if self._state.collector is not None:
             self._state.collector.callback(0, "msg", 3, f"lock_flake: parsing ref '{message.ref}'")
-        es = self._get_es(message.store_handle)
+        es = self._get_es(message.store_handle).require_raw()
         ref = nanopynix_flake.parse_flake_ref(message.ref)
 
         if message.update_all is not None:
@@ -441,7 +445,7 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
         lf = self._state.handles.get_typed(message.handle, "locked_flake")
-        pyv = nanopynix_flake.call_flake(self._get_es(), lf)
+        pyv = nanopynix_flake.call_flake(self._get_es().require_raw(), lf)
         return self._export(pyv)
 
     async def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
@@ -464,7 +468,7 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
         pyv = nanopynix_flake.eval_flake(
-            self._get_es(message.store_handle),
+            self._get_es(message.store_handle).require_raw(),
             message.ref,
             message.write_lock_file,
         )
@@ -475,7 +479,7 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
         ref = nanopynix_flake.parse_flake_ref(message.ref)
-        fr = nanopynix_flake.get_flake(self._get_es(message.store_handle), ref)
+        fr = nanopynix_flake.get_flake(self._get_es(message.store_handle).require_raw(), ref)
         return common_pb.FlakeRef(attrs=_flake_ref_attrs(fr))
 
     async def release(self, message: ReleaseRequest) -> ReleaseResponse:

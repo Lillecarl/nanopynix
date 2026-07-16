@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
-from nanopynix._nix_core import NixCore
+from nanopynix._local import LocalEvalState, LocalRuntime, LocalStore
 from nanopynix._nix_executor import NixThreadExecutor
 from nanopynix.logging import LogCollector
 from nanopynix.models import LogEvent
@@ -100,7 +100,7 @@ class Session:
         self._restrict_eval = restrict_eval
         self._allowed_uris = list(allowed_uris or [])
         self._collector = LogCollector()
-        self._core = NixCore()
+        self._runtime = LocalRuntime()
         self._executor = _EXECUTOR
         self._log_callbacks: set[Any] = set()
         self._log_task: asyncio.Task[None] | None = None
@@ -164,7 +164,7 @@ class Session:
             raise RuntimeError("Nix is already initialized in this process with different nanopynix.inproc settings")
 
     def _init_nix(self) -> None:
-        self._core.initialize(
+        self._runtime.initialize(
             settings=self._settings.to_worker_settings(),
             load_config=self._load_config,
             verbosity=None if self._verbosity is None else int(self._verbosity),
@@ -223,11 +223,11 @@ class Session:
         return EvalSession(self, store)
 
     async def get_verbosity(self) -> int:
-        return await self.run(self._core.get_verbosity)
+        return await self.run(self._runtime.get_verbosity)
 
     async def set_verbosity(self, verbosity: LogLevelInput) -> int:
         level = normalize_log_level(verbosity)
-        return await self.run(self._core.set_verbosity, int(level))
+        return await self.run(self._runtime.set_verbosity, int(level))
 
     async def log_stream(self) -> AsyncIterator[LogEvent]:
         queue: asyncio.Queue[LogEvent] = asyncio.Queue()
@@ -249,7 +249,7 @@ class Store:
     def __init__(self, session: Session, uri: str) -> None:
         self._session = session
         self._uri = uri
-        self._raw: Any = None
+        self._local: LocalStore | None = None
 
     async def __aenter__(self) -> Store:
         await self.open()
@@ -259,20 +259,25 @@ class Store:
         await self.close()
 
     async def open(self) -> None:
-        if self._raw is None:
-            self._raw = await self._session.run(self._session._core.open_store, self._uri)  # type: ignore[reportPrivateUsage] -- session owns Nix core
+        if self._local is None:
+            self._local = await self._session.run(self._session._runtime.open_store, self._uri)  # type: ignore[reportPrivateUsage] -- session owns local runtime
 
     async def close(self) -> None:
-        raw = self._raw
-        self._raw = None
+        local = self._local
+        self._local = None
         self._session._stores.discard(self)  # type: ignore[reportPrivateUsage] -- session owns store lifetime tracking
-        if raw is not None:
-            await self._session.run(_drop_reference, raw)
+        if local is not None:
+            await self._session.run(local.close)
 
     def _require_raw(self) -> Any:
-        if self._raw is None:
+        if self._local is None:
             raise InprocSessionClosedError("Store is not open — use async with")
-        return self._raw
+        return self._local.require_raw()
+
+    def _require_local(self) -> LocalStore:
+        if self._local is None:
+            raise InprocSessionClosedError("Store is not open — use async with")
+        return self._local
 
     async def uri(self) -> str:
         return await self._session.run(self._require_raw().get_uri)
@@ -306,7 +311,7 @@ class EvalSession:
     def __init__(self, session: Session, store: Store) -> None:
         self._session = session
         self._store = store
-        self._raw: Any = None
+        self._local: LocalEvalState | None = None
         self._active = False
         self._values: set[Value] = set()
 
@@ -322,26 +327,25 @@ class EvalSession:
             return
         if self._session._eval is not None:  # type: ignore[reportPrivateUsage] -- session owns the sole EvalState slot
             raise InprocEvalBusyError("inproc Session already has a live EvalState")
-        store = self._store._require_raw()  # type: ignore[reportPrivateUsage] -- direct pointer is evaluator input
-        self._raw = await self._session.run(self._session._core.open_eval_state, store, self._session._nix_path)  # type: ignore[reportPrivateUsage] -- session owns Nix core
+        self._local = await self._session.run(self._session._runtime.open_eval_state, self._store._require_local(), self._session._nix_path)  # type: ignore[reportPrivateUsage] -- session owns local runtime
         self._session._eval = self  # type: ignore[reportPrivateUsage] -- session owns the sole EvalState slot
         self._active = True
 
     async def close(self) -> None:
         for value in tuple(self._values):
             await value.close()
-        raw = self._raw
-        self._raw = None
+        local = self._local
+        self._local = None
         self._active = False
         if self._session._eval is self:  # type: ignore[reportPrivateUsage] -- release sole EvalState slot
             self._session._eval = None  # type: ignore[reportPrivateUsage] -- release sole EvalState slot
-        if raw is not None:
-            await self._session.run(_drop_reference, raw)
+        if local is not None:
+            await self._session.run(local.close)
 
     def _require_raw(self) -> Any:
-        if not self._active or self._raw is None:
+        if not self._active or self._local is None:
             raise InprocSessionClosedError("EvalSession is not open — use async with")
-        return self._raw
+        return self._local.require_raw()
 
     async def string(self, expression: str, path: str = "<string>") -> Value:
         raw = await self._session.run(self._require_raw().eval_string, expression, path)
@@ -521,10 +525,6 @@ class Value:
 
 def _call(target: Any, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
     return target(*args, **kwargs)
-
-
-def _drop_reference(value: Any) -> None:
-    del value
 
 
 def _force_to_python(value: Any) -> Any:
