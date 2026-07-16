@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 async def test_nanopynix_store_get_build_log_from_populated_store(populated_store: dict[str, str]):
     async with nanopynix.Session() as nix, nix.store(populated_store["store_url"]) as store:
-        response = await store.get_build_log(GetBuildLogRequest(path=populated_store["log_path"]))
+        response = await store.rpc.get_build_log(GetBuildLogRequest(path=populated_store["log_path"]))
 
     assert response.log is not None
     assert "pynix-log-line" in response.log

@@ -7,7 +7,6 @@ from typing import override
 import structlog
 from clypi import Command, Positional, arg
 from nanopynix_proto.nix.common import PathInfo as PathInfoProto  # noqa: TC002
-from nanopynix_proto.nix.store import QueryPathInfoRequest
 from rich.console import Console
 
 import nanopynix
@@ -31,7 +30,7 @@ class PathInfo(Command):
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             try:
-                info: PathInfoProto = await store.query_path_info(QueryPathInfoRequest(path=self.path))
+                info: PathInfoProto = await store.query_path_info(self.path)
             except Exception as exc:
                 console.print(f"[red]Error:[/red] {exc}")
                 raise SystemExit(1) from exc

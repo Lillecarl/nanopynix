@@ -75,7 +75,8 @@ from nanopynix.settings import (
     list_flake_settings_metadata,
     list_settings_metadata,
 )
-from nanopynix.store import StoreHandle
+from nanopynix.store import Store as Store
+from nanopynix.store import StoreHandle as StoreHandle
 from nanopynix.types import NixArg, NixDeepValue, NixValue
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 from nanopynix_expr import EvalState, Value, eval_file, init_libexpr, register_primop
@@ -96,9 +97,6 @@ from nanopynix_util import (
     set_setting,
     set_verbosity,
 )
-
-# Backward-compatible alias for StoreHandle
-Store = StoreHandle
 
 __all__ = [
     "BuildMode",

@@ -54,7 +54,7 @@ from nanopynix._session import (
 )
 from nanopynix.models import LogEvent
 from nanopynix.nix import Session
-from nanopynix.store import StoreHandle
+from nanopynix.store import Store, StoreHandle
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -349,11 +349,11 @@ class TestSessionEvalFacade:
         session._session_id = "session-id"  # type: ignore[reportPrivateUsage] -- test injects internal session ID
         return session
 
-    def _store(self, session_id: str = "session-id", handle: int = 42) -> StoreHandle:
-        store = StoreHandle(_mock_pool(), "mock", session_id)
-        store._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
-        store._store_handle = handle  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
-        return store
+    def _store(self, session_id: str = "session-id", handle: int = 42) -> Store:
+        rpc = StoreHandle(_mock_pool(), "mock", session_id)
+        rpc._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
+        rpc._store_handle = handle  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
+        return Store(rpc)
 
     def test_eval_uses_explicit_store_handle(self):
         session = self._session()
@@ -372,7 +372,7 @@ class TestSessionEvalFacade:
 
     def test_eval_rejects_closed_store(self):
         session = self._session()
-        store = StoreHandle(_mock_pool(), "mock", "session-id")
+        store = Store(StoreHandle(_mock_pool(), "mock", "session-id"))
 
         with pytest.raises(RuntimeError, match="StoreHandle is closed"):
             session.eval(store)
@@ -698,9 +698,10 @@ class TestValueProxyLifecycle:
     async def test_build_store_overrides_build_store_not_eval_store(self):
         w = self._worker()
         w._eval_stub.build.return_value = _mock_build_response()
-        build_store = StoreHandle(_mock_pool(), "mock", "session-id")
-        build_store._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
-        build_store._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
+        rpc = StoreHandle(_mock_pool(), "mock", "session-id")
+        rpc._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
+        rpc._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
+        build_store = Store(rpc)
         ctx = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123, session_id="session-id")
         vp = ctx.value(1, "attrs")
 
@@ -714,9 +715,10 @@ class TestValueProxyLifecycle:
 
     async def test_build_rejects_foreign_build_store(self):
         w = self._worker()
-        build_store = StoreHandle(_mock_pool(), "mock", "other-session")
-        build_store._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
-        build_store._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
+        rpc = StoreHandle(_mock_pool(), "mock", "other-session")
+        rpc._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
+        rpc._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
+        build_store = Store(rpc)
         ctx = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123, session_id="session-id")
         vp = ctx.value(1, "attrs")
 

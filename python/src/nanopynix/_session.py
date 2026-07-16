@@ -78,7 +78,7 @@ if TYPE_CHECKING:
     from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
     from nanopynix._pool import ReservedWorker, _WorkerManager  # type: ignore[reportPrivateUsage] -- cross-class access
-    from nanopynix.store import StoreHandle
+    from nanopynix.store import Store
     from nanopynix_store import BuildMode as BuildModeType
 
 
@@ -497,7 +497,7 @@ class ValueProxy:
         self,
         *,
         build_mode: BuildModeType | int | None = None,
-        store: StoreHandle | None = None,
+        store: Store | None = None,
         timeout: float | None = None,
     ) -> dict[str, str]:
         """Build the derivation represented by this evaluated value."""
@@ -505,11 +505,11 @@ class ValueProxy:
         mode_value = self._build_mode_value(build_mode)
         return await self._build_evaluated_value(mode_value, build_store_handle, timeout=timeout)
 
-    def _build_store_handle(self, store: StoreHandle | None) -> int:
+    def _build_store_handle(self, store: Store | None) -> int:
         if store is None:
             return self._ctx.store_handle
         if store._session_id != self._ctx.session_id:  # type: ignore[reportPrivateUsage] -- cross-class access
-            raise ValueError("StoreHandle belongs to a different session")
+            raise ValueError("Store belongs to a different session")
         return store.store_handle
 
     def _build_mode_value(self, build_mode: BuildModeType | int | None) -> int:

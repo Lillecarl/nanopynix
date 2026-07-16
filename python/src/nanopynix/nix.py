@@ -6,11 +6,9 @@ logger, and configuration.
 
 Usage::
 
-    from nanopynix_proto.nix.store import QueryPathInfoRequest
-
     async with Session(store_uri="daemon", experimental_features=["flakes"]) as session:
         async with session.store() as store:
-            info = await store.query_path_info(QueryPathInfoRequest(path="/nix/store/..."))
+            info = await store.query_path_info("/nix/store/...")
         async for event in session.log_stream():
             ...
 """
@@ -32,7 +30,7 @@ from nanopynix._process_title import set_manager_title
 from nanopynix._session import EvalSession, ReplSession
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.settings import NanopynixSettings, NixSettings, normalize_nix_settings
-from nanopynix.store import StoreHandle
+from nanopynix.store import Store, StoreHandle
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 if TYPE_CHECKING:
@@ -99,14 +97,12 @@ class Session:
 
     Usage::
 
-        from nanopynix_proto.nix.store import QueryPathInfoRequest
-
         async with Session(
             store_uri="daemon",
             settings=NixSettings(max_jobs=4),
         ) as session:
             async with session.store() as store:
-                info = await store.query_path_info(QueryPathInfoRequest(path=str(sp)))
+                info = await store.query_path_info(str(sp))
     """
 
     def __init__(
@@ -158,28 +154,28 @@ class Session:
         )
         self._session_id = uuid.uuid4().hex
 
-    def store(self, uri: str = "auto") -> StoreHandle:
-        """Create a StoreHandle for store operations.
+    def store(self, uri: str = "auto") -> Store:
+        """Create an ergonomic Store facade for store operations.
 
         Usage::
 
-            from nanopynix_proto.nix.store import BuildDerivationRequest, QueryPathInfoRequest
-
             async with session.store() as store:
-                info = await store.query_path_info(QueryPathInfoRequest(path=str(sp)))
-                drv = await store.build_derivation(
+                info = await store.query_path_info(str(sp))
+                drv = await store.rpc.build_derivation(
                     BuildDerivationRequest(path=str(sp), build_mode=mode)
                 )
 
-        The handle carries this session's ID — passing it to
+        The store carries this session's ID — passing it to
         ``Eval`` from a different session raises ``ValueError``. Opening the
         handle adds its URI to the worker's process title.
         """
-        return StoreHandle(
-            self._manager,
-            uri,
-            self._session_id,
-            self._manager.rpc_timeout,
+        return Store(
+            StoreHandle(
+                self._manager,
+                uri,
+                self._session_id,
+                self._manager.rpc_timeout,
+            )
         )
 
     async def open(self) -> None:
@@ -240,7 +236,7 @@ class Session:
         """
         return self._manager.subscribe(callback)
 
-    def eval(self, store: StoreHandle) -> EvalSession:
+    def eval(self, store: Store) -> EvalSession:
         """Acquire the worker exclusively for an eval session.
 
         Usage::
@@ -250,14 +246,14 @@ class Session:
                     root = await eval_.file("/path/to/flake.nix")
 
         Args:
-            store: Open StoreHandle to use for this eval state. If it belongs to
+            store: Open Store to use for this eval state. If it belongs to
                    a different session, raises ValueError.
 
         Returns an ``EvalSession`` context manager that holds the worker
         for the duration.  All exported handles are released on exit.
         """
         if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
-            raise ValueError("StoreHandle belongs to a different session")
+            raise ValueError("Store belongs to a different session")
         return EvalSession(
             self._manager,
             store.store_handle,
@@ -265,14 +261,14 @@ class Session:
             rpc_timeout=self._manager.rpc_timeout,
         )
 
-    def repl(self, store: StoreHandle) -> ReplSession:
+    def repl(self, store: Store) -> ReplSession:
         """Acquire the worker for a persistent Nix REPL session.
 
         Bindings entered through :meth:`ReplSession.line` remain available
         until the returned context manager exits.
         """
         if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
-            raise ValueError("StoreHandle belongs to a different session")
+            raise ValueError("Store belongs to a different session")
         return ReplSession(
             self._manager,
             store.store_handle,
