@@ -7,3 +7,26 @@ exclude = ["**/result*"]
 [[tool.pyright.executionEnvironments]]
 root = "tests"
 reportPrivateUsage = "none"
+
+[tool.coverage.run]
+source_pkgs = ["nanopynix", "pynix"]
+branch = true
+# The Nix worker runs in a process forked from a `multiprocessing` forkserver
+# helper, not a plain subprocess. `concurrency = multiprocessing` plus
+# `parallel = true` gives each process its own data file (merged later via
+# `coverage combine`); `sigterm` flushes data on graceful worker shutdown.
+# The forkserver helper itself is a freshly exec'd interpreter, so it only
+# picks up COVERAGE_PROCESS_START via the sitecustomize shim wired in
+# tests/conftest.py -- see COVERAGE_PROCESS_START there for the other half.
+concurrency = ["multiprocessing", "thread"]
+parallel = true
+sigterm = true
+
+[tool.coverage.paths]
+nanopynix = ["python/src/nanopynix", "*/site-packages/nanopynix"]
+pynix = ["pynix/src/pynix", "*/site-packages/pynix"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_also = ["if TYPE_CHECKING:"]
