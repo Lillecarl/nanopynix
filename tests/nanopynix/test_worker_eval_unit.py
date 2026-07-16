@@ -188,3 +188,23 @@ def test_releasing_remote_value_closes_local_value() -> None:
     assert value.closed
     with pytest.raises(KeyError):
         handles.get_typed(handle, "value")
+
+
+def test_releasing_locked_flake_closes_local_resource() -> None:
+    class LockedFlake:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    handles = HandleRegistry()
+    locked_flake = LockedFlake()
+    handle = handles.allocate(locked_flake, "locked_flake")
+    handler = EvalServiceHandler(SimpleNamespace(handles=handles))
+
+    handler._do_release_locked_flake(SimpleNamespace(handle=handle))  # type: ignore[reportPrivateUsage] -- test verifies worker release ownership
+
+    assert locked_flake.closed
+    with pytest.raises(KeyError):
+        handles.get_typed(handle, "locked_flake")
