@@ -240,18 +240,22 @@ class Store:
         return [StorePath(item) for item in response.paths]
 
     async def follow_links_to_store_path(self, path: str) -> StorePath:
+        """Resolve a path that may traverse symlinks to its containing store path."""
         response = await self.rpc.follow_links_to_store_path(FollowLinksToStorePathRequest(path=path))
         return StorePath(response.path)
 
     async def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
+        """Return the valid store path whose hash component is ``hash_part``, if any."""
         response = await self.rpc.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=hash_part))
         return StorePath(response.path) if response.path is not None else None
 
     async def query_substitutable_paths(self, paths: list[str | StorePath]) -> list[StorePath]:
+        """Return the subset of ``paths`` that can be substituted from a binary cache."""
         response = await self.rpc.query_substitutable_paths(QuerySubstitutablePathsRequest(paths=[str(path) for path in paths]))
         return [StorePath(item) for item in response.paths]
 
     async def get_build_log(self, path: str | StorePath) -> str | None:
+        """Return the build log for ``path``, or ``None`` if no log is available."""
         response = await self.rpc.get_build_log(GetBuildLogRequest(path=str(path)))
         return response.log
 
@@ -260,11 +264,13 @@ class Store:
         derived_paths: list[str | StorePath],
         /,
     ) -> MissingInfo:
+        """Return which of ``derived_paths`` still need to be built or substituted."""
         return await self.rpc.query_missing(
             QueryMissingRequest(derived_paths=[str(p) for p in derived_paths])
         )
 
     async def read_derivation(self, drv_path: str | StorePath, /) -> Derivation:
+        """Parse and return the ``.drv`` file at ``drv_path``."""
         return await self.rpc.read_derivation(ReadDerivationRequest(path=str(drv_path)))
 
     async def collect_garbage(
@@ -276,6 +282,19 @@ class Store:
         paths_to_delete: list[str | StorePath] | tuple[()] = (),
         max_freed: int = 2**64 - 1,
     ) -> GcResult:
+        """Run a garbage-collection pass.
+
+        Args:
+            action: What the collector should do — e.g. list or delete dead
+                paths (see :class:`~nanopynix_proto.nix.store.GcAction`).
+            ignore_liveness: Delete ``paths_to_delete`` even if reachable
+                from a root.
+            paths_to_delete: Restrict the action to these paths, if given.
+            max_freed: Stop once this many bytes have been freed.
+
+        Returns:
+            The paths affected and total bytes freed.
+        """
         response = await self.rpc.collect_garbage(
             CollectGarbageRequest(
                 action=action,

@@ -75,6 +75,7 @@ class SettingsDrift(BaseModel):
 
     @property
     def ok(self) -> bool:
+        """True if the model has neither missing nor extra settings."""
         return not self.missing and not self.extra
 
 
@@ -190,6 +191,11 @@ class NixSettings(BaseModel):
 
     @classmethod
     def from_file(cls, path: os.PathLike[str] | str) -> NixSettings:
+        """Load settings from a ``.json``, ``.toml``, ``.yaml``/``.yml``, or ``nix.conf``-style file.
+
+        Format is inferred from the file extension; anything else is parsed
+        as ``nix.conf`` (``key = value`` lines, ``#`` comments).
+        """
         config_path = Path(os.fspath(path))
         text = config_path.read_text()
         raw: object
@@ -206,6 +212,7 @@ class NixSettings(BaseModel):
         return cls.model_validate(raw)
 
     def with_experimental_features(self, features: list[str] | None) -> NixSettings:
+        """Return a copy with ``features`` merged into ``experimental_features`` (order-preserving, deduplicated)."""
         if not features:
             return self
         merged = [*(self.experimental_features or [])]
@@ -231,9 +238,11 @@ class NixSettings(BaseModel):
             yield _alias(name), rendered
 
     def to_nix_config(self) -> str:
+        """Render the set fields as ``nix.conf`` text (``key = value`` lines)."""
         return "\n".join(f"{key} = {value}" for key, value in self._iter_set())
 
     def to_worker_settings(self) -> dict[str, str]:
+        """Render the set fields as a ``{nix-conf-key: rendered-value}`` mapping."""
         return dict(self._iter_set())
 
 
@@ -327,6 +336,11 @@ class NanopynixSettings(BaseSettings):
 
 
 def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None) -> NixSettings:
+    """Coerce ``settings`` to a ``NixSettings`` instance.
+
+    ``None`` becomes defaults; a path-like value is loaded with
+    :meth:`NixSettings.from_file`; an existing ``NixSettings`` passes through.
+    """
     if settings is None:
         return NixSettings()
     if isinstance(settings, NixSettings):
@@ -337,21 +351,25 @@ def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None
 
 
 def list_settings_metadata() -> dict[str, NixSettingMetadata]:
+    """Return Nix's live registry of global store/eval settings, keyed by name."""
     raw: dict[str, object] = json.loads(nanopynix_util.list_settings_metadata_json())
     return _settings_metadata_from_raw(raw)
 
 
 def list_eval_settings_metadata() -> dict[str, NixSettingMetadata]:
+    """Return Nix's live registry of evaluator-specific settings, keyed by name."""
     raw: dict[str, object] = json.loads(nanopynix_expr.list_eval_settings_metadata_json())
     return _settings_metadata_from_raw(raw)
 
 
 def list_fetch_settings_metadata() -> dict[str, NixSettingMetadata]:
+    """Return Nix's live registry of fetcher-specific settings, keyed by name."""
     raw: dict[str, object] = json.loads(nanopynix_fetchers.list_fetch_settings_metadata_json())
     return _settings_metadata_from_raw(raw)
 
 
 def list_flake_settings_metadata() -> dict[str, NixSettingMetadata]:
+    """Return Nix's live registry of flake-specific settings, keyed by name."""
     raw: dict[str, object] = json.loads(nanopynix_flake.list_flake_settings_metadata_json())
     return _settings_metadata_from_raw(raw)
 
@@ -361,6 +379,17 @@ def check_settings_model_drift(
     *,
     surface: SettingsSurface = "global",
 ) -> SettingsDrift:
+    """Compare the Pydantic settings model for ``surface`` against Nix's live registry.
+
+    Args:
+        metadata: Registry to compare against; defaults to the live registry
+            for ``surface`` (via e.g. :func:`list_settings_metadata`).
+        surface: Which settings model/registry pair to compare.
+
+    Returns:
+        Settings registered in Nix but missing from the model, and settings
+        in the model but not registered in Nix (excluding known aliases).
+    """
     if metadata is None:
         metadata = _metadata_for_surface(surface)
     if surface == "global":
@@ -384,6 +413,12 @@ def check_settings_model_drift(
 
 
 def check_all_settings_model_drift(*, include_optional: bool = False) -> dict[str, SettingsDrift]:
+    """Run :func:`check_settings_model_drift` across settings surfaces, keyed by surface name.
+
+    Args:
+        include_optional: If True, also check the ``eval``, ``fetch``, and
+            ``flake`` surfaces in addition to ``global``.
+    """
     surfaces: tuple[SettingsSurface, ...] = ("global", "eval", "fetch", "flake") if include_optional else ("global",)
     return {surface: check_settings_model_drift(surface=surface) for surface in surfaces}
 

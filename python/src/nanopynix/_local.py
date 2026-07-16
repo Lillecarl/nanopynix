@@ -234,13 +234,13 @@ def _unwrap_local_values(value: Any) -> Any:
     if isinstance(value, LocalValue):
         return value.require_raw()
     if isinstance(value, list):
-        items = cast(list[Any], value)
+        items = cast("list[Any]", value)
         return [_unwrap_local_values(item) for item in items]
     if isinstance(value, tuple):
-        items = cast(tuple[Any, ...], value)
+        items = cast("tuple[Any, ...]", value)
         return tuple(_unwrap_local_values(item) for item in items)
     if isinstance(value, dict):
-        items = cast(dict[Any, Any], value)
+        items = cast("dict[Any, Any]", value)
         return {key: _unwrap_local_values(item) for key, item in items.items()}
     return value
 
