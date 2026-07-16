@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from nanopynix_proto.nix.common import LogLevel
+from nanopynix_proto.nix.store import GcAction as GcAction
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from nanopynix import inproc as inproc
@@ -38,6 +39,7 @@ from nanopynix.models import (
     Derivation,
     DerivationOutputs,
     FlakeRef,
+    GcResult,
     Input,
     LockedFlake,
     LockedInput,
@@ -155,6 +157,8 @@ __all__ = [
     "current_system",
     "enable_experimental_feature",
     "eval_file",
+    "GcResult",
+    "GcAction",
     "from_yaml",
     "from_yaml11",
     "from_yaml11_stream",

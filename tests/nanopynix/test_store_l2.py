@@ -30,7 +30,7 @@ from nanopynix_proto.nix.store import (
     VerifyStoreRequest,
 )
 
-from nanopynix import MissingInfo, PathInfo, Session, StorePath, build_info
+from nanopynix import Derivation, GcResult, MissingInfo, PathInfo, Session, StorePath, build_info
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -254,6 +254,56 @@ async def test_collect_garbage_return_dead_does_not_delete(tmp_path: Path):
         store: Any
         async with session.store() as store:
             result = await store.rpc.collect_garbage(CollectGarbageRequest(action=GcAction.RETURN_DEAD))
+            assert isinstance(result.paths, list)
+            assert result.bytes_freed == 0
+
+
+async def test_public_query_missing():
+    """Public store.query_missing returns a MissingInfo model."""
+    async with Session() as session:
+        store: Any
+        async with session.store() as store:
+            mi = await store.query_missing(["/nix/store/00000000000000000000000000000000-nonexistent-1.0"])
+            assert isinstance(mi, MissingInfo)
+            assert isinstance(mi.will_build, list)
+            assert isinstance(mi.will_substitute, list)
+            assert isinstance(mi.unknown, list)
+
+
+async def test_public_query_missing_accepts_storepath():
+    """query_missing accepts StorePath instances."""
+    async with Session() as session:
+        store: Any
+        async with session.store() as store:
+            paths = (await store.rpc.query_all_valid_paths(QueryAllValidPathsRequest())).paths
+            if paths:
+                sp = StorePath(paths[0])
+                mis = await store.query_missing([sp])
+                assert isinstance(mis, MissingInfo)
+
+
+async def test_public_read_derivation():
+    """Public store.read_derivation returns a Derivation model."""
+    async with Session() as session:
+        store: Any
+        async with session.store() as store:
+            paths = (await store.rpc.query_all_valid_paths(QueryAllValidPathsRequest())).paths
+            drv = next((p for p in paths if StorePath(p).is_derivation), None)
+            if drv is not None:
+                d = await store.read_derivation(drv)
+                assert isinstance(d, Derivation)
+                assert d.name
+                assert d.system
+
+
+@NIX_GC_ROOTS_BUG
+async def test_public_collect_garbage_return_dead(tmp_path: Path):
+    """Public store.collect_garbage(GcAction.RETURN_DEAD) returns GcResult."""
+    async with Session(store_uri=f"local?root={tmp_path}") as session:
+        store: Any
+        async with session.store() as store:
+            result = await store.collect_garbage(GcAction.RETURN_DEAD)
+            assert isinstance(result, GcResult)
             assert isinstance(result.paths, list)
             assert result.bytes_freed == 0
 

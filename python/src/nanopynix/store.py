@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_proto.nix.common import PathInfo
 from nanopynix_proto.nix.store import (
+    CollectGarbageRequest,
     ComputeFsClosureRequest,
     FollowLinksToStorePathRequest,
+    GcAction,
     GetBuildLogRequest,
     GetStoreDirRequest,
     GetUriRequest,
@@ -16,11 +18,13 @@ from nanopynix_proto.nix.store import (
     ParseStorePathRequest,
     QueryAllValidPathsRequest,
     QueryDerivationOutputsRequest,
+    QueryMissingRequest,
     QueryPathFromHashPartRequest,
     QueryPathInfoRequest,
     QueryReferrersRequest,
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
+    ReadDerivationRequest,
     StoreServiceBase,
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
@@ -31,7 +35,7 @@ from nanopynix._pool import (  # type: ignore[reportPrivateUsage] -- cross-modul
     _grpc_call,  # type: ignore[reportPrivateUsage] -- cross-module internal utility
 )
 from nanopynix._rpc_proxy import RpcProxyMixin
-from nanopynix.models import StorePath
+from nanopynix.models import Derivation, GcResult, MissingInfo, StorePath
 
 if TYPE_CHECKING:
     from betterproto2 import Message
@@ -238,3 +242,37 @@ class Store:
     async def get_build_log(self, path: str | StorePath) -> str | None:
         response = await self.rpc.get_build_log(GetBuildLogRequest(path=str(path)))
         return response.log
+
+    async def query_missing(
+        self,
+        derived_paths: list[str | StorePath],
+        /,
+    ) -> MissingInfo:
+        return await self.rpc.query_missing(
+            QueryMissingRequest(derived_paths=[str(p) for p in derived_paths])
+        )
+
+    async def read_derivation(self, drv_path: str | StorePath, /) -> Derivation:
+        return await self.rpc.read_derivation(ReadDerivationRequest(path=str(drv_path)))
+
+    async def collect_garbage(
+        self,
+        action: GcAction,
+        /,
+        *,
+        ignore_liveness: bool = False,
+        paths_to_delete: list[str | StorePath] | tuple[()] = (),
+        max_freed: int = 2**64 - 1,
+    ) -> GcResult:
+        response = await self.rpc.collect_garbage(
+            CollectGarbageRequest(
+                action=action,
+                ignore_liveness=ignore_liveness,
+                paths_to_delete=[str(p) for p in paths_to_delete],
+                max_freed=max_freed,
+            )
+        )
+        return GcResult(
+            paths=[StorePath(p) for p in response.paths],
+            bytes_freed=response.bytes_freed,
+        )

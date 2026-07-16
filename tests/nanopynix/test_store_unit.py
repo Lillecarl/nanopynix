@@ -277,6 +277,63 @@ class TestPublicStore:
 
         assert response.log == "hello log\n"
 
+    async def test_query_missing_sends_request(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.query_missing.return_value = _mock_missing_info(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+            will_build=["/nix/store/aaa-foo.drv"],
+            will_substitute=["/nix/store/bbb-bar"],
+            unknown=[],
+            download_size=12345,
+            nar_size=67890,
+        )
+        result = await public_store.query_missing(["/nix/store/aaa-foo.drv", "/nix/store/bbb-bar"])
+        assert result.will_build == ["/nix/store/aaa-foo.drv"]
+        assert result.download_size == 12345
+        pool._store_stub.query_missing.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        sent = pool._store_stub.query_missing.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        assert sent.derived_paths == ["/nix/store/aaa-foo.drv", "/nix/store/bbb-bar"]
+
+    async def test_read_derivation_sends_request(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.read_derivation.return_value = _mock_derivation(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+            name="foo", system="x86_64-linux", builder="/bin/sh"
+        )
+        result = await public_store.read_derivation("/nix/store/aaa-foo.drv")
+        assert result.name == "foo"
+        assert result.system == "x86_64-linux"
+        pool._store_stub.read_derivation.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        sent = pool._store_stub.read_derivation.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        assert sent.path == "/nix/store/aaa-foo.drv"
+
+    async def test_collect_garbage_sends_request(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.collect_garbage.return_value = _mock_collect_garbage_response(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+            paths=["/nix/store/aaa-foo", "/nix/store/bbb-bar"],
+            bytes_freed=4096,
+        )
+        result = await public_store.collect_garbage(GcAction.RETURN_DEAD)
+        assert result.paths == ["/nix/store/aaa-foo", "/nix/store/bbb-bar"]
+        assert result.bytes_freed == 4096
+        pool._store_stub.collect_garbage.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        sent = pool._store_stub.collect_garbage.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        assert sent.action == GcAction.RETURN_DEAD
+
+    async def test_collect_garbage_with_options(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.collect_garbage.return_value = _mock_collect_garbage_response(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+            paths=[],
+            bytes_freed=0,
+        )
+        result = await public_store.collect_garbage(
+            GcAction.DELETE_SPECIFIC,
+            ignore_liveness=True,
+            paths_to_delete=["/nix/store/aaa-foo"],
+            max_freed=1000,
+        )
+        assert result.paths == []
+        pool._store_stub.collect_garbage.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        sent = pool._store_stub.collect_garbage.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        assert sent.action == GcAction.DELETE_SPECIFIC
+        assert sent.ignore_liveness is True
+        assert sent.paths_to_delete == ["/nix/store/aaa-foo"]
+        assert sent.max_freed == 1000
+
 
 # ════════════════════════════════════════════════════════════════════
 # StorePath parsing — coercion from StorePath or str
