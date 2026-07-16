@@ -152,3 +152,29 @@ async def test_build_missing_input_errors(capsys: pytest.CaptureFixture[str]) ->
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "either --file or --flake is required" in captured.err
+
+
+async def test_build_with_separate_eval_store(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    nix_file = tmp_path / "build-test.nix"
+    nix_file.write_text("""
+    let
+      pkgs = import <nixpkgs> {};
+    in
+      pkgs.stdenvNoCC.mkDerivation {
+        pname = "pynix-build-eval-store-test";
+        version = "1";
+        dontUnpack = true;
+        installPhase = ''
+          echo built-with-eval-store > "$out"
+        '';
+      }
+    """)
+    cmd = Pynix.parse(["build", "--file", str(nix_file), "--eval-store", "auto"])
+
+    await cmd.astart()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    out_path = data["outputs"]["out"]
+    assert "pynix-build-eval-store-test" in out_path
+    assert await AnyioPath(out_path).read_text() == "built-with-eval-store\n"
