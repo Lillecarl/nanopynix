@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypeVar, cast
 
-from nanopynix.protocols import AsyncEvalSession, AsyncLockedFlake, AsyncReplSession, AsyncValue
+from nanopynix.protocols import (
+    AsyncEvalSession,
+    AsyncLockedFlake,
+    AsyncReplSession,
+    AsyncValue,
+    AsyncVerbosityController,
+)
 
 ReplValueT = TypeVar("ReplValueT", bound=AsyncValue)
+VerbosityT = TypeVar("VerbosityT")
 
 if TYPE_CHECKING:
     from nanopynix._session import EvalSession as RpcEvalSession
@@ -15,6 +22,8 @@ if TYPE_CHECKING:
     from nanopynix.inproc import EvalSession as InprocEvalSession
     from nanopynix.inproc import LockedFlake, Value
     from nanopynix.inproc import ReplSession as InprocReplSession
+    from nanopynix.inproc import Session as InprocSession
+    from nanopynix.nix import Session as RpcSession
 
 
 def _accept_async_value(value: AsyncValue) -> None:
@@ -33,6 +42,10 @@ def _accept_async_repl_session(repl_session: AsyncReplSession[ReplValueT]) -> No
     del repl_session
 
 
+def _accept_async_verbosity_controller(controller: AsyncVerbosityController[VerbosityT]) -> None:
+    del controller
+
+
 def test_protocol_static_conformance() -> None:
     """Keep structural compatibility checked by pyright without constructing Nix."""
     if TYPE_CHECKING:
@@ -42,6 +55,8 @@ def test_protocol_static_conformance() -> None:
         inproc_eval_session = cast(InprocEvalSession, None)
         rpc_repl_session = cast(RpcReplSession, None)
         inproc_repl_session = cast(InprocReplSession, None)
+        rpc_session = cast(RpcSession, None)
+        inproc_session = cast(InprocSession, None)
         inproc_locked_flake = cast(LockedFlake, None)
         locked_flake = cast(LockedFlakeHandle, None)
         _accept_async_value(value_proxy)
@@ -50,5 +65,7 @@ def test_protocol_static_conformance() -> None:
         _accept_async_eval_session(inproc_eval_session)
         _accept_async_repl_session(rpc_repl_session)
         _accept_async_repl_session(inproc_repl_session)
+        _accept_async_verbosity_controller(rpc_session)
+        _accept_async_verbosity_controller(inproc_session)
         _accept_async_locked_flake(inproc_locked_flake)
         _accept_async_locked_flake(locked_flake)
