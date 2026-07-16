@@ -58,7 +58,22 @@ jobs:
           unshare --user --map-root-user --mount --pid --fork --mount-proc true
 
       - name: Test nanopynix against Nix ${{ matrix.version }}
-        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds
+        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --cov --cov-branch --cov-report=xml:${{ github.workspace }}/coverage.xml --junitxml=${{ github.workspace }}/junit.xml -o junit_family=legacy
+
+      - name: Upload coverage reports to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ github.workspace }}/coverage.xml
+          flags: ${{ matrix.version }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ github.workspace }}/junit.xml
 
       - name: Verify test runner closure after tests
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
