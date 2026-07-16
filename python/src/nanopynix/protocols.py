@@ -7,7 +7,9 @@ Protocols deliberately describe only behaviour common to both transports.
 
 from __future__ import annotations
 
-from typing import Any, Protocol, Self
+from typing import Any, Protocol, Self, TypeVar
+
+ValueT = TypeVar("ValueT", bound="AsyncValue")
 
 
 class AsyncValue(Protocol):
@@ -67,4 +69,18 @@ class AsyncEvalSession(Protocol):
     async def eval_flake(self, ref: str, /, *, write_lock_file: bool = True) -> AsyncValue: ...
 
 
-__all__ = ["AsyncEvalSession", "AsyncLockedFlake", "AsyncValue"]
+class AsyncReplSession(Protocol[ValueT]):
+    """The shared persistent REPL-scope operation interface."""
+
+    async def line(self, text: str, path: str = "<string>", /) -> ValueT | None: ...
+
+    async def load_file(self, path: str, /) -> ValueT: ...
+
+    async def add_attrs(self, value: ValueT, /) -> list[str]: ...
+
+    async def scope_names(self) -> list[str]: ...
+
+    async def reset_file_cache(self) -> None: ...
+
+
+__all__ = ["AsyncEvalSession", "AsyncLockedFlake", "AsyncReplSession", "AsyncValue"]

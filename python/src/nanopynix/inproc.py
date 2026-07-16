@@ -424,6 +424,9 @@ class ReplSession:
     async def scope_names(self) -> list[str]:
         return await self._eval_session._session.run(self._eval_session._require_raw().repl_scope_names)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
+    async def reset_file_cache(self) -> None:
+        await self._eval_session._session.run(self._eval_session._require_raw().reset_file_cache)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+
 
 class LockedFlake:
     """Async façade over one thread-confined in-memory flake lock."""
