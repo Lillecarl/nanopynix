@@ -5,18 +5,21 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import shlex
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
+import tree_sitter_nix  # type: ignore[reportMissingTypeStubs] -- tree-sitter-nix does not ship type stubs
 from clypi import Command, arg
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
-from prompt_toolkit.formatted_text import ANSI
+from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples
+from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import print_formatted_text
+from prompt_toolkit.styles import Style
+from tree_sitter import Language, Parser, Query, QueryCursor
 
 import nanopynix
 from nanopynix.exceptions import NixError
@@ -32,7 +35,7 @@ from pynix.target import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from prompt_toolkit.document import Document
 
@@ -67,7 +70,60 @@ _COMMANDS = {
     ":verbosity": "Show or set Nix log verbosity",
     ":?": "Show this help",
 }
-_NIX_IDENTIFIER = re.compile(r"(?P<path>(?:[A-Za-z_][A-Za-z0-9_'-]*\.)*[A-Za-z_][A-Za-z0-9_'-]*\.?)$")
+_NIX_EXPRESSION_COMMANDS = frozenset({":a", ":add", ":b", ":build", ":e", ":edit", ":exec", ":p", ":print", ":run", ":shell", ":t", ":type"})
+class _Grammar(Protocol):
+    path: str | None
+
+
+class _GrammarConfig(Protocol):
+    grammars: list[_Grammar]
+
+
+_NIX_LANGUAGE = Language(cast("int", tree_sitter_nix.language()))  # type: ignore[reportDeprecated, reportUnknownMemberType] -- tree-sitter-nix 0.3 exposes the legacy integer language pointer
+_NIX_GRAMMAR_CONFIG = cast("_GrammarConfig | None", tree_sitter_nix.config())  # type: ignore[reportUnknownMemberType] -- tree-sitter-nix has no type stubs
+if _NIX_GRAMMAR_CONFIG is None:
+    raise RuntimeError("tree-sitter-nix did not provide its grammar configuration")
+_NIX_GRAMMAR_PATH = _NIX_GRAMMAR_CONFIG.grammars[0].path
+if _NIX_GRAMMAR_PATH is None:
+    raise RuntimeError("tree-sitter-nix did not provide its grammar path")
+_NIX_HIGHLIGHTS = Query(
+    _NIX_LANGUAGE,
+    (Path(_NIX_GRAMMAR_PATH) / "queries" / "highlights.scm").read_text(),
+)
+_NIX_HIGHLIGHT_STYLES = {
+    "comment": "class:nix.comment",
+    "escape": "class:nix.escape",
+    "function": "class:nix.function",
+    "function.builtin": "class:nix.builtin",
+    "keyword": "class:nix.keyword",
+    "number": "class:nix.number",
+    "operator": "class:nix.operator",
+    "property": "class:nix.property",
+    "punctuation.bracket": "class:nix.punctuation",
+    "punctuation.delimiter": "class:nix.punctuation",
+    "punctuation.special": "class:nix.punctuation",
+    "string": "class:nix.string",
+    "string.special.path": "class:nix.path",
+    "string.special.uri": "class:nix.path",
+    "variable.builtin": "class:nix.builtin",
+    "variable.parameter": "class:nix.parameter",
+}
+_REPL_STYLE = Style.from_dict(
+    {
+        "nix.builtin": "ansicyan",
+        "nix.comment": "ansibrightblack italic",
+        "nix.escape": "ansiyellow",
+        "nix.function": "ansiblue",
+        "nix.keyword": "ansimagenta bold",
+        "nix.number": "ansicyan",
+        "nix.operator": "ansimagenta",
+        "nix.parameter": "ansiyellow",
+        "nix.path": "underline ansiblue",
+        "nix.property": "ansiblue",
+        "nix.punctuation": "ansibrightblack",
+        "nix.string": "ansigreen",
+    }
+)
 _HELP = """Commands:
   <expr>                 Evaluate and print an expression
   <name> = <expr>        Bind an expression to a name
@@ -86,6 +142,114 @@ _HELP = """Commands:
   :verbosity [level]      Show or set Nix log verbosity (0-7 or a level name)
   :q, :quit              Exit the REPL
   :?, :help              Show this help"""
+
+
+def _nix_input(text: str) -> tuple[str, int] | None:
+    """Return Nix source and its character offset within one REPL input line."""
+    command, separator, argument = text.partition(" ")
+    if command.startswith(":"):
+        if command not in _NIX_EXPRESSION_COMMANDS or not separator:
+            return None
+        return argument, len(command) + len(separator)
+    return text, 0
+
+
+def _parse_nix(source: str):
+    """Parse one possibly incomplete Nix expression for prompt interaction."""
+    return Parser(_NIX_LANGUAGE).parse(source.encode())
+
+
+def _nodes(root: Any) -> list[Any]:
+    """Return all nodes below ``root`` in source order."""
+    nodes: list[Any] = [root]
+    result: list[Any] = []
+    while nodes:
+        node = nodes.pop()
+        result.append(node)
+        nodes.extend(reversed(node.children))
+    return result
+
+
+def _completion_target(source: str) -> tuple[str | None, str] | None:
+    """Return the semantic prefix and partial identifier at the cursor, if any."""
+    encoded = source.encode()
+    nodes = _nodes(_parse_nix(source).root_node)
+    selections = [node for node in nodes if node.type == "select_expression" and node.end_byte == len(encoded)]
+    if selections:
+        target = selections[-1]
+        attrpath = target.child_by_field_name("attrpath")
+        if attrpath is None:
+            return None
+        attributes = [node for node in attrpath.named_children if node.type == "identifier"]
+        if not attributes:
+            return None
+        partial_node = attributes[-1]
+        prefix = encoded[target.start_byte : partial_node.start_byte].rstrip(b".").decode()
+        partial = encoded[partial_node.start_byte : partial_node.end_byte].decode()
+        return (prefix, partial) if prefix else None
+
+    if source.endswith("."):
+        before_dot = source.removesuffix(".")
+        encoded_before_dot = before_dot.encode()
+        expressions = [
+            node
+            for node in _nodes(_parse_nix(before_dot).root_node)
+            if node.type in {"identifier", "select_expression", "variable_expression"}
+            and node.end_byte == len(encoded_before_dot)
+        ]
+        if expressions:
+            target = expressions[-1]
+            return encoded_before_dot[target.start_byte : target.end_byte].decode(), ""
+
+    variables = [node for node in nodes if node.type == "variable_expression" and node.end_byte == len(encoded)]
+    if variables:
+        target = variables[-1]
+        name = target.child_by_field_name("name")
+        if name is not None:
+            return None, encoded[name.start_byte : name.end_byte].decode()
+    identifiers = [node for node in nodes if node.type == "identifier" and node.end_byte == len(encoded)]
+    if identifiers:
+        target = identifiers[-1]
+        return None, encoded[target.start_byte : target.end_byte].decode()
+
+    interpolation_starts = [node for node in nodes if node.type == "${" and node.end_byte == len(encoded)]
+    if interpolation_starts:
+        return None, ""
+    return None
+
+
+class _NixLexer(Lexer):
+    """Color Nix expressions with the tree-sitter-nix highlight query."""
+
+    @override
+    def lex_document(self, document: Document) -> Callable[[int], StyleAndTextTuples]:
+        source_and_offset = _nix_input(document.text)
+        styles = [""] * len(document.text)
+        if source_and_offset is not None:
+            source, offset = source_and_offset
+            encoded = source.encode()
+            captures = QueryCursor(_NIX_HIGHLIGHTS).captures(_parse_nix(source).root_node)
+            for capture, nodes in captures.items():
+                style = _NIX_HIGHLIGHT_STYLES.get(capture)
+                if style is None:
+                    continue
+                for node in nodes:
+                    start = offset + len(encoded[: node.start_byte].decode())
+                    end = offset + len(encoded[: node.end_byte].decode())
+                    styles[start:end] = [style] * (end - start)
+
+        def get_line(line_number: int) -> StyleAndTextTuples:
+            line = document.lines[line_number]
+            start = sum(len(previous) + 1 for previous in document.lines[:line_number])
+            fragments: StyleAndTextTuples = []
+            for character, style in zip(line, styles[start : start + len(line)], strict=True):
+                if fragments and fragments[-1][0] == style:
+                    fragments[-1] = (style, fragments[-1][1] + character)
+                else:
+                    fragments.append((style, character))
+            return fragments
+
+        return get_line
 
 
 class _ReplCompleter(Completer):
@@ -109,18 +273,17 @@ class _ReplCompleter(Completer):
                     yield Completion(name, start_position=-len(command), display_meta=description)
             return
 
-        match = _NIX_IDENTIFIER.search(before_cursor)
-        if match is None:
-            return
-        path = match.group("path")
-        prefix, dot, partial = path.rpartition(".")
-        if dot:
-            candidates = await self._attr_names(prefix)
-        else:
-            candidates = await self._repl.scope_names()
-        for name in candidates:
-            if name.startswith(partial):
-                yield Completion(name, start_position=-len(partial))
+        source_and_offset = _nix_input(before_cursor)
+        if source_and_offset is not None:
+            source, _offset = source_and_offset
+            target = _completion_target(source)
+            if target is not None:
+                prefix, partial = target
+                candidates = await self._repl.scope_names() if prefix is None else await self._attr_names(prefix)
+                for name in candidates:
+                    if name.startswith(partial):
+                        yield Completion(name, start_position=-len(partial))
+                return
 
     async def _attr_names(self, expression: str) -> list[str]:
         try:
@@ -405,7 +568,10 @@ class Repl(Command):
             with patch_stdout():
                 async with forward_nix_logs(nix, log_file=sys.stdout), nix.store(self.store) as store, nix.repl(store) as repl:
                     prompt: PromptSession[str] = PromptSession(
-                        completer=_ReplCompleter(repl), complete_while_typing=True
+                        completer=_ReplCompleter(repl),
+                        complete_while_typing=True,
+                        lexer=_NixLexer(),
+                        style=_REPL_STYLE,
                     )
                     try:
                         initial_loaded = await _load_initial_target(repl, target)
