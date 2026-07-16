@@ -7,6 +7,7 @@ from __future__ import annotations
 from nanopynix_proto.nix.common import LogLevel
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
+from nanopynix import inproc as inproc
 from nanopynix._pool import WorkerBusyError, WorkerDiedError
 from nanopynix._process_title import set_manager_title as set_manager_title
 from nanopynix._session import EvalSession, LockedFlakeHandle, ReplSession, ValueAttrs, ValueList, ValueProxy
@@ -153,6 +154,7 @@ __all__ = [
     "init_libstore",
     "init_nix",
     "init_plugins",
+    "inproc",
     "input_from_attrs",
     "input_from_url",
     "install_logger",
