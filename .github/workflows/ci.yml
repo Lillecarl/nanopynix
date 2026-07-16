@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@main
 
-      - uses: nixbuild/nix-quick-install-action@v35
+      - uses: nixbuild/nix-quick-install-action@master
 
       - id: versions
         name: Compute Nix version matrix
@@ -32,9 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@main
 
-      - uses: nixbuild/nix-quick-install-action@v35
+      - uses: nixbuild/nix-quick-install-action@master
 
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@master
         with:
           name: lillecarl
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
@@ -62,7 +62,7 @@ jobs:
 
       - name: Upload coverage reports to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@main
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ github.workspace }}/coverage.xml
@@ -70,7 +70,7 @@ jobs:
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@main
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ github.workspace }}/junit.xml
@@ -87,9 +87,9 @@ jobs:
     steps:
       - uses: actions/checkout@main
 
-      - uses: nixbuild/nix-quick-install-action@v35
+      - uses: nixbuild/nix-quick-install-action@master
 
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@master
         with:
           name: lillecarl
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
@@ -106,7 +106,7 @@ jobs:
           mkdir -p public
           cp -r --no-preserve=mode,ownership result/. public/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@main
         with:
           path: public
 
@@ -126,7 +126,7 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@main
 
   update-lockfile-prep:
     if: github.event_name == 'schedule'
@@ -138,9 +138,9 @@ jobs:
         with:
           ref: main
 
-      - uses: nixbuild/nix-quick-install-action@v35
+      - uses: nixbuild/nix-quick-install-action@master
 
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@master
         with:
           name: lillecarl
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
@@ -153,7 +153,7 @@ jobs:
         name: Compute Nix version matrix
         run: echo "versions=$(nix eval --json '.#nanopynixVersionNames.x86_64-linux')" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@main
         with:
           name: flake-lock
           path: flake.lock
@@ -171,13 +171,13 @@ jobs:
         with:
           ref: main
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@main
         with:
           name: flake-lock
 
-      - uses: nixbuild/nix-quick-install-action@v35
+      - uses: nixbuild/nix-quick-install-action@master
 
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@master
         with:
           name: lillecarl
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
@@ -217,10 +217,10 @@ jobs:
         with:
           ref: main
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@main
         with:
           name: flake-lock
 
-      - uses: step-security/git-auto-commit-action@v7
+      - uses: step-security/git-auto-commit-action@main
         with:
           commit_message: "nix flake update"
