@@ -64,7 +64,6 @@ from nanopynix_proto.nix.eval import (
     WriteLockFileResponse,
 )
 
-import nanopynix_expr
 import nanopynix_flake
 from nanopynix._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._extract import locked_flake as _locked_flake
@@ -131,7 +130,7 @@ class EvalServiceHandler(EvalServiceBase):
             return
         if self._state.eval_state is not None:
             raise RuntimeError("eval session is already bound to a different store")
-        self._state.eval_state = nanopynix_expr.EvalState(store, list(self._state.nix_path))
+        self._state.eval_state = self._state.nix_core.open_eval_state(store, self._state.nix_path)
         self._state.eval_store_handle = store_handle
 
     def _reset(self) -> None:

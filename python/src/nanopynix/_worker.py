@@ -53,10 +53,10 @@ from nanopynix_proto.nix.worker import (
 )
 
 import nanopynix_expr
-import nanopynix_store
 import nanopynix_util
 from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix._handle_registry import HandleRegistry
+from nanopynix._nix_core import NixCore
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._worker_eval import EvalServiceHandler
 from nanopynix._worker_nix import NixThreadExecutor
@@ -156,6 +156,7 @@ class WorkerState:
         self.collector: LogCollector | None = None
         self.log_task: asyncio.Task[None] | None = None
         self.handles: HandleRegistry = HandleRegistry()
+        self.nix_core = NixCore()
         self.executor: NixThreadExecutor | None = None
         self.rpc_bridge: ThreadedRpcPrimopBridge | None = None
         self.eval_store_handle: int | None = None
@@ -197,21 +198,16 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     def _init_nix(self, message: InitRequest, settings: dict[str, str]) -> None:
         """Run every Nix C++ initialization operation on the Nix thread."""
-        for k, v in settings.items():
-            nanopynix_util.set_setting(k, v)
         for feature in message.experimental_features:
             nanopynix_util.enable_experimental_feature(feature)
-
-        nanopynix_util.init_libstore(load_config=message.load_config)
-        nanopynix_util.set_verbosity(int(message.verbosity if message.verbosity is not None else LogLevel.NOTICE))
-        nanopynix_expr.init_libexpr()
-
-        if message.pure_eval is not None:
-            nanopynix_expr._set_pure_eval(message.pure_eval)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
-        if message.restrict_eval is not None:
-            nanopynix_expr._set_restrict_eval(message.restrict_eval)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
-        if message.allowed_uris:
-            nanopynix_expr._set_allowed_uris(message.allowed_uris)  # type: ignore[reportPrivateUsage] -- worker-only binding configuration
+        self._state.nix_core.initialize(
+            settings=settings,
+            load_config=message.load_config,
+            verbosity=int(LogLevel.NOTICE) if message.verbosity is None else int(message.verbosity),
+            pure_eval=message.pure_eval,
+            restrict_eval=message.restrict_eval,
+            allowed_uris=message.allowed_uris,
+        )
         self._state.nix_path = list(message.nix_path)
 
         primops_raw = [
@@ -238,7 +234,7 @@ class WorkerServiceHandler(WorkerServiceBase):
         )
 
     def _open_store(self, uri: str) -> tuple[int, str, str]:
-        store = nanopynix_store.open_store(uri)
+        store = self._state.nix_core.open_store(uri)
         handle = self._state.handles.allocate(store, "store")
         store_uri = store.get_uri()
         self._state.named_store_uris[handle] = store_uri
@@ -259,19 +255,14 @@ class WorkerServiceHandler(WorkerServiceBase):
         """Return the worker's current Nix logger verbosity."""
         del message
         assert self._state.executor is not None  # set by worker_service_factory before init
-        verbosity = await self._state.executor.run(nanopynix_util.get_verbosity)
+        verbosity = await self._state.executor.run(self._state.nix_core.get_verbosity)
         return GetVerbosityResponse(verbosity=LogLevel(verbosity))
 
     async def set_verbosity(self, message: SetVerbosityRequest) -> SetVerbosityResponse:
         """Update Nix logger verbosity on the Nix thread."""
         assert self._state.executor is not None  # set by worker_service_factory before init
-        verbosity = await self._state.executor.run(self._set_verbosity, message.verbosity)
+        verbosity = await self._state.executor.run(self._state.nix_core.set_verbosity, int(message.verbosity))
         return SetVerbosityResponse(verbosity=LogLevel(verbosity))
-
-    @staticmethod
-    def _set_verbosity(verbosity: LogLevel) -> int:
-        nanopynix_util.set_verbosity(int(verbosity))
-        return nanopynix_util.get_verbosity()
 
     def _update_store_title(self) -> None:
         subname = " ".join(self._state.named_store_uris.values()) or self._state.worker_subname

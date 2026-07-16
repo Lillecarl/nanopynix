@@ -8,9 +8,12 @@ from typing import Any
 
 import pytest
 
+import nanopynix._nix_core as nix_core  # type: ignore[reportPrivateUsage] -- test patches direct-pointer core boundary
 import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
-import nanopynix._worker_eval as worker_eval  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix._handle_registry import HandleRegistry  # type: ignore[reportPrivateUsage] -- test imports private module
+from nanopynix._nix_core import (
+    NixCore,  # type: ignore[reportPrivateUsage] -- test constructs worker's direct-pointer core
+)
 from nanopynix._worker import (  # type: ignore[reportPrivateUsage] -- test imports private module
     WorkerServiceHandler,
     WorkerState,
@@ -46,7 +49,7 @@ def test_worker_opens_auto_store_with_explicit_auto_uri(monkeypatch: pytest.Monk
         opened_uris.append(uri)
         return _FakeStore()
 
-    monkeypatch.setattr(worker.nanopynix_store, "open_store", _open_store)
+    monkeypatch.setattr(nix_core.nanopynix_store, "open_store", _open_store)
     handler = WorkerServiceHandler(WorkerState())
 
     _handle, uri, store_dir = handler._open_store("auto")  # type: ignore[reportPrivateUsage] -- test verifies worker store dispatch
@@ -80,7 +83,7 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
         def get_store_dir(self) -> str:
             return "/nix/store"
 
-    monkeypatch.setattr(worker.nanopynix_store, "open_store", lambda uri: Store(uri))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
+    monkeypatch.setattr(nix_core.nanopynix_store, "open_store", lambda uri: Store(uri))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
     state = WorkerState()
     state.worker_subname = "quiet-otter"
     handler = WorkerServiceHandler(state)
@@ -104,10 +107,10 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
     monkeypatch.setattr(worker.nanopynix_util, "enable_experimental_feature", record)
     monkeypatch.setattr(worker.nanopynix_util, "init_libstore", record)
     monkeypatch.setattr(worker.nanopynix_util, "set_verbosity", record)
-    monkeypatch.setattr(worker.nanopynix_expr, "init_libexpr", record)
-    monkeypatch.setattr(worker.nanopynix_expr, "_set_pure_eval", record)
-    monkeypatch.setattr(worker.nanopynix_expr, "_set_restrict_eval", record)
-    monkeypatch.setattr(worker.nanopynix_expr, "_set_allowed_uris", record)
+    monkeypatch.setattr(nix_core.nanopynix_expr, "init_libexpr", record)
+    monkeypatch.setattr(nix_core.nanopynix_expr, "_set_pure_eval", record)
+    monkeypatch.setattr(nix_core.nanopynix_expr, "_set_restrict_eval", record)
+    monkeypatch.setattr(nix_core.nanopynix_expr, "_set_allowed_uris", record)
     monkeypatch.setattr(worker, "_register_primops", record)
 
     state = WorkerState()
@@ -139,7 +142,7 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
 
 
 def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(worker_eval.nanopynix_expr, "EvalState", _FakeEvalState)
+    monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
 
     handles = HandleRegistry()
     second_handle = handles.allocate("second-store", "store")
@@ -148,6 +151,7 @@ def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.Mo
         eval_state=None,
         eval_store_handle=None,
         handles=handles,
+        nix_core=NixCore(),
         nix_path=["nixpkgs=/tmp/nixpkgs"],
     )
     handler = EvalServiceHandler(state)
