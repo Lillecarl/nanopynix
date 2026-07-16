@@ -52,3 +52,13 @@ expected to be fixed there.
 ```{literalinclude} ../examples/primops_example.py
 :language: python
 ```
+
+## In-process (L2) API
+
+The same store queries and eval navigation as above, but through
+`nanopynix.inproc` instead of a worker subprocess. See
+{doc}`architecture` for how the two compare.
+
+```{literalinclude} ../examples/inproc_example.py
+:language: python
+```

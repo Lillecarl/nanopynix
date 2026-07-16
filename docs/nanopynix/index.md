@@ -6,6 +6,7 @@ Eval Nix from Python — a fast, async-first Python binding for the Nix evaluato
 :maxdepth: 2
 :caption: Contents
 
+architecture
 examples
 api/index
 ```
