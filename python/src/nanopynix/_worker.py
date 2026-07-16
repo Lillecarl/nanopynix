@@ -158,6 +158,7 @@ class WorkerState:
         self.handles: HandleRegistry = HandleRegistry()
         self.runtime = LocalRuntime()
         self.executor: NixThreadExecutor | None = None
+        self.owns_executor = True
         self.rpc_bridge: ThreadedRpcPrimopBridge | None = None
         self.eval_store_handle: int | None = None
         self.nix_path: list[str] = []
@@ -173,7 +174,7 @@ class WorkerServiceHandler(WorkerServiceBase):
     """Lifecycle handler: init, subscribe-logs, shutdown."""
 
     def __init__(self, state: WorkerState) -> None:
-        self._state = state
+        self._state: WorkerState = state
 
     async def init(self, message: InitRequest) -> InitResponse:
         """Bootstrap Nix without splitting its global state across threads."""
@@ -298,14 +299,19 @@ class WorkerServiceHandler(WorkerServiceBase):
         if self._state.rpc_bridge is not None:
             self._state.rpc_bridge.stop()
         if self._state.executor is not None:
-            self._state.executor.shutdown(wait=False)
+            if self._state.owns_executor:
+                self._state.executor.shutdown(wait=False)
         return ShutdownResponse()
 
 
 # ── Factory ──────────────────────────────────────────────────────────
 
 
-def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list[IServable]:
+def worker_service_factory(
+    backchannel: WorkerBackchannel | None = None,
+    *,
+    executor: NixThreadExecutor | None = None,
+) -> list[IServable]:
     """Create service handlers with a shared WorkerState.
 
     Must be called *inside* the worker process (before Nix init so that
@@ -326,7 +332,8 @@ def worker_service_factory(backchannel: WorkerBackchannel | None = None) -> list
     state.worker_subname = set_worker_title()
     state.collector = collector
 
-    state.executor = NixThreadExecutor()
+    state.executor = NixThreadExecutor() if executor is None else executor
+    state.owns_executor = executor is None
 
     if backchannel is not None:
         loop = asyncio.get_running_loop()

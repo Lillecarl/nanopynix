@@ -10,6 +10,8 @@ No Nix daemon needed — exercises error paths and edge cases.
 from __future__ import annotations
 
 import asyncio
+import copy
+import gc
 import json as _json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
@@ -37,6 +39,7 @@ from nanopynix._session import (
     EvalProxy,
     EvalSession,
     ReplSession,
+    ValueAttrs,
     ValueList,
     ValueProxy,
 )
@@ -770,6 +773,43 @@ class TestValueProxyLifecycle:
         with pytest.raises(ValueReleasedError, match="has been released"):
             await vp.force()
 
+    async def test_attrs_borrow_parent_handle(self):
+        """An attrs view cannot independently release its parent's handle."""
+        w = self._worker()
+        w._eval_stub.attr_names.return_value = MagicMock(names=["x"])
+        w._eval_stub.release.return_value = MagicMock()
+        parent = self._proxy(w, 1, "attrs")
+
+        attrs = await parent.force()
+
+        assert isinstance(attrs, ValueAttrs)
+        assert not hasattr(attrs, "release")
+        await parent.release()
+        with pytest.raises(ValueReleasedError, match="ValueProxy has been released"):
+            _ = attrs["x"]
+        w._eval_stub.release.assert_awaited_once()
+
+    async def test_finalizer_defers_release_until_a_safe_rpc_boundary(self):
+        w = self._worker()
+        proxy = EvalProxy(w)
+        ctx = _EvalProxyContext(proxy, self._owner())
+        value = ctx.value(7, "int")
+
+        del value
+        gc.collect()
+
+        w._eval_stub.release.assert_not_awaited()
+        await proxy.drain_deferred_releases()
+        w._eval_stub.release.assert_awaited_once()
+
+    async def test_value_proxy_rejects_copying(self):
+        value = self._proxy(self._worker(), 7, "int")
+
+        with pytest.raises(TypeError, match="cannot be copied"):
+            copy.copy(value)
+        with pytest.raises(TypeError, match="cannot be copied"):
+            copy.deepcopy(value)
+
     async def test_check_active_only_when_owner_has_flag(self):
         """An owner without an active flag never expires."""
         w = self._worker()
@@ -793,7 +833,7 @@ class TestValueListBounds:
 
     def _list(self, worker: MagicMock, length: int = 2) -> ValueList:
         ctx = _EvalProxyContext(EvalProxy(worker), _EvalOwner(_EvalOwnerToken()), None)
-        return ValueList(ctx, _ResolvedValue(1, NixType.LIST), length)
+        return ValueList(ctx.value(1, NixType.LIST), length)
 
     async def test_getitem_rejects_out_of_range_indexes(self):
         w = self._worker()
@@ -844,7 +884,9 @@ class TestLazyChildProxy:
         owner: _EvalOwner | None = None,
         timeout: float | None = None,
     ) -> ValueProxy:
-        return _EvalProxyContext(EvalProxy(worker), owner or self._owner(), timeout).child(parent, selector)
+        ctx = _EvalProxyContext(EvalProxy(worker), owner or self._owner(), timeout)
+        parent_proxy = parent if isinstance(parent, ValueProxy) else ctx.value(parent.handle, parent.nix_type)
+        return ctx.child(parent_proxy, selector)
 
     async def test_attrs_getitem_force_calls_attr(self):
         """attrs[\"x\"].force() calls eval.attr with parent handle and name."""

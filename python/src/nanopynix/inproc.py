@@ -21,7 +21,7 @@ import nanopynix_store
 import nanopynix_util
 from nanopynix._extract import locked_flake as _locked_flake_proto
 from nanopynix._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
-from nanopynix._nix_executor import NixThreadExecutor
+from nanopynix._nix_executor import shared_nix_executor
 from nanopynix.logging import LogCollector
 from nanopynix.models import Derivation, GcResult, LockedInput, LogEvent, MissingInfo, PathInfo
 from nanopynix.models import StorePath as PublicStorePath
@@ -55,10 +55,6 @@ def _raw_gc_action(action: PublicGcAction) -> Any:
     except KeyError as exc:
         raise ValueError(f"unsupported garbage-collection action: {action!r}") from exc
 
-# Nix initialization is process-global and must remain on the same OS thread
-# for the lifetime of this interpreter. Sessions are exclusive, but reuse this
-# executor sequentially rather than creating thread-affinity violations.
-_EXECUTOR = NixThreadExecutor()
 _initialization_signature: tuple[object, ...] | None = None
 
 
@@ -141,7 +137,9 @@ class Session:
         self._allowed_uris = list(allowed_uris or [])
         self._collector = LogCollector()
         self._runtime = LocalRuntime()
-        self._executor = _EXECUTOR
+        # Creation is deliberately lazy: merely importing nanopynix.inproc
+        # must not start a Nix thread in an L3 manager process.
+        self._executor = shared_nix_executor()
         self._log_callbacks: set[Any] = set()
         self._log_task: asyncio.Task[None] | None = None
         self._opened = False

@@ -463,7 +463,10 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_release_locked_flake, message)
 
     def _do_release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
-        locked_flake: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
+        try:
+            locked_flake: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
+        except KeyError:
+            return ReleaseLockedFlakeResponse()
         locked_flake.close()
         self._state.handles.release(message.handle)
         return ReleaseLockedFlakeResponse()
@@ -487,7 +490,11 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_release, message)
 
     def _do_release(self, message: ReleaseRequest) -> ReleaseResponse:
-        self._resolve(message.handle).close()
+        try:
+            value = self._resolve(message.handle)
+        except KeyError:
+            return ReleaseResponse()
+        value.close()
         self._state.handles.release(message.handle)
         return ReleaseResponse()
 

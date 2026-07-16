@@ -118,6 +118,23 @@ async def test_eval_string():
         assert await root.force() == 43
 
 
+async def test_forced_attrs_borrow_the_parent_value_handle():
+    """Attrs are views: only their parent owns and releases the worker handle."""
+    async with (
+        Session() as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        parent = await eval.string("{ x = 1; }")
+        attrs = await parent.force_as(NixType.ATTRS)
+        child = attrs["x"]
+
+        assert not hasattr(attrs, "release")
+        await parent.release()
+        with pytest.raises(ValueReleasedError, match="ValueProxy has been released"):
+            await child.force()
+
+
 async def test_eval_realise_command_values_preserves_string_context():
     """Realising strings and argv uses Nix's context-aware coercion path."""
     async with (

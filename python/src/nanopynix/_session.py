@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import json as _json
+import queue
+import threading
+import weakref
 from dataclasses import dataclass, field
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, Never, overload
 
 from nanopynix_proto.nix.common import (
     CallArg,
@@ -131,6 +134,7 @@ def _parse_nix_type(value: Any) -> NixType | None:
 class _ResolvedValue:
     handle: int
     nix_type: NixType | None
+    lease: _Lease | None = None
 
 
 @dataclass(frozen=True)
@@ -140,7 +144,7 @@ class _EvalOwnerToken:
 
 @dataclass(frozen=True)
 class _LazyValue:
-    parent: ValueProxy | _ResolvedValue
+    parent: ValueProxy
     selector: str | int
     nix_type: NixType | None = None
 
@@ -158,6 +162,89 @@ class _EvalOwner:
         return value._ctx.owner.token is self.token  # type: ignore[reportPrivateUsage] -- cross-class access
 
 
+@dataclass(frozen=True, slots=True)
+class _LeaseRef:
+    """Opaque identity of one worker-side resource allocation."""
+
+    kind: str
+    handle: int
+    generation: object
+
+    def __copy__(self) -> Never:
+        raise TypeError("worker cleanup leases cannot be copied")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Never:
+        del memo
+        raise TypeError("worker cleanup leases cannot be copied")
+
+
+class _Lease:
+    """The single local claim on a worker allocation.
+
+    The state is intentionally separate from :class:`_LeaseRef`: the latter
+    can safely cross a finalizer boundary while this object serializes explicit
+    release and finalizer fallback.
+    """
+
+    __slots__ = ("ref", "_lock", "_released")
+
+    def __init__(self, ref: _LeaseRef) -> None:
+        self.ref = ref
+        self._lock = threading.Lock()
+        self._released = False
+
+    def claim(self) -> _LeaseRef | None:
+        with self._lock:
+            if self._released:
+                return None
+            self._released = True
+            return self.ref
+
+
+class _DeferredReleases:
+    """Thread-safe, generation-scoped finalizer handoff for one eval session."""
+
+    __slots__ = ("_active", "_generation", "_queue")
+
+    def __init__(self) -> None:
+        self._active = True
+        self._generation = object()
+        self._queue: queue.SimpleQueue[_LeaseRef] = queue.SimpleQueue()
+
+    @property
+    def generation(self) -> object:
+        return self._generation
+
+    def new_lease(self, kind: str, handle: int) -> _Lease:
+        return _Lease(_LeaseRef(kind, handle, self._generation))
+
+    def defer(self, ref: _LeaseRef) -> None:
+        if self._active and ref.generation is self._generation:
+            self._queue.put(ref)
+
+    def drain(self) -> list[_LeaseRef]:
+        refs: list[_LeaseRef] = []
+        while True:
+            try:
+                ref = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if ref.generation is self._generation:
+                refs.append(ref)
+        return refs
+
+    def close(self) -> None:
+        self._active = False
+        self.drain()
+
+
+def _finalize_lease(lease: _Lease, releases: _DeferredReleases) -> None:
+    """Finalizer callback: queue cleanup; never make an RPC from GC."""
+    ref = lease.claim()
+    if ref is not None:
+        releases.defer(ref)
+
+
 # ════════════════════════════════════════════════════════════════════
 # EvalProxy — auto-generated RPC proxy for the EvalService gRPC API
 # ════════════════════════════════════════════════════════════════════
@@ -171,12 +258,19 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
     serializing all eval RPCs under the worker's exclusive lease.
     """
 
-    __slots__ = ("_active", "_rpc_timeout", "_rw")
+    __slots__ = ("_active", "_draining_releases", "_releases", "_rpc_timeout", "_rw")
 
-    def __init__(self, rw: ReservedWorker, rpc_timeout: float = _RPC_TIMEOUT) -> None:
+    def __init__(
+        self,
+        rw: ReservedWorker,
+        releases: _DeferredReleases | None = None,
+        rpc_timeout: float = _RPC_TIMEOUT,
+    ) -> None:
         self._rw = rw
+        self._releases = releases or _DeferredReleases()
         self._rpc_timeout = rpc_timeout
         self._active = True
+        self._draining_releases = False
 
     def _check_active(self) -> None:
         if not self._active:
@@ -187,8 +281,26 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
 
     async def _rpc_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
+        if not self._draining_releases:
+            await self.drain_deferred_releases()
         method = getattr(self._rw._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
         return await self._rw.call(method(message, timeout=self._rpc_timeout))
+
+    async def drain_deferred_releases(self) -> None:
+        """Best-effort cleanup at a safe worker-RPC boundary."""
+        if self._draining_releases:
+            return
+        self._draining_releases = True
+        try:
+            for ref in self._releases.drain():
+                if ref.kind == "value":
+                    await self.release(ReleaseRequest(handle=ref.handle))
+                elif ref.kind == "locked_flake":
+                    await self.release_locked_flake(ReleaseLockedFlakeRequest(handle=ref.handle))
+                else:
+                    raise RuntimeError(f"unknown deferred lease kind: {ref.kind}")
+        finally:
+            self._draining_releases = False
 
     async def _store_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
@@ -203,6 +315,10 @@ class _EvalProxyContext:
     timeout: float | None = None
     store_handle: int = 1
     session_id: str = ""
+    releases: _DeferredReleases = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "releases", self.proxy._releases)  # type: ignore[reportPrivateUsage] -- context shares its proxy's session cleanup queue
 
     def with_timeout(self, timeout: float | None) -> _EvalProxyContext:
         if timeout is None:
@@ -213,11 +329,18 @@ class _EvalProxyContext:
         return override if override is not None else self.timeout
 
     def value(self, handle: int, typ: Any) -> ValueProxy:
-        return ValueProxy(self, _ResolvedValue(handle=handle, nix_type=_parse_nix_type(typ)))
+        return ValueProxy(
+            self,
+            _ResolvedValue(
+                handle=handle,
+                nix_type=_parse_nix_type(typ),
+                lease=self.releases.new_lease("value", handle),
+            ),
+        )
 
     def child(
         self,
-        parent: ValueProxy | _ResolvedValue,
+        parent: ValueProxy,
         selector: str | int,
         *,
         timeout: float | None = None,
@@ -227,11 +350,11 @@ class _EvalProxyContext:
             _LazyValue(parent=parent, selector=selector),
         )
 
-    def attrs(self, handle: int, keys: Sequence[str]) -> ValueAttrs:
-        return ValueAttrs(self, _ResolvedValue(handle=handle, nix_type=NixType.ATTRS), keys)
+    def attrs(self, parent: ValueProxy, keys: Sequence[str]) -> ValueAttrs:
+        return ValueAttrs(parent, keys)
 
-    def list(self, handle: int, length: int) -> ValueList:
-        return ValueList(self, _ResolvedValue(handle=handle, nix_type=NixType.LIST), length)
+    def list(self, parent: ValueProxy, length: int) -> ValueList:
+        return ValueList(parent, length)
 
 
 type NixArg = ValueProxy | JsonScalar | list[NixArg] | dict[str, NixArg]
@@ -249,21 +372,35 @@ class ValueProxy:
     """
 
     __slots__ = (
+        "__weakref__",
         "_ctx",
+        "_finalizer",
         "_released",
         "_state",
     )
 
     def __init__(self, ctx: _EvalProxyContext, state: _ValueState) -> None:
         self._ctx = ctx
+        if isinstance(state, _ResolvedValue) and state.lease is None:
+            state = _ResolvedValue(state.handle, state.nix_type, ctx.releases.new_lease("value", state.handle))
         self._state = state
         self._released = False
+        self._finalizer: Any = None
+        if isinstance(state, _ResolvedValue):
+            self._finalizer = weakref.finalize(self, _finalize_lease, self._lease, ctx.releases)
 
     async def __aenter__(self) -> ValueProxy:
         return self
 
     async def __aexit__(self, *args: object) -> None:
         await self.release()
+
+    def __copy__(self) -> Never:
+        raise TypeError("ValueProxy cannot be copied; use normal assignment to share it")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Never:
+        del memo
+        raise TypeError("ValueProxy cannot be copied; use normal assignment to share it")
 
     def _check_active(self) -> None:
         active = self._ctx.owner.active
@@ -285,6 +422,13 @@ class ValueProxy:
         return self._state
 
     @property
+    def _lease(self) -> _Lease:
+        lease = self._resolved.lease
+        if lease is None:
+            raise RuntimeError("resolved ValueProxy has no cleanup lease")
+        return lease
+
+    @property
     def nix_type(self) -> NixType:
         return self._state.nix_type or NixType.UNSPECIFIED
 
@@ -293,16 +437,18 @@ class ValueProxy:
         if isinstance(self._state, _ResolvedValue):
             return
         lazy = self._state
-        if isinstance(lazy.parent, ValueProxy):
-            await lazy.parent._ensure_resolved(timeout=timeout)
-            parent = lazy.parent._resolved
-        else:
-            parent = lazy.parent
+        await lazy.parent._ensure_resolved(timeout=timeout)
+        parent = lazy.parent._resolved
         if isinstance(lazy.selector, str):
             handle = await self._ctx.proxy.attr(AttrRequest(handle=parent.handle, name=lazy.selector))
         else:
             handle = await self._ctx.proxy.list_get(ListGetRequest(handle=parent.handle, index=lazy.selector))
-        self._state = _ResolvedValue(handle=handle.handle, nix_type=_parse_nix_type(handle.type))
+        self._state = _ResolvedValue(
+            handle=handle.handle,
+            nix_type=_parse_nix_type(handle.type),
+            lease=self._ctx.releases.new_lease("value", handle.handle),
+        )
+        self._finalizer = weakref.finalize(self, _finalize_lease, self._lease, self._ctx.releases)
 
     async def _ensure_type(self, *, timeout: float | None = None) -> NixType:
         await self._ensure_resolved(timeout=timeout)
@@ -311,7 +457,7 @@ class ValueProxy:
             return cached
         resp = await self._ctx.proxy.type_name(TypeNameRequest(handle=self.handle))
         resolved_type = _parse_nix_type(resp.type) or NixType.UNSPECIFIED
-        self._state = _ResolvedValue(handle=self.handle, nix_type=resolved_type)
+        self._state = _ResolvedValue(handle=self.handle, nix_type=resolved_type, lease=self._resolved.lease)
         return resolved_type
 
     def _decode_force_value(self, value: ForceValue) -> JsonValue | ValueProxy:
@@ -355,10 +501,10 @@ class ValueProxy:
         typ = await self._ensure_type(timeout=timeout)
         if typ == NixType.ATTRS:
             keys = await self.attr_names(timeout=timeout)
-            return self._ctx.attrs(self.handle, keys)
+            return self._ctx.attrs(self, keys)
         if typ == NixType.LIST:
             length = await self.list_length(timeout=timeout)
-            return self._ctx.list(self.handle, length)
+            return self._ctx.list(self, length)
         if typ == NixType.FUNCTION:
             return self
         # scalar — delegate to worker
@@ -552,13 +698,11 @@ class ValueProxy:
 
     def attr(self, name: str, *, timeout: float | None = None) -> ValueProxy:
         self._check_active()
-        parent: ValueProxy | _ResolvedValue = self if isinstance(self._state, _LazyValue) else self._resolved
-        return self._ctx.child(parent, name, timeout=timeout)
+        return self._ctx.child(self, name, timeout=timeout)
 
     def list_get(self, idx: int, *, timeout: float | None = None) -> ValueProxy:
         self._check_active()
-        parent: ValueProxy | _ResolvedValue = self if isinstance(self._state, _LazyValue) else self._resolved
-        return self._ctx.child(parent, idx, timeout=timeout)
+        return self._ctx.child(self, idx, timeout=timeout)
 
     async def list_length(self, *, timeout: float | None = None) -> int:
         await self._ensure_resolved(timeout=timeout)
@@ -599,12 +743,23 @@ class ValueProxy:
     # ── release ────────────────────────────────────────────────────
 
     async def release(self, *, timeout: float | None = None) -> None:
+        if self._released:
+            return
         if not isinstance(self._state, _ResolvedValue):
             self._released = True
             return
         self._check_active()
-        await self._ctx.proxy.release(ReleaseRequest(handle=self.handle))
+        ref = self._lease.claim()
         self._released = True
+        if self._finalizer is not None:
+            self._finalizer.detach()
+        if ref is None:
+            return
+        try:
+            await self._ctx.proxy.release(ReleaseRequest(handle=ref.handle))
+        except BaseException:
+            self._ctx.releases.defer(ref)
+            raise
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -622,35 +777,18 @@ _ChildProxy = ValueProxy
 class ValueAttrs:
     """Attrset forced to WHNF — keys are available, values are still lazy.
 
-    ``__getitem__`` returns a ``ValueProxy``.  ``__aenter__``/``__aexit__``
-    support early release of the underlying handle.
+    This is a borrowing view of its parent ``ValueProxy``. Keeping the view
+    alive keeps the parent handle alive; release the parent to release it.
     """
 
-    __slots__ = ("_ctx", "_keys", "_released", "_value")
+    __slots__ = ("_keys", "_parent")
 
-    def __init__(
-        self,
-        ctx: _EvalProxyContext,
-        value: _ResolvedValue,
-        keys: Sequence[str],
-    ) -> None:
-        self._ctx = ctx
-        self._value = value
+    def __init__(self, parent: ValueProxy, keys: Sequence[str]) -> None:
+        self._parent = parent
         self._keys = keys
-        self._released = False
-
-    async def __aenter__(self) -> ValueAttrs:
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        await self.release()
 
     def _check_active(self) -> None:
-        active = self._ctx.owner.active
-        if active is not None and not active[0]:
-            raise EvalSessionClosedError("ValueAttrs is invalid — the EvalSession has been closed")
-        if self._released:
-            raise ValueReleasedError("ValueAttrs has been released")
+        self._parent._check_active()  # type: ignore[reportPrivateUsage] -- views delegate liveness to their owning proxy
 
     def keys(self) -> list[str]:
         return list(self._keys)
@@ -658,19 +796,12 @@ class ValueAttrs:
     def __getitem__(self, name: str) -> ValueProxy:
         """Return a lazy child proxy — the RPC fires on ``await .force()``."""
         self._check_active()
-        return self._ctx.child(self._value, name)
+        return self._parent.attr(name)
 
     async def force(self, name: str, *, timeout: float | None = None) -> NixValue:
         """Force a single attribute and return its value."""
         self._check_active()
-        result = await self._ctx.proxy.attr(AttrRequest(handle=self._value.handle, name=name))
-        proxy = self._ctx.value(result.handle, result.type)
-        return await proxy.force()
-
-    async def release(self) -> None:
-        self._check_active()
-        await self._ctx.proxy.release(ReleaseRequest(handle=self._value.handle))
-        self._released = True
+        return await self[name].force(timeout=timeout)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -681,35 +812,18 @@ class ValueAttrs:
 class ValueList:
     """List forced to WHNF — length is available, elements are still lazy.
 
-    ``__getitem__`` returns a ``ValueProxy``.  ``__aenter__``/``__aexit__``
-    support early release of the underlying handle.
+    This is a borrowing view of its parent ``ValueProxy``. Keeping the view
+    alive keeps the parent handle alive; release the parent to release it.
     """
 
-    __slots__ = ("_ctx", "_length", "_released", "_value")
+    __slots__ = ("_length", "_parent")
 
-    def __init__(
-        self,
-        ctx: _EvalProxyContext,
-        value: _ResolvedValue,
-        length: int,
-    ) -> None:
-        self._ctx = ctx
-        self._value = value
+    def __init__(self, parent: ValueProxy, length: int) -> None:
+        self._parent = parent
         self._length = length
-        self._released = False
-
-    async def __aenter__(self) -> ValueList:
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        await self.release()
 
     def _check_active(self) -> None:
-        active = self._ctx.owner.active
-        if active is not None and not active[0]:
-            raise EvalSessionClosedError("ValueList is invalid — the EvalSession has been closed")
-        if self._released:
-            raise ValueReleasedError("ValueList has been released")
+        self._parent._check_active()  # type: ignore[reportPrivateUsage] -- views delegate liveness to their owning proxy
 
     def _check_index(self, idx: int) -> None:
         normalized = idx if idx >= 0 else idx + self._length
@@ -722,20 +836,13 @@ class ValueList:
     def __getitem__(self, idx: int) -> ValueProxy:
         self._check_active()
         self._check_index(idx)
-        return self._ctx.child(self._value, idx)
+        return self._parent.list_get(idx)
 
     async def force(self, idx: int, *, timeout: float | None = None) -> NixValue:
         """Force a single element and return its value."""
         self._check_active()
         self._check_index(idx)
-        result = await self._ctx.proxy.list_get(ListGetRequest(handle=self._value.handle, index=idx))
-        proxy = self._ctx.value(result.handle, result.type)
-        return await proxy.force()
-
-    async def release(self) -> None:
-        self._check_active()
-        await self._ctx.proxy.release(ReleaseRequest(handle=self._value.handle))
-        self._released = True
+        return await self[idx].force(timeout=timeout)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -752,6 +859,20 @@ class LockedFlakeHandle:
     description: str
     inputs: dict[str, LockedInput]
     _released: bool = field(default=False, init=False, repr=False)
+    _lease: _Lease = field(init=False, repr=False)
+    _finalizer: Any = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        releases = self._session._deferred_releases()  # type: ignore[reportPrivateUsage] -- session owns resource cleanup generation
+        self._lease = releases.new_lease("locked_flake", self.handle)
+        self._finalizer = weakref.finalize(self, _finalize_lease, self._lease, releases)
+
+    def __copy__(self) -> Never:
+        raise TypeError("LockedFlakeHandle cannot be copied; use normal assignment to share it")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Never:
+        del memo
+        raise TypeError("LockedFlakeHandle cannot be copied; use normal assignment to share it")
 
     def _check_active(self) -> None:
         if self._released:
@@ -768,8 +889,16 @@ class LockedFlakeHandle:
     async def release(self, *, timeout: float | None = None) -> None:
         if self._released:
             return
-        await self._session.release_locked_flake(self, timeout=timeout)
         self._released = True
+        self._finalizer.detach()
+        ref = self._lease.claim()
+        if ref is None:
+            return
+        try:
+            await self._session.release_locked_flake(self, timeout=timeout)
+        except BaseException:
+            self._session._deferred_releases().defer(ref)  # type: ignore[reportPrivateUsage] -- session owns cleanup retry queue
+            raise
 
 
 class EvalSession:
@@ -782,6 +911,7 @@ class EvalSession:
     __slots__ = (
         "_active",
         "_ctx",
+        "_releases",
         "_line_editors",
         "_manager",
         "_owner",
@@ -813,6 +943,7 @@ class EvalSession:
         self._active: list[bool] = [False]
         self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
         self._ctx: _EvalProxyContext | None = None
+        self._releases: _DeferredReleases | None = None
 
     async def __aenter__(self) -> EvalSession:
         await self.open()
@@ -825,7 +956,10 @@ class EvalSession:
         if self._rw is not None:
             return
         self._rw = await self._manager.reserve(timeout=self._timeout)
-        self._proxy = EvalProxy(self._rw, self._rpc_timeout)
+        self._active = [True]
+        self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
+        self._releases = _DeferredReleases()
+        self._proxy = EvalProxy(self._rw, self._releases, self._rpc_timeout)
         self._ctx = _EvalProxyContext(
             self._proxy,
             self._owner,
@@ -833,7 +967,6 @@ class EvalSession:
             self._store_handle,
             self._session_id,
         )
-        self._active[0] = True
 
     async def get_verbosity(self) -> LogLevel:
         """Return the current Nix log verbosity while this eval session is open."""
@@ -853,6 +986,7 @@ class EvalSession:
             return
         try:
             if proxy is not None:
+                await proxy.drain_deferred_releases()
                 await proxy.release_all(ReleaseAllRequest())
         finally:
             if proxy is not None:
@@ -861,6 +995,10 @@ class EvalSession:
             self._rw = None
             self._proxy = None
             self._ctx = None
+            releases = self._releases
+            self._releases = None
+            if releases is not None:
+                releases.close()
 
     def _ensure_proxy(self) -> EvalProxy:
         p = self._proxy
@@ -873,6 +1011,12 @@ class EvalSession:
         if ctx is None:
             raise EvalSessionClosedError("EvalSession not entered — use 'async with session.eval() as eval_:'")
         return ctx
+
+    def _deferred_releases(self) -> _DeferredReleases:
+        releases = self._releases
+        if releases is None:
+            raise EvalSessionClosedError("EvalSession is not open — use 'async with session.eval() as eval_:'")
+        return releases
 
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         handle = await self._ensure_proxy().eval_file(EvalFileRequest(path=path, store_handle=self._store_handle))

@@ -413,15 +413,20 @@ class _FakeStore:
     async def __aexit__(self, *args: object) -> None:
         return None
 
-    async def get_store_dir(self, request: Any) -> SimpleNamespace:
-        return SimpleNamespace(dir="/nix/store")
+    @property
+    def rpc(self) -> _FakeStore:
+        """Expose the generated-RPC surface used by closure inspection."""
+        return self
 
-    async def query_path_info(self, request: Any) -> SimpleNamespace:
-        if request.path in self._nar_sizes:
-            return SimpleNamespace(nar_size=self._nar_sizes[request.path])
-        physical_path = self._store_root / request.path.removeprefix("/")
+    async def store_dir(self) -> str:
+        return "/nix/store"
+
+    async def query_path_info(self, path: str) -> SimpleNamespace:
+        if path in self._nar_sizes:
+            return SimpleNamespace(nar_size=self._nar_sizes[path])
+        physical_path = self._store_root / path.removeprefix("/")
         if not physical_path.exists():
-            raise FileNotFoundError(request.path)
+            raise FileNotFoundError(path)
         return SimpleNamespace(nar_size=physical_path.stat().st_size)
 
     async def compute_fs_closure(self, request: Any) -> SimpleNamespace:
