@@ -9,6 +9,7 @@ doesn't provide (``is_derivation``, ``message``, etc.).
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from nanopynix_proto.nix.common import (
@@ -122,6 +123,15 @@ class StorePath(str):
     def is_derivation(self) -> bool:
         """True if this path ends with .drv."""
         return self.name.endswith(".drv")
+
+
+@dataclass(frozen=True)
+class GcResult:
+    """Result of a garbage collection operation."""
+
+    paths: list[StorePath]
+    bytes_freed: int
+
 
 class LogEventExt(_LogEventProto):
     """Extension of proto LogEvent with ``message``, ``message_without_ansi``, and ``args``."""

@@ -1,13 +1,17 @@
 """Tests for the asynchronous direct-pointer in-process API."""
 
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportAttributeAccessIssue=false
+# nanopynix_store / nanopynix_expr are C++ extensions without type stubs.
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 from _git import init_flake_repo
+from nanopynix_proto.nix.store import GcAction
 
-from nanopynix import inproc
+from nanopynix import Derivation, GcResult, MissingInfo, inproc
 
 
 @pytest.mark.anyio
@@ -99,3 +103,37 @@ async def test_inproc_locked_flake_facade(tmp_path: Path) -> None:
         await locked.release()
         with pytest.raises(inproc.InprocLockedFlakeReleasedError):
             await locked.eval()
+
+
+@pytest.mark.anyio
+async def test_inproc_store_query_missing() -> None:
+    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+        mi = await store.query_missing(
+            ["/nix/store/00000000000000000000000000000000-nonexistent-1.0"]
+        )
+        assert isinstance(mi, MissingInfo)
+        assert isinstance(mi.will_build, list)
+        assert isinstance(mi.will_substitute, list)
+        assert isinstance(mi.unknown, list)
+
+
+@pytest.mark.anyio
+async def test_inproc_store_read_derivation(tmp_path: Path) -> None:
+    """read_derivation via direct string argument."""
+    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+        paths = await store.query_all_valid_paths()
+        drv = next((p for p in paths if p.is_derivation), None)
+        if drv is not None:
+            d = await store.read_derivation(str(drv))
+            assert isinstance(d, Derivation)
+            assert d.name
+            assert d.system
+
+
+@pytest.mark.anyio
+async def test_inproc_store_collect_garbage_return_dead(tmp_path: Path) -> None:
+    async with inproc.Session(load_config=False) as nix, nix.store(f"local?root={tmp_path}") as store:
+        result = await store.collect_garbage(GcAction.RETURN_DEAD)
+        assert isinstance(result, GcResult)
+        assert isinstance(result.paths, list)
+        assert result.bytes_freed == 0

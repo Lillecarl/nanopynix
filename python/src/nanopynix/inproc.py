@@ -14,6 +14,8 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from nanopynix_proto.nix.store import GcAction as PublicGcAction
+
 import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
@@ -21,7 +23,7 @@ from nanopynix._extract import locked_flake as _locked_flake_proto
 from nanopynix._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._nix_executor import NixThreadExecutor
 from nanopynix.logging import LogCollector
-from nanopynix.models import LockedInput, LogEvent, PathInfo
+from nanopynix.models import Derivation, GcResult, LockedInput, LogEvent, MissingInfo, PathInfo
 from nanopynix.models import StorePath as PublicStorePath
 from nanopynix.settings import NixSettings, normalize_nix_settings
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
@@ -38,6 +40,21 @@ RawStore = nanopynix_store.Store
 RawValue = nanopynix_expr.Value
 StorePath = nanopynix_store.StorePath
 
+
+_RAW_GC_ACTIONS = {
+    PublicGcAction.RETURN_LIVE: GCAction.ReturnLive,
+    PublicGcAction.RETURN_DEAD: GCAction.ReturnDead,
+    PublicGcAction.DELETE_DEAD: GCAction.DeleteDead,
+    PublicGcAction.DELETE_SPECIFIC: GCAction.DeleteSpecific,
+}
+
+
+def _raw_gc_action(action: PublicGcAction) -> Any:
+    try:
+        return _RAW_GC_ACTIONS[action]
+    except KeyError as exc:
+        raise ValueError(f"unsupported garbage-collection action: {action!r}") from exc
+
 # Nix initialization is process-global and must remain on the same OS thread
 # for the lifetime of this interpreter. Sessions are exclusive, but reuse this
 # executor sequentially rather than creating thread-affinity violations.
@@ -46,7 +63,11 @@ _initialization_signature: tuple[object, ...] | None = None
 
 
 def _print_store_path(raw_store: Any, raw_path: Any) -> str:
-    return f"{raw_store.get_store_dir().rstrip('/')}/{raw_path}"
+    path = str(raw_path)
+    store_dir = raw_store.get_store_dir().rstrip("/")
+    if path == store_dir or path.startswith(f"{store_dir}/"):
+        return path
+    return f"{store_dir}/{path}"
 
 
 def _print_store_paths(raw_store: Any, raw_paths: Any) -> list[str]:
@@ -372,6 +393,51 @@ class Store:
     async def get_build_log(self, path: str | PublicStorePath) -> str | None:
         raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
         return await self._session.run(self._require_raw().get_build_log, raw_path)
+
+    async def query_missing(
+        self,
+        derived_paths: list[str | PublicStorePath],
+        /,
+    ) -> MissingInfo:
+        raw_paths = await self._session.run(
+            _parse_store_paths, self._require_raw(), [str(p) for p in derived_paths]
+        )
+        result = await self._session.run(self._require_raw().query_missing, raw_paths)
+        return MissingInfo(**result)
+
+    async def read_derivation(
+        self, drv_path: str | PublicStorePath, /
+    ) -> Derivation:
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(drv_path))
+        result = await self._session.run(self._require_raw().read_derivation, raw_path)
+        return Derivation(**result)
+
+    async def collect_garbage(
+        self,
+        action: PublicGcAction,
+        /,
+        *,
+        ignore_liveness: bool = False,
+        paths_to_delete: list[str | PublicStorePath] | tuple[()] = (),
+        max_freed: int = 2**64 - 1,
+    ) -> GcResult:
+        raw_paths = await self._session.run(
+            _parse_store_paths, self._require_raw(), [str(p) for p in paths_to_delete]
+        )
+        result = await self._session.run(
+            self._require_raw().collect_garbage,
+            _raw_gc_action(action),
+            ignore_liveness,
+            raw_paths,
+            max_freed,
+        )
+        paths = await self._session.run(
+            _print_store_paths, self._require_raw(), result["paths"]
+        )
+        return GcResult(
+            paths=[PublicStorePath(p) for p in paths],
+            bytes_freed=result["bytes_freed"],
+        )
 
     async def _public_store_paths(self, raw_paths: Any) -> list[PublicStorePath]:
         paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)

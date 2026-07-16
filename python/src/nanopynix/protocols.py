@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import Any, Protocol, Self, TypeVar
 
-from nanopynix.models import PathInfo, StorePath
+from nanopynix_proto.nix.store import GcAction
+
+from nanopynix.models import Derivation, GcResult, MissingInfo, PathInfo, StorePath
 from nanopynix.verbosity import LogLevelInput
 
 ValueT = TypeVar("ValueT", bound="AsyncValue")
@@ -85,6 +87,24 @@ class AsyncStore(Protocol):
 
     async def get_build_log(self, path: str | StorePath, /) -> str | None: ...
 
+    async def query_missing(
+        self,
+        derived_paths: list[str | StorePath],
+        /,
+    ) -> MissingInfo: ...
+
+    async def read_derivation(self, drv_path: str | StorePath, /) -> Derivation: ...
+
+    async def collect_garbage(
+        self,
+        action: GcAction,
+        /,
+        *,
+        ignore_liveness: bool = False,
+        paths_to_delete: list[str | StorePath] | tuple[()] = (),
+        max_freed: int = 2**64 - 1,
+    ) -> GcResult: ...
+
 
 class AsyncLockedFlake(Protocol):
     """The common lifecycle for an in-memory flake lock."""
@@ -150,4 +170,5 @@ __all__ = [
     "AsyncStore",
     "AsyncValue",
     "AsyncVerbosityController",
+    "GcAction",
 ]
