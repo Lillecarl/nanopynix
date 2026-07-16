@@ -1,4 +1,10 @@
-"""Worker-side Python primop helpers."""
+"""Worker-side Python primop helpers.
+
+.. note::
+   Primop registration (both these YAML primops and custom
+   ``Session(primops=..., primop_callables=...)`` registration) is broken on
+   Nix 2.31 and is not expected to be fixed there — it requires Nix >= 2.32.
+"""
 
 from __future__ import annotations
 
