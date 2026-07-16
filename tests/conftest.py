@@ -3,12 +3,15 @@
 import atexit
 import os
 import re
+from pathlib import Path
 from typing import Any, Protocol, cast
 
 import pytest
 
 import nanopynix
 import nanopynix_expr
+
+_COVERAGE_SITECUSTOMIZE_DIR = str(Path(__file__).resolve().parent / "_coverage_subprocess")
 
 
 def pytest_addoption(parser: pytest.Parser):
@@ -26,6 +29,21 @@ def pytest_addoption(parser: pytest.Parser):
     )
 
 
+def _enable_subprocess_coverage() -> None:
+    """Let the multiprocessing-forkserver Nix worker report coverage too.
+
+    pytest-cov sets COVERAGE_PROCESS_START when --cov is active, but that env
+    var only takes effect in a subprocess whose interpreter imports a
+    `sitecustomize` module. nanopynix's worker is forked from a forkserver
+    helper process that is itself freshly exec'd, so it needs that shim
+    discoverable via PYTHONPATH before it starts.
+    """
+    existing = os.environ.get("PYTHONPATH", "")
+    parts = [_COVERAGE_SITECUSTOMIZE_DIR, *([existing] if existing else [])]
+    os.environ["PYTHONPATH"] = os.pathsep.join(parts)
+
+
+@pytest.hookimpl(trylast=True)
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
@@ -35,6 +53,8 @@ def pytest_configure(config: pytest.Config):
         "markers",
         "required_nix_version(min, max): require linked Nix in [min, max); use None for no bound",
     )
+    if os.environ.get("COVERAGE_PROCESS_START"):
+        _enable_subprocess_coverage()
 
 
 def _nix_version_tuple(value: str) -> tuple[int, ...]:
