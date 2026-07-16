@@ -32,6 +32,19 @@ async def test_inproc_value_autocall_and_realise_argv() -> None:
 
 
 @pytest.mark.anyio
+async def test_inproc_repl_supports_shared_protocol_operations() -> None:
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
+        repl = await eval_.repl()
+        assert await repl.line("answer = 42") is None
+        value = await repl.line("answer")
+        if value is None:
+            raise AssertionError("REPL expression unexpectedly created a binding")
+        assert await value.as_int() == 42
+        assert "answer" in await repl.scope_names()
+        await repl.reset_file_cache()
+
+
+@pytest.mark.anyio
 async def test_inproc_allows_only_one_live_eval_state() -> None:
     async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store):
         with pytest.raises(inproc.InprocEvalBusyError):
