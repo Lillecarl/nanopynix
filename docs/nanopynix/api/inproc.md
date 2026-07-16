@@ -1,4 +1,4 @@
-# In-process API (L2)
+# Inproc (L2)
 
 `nanopynix.inproc` mirrors the worker-based `Session`/`Store`/`EvalSession`
 API, but runs Nix directly on a dedicated thread in the current process —
