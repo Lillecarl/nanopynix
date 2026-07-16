@@ -3,3 +3,6 @@ nanopynix_store.StorePath.__eq__:
 
 nanopynix_store.Store.get_store_dirs:
     def get_store_dirs(self) -> dict[str, str | None]: ...
+
+nanopynix_store.Store.get_build_log:
+    def get_build_log(self, path: StorePath) -> str | None: ...
