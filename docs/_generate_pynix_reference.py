@@ -52,23 +52,30 @@ def _render_type(tp: Any) -> str:
     return str(tp).replace("typing.", "").replace("pathlib.", "")
 
 
-def _render_default(conf: Any) -> str:
+def _render_default_suffix(conf: Any) -> str:
+    """Render a trailing " (default: ...)" / " *(required)*" note for the Help column.
+
+    Some defaults (e.g. the trusted-public-keys signing key) are very long —
+    giving them their own table column stretches that column and drags every
+    other row wide with it. Folding the note into Help lets it wrap normally.
+    """
     if not conf.has_default():
-        return "*required*"
+        return " *(required)*"
     default = conf.get_default()
-    return "`None`" if default is None else f"`{default!r}`"
+    rendered = "None" if default is None else repr(default)
+    return f" (default: `{rendered}`)"
 
 
 def _render_args_table(cmd: type[Command]) -> list[str]:
     names = [name for name in cmd.field_names() if name != "subcommand"]
     if not names:
         return []
-    lines = ["| Argument | Type | Default | Help |", "| --- | --- | --- | --- |"]
+    lines = ["| Argument | Type | Help |", "| --- | --- | --- |"]
     for name in names:
         conf = cmd.get_field_conf(name)
         help_text = (conf.help or "").replace("|", "\\|")
         type_text = _render_type(conf.arg_type)
-        lines.append(f"| `{conf.display_name}` | `{type_text}` | {_render_default(conf)} | {help_text} |")
+        lines.append(f"| `{conf.display_name}` | `{type_text}` | {help_text}{_render_default_suffix(conf)} |")
     lines.append("")
     return lines
 
