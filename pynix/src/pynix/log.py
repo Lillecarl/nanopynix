@@ -4,7 +4,6 @@ import sys
 from typing import override
 
 from clypi import Command, Positional, arg
-from nanopynix_proto.nix.store import GetBuildLogRequest
 
 import nanopynix
 from pynix._util import forward_nix_logs, prepare_sys_path
@@ -23,8 +22,8 @@ class Log(Command):
         prepare_sys_path()
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
-            response = await store.rpc.get_build_log(GetBuildLogRequest(path=self.path))
+            log = await store.get_build_log(self.path)
 
-        if response.log is None:
+        if log is None:
             raise SystemExit(f"build log of '{self.path}' is not available")
-        sys.stdout.write(response.log)
+        sys.stdout.write(log)

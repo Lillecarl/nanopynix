@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, override
 
 import structlog
 from clypi import Command, arg
-from nanopynix_proto.nix.store import ReadDerivationRequest
 from rich.console import Console
 
 if TYPE_CHECKING:
@@ -68,7 +67,7 @@ class Show(Command):
 
                 drv_path = await self._get_drv_path(root)
 
-            derivation = await store.rpc.read_derivation(ReadDerivationRequest(path=drv_path))
+            derivation = await store.read_derivation(drv_path)
             result = {drv_path: self._derivation_to_dict(derivation)}
             sys.stdout.write(json.dumps(result, sort_keys=True, indent=2))
             sys.stdout.write("\n")
