@@ -426,6 +426,10 @@ class Value:
     async def json(self, *, copy_to_store: bool = False) -> Any:
         return await self._eval_session._session.run(self._local_for(self._eval_session).to_json, copy_to_store)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
+    async def force_json(self, *, copy_to_store: bool = False) -> Any:
+        """Serialize this value to JSON-compatible Python objects."""
+        return await self.json(copy_to_store=copy_to_store)
+
     async def type(self) -> str:
         return await self._eval_session._session.run(self._local_for(self._eval_session).type_name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
@@ -493,6 +497,10 @@ class Value:
         if not results or not results[0]["success"]:
             raise RuntimeError(result["results"][0].get("error_msg", "build failed") if results else "build returned no result")
         return dict(result["outputs"])
+
+    async def release(self) -> None:
+        """Alias for :meth:`close`, matching the RPC value lifecycle API."""
+        await self.close()
 
 
 def _call(target: Any, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
