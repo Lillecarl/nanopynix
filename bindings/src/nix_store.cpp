@@ -980,13 +980,15 @@ static nb::dict store_verify_store(nix::Store &s, const nb::dict &request) {
     return d;
 }
 
-static nb::dict store_get_build_log(nix::Store &s, const nb::dict &request) {
-    auto path = request_store_path(s, request, "path");
-    std::optional<std::string> log;
+static std::optional<std::string> get_build_log(nix::Store &s, const nix::StorePath &path) {
     {
         nb::gil_scoped_release release;
-        log = require_log_store(s).getBuildLog(path);
+        return require_log_store(s).getBuildLog(path);
     }
+}
+
+static nb::dict store_get_build_log(nix::Store &s, const nb::dict &request) {
+    auto log = get_build_log(s, request_store_path(s, request, "path"));
     nb::dict d;
     if (log)
         d["log"] = *log;
@@ -1044,6 +1046,7 @@ static void bind_store(nb::module_ &m) {
         .def("follow_links_to_store_path",
              [](nix::Store &s, const std::string &p) { return s.followLinksToStorePath(p); },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
+        .def("get_build_log", &get_build_log, "path"_a)
         // Build
         .def("build_paths", &build_paths, "paths"_a, "build_mode"_a = nix::bmNormal, "eval_store"_a = nullptr)
         .def(

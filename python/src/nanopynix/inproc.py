@@ -53,6 +53,10 @@ def _print_store_paths(raw_store: Any, raw_paths: Any) -> list[str]:
     return [_print_store_path(raw_store, path) for path in raw_paths]
 
 
+def _parse_store_paths(raw_store: Any, paths: list[str]) -> list[Any]:
+    return [raw_store.parse_store_path(path) for path in paths]
+
+
 class InprocSessionClosedError(RuntimeError):
     """Raised when an in-process session resource is used after close."""
 
@@ -349,6 +353,25 @@ class Store:
         raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
         paths = await self._session.run(self._require_raw().query_referrers, raw_path)
         return await self._public_store_paths(paths)
+
+    async def follow_links_to_store_path(self, path: str) -> PublicStorePath:
+        raw_path = await self._session.run(self._require_raw().follow_links_to_store_path, path)
+        return PublicStorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
+
+    async def query_path_from_hash_part(self, hash_part: str) -> PublicStorePath | None:
+        raw_path = await self._session.run(self._require_raw().query_path_from_hash_part, hash_part)
+        if raw_path is None:
+            return None
+        return PublicStorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
+
+    async def query_substitutable_paths(self, paths: list[str | PublicStorePath]) -> list[PublicStorePath]:
+        raw_paths = await self._session.run(_parse_store_paths, self._require_raw(), [str(path) for path in paths])
+        result = await self._session.run(self._require_raw().query_substitutable_paths, raw_paths)
+        return await self._public_store_paths(result)
+
+    async def get_build_log(self, path: str | PublicStorePath) -> str | None:
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        return await self._session.run(self._require_raw().get_build_log, raw_path)
 
     async def _public_store_paths(self, raw_paths: Any) -> list[PublicStorePath]:
         paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)

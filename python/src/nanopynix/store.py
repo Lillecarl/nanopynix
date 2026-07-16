@@ -8,14 +8,18 @@ from typing import TYPE_CHECKING, Any, cast
 from nanopynix_proto.nix.common import PathInfo
 from nanopynix_proto.nix.store import (
     ComputeFsClosureRequest,
+    FollowLinksToStorePathRequest,
+    GetBuildLogRequest,
     GetStoreDirRequest,
     GetUriRequest,
     IsValidPathRequest,
     ParseStorePathRequest,
     QueryAllValidPathsRequest,
     QueryDerivationOutputsRequest,
+    QueryPathFromHashPartRequest,
     QueryPathInfoRequest,
     QueryReferrersRequest,
+    QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
     StoreServiceBase,
 )
@@ -218,3 +222,19 @@ class Store:
         """Return valid store paths that reference ``path``."""
         response = await self.rpc.query_referrers(QueryReferrersRequest(path=str(path)))
         return [StorePath(item) for item in response.paths]
+
+    async def follow_links_to_store_path(self, path: str) -> StorePath:
+        response = await self.rpc.follow_links_to_store_path(FollowLinksToStorePathRequest(path=path))
+        return StorePath(response.path)
+
+    async def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
+        response = await self.rpc.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=hash_part))
+        return StorePath(response.path) if response.path is not None else None
+
+    async def query_substitutable_paths(self, paths: list[str | StorePath]) -> list[StorePath]:
+        response = await self.rpc.query_substitutable_paths(QuerySubstitutablePathsRequest(paths=[str(path) for path in paths]))
+        return [StorePath(item) for item in response.paths]
+
+    async def get_build_log(self, path: str | StorePath) -> str | None:
+        response = await self.rpc.get_build_log(GetBuildLogRequest(path=str(path)))
+        return response.log
