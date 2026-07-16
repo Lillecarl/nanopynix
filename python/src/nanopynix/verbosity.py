@@ -1,8 +1,12 @@
+"""Flexible verbosity input accepted by session/eval-session verbosity setters."""
+
 from __future__ import annotations
 
 from nanopynix_proto.nix.common import LogLevel
 
 type LogLevelInput = LogLevel | int | str
+"""A :class:`~nanopynix_proto.nix.common.LogLevel`, an int 0-7, or a level
+name such as ``"warn"``, ``"info"``, or ``"LVL_DEBUG"`` (case-insensitive)."""
 
 _LOG_LEVEL_NAMES: dict[str, LogLevel] = {
     "error": LogLevel.ERROR,
@@ -19,6 +23,12 @@ _LOG_LEVEL_NAMES: dict[str, LogLevel] = {
 
 
 def normalize_log_level(value: LogLevelInput) -> LogLevel:
+    """Coerce ``value`` (a :class:`LogLevel`, int 0-7, or level name) to a ``LogLevel``.
+
+    Raises:
+        TypeError: ``value`` is a ``bool``.
+        ValueError: ``value`` is an out-of-range int or an unrecognized name.
+    """
     if isinstance(value, LogLevel):
         return value
     if isinstance(value, bool):

@@ -186,7 +186,7 @@ class _Lease:
     release and finalizer fallback.
     """
 
-    __slots__ = ("ref", "_lock", "_released")
+    __slots__ = ("_lock", "_released", "ref")
 
     def __init__(self, ref: _LeaseRef) -> None:
         self.ref = ref
@@ -536,6 +536,11 @@ class ValueProxy:
         return await self.force(timeout=timeout)
 
     async def coerce_str(self, *, timeout: float | None = None) -> str:
+        """Force and coerce to ``str``, converting bools/numbers/null as Nix would.
+
+        Raises:
+            NixCoercionError: The value has no string coercion (e.g. an attrset).
+        """
         value = await self.force(timeout=timeout)
         if isinstance(value, str):
             return value
@@ -548,6 +553,12 @@ class ValueProxy:
         raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to string")
 
     async def coerce_int(self, *, timeout: float | None = None) -> int:
+        """Force and coerce to ``int``.
+
+        Raises:
+            NixCoercionError: The value is a bool, a non-integral float, a
+                non-numeric string, or another non-coercible type.
+        """
         value = await self.force(timeout=timeout)
         if isinstance(value, bool):
             raise NixCoercionError("cannot coerce Nix bool to int")
@@ -565,6 +576,12 @@ class ValueProxy:
         raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to int")
 
     async def coerce_float(self, *, timeout: float | None = None) -> float:
+        """Force and coerce to ``float``.
+
+        Raises:
+            NixCoercionError: The value is a bool, a non-numeric string, a
+                non-finite result, or another non-coercible type.
+        """
         value = await self.force(timeout=timeout)
         if isinstance(value, bool):
             raise NixCoercionError("cannot coerce Nix bool to float")
@@ -582,6 +599,12 @@ class ValueProxy:
         return result
 
     async def coerce_bool(self, *, timeout: float | None = None) -> bool:
+        """Force and coerce to ``bool``.
+
+        Raises:
+            NixCoercionError: The value is not a bool or one of the strings
+                ``"true"``/``"false"``.
+        """
         value = await self.force(timeout=timeout)
         if isinstance(value, bool):
             return value
@@ -697,29 +720,52 @@ class ValueProxy:
     # ── navigation ─────────────────────────────────────────────────
 
     def attr(self, name: str, *, timeout: float | None = None) -> ValueProxy:
+        """Return a lazy child proxy for attrset attribute ``name``.
+
+        No RPC is made until the result is forced or resolved.
+        """
         self._check_active()
         return self._ctx.child(self, name, timeout=timeout)
 
     def list_get(self, idx: int, *, timeout: float | None = None) -> ValueProxy:
+        """Return a lazy child proxy for list index ``idx``.
+
+        No RPC is made until the result is forced or resolved.
+        """
         self._check_active()
         return self._ctx.child(self, idx, timeout=timeout)
 
     async def list_length(self, *, timeout: float | None = None) -> int:
+        """Force this value as a list and return its length."""
         await self._ensure_resolved(timeout=timeout)
         resp = await self._ctx.proxy.list_length(ListLengthRequest(handle=self.handle))
         return resp.length
 
     async def attr_names(self, *, timeout: float | None = None) -> list[str]:
+        """Force this value as an attrset and return its attribute names."""
         await self._ensure_resolved(timeout=timeout)
         resp = await self._ctx.proxy.attr_names(AttrNamesRequest(handle=self.handle))
         return resp.names
 
     async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
+        """Force this value as an attrset and return whether ``name`` is present."""
         await self._ensure_resolved(timeout=timeout)
         resp = await self._ctx.proxy.has_attr(HasAttrRequest(handle=self.handle, name=name))
         return resp.has
 
     async def call(self, *args: NixArg, timeout: float | None = None) -> ValueProxy:
+        """Call this value as a Nix function with ``args``.
+
+        Args:
+            *args: Each argument may be a ``ValueProxy`` from the same
+                ``EvalSession``, or a JSON-scalar/list/dict, which is encoded
+                as a Nix value on the worker side.
+
+        Raises:
+            WrongNixTypeError: This value is not a function.
+            ForeignValueError: An argument ``ValueProxy`` belongs to a
+                different ``EvalSession``.
+        """
         await self._ensure_resolved(timeout=timeout)
         actual = await self._ensure_type(timeout=timeout)
         if actual != NixType.FUNCTION:
@@ -738,11 +784,18 @@ class ValueProxy:
         return await self.call(*args, timeout=timeout)
 
     async def get_type(self, *, timeout: float | None = None) -> NixType:
+        """Resolve this value and return its Nix type."""
         return await self._ensure_type(timeout=timeout)
 
     # ── release ────────────────────────────────────────────────────
 
     async def release(self, *, timeout: float | None = None) -> None:
+        """Release the worker-side handle for this value.
+
+        Idempotent — calling this more than once, or on an unresolved
+        (never-forced) value, is a no-op. Also invoked automatically by
+        ``async with``/garbage collection.
+        """
         if self._released:
             return
         if not isinstance(self._state, _ResolvedValue):
@@ -791,6 +844,7 @@ class ValueAttrs:
         self._parent._check_active()  # type: ignore[reportPrivateUsage] -- views delegate liveness to their owning proxy
 
     def keys(self) -> list[str]:
+        """Return the attrset's attribute names."""
         return list(self._keys)
 
     def __getitem__(self, name: str) -> ValueProxy:
@@ -879,14 +933,17 @@ class LockedFlakeHandle:
             raise ValueReleasedError("LockedFlakeHandle has been released")
 
     async def eval(self, *, timeout: float | None = None) -> ValueProxy:
+        """Evaluate this locked flake's outputs. See :meth:`EvalSession.eval_locked_flake`."""
         self._check_active()
         return await self._session.eval_locked_flake(self, timeout=timeout)
 
     async def write_lock_file(self, *, timeout: float | None = None) -> None:
+        """Persist this locked flake's lock file to disk. See :meth:`EvalSession.write_lock_file`."""
         self._check_active()
         await self._session.write_lock_file(self, timeout=timeout)
 
     async def release(self, *, timeout: float | None = None) -> None:
+        """Release the worker-side handle for this locked flake. Idempotent."""
         if self._released:
             return
         self._released = True
@@ -911,11 +968,11 @@ class EvalSession:
     __slots__ = (
         "_active",
         "_ctx",
-        "_releases",
         "_line_editors",
         "_manager",
         "_owner",
         "_proxy",
+        "_releases",
         "_rpc_timeout",
         "_rw",
         "_session_id",
@@ -953,6 +1010,7 @@ class EvalSession:
         await self.close()
 
     async def open(self) -> None:
+        """Reserve the worker exclusively. Called automatically by ``async with``."""
         if self._rw is not None:
             return
         self._rw = await self._manager.reserve(timeout=self._timeout)
@@ -979,6 +1037,11 @@ class EvalSession:
         return await self._manager.set_verbosity(normalize_log_level(verbosity))
 
     async def close(self) -> None:
+        """Release all values and hand the worker back to the pool.
+
+        Called automatically by ``async with``. Invalidates every
+        ``ValueProxy`` exported from this session.
+        """
         self._active[0] = False
         rw = self._rw
         proxy = self._proxy
@@ -1019,10 +1082,17 @@ class EvalSession:
         return releases
 
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
+        """Evaluate the Nix expression in the file at ``path``."""
         handle = await self._ensure_proxy().eval_file(EvalFileRequest(path=path, store_handle=self._store_handle))
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
+        """Evaluate the Nix expression ``expr``.
+
+        Args:
+            expr: Nix source to evaluate.
+            path: Source name attributed to ``expr`` in error messages.
+        """
         handle = await self._ensure_proxy().eval_string(
             EvalStringRequest(expr=expr, source_name=path, store_handle=self._store_handle)
         )
@@ -1111,6 +1181,7 @@ class EvalSession:
         await self._ensure_proxy().write_lock_file(WriteLockFileRequest(handle=self._locked_flake_id(locked)))
 
     async def release_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
+        """Release the worker-side handle for a locked flake. Prefer ``locked.release()``."""
         await self._ensure_proxy().release_locked_flake(ReleaseLockedFlakeRequest(handle=self._locked_flake_id(locked)))
 
     async def eval_flake(
@@ -1139,6 +1210,7 @@ class EvalSession:
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def get_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> FlakeRef:
+        """Parse and resolve a flake reference without evaluating its outputs."""
         ref_str = ref if isinstance(ref, str) else str(ref)
         return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str, store_handle=self._store_handle))
 

@@ -102,14 +102,16 @@ from nanopynix_util import (
 )
 
 __all__ = [
-    "BuildMode",
+    "AsyncEvalSession",
     "AsyncLockedFlake",
     "AsyncReplSession",
     "AsyncStore",
     "AsyncValue",
     "AsyncVerbosityController",
-    "AsyncEvalSession",
+    "BuildMode",
     "EvalSession",
+    "GcAction",
+    "GcResult",
     "LockedFlakeHandle",
     "LogLevel",
     "LogLevelInput",
@@ -157,8 +159,6 @@ __all__ = [
     "current_system",
     "enable_experimental_feature",
     "eval_file",
-    "GcResult",
-    "GcAction",
     "from_yaml",
     "from_yaml11",
     "from_yaml11_stream",

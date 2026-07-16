@@ -30,3 +30,12 @@ html_theme = "furo"
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
 }
+
+autodoc_member_order = "bysource"
+autodoc_typehints = "description"
+autodoc_default_options = {
+    "member-order": "bysource",
+}
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
+napoleon_use_rtype = False

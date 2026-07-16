@@ -121,10 +121,10 @@ async def l3_inproc(tmp_path: Path) -> AsyncIterator[_L3Inproc]:
         store = await worker_stub.open_store(OpenStoreRequest(uri=store_uri))
         worker = _InprocReservedWorker(eval_stub, worker_stub)
         manager = _InprocManager(worker)
-        session = EvalSession(cast(Any, manager), store_handle=store.store_handle)
-        worker_handler = cast(WorkerServiceHandler, handlers[0])  # type: ignore[reportUnknownVariableType] -- service decorator has no static type information
+        session = EvalSession(cast("Any", manager), store_handle=store.store_handle)
+        worker_handler = cast("WorkerServiceHandler", handlers[0])  # type: ignore[reportUnknownVariableType] -- service decorator has no static type information
         state = worker_handler._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType] -- test intentionally observes the decorated in-process worker
-        worker_state = cast(WorkerState, state)
+        worker_state = cast("WorkerState", state)
         try:
             yield _L3Inproc(  # type: ignore[reportUnknownArgumentType] -- decorated handler state is runtime-typed above
                 session,
@@ -366,8 +366,8 @@ async def test_late_finalizer_from_closed_generation_cannot_release_new_values(l
 
 
 async def test_store_handles_are_distinct_and_close_exactly_once(l3_inproc: _L3Inproc) -> None:
-    first = StoreHandle(cast(Any, l3_inproc.manager), l3_inproc.store_uri, "inproc")
-    second = StoreHandle(cast(Any, l3_inproc.manager), l3_inproc.store_uri, "inproc")
+    first = StoreHandle(cast("Any", l3_inproc.manager), l3_inproc.store_uri, "inproc")
+    second = StoreHandle(cast("Any", l3_inproc.manager), l3_inproc.store_uri, "inproc")
     await first.open()
     await second.open()
     first_handle = first.store_handle
