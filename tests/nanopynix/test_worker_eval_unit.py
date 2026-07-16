@@ -168,3 +168,23 @@ def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.Mo
 
     assert state.eval_state is selected
     assert state.eval_store_handle == second_handle
+
+
+def test_releasing_remote_value_closes_local_value() -> None:
+    class Value:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    handles = HandleRegistry()
+    value = Value()
+    handle = handles.allocate(value, "value")
+    handler = EvalServiceHandler(SimpleNamespace(handles=handles))
+
+    handler._do_release(SimpleNamespace(handle=handle))  # type: ignore[reportPrivateUsage] -- test verifies worker release ownership
+
+    assert value.closed
+    with pytest.raises(KeyError):
+        handles.get_typed(handle, "value")

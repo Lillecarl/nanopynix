@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 import nanopynix_expr
 import nanopynix_store
 import nanopynix_util
-from nanopynix._local import LocalEvalState, LocalRuntime, LocalStore
+from nanopynix._local import LocalEvalState, LocalRuntime, LocalStore, LocalValue
 from nanopynix._nix_executor import NixThreadExecutor
 from nanopynix.logging import LogCollector
 from nanopynix.models import LogEvent
@@ -313,7 +313,6 @@ class EvalSession:
         self._store = store
         self._local: LocalEvalState | None = None
         self._active = False
-        self._values: set[Value] = set()
 
     async def __aenter__(self) -> EvalSession:
         await self.open()
@@ -332,8 +331,6 @@ class EvalSession:
         self._active = True
 
     async def close(self) -> None:
-        for value in tuple(self._values):
-            await value.close()
         local = self._local
         self._local = None
         self._active = False
@@ -347,19 +344,21 @@ class EvalSession:
             raise InprocSessionClosedError("EvalSession is not open — use async with")
         return self._local.require_raw()
 
+    def _require_local(self) -> LocalEvalState:
+        if not self._active or self._local is None:
+            raise InprocSessionClosedError("EvalSession is not open — use async with")
+        return self._local
+
     async def string(self, expression: str, path: str = "<string>") -> Value:
-        raw = await self._session.run(self._require_raw().eval_string, expression, path)
-        return self._track_value(raw)
+        local = await self._session.run(self._require_local().eval_string, expression, path)
+        return self._track_value(local)
 
     async def file(self, path: str) -> Value:
-        raw = await self._session.run(self._require_raw().eval_file, path)
-        return self._track_value(raw)
+        local = await self._session.run(self._require_local().eval_file, path)
+        return self._track_value(local)
 
-    def _track_value(self, raw: Any) -> Value:
-        """Track an L1 value, which owns its Nix ``RootValue`` directly."""
-        value = Value(self, raw)
-        self._values.add(value)
-        return value
+    def _track_value(self, local: LocalValue) -> Value:
+        return Value(self, local)
 
     async def repl(self) -> ReplSession:
         raw = self._require_raw()
@@ -374,35 +373,30 @@ class ReplSession:
         self._eval_session = eval_session
 
     async def line(self, text: str, path: str = "<string>") -> Value | None:
-        raw = await self._eval_session._session.run(self._eval_session._require_raw().repl_process_line, text, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return None if raw is None else self._eval_session._track_value(raw)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        local = await self._eval_session._session.run(self._eval_session._require_local().repl_process_line, text, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return None if local is None else self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def load_file(self, path: str) -> Value:
-        raw = await self._eval_session._session.run(self._eval_session._require_raw().repl_load_file, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return self._eval_session._track_value(raw)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        local = await self._eval_session._session.run(self._eval_session._require_local().repl_load_file, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def add_attrs(self, value: Value) -> list[str]:
-        raw_value = value._raw_for(self._eval_session)  # type: ignore[reportPrivateUsage] -- same-evaluator guard
-        return await self._eval_session._session.run(self._eval_session._require_raw().repl_add_attrs, raw_value)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        local_value = value._local_for(self._eval_session)  # type: ignore[reportPrivateUsage] -- same-evaluator guard
+        return await self._eval_session._session.run(self._eval_session._require_local().repl_add_attrs, local_value)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def scope_names(self) -> list[str]:
         return await self._eval_session._session.run(self._eval_session._require_raw().repl_scope_names)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
 
 class Value:
-    """Async façade over a direct ``nanopynix_expr.Value`` pointer.
+    """Async façade over a thread-confined :class:`LocalValue`."""
 
-    The L1 wrapper owns Nix's ``RootValue`` until :meth:`close` is called. Use
-    ``async with`` when a value has a bounded scope; closing the parent
-    :class:`EvalSession` releases every remaining value automatically.
-    """
-
-    def __init__(self, eval_session: EvalSession, raw: Any) -> None:
+    def __init__(self, eval_session: EvalSession, local: LocalValue) -> None:
         self._eval_session = eval_session
-        self._raw = raw
+        self._local: LocalValue | None = local
 
     async def __aenter__(self) -> Value:
-        self._raw_for(self._eval_session)
+        self._local_for(self._eval_session)
         return self
 
     async def __aexit__(self, *args: object) -> None:
@@ -410,113 +404,91 @@ class Value:
 
     async def close(self) -> None:
         """Release this value's rooted L1 object. This operation is idempotent."""
-        raw = self._raw
-        self._raw = None
-        self._eval_session._values.discard(self)  # type: ignore[reportPrivateUsage] -- evaluator owns exported value tracking
-        if raw is not None:
-            await self._eval_session._session.run(raw._release)  # type: ignore[reportPrivateUsage] -- RootValue must detach on the Nix thread
+        local = self._local
+        self._local = None
+        if local is not None:
+            await self._eval_session._session.run(local.close)  # type: ignore[reportPrivateUsage] -- RootValue detaches on the Nix thread
 
-    def _raw_for(self, eval_session: EvalSession) -> Any:
-        self._eval_session._require_raw()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use
+    def _local_for(self, eval_session: EvalSession) -> LocalValue:
+        self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use
         if eval_session is not self._eval_session:
             raise ValueError("Value belongs to a different inproc EvalSession")
-        if self._raw is None:
+        if self._local is None:
             raise InprocValueReleasedError("Value has been released")
-        return self._raw
+        return self._local
 
     async def force(self) -> Any:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(_force_to_python, raw)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(_force_to_python, self._local_for(self._eval_session))  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def force_deep(self) -> Any:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(_force_deep_to_python, raw)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(_force_deep_to_python, self._local_for(self._eval_session))  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def json(self, *, copy_to_store: bool = False) -> Any:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.to_json, copy_to_store)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).to_json, copy_to_store)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def type(self) -> str:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.type_name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).type_name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def as_int(self) -> int:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.as_int)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).as_int)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def as_float(self) -> float:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.as_float)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).as_float)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def as_bool(self) -> bool:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.as_bool)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).as_bool)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def as_string(self) -> str:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.as_string)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).as_string)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def realise_string(self) -> str:
-        """Realise a string value and return its rewritten physical path."""
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.realise_string)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).realise_string)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def realise_argv(self) -> list[str]:
-        """Realise a Nix list as an executable argument vector."""
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.realise_argv)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).realise_argv)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def edit_location(self) -> tuple[str, int]:
-        """Return the physical source path and line Nix would open for this value."""
-        raw = self._raw_for(self._eval_session)
-        location = await self._eval_session._session.run(raw.edit_location)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        location = await self._eval_session._session.run(self._local_for(self._eval_session).edit_location)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
         return location["path"], location["line"]
 
     async def attr(self, name: str) -> Value:
-        raw = self._raw_for(self._eval_session)
-        child = await self._eval_session._session.run(raw.attr_get, name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return self._eval_session._track_value(child)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        local = await self._eval_session._session.run(self._local_for(self._eval_session).attr_get, name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def has_attr(self, name: str) -> bool:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.has_attr, name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).has_attr, name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def list_get(self, index: int) -> Value:
-        raw = self._raw_for(self._eval_session)
-        child = await self._eval_session._session.run(raw.list_get, index)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return self._eval_session._track_value(child)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        local = await self._eval_session._session.run(self._local_for(self._eval_session).list_get, index)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def attr_names(self) -> list[str]:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.attr_names)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).attr_names)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def list_length(self) -> int:
-        raw = self._raw_for(self._eval_session)
-        return await self._eval_session._session.run(raw.list_length)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session._session.run(self._local_for(self._eval_session).list_length)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def call(self, argument: Value | Any) -> Value:
-        raw = self._raw_for(self._eval_session)
-        argument_raw = await self._argument_raw(argument)
-        result = await self._eval_session._session.run(raw.call, argument_raw)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        local = self._local_for(self._eval_session)
+        argument_local = await self._argument_local(argument)
+        result = await self._eval_session._session.run(local.call, argument_local)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
         return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def auto_call(self) -> Value:
-        raw = self._raw_for(self._eval_session)
-        result = await self._eval_session._session.run(raw.auto_call)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        result = await self._eval_session._session.run(self._local_for(self._eval_session).auto_call)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
         return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
-    async def _argument_raw(self, argument: Value | Any) -> Any:
+    async def _argument_local(self, argument: Value | Any) -> LocalValue:
         if isinstance(argument, Value):
-            return argument._raw_for(self._eval_session)
-        return await self._eval_session._session.run(self._eval_session._require_raw().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+            return argument._local_for(self._eval_session)
+        return await self._eval_session._session.run(self._eval_session._require_local().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
 
     async def build(self, *, store: Store | None = None, build_mode: Any = None) -> dict[str, str]:
-        raw = self._raw_for(self._eval_session)
         target_store = self._eval_session._store if store is None else store  # type: ignore[reportPrivateUsage] -- evaluator's bound store is default
         if target_store._session is not self._eval_session._session:  # type: ignore[reportPrivateUsage] -- session ownership guard
             raise ValueError("Store belongs to a different inproc Session")
         mode = BuildMode.Normal.value if build_mode is None else int(build_mode)
-        result = await self._eval_session._session.run(raw.build, target_store._require_raw(), mode, None)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        result = await self._eval_session._session.run(self._local_for(self._eval_session).build, target_store._require_local(), mode, None)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
         results = result["results"]
         if not results or not results[0]["success"]:
             raise RuntimeError(result["results"][0].get("error_msg", "build failed") if results else "build returned no result")

@@ -22,6 +22,9 @@ nanopynix_expr.register_primop:
 nanopynix_expr.Value.to_python:
     def to_python(self) -> ValueType: ...
 
+nanopynix_expr.Value._release:
+    def _release(self) -> None: ...
+
 nanopynix_expr.Value.to_json:
     def to_json(self, *, copy_to_store: bool = False) -> ValueType: ...
 
