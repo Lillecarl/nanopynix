@@ -94,6 +94,14 @@ let
     (lib.mapAttrs (_: nix: nanopynixForNix nix))
   ];
 
+  nanopynixVersionNames = builtins.attrNames nanopynixVersions;
+
+  # Per-version test runners, exposed individually as `nanopynix-tests-<name>`
+  # flake packages so CI can build/run each Nix version in its own job.
+  nanopynixVersionTests = lib.mapAttrs' (
+    name: value: lib.nameValuePair "nanopynix-tests-${name}" value.tests
+  ) nanopynixVersions;
+
   nanopynix-all-tests = pkgs.callPackage ./nix/nix-version-tests.nix {
     nanopynixVersions = nanopynixVersions;
     inherit (inputs) nixpkgs;
@@ -115,6 +123,7 @@ in
     flake
     pkgs
     nanopynixVersions
+    nanopynixVersionNames
     nanopynix-all-tests
     nanopynix-proto
     clypi
@@ -122,3 +131,4 @@ in
     pyproject-nix
     ;
 }
+// nanopynixVersionTests
