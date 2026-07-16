@@ -44,3 +44,23 @@ async def test_inproc_value_rejects_use_after_eval_close() -> None:
         await eval_.close()
         with pytest.raises(inproc.InprocSessionClosedError):
             await value.force()
+
+
+@pytest.mark.anyio
+async def test_inproc_value_context_manager_releases_gc_reference() -> None:
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
+        async with await eval_.string("{ answer = 42; }") as root:
+            assert await (await root.attr("answer")).as_int() == 42
+        with pytest.raises(inproc.InprocValueReleasedError):
+            await root.force()
+
+
+@pytest.mark.anyio
+async def test_inproc_eval_close_releases_values_left_open() -> None:
+    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+        eval_ = nix.eval(store)
+        await eval_.open()
+        value = await eval_.string("1")
+        await eval_.close()
+        with pytest.raises(inproc.InprocSessionClosedError):
+            await value.force()
