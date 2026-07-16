@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python" / "src"))
+_DOCS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_DOCS_DIR))
+sys.path.insert(0, str(_DOCS_DIR.parent / "python" / "src"))
+sys.path.insert(0, str(_DOCS_DIR.parent / "pynix" / "src"))
+
+from _generate_pynix_reference import generate as _generate_pynix_reference  # noqa: E402, I001 -- sys.path must be extended first, and this import cannot be merged into the block above it
+
+if TYPE_CHECKING:
+    from sphinx.application import Sphinx
 
 project = "nanopynix"
 copyright = "2025, Carl Andersson"
@@ -27,6 +36,10 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "furo"
 
+# Disable smart quotes/dashes: this site is full of literal `--flag` mentions
+# and numeric ranges (e.g. "0-7") that must not be typographically mangled.
+smartquotes = False
+
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
 }
@@ -39,3 +52,12 @@ autodoc_default_options = {
 napoleon_google_docstring = True
 napoleon_numpy_docstring = False
 napoleon_use_rtype = False
+
+
+def _on_builder_inited(app: Sphinx) -> None:
+    del app
+    _generate_pynix_reference()
+
+
+def setup(app: Sphinx) -> None:
+    app.connect("builder-inited", _on_builder_inited)
