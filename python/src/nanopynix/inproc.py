@@ -21,7 +21,8 @@ from nanopynix._extract import locked_flake as _locked_flake_proto
 from nanopynix._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._nix_executor import NixThreadExecutor
 from nanopynix.logging import LogCollector
-from nanopynix.models import LockedInput, LogEvent
+from nanopynix.models import LockedInput, LogEvent, PathInfo
+from nanopynix.models import StorePath as PublicStorePath
 from nanopynix.settings import NixSettings, normalize_nix_settings
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
@@ -42,6 +43,10 @@ StorePath = nanopynix_store.StorePath
 # executor sequentially rather than creating thread-affinity violations.
 _EXECUTOR = NixThreadExecutor()
 _initialization_signature: tuple[object, ...] | None = None
+
+
+def _print_store_path(raw_store: Any, raw_path: Any) -> str:
+    return f"{raw_store.get_store_dir().rstrip('/')}/{raw_path}"
 
 
 class InprocSessionClosedError(RuntimeError):
@@ -291,14 +296,18 @@ class Store:
     async def store_dir(self) -> str:
         return await self._session.run(self._require_raw().get_store_dir)
 
-    async def parse_store_path(self, path: str) -> Any:
-        return await self._session.run(self._require_raw().parse_store_path, path)
+    async def parse_store_path(self, path: str) -> PublicStorePath:
+        raw_path = await self._session.run(self._require_raw().parse_store_path, path)
+        return PublicStorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
 
-    async def is_valid_path(self, path: Any) -> bool:
-        return await self._session.run(self._require_raw().is_valid_path, path)
+    async def is_valid_path(self, path: str | PublicStorePath) -> bool:
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        return await self._session.run(self._require_raw().is_valid_path, raw_path)
 
-    async def query_path_info(self, path: Any) -> dict[str, Any]:
-        return await self._session.run(self._require_raw().query_path_info, path)
+    async def query_path_info(self, path: str | PublicStorePath) -> PathInfo:
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        raw_info = await self._session.run(self._require_raw().query_path_info, raw_path)
+        return PathInfo(**raw_info)
 
     async def call(self, method: str, /, *args: Any, **kwargs: Any) -> Any:
         """Call an L1 store method on the session's Nix thread.

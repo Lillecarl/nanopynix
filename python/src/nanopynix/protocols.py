@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, Self, TypeVar
 
+from nanopynix.models import PathInfo, StorePath
 from nanopynix.verbosity import LogLevelInput
 
 ValueT = TypeVar("ValueT", bound="AsyncValue")
@@ -35,6 +36,28 @@ class AsyncValue(Protocol):
     async def edit_location(self) -> tuple[str, int]: ...
 
     async def release(self) -> None: ...
+
+
+class AsyncStore(Protocol):
+    """The common asynchronous Store lifecycle and path-query interface."""
+
+    async def __aenter__(self) -> Self: ...
+
+    async def __aexit__(self, *args: object) -> None: ...
+
+    async def open(self) -> None: ...
+
+    async def close(self) -> None: ...
+
+    async def uri(self) -> str: ...
+
+    async def store_dir(self) -> str: ...
+
+    async def parse_store_path(self, path: str, /) -> StorePath: ...
+
+    async def is_valid_path(self, path: str | StorePath, /) -> bool: ...
+
+    async def query_path_info(self, path: str | StorePath, /) -> PathInfo: ...
 
 
 class AsyncLockedFlake(Protocol):
@@ -98,6 +121,7 @@ __all__ = [
     "AsyncEvalSession",
     "AsyncLockedFlake",
     "AsyncReplSession",
+    "AsyncStore",
     "AsyncValue",
     "AsyncVerbosityController",
 ]
