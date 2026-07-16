@@ -1,6 +1,7 @@
 # nanopynix
 
 [![Documentation Status](https://readthedocs.org/projects/nanopynix/badge/?version=latest)](https://nanopynix.readthedocs.io/en/latest/?badge=latest)
+[![codecov](https://codecov.io/gh/Lillecarl/nanopynix/graph/badge.svg)](https://codecov.io/gh/Lillecarl/nanopynix)
 
 nanobind-based Python bindings for Nix.
 
