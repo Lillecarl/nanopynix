@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import threading
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
@@ -29,3 +30,20 @@ class NixThreadExecutor:
 
     def shutdown(self, wait: bool = True) -> None:
         self._pool.shutdown(wait=wait)
+
+
+# Nix initialization is process-global and its objects are thread-affine.
+# Direct in-process users therefore share one executor for the interpreter's
+# lifetime rather than recreating the Nix thread per session or test.  This
+# must be lazy: importing manager-side L3 modules must not create a Nix thread.
+_shared_nix_executor: NixThreadExecutor | None = None
+_shared_nix_executor_lock = threading.Lock()
+
+
+def shared_nix_executor() -> NixThreadExecutor:
+    """Return the lazily created executor for in-process Nix runtimes."""
+    global _shared_nix_executor
+    with _shared_nix_executor_lock:
+        if _shared_nix_executor is None:
+            _shared_nix_executor = NixThreadExecutor()
+        return _shared_nix_executor

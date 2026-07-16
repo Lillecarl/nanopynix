@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-_EXAMPLES = Path(__file__).resolve().parent.parent / "docs" / "examples"
+_EXAMPLES = Path(__file__).resolve().parents[2] / "docs" / "examples"
 if not _EXAMPLES.is_dir():
     pytest.skip("examples directory not found", allow_module_level=True)
 
