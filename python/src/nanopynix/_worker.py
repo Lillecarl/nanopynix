@@ -56,7 +56,7 @@ import nanopynix_expr
 import nanopynix_util
 from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix._handle_registry import HandleRegistry
-from nanopynix._nix_core import NixCore
+from nanopynix._local import LocalRuntime
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._worker_eval import EvalServiceHandler
 from nanopynix._worker_nix import NixThreadExecutor
@@ -156,7 +156,7 @@ class WorkerState:
         self.collector: LogCollector | None = None
         self.log_task: asyncio.Task[None] | None = None
         self.handles: HandleRegistry = HandleRegistry()
-        self.nix_core = NixCore()
+        self.runtime = LocalRuntime()
         self.executor: NixThreadExecutor | None = None
         self.rpc_bridge: ThreadedRpcPrimopBridge | None = None
         self.eval_store_handle: int | None = None
@@ -200,7 +200,7 @@ class WorkerServiceHandler(WorkerServiceBase):
         """Run every Nix C++ initialization operation on the Nix thread."""
         for feature in message.experimental_features:
             nanopynix_util.enable_experimental_feature(feature)
-        self._state.nix_core.initialize(
+        self._state.runtime.initialize(
             settings=settings,
             load_config=message.load_config,
             verbosity=int(LogLevel.NOTICE) if message.verbosity is None else int(message.verbosity),
@@ -234,7 +234,7 @@ class WorkerServiceHandler(WorkerServiceBase):
         )
 
     def _open_store(self, uri: str) -> tuple[int, str, str]:
-        store = self._state.nix_core.open_store(uri)
+        store = self._state.runtime.open_store(uri)
         handle = self._state.handles.allocate(store, "store")
         store_uri = store.get_uri()
         self._state.named_store_uris[handle] = store_uri
@@ -255,13 +255,13 @@ class WorkerServiceHandler(WorkerServiceBase):
         """Return the worker's current Nix logger verbosity."""
         del message
         assert self._state.executor is not None  # set by worker_service_factory before init
-        verbosity = await self._state.executor.run(self._state.nix_core.get_verbosity)
+        verbosity = await self._state.executor.run(self._state.runtime.get_verbosity)
         return GetVerbosityResponse(verbosity=LogLevel(verbosity))
 
     async def set_verbosity(self, message: SetVerbosityRequest) -> SetVerbosityResponse:
         """Update Nix logger verbosity on the Nix thread."""
         assert self._state.executor is not None  # set by worker_service_factory before init
-        verbosity = await self._state.executor.run(self._state.nix_core.set_verbosity, int(message.verbosity))
+        verbosity = await self._state.executor.run(self._state.runtime.set_verbosity, int(message.verbosity))
         return SetVerbosityResponse(verbosity=LogLevel(verbosity))
 
     def _update_store_title(self) -> None:

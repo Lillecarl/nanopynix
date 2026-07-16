@@ -51,4 +51,4 @@ class StoreServiceHandler(
             return ()
         eval_store_handle = request.pop("eval_store_handle", 0)
         eval_store = self._get_store(eval_store_handle) if eval_store_handle else None
-        return (eval_store,)
+        return (None if eval_store is None else eval_store.require_raw(),)
