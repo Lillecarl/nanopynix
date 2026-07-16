@@ -59,6 +59,24 @@ class AsyncStore(Protocol):
 
     async def query_path_info(self, path: str | StorePath, /) -> PathInfo: ...
 
+    async def query_all_valid_paths(self) -> list[StorePath]: ...
+
+    async def compute_fs_closure(
+        self,
+        path: str | StorePath,
+        /,
+        *,
+        flip_direction: bool = False,
+        include_outputs: bool = False,
+        include_derivers: bool = False,
+    ) -> list[StorePath]: ...
+
+    async def query_derivation_outputs(self, path: str | StorePath, /) -> list[StorePath]: ...
+
+    async def query_valid_derivers(self, path: str | StorePath, /) -> list[StorePath]: ...
+
+    async def query_referrers(self, path: str | StorePath, /) -> list[StorePath]: ...
+
 
 class AsyncLockedFlake(Protocol):
     """The common lifecycle for an in-memory flake lock."""

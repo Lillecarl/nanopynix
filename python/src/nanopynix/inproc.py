@@ -49,6 +49,10 @@ def _print_store_path(raw_store: Any, raw_path: Any) -> str:
     return f"{raw_store.get_store_dir().rstrip('/')}/{raw_path}"
 
 
+def _print_store_paths(raw_store: Any, raw_paths: Any) -> list[str]:
+    return [_print_store_path(raw_store, path) for path in raw_paths]
+
+
 class InprocSessionClosedError(RuntimeError):
     """Raised when an in-process session resource is used after close."""
 
@@ -308,6 +312,47 @@ class Store:
         raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
         raw_info = await self._session.run(self._require_raw().query_path_info, raw_path)
         return PathInfo(**raw_info)
+
+    async def query_all_valid_paths(self) -> list[PublicStorePath]:
+        paths = await self._session.run(self._require_raw().query_all_valid_paths)
+        return await self._public_store_paths(paths)
+
+    async def compute_fs_closure(
+        self,
+        path: str | PublicStorePath,
+        *,
+        flip_direction: bool = False,
+        include_outputs: bool = False,
+        include_derivers: bool = False,
+    ) -> list[PublicStorePath]:
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        paths = await self._session.run(
+            self._require_raw().compute_fs_closure,
+            raw_path,
+            flip_direction,
+            include_outputs,
+            include_derivers,
+        )
+        return await self._public_store_paths(paths)
+
+    async def query_derivation_outputs(self, path: str | PublicStorePath) -> list[PublicStorePath]:
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        paths = await self._session.run(self._require_raw().query_derivation_outputs, raw_path)
+        return await self._public_store_paths(paths)
+
+    async def query_valid_derivers(self, path: str | PublicStorePath) -> list[PublicStorePath]:
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        paths = await self._session.run(self._require_raw().query_valid_derivers, raw_path)
+        return await self._public_store_paths(paths)
+
+    async def query_referrers(self, path: str | PublicStorePath) -> list[PublicStorePath]:
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        paths = await self._session.run(self._require_raw().query_referrers, raw_path)
+        return await self._public_store_paths(paths)
+
+    async def _public_store_paths(self, raw_paths: Any) -> list[PublicStorePath]:
+        paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)
+        return [PublicStorePath(path) for path in paths]
 
     async def call(self, method: str, /, *args: Any, **kwargs: Any) -> Any:
         """Call an L1 store method on the session's Nix thread.

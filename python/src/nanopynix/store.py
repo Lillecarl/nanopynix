@@ -7,11 +7,16 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_proto.nix.common import PathInfo
 from nanopynix_proto.nix.store import (
+    ComputeFsClosureRequest,
     GetStoreDirRequest,
     GetUriRequest,
     IsValidPathRequest,
     ParseStorePathRequest,
+    QueryAllValidPathsRequest,
+    QueryDerivationOutputsRequest,
     QueryPathInfoRequest,
+    QueryReferrersRequest,
+    QueryValidDeriversRequest,
     StoreServiceBase,
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
@@ -174,3 +179,42 @@ class Store:
     async def query_path_info(self, path: str | StorePath) -> PathInfo:
         """Return metadata for a valid store path."""
         return await self.rpc.query_path_info(QueryPathInfoRequest(path=str(path)))
+
+    async def query_all_valid_paths(self) -> list[StorePath]:
+        """Return every valid path registered in this store."""
+        response = await self.rpc.query_all_valid_paths(QueryAllValidPathsRequest())
+        return [StorePath(path) for path in response.paths]
+
+    async def compute_fs_closure(
+        self,
+        path: str | StorePath,
+        *,
+        flip_direction: bool = False,
+        include_outputs: bool = False,
+        include_derivers: bool = False,
+    ) -> list[StorePath]:
+        """Return the filesystem closure of ``path``."""
+        response = await self.rpc.compute_fs_closure(
+            ComputeFsClosureRequest(
+                path=str(path),
+                flip_direction=flip_direction,
+                include_outputs=include_outputs,
+                include_derivers=include_derivers,
+            )
+        )
+        return [StorePath(item) for item in response.paths]
+
+    async def query_derivation_outputs(self, path: str | StorePath) -> list[StorePath]:
+        """Return output paths declared by a derivation."""
+        response = await self.rpc.query_derivation_outputs(QueryDerivationOutputsRequest(path=str(path)))
+        return [StorePath(item) for item in response.paths]
+
+    async def query_valid_derivers(self, path: str | StorePath) -> list[StorePath]:
+        """Return valid derivations that produced ``path``."""
+        response = await self.rpc.query_valid_derivers(QueryValidDeriversRequest(path=str(path)))
+        return [StorePath(item) for item in response.paths]
+
+    async def query_referrers(self, path: str | StorePath) -> list[StorePath]:
+        """Return valid store paths that reference ``path``."""
+        response = await self.rpc.query_referrers(QueryReferrersRequest(path=str(path)))
+        return [StorePath(item) for item in response.paths]
