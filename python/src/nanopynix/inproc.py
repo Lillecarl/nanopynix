@@ -50,6 +50,10 @@ class InprocEvalBusyError(RuntimeError):
     """Raised when a session already owns its single permitted EvalState."""
 
 
+class InprocValueReleasedError(RuntimeError):
+    """Raised when an in-process value is used after its explicit release."""
+
+
 class _LogSubscription:
     def __init__(self, session: Session, callback: Any) -> None:
         self._session = session
@@ -102,6 +106,7 @@ class Session:
         self._log_task: asyncio.Task[None] | None = None
         self._opened = False
         self._eval: EvalSession | None = None
+        self._stores: set[Store] = set()
 
     @staticmethod
     def _normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
@@ -174,6 +179,8 @@ class Session:
         eval_session = self._eval
         if eval_session is not None:
             await eval_session.close()
+        for store in tuple(self._stores):
+            await store.close()
         task = self._log_task
         self._log_task = None
         if task is not None:
@@ -205,7 +212,9 @@ class Session:
 
     def store(self, uri: str = "auto") -> Store:
         """Return a direct-pointer store context manager."""
-        return Store(self, uri)
+        store = Store(self, uri)
+        self._stores.add(store)
+        return store
 
     def eval(self, store: Store) -> EvalSession:
         """Return the single pointer-backed evaluator permitted by this session."""
@@ -256,6 +265,7 @@ class Store:
     async def close(self) -> None:
         raw = self._raw
         self._raw = None
+        self._session._stores.discard(self)  # type: ignore[reportPrivateUsage] -- session owns store lifetime tracking
         if raw is not None:
             await self._session.run(_drop_reference, raw)
 
@@ -298,6 +308,7 @@ class EvalSession:
         self._store = store
         self._raw: Any = None
         self._active = False
+        self._values: set[Value] = set()
 
     async def __aenter__(self) -> EvalSession:
         await self.open()
@@ -317,6 +328,8 @@ class EvalSession:
         self._active = True
 
     async def close(self) -> None:
+        for value in tuple(self._values):
+            await value.close()
         raw = self._raw
         self._raw = None
         self._active = False
@@ -332,11 +345,18 @@ class EvalSession:
 
     async def string(self, expression: str, path: str = "<string>") -> Value:
         raw = await self._session.run(self._require_raw().eval_string, expression, path)
-        return Value(self, raw)
+        return await self._export_value(raw)
 
     async def file(self, path: str) -> Value:
         raw = await self._session.run(self._require_raw().eval_file, path)
-        return Value(self, raw)
+        return await self._export_value(raw)
+
+    async def _export_value(self, raw: Any) -> Value:
+        """Take Nix's GC reference before exposing a value to Python callers."""
+        exported = await self._session.run(self._require_raw()._export_pyvalue, raw)  # type: ignore[reportPrivateUsage] -- binding exports a stable GC-owned value
+        value = Value(self, exported)
+        self._values.add(value)
+        return value
 
     async def repl(self) -> ReplSession:
         raw = self._require_raw()
@@ -352,11 +372,11 @@ class ReplSession:
 
     async def line(self, text: str, path: str = "<string>") -> Value | None:
         raw = await self._eval_session._session.run(self._eval_session._require_raw().repl_process_line, text, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return None if raw is None else Value(self._eval_session, raw)
+        return None if raw is None else await self._eval_session._export_value(raw)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
 
     async def load_file(self, path: str) -> Value:
         raw = await self._eval_session._session.run(self._eval_session._require_raw().repl_load_file, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return Value(self._eval_session, raw)
+        return await self._eval_session._export_value(raw)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
 
     async def add_attrs(self, value: Value) -> list[str]:
         raw_value = value._raw_for(self._eval_session)  # type: ignore[reportPrivateUsage] -- same-evaluator guard
@@ -367,16 +387,39 @@ class ReplSession:
 
 
 class Value:
-    """Async façade over a direct ``nanopynix_expr.Value`` pointer."""
+    """Async façade over an exported direct ``nanopynix_expr.Value`` pointer.
+
+    Values hold a Nix GC reference until :meth:`close` is called. Use
+    ``async with`` when a value has a bounded scope; closing the parent
+    :class:`EvalSession` releases every remaining value automatically.
+    """
 
     def __init__(self, eval_session: EvalSession, raw: Any) -> None:
         self._eval_session = eval_session
         self._raw = raw
 
+    async def __aenter__(self) -> Value:
+        self._raw_for(self._eval_session)
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        """Release this value's Nix GC reference. This operation is idempotent."""
+        raw = self._raw
+        self._raw = None
+        self._eval_session._values.discard(self)  # type: ignore[reportPrivateUsage] -- evaluator owns exported value tracking
+        if raw is not None and self._eval_session._active:  # type: ignore[reportPrivateUsage] -- release requires a live EvalState
+            eval_raw = self._eval_session._require_raw()  # type: ignore[reportPrivateUsage] -- release requires the owning EvalState
+            await self._eval_session._session.run(eval_raw.release_exported_value, raw)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+
     def _raw_for(self, eval_session: EvalSession) -> Any:
         self._eval_session._require_raw()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use
         if eval_session is not self._eval_session:
             raise ValueError("Value belongs to a different inproc EvalSession")
+        if self._raw is None:
+            raise InprocValueReleasedError("Value has been released")
         return self._raw
 
     async def force(self) -> Any:
@@ -430,7 +473,7 @@ class Value:
     async def attr(self, name: str) -> Value:
         raw = self._raw_for(self._eval_session)
         child = await self._eval_session._session.run(raw.attr_get, name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return Value(self._eval_session, child)
+        return await self._eval_session._export_value(child)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
 
     async def has_attr(self, name: str) -> bool:
         raw = self._raw_for(self._eval_session)
@@ -439,7 +482,7 @@ class Value:
     async def list_get(self, index: int) -> Value:
         raw = self._raw_for(self._eval_session)
         child = await self._eval_session._session.run(raw.list_get, index)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return Value(self._eval_session, child)
+        return await self._eval_session._export_value(child)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
 
     async def attr_names(self) -> list[str]:
         raw = self._raw_for(self._eval_session)
@@ -453,12 +496,12 @@ class Value:
         raw = self._raw_for(self._eval_session)
         argument_raw = await self._argument_raw(argument)
         result = await self._eval_session._session.run(raw.call, argument_raw)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return Value(self._eval_session, result)
+        return await self._eval_session._export_value(result)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
 
     async def auto_call(self) -> Value:
         raw = self._raw_for(self._eval_session)
         result = await self._eval_session._session.run(raw.auto_call)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
-        return Value(self._eval_session, result)
+        return await self._eval_session._export_value(result)  # type: ignore[reportPrivateUsage] -- parent owns exported value tracking
 
     async def _argument_raw(self, argument: Value | Any) -> Any:
         if isinstance(argument, Value):
@@ -502,6 +545,7 @@ __all__ = [
     "GCAction",
     "InprocEvalBusyError",
     "InprocSessionClosedError",
+    "InprocValueReleasedError",
     "RawEvalState",
     "RawStore",
     "RawValue",
