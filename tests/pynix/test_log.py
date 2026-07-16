@@ -4,15 +4,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
+import pynix.log as log_module
+import pytest
 from nanopynix_proto.nix.store import GetBuildLogRequest
 
 import nanopynix
 from pynix import Pynix
 
 if TYPE_CHECKING:
-    import pytest
+    from collections.abc import AsyncGenerator, AsyncIterator
 
 
 async def test_nanopynix_store_get_build_log_from_populated_store(populated_store: dict[str, str]):
@@ -28,3 +32,45 @@ async def test_pynix_log_prints_build_log_from_populated_store(populated_store: 
     await cmd.astart()
     captured = capsys.readouterr()
     assert "pynix-log-line" in captured.out
+
+
+async def test_pynix_log_errors_when_build_log_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    path = "/nix/store/00000000000000000000000000000000-no-log"
+    monkeypatch.setattr(log_module, "prepare_sys_path", lambda: None)
+    monkeypatch.setattr(log_module, "forward_nix_logs", _noop_forward_nix_logs)
+    monkeypatch.setattr(log_module, "nanopynix", SimpleNamespace(Session=_FakeSession))
+
+    cmd = Pynix.parse(["log", path, "--store", "auto"])
+    with pytest.raises(SystemExit, match=r"build log of .* is not available"):
+        await cmd.astart()
+
+
+@asynccontextmanager
+async def _noop_forward_nix_logs(session: Any, *, print_build_logs: bool = False) -> AsyncGenerator[None]:  # noqa: ARG001 -- matches real forward_nix_logs signature
+    yield
+
+
+class _FakeSession:
+    async def __aenter__(self) -> _FakeSession:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    def store(self, uri: str) -> _FakeStore:
+        return _FakeStore()
+
+    async def log_stream(self) -> AsyncIterator[None]:
+        if False:
+            yield None
+
+
+class _FakeStore:
+    async def __aenter__(self) -> _FakeStore:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def get_build_log(self, path: str) -> str | None:
+        return None

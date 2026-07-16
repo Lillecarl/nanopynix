@@ -139,3 +139,33 @@ async def test_show_both_file_and_flake_errors(tmp_path: Path, capsys: pytest.Ca
         await cmd.astart()
     captured = capsys.readouterr()
     assert "--file and --flake are mutually exclusive" in captured.out
+
+
+async def test_show_file_missing_attr_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    nix_file = tmp_path / "test.nix"
+    nix_file.write_text("{ present = 1; }")
+    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), "--attr", "missing"])
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+    captured = capsys.readouterr()
+    assert "attribute 'missing' not found" in captured.out
+
+
+async def test_show_file_wrong_type_attr_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    nix_file = tmp_path / "test.nix"
+    nix_file.write_text('{ type = "not-a-derivation"; }')
+    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file)])
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+    captured = capsys.readouterr()
+    assert "value at attribute path is not a derivation" in captured.out
+
+
+async def test_show_file_non_string_drv_path_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    nix_file = tmp_path / "test.nix"
+    nix_file.write_text('{ type = "derivation"; drvPath = 123; }')
+    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file)])
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+    captured = capsys.readouterr()
+    assert "failed to get derivation path" in captured.out

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import io
 import json
 import re
 from typing import TYPE_CHECKING
+
+import pytest
 
 from pynix import Pynix
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def _parse_json_output(out: str) -> object:
@@ -59,3 +60,39 @@ async def test_eval_json_sorted_keys(capsys: pytest.CaptureFixture[str]) -> None
     captured = capsys.readouterr()
     result = _parse_json_output(captured.out)
     assert json.dumps(result, sort_keys=True, indent=2) + "\n" in captured.out
+
+
+async def test_eval_attr_without_file_or_flake_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    cmd = Pynix.parse(["eval", "--expr", "1", "--attr", "x"])
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+    captured = capsys.readouterr()
+    assert "--attr requires --file or --flake" in captured.out
+
+
+async def test_eval_expr_combined_with_file_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    nix_file = tmp_path / "test.nix"
+    nix_file.write_text("1")
+    cmd = Pynix.parse(["eval", "--expr", "1", "--file", str(nix_file)])
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+    captured = capsys.readouterr()
+    assert "expression argument cannot be combined with --file or --flake" in captured.out
+
+
+async def test_eval_reads_expression_from_stdin(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("21 + 21"))
+    cmd = Pynix.parse(["eval"])
+    await cmd.astart()
+    captured = capsys.readouterr()
+    assert _parse_json_output(captured.out) == 42
+
+
+async def test_eval_file_missing_attr_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    nix_file = tmp_path / "test.nix"
+    nix_file.write_text("{ present = 1; }")
+    cmd = Pynix.parse(["eval", "--file", str(nix_file), "--attr", "missing"])
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+    captured = capsys.readouterr()
+    assert "attribute 'missing' not found" in captured.out
