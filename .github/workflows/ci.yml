@@ -7,9 +7,28 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  matrix:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
+    outputs:
+      versions: ${{ steps.versions.outputs.versions }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: nixbuild/nix-quick-install-action@v35
+
+      - id: versions
+        name: Compute Nix version matrix
+        run: echo "versions=$(nix eval --json '.#nanopynixVersionNames.x86_64-linux')" >> "$GITHUB_OUTPUT"
+
+  test:
+    if: github.event_name != 'schedule'
+    needs: matrix
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.matrix.outputs.versions) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,11 +45,8 @@ jobs:
           sudo install -d -m 0755 /etc/nix
           printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
 
-      - name: Show Nix configuration
-        run: nix config show
-
-      - name: Build all supported Nix versions
-        run: nix build .#nanopynix-all-tests --out-link result --print-build-logs --print-out-paths
+      - name: Build nanopynix test runner for Nix ${{ matrix.version }}
+        run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs --print-out-paths
 
       - name: Verify test runner closure after build
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
@@ -41,17 +57,17 @@ jobs:
           sudo sysctl -w kernel.unprivileged_userns_clone=1
           unshare --user --map-root-user --mount --pid --fork --mount-proc true
 
-      - name: Test all supported Nix versions
-        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 ./result/bin/nanopynix-nix-version-tests --verbose --tb=short -rsxXfE --run-temp-store-builds
+      - name: Test nanopynix against Nix ${{ matrix.version }}
+        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds
 
       - name: Verify test runner closure after tests
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
 
-  update-lockfile:
+  update-lockfile-prep:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
+    outputs:
+      versions: ${{ steps.versions.outputs.versions }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,19 +81,50 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           useDaemon: false
 
+      - name: Update flake inputs
+        run: nix flake update
+
+      - id: versions
+        name: Compute Nix version matrix
+        run: echo "versions=$(nix eval --json '.#nanopynixVersionNames.x86_64-linux')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flake-lock
+          path: flake.lock
+
+  update-lockfile-test:
+    if: github.event_name == 'schedule'
+    needs: update-lockfile-prep
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.update-lockfile-prep.outputs.versions) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: flake-lock
+
+      - uses: nixbuild/nix-quick-install-action@v35
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: lillecarl
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          useDaemon: false
+
       - name: Configure single-user Nix builds
         run: |
           sudo install -d -m 0755 /etc/nix
           printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
 
-      - name: Show Nix configuration
-        run: nix config show
-
-      - name: Update flake inputs
-        run: nix flake update
-
-      - name: Build all supported Nix versions
-        run: nix build .#nanopynix-all-tests --out-link result --print-build-logs --print-out-paths
+      - name: Build nanopynix test runner for Nix ${{ matrix.version }}
+        run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs --print-out-paths
 
       - name: Verify test runner closure after build
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
@@ -88,11 +135,26 @@ jobs:
           sudo sysctl -w kernel.unprivileged_userns_clone=1
           unshare --user --map-root-user --mount --pid --fork --mount-proc true
 
-      - name: Test all supported Nix versions
-        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 ./result/bin/nanopynix-nix-version-tests --verbose --tb=short -rsxXfE --run-temp-store-builds
+      - name: Test nanopynix against Nix ${{ matrix.version }}
+        run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds
 
       - name: Verify test runner closure after tests
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
+
+  update-lockfile-commit:
+    if: github.event_name == 'schedule'
+    needs: update-lockfile-test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: flake-lock
 
       - uses: step-security/git-auto-commit-action@v7
         with:

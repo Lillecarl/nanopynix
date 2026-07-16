@@ -30,5 +30,9 @@
         default = eachDefNix.${system}.shell;
       });
       legacyPackages = forAllSystems (system: inputs.nixpkgs.legacyPackages.${system});
+      # Per-system list of Nix version names tested by `nanopynix-tests-<name>`
+      # packages; consumed by CI to build a dynamic GitHub Actions matrix via
+      # `nix eval --json`.
+      nanopynixVersionNames = forAllSystems (system: eachDefNix.${system}.nanopynixVersionNames);
     };
 }
