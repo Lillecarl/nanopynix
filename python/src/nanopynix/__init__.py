@@ -52,7 +52,13 @@ from nanopynix.models import (
 )
 from nanopynix.nix import LogCapture, Nix, Session
 from nanopynix.primops import from_yaml, from_yaml11, from_yaml11_stream, from_yaml_stream, to_yaml, yaml_primops
-from nanopynix.protocols import AsyncEvalSession, AsyncLockedFlake, AsyncReplSession, AsyncValue
+from nanopynix.protocols import (
+    AsyncEvalSession,
+    AsyncLockedFlake,
+    AsyncReplSession,
+    AsyncValue,
+    AsyncVerbosityController,
+)
 from nanopynix.settings import (
     NanopynixSettings,
     NixEvalSettings,
@@ -99,6 +105,7 @@ __all__ = [
     "AsyncLockedFlake",
     "AsyncReplSession",
     "AsyncValue",
+    "AsyncVerbosityController",
     "AsyncEvalSession",
     "EvalSession",
     "LockedFlakeHandle",

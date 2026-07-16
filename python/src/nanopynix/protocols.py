@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Protocol, Self, TypeVar
 
+from nanopynix.verbosity import LogLevelInput
+
 ValueT = TypeVar("ValueT", bound="AsyncValue")
+VerbosityT_co = TypeVar("VerbosityT_co", covariant=True)
 
 
 class AsyncValue(Protocol):
@@ -83,4 +86,18 @@ class AsyncReplSession(Protocol[ValueT]):
     async def reset_file_cache(self) -> None: ...
 
 
-__all__ = ["AsyncEvalSession", "AsyncLockedFlake", "AsyncReplSession", "AsyncValue"]
+class AsyncVerbosityController(Protocol[VerbosityT_co]):
+    """A resource that reads and updates the process-wide Nix verbosity."""
+
+    async def get_verbosity(self) -> VerbosityT_co: ...
+
+    async def set_verbosity(self, verbosity: LogLevelInput) -> VerbosityT_co: ...
+
+
+__all__ = [
+    "AsyncEvalSession",
+    "AsyncLockedFlake",
+    "AsyncReplSession",
+    "AsyncValue",
+    "AsyncVerbosityController",
+]
