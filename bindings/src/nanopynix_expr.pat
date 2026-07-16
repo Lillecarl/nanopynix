@@ -30,9 +30,3 @@ nanopynix_expr.Value.build:
 
 nanopynix_expr.EvalState.__init__:
     def __init__(self, store: Store, search_path: Sequence[str] = []) -> None: ...
-
-nanopynix_expr.EvalState.export_value:
-    def export_value(self, value: Value) -> int: ...
-
-nanopynix_expr.EvalState.get_exported:
-    def get_exported(self, handle: int) -> Value: ...

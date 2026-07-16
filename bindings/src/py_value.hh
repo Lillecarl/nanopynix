@@ -14,12 +14,14 @@
 #include "py_eval.hh"
 
 struct PyValue {
-    nix::Value *value;
+    nix::RootValue root;
     PyEvalState *eval;
     std::shared_ptr<bool> eval_alive;
 
     PyValue(nix::Value *v, PyEvalState *e, std::shared_ptr<bool> alive)
-        : value(v), eval(e), eval_alive(std::move(alive)) {}
+        : root(nix::allocRootValue(v)), eval(e), eval_alive(std::move(alive)) {}
+
+    void release() { root.reset(); }
 
     std::string type_name();
     bool is_null() const;

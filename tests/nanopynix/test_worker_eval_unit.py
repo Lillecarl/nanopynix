@@ -28,10 +28,6 @@ class _FakeEvalState:
     def __init__(self, store: object, nix_path: list[str]) -> None:
         self.store = store
         self.nix_path = nix_path
-        self.released: list[Any] = []
-
-    def release_exported_value(self, value: Any) -> None:
-        self.released.append(value)
 
 
 class _FakeStore:

@@ -136,8 +136,7 @@ class EvalServiceHandler(EvalServiceBase):
     def _reset(self) -> None:
         es = self._state.eval_state
         if es is not None:
-            for handle, resource in self._state.handles.iter_kind("value"):
-                es.release_exported_value(resource)
+            for handle, _resource in self._state.handles.iter_kind("value"):
                 self._state.handles.release(handle)
             self._state.eval_state = None
             self._state.eval_store_handle = None
@@ -145,9 +144,8 @@ class EvalServiceHandler(EvalServiceBase):
             self._state.handles.release(handle)
 
     def _export(self, pyv: Any) -> common_pb.ValueHandle:
-        es = self._get_es()
-        exported = es._export_pyvalue(pyv)
-        handle = self._state.handles.allocate(exported, "value")
+        self._get_es()
+        handle = self._state.handles.allocate(pyv, "value")
         type_name = pyv.type_name()
         nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
         return common_pb.ValueHandle(handle=handle, type=nix_type)
@@ -484,10 +482,6 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._state.executor.run(self._do_release, message)
 
     def _do_release(self, message: ReleaseRequest) -> ReleaseResponse:
-        es = self._state.eval_state
-        if es is not None:
-            pyv = self._resolve(message.handle)
-            es.release_exported_value(pyv)
         self._state.handles.release(message.handle)
         return ReleaseResponse()
 
