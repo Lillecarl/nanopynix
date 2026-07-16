@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 from _git import init_flake_repo
 from anyio import Path as AnyioPath
-from nanopynix_proto.nix.store import GetUriRequest
 
 from nanopynix import (
     NixCoercionError,
@@ -280,8 +279,8 @@ async def test_eval_session_cleanup(tmp_path: Path):
             root = await eval.file(str(nix_file))
             await root.force()
         # Eval session closed — store is still available
-        uri = await store.get_uri(GetUriRequest())
-        assert isinstance(uri.uri, str)
+        uri = await store.uri()
+        assert isinstance(uri, str)
 
 
 async def test_eval_thunk(tmp_path: Path):

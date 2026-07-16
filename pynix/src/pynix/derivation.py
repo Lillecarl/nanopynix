@@ -68,7 +68,7 @@ class Show(Command):
 
                 drv_path = await self._get_drv_path(root)
 
-            derivation = await store.read_derivation(ReadDerivationRequest(path=drv_path))
+            derivation = await store.rpc.read_derivation(ReadDerivationRequest(path=drv_path))
             result = {drv_path: self._derivation_to_dict(derivation)}
             sys.stdout.write(json.dumps(result, sort_keys=True, indent=2))
             sys.stdout.write("\n")

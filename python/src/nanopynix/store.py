@@ -1,11 +1,19 @@
-"""Store facade — checked proxy for the generated StoreService API."""
+"""Public Store facade and its private generated-RPC transport."""
 
 from __future__ import annotations
 
 import contextlib
 from typing import TYPE_CHECKING, Any, cast
 
-from nanopynix_proto.nix.store import StoreServiceBase
+from nanopynix_proto.nix.common import PathInfo
+from nanopynix_proto.nix.store import (
+    GetStoreDirRequest,
+    GetUriRequest,
+    IsValidPathRequest,
+    ParseStorePathRequest,
+    QueryPathInfoRequest,
+    StoreServiceBase,
+)
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
 from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
@@ -14,6 +22,7 @@ from nanopynix._pool import (  # type: ignore[reportPrivateUsage] -- cross-modul
     _grpc_call,  # type: ignore[reportPrivateUsage] -- cross-module internal utility
 )
 from nanopynix._rpc_proxy import RpcProxyMixin
+from nanopynix.models import StorePath
 
 if TYPE_CHECKING:
     from betterproto2 import Message
@@ -24,7 +33,11 @@ if TYPE_CHECKING:
 
 
 class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreServiceBase):
-    """Session-bound proxy for the generated ``StoreService`` request/response API."""
+    """Private session-bound proxy for the generated ``StoreService`` API.
+
+    Public callers use :class:`Store`.  It exposes this transport explicitly as
+    :attr:`Store.rpc` for operations which do not yet have an ergonomic method.
+    """
 
     __slots__ = ("_active", "_pool", "_rpc_timeout", "_session_id", "_store_handle", "_uri")
 
@@ -99,5 +112,65 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         return await self._store_call(method(message, timeout=self._rpc_timeout))
 
 
-# Backward-compatible alias
-Store = StoreHandle
+class Store:
+    """Ergonomic asynchronous facade for one opened Nix store.
+
+    The complete generated request/response API remains available through
+    :attr:`rpc`; dedicated methods use ordinary Python values and unwrap simple
+    response messages.
+    """
+
+    __slots__ = ("_rpc",)
+
+    def __init__(self, rpc: StoreHandle) -> None:
+        self._rpc = rpc
+
+    @property
+    def rpc(self) -> StoreHandle:
+        """Low-level generated request/response StoreService proxy."""
+        return self._rpc
+
+    @property
+    def _session_id(self) -> str:
+        return self._rpc._session_id  # type: ignore[reportPrivateUsage] -- facade exposes transport ownership internally
+
+    @property
+    def store_handle(self) -> int:
+        """Worker-side handle for internal session integration."""
+        return self._rpc.store_handle
+
+    async def open(self) -> None:
+        """Open the underlying store."""
+        await self._rpc.open()
+
+    async def close(self) -> None:
+        """Close the underlying store."""
+        await self._rpc.close()
+
+    async def __aenter__(self) -> Store:
+        await self.open()
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.close()
+
+    async def uri(self) -> str:
+        """Return the canonical URI of this store."""
+        return (await self.rpc.get_uri(GetUriRequest())).uri
+
+    async def store_dir(self) -> str:
+        """Return this store's logical store directory."""
+        return (await self.rpc.get_store_dir(GetStoreDirRequest())).dir
+
+    async def parse_store_path(self, path: str) -> StorePath:
+        """Validate and normalise ``path`` as a Nix store path."""
+        response = await self.rpc.parse_store_path(ParseStorePathRequest(path=path))
+        return StorePath(response.path)
+
+    async def is_valid_path(self, path: str | StorePath) -> bool:
+        """Return whether ``path`` is valid in this store."""
+        return (await self.rpc.is_valid_path(IsValidPathRequest(path=str(path)))).valid
+
+    async def query_path_info(self, path: str | StorePath) -> PathInfo:
+        """Return metadata for a valid store path."""
+        return await self.rpc.query_path_info(QueryPathInfoRequest(path=str(path)))

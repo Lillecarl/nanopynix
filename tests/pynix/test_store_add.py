@@ -18,10 +18,10 @@ async def test_nanopynix_add_to_store_imports_file(empty_store: dict[str, str | 
     source.write_text("nanopynix-add-file\n")
 
     async with nanopynix.Session() as nix, nix.store(str(empty_store["store_url"])) as store:
-        computed = await store.compute_store_path(
+        computed = await store.rpc.compute_store_path(
             ComputeStorePathRequest(path=str(source), method="flat", hash_algo="sha256")
         )
-        added = await store.add_to_store(AddToStoreRequest(path=str(source), method="flat", hash_algo="sha256"))
+        added = await store.rpc.add_to_store(AddToStoreRequest(path=str(source), method="flat", hash_algo="sha256"))
 
     assert added.path == computed.path
     physical_path = _physical_store_path(empty_store, added.path)

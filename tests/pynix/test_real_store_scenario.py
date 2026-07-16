@@ -1,8 +1,10 @@
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
+# pyright: reportAttributeAccessIssue=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 # All lines access PynixStoreScenario fixture methods/results whose return types
 # cascade from C++ nanobind extensions and cannot be resolved by the type checker.
 # reportUnknownArgumentType: request.node.nodeid and similar fixture attributes
 # are typed as Any by pytest stubs, causing cascade into function call args.
+# reportAttributeAccessIssue/reportUnknownParameterType: Pyright resolves the
+# repository-level conftest before this directory's fixture module.
 
 from __future__ import annotations
 

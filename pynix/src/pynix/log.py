@@ -23,7 +23,7 @@ class Log(Command):
         prepare_sys_path()
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
-            response = await store.get_build_log(GetBuildLogRequest(path=self.path))
+            response = await store.rpc.get_build_log(GetBuildLogRequest(path=self.path))
 
         if response.log is None:
             raise SystemExit(f"build log of '{self.path}' is not available")

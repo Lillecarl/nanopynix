@@ -30,7 +30,11 @@ class _Logger:
 
 async def test_nix_log_forwarder_skips_empty_activity_events(monkeypatch: Any) -> None:
     logger = _Logger()
-    monkeypatch.setattr("pynix._util.structlog.get_logger", lambda _name: logger)
+
+    def get_logger(_name: str) -> _Logger:
+        return logger
+
+    monkeypatch.setattr("pynix._util.structlog.get_logger", get_logger)
 
     await _forward_nix_logs(_Session(), print_build_logs=False)
 

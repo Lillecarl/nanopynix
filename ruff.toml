@@ -16,6 +16,9 @@ ignore = [
 [lint.flake8-builtins]
 ignorelist = ["eval"]
 
+[lint.per-file-ignores]
+"tests/**" = ["SLF001"] # tests intentionally inspect private implementation state
+
 [lint.isort]
 known-first-party = [
   "nanopynix",

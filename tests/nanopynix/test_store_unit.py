@@ -49,6 +49,7 @@ from nanopynix_proto.nix.store import (
 )
 
 import nanopynix
+from nanopynix.store import Store as PublicStore
 from nanopynix.store import StoreHandle as Store
 
 
@@ -238,6 +239,43 @@ class TestIdentity:
         pool._store_stub.compute_store_path.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
         sent = pool._store_stub.compute_store_path.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args; await_args may be None
         assert sent.store_handle == 456
+
+
+class TestPublicStore:
+    @pytest.fixture
+    def public_store(self, store: Store) -> PublicStore:
+        return PublicStore(store)
+
+    async def test_uri_unwraps_response(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.get_uri.return_value = MagicMock(uri="daemon")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+
+        assert await public_store.uri() == "daemon"
+        pool._store_stub.get_uri.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+
+    async def test_store_dir_unwraps_response(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.get_store_dir.return_value = MagicMock(dir="/nix/store")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+
+        assert await public_store.store_dir() == "/nix/store"
+        pool._store_stub.get_store_dir.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+
+    async def test_parse_store_path_returns_model(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.parse_store_path.return_value = ParseStorePathResponse(path="/nix/store/aaa-bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+
+        path = await public_store.parse_store_path("/nix/store/aaa-bbb")
+
+        assert path == "/nix/store/aaa-bbb"
+
+    async def test_is_valid_path_unwraps_response(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.is_valid_path.return_value = MagicMock(valid=True)  # type: ignore[reportPrivateUsage] -- test accesses private stub
+
+        assert await public_store.is_valid_path("/nix/store/aaa-bbb")
+
+    async def test_rpc_exposes_generated_surface(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.get_build_log.return_value = MagicMock(log="hello log\n")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+
+        response = await public_store.rpc.get_build_log(GetBuildLogRequest(path="/nix/store/aaa-bbb"))
+
+        assert response.log == "hello log\n"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -452,6 +490,7 @@ class TestGC:
 # ════════════════════════════════════════════════════════════════════
 
 
-async def test_store_alias_is_bound():
-    """nanopynix.Store is a backward-compatible alias for StoreHandle."""
-    assert nanopynix.Store is nanopynix.StoreHandle
+async def test_public_store_is_distinct_from_rpc_transport():
+    """The public facade intentionally separates ergonomic and generated APIs."""
+    assert nanopynix.Store is PublicStore
+    assert nanopynix.Store is not nanopynix.StoreHandle
