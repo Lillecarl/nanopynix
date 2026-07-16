@@ -70,10 +70,12 @@ jobs:
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ github.workspace }}/junit.xml
+          flags: ${{ matrix.version }}
+          report_type: test_results
 
       - name: Verify test runner closure after tests
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
