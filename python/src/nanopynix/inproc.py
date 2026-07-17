@@ -580,6 +580,10 @@ class EvalSession:
         )
         return self._track_value(local)
 
+    async def reset_file_cache(self) -> None:
+        """Discard parsed file cache entries before re-evaluating source files."""
+        await self._session.run(self._require_raw().reset_file_cache)
+
 
 class ReplSession:
     """Persistent REPL scope backed by its parent direct ``EvalState``."""

@@ -178,3 +178,45 @@ async def test_build_with_separate_eval_store(tmp_path: Path, capsys: pytest.Cap
     out_path = data["outputs"]["out"]
     assert "pynix-build-eval-store-test" in out_path
     assert await AnyioPath(out_path).read_text() == "built-with-eval-store\n"
+
+
+async def test_build_update_fod_dry_run_reports_local_fetchurl_diff(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    payload = tmp_path / "payload"
+    payload.write_text("fixed-output payload\n")
+    nix_file = tmp_path / "source.nix"
+    source = f'builtins.fetchurl {{ url = "file://{payload}"; sha256 = ""; }}\n'
+    nix_file.write_text(source)
+    cmd = Pynix.parse(["build", "--file", str(nix_file), "--update-fod", "--dry-run"])
+
+    await cmd.astart()
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {"dryRun": True, "outputs": {}, "updatedFods": 1}
+    assert "-builtins.fetchurl" in strip_ansi(captured.err)
+    assert "+builtins.fetchurl" in strip_ansi(captured.err)
+    assert nix_file.read_text() == source
+
+
+async def test_build_update_fod_rewrites_and_rebuilds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    nix_file = tmp_path / "source.nix"
+    nix_file.write_text(
+        """with import <nixpkgs> {};
+runCommand "payload" {
+  outputHash = "";
+  outputHashAlgo = "sha256";
+  outputHashMode = "flat";
+} "printf '%s\\n' fixed-output-payload > $out"
+"""
+    )
+    cmd = Pynix.parse(["build", "--file", str(nix_file), "--update-fod"])
+
+    await cmd.astart()
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["updatedFods"] == 1
+    assert data["outputs"]["out"]
+    assert 'outputHash = "sha256-' in nix_file.read_text()

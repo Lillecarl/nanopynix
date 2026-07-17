@@ -196,6 +196,10 @@ class AsyncEvalSession(Protocol):
         """Evaluate the Nix expression ``expr``."""
         ...
 
+    async def reset_file_cache(self) -> None:
+        """Discard parsed file cache entries before re-evaluating source files."""
+        ...
+
     async def lock_flake(
         self,
         ref: str,

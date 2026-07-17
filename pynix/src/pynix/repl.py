@@ -16,6 +16,7 @@ from clypi import Command, arg
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples
+from prompt_toolkit.history import FileHistory
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import print_formatted_text
@@ -163,6 +164,14 @@ def _render_help() -> str:
 
 
 _HELP = _render_help()
+
+
+def _repl_history() -> FileHistory:
+    """Create persistent REPL history in the XDG state directory."""
+    state_home = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+    path = state_home / "pynix" / "repl_history"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return FileHistory(str(path))
 
 
 def _nix_input(text: str) -> tuple[str, int] | None:
@@ -591,6 +600,7 @@ class Repl(Command):
                     prompt: PromptSession[str] = PromptSession(
                         completer=_ReplCompleter(repl),
                         complete_while_typing=True,
+                        history=_repl_history(),
                         lexer=_NixLexer(),
                         style=_REPL_STYLE,
                     )

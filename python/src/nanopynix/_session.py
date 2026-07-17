@@ -1214,6 +1214,10 @@ class EvalSession:
         ref_str = ref if isinstance(ref, str) else str(ref)
         return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str, store_handle=self._store_handle))
 
+    async def reset_file_cache(self, *, timeout: float | None = None) -> None:
+        """Discard parsed file cache entries before re-evaluating source files."""
+        await self._ensure_proxy().reset_file_cache(ResetFileCacheRequest())
+
 
 class ReplSession(EvalSession):
     """An :class:`EvalSession` with a persistent Nix lexical scope.
@@ -1278,7 +1282,3 @@ class ReplSession(EvalSession):
         """Return the identifiers visible in this REPL's lexical scope."""
         response = await self._ensure_proxy().repl_scope_names(ReplScopeNamesRequest())
         return response.names
-
-    async def reset_file_cache(self, *, timeout: float | None = None) -> None:
-        """Discard parsed file cache entries before reloading REPL sources."""
-        await self._ensure_proxy().reset_file_cache(ResetFileCacheRequest())

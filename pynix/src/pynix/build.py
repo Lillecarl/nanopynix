@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import json
 import sys
 from pathlib import Path  # noqa: TC003 -- clypi evaluates annotations at runtime, Path must be importable
@@ -13,7 +14,15 @@ if TYPE_CHECKING:
     from nanopynix._session import ValueProxy
 
 import nanopynix
+from nanopynix.exceptions import StoreError
 from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix.fod import (
+    FodSourceUpdateError,
+    extract_fod_hash_mismatch,
+    extract_unique_fod_hash_mismatch,
+    find_fod_hash_literal,
+    replace_fod_hash,
+)
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -47,6 +56,8 @@ class Build(Command):
         help="Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7.",
     )
     print_build_logs: bool = arg(False, help="Print build log lines to stderr.")
+    update_fod: bool = arg(False, help="Update plain fixed-output hash literals after a hash mismatch.")
+    dry_run: bool = arg(False, help="Show --update-fod changes without writing or rebuilding.")
 
     @override
     async def run(self) -> None:
@@ -58,6 +69,12 @@ class Build(Command):
         except EvaluationTargetError as exc:
             error_console.print(f"[red]Error:[/red] {exc}")
             raise SystemExit(1) from exc
+        if self.update_fod and target.file is None:
+            error_console.print("[red]Error:[/red] --update-fod currently requires --file")
+            raise SystemExit(1)
+        if self.dry_run and not self.update_fod:
+            error_console.print("[red]Error:[/red] --dry-run requires --update-fod")
+            raise SystemExit(1)
 
         settings = nanopynix.NixSettingsEnv(
             substituters=self.substituters.split(),
@@ -72,9 +89,9 @@ class Build(Command):
                     async with nix.store(self.store) as store:
                         async with nix.eval(store) as session:
                             logger.info("pynix build evaluating target")
-                            root = await _evaluate_build_target(target, session)
-                            logger.info("pynix build target evaluated")
-                            outputs = await root.build()
+                            outputs, updates = await _build_target(
+                                target, session, nix=nix, update_fod=self.update_fod, dry_run=self.dry_run
+                            )
                         logger.info("pynix build finished")
                 else:
                     async with (
@@ -83,15 +100,20 @@ class Build(Command):
                     ):
                         async with nix.eval(eval_store) as session:
                             logger.info("pynix build evaluating target")
-                            root = await _evaluate_build_target(target, session)
-                            logger.info("pynix build target evaluated")
-                            outputs = await root.build(store=build_store)
+                            outputs, updates = await _build_target(
+                                target,
+                                session,
+                                nix=nix,
+                                build_store=build_store,
+                                update_fod=self.update_fod,
+                                dry_run=self.dry_run,
+                            )
                         logger.info("pynix build finished")
             except BuildTargetError as exc:
                 error_console.print(f"[red]Error:[/red] {exc}")
                 raise SystemExit(1) from exc
 
-        _print_json({"outputs": outputs})
+        _print_json({"outputs": outputs, "updatedFods": updates, "dryRun": self.dry_run})
 
 
 async def _evaluate_build_target(target: EvaluationTarget, session: Any) -> ValueProxy:
@@ -103,6 +125,68 @@ async def _evaluate_build_target(target: EvaluationTarget, session: Any) -> Valu
 
 class BuildTargetError(EvaluationTargetError):
     pass
+
+
+async def _build_target(
+    target: EvaluationTarget,
+    session: Any,
+    *,
+    nix: Any,
+    build_store: Any = None,
+    update_fod: bool,
+    dry_run: bool,
+) -> tuple[dict[str, str], int]:
+    """Build a target, applying only unambiguous plain-string FOD updates."""
+    updates = 0
+    while True:
+        root: ValueProxy | None = None
+        async with nix.capture_logs() as logs:
+            try:
+                root = await _evaluate_build_target(target, session)
+                logger.info("pynix build target evaluated")
+                outputs = await (root.build() if build_store is None else root.build(store=build_store))
+            except StoreError as exc:
+                if root is not None:
+                    await root.release()
+                mismatch = extract_fod_hash_mismatch(exc.msg)
+                # The daemon's build response only contains a generic failure.
+                # The exact mismatch is emitted first as a Nix log event.
+                if mismatch is None:
+                    mismatch = extract_unique_fod_hash_mismatch(
+                        event.message_without_ansi for event in logs.events if event.message_without_ansi is not None
+                    )
+                if not update_fod or mismatch is None:
+                    raise
+                if target.file is None:
+                    raise BuildTargetError("--update-fod currently requires --file") from exc
+                if updates >= 10:
+                    raise BuildTargetError("stopped after 10 fixed-output hash updates") from exc
+                try:
+                    source = target.file.read_text()
+                    literal = find_fod_hash_literal(source, mismatch.specified)
+                    updated = replace_fod_hash(source, literal, mismatch.got)
+                except (OSError, FodSourceUpdateError) as source_exc:
+                    raise BuildTargetError(f"cannot update fixed-output hash: {source_exc}") from source_exc
+                error_console.print(
+                    "".join(
+                        difflib.unified_diff(
+                            source.splitlines(keepends=True),
+                            updated.splitlines(keepends=True),
+                            fromfile=str(target.file),
+                            tofile=str(target.file),
+                        )
+                    ),
+                    markup=False,
+                    highlight=False,
+                    end="",
+                )
+                updates += 1
+                if dry_run:
+                    return {}, updates
+                target.file.write_text(updated)
+                await session.reset_file_cache()
+                continue
+        return outputs, updates
 
 
 def _print_json(obj: object) -> None:
