@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import gc
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from _git import init_flake_repo
@@ -35,6 +33,10 @@ from nanopynix._worker import WorkerServiceHandler, WorkerState, worker_service_
 from nanopynix.models import NixType
 from nanopynix.store import StoreHandle
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
+
 pytestmark = pytest.mark.l3_inproc
 
 
@@ -54,6 +56,12 @@ class _InprocManager:
     def __init__(self, worker: _InprocWorkerClient) -> None:
         self._worker = worker
         self._worker_stub = worker._store_stub
+        self.reserve_count = 0
+
+    async def reserve(self, *, timeout: float | None = None) -> _InprocWorkerClient:  # noqa: ASYNC109 -- threading timeout through to grpclib, not asyncio.timeout
+        del timeout
+        self.reserve_count += 1
+        return self._worker
 
     async def call(self, coro: Any) -> Any:
         return await self._worker.call(coro)
