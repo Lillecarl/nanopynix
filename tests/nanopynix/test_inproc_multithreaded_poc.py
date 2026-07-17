@@ -6,19 +6,42 @@ import asyncio
 import threading
 import time
 import uuid
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import pytest
 
 import nanopynix_util
 from nanopynix import inproc
-from nanopynix.settings import NixSettings
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 
-_TEST_SETTINGS = NixSettings(max_jobs=25)
+def _raw_session(*, store_workers: int = 4) -> inproc.Session:
+    """Build a Session with the suite-wide default settings.
+
+    nanopynix.inproc.Session settings are process-global and cannot be
+    reinitialized differently within one interpreter (see
+    ``_InprocProcessGuard`` in ``nanopynix.inproc``), so this must match the
+    plain ``inproc.Session(load_config=False)`` signature every other inproc
+    test file establishes first.
+    """
+    return inproc.Session(load_config=False, store_workers=store_workers)
 
 
-def _session(*, store_workers: int = 4) -> inproc.Session:
-    return inproc.Session(load_config=False, settings=_TEST_SETTINGS, store_workers=store_workers)
+@asynccontextmanager
+async def _session(*, store_workers: int = 4) -> AsyncGenerator[inproc.Session]:
+    """Open a Session and raise its live max-jobs for deterministic build timing.
+
+    max-jobs is a dynamically mutable Nix setting (``nix::globalConfig.set``),
+    unlike the constructor-time settings the process guard locks in, so it is
+    safe to bump per-session after open() instead of passing it to the
+    constructor.
+    """
+    async with _raw_session(store_workers=store_workers) as nix:
+        await nix.run(nanopynix_util.set_setting, "max-jobs", "25")
+        yield nix
 
 
 def _wait_for_peer(barrier: threading.Barrier) -> int:
@@ -207,7 +230,7 @@ async def test_inproc_logs_keep_operation_ids_isolated_between_store_threads() -
 
 @pytest.mark.anyio
 async def test_inproc_close_wait_false_preserves_running_store_work() -> None:
-    session = _session(store_workers=1)
+    session = _raw_session(store_workers=1)
     await session.open()
     started = threading.Event()
     release = threading.Event()
@@ -269,21 +292,20 @@ async def test_inproc_independent_builds_overlap_without_cpu_pressure() -> None:
 @pytest.mark.anyio
 async def test_inproc_one_evaluator_extracts_and_builds_fifty_derivations() -> None:
     """One EvalState hands 50 DerivedPath strings to one max-jobs-limited build request."""
-    async with _session(store_workers=1) as nix, nix.store() as store:
-        async with nix.eval(store) as evaluator:
-            values = await _sleep_derivations(evaluator, count=50, seconds=2)
-            try:
-                paths = await _derived_paths(values)
-                started = time.monotonic()
-                results = await store.build_paths_with_results(paths)
-                elapsed = time.monotonic() - started
-                assert len(results) == 50
-                assert all(result.success for result in results)
-                # max-jobs=25 permits two waves of 25 sleeping builders. Give
-                # local-store startup and loaded CI hosts ample scheduling room.
-                assert elapsed < 8, f"50 two-second builds exceeded two-wave budget: {elapsed:.3f}s"
-            finally:
-                await _release_all(values)
+    async with _session(store_workers=1) as nix, nix.store() as store, nix.eval(store) as evaluator:
+        values = await _sleep_derivations(evaluator, count=50, seconds=2)
+        try:
+            paths = await _derived_paths(values)
+            started = time.monotonic()
+            results = await store.build_paths_with_results(paths)
+            elapsed = time.monotonic() - started
+            assert len(results) == 50
+            assert all(result.success for result in results)
+            # max-jobs=25 permits two waves of 25 sleeping builders. Give
+            # local-store startup and loaded CI hosts ample scheduling room.
+            assert elapsed < 8, f"50 two-second builds exceeded two-wave budget: {elapsed:.3f}s"
+        finally:
+            await _release_all(values)
 
 
 @pytest.mark.anyio
@@ -355,7 +377,7 @@ async def test_inproc_mixed_evaluation_build_and_store_workloads() -> None:
 
 @pytest.mark.anyio
 async def test_inproc_session_close_drains_open_evaluators() -> None:
-    session = _session(store_workers=2)
+    session = _raw_session(store_workers=2)
     await session.open()
     store = session.store()
     await store.open()
