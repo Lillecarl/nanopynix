@@ -9,13 +9,14 @@ from nanopynix_proto.nix.store import GcAction as GcAction
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from nanopynix import inproc as inproc
-from nanopynix._pool import WorkerBusyError, WorkerDiedError
+from nanopynix._pool import WorkerDiedError
 from nanopynix._process_title import set_manager_title as set_manager_title
 from nanopynix._session import EvalSession, LockedFlakeHandle, ReplSession, ValueAttrs, ValueList, ValueProxy
 from nanopynix.exceptions import (
     EvalError,
     EvalProxyError,
     EvalSessionClosedError,
+    EvalStateBusyError,
     ForeignValueError,
     InfiniteRecursionError,
     MissingArgumentError,
@@ -110,6 +111,7 @@ __all__ = [
     "AsyncVerbosityController",
     "BuildMode",
     "EvalSession",
+    "EvalStateBusyError",
     "GcAction",
     "GcResult",
     "LockedFlakeHandle",
@@ -150,7 +152,6 @@ __all__ = [
     "ValueList",
     "ValueProxy",
     "ValueReleasedError",
-    "WorkerBusyError",
     "WorkerDiedError",
     "WrongNixTypeError",
     "build_info",

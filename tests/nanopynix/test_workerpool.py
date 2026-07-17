@@ -7,7 +7,7 @@ import contextlib
 
 import pytest
 
-from nanopynix import LogEvent, Nix, StoreError, WorkerBusyError, WorkerDiedError
+from nanopynix import EvalStateBusyError, LogEvent, Nix, StoreError, WorkerDiedError
 
 
 async def test_single_worker_basics():
@@ -27,11 +27,24 @@ async def test_two_workers_sequential():
             assert isinstance(uri, str)
 
 
-async def test_worker_busy_while_eval_session_holds_worker():
-    """The single worker does not silently queue behind an eval session."""
+async def test_store_operation_runs_while_eval_session_is_open():
+    """An EvalState owns evaluator state, not the worker's Store API."""
     async with Nix() as nix, nix.store() as store, nix.eval(store):
-        with pytest.raises(WorkerBusyError):
-            await store.uri()
+        assert isinstance(await store.uri(), str)
+
+
+async def test_session_allows_only_one_live_eval_state():
+    async with Nix() as nix, nix.store() as store:
+        first = nix.eval(store)
+        second = nix.repl(store)
+        await first.open()
+
+        with pytest.raises(EvalStateBusyError, match="live EvalState"):
+            await second.open()
+
+        await first.close()
+        await second.open()
+        await second.close()
 
 
 async def test_concurrent_log_stream():

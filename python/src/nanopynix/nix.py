@@ -1,6 +1,6 @@
 """Session manager — lifecycle, configuration, and entry point for all facades.
 
-Manages a single subprocess worker via ``_WorkerManager``.  The worker is an
+Manages a single subprocess worker via ``_WorkerClient``.  The worker is an
 independent Nix process (forkserver-based gRPC) with its own Store connection,
 logger, and configuration.
 
@@ -25,9 +25,10 @@ from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from nanopynix_proto.nix.common import LogLevel
 
 import nanopynix_expr
-from nanopynix._pool import _WorkerManager  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
+from nanopynix._pool import _WorkerClient  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
 from nanopynix._process_title import set_manager_title
 from nanopynix._session import EvalSession, ReplSession
+from nanopynix.exceptions import EvalStateBusyError
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.settings import NanopynixSettings, NixSettings, normalize_nix_settings
 from nanopynix.store import Store, StoreHandle
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from os import PathLike
 
     from nanopynix._pool import (
-        _Subscription,  # type: ignore[reportPrivateUsage] -- type of _WorkerManager.subscribe result
+        _Subscription,  # type: ignore[reportPrivateUsage] -- type of _WorkerClient.subscribe result
     )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ def _raw_log_event(raw: LogEventProto) -> LogEvent:
 class LogCapture:
     """Async context manager that records log events while active."""
 
-    def __init__(self, manager: _WorkerManager) -> None:
+    def __init__(self, manager: _WorkerClient) -> None:
         self._manager = manager
         self._sub: _Subscription | None = None
         self.events: list[LogEvent] = []
@@ -121,7 +122,6 @@ class Session:
         restrict_eval: bool | None = None,
         allowed_uris: Sequence[str] | None = None,
         worker_oom_score_adj: int | None = None,
-        reserved_worker_oom_score_adj: int | None = None,
         runtime_settings: NanopynixSettings | None = None,
     ) -> None:
         set_manager_title()
@@ -134,7 +134,7 @@ class Session:
         nanopynix_settings = runtime_settings or NanopynixSettings()
         self.runtime_settings = nanopynix_settings
         worker_settings = nix_settings.to_worker_settings()
-        self._manager = _WorkerManager(
+        self._manager = _WorkerClient(
             store_uri=store_uri,
             nix_conf=nix_conf,
             load_config=load_config,
@@ -148,11 +148,11 @@ class Session:
             restrict_eval=restrict_eval,
             allowed_uris=allowed_uris,
             worker_oom_score_adj=worker_oom_score_adj,
-            reserved_worker_oom_score_adj=reserved_worker_oom_score_adj,
             rpc_timeout=nanopynix_settings.rpc_timeout,
             shutdown_timeout=nanopynix_settings.shutdown_timeout,
         )
         self._session_id = uuid.uuid4().hex
+        self._active_eval: EvalSession | None = None
 
     def store(self, uri: str = "auto") -> Store:
         """Create an ergonomic Store facade for store operations.
@@ -186,6 +186,9 @@ class Session:
         """Shut down the worker."""
         try:
             async with asyncio.timeout(60):
+                active_eval = self._active_eval
+                if active_eval is not None:
+                    await active_eval.close()
                 await self._manager.close()
         except TimeoutError:
             logger.warning("nanopynix: timed out closing worker")
@@ -237,7 +240,7 @@ class Session:
         return self._manager.subscribe(callback)
 
     def eval(self, store: Store) -> EvalSession:
-        """Acquire the worker exclusively for an eval session.
+        """Create this session's one permitted eval-session context manager.
 
         Usage::
 
@@ -249,13 +252,15 @@ class Session:
             store: Open Store to use for this eval state. If it belongs to
                    a different session, raises ValueError.
 
-        Returns an ``EvalSession`` context manager that holds the worker
-        for the duration.  All exported handles are released on exit.
+        Returns an ``EvalSession`` context manager. All exported handles are
+        released on exit. Only one EvalSession or ReplSession may be open at a
+        time; Store operations remain available while it is open.
         """
         if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
             raise ValueError("Store belongs to a different session")
         return EvalSession(
             self._manager,
+            self,
             store.store_handle,
             session_id=self._session_id,
             rpc_timeout=self._manager.rpc_timeout,
@@ -263,7 +268,7 @@ class Session:
         )
 
     def repl(self, store: Store) -> ReplSession:
-        """Acquire the worker for a persistent Nix REPL session.
+        """Create this session's one permitted persistent Nix REPL.
 
         Bindings entered through :meth:`ReplSession.line` remain available
         until the returned context manager exits.
@@ -272,11 +277,23 @@ class Session:
             raise ValueError("Store belongs to a different session")
         return ReplSession(
             self._manager,
+            self,
             store.store_handle,
             session_id=self._session_id,
             rpc_timeout=self._manager.rpc_timeout,
             line_editors=self.runtime_settings.line_editors,
+            store=store,
         )
+
+    def claim_eval(self, eval_session: EvalSession) -> None:
+        active_eval = self._active_eval
+        if active_eval is not None and active_eval is not eval_session:
+            raise EvalStateBusyError("Session already has a live EvalState")
+        self._active_eval = eval_session
+
+    def release_eval(self, eval_session: EvalSession) -> None:
+        if self._active_eval is eval_session:
+            self._active_eval = None
 
 
 # Backward-compatible alias
