@@ -5,6 +5,8 @@ package nix.eval;
 import "common.proto";
 
 service EvalService {
+  rpc OpenEval(OpenEvalRequest) returns (OpenEvalResponse);
+  rpc CloseEval(CloseEvalRequest) returns (CloseEvalResponse);
   rpc EvalFile(EvalFileRequest) returns (nix.common.ValueHandle);
   rpc EvalString(EvalStringRequest) returns (nix.common.ValueHandle);
   rpc BeginRepl(BeginReplRequest) returns (BeginReplResponse);
@@ -38,31 +40,33 @@ service EvalService {
   rpc ReleaseAll(ReleaseAllRequest) returns (ReleaseAllResponse);
 }
 
+message OpenEvalRequest {
+  int64 store_handle = 1;
+}
+message OpenEvalResponse {}
+
+message CloseEvalRequest {}
+message CloseEvalResponse {}
+
 message EvalFileRequest {
   string path = 1;
-  int64 store_handle = 2;
 }
 
 message EvalStringRequest {
   string expr = 1;
   string source_name = 2;
-  int64 store_handle = 3;
 }
 
-message BeginReplRequest {
-  int64 store_handle = 1;
-}
+message BeginReplRequest {}
 message BeginReplResponse {}
 
 message ReplLoadFileRequest {
   string path = 1;
-  int64 store_handle = 2;
 }
 
 message ReplProcessLineRequest {
   string line = 1;
   string source_name = 2;
-  int64 store_handle = 3;
 }
 message ReplProcessLineResponse {
   bool is_binding = 1;
@@ -188,7 +192,6 @@ message LockFlakeRequest {
     UpdateInputsList update_inputs_list = 3;
   }
   bool write_lock_file = 4;
-  int64 store_handle = 5;
 }
 
 message UpdateInputsList {
@@ -212,12 +215,10 @@ message ReleaseLockedFlakeResponse {}
 message EvalFlakeRequest {
   string ref = 1;
   bool write_lock_file = 2;
-  int64 store_handle = 3;
 }
 
 message GetFlakeRequest {
   string ref = 1;
-  int64 store_handle = 2;
 }
 
 message ReleaseRequest {

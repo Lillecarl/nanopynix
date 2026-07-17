@@ -47,6 +47,7 @@ message OpenStoreResponse {
 
 message CloseStoreRequest {
   int64 store_handle = 1;
+  bool force = 2;
 }
 message CloseStoreResponse {}
 

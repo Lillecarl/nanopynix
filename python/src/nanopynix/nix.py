@@ -259,6 +259,7 @@ class Session:
             store.store_handle,
             session_id=self._session_id,
             rpc_timeout=self._manager.rpc_timeout,
+            store=store,
         )
 
     def repl(self, store: Store) -> ReplSession:

@@ -30,6 +30,7 @@ from nanopynix_proto.nix.eval import (
     BuildRequest,
     CallLockedFlakeRequest,
     CallRequest,
+    CloseEvalRequest,
     EditLocationRequest,
     EvalFileRequest,
     EvalFlakeRequest,
@@ -43,9 +44,9 @@ from nanopynix_proto.nix.eval import (
     ListGetRequest,
     ListLengthRequest,
     LockFlakeRequest,
+    OpenEvalRequest,
     RealiseArgvRequest,
     RealiseStringRequest,
-    ReleaseAllRequest,
     ReleaseLockedFlakeRequest,
     ReleaseRequest,
     ReplAddAttrsRequest,
@@ -251,7 +252,7 @@ def _finalize_lease(lease: _Lease, releases: _DeferredReleases) -> None:
 
 
 class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase):
-    """Auto-generated proxy for all 20 ``EvalService`` gRPC methods.
+    """Auto-generated proxy for all ``EvalService`` gRPC methods.
 
     Created by ``EvalSession.open()`` when the worker is reserved.
     Method forwarders dispatch through ``ReservedWorker.call()``,
@@ -976,6 +977,7 @@ class EvalSession:
         "_rpc_timeout",
         "_rw",
         "_session_id",
+        "_store",
         "_store_handle",
         "_timeout",
     )
@@ -988,8 +990,10 @@ class EvalSession:
         session_id: str = "",
         rpc_timeout: float = _RPC_TIMEOUT,
         line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
+        store: Store | None = None,
     ) -> None:
         self._manager = manager
+        self._store = store
         self._store_handle = store_handle
         self._session_id = session_id
         self._rw: ReservedWorker | None = None
@@ -1013,18 +1017,24 @@ class EvalSession:
         """Reserve the worker exclusively. Called automatically by ``async with``."""
         if self._rw is not None:
             return
-        self._rw = await self._manager.reserve(timeout=self._timeout)
+        rw = await self._manager.reserve(timeout=self._timeout)
+        releases = _DeferredReleases()
+        proxy = EvalProxy(rw, releases, self._rpc_timeout)
+        try:
+            await proxy.open_eval(OpenEvalRequest(store_handle=self._store_handle))
+        except BaseException:
+            proxy.deactivate()
+            releases.close()
+            await rw.release()
+            raise
+        self._rw = rw
         self._active = [True]
         self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
-        self._releases = _DeferredReleases()
-        self._proxy = EvalProxy(self._rw, self._releases, self._rpc_timeout)
-        self._ctx = _EvalProxyContext(
-            self._proxy,
-            self._owner,
-            self._timeout,
-            self._store_handle,
-            self._session_id,
-        )
+        self._releases = releases
+        self._proxy = proxy
+        self._ctx = _EvalProxyContext(proxy, self._owner, self._timeout, self._store_handle, self._session_id)
+        if self._store is not None:
+            self._store.rpc._register_dependent_eval(self)  # type: ignore[reportPrivateUsage] -- Store owns the public force-close lifecycle hook
 
     async def get_verbosity(self) -> LogLevel:
         """Return the current Nix log verbosity while this eval session is open."""
@@ -1049,8 +1059,10 @@ class EvalSession:
             return
         try:
             if proxy is not None:
-                await proxy.drain_deferred_releases()
-                await proxy.release_all(ReleaseAllRequest())
+                try:
+                    await proxy.drain_deferred_releases()
+                finally:
+                    await proxy.close_eval(CloseEvalRequest())
         finally:
             if proxy is not None:
                 proxy.deactivate()
@@ -1062,6 +1074,8 @@ class EvalSession:
             self._releases = None
             if releases is not None:
                 releases.close()
+            if self._store is not None:
+                self._store.rpc._unregister_dependent_eval(self)  # type: ignore[reportPrivateUsage] -- Store owns the public force-close lifecycle hook
 
     def _ensure_proxy(self) -> EvalProxy:
         p = self._proxy
@@ -1083,7 +1097,7 @@ class EvalSession:
 
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
         """Evaluate the Nix expression in the file at ``path``."""
-        handle = await self._ensure_proxy().eval_file(EvalFileRequest(path=path, store_handle=self._store_handle))
+        handle = await self._ensure_proxy().eval_file(EvalFileRequest(path=path))
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def string(self, expr: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy:
@@ -1094,7 +1108,7 @@ class EvalSession:
             path: Source name attributed to ``expr`` in error messages.
         """
         handle = await self._ensure_proxy().eval_string(
-            EvalStringRequest(expr=expr, source_name=path, store_handle=self._store_handle)
+            EvalStringRequest(expr=expr, source_name=path)
         )
         return self._proxy_context().value(handle.handle, handle.type)
 
@@ -1124,7 +1138,6 @@ class EvalSession:
                     ref=ref,
                     update_all=True,
                     write_lock_file=write_lock_file,
-                    store_handle=self._store_handle,
                 )
             )
         elif isinstance(update_inputs, list):
@@ -1133,7 +1146,6 @@ class EvalSession:
                     ref=ref,
                     update_inputs_list=UpdateInputsList(inputs=update_inputs),
                     write_lock_file=write_lock_file,
-                    store_handle=self._store_handle,
                 )
             )
         else:
@@ -1141,7 +1153,6 @@ class EvalSession:
                 LockFlakeRequest(
                     ref=ref,
                     write_lock_file=write_lock_file,
-                    store_handle=self._store_handle,
                 )
             )
         return self._locked_flake_handle(locked)
@@ -1204,7 +1215,6 @@ class EvalSession:
             EvalFlakeRequest(
                 ref=ref,
                 write_lock_file=write_lock_file,
-                store_handle=self._store_handle,
             )
         )
         return self._proxy_context().value(handle.handle, handle.type)
@@ -1212,7 +1222,7 @@ class EvalSession:
     async def get_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> FlakeRef:
         """Parse and resolve a flake reference without evaluating its outputs."""
         ref_str = ref if isinstance(ref, str) else str(ref)
-        return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str, store_handle=self._store_handle))
+        return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str))
 
     async def reset_file_cache(self, *, timeout: float | None = None) -> None:
         """Discard parsed file cache entries before re-evaluating source files."""
@@ -1238,7 +1248,7 @@ class ReplSession(EvalSession):
     async def open(self) -> None:
         await super().open()
         try:
-            await self._ensure_proxy().begin_repl(BeginReplRequest(store_handle=self._store_handle))
+            await self._ensure_proxy().begin_repl(BeginReplRequest())
         except BaseException:
             await self.close()
             raise
@@ -1250,7 +1260,7 @@ class ReplSession(EvalSession):
         session-bound :class:`ValueProxy`.
         """
         response = await self._ensure_proxy().repl_process_line(
-            ReplProcessLineRequest(line=text, source_name=path, store_handle=self._store_handle)
+            ReplProcessLineRequest(line=text, source_name=path)
         )
         if response.is_binding:
             return None
@@ -1266,7 +1276,7 @@ class ReplSession(EvalSession):
         returning the resulting attribute set for :meth:`add_attrs`.
         """
         handle = await self._ensure_proxy().repl_load_file(
-            ReplLoadFileRequest(path=path, store_handle=self._store_handle)
+            ReplLoadFileRequest(path=path)
         )
         return self._proxy_context().value(handle.handle, handle.type)
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_proto.nix.common import PathInfo
@@ -64,7 +63,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
     :attr:`Store.rpc` for operations which do not yet have an ergonomic method.
     """
 
-    __slots__ = ("_active", "_pool", "_rpc_timeout", "_session_id", "_store_handle", "_uri")
+    __slots__ = ("_active", "_dependent_eval", "_pool", "_rpc_timeout", "_session_id", "_store_handle", "_uri")
 
     def __init__(
         self,
@@ -79,6 +78,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         self._session_id = session_id
         self._store_handle: int = 0
         self._active = False
+        self._dependent_eval: Any = None
 
     async def open(self) -> None:
         """Open a store on the worker and activate the handle."""
@@ -90,17 +90,30 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         self._store_handle = resp.store_handle
         self._active = True
 
-    async def close(self) -> None:
-        """Close the store on the worker and deactivate the handle."""
-        with contextlib.suppress(Exception):
-            await self._pool.call(
-                self._pool._worker_stub.close_store(  # type: ignore[reportPrivateUsage] -- cross-class access
-                    CloseStoreRequest(store_handle=self._store_handle),
-                    timeout=self._rpc_timeout,
-                )
+    async def close(self, *, force: bool = False) -> None:
+        """Close the store, optionally closing its dependent evaluator first."""
+        if not self._active:
+            return
+        dependent_eval = self._dependent_eval
+        if force and dependent_eval is not None:
+            await dependent_eval.close()
+        await self._pool.call(
+            self._pool._worker_stub.close_store(  # type: ignore[reportPrivateUsage] -- cross-class access
+                CloseStoreRequest(store_handle=self._store_handle, force=force),
+                timeout=self._rpc_timeout,
             )
+        )
         self._active = False
         self._store_handle = 0
+
+    def _register_dependent_eval(self, eval_session: Any) -> None:
+        if self._dependent_eval is not None and self._dependent_eval is not eval_session:
+            raise RuntimeError("store already has a live EvalSession")
+        self._dependent_eval = eval_session
+
+    def _unregister_dependent_eval(self, eval_session: Any) -> None:
+        if self._dependent_eval is eval_session:
+            self._dependent_eval = None
 
     async def __aenter__(self) -> StoreHandle:
         await self.open()
@@ -168,9 +181,9 @@ class Store:
         """Open the underlying store."""
         await self._rpc.open()
 
-    async def close(self) -> None:
-        """Close the underlying store."""
-        await self._rpc.close()
+    async def close(self, *, force: bool = False) -> None:
+        """Close the underlying store, optionally closing its evaluator first."""
+        await self._rpc.close(force=force)
 
     async def __aenter__(self) -> Store:
         await self.open()

@@ -58,7 +58,7 @@ from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix._handle_registry import HandleRegistry
 from nanopynix._local import LocalRuntime
 from nanopynix._process_title import set_process_title, set_worker_title
-from nanopynix._worker_eval import EvalServiceHandler
+from nanopynix._worker_eval import EvalServiceHandler, close_eval_state
 from nanopynix._worker_nix import NixThreadExecutor
 from nanopynix._worker_primop import ThreadedRpcPrimopBridge
 from nanopynix._worker_primop import (
@@ -244,10 +244,14 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
         assert self._state.executor is not None  # set by worker_service_factory before init
-        await self._state.executor.run(self._close_store, message.store_handle)
+        await self._state.executor.run(self._close_store, message.store_handle, message.force)
         return CloseStoreResponse()
 
-    def _close_store(self, store_handle: int) -> None:
+    def _close_store(self, store_handle: int, force: bool = False) -> None:
+        if self._state.eval_store_handle == store_handle:
+            if not force:
+                raise RuntimeError("cannot close a store while its EvalState is open; call CloseEval first")
+            close_eval_state(self._state)
         self._state.handles.release(store_handle)
         if self._state.named_store_uris.pop(store_handle, None) is not None:
             self._update_store_title()

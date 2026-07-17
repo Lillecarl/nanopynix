@@ -15,6 +15,7 @@ from _git import init_flake_repo
 from anyio import Path as AnyioPath
 
 from nanopynix import (
+    EvalSessionClosedError,
     NixCoercionError,
     NixType,
     Session,
@@ -26,6 +27,20 @@ from nanopynix import (
 )
 
 requires_dynamic_primops = pytest.mark.required_nix_version("2.32", None)
+
+
+async def test_force_closing_store_closes_dependent_eval_state() -> None:
+    async with Session() as nix:
+        store = nix.store()
+        await store.open()
+        eval_ = nix.eval(store)
+        await eval_.open()
+        value = await eval_.string("1")
+
+        await store.close(force=True)
+
+        with pytest.raises(EvalSessionClosedError, match="EvalSession has been closed"):
+            await value.force()
 
 
 async def test_eval_file_simple(tmp_path: Path):
