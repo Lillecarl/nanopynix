@@ -25,7 +25,7 @@ from nanopynix._extract import locked_flake as _locked_flake_proto
 from nanopynix._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._nix_executor import NixThreadExecutor
 from nanopynix.logging import LogCollector
-from nanopynix.models import Derivation, GcResult, LockedInput, LogEvent, MissingInfo, PathInfo
+from nanopynix.models import BuildResult, Derivation, GcResult, LockedInput, LogEvent, MissingInfo, PathInfo
 from nanopynix.models import StorePath as PublicStorePath
 from nanopynix.settings import NixSettings, normalize_nix_settings
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
@@ -535,6 +535,32 @@ class Store:
         result = await self._session.run(self._require_raw().query_missing, raw_paths)
         return MissingInfo(**result)
 
+    async def build_paths_with_results(
+        self,
+        derived_paths: Sequence[str | PublicStorePath],
+        /,
+        *,
+        build_mode: Any = None,
+        eval_store: Store | None = None,
+    ) -> list[BuildResult]:
+        """Build derived paths and return one result per Nix build outcome.
+
+        A plain derivation path means all outputs. A ``^`` separator opts into
+        Nix's explicit canonical DerivedPath output-selection syntax.
+        """
+        if eval_store is not None and eval_store._session is not self._session:  # type: ignore[reportPrivateUsage] -- session ownership guard
+            raise ValueError("eval_store belongs to a different inproc Session")
+        mode = BuildMode.Normal.value if build_mode is None else int(build_mode)
+        response = await self._session.run(
+            self._require_raw().store_build_paths_with_results,
+            {
+                "derived_paths": [str(path) for path in derived_paths],
+                "build_mode": mode,
+            },
+            None if eval_store is None else eval_store._require_raw(),
+        )
+        return [BuildResult(**result) for result in response["results"]]
+
     async def read_derivation(
         self, drv_path: str | PublicStorePath, /
     ) -> Derivation:
@@ -596,7 +622,11 @@ class EvalSession:
         self._local: LocalEvalState | None = None
         self._active = False
         self._locked_flakes: set[LockedFlake] = set()
-        self._executor = NixThreadExecutor(thread_name_prefix="nix-eval")
+        self._executor = NixThreadExecutor(
+            thread_name_prefix="nix-eval",
+            thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
+            thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
+        )
 
     async def __aenter__(self) -> EvalSession:
         await self.open()
@@ -610,7 +640,11 @@ class EvalSession:
         if self._active:
             return
         if self._executor.closed:
-            self._executor = NixThreadExecutor(thread_name_prefix="nix-eval")
+            self._executor = NixThreadExecutor(
+                thread_name_prefix="nix-eval",
+                thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
+                thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
+            )
         self._local = await self.run(
             self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime
             self._store._require_local(),
@@ -942,14 +976,28 @@ class Value:
             build_mode: A :data:`BuildMode` value, or ``None`` for normal builds.
         """
         target_store = self._eval_session._store if store is None else store  # type: ignore[reportPrivateUsage] -- evaluator's bound store is default
-        if target_store._session is not self._eval_session._session:  # type: ignore[reportPrivateUsage] -- session ownership guard
-            raise ValueError("Store belongs to a different inproc Session")
-        mode = BuildMode.Normal.value if build_mode is None else int(build_mode)
-        result = await self._eval_session.run(self._local_for(self._eval_session).build, target_store._require_local(), mode, None)
-        results = result["results"]
-        if not results or not results[0]["success"]:
-            raise RuntimeError(result["results"][0].get("error_msg", "build failed") if results else "build returned no result")
-        return dict(result["outputs"])
+        derived_path = await self.get_derived_path()
+        results = await target_store.build_paths_with_results(
+            [derived_path],
+            build_mode=build_mode,
+            eval_store=None if target_store is self._eval_session._store else self._eval_session._store,  # type: ignore[reportPrivateUsage] -- cross-store build source
+        )
+        if not results or not results[0].success:
+            raise RuntimeError(results[0].error_msg if results else "build returned no result")
+        derivation = await target_store.read_derivation(derived_path)
+        return {
+            name: output.path
+            for name, output in derivation.outputs.items()
+            if output.path is not None
+        }
+
+    async def get_derived_path(self) -> str:
+        """Extract this derivation's canonical DerivedPath string.
+
+        The result contains no evaluator pointer and can be built by any Store
+        in this session. Plain derivation paths select all outputs by default.
+        """
+        return await self._eval_session.run(self._local_for(self._eval_session).derived_path)
 
     async def release(self) -> None:
         """Alias for :meth:`close`, matching the RPC value lifecycle API."""

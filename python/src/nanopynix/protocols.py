@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 from nanopynix_proto.nix.store import GcAction
 
 if TYPE_CHECKING:
-    from nanopynix.models import Derivation, GcResult, MissingInfo, PathInfo, StorePath
+    from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, PathInfo, StorePath
     from nanopynix.verbosity import LogLevelInput
 
 ValueT = TypeVar("ValueT", bound="AsyncValue")
@@ -143,6 +143,17 @@ class AsyncStore(Protocol):
         /,
     ) -> MissingInfo:
         """Return which of ``derived_paths`` still need to be built or substituted."""
+        ...
+
+    async def build_paths_with_results(
+        self,
+        derived_paths: list[str | StorePath],
+        /,
+        *,
+        build_mode: int = 0,
+        eval_store: AsyncStore | None = None,
+    ) -> list[BuildResult]:
+        """Build derived paths, treating a plain derivation path as all outputs."""
         ...
 
     async def read_derivation(self, drv_path: str | StorePath, /) -> Derivation:

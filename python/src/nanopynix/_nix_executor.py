@@ -20,17 +20,35 @@ class NixThreadExecutor:
     callers may use several workers because Nix stores are thread-safe.
     """
 
-    def __init__(self, *, max_workers: int = 1, thread_name_prefix: str = "nix") -> None:
+    def __init__(
+        self,
+        *,
+        max_workers: int = 1,
+        thread_name_prefix: str = "nix",
+        thread_initializer: Callable[[], None] | None = None,
+        thread_finalizer: Callable[[], None] | None = None,
+    ) -> None:
         if max_workers < 1:
             raise ValueError("max_workers must be at least 1")
+        self._thread_initializer = thread_initializer
+        self._thread_finalizer = thread_finalizer
+        self._thread_started = threading.Event()
         self._pool = concurrent.futures.ThreadPoolExecutor(
             max_workers=max_workers,
             thread_name_prefix=thread_name_prefix,
+            initializer=self._initialize_thread if thread_initializer is not None else None,
         )
         self._lock = threading.Lock()
         self._futures: set[concurrent.futures.Future[Any]] = set()
         self._accepting = True
         self._closed = False
+
+    def _initialize_thread(self) -> None:
+        initializer = self._thread_initializer
+        if initializer is None:
+            return
+        initializer()
+        self._thread_started.set()
 
     async def run(self, func: Callable[..., _T], *args: Any) -> _T:
         return await self._submit(func, args, allow_when_closing=False)
@@ -91,6 +109,11 @@ class NixThreadExecutor:
 
     def shutdown(self, wait: bool = True) -> None:
         self.begin_close()
+        finalizer = self._thread_finalizer
+        if finalizer is not None and self._thread_started.is_set():
+            # Evaluator executors have one worker. Drain before shutdown, then
+            # execute the matching GC teardown on that same owning thread.
+            self._pool.submit(finalizer).result()
         self._pool.shutdown(wait=wait)
         self._closed = True
 

@@ -9,6 +9,7 @@ from nanopynix_proto.nix.store import (
     AddPermRootRequest,
     AddTempRootRequest,
     AddToStoreRequest,
+    BuildPathsWithResultsRequest,
     CollectGarbageRequest,
     ComputeFsClosureRequest,
     ComputeStorePathRequest,
@@ -42,7 +43,7 @@ from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
 from nanopynix._pool import WorkerDiedError
 from nanopynix._rpc_proxy import RpcProxyMixin
-from nanopynix.models import Derivation, GcResult, MissingInfo, StorePath
+from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
 
 if TYPE_CHECKING:
     from betterproto2 import Message
@@ -279,6 +280,30 @@ class Store:
         return await self.rpc.query_missing(
             QueryMissingRequest(derived_paths=[str(p) for p in derived_paths])
         )
+
+    async def build_paths_with_results(
+        self,
+        derived_paths: list[str | StorePath],
+        /,
+        *,
+        build_mode: int = 0,
+        eval_store: Store | None = None,
+    ) -> list[BuildResult]:
+        """Build derived paths and return Nix's result for each path.
+
+        A plain derivation path builds all outputs. Use Nix's ``^`` syntax to
+        select explicit outputs in a canonical DerivedPath string.
+        """
+        if eval_store is not None and eval_store._session_id != self._session_id:
+            raise ValueError("eval_store belongs to a different Session")
+        response = await self.rpc.build_paths_with_results(
+            BuildPathsWithResultsRequest(
+                derived_paths=[str(path) for path in derived_paths],
+                build_mode=build_mode,
+                eval_store_handle=0 if eval_store is None else eval_store.store_handle,
+            )
+        )
+        return list(response.results)
 
     async def read_derivation(self, drv_path: str | StorePath, /) -> Derivation:
         """Parse and return the ``.drv`` file at ``drv_path``."""

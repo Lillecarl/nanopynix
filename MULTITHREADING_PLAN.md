@@ -95,9 +95,20 @@ session.eval(store, *, build_store: Store | None = None)
 `build_store=None` means use `store`. A real cross-store build Store remains
 supported for remote IFD/build routing.
 
-Keep `Value.build()` as the public build API. Its evaluator-side preparation
-is internal; do not expose `PreparedBuild` or caller-managed batch scheduling
-initially.
+Expose `Value.get_derived_path()` as the evaluator-side boundary. It returns
+the canonical DerivedPath string, which is self-contained and can cross Python
+threads safely. Store owns every build entry point:
+
+```python
+paths = await asyncio.gather(*(value.get_derived_path() for value in values))
+await store.build_paths_with_results(paths)
+```
+
+A plain `.drv` string means all outputs; `^` opts into explicit canonical
+DerivedPath output selection. Callers may use `asyncio.gather()` for separate
+Store build requests, or pass a batch to one request for Nix `max-jobs`
+scheduling. Do not introduce a `PreparedBuild` or an evaluator-owned batch
+build API.
 
 Remove or internalize generic `Store.call(method, ...)`: it bypasses operation
 classification and can route builds through query scheduling. Compatibility is
@@ -205,7 +216,7 @@ query executor
   -> complete Store query closures on canonical Store
 
 build executor
-  -> PreparedBuild execution through BuildGateStore
+  -> DerivedPath-string execution through BuildGateStore
 ```
 
 Every Store public method becomes one native submission: parsing, Nix call,
@@ -217,10 +228,10 @@ aggregate build limit because IFD enters via evaluator lanes.
 
 ### Explicit build handoff
 
-1. On Value's evaluator lane, use `getDerivation`/outputs to create immutable
-   internal `PreparedBuild` data: derived path, output specification, build
-   mode, predicted outputs for presentation, and source Store identity.
-2. Submit Store build through build executor and BuildGateStore.
+1. On Value's evaluator lane, use `getDerivation` to produce the canonical
+   DerivedPath string.
+2. Submit that string through a Store build API and BuildGateStore. Store
+   normalizes a plain `.drv` to `DerivedPath::Built` with all outputs.
 3. Same canonical Store: build with no separate `evalStore`; true cross-store:
    pass source eval Store.
 
@@ -297,7 +308,7 @@ Only run the dedicated multithreading group during this implementation.
 2. Add Boehm bridge and dedicated evaluator lane; add evaluator stress tests.
 3. Add `PyEvalState.buildStore` support and C++ BuildGateStore.
 4. Rework Store methods into atomic query/build submissions; remove raw call.
-5. Split `Value.build()` through internal PreparedBuild.
+5. Add `Value.get_derived_path()` and Store-owned DerivedPath build APIs.
 6. Implement lifecycle/cancellation contract and concurrency diagnostics.
 7. Add real Store/build/IFD/logging tests and iterate until robust.
 8. Only then run repository-wide quality checks and update public docs/examples.
