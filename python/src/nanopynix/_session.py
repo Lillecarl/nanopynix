@@ -1084,19 +1084,19 @@ class EvalSession:
     def _ensure_proxy(self) -> EvalProxy:
         p = self._proxy
         if p is None:
-            raise EvalSessionClosedError("EvalSession not entered — use 'async with session.eval() as eval_:'")
+            raise EvalSessionClosedError("EvalSession not entered — use 'async with session.eval() as eval:'")
         return p
 
     def _proxy_context(self) -> _EvalProxyContext:
         ctx = self._ctx
         if ctx is None:
-            raise EvalSessionClosedError("EvalSession not entered — use 'async with session.eval() as eval_:'")
+            raise EvalSessionClosedError("EvalSession not entered — use 'async with session.eval() as eval:'")
         return ctx
 
     def _deferred_releases(self) -> _DeferredReleases:
         releases = self._releases
         if releases is None:
-            raise EvalSessionClosedError("EvalSession is not open — use 'async with session.eval() as eval_:'")
+            raise EvalSessionClosedError("EvalSession is not open — use 'async with session.eval() as eval:'")
         return releases
 
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:

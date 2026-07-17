@@ -245,8 +245,8 @@ class Session:
         Usage::
 
             async with session.store() as store:
-                async with session.eval(store) as eval_:
-                    root = await eval_.file("/path/to/flake.nix")
+                async with session.eval(store) as eval:
+                    root = await eval.file("/path/to/flake.nix")
 
         Args:
             store: Open Store to use for this eval state. If it belongs to

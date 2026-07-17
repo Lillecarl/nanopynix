@@ -33,9 +33,9 @@ async def test_force_closing_store_closes_dependent_eval_state() -> None:
     async with Session() as nix:
         store = nix.store()
         await store.open()
-        eval_ = nix.eval(store)
-        await eval_.open()
-        value = await eval_.string("1")
+        eval = nix.eval(store)
+        await eval.open()
+        value = await eval.string("1")
 
         await store.close(force=True)
 

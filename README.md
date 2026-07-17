@@ -16,8 +16,8 @@ async with nanopynix.Session(config={"max-jobs": "4"}) as session:
     async with session.store() as store:
         store_dir = (await store.get_store_dir(GetStoreDirRequest())).dir
 
-        async with session.eval(store) as eval_:
-            root = await eval_.string('{ name = "hello"; }')
+        async with session.eval(store) as eval:
+            root = await eval.string('{ name = "hello"; }')
             attrs = await root.force()
             name = await attrs["name"].force()
 ```

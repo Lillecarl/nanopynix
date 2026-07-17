@@ -22,8 +22,8 @@ from nanopynix import Derivation, EvalStateBusyError, GcResult, MissingInfo, inp
 
 @pytest.mark.anyio
 async def test_inproc_eval_value_navigation() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        root = await eval_.string('{ greeting = "hello"; numbers = [ 1 2 3 ]; }')
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        root = await eval.string('{ greeting = "hello"; numbers = [ 1 2 3 ]; }')
         assert await (await root.attr("greeting")).force() == "hello"
         numbers = await root.attr("numbers")
         assert await numbers.list_length() == 3
@@ -34,17 +34,17 @@ async def test_inproc_eval_value_navigation() -> None:
 
 @pytest.mark.anyio
 async def test_inproc_value_autocall_and_realise_argv() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        function = await eval_.string("x: x + 1")
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        function = await eval.string("x: x + 1")
         assert await (await function.call(41)).as_int() == 42
-        argv = await eval_.string('[ "echo" "hello" ]')
+        argv = await eval.string('[ "echo" "hello" ]')
         assert await argv.realise_argv() == ["echo", "hello"]
 
 
 @pytest.mark.anyio
 async def test_inproc_repl_supports_shared_protocol_operations() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        repl = await eval_.repl()
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        repl = await eval.repl()
         assert await repl.line("answer = 42") is None
         value = await repl.line("answer")
         if value is None:
@@ -64,18 +64,18 @@ async def test_inproc_allows_only_one_live_eval_state() -> None:
 @pytest.mark.anyio
 async def test_inproc_value_rejects_use_after_eval_close() -> None:
     async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        eval_ = nix.eval(store)
-        await eval_.open()
-        value = await eval_.string("1")
-        await eval_.close()
+        eval = nix.eval(store)
+        await eval.open()
+        value = await eval.string("1")
+        await eval.close()
         with pytest.raises(inproc.InprocSessionClosedError):
             await value.force()
 
 
 @pytest.mark.anyio
 async def test_inproc_value_context_manager_releases_rooted_value() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        async with await eval_.string("{ answer = 42; }") as root:
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        async with await eval.string("{ answer = 42; }") as root:
             assert await (await root.attr("answer")).as_int() == 42
         with pytest.raises(inproc.InprocValueReleasedError):
             await root.force()
@@ -84,10 +84,10 @@ async def test_inproc_value_context_manager_releases_rooted_value() -> None:
 @pytest.mark.anyio
 async def test_inproc_eval_close_releases_values_left_open() -> None:
     async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        eval_ = nix.eval(store)
-        await eval_.open()
-        value = await eval_.string("1")
-        await eval_.close()
+        eval = nix.eval(store)
+        await eval.open()
+        value = await eval.string("1")
+        await eval.close()
         with pytest.raises(inproc.InprocSessionClosedError):
             await value.force()
 
@@ -114,21 +114,21 @@ async def test_inproc_eval_state_can_be_closed_and_reopened() -> None:
 @pytest.mark.anyio
 async def test_inproc_store_cannot_close_while_its_eval_state_is_open() -> None:
     async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        eval_ = nix.eval(store)
-        await eval_.open()
+        eval = nix.eval(store)
+        await eval.open()
         with pytest.raises(RuntimeError, match="close the EvalSession first"):
             await store.close()
         await store.close(force=True)
         with pytest.raises(inproc.InprocSessionClosedError):
-            await eval_.string("1")
+            await eval.string("1")
 
 
 @pytest.mark.anyio
 async def test_inproc_locked_flake_facade(tmp_path: Path) -> None:
     init_flake_repo(tmp_path, "value = 42;")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        locked = await eval_.lock_flake(str(tmp_path), write_lock_file=False)
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
         assert not (tmp_path / "flake.lock").exists()
         assert isinstance(locked.description, str)
 
@@ -281,8 +281,8 @@ async def test_inproc_eval_file(tmp_path: Path) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ a = 1; b = "hello"; }')
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        root = await eval_.file(str(nix_file))
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        root = await eval.file(str(nix_file))
         assert await root.force() == {"a": 1, "b": "hello"}
 
 
@@ -290,8 +290,8 @@ async def test_inproc_eval_file(tmp_path: Path) -> None:
 async def test_inproc_eval_flake(tmp_path: Path) -> None:
     init_flake_repo(tmp_path, 'greeting = "hello"; count = 42;')
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        outputs = await eval_.eval_flake(str(tmp_path), write_lock_file=False)
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        outputs = await eval.eval_flake(str(tmp_path), write_lock_file=False)
         assert await (await outputs.attr("greeting")).as_string() == "hello"
         assert await (await outputs.attr("count")).as_int() == 42
         assert not (tmp_path / "flake.lock").exists()
@@ -301,12 +301,12 @@ async def test_inproc_eval_flake(tmp_path: Path) -> None:
 async def test_inproc_lock_flake_update_inputs_variants(tmp_path: Path) -> None:
     init_flake_repo(tmp_path, "x = 1;")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        locked_all = await eval_.lock_flake(str(tmp_path), update_inputs=True, write_lock_file=False)
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        locked_all = await eval.lock_flake(str(tmp_path), update_inputs=True, write_lock_file=False)
         assert isinstance(locked_all.description, str)
         await locked_all.release()
 
-        locked_specific = await eval_.lock_flake(
+        locked_specific = await eval.lock_flake(
             str(tmp_path), update_inputs=["nonexistent"], write_lock_file=False
         )
         assert isinstance(locked_specific.description, str)
@@ -321,8 +321,8 @@ async def test_inproc_repl_load_file_and_add_attrs(tmp_path: Path) -> None:
     nix_file = tmp_path / "scope.nix"
     nix_file.write_text("{ answer = 42; }")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        repl = await eval_.repl()
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        repl = await eval.repl()
         loaded = await repl.load_file(str(nix_file))
         assert await repl.add_attrs(loaded) == ["answer"]
         value = await repl.line("answer")
@@ -336,21 +336,21 @@ async def test_inproc_repl_load_file_and_add_attrs(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_inproc_value_scalar_conversions() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        assert await (await eval_.string("42")).type() == "int"
-        assert await (await eval_.string("3.5")).as_float() == 3.5
-        assert await (await eval_.string("true")).as_bool() is True
-        assert await (await eval_.string('"hello"')).as_string() == "hello"
-        assert await (await eval_.string('"realised"')).realise_string() == "realised"
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        assert await (await eval.string("42")).type() == "int"
+        assert await (await eval.string("3.5")).as_float() == 3.5
+        assert await (await eval.string("true")).as_bool() is True
+        assert await (await eval.string('"hello"')).as_string() == "hello"
+        assert await (await eval.string('"realised"')).realise_string() == "realised"
 
 
 @pytest.mark.anyio
 async def test_inproc_value_force_deep_and_json() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        deep = await eval_.string("{ a = { b = 1; }; }")
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        deep = await eval.string("{ a = { b = 1; }; }")
         assert await deep.force_deep() == {"a": {"b": 1}}
 
-        as_json = await eval_.string('{ a = 1; b = [ "x" "y" ]; }')
+        as_json = await eval.string('{ a = 1; b = [ "x" "y" ]; }')
         assert await as_json.json() == {"a": 1, "b": ["x", "y"]}
         assert await as_json.force_json() == {"a": 1, "b": ["x", "y"]}
 
@@ -360,8 +360,8 @@ async def test_inproc_value_edit_location(tmp_path: Path) -> None:
     nix_file = tmp_path / "function.nix"
     nix_file.write_text("argument: argument\n")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        value = await eval_.file(str(nix_file))
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        value = await eval.file(str(nix_file))
         path, line = await value.edit_location()
         assert Path(path) == nix_file
         assert line == 1
@@ -369,16 +369,16 @@ async def test_inproc_value_edit_location(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_inproc_value_auto_call() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        function = await eval_.string("{ x ? 1 }: x + 1")
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        function = await eval.string("{ x ? 1 }: x + 1")
         result = await function.auto_call()
         assert await result.as_int() == 2
 
 
 @pytest.mark.anyio
 async def test_inproc_value_build_and_release() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        drv = await eval_.string("""
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        drv = await eval.string("""
             let pkgs = import <nixpkgs> {}; in
             pkgs.stdenvNoCC.mkDerivation {
               pname = "inproc-value-build-test";
@@ -398,8 +398,8 @@ async def test_inproc_value_build_and_release() -> None:
 
 @pytest.mark.anyio
 async def test_inproc_value_close_is_idempotent() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        value = await eval_.string("1")
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        value = await eval.string("1")
         await value.close()
         await value.close()
 
@@ -521,13 +521,13 @@ async def test_inproc_store_not_open_raises() -> None:
 @pytest.mark.anyio
 async def test_inproc_eval_busy_error_message_and_close_idempotent() -> None:
     async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        eval_ = nix.eval(store)
-        await eval_.open()
-        await eval_.open()  # already active: no-op, does not re-raise
+        eval = nix.eval(store)
+        await eval.open()
+        await eval.open()  # already active: no-op, does not re-raise
         with pytest.raises(EvalStateBusyError):
             await nix.eval(store).open()
-        await eval_.close()
-        await eval_.close()
+        await eval.close()
+        await eval.close()
 
 
 def test_raw_gc_action_rejects_unsupported_action() -> None:
@@ -610,9 +610,9 @@ async def test_inproc_eval_open_requires_open_store() -> None:
 @pytest.mark.anyio
 async def test_inproc_eval_repl_requires_open_eval() -> None:
     async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        eval_ = nix.eval(store)
+        eval = nix.eval(store)
         with pytest.raises(inproc.InprocSessionClosedError):
-            await eval_.repl()
+            await eval.repl()
 
 
 @pytest.mark.anyio
@@ -621,9 +621,9 @@ async def test_inproc_session_close_auto_closes_open_eval() -> None:
     await session.open()
     store = session.store()
     await store.open()
-    eval_ = session.eval(store)
-    await eval_.open()
-    value = await eval_.string("1")
+    eval = session.eval(store)
+    await eval.open()
+    value = await eval.string("1")
 
     await session.close()
 
@@ -636,12 +636,12 @@ async def test_inproc_eval_close_releases_leftover_locked_flakes(tmp_path: Path)
     init_flake_repo(tmp_path, "val = 1;")
 
     async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        eval_ = nix.eval(store)
-        await eval_.open()
-        locked = await eval_.lock_flake(str(tmp_path), write_lock_file=False)
-        await eval_.close()
+        eval = nix.eval(store)
+        await eval.open()
+        locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
+        await eval.close()
 
-        assert locked not in eval_._locked_flakes  # type: ignore[reportPrivateUsage] -- verifying close() drained the leftover locked flake
+        assert locked not in eval._locked_flakes  # type: ignore[reportPrivateUsage] -- verifying close() drained the leftover locked flake
         with pytest.raises(inproc.InprocSessionClosedError):
             await locked.eval()
 
@@ -650,24 +650,24 @@ async def test_inproc_eval_close_releases_leftover_locked_flakes(tmp_path: Path)
 async def test_inproc_locked_flake_release_is_idempotent(tmp_path: Path) -> None:
     init_flake_repo(tmp_path, "val = 1;")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        locked = await eval_.lock_flake(str(tmp_path), write_lock_file=False)
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
         await locked.release()
         await locked.release()
 
 
 @pytest.mark.anyio
 async def test_inproc_value_attr_names() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        root = await eval_.string("{ a = 1; b = 2; }")
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        root = await eval.string("{ a = 1; b = 2; }")
         assert set(await root.attr_names()) == {"a", "b"}
 
 
 @pytest.mark.anyio
 async def test_inproc_value_call_accepts_value_argument() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        function = await eval_.string("x: x + 1")
-        argument = await eval_.string("41")
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        function = await eval.string("x: x + 1")
+        argument = await eval.string("41")
         result = await function.call(argument)
         assert await result.as_int() == 42
 
@@ -691,16 +691,16 @@ async def test_inproc_value_build_rejects_store_from_different_session() -> None
     other_session = inproc.Session(load_config=False)
     foreign_store = other_session.store()
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        drv = await eval_.string("1")
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        drv = await eval.string("1")
         with pytest.raises(ValueError, match="different inproc Session"):
             await drv.build(store=foreign_store)
 
 
 @pytest.mark.anyio
 async def test_inproc_value_build_raises_on_build_failure() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval_:
-        drv = await eval_.string("""
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+        drv = await eval.string("""
             let pkgs = import <nixpkgs> {}; in
             pkgs.stdenvNoCC.mkDerivation {
               pname = "inproc-value-build-fail-test";

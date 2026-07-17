@@ -140,8 +140,8 @@ async def l3_inproc(tmp_path: Path) -> AsyncIterator[_L3Inproc]:
 
 
 async def test_attrs_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -> None:
-    async with l3_inproc.eval as eval_:
-        parent = await eval_.string("{ x = 1; }")
+    async with l3_inproc.eval as eval:
+        parent = await eval.string("{ x = 1; }")
         assert [handle for handle, _ in l3_inproc.state.handles.iter_kind("value")] == [parent.handle]
 
         attrs = await parent.force_as(NixType.ATTRS)
@@ -159,8 +159,8 @@ async def test_attrs_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -
 
 
 async def test_lists_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -> None:
-    async with l3_inproc.eval as eval_:
-        parent = await eval_.string("[ 1 ]")
+    async with l3_inproc.eval as eval:
+        parent = await eval.string("[ 1 ]")
         values = await parent.force_as(NixType.LIST)
         child = values[0]
         assert {handle for handle, _ in l3_inproc.state.handles.iter_kind("value")} == {parent.handle}
@@ -178,20 +178,20 @@ async def test_lists_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -
 
 
 async def test_value_finalizer_defers_then_drains_to_worker(l3_inproc: _L3Inproc) -> None:
-    async with l3_inproc.eval as eval_:
-        value = await eval_.string("1")
+    async with l3_inproc.eval as eval:
+        value = await eval.string("1")
         handle = value.handle
         del value
         gc.collect()
 
         assert {item[0] for item in l3_inproc.state.handles.iter_kind("value")} == {handle}
-        await eval_.string("2")
+        await eval.string("2")
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind("value")}
 
 
 async def test_borrowing_view_keeps_parent_alive_until_the_view_is_dropped(l3_inproc: _L3Inproc) -> None:
-    async with l3_inproc.eval as eval_:
-        parent = await eval_.string("{ x = 1; }")
+    async with l3_inproc.eval as eval:
+        parent = await eval.string("{ x = 1; }")
         handle = parent.handle
         attrs = await parent.force_as(NixType.ATTRS)
 
@@ -206,13 +206,13 @@ async def test_borrowing_view_keeps_parent_alive_until_the_view_is_dropped(l3_in
         await child.release()
         del child, attrs
         gc.collect()
-        await eval_.string("2")
+        await eval.string("2")
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind("value")}
 
 
 async def test_borrowing_list_keeps_parent_alive_until_the_view_is_dropped(l3_inproc: _L3Inproc) -> None:
-    async with l3_inproc.eval as eval_:
-        parent = await eval_.string("[ 1 ]")
+    async with l3_inproc.eval as eval:
+        parent = await eval.string("[ 1 ]")
         handle = parent.handle
         values = await parent.force_as(NixType.LIST)
 
@@ -225,13 +225,13 @@ async def test_borrowing_list_keeps_parent_alive_until_the_view_is_dropped(l3_in
         await child.release()
         del child, values
         gc.collect()
-        await eval_.string("2")
+        await eval.string("2")
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind("value")}
 
 
 async def test_explicit_value_release_is_idempotent_at_both_sides(l3_inproc: _L3Inproc) -> None:
-    async with l3_inproc.eval as eval_:
-        value = await eval_.string("1")
+    async with l3_inproc.eval as eval:
+        value = await eval.string("1")
         handle = value.handle
 
         await value.release()
@@ -243,8 +243,8 @@ async def test_explicit_value_release_is_idempotent_at_both_sides(l3_inproc: _L3
 
 
 async def test_failed_value_release_retries_at_the_next_rpc_boundary(l3_inproc: _L3Inproc) -> None:
-    async with l3_inproc.eval as eval_:
-        value = await eval_.string("1")
+    async with l3_inproc.eval as eval:
+        value = await eval.string("1")
         handle = value.handle
         l3_inproc.worker._eval_stub = _FailFirstRpc(l3_inproc.worker._eval_stub, "release")
 
@@ -252,18 +252,18 @@ async def test_failed_value_release_retries_at_the_next_rpc_boundary(l3_inproc: 
             await value.release()
         assert {item[0] for item in l3_inproc.state.handles.iter_kind("value")} == {handle}
 
-        await eval_.string("2")
+        await eval.string("2")
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind("value")}
 
 
 async def test_session_close_closes_eval_state_and_clears_worker_values(l3_inproc: _L3Inproc) -> None:
-    eval_ = l3_inproc.eval
-    await eval_.open()
-    first = await eval_.string("1")
-    second = await eval_.string("2")
+    eval = l3_inproc.eval
+    await eval.open()
+    first = await eval.string("1")
+    second = await eval.string("2")
     assert len(l3_inproc.state.handles.iter_kind("value")) == 2
 
-    await eval_.close()
+    await eval.close()
 
     assert l3_inproc.state.handles.iter_kind("value") == []
     assert l3_inproc.state.eval_state is None
@@ -296,8 +296,8 @@ async def test_locked_flake_explicit_release_removes_exact_worker_handle(
     l3_inproc: _L3Inproc, tmp_path: Path
 ) -> None:
     init_flake_repo(tmp_path, "val = 1;")
-    async with l3_inproc.eval as eval_:
-        locked = await eval_.lock_flake(str(tmp_path), write_lock_file=False)
+    async with l3_inproc.eval as eval:
+        locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
         handle = locked.handle
         assert {item[0] for item in l3_inproc.state.handles.iter_kind("locked_flake")} == {handle}
 
@@ -317,8 +317,8 @@ async def test_failed_locked_flake_release_retries_at_the_next_rpc_boundary(
     l3_inproc: _L3Inproc, tmp_path: Path
 ) -> None:
     init_flake_repo(tmp_path, "val = 1;")
-    async with l3_inproc.eval as eval_:
-        locked = await eval_.lock_flake(str(tmp_path), write_lock_file=False)
+    async with l3_inproc.eval as eval:
+        locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
         handle = locked.handle
         l3_inproc.worker._eval_stub = _FailFirstRpc(l3_inproc.worker._eval_stub, "release_locked_flake")
 
@@ -326,20 +326,20 @@ async def test_failed_locked_flake_release_retries_at_the_next_rpc_boundary(
             await locked.release()
         assert {item[0] for item in l3_inproc.state.handles.iter_kind("locked_flake")} == {handle}
 
-        await eval_.string("1")
+        await eval.string("1")
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind("locked_flake")}
 
 
 async def test_locked_flake_finalizer_defers_then_drains_to_worker(l3_inproc: _L3Inproc, tmp_path: Path) -> None:
     init_flake_repo(tmp_path, "val = 1;")
-    async with l3_inproc.eval as eval_:
-        locked = await eval_.lock_flake(str(tmp_path), write_lock_file=False)
+    async with l3_inproc.eval as eval:
+        locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
         handle = locked.handle
         del locked
         gc.collect()
 
         assert {item[0] for item in l3_inproc.state.handles.iter_kind("locked_flake")} == {handle}
-        await eval_.string("1")
+        await eval.string("1")
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind("locked_flake")}
 
 
@@ -347,14 +347,14 @@ async def test_session_close_closes_eval_state_and_clears_values_and_locked_flak
     l3_inproc: _L3Inproc, tmp_path: Path
 ) -> None:
     init_flake_repo(tmp_path, "val = 1;")
-    eval_ = l3_inproc.eval
-    await eval_.open()
-    value = await eval_.string("1")
-    locked = await eval_.lock_flake(str(tmp_path), write_lock_file=False)
+    eval = l3_inproc.eval
+    await eval.open()
+    value = await eval.string("1")
+    locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
     assert {item[0] for item in l3_inproc.state.handles.iter_kind("value")} == {value.handle}
     assert {item[0] for item in l3_inproc.state.handles.iter_kind("locked_flake")} == {locked.handle}
 
-    await eval_.close()
+    await eval.close()
 
     assert l3_inproc.state.handles.iter_kind("value") == []
     assert l3_inproc.state.handles.iter_kind("locked_flake") == []
@@ -364,21 +364,21 @@ async def test_session_close_closes_eval_state_and_clears_values_and_locked_flak
 
 
 async def test_late_finalizer_from_closed_generation_cannot_release_new_values(l3_inproc: _L3Inproc) -> None:
-    eval_ = l3_inproc.eval
-    await eval_.open()
-    stale = await eval_.string("1")
-    await eval_.close()
+    eval = l3_inproc.eval
+    await eval.open()
+    stale = await eval.string("1")
+    await eval.close()
     assert l3_inproc.state.handles.iter_kind("value") == []
 
-    await eval_.open()
-    live = await eval_.string("2")
+    await eval.open()
+    live = await eval.string("2")
     live_handle = live.handle
     del stale
     gc.collect()
-    await eval_.string("3")
+    await eval.string("3")
 
     assert live_handle in {item[0] for item in l3_inproc.state.handles.iter_kind("value")}
-    await eval_.close()
+    await eval.close()
 
 
 async def test_store_handles_are_distinct_and_close_exactly_once(l3_inproc: _L3Inproc) -> None:
