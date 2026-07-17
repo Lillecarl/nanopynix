@@ -23,6 +23,7 @@ import nanopynix_util
 from nanopynix._extract import locked_flake as _locked_flake_proto
 from nanopynix._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._nix_executor import NixThreadExecutor
+from nanopynix.exceptions import EvalStateBusyError
 from nanopynix.logging import LogCollector
 from nanopynix.models import Derivation, GcResult, LockedInput, LogEvent, MissingInfo, PathInfo
 from nanopynix.models import StorePath as PublicStorePath
@@ -111,10 +112,6 @@ def _parse_store_paths(raw_store: Any, paths: list[str]) -> list[Any]:
 
 class InprocSessionClosedError(RuntimeError):
     """Raised when an in-process session resource is used after close."""
-
-
-class InprocEvalBusyError(RuntimeError):
-    """Raised when a session already owns its single permitted EvalState."""
 
 
 class InprocValueReleasedError(RuntimeError):
@@ -560,12 +557,12 @@ class EvalSession:
         """Claim this session's single permitted ``EvalState``.
 
         Raises:
-            InprocEvalBusyError: The session already has a live ``EvalState``.
+            EvalStateBusyError: The session already has a live ``EvalState``.
         """
         if self._active:
             return
         if self._session._eval is not None:  # type: ignore[reportPrivateUsage] -- session owns the sole EvalState slot
-            raise InprocEvalBusyError("inproc Session already has a live EvalState")
+            raise EvalStateBusyError("Session already has a live EvalState")
         self._local = await self._session.run(self._session._runtime.open_eval_state, self._store._require_local(), self._session._nix_path)  # type: ignore[reportPrivateUsage] -- session owns local runtime
         self._session._eval = self  # type: ignore[reportPrivateUsage] -- session owns the sole EvalState slot
         self._active = True
@@ -896,7 +893,6 @@ __all__ = [
     "BuildMode",
     "EvalSession",
     "GCAction",
-    "InprocEvalBusyError",
     "InprocLockedFlakeReleasedError",
     "InprocSessionClosedError",
     "InprocValueReleasedError",

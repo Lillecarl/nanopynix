@@ -9,12 +9,11 @@ No Nix daemon needed — exercises error paths and edge cases.
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import gc
 import json as _json
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -33,8 +32,7 @@ from nanopynix import (
     WrongNixTypeError,
 )
 from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT
-from nanopynix._pool import ReservedWorker
-from nanopynix._pool import _WorkerManager as _WorkerManager
+from nanopynix._pool import _WorkerClient as _WorkerClient
 from nanopynix._session import (
     EvalProxy,
     EvalSession,
@@ -168,16 +166,20 @@ def _mock_has_attr_response(has: bool = True) -> MagicMock:
 
 
 def _mock_pool():
-    """Return a mock WorkerPool that supports reserve()."""
+    """Return a mock worker client that serializes individual RPCs."""
     pool = MagicMock()
-    pool.reserve = AsyncMock()
     pool._eval_stub = _make_eval_stub()
     pool._store_stub = MagicMock()
+
+    async def _call(coro: Any) -> Any:
+        return await coro
+
+    pool.call = _call
     return pool
 
 
-def _mock_reserved_worker():
-    """Return a mock ReservedWorker with eval_stub."""
+def _mock_worker_client():
+    """Return a mock worker client with eval and Store RPC stubs."""
     rw = MagicMock()
     rw._eval_stub = _make_eval_stub()
     rw._store_stub = MagicMock()
@@ -200,55 +202,43 @@ def _mock_reserved_worker():
 
 
 class TestEvalSessionLifecycle:
-    async def test_enter_reserves_worker(self):
+    async def test_enter_opens_eval_state_on_worker_client(self):
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        pool.reserve.return_value = rw
 
         session = EvalSession(pool)
         result = await session.__aenter__()
         assert result is session
-        pool.reserve.assert_awaited_once()
-        rw._eval_stub.open_eval.assert_awaited_once()
+        pool._eval_stub.open_eval.assert_awaited_once()
 
     async def test_open_close_manual_lifecycle(self):
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        pool.reserve.return_value = rw
-
         session = EvalSession(pool)
         await session.open()
         await session.close()
 
-        pool.reserve.assert_awaited_once()
-        rw.release.assert_awaited_once()
+        pool._eval_stub.close_eval.assert_awaited_once()
 
-    async def test_exit_releases_worker(self):
+    async def test_exit_closes_eval_state(self):
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        pool.reserve.return_value = rw
 
         session = EvalSession(pool)
         await session.__aenter__()
         await session.__aexit__(None, None, None)
 
-        rw._eval_stub.close_eval.assert_awaited_once()
-        rw.release.assert_awaited_once()
+        pool._eval_stub.close_eval.assert_awaited_once()
 
-    async def test_exit_releases_worker_even_on_close_eval_error(self):
-        """Worker is always returned to pool even if release_all RPC fails."""
+    async def test_exit_deactivates_after_close_eval_error(self):
+        """A failed CloseEval still invalidates the client-side session."""
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        rw._eval_stub.close_eval.side_effect = TimeoutError("close_eval timed out")
-        pool.reserve.return_value = rw
+        pool._eval_stub.close_eval.side_effect = TimeoutError("close_eval timed out")
 
         session = EvalSession(pool)
         await session.__aenter__()
-        # Exception propagates, but worker must still be released
         with pytest.raises(TimeoutError, match="close_eval timed out"):
             await session.__aexit__(None, None, None)
 
-        rw.release.assert_awaited_once()
+        with pytest.raises(EvalSessionClosedError, match="not entered"):
+            await session.string("1")
 
     async def test_file_before_enter_raises(self):
         pool = _mock_pool()
@@ -264,9 +254,7 @@ class TestEvalSessionLifecycle:
 
     async def test_file_after_enter(self):
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        rw._eval_stub.eval_file.return_value = _mock_value_handle(1, "attrs")
-        pool.reserve.return_value = rw
+        pool._eval_stub.eval_file.return_value = _mock_value_handle(1, "attrs")
 
         session = EvalSession(pool)
         await session.__aenter__()
@@ -274,72 +262,62 @@ class TestEvalSessionLifecycle:
         assert isinstance(root, ValueProxy)
         assert root.handle == 1
         assert root.nix_type == NixType.ATTRS
-        request = rw._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        request = pool._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 1
 
     async def test_string_after_enter(self):
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        rw._eval_stub.eval_string.return_value = _mock_value_handle(2, "int")
-        pool.reserve.return_value = rw
+        pool._eval_stub.eval_string.return_value = _mock_value_handle(2, "int")
 
         session = EvalSession(pool, store_handle=99)
         await session.__aenter__()
         root = await session.string("42 + 1")
         assert root.nix_type == NixType.INT
-        request = rw._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        request = pool._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 99
 
     async def test_timeout_override(self):
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        rw._eval_stub.eval_string.return_value = _mock_value_handle(1, "int")
-        pool.reserve.return_value = rw
+        pool._eval_stub.eval_string.return_value = _mock_value_handle(1, "int")
 
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.string("42", timeout=5.0)
-        call_kwargs = rw._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
+        call_kwargs = pool._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
         assert call_kwargs["timeout"] == _RPC_TIMEOUT
 
     async def test_timeout_falls_back_to_session_default(self):
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        rw._eval_stub.eval_string.return_value = _mock_value_handle(1, "int")
-        pool.reserve.return_value = rw
+        pool._eval_stub.eval_string.return_value = _mock_value_handle(1, "int")
 
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.string("42")  # no override
-        call_kwargs = rw._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
+        call_kwargs = pool._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
         assert call_kwargs["timeout"] == _RPC_TIMEOUT
 
 
 class TestReplSession:
     async def test_open_starts_repl_scope_and_line_returns_expression_value(self):
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        rw._eval_stub.repl_process_line.return_value = SimpleNamespace(
+        pool._eval_stub.repl_process_line.return_value = SimpleNamespace(
             is_binding=False,
             value=_mock_value_handle(7, "int"),
         )
-        pool.reserve.return_value = rw
 
         session = ReplSession(pool, store_handle=99)
         await session.open()
         result = await session.line("x + 1")
 
-        rw._eval_stub.begin_repl.assert_awaited_once()
-        open_request = rw._eval_stub.open_eval.call_args.args[0]
+        pool._eval_stub.begin_repl.assert_awaited_once()
+        open_request = pool._eval_stub.open_eval.call_args.args[0]
         assert open_request.store_handle == 99
         assert isinstance(result, ValueProxy)
         assert result.handle == 7
 
     async def test_line_returns_none_for_binding(self):
         pool = _mock_pool()
-        rw = _mock_reserved_worker()
-        rw._eval_stub.repl_process_line.return_value = SimpleNamespace(is_binding=True)
-        pool.reserve.return_value = rw
+        pool._eval_stub.repl_process_line.return_value = SimpleNamespace(is_binding=True)
 
         session = ReplSession(pool)
         await session.open()
@@ -390,7 +368,7 @@ class TestSessionEvalFacade:
 
 class TestValueProxyLifecycle:
     def _worker(self) -> MagicMock:
-        return _mock_reserved_worker()
+        return _mock_worker_client()
 
     def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
         return _EvalOwner(_EvalOwnerToken(), active)
@@ -831,7 +809,7 @@ class TestValueProxyLifecycle:
 
 class TestValueListBounds:
     def _worker(self) -> MagicMock:
-        return _mock_reserved_worker()
+        return _mock_worker_client()
 
     def _list(self, worker: MagicMock, length: int = 2) -> ValueList:
         ctx = _EvalProxyContext(EvalProxy(worker), _EvalOwner(_EvalOwnerToken()), None)
@@ -872,7 +850,7 @@ class TestLazyChildProxy:
     """Verify child proxies resolve via attr/list_get, not parent force."""
 
     def _worker(self) -> MagicMock:
-        return _mock_reserved_worker()
+        return _mock_worker_client()
 
     def _owner(self, active: list[bool] | None = None) -> _EvalOwner:
         return _EvalOwner(_EvalOwnerToken(), active)
@@ -968,72 +946,6 @@ class TestLazyChildProxy:
         assert w._eval_stub.attr.call_args[1]["timeout"] == _RPC_TIMEOUT  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
 
 
-# ════════════════════════════════════════════════════════════════════
-# ReservedWorker
-# ════════════════════════════════════════════════════════════════════
-
-
-class TestReservedWorker:
-    async def test_release_idempotent(self):
-        manager = MagicMock(spec=_WorkerManager)
-        manager._release = MagicMock()
-
-        rw = ReservedWorker(manager)
-        await rw.release()
-        manager._release.assert_called_once()
-
-        # Second release should be a no-op
-        await rw.release()
-        manager._release.assert_called_once()  # still only once
-
-    async def test_eval_stub_property_delegates(self):
-        """ReservedWorker._eval_stub delegates to manager._eval_stub."""
-        manager = MagicMock(spec=_WorkerManager)
-        manager._eval_stub = _make_eval_stub()
-        rw = ReservedWorker(manager)
-        assert rw._eval_stub is manager._eval_stub  # type: ignore[reportPrivateUsage] -- cross-class access in test
-
-    async def test_store_stub_property_delegates(self):
-        """ReservedWorker._store_stub delegates to manager._store_stub."""
-        manager = MagicMock(spec=_WorkerManager)
-        manager._store_stub = MagicMock()
-        rw = ReservedWorker(manager)
-        assert rw._store_stub is manager._store_stub  # type: ignore[reportPrivateUsage] -- cross-class access in test
-
-    async def test_call_serializes_reserved_worker_rpcs(self):
-        """Concurrent calls through one reserved worker run one at a time."""
-        manager = MagicMock(spec=_WorkerManager)
-        rw = ReservedWorker(manager)
-        first_started = asyncio.Event()
-        first_can_finish = asyncio.Event()
-        second_started = asyncio.Event()
-        order: list[str] = []
-
-        async def first():
-            first_started.set()
-            order.append("first-start")
-            await first_can_finish.wait()
-            order.append("first-end")
-            return "first"
-
-        async def second():
-            second_started.set()
-            order.append("second")
-            return "second"
-
-        first_task = asyncio.create_task(rw.call(first()))
-        await first_started.wait()
-        second_task = asyncio.create_task(rw.call(second()))
-        await asyncio.sleep(0)
-
-        assert not second_started.is_set()
-
-        first_can_finish.set()
-        assert await first_task == "first"
-        assert await second_task == "second"
-        assert order == ["first-start", "first-end", "second"]
-
-
 class TestWorkerOomScore:
     def test_write_oom_score_adj_clamps_value(self, tmp_path: Path):
         proc_dir = tmp_path / "123"
@@ -1050,32 +962,12 @@ class TestWorkerOomScore:
             "_write_oom_score_adj",
             lambda pid, value: calls.append((pid, value)),
         )
-        manager = _WorkerManager(worker_oom_score_adj=500)  # type: ignore[reportPrivateUsage] -- test accesses pool internals
+        manager = _WorkerClient(worker_oom_score_adj=500)  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 
         manager._on_worker_process_start(MagicMock(pid=1234))  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 
         assert manager._worker_pid == 1234  # type: ignore[reportPrivateUsage] -- test accesses pool internals
         assert calls == [(1234, 500)]
-
-    async def test_reserved_worker_score_is_restored_on_release(self, monkeypatch: pytest.MonkeyPatch):
-        calls: list[tuple[int, int]] = []
-        monkeypatch.setattr(
-            pool_module,
-            "_write_oom_score_adj",
-            lambda pid, value: calls.append((pid, value)),
-        )
-        manager = _WorkerManager(  # type: ignore[reportPrivateUsage] -- test accesses pool internals
-            worker_oom_score_adj=500,
-            reserved_worker_oom_score_adj=250,
-        )
-        manager._channel = cast("Any", object())  # type: ignore[reportPrivateUsage] -- test accesses pool internals
-        manager._worker_pid = 1234  # type: ignore[reportPrivateUsage] -- test accesses pool internals
-
-        worker = await manager.reserve()
-        await worker.release()
-
-        assert calls == [(1234, 250), (1234, 500)]
-
 
 # ════════════════════════════════════════════════════════════════════
 # log_stream request-id handling (C1 fix)
@@ -1159,7 +1051,7 @@ class TestLogStreamRequestId:
 class TestLogCapture:
     async def test_capture_records_typed_events(self):
         session = object.__new__(Session)
-        manager = _WorkerManager()
+        manager = _WorkerClient()
         session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
         async with session.capture_logs() as logs:
@@ -1173,7 +1065,7 @@ class TestLogCapture:
 
     async def test_capture_unsubscribes_on_exit(self):
         session = object.__new__(Session)
-        manager = _WorkerManager()
+        manager = _WorkerClient()
         session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
         async with session.capture_logs() as logs:

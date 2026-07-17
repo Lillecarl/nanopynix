@@ -1,5 +1,5 @@
 # ruff: noqa: ASYNC109
-"""Eval session — exclusive worker lock + ValueProxy for eval over gRPC."""
+"""Eval session and ValueProxy for eval over gRPC."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import threading
 import weakref
 from dataclasses import dataclass, field
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Literal, Never, overload
+from typing import TYPE_CHECKING, Any, Literal, Never, Protocol, overload
 
 from nanopynix_proto.nix.common import (
     CallArg,
@@ -81,9 +81,15 @@ if TYPE_CHECKING:
     from betterproto2 import Message
     from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
-    from nanopynix._pool import ReservedWorker, _WorkerManager  # type: ignore[reportPrivateUsage] -- cross-class access
+    from nanopynix._pool import _WorkerClient  # type: ignore[reportPrivateUsage] -- cross-class access
     from nanopynix.store import Store
     from nanopynix_store import BuildMode as BuildModeType
+
+
+class _EvalSessionOwner(Protocol):
+    def claim_eval(self, eval_session: EvalSession) -> None: ...
+
+    def release_eval(self, eval_session: EvalSession) -> None: ...
 
 
 def _scalar_to_pyval(scalar: ScalarValue | None) -> JsonScalar:
@@ -254,20 +260,19 @@ def _finalize_lease(lease: _Lease, releases: _DeferredReleases) -> None:
 class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase):
     """Auto-generated proxy for all ``EvalService`` gRPC methods.
 
-    Created by ``EvalSession.open()`` when the worker is reserved.
-    Method forwarders dispatch through ``ReservedWorker.call()``,
-    serializing all eval RPCs under the worker's exclusive lease.
+    Created by ``EvalSession.open()``. Method forwarders dispatch through the
+    owning worker client, which serializes each Nix operation.
     """
 
-    __slots__ = ("_active", "_draining_releases", "_releases", "_rpc_timeout", "_rw")
+    __slots__ = ("_active", "_draining_releases", "_releases", "_rpc_timeout", "_worker")
 
     def __init__(
         self,
-        rw: ReservedWorker,
+        worker: _WorkerClient,
         releases: _DeferredReleases | None = None,
         rpc_timeout: float = _RPC_TIMEOUT,
     ) -> None:
-        self._rw = rw
+        self._worker = worker
         self._releases = releases or _DeferredReleases()
         self._rpc_timeout = rpc_timeout
         self._active = True
@@ -284,8 +289,8 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
         self._check_active()
         if not self._draining_releases:
             await self.drain_deferred_releases()
-        method = getattr(self._rw._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
-        return await self._rw.call(method(message, timeout=self._rpc_timeout))
+        method = getattr(self._worker._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
+        return await self._worker.call(method(message, timeout=self._rpc_timeout))
 
     async def drain_deferred_releases(self) -> None:
         """Best-effort cleanup at a safe worker-RPC boundary."""
@@ -305,8 +310,8 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
 
     async def _store_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
-        method = getattr(self._rw._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
-        return await self._rw.call(method(message, timeout=self._rpc_timeout))
+        method = getattr(self._worker._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
+        return await self._worker.call(method(message, timeout=self._rpc_timeout))
 
 
 @dataclass(frozen=True)
@@ -960,7 +965,7 @@ class LockedFlakeHandle:
 
 
 class EvalSession:
-    """Holds the worker exclusively for the duration of an eval session.
+    """Own the parent Session's one live EvalState.
 
     All ``ValueProxy`` instances created through this session become
     invalid after ``__aexit__`` — their RPC methods raise ``EvalSessionClosedError``.
@@ -970,12 +975,12 @@ class EvalSession:
         "_active",
         "_ctx",
         "_line_editors",
-        "_manager",
+        "_owner_session",
         "_owner",
         "_proxy",
         "_releases",
         "_rpc_timeout",
-        "_rw",
+        "_worker",
         "_session_id",
         "_store",
         "_store_handle",
@@ -984,7 +989,8 @@ class EvalSession:
 
     def __init__(
         self,
-        manager: _WorkerManager,
+        worker: _WorkerClient,
+        owner_session: _EvalSessionOwner | None = None,
         store_handle: int = 1,
         timeout: float | None = None,
         session_id: str = "",
@@ -992,11 +998,11 @@ class EvalSession:
         line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
         store: Store | None = None,
     ) -> None:
-        self._manager = manager
+        self._worker = worker
+        self._owner_session = owner_session
         self._store = store
         self._store_handle = store_handle
         self._session_id = session_id
-        self._rw: ReservedWorker | None = None
         self._proxy: EvalProxy | None = None
         self._timeout = timeout
         self._rpc_timeout = rpc_timeout
@@ -1014,20 +1020,21 @@ class EvalSession:
         await self.close()
 
     async def open(self) -> None:
-        """Reserve the worker exclusively. Called automatically by ``async with``."""
-        if self._rw is not None:
+        """Open this session's EvalState. Called automatically by ``async with``."""
+        if self._proxy is not None:
             return
-        rw = await self._manager.reserve(timeout=self._timeout)
+        if self._owner_session is not None:
+            self._owner_session.claim_eval(self)
         releases = _DeferredReleases()
-        proxy = EvalProxy(rw, releases, self._rpc_timeout)
+        proxy = EvalProxy(self._worker, releases, self._rpc_timeout)
         try:
             await proxy.open_eval(OpenEvalRequest(store_handle=self._store_handle))
         except BaseException:
             proxy.deactivate()
             releases.close()
-            await rw.release()
+            if self._owner_session is not None:
+                self._owner_session.release_eval(self)
             raise
-        self._rw = rw
         self._active = [True]
         self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
         self._releases = releases
@@ -1039,35 +1046,30 @@ class EvalSession:
     async def get_verbosity(self) -> LogLevel:
         """Return the current Nix log verbosity while this eval session is open."""
         self._ensure_proxy()
-        return await self._manager.get_verbosity()
+        return await self._worker.get_verbosity()
 
     async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
         """Update Nix log verbosity while retaining this eval session's scope."""
         self._ensure_proxy()
-        return await self._manager.set_verbosity(normalize_log_level(verbosity))
+        return await self._worker.set_verbosity(normalize_log_level(verbosity))
 
     async def close(self) -> None:
-        """Release all values and hand the worker back to the pool.
+        """Release all values and close this session's EvalState.
 
         Called automatically by ``async with``. Invalidates every
         ``ValueProxy`` exported from this session.
         """
         self._active[0] = False
-        rw = self._rw
         proxy = self._proxy
-        if rw is None:
+        if proxy is None:
             return
         try:
-            if proxy is not None:
-                try:
-                    await proxy.drain_deferred_releases()
-                finally:
-                    await proxy.close_eval(CloseEvalRequest())
+            try:
+                await proxy.drain_deferred_releases()
+            finally:
+                await proxy.close_eval(CloseEvalRequest())
         finally:
-            if proxy is not None:
-                proxy.deactivate()
-            await rw.release()
-            self._rw = None
+            proxy.deactivate()
             self._proxy = None
             self._ctx = None
             releases = self._releases
@@ -1076,6 +1078,8 @@ class EvalSession:
                 releases.close()
             if self._store is not None:
                 self._store.rpc._unregister_dependent_eval(self)  # type: ignore[reportPrivateUsage] -- Store owns the public force-close lifecycle hook
+            if self._owner_session is not None:
+                self._owner_session.release_eval(self)
 
     def _ensure_proxy(self) -> EvalProxy:
         p = self._proxy

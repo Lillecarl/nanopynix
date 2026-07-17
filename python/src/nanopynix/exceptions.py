@@ -112,6 +112,10 @@ class EvalSessionClosedError(EvalProxyError):
     """A proxy or eval session was used after its owning session closed."""
 
 
+class EvalStateBusyError(EvalProxyError):
+    """A session already owns its one permitted live EvalState."""
+
+
 class ValueReleasedError(EvalProxyError):
     """A proxy wrapper was used after its remote value handle was released."""
 

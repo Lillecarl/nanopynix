@@ -302,7 +302,7 @@ in runCommand "combined" {} "cat ${first} ${second} > $out"
             root_drv_path = await root.attr("drvPath").force_json()
             if not isinstance(root_drv_path, str):
                 raise TypeError("root derivation drvPath was not a string")
-        fixed_output_closure = await _fixed_output_derivations_in_closure(store, root_drv_path)
+            fixed_output_closure = await _fixed_output_derivations_in_closure(store, root_drv_path)
 
     assert fixed_output_values == set()
     assert {"first.drv", "second.drv"} <= {path.rsplit("-", 1)[-1] for path in fixed_output_closure}

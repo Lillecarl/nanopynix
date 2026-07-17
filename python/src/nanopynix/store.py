@@ -41,10 +41,7 @@ from nanopynix_proto.nix.store import (
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
 from nanopynix._pool import _RPC_TIMEOUT as _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
-from nanopynix._pool import (  # type: ignore[reportPrivateUsage] -- cross-module internal utility
-    WorkerBusyError,
-    _grpc_call,  # type: ignore[reportPrivateUsage] -- cross-module internal utility
-)
+from nanopynix._pool import WorkerDiedError
 from nanopynix._rpc_proxy import RpcProxyMixin
 from nanopynix.models import Derivation, GcResult, MissingInfo, StorePath
 
@@ -52,7 +49,7 @@ if TYPE_CHECKING:
     from betterproto2 import Message
 
     from nanopynix._pool import (
-        _WorkerManager,  # type: ignore[reportPrivateUsage] -- TYPE_CHECKING import of lifecycle type
+        _WorkerClient,  # type: ignore[reportPrivateUsage] -- TYPE_CHECKING import of lifecycle type
     )
 
 
@@ -67,7 +64,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
     def __init__(
         self,
-        pool: _WorkerManager,
+        pool: _WorkerClient,
         uri: str,
         session_id: str,
         rpc_timeout: float = _RPC_TIMEOUT,
@@ -97,14 +94,20 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         dependent_eval = self._dependent_eval
         if force and dependent_eval is not None:
             await dependent_eval.close()
-        await self._pool.call(
-            self._pool._worker_stub.close_store(  # type: ignore[reportPrivateUsage] -- cross-class access
-                CloseStoreRequest(store_handle=self._store_handle, force=force),
-                timeout=self._rpc_timeout,
+        try:
+            await self._pool.call(
+                self._pool._worker_stub.close_store(  # type: ignore[reportPrivateUsage] -- cross-class access
+                    CloseStoreRequest(store_handle=self._store_handle, force=force),
+                    timeout=self._rpc_timeout,
+                )
             )
-        )
-        self._active = False
-        self._store_handle = 0
+        except WorkerDiedError:
+            # The remote handle disappeared with its worker, so no close RPC
+            # remains possible or necessary.
+            pass
+        finally:
+            self._active = False
+            self._store_handle = 0
 
     def _register_dependent_eval(self, eval_session: Any) -> None:
         if self._dependent_eval is not None and self._dependent_eval is not eval_session:
@@ -134,12 +137,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
     async def _store_call(self, coro: Any) -> Any:
         """Acquire the worker lock, execute a gRPC call, and handle errors."""
-        wrapped = _grpc_call(coro)  # type: ignore[reportUnknownVariableType] -- _grpc_call return type not resolved
-        try:
-            return await self._pool.call(wrapped)
-        except WorkerBusyError:
-            coro.close()
-            raise
+        return await self._pool.call(coro)
 
     async def _rpc_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()

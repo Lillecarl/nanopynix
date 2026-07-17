@@ -5,9 +5,7 @@ A single forkserver subprocess runs an independent Nix process with its own
 Store, logger, and globals.  Communication is gRPC over a multiprocessing pipe
 pair via grpclib-transports.
 
-Only one call is in-flight at a time — the worker is single-threaded.
-``_WorkerManager.reserve()`` holds the lock for the duration of an
-``EvalSession``.
+Only one Nix operation is in-flight at a time — the worker is single-threaded.
 """
 
 from __future__ import annotations
@@ -48,8 +46,7 @@ logger = logging.getLogger(__name__)
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
 # Keep one handler slot for each long-lived stream (primop backchannel and
-# SubscribeLogs) plus one for the active manager->worker call. EvalSession still
-# serializes Nix eval RPCs at the ReservedWorker boundary.
+# SubscribeLogs) plus one for the active manager->worker call.
 _WORKER_MAX_CONCURRENCY = 3
 _OOM_SCORE_ADJ_MIN = -1000
 _OOM_SCORE_ADJ_MAX = 1000
@@ -62,10 +59,6 @@ _OOM_SCORE_ADJ_MAX = 1000
 
 class WorkerDiedError(RuntimeError):
     """Raised when the subprocess worker dies unexpectedly."""
-
-
-class WorkerBusyError(RuntimeError):
-    """Raised when the single worker is already handling another operation."""
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -144,59 +137,15 @@ class _Subscription:
 
 
 # ════════════════════════════════════════════════════════════════════
-# ReservedWorker — public token for an exclusive worker lease
+# _WorkerClient — single-worker lifecycle and operation dispatch
 # ════════════════════════════════════════════════════════════════════
 
 
-class ReservedWorker:
-    """Exclusive lease on the session worker, obtained via ``_WorkerManager.reserve()``.
-
-    Provides access to ``_eval_stub`` and ``_store_stub`` for direct gRPC
-    calls.  Calls made through ``call()`` are serialized because the worker's
-    Nix state is single-threaded even when the underlying transport can
-    multiplex gRPC streams.
-    """
-
-    __slots__ = ("_manager", "_released", "_rpc_lock")
-
-    def __init__(self, manager: _WorkerManager) -> None:
-        self._manager = manager
-        self._released = False
-        self._rpc_lock = asyncio.Lock()
-
-    @property
-    def _eval_stub(self):
-        return self._manager._eval_stub  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
-
-    @property
-    def _store_stub(self):
-        return self._manager._store_stub  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
-
-    async def call(self, coro: Any) -> Any:
-        """Await one reserved-worker RPC with gRPC error conversion."""
-        if self._released:
-            coro.close()
-            raise WorkerDiedError("reserved worker has been released")
-        async with self._rpc_lock:
-            return await _grpc_call(coro)
-
-    async def release(self) -> None:
-        """Return the worker to the manager.  Idempotent — safe to call twice."""
-        if not self._released:
-            self._released = True
-            self._manager._release()  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
-
-
-# ════════════════════════════════════════════════════════════════════
-# _WorkerManager — single-worker lifecycle
-# ════════════════════════════════════════════════════════════════════
-
-
-class _WorkerManager:
-    """Manages a single multiprocessing worker with an independent Nix Store.
+class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the public Session façade
+    """Own one multiprocessing worker and serialize its Nix operations.
 
     Provides:
-    - ``reserve()`` — exclusive worker lease (used by EvalSession).
+    - ``call()`` — one-at-a-time worker RPC dispatch.
     - ``subscribe()`` / ``log_stream()`` — log event access.
     - Direct access to ``_store_stub`` and ``_eval_stub`` for gRPC calls.
     """
@@ -217,7 +166,6 @@ class _WorkerManager:
         restrict_eval: bool | None = None,
         allowed_uris: Sequence[str] | None = None,
         worker_oom_score_adj: int | None = None,
-        reserved_worker_oom_score_adj: int | None = None,
         rpc_timeout: float = _RPC_TIMEOUT,
         shutdown_timeout: float = 5.0,
     ) -> None:
@@ -234,7 +182,6 @@ class _WorkerManager:
         self._restrict_eval = restrict_eval
         self._allowed_uris = list(allowed_uris) if allowed_uris else []
         self._worker_oom_score_adj = worker_oom_score_adj
-        self._reserved_worker_oom_score_adj = reserved_worker_oom_score_adj
         self.rpc_timeout = rpc_timeout
         self._shutdown_timeout = shutdown_timeout
         self._worker_pid: int | None = None
@@ -243,7 +190,7 @@ class _WorkerManager:
         self._store_service_stub: StoreServiceStub | None = None
         self._eval_service_stub: EvalServiceStub | None = None
         self._primop_handler: Any = None
-        self._available: asyncio.Lock = asyncio.Lock()
+        self._operation_lock = asyncio.Lock()
         self._log_bus: _LogBus = _LogBus()
         self._log_task: asyncio.Task[None] | None = None
         self._stack: contextlib.AsyncExitStack | None = None
@@ -325,50 +272,15 @@ class _WorkerManager:
 
         self._log_bus.emit(None)
 
-    # ── worker lock ────────────────────────────────────────────────
+    # ── operation dispatch ─────────────────────────────────────────
 
-    async def reserve(self, timeout: float | None = None) -> ReservedWorker:
-        """Acquire an exclusive worker lease for an EvalSession."""
+    async def call(self, coro: Any) -> Any:
+        """Run one RPC after prior worker operations have completed."""
         if self._channel is None:
+            coro.close()
             raise WorkerDiedError("Worker not started")
-        if self._available.locked():
-            if timeout is None:
-                raise WorkerBusyError("worker is busy")
-            try:
-                await asyncio.wait_for(self._available.acquire(), timeout=timeout)
-            except TimeoutError as exc:
-                raise WorkerBusyError(f"worker is busy after waiting {timeout}s") from exc
-        else:
-            await self._available.acquire()
-        self._set_worker_oom_score_adj(self._reserved_worker_oom_score_adj)
-        return ReservedWorker(self)
-
-    def _release(self) -> None:
-        """Release the worker lock (called by ReservedWorker.release())."""
-        self._set_worker_oom_score_adj(self._worker_oom_score_adj)
-        self._available.release()
-
-    async def call(self, coro: Any, *, timeout: float | None = None) -> Any:
-        """Acquire the worker lock and await a gRPC coroutine.
-
-        Raises ``WorkerBusyError`` if the worker is reserved by an
-        ``EvalSession`` and no timeout is given.
-        """
-        if self._available.locked():
-            if timeout is None:
-                coro.close()
-                raise WorkerBusyError("worker is busy")
-            try:
-                await asyncio.wait_for(self._available.acquire(), timeout=timeout)
-            except TimeoutError as exc:
-                coro.close()
-                raise WorkerBusyError(f"worker is busy after waiting {timeout}s") from exc
-            try:
-                return await coro
-            finally:
-                self._available.release()
-        async with self._available:
-            return await coro
+        async with self._operation_lock:
+            return await _grpc_call(coro)
 
     # ── log access ─────────────────────────────────────────────────
 
@@ -423,13 +335,13 @@ class _WorkerManager:
 
     async def get_verbosity(self) -> LogLevel:
         """Return the current worker-side Nix log verbosity."""
-        response = await _grpc_call(self._worker_stub.get_verbosity(GetVerbosityRequest(), timeout=self.rpc_timeout))
+        response = await self.call(self._worker_stub.get_verbosity(GetVerbosityRequest(), timeout=self.rpc_timeout))
         self._verbosity = response.verbosity
         return response.verbosity
 
     async def set_verbosity(self, verbosity: LogLevel) -> LogLevel:
         """Set the worker-side Nix log verbosity."""
-        response = await _grpc_call(
+        response = await self.call(
             self._worker_stub.set_verbosity(SetVerbosityRequest(verbosity=verbosity), timeout=self.rpc_timeout)
         )
         self._verbosity = response.verbosity

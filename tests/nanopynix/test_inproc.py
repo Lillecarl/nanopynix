@@ -17,7 +17,7 @@ from nanopynix_proto.nix.store import GcAction
 
 import nanopynix_expr
 import nanopynix_util
-from nanopynix import Derivation, GcResult, MissingInfo, inproc
+from nanopynix import Derivation, EvalStateBusyError, GcResult, MissingInfo, inproc
 
 
 @pytest.mark.anyio
@@ -57,7 +57,7 @@ async def test_inproc_repl_supports_shared_protocol_operations() -> None:
 @pytest.mark.anyio
 async def test_inproc_allows_only_one_live_eval_state() -> None:
     async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store):
-        with pytest.raises(inproc.InprocEvalBusyError):
+        with pytest.raises(EvalStateBusyError):
             await nix.eval(store).open()
 
 
@@ -524,7 +524,7 @@ async def test_inproc_eval_busy_error_message_and_close_idempotent() -> None:
         eval_ = nix.eval(store)
         await eval_.open()
         await eval_.open()  # already active: no-op, does not re-raise
-        with pytest.raises(inproc.InprocEvalBusyError):
+        with pytest.raises(EvalStateBusyError):
             await nix.eval(store).open()
         await eval_.close()
         await eval_.close()

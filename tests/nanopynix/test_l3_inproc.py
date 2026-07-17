@@ -39,32 +39,21 @@ pytestmark = pytest.mark.l3_inproc
 
 
 @dataclass
-class _InprocReservedWorker:
-    """Minimal reserved-worker shape used by the public L3 EvalSession."""
+class _InprocWorkerClient:
+    """Minimal worker-client shape used by the public L3 EvalSession."""
 
     _eval_stub: Any
     _store_stub: Any
-    released: bool = False
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def call(self, coro: Any) -> Any:
         async with self._lock:
             return await coro
 
-    async def release(self) -> None:
-        self.released = True
-
-
 class _InprocManager:
-    def __init__(self, worker: _InprocReservedWorker) -> None:
+    def __init__(self, worker: _InprocWorkerClient) -> None:
         self._worker = worker
         self._worker_stub = worker._store_stub
-        self.reserve_count = 0
-
-    async def reserve(self, *, timeout: float | None = None) -> _InprocReservedWorker:
-        del timeout
-        self.reserve_count += 1
-        return self._worker
 
     async def call(self, coro: Any) -> Any:
         return await self._worker.call(coro)
@@ -97,7 +86,7 @@ class _L3Inproc:
     eval: EvalSession
     manager: _InprocManager
     state: WorkerState
-    worker: _InprocReservedWorker
+    worker: _InprocWorkerClient
     worker_stub: WorkerServiceStub
     initial_store_handle: int
     store_uri: str
@@ -120,9 +109,9 @@ async def l3_inproc(tmp_path: Path) -> AsyncIterator[_L3Inproc]:
         eval_stub = EvalServiceStub(channel)
         await worker_stub.init(InitRequest(store_uri=store_uri, load_config=False, experimental_features=["flakes"]))
         store = await worker_stub.open_store(OpenStoreRequest(uri=store_uri))
-        worker = _InprocReservedWorker(eval_stub, worker_stub)
+        worker = _InprocWorkerClient(eval_stub, worker_stub)
         manager = _InprocManager(worker)
-        session = EvalSession(cast("Any", manager), store_handle=store.store_handle)
+        session = EvalSession(cast("Any", worker), store_handle=store.store_handle)
         worker_handler = cast("WorkerServiceHandler", handlers[0])  # type: ignore[reportUnknownVariableType] -- service decorator has no static type information
         state = worker_handler._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType] -- test intentionally observes the decorated in-process worker
         worker_state = cast("WorkerState", state)

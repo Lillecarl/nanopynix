@@ -14,7 +14,7 @@ Threading model
   cross-thread access.  ``LogCollector`` is inherently thread-safe
   (``janus.Queue``).
 
-Spawned by ``Session._WorkerManager``.
+Spawned by ``Session._WorkerClient``.
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ __all__ = ["main", "run_worker", "worker_service_factory"]
 
 # Keep handler slots for the long-lived primop backchannel, the long-lived
 # SubscribeLogs stream, and the active manager->worker call. EvalSession still
-# serializes Nix eval RPCs at the ReservedWorker boundary.
+# serializes all Nix operations at the worker-client boundary.
 _WORKER_MAX_CONCURRENCY = 3
 
 # ── Primop registration ──────────────────────────────────────────────
