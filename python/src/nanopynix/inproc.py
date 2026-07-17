@@ -1,14 +1,15 @@
 """Asynchronous in-process Nix API backed by direct L1 object pointers.
 
 Unlike :class:`nanopynix.Session`, this module does not start a worker
-process.  It still confines all Nix work to one dedicated thread, so callers
-retain the same asynchronous programming model without exposing Nix's
-thread-affinity requirements.
+process. Store work uses a bounded thread pool, while each evaluator owns a
+dedicated thread so callers retain an asynchronous API without exposing Nix's
+evaluator thread-affinity requirements.
 """
 
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import threading
 from functools import partial
@@ -23,7 +24,6 @@ import nanopynix_util
 from nanopynix._extract import locked_flake as _locked_flake_proto
 from nanopynix._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._nix_executor import NixThreadExecutor
-from nanopynix.exceptions import EvalStateBusyError
 from nanopynix.logging import LogCollector
 from nanopynix.models import Derivation, GcResult, LockedInput, LogEvent, MissingInfo, PathInfo
 from nanopynix.models import StorePath as PublicStorePath
@@ -110,6 +110,15 @@ def _parse_store_paths(raw_store: Any, paths: list[str]) -> list[Any]:
     return [raw_store.parse_store_path(path) for path in paths]
 
 
+def _run_with_log_context(operation_id: int, func: Any, args: tuple[Any, ...]) -> Any:
+    previous = nanopynix_util.get_logger_request_id()
+    nanopynix_util.set_logger_request_id(operation_id)
+    try:
+        return func(*args)
+    finally:
+        nanopynix_util.set_logger_request_id(previous)
+
+
 class InprocSessionClosedError(RuntimeError):
     """Raised when an in-process session resource is used after close."""
 
@@ -136,7 +145,8 @@ class Session:
 
     Nix library initialization and logger installation are process-global. To
     make that constraint explicit, only one :class:`Session` may be open at a
-    time. A session likewise owns at most one live :class:`EvalSession`.
+    time. Store work uses a bounded pool and each live :class:`EvalSession`
+    owns one separate Nix thread.
     """
 
     def __init__(
@@ -151,6 +161,7 @@ class Session:
         pure_eval: bool | None = None,
         restrict_eval: bool | None = None,
         allowed_uris: Sequence[str] | None = None,
+        store_workers: int = 4,
     ) -> None:
         if nix_conf is not None:
             if not isinstance(nix_conf, Path):  # type: ignore[reportUnnecessaryIsInstance] -- runtime guard for untyped callers
@@ -165,6 +176,9 @@ class Session:
         self._pure_eval = pure_eval
         self._restrict_eval = restrict_eval
         self._allowed_uris = list(allowed_uris or [])
+        if store_workers < 1:
+            raise ValueError("store_workers must be at least 1")
+        self._store_workers = store_workers
         self._collector = LogCollector()
         self._runtime = LocalRuntime()
         # Creation is deliberately lazy: merely importing nanopynix.inproc
@@ -173,7 +187,8 @@ class Session:
         self._log_callbacks: set[Any] = set()
         self._log_task: asyncio.Task[None] | None = None
         self._opened = False
-        self._eval: EvalSession | None = None
+        self._operation_ids = itertools.count(1)
+        self._evals: set[EvalSession] = set()
         self._stores: set[Store] = set()
 
     @staticmethod
@@ -196,7 +211,7 @@ class Session:
             return
         signature = self._initialization_signature()
         _process_guard.acquire(self, signature)
-        executor = NixThreadExecutor()
+        executor = NixThreadExecutor(max_workers=self._store_workers, thread_name_prefix="nix-store")
         self._executor = executor
         logger_installed = False
         try:
@@ -242,12 +257,33 @@ class Session:
             allowed_uris=self._allowed_uris,
         )
 
-    async def close(self) -> None:
+    async def close(
+        self,
+        *,
+        wait: bool = True,
+        timeout: float | None = None,
+        force: bool = False,
+    ) -> None:
         if not self._opened:
             return
         executor = self._executor
         if executor is None:
             raise RuntimeError("open inproc Session has no Nix executor")
+        if not wait and (executor.has_pending_work() or any(eval.has_pending_work() for eval in self._evals)):
+            raise RuntimeError("cannot close inproc Session while Nix work is outstanding")
+        executor.begin_close(force=force)
+        for eval_session in tuple(self._evals):
+            eval_session._begin_close(force=force)  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors
+        try:
+            await executor.drain(timeout=timeout)
+            for eval_session in tuple(self._evals):
+                await eval_session._drain(timeout=timeout)  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors
+        except TimeoutError:
+            executor.resume()
+            for eval_session in tuple(self._evals):
+                eval_session._resume()  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors
+            raise
+
         errors: list[BaseException] = []
 
         async def close_resource(operation: Any) -> None:
@@ -257,8 +293,7 @@ class Session:
                 errors.append(exc)
 
         try:
-            eval_session = self._eval
-            if eval_session is not None:
+            for eval_session in tuple(self._evals):
                 await close_resource(eval_session.close())
             for store in tuple(self._stores):
                 await close_resource(store.close())
@@ -267,7 +302,7 @@ class Session:
             if task is not None:
                 await close_resource(self._collector.aclose())
                 await close_resource(task)
-            await close_resource(executor.run(nanopynix_util.remove_logger))
+            await close_resource(executor.run_closing(nanopynix_util.remove_logger))
         finally:
             try:
                 executor.shutdown(wait=True)
@@ -294,12 +329,23 @@ class Session:
             raise InprocSessionClosedError("inproc Session is not open — use async with")
 
     async def run(self, func: Any, *args: Any) -> Any:
-        """Run one direct-pointer Nix operation on this session's Nix thread."""
+        """Run one Store-only Nix operation on this session's Store pool."""
         self._check_open()
         executor = self._executor
         if executor is None:
             raise RuntimeError("open inproc Session has no Nix executor")
-        return await executor.run(func, *args)
+        operation_id = self._next_operation_id()
+        return await executor.run(_run_with_log_context, operation_id, func, args)
+
+    async def _run_closing(self, func: Any, *args: Any) -> Any:
+        executor = self._executor
+        if executor is None:
+            raise RuntimeError("open inproc Session has no Nix executor")
+        operation_id = self._next_operation_id()
+        return await executor.run_closing(_run_with_log_context, operation_id, func, args)
+
+    def _next_operation_id(self) -> int:
+        return next(self._operation_ids)
 
     def unsubscribe(self, callback: Any) -> None:
         """Remove one callback previously registered with :meth:`subscribe`."""
@@ -311,11 +357,13 @@ class Session:
         self._stores.add(store)
         return store
 
-    def eval(self, store: Store) -> EvalSession:
-        """Return the single pointer-backed evaluator permitted by this session."""
+    def eval(self, store: Store, *, build_store: Store | None = None) -> EvalSession:
+        """Return a pointer-backed evaluator with its own dedicated Nix thread."""
         if store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary
             raise ValueError("Store belongs to a different inproc Session")
-        return EvalSession(self, store)
+        if build_store is not None and build_store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary
+            raise ValueError("build_store belongs to a different inproc Session")
+        return EvalSession(self, store, build_store)
 
     async def get_verbosity(self) -> int:
         """Return the current Nix log verbosity."""
@@ -364,15 +412,17 @@ class Store:
 
     async def close(self, *, force: bool = False) -> None:
         """Close the underlying store, optionally closing its evaluator first."""
-        if self._session._eval is not None and self._session._eval._store is self:  # type: ignore[reportPrivateUsage] -- session owns the sole evaluator and this store owns its backing pointer
+        evals = tuple(eval_session for eval_session in self._session._evals if eval_session._store is self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking
+        if evals:
             if not force:
                 raise RuntimeError("cannot close a store while its EvalState is open; close the EvalSession first")
-            await self._session._eval.close()  # type: ignore[reportPrivateUsage] -- store force-close owns the dependent evaluator teardown
+            for eval_session in evals:
+                await eval_session.close()
         local = self._local
         self._local = None
         self._session._stores.discard(self)  # type: ignore[reportPrivateUsage] -- session owns store lifetime tracking
         if local is not None:
-            await self._session.run(local.close)
+            await self._session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- Store teardown follows Session close ordering
 
     def _require_raw(self) -> Any:
         if self._local is None:
@@ -537,14 +587,16 @@ class Store:
 
 
 class EvalSession:
-    """Own the one direct ``EvalState`` pointer permitted by a session."""
+    """Own one thread-confined direct ``EvalState`` pointer."""
 
-    def __init__(self, session: Session, store: Store) -> None:
+    def __init__(self, session: Session, store: Store, build_store: Store | None = None) -> None:
         self._session = session
         self._store = store
+        self._build_store = build_store
         self._local: LocalEvalState | None = None
         self._active = False
         self._locked_flakes: set[LockedFlake] = set()
+        self._executor = NixThreadExecutor(thread_name_prefix="nix-eval")
 
     async def __aenter__(self) -> EvalSession:
         await self.open()
@@ -554,30 +606,60 @@ class EvalSession:
         await self.close()
 
     async def open(self) -> None:
-        """Claim this session's single permitted ``EvalState``.
-
-        Raises:
-            EvalStateBusyError: The session already has a live ``EvalState``.
-        """
+        """Create this evaluator's ``EvalState`` on its dedicated Nix thread."""
         if self._active:
             return
-        if self._session._eval is not None:  # type: ignore[reportPrivateUsage] -- session owns the sole EvalState slot
-            raise EvalStateBusyError("Session already has a live EvalState")
-        self._local = await self._session.run(self._session._runtime.open_eval_state, self._store._require_local(), self._session._nix_path)  # type: ignore[reportPrivateUsage] -- session owns local runtime
-        self._session._eval = self  # type: ignore[reportPrivateUsage] -- session owns the sole EvalState slot
+        if self._executor.closed:
+            self._executor = NixThreadExecutor(thread_name_prefix="nix-eval")
+        self._local = await self.run(
+            self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime
+            self._store._require_local(),
+            self._session._nix_path,  # type: ignore[reportPrivateUsage] -- Session owns evaluator configuration
+            None if self._build_store is None else self._build_store._require_local(),
+        )
+        self._session._evals.add(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking
         self._active = True
 
     async def close(self) -> None:
-        """Release all values and locked flakes, and free the ``EvalState`` slot."""
+        """Release all values and locked flakes, then destroy this evaluator."""
         for locked_flake in tuple(self._locked_flakes):
             await locked_flake.release()
         local = self._local
         self._local = None
         self._active = False
-        if self._session._eval is self:  # type: ignore[reportPrivateUsage] -- release sole EvalState slot
-            self._session._eval = None  # type: ignore[reportPrivateUsage] -- release sole EvalState slot
+        self._session._evals.discard(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking
         if local is not None:
-            await self._session.run(local.close)
+            await self._run_closing(local.close)
+        self._executor.shutdown(wait=True)
+
+    def _begin_close(self, *, force: bool) -> None:
+        self._executor.begin_close(force=force)
+
+    async def _drain(self, *, timeout: float | None) -> None:
+        await self._executor.drain(timeout=timeout)
+
+    def _resume(self) -> None:
+        self._executor.resume()
+
+    def has_pending_work(self) -> bool:
+        return self._executor.has_pending_work()
+
+    async def run(self, func: Any, *args: Any) -> Any:
+        """Run evaluator and Value work on this evaluator's dedicated thread."""
+        return await self._executor.run(
+            _run_with_log_context,
+            self._session._next_operation_id(),  # type: ignore[reportPrivateUsage] -- Session owns operation correlation
+            func,
+            args,
+        )
+
+    async def _run_closing(self, func: Any, *args: Any) -> Any:
+        return await self._executor.run_closing(
+            _run_with_log_context,
+            self._session._next_operation_id(),  # type: ignore[reportPrivateUsage] -- Session owns operation correlation
+            func,
+            args,
+        )
 
     def _require_raw(self) -> Any:
         if not self._active or self._local is None:
@@ -596,12 +678,12 @@ class EvalSession:
             expression: Nix source to evaluate.
             path: Source name attributed to ``expression`` in error messages.
         """
-        local = await self._session.run(self._require_local().eval_string, expression, path)
+        local = await self.run(self._require_local().eval_string, expression, path)
         return self._track_value(local)
 
     async def file(self, path: str) -> Value:
         """Evaluate the Nix expression in the file at ``path``."""
-        local = await self._session.run(self._require_local().eval_file, path)
+        local = await self.run(self._require_local().eval_file, path)
         return self._track_value(local)
 
     def _track_value(self, local: LocalValue) -> Value:
@@ -610,7 +692,7 @@ class EvalSession:
     async def repl(self) -> ReplSession:
         """Begin a persistent Nix REPL scope over this evaluator."""
         raw = self._require_raw()
-        await self._session.run(raw.begin_repl)
+        await self.run(raw.begin_repl)
         return ReplSession(self)
 
     async def lock_flake(
@@ -621,7 +703,7 @@ class EvalSession:
         write_lock_file: bool = True,
     ) -> LockedFlake:
         """Lock a flake, optionally retaining the lock only in memory."""
-        local = await self._session.run(
+        local = await self.run(
             partial(
                 self._require_local().lock_flake,
                 ref,
@@ -629,21 +711,21 @@ class EvalSession:
                 write_lock_file=write_lock_file,
             )
         )
-        proto = await self._session.run(_locked_flake_proto, local.require_raw())
+        proto = await self.run(_locked_flake_proto, local.require_raw())
         locked_flake = LockedFlake(self, local, proto.description, proto.inputs)
         self._locked_flakes.add(locked_flake)
         return locked_flake
 
     async def eval_flake(self, ref: str, *, write_lock_file: bool = True) -> Value:
         """Lock and evaluate a flake in one step."""
-        local = await self._session.run(
+        local = await self.run(
             partial(self._require_local().eval_flake, ref, write_lock_file=write_lock_file)
         )
         return self._track_value(local)
 
     async def reset_file_cache(self) -> None:
         """Discard parsed file cache entries before re-evaluating source files."""
-        await self._session.run(self._require_raw().reset_file_cache)
+        await self.run(self._require_raw().reset_file_cache)
 
 
 class ReplSession:
@@ -658,26 +740,26 @@ class ReplSession:
         A binding such as ``x = 1`` returns ``None``. An expression returns a
         session-bound :class:`Value`.
         """
-        local = await self._eval_session._session.run(self._eval_session._require_local().repl_process_line, text, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        local = await self._eval_session.run(self._eval_session._require_local().repl_process_line, text, path)
         return None if local is None else self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def load_file(self, path: str) -> Value:
         """Load a Nix expression file as ``nix repl :load`` does."""
-        local = await self._eval_session._session.run(self._eval_session._require_local().repl_load_file, path)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        local = await self._eval_session.run(self._eval_session._require_local().repl_load_file, path)
         return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def add_attrs(self, value: Value) -> list[str]:
         """Add all attributes from ``value`` to this REPL's lexical scope."""
         local_value = value._local_for(self._eval_session)  # type: ignore[reportPrivateUsage] -- same-evaluator guard
-        return await self._eval_session._session.run(self._eval_session._require_local().repl_add_attrs, local_value)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._eval_session._require_local().repl_add_attrs, local_value)
 
     async def scope_names(self) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
-        return await self._eval_session._session.run(self._eval_session._require_raw().repl_scope_names)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._eval_session._require_raw().repl_scope_names)
 
     async def reset_file_cache(self) -> None:
         """Discard parsed file cache entries before reloading REPL sources."""
-        await self._eval_session._session.run(self._eval_session._require_raw().reset_file_cache)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        await self._eval_session.run(self._eval_session._require_raw().reset_file_cache)
 
 
 class LockedFlake:
@@ -703,9 +785,8 @@ class LockedFlake:
 
     async def eval(self) -> Value:
         """Evaluate this locked flake's outputs."""
-        session = self._eval_session._session  # type: ignore[reportPrivateUsage] -- parent owns the sole Nix executor
         evaluator = self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- parent owns the local evaluator
-        local = await session.run(
+        local = await self._eval_session.run(
             evaluator.call_locked_flake,
             self._local_for(),
         )
@@ -713,7 +794,7 @@ class LockedFlake:
 
     async def write_lock_file(self) -> None:
         """Persist this locked flake's lock file to disk."""
-        await self._eval_session._session.run(self._local_for().write_lock_file)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        await self._eval_session.run(self._local_for().write_lock_file)
 
     async def release(self) -> None:
         """Release the underlying handle for this locked flake. Idempotent."""
@@ -721,7 +802,7 @@ class LockedFlake:
         self._local = None
         self._eval_session._locked_flakes.discard(self)  # type: ignore[reportPrivateUsage] -- evaluator owns facade lifetime tracking
         if local is not None:
-            await self._eval_session._session.run(local.close)  # type: ignore[reportPrivateUsage] -- local lock must be released on the Nix thread
+            await self._eval_session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- flake teardown follows evaluator close ordering
 
 
 class Value:
@@ -743,7 +824,7 @@ class Value:
         local = self._local
         self._local = None
         if local is not None:
-            await self._eval_session._session.run(local.close)  # type: ignore[reportPrivateUsage] -- RootValue detaches on the Nix thread
+            await self._eval_session.run(local.close)
 
     def _local_for(self, eval_session: EvalSession) -> LocalValue:
         self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use
@@ -761,15 +842,15 @@ class Value:
         wrapper views — there is no ``ValueAttrs``/``ValueList`` equivalent
         in the in-process API.
         """
-        return await self._eval_session._session.run(_force_to_python, self._local_for(self._eval_session))  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(_force_to_python, self._local_for(self._eval_session))
 
     async def force_deep(self) -> Any:
         """Recursively evaluate and convert the entire value tree to Python."""
-        return await self._eval_session._session.run(_force_deep_to_python, self._local_for(self._eval_session))  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(_force_deep_to_python, self._local_for(self._eval_session))
 
     async def json(self, *, copy_to_store: bool = False) -> Any:
         """Serialize this value to JSON-compatible Python objects. See :meth:`force_json`."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).to_json, copy_to_store)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).to_json, copy_to_store)
 
     async def force_json(self, *, copy_to_store: bool = False) -> Any:
         """Serialize this value to JSON-compatible Python objects."""
@@ -777,58 +858,58 @@ class Value:
 
     async def type(self) -> str:
         """Resolve this value and return its Nix type name (e.g. ``"string"``)."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).type_name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).type_name)
 
     async def as_int(self) -> int:
         """Force this value and return it as ``int``. Raises if not an int."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).as_int)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).as_int)
 
     async def as_float(self) -> float:
         """Force this value and return it as ``float``. Raises if not a float."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).as_float)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).as_float)
 
     async def as_bool(self) -> bool:
         """Force this value and return it as ``bool``. Raises if not a bool."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).as_bool)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).as_bool)
 
     async def as_string(self) -> str:
         """Force this value and return it as ``str``. Raises if not a string."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).as_string)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).as_string)
 
     async def realise_string(self) -> str:
         """Coerce this value to a string and realise its Nix string context."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).realise_string)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).realise_string)
 
     async def realise_argv(self) -> list[str]:
         """Coerce a Nix list to argv and realise all of its string contexts."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).realise_argv)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).realise_argv)
 
     async def edit_location(self) -> tuple[str, int]:
         """Return the physical file path and line Nix would open for this value."""
-        location = await self._eval_session._session.run(self._local_for(self._eval_session).edit_location)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        location = await self._eval_session.run(self._local_for(self._eval_session).edit_location)
         return location["path"], location["line"]
 
     async def attr(self, name: str) -> Value:
         """Force this value as an attrset and return attribute ``name``."""
-        local = await self._eval_session._session.run(self._local_for(self._eval_session).attr_get, name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        local = await self._eval_session.run(self._local_for(self._eval_session).attr_get, name)
         return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def has_attr(self, name: str) -> bool:
         """Force this value as an attrset and return whether ``name`` is present."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).has_attr, name)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).has_attr, name)
 
     async def list_get(self, index: int) -> Value:
         """Force this value as a list and return element ``index``."""
-        local = await self._eval_session._session.run(self._local_for(self._eval_session).list_get, index)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        local = await self._eval_session.run(self._local_for(self._eval_session).list_get, index)
         return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def attr_names(self) -> list[str]:
         """Force this value as an attrset and return its attribute names."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).attr_names)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).attr_names)
 
     async def list_length(self) -> int:
         """Force this value as a list and return its length."""
-        return await self._eval_session._session.run(self._local_for(self._eval_session).list_length)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._local_for(self._eval_session).list_length)
 
     async def call(self, argument: Value | Any) -> Value:
         """Call this value as a Nix function with a single ``argument``.
@@ -839,18 +920,18 @@ class Value:
         """
         local = self._local_for(self._eval_session)
         argument_local = await self._argument_local(argument)
-        result = await self._eval_session._session.run(local.call, argument_local)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        result = await self._eval_session.run(local.call, argument_local)
         return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def auto_call(self) -> Value:
         """Apply Nix top-level auto-call semantics to a function value."""
-        result = await self._eval_session._session.run(self._local_for(self._eval_session).auto_call)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        result = await self._eval_session.run(self._local_for(self._eval_session).auto_call)
         return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def _argument_local(self, argument: Value | Any) -> LocalValue:
         if isinstance(argument, Value):
             return argument._local_for(self._eval_session)
-        return await self._eval_session._session.run(self._eval_session._require_local().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        return await self._eval_session.run(self._eval_session._require_local().value_from_python, argument)
 
     async def build(self, *, store: Store | None = None, build_mode: Any = None) -> dict[str, str]:
         """Build the derivation represented by this evaluated value.
@@ -864,7 +945,7 @@ class Value:
         if target_store._session is not self._eval_session._session:  # type: ignore[reportPrivateUsage] -- session ownership guard
             raise ValueError("Store belongs to a different inproc Session")
         mode = BuildMode.Normal.value if build_mode is None else int(build_mode)
-        result = await self._eval_session._session.run(self._local_for(self._eval_session).build, target_store._require_local(), mode, None)  # type: ignore[reportPrivateUsage] -- parent owns Nix executor
+        result = await self._eval_session.run(self._local_for(self._eval_session).build, target_store._require_local(), mode, None)
         results = result["results"]
         if not results or not results[0]["success"]:
             raise RuntimeError(result["results"][0].get("error_msg", "build failed") if results else "build returned no result")

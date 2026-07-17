@@ -46,8 +46,8 @@ class NixCore:
     def open_store(self, uri: str) -> Any:
         return nanopynix_store.open_store(uri)
 
-    def open_eval_state(self, store: Any, nix_path: Sequence[str]) -> Any:
-        return nanopynix_expr.EvalState(store, list(nix_path))
+    def open_eval_state(self, store: Any, nix_path: Sequence[str], build_store: Any | None = None) -> Any:
+        return nanopynix_expr.EvalState(store, list(nix_path), build_store)
 
     def get_verbosity(self) -> int:
         return nanopynix_util.get_verbosity()

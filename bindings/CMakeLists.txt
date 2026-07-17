@@ -76,6 +76,9 @@ if(BUILD_EXPR)
     ${NIX_CMD_INCLUDE_DIRS} ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
   target_link_libraries(nanopynix_expr PRIVATE
     ${NIX_CMD_LIBRARIES} ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
+  # nix-expr propagates bdw-gc. Its public thread-registration declarations
+  # are intentionally visible only to consumers defining GC_THREADS.
+  target_compile_definitions(nanopynix_expr PRIVATE GC_THREADS)
   target_compile_options(nanopynix_expr PRIVATE -std=c++23)
   nanopynix_target_uses_nix_compat(nanopynix_expr)
 endif()

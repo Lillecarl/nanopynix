@@ -10,6 +10,8 @@
 #include <cstdlib>
 #include <stdexcept>
 
+#include <gc/gc.h>
+
 #include <nix/expr/eval.hh>
 #include <nix/expr/eval-error.hh>
 #include <nix/expr/eval-gc.hh>
@@ -1173,8 +1175,8 @@ static void bind_eval_state(nb::module_ &m) {
     nb::class_<PyEvalState>(m, "EvalState")
         .def(nb::init<nix::Store &, const std::vector<std::string> &>(),
              "store"_a, "search_path"_a = std::vector<std::string>{})
-        .def(nb::init<std::shared_ptr<nix::Store>, const std::vector<std::string> &>(),
-             "store"_a, "search_path"_a = std::vector<std::string>{})
+        .def(nb::init<std::shared_ptr<nix::Store>, const std::vector<std::string> &, std::shared_ptr<nix::Store>>(),
+             "store"_a, "search_path"_a = std::vector<std::string>{}, "build_store"_a = nullptr)
         .def("eval_string", &PyEvalState::eval_string,
              "expr"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
         .def("eval_file", &PyEvalState::eval_file, "path"_a, nb::keep_alive<0, 1>())
@@ -1193,6 +1195,34 @@ static void bind_eval_state(nb::module_ &m) {
         .def("value_from_python", &PyEvalState::value_from_python, "obj"_a, nb::keep_alive<0, 1>());
 }
 
+// Python owns evaluator threads. Nix enables manual Boehm registration during
+// initGC(), but it does not register embedding-created threads itself.
+static thread_local bool evaluator_thread_registered = false;
+
+static void enter_evaluator_thread() {
+    if (evaluator_thread_registered)
+        throw std::runtime_error("evaluator thread is already registered with Boehm GC");
+
+    GC_stack_base stack_base;
+    auto stack_base_result = GC_get_stack_base(&stack_base);
+    if (stack_base_result != GC_SUCCESS)
+        throw std::runtime_error("could not determine evaluator thread stack base for Boehm GC");
+
+    auto register_result = GC_register_my_thread(&stack_base);
+    if (register_result != GC_SUCCESS)
+        throw std::runtime_error("could not register evaluator thread with Boehm GC");
+    evaluator_thread_registered = true;
+}
+
+static void exit_evaluator_thread() {
+    if (!evaluator_thread_registered)
+        throw std::runtime_error("evaluator thread is not registered with Boehm GC");
+    auto unregister_result = GC_unregister_my_thread();
+    if (unregister_result != GC_SUCCESS)
+        throw std::runtime_error("could not unregister evaluator thread from Boehm GC");
+    evaluator_thread_registered = false;
+}
+
 // =========================================================================
 
 NB_MODULE(nanopynix_expr, m) {
@@ -1203,6 +1233,10 @@ NB_MODULE(nanopynix_expr, m) {
         auto &f = nix::experimentalFeatureSettings.experimentalFeatures.get();
         f.insert(nix::Xp::FetchTree);
     }, nb::call_guard<nb::gil_scoped_release>());
+    m.def("_enter_evaluator_thread", &enter_evaluator_thread,
+          "Internal: register the current dedicated evaluator thread with Boehm GC.");
+    m.def("_exit_evaluator_thread", &exit_evaluator_thread,
+          "Internal: unregister the current dedicated evaluator thread from Boehm GC.");
     m.def("parse_nix_path", [](std::optional<std::string> raw) -> std::vector<std::string> {
         std::string value;
         if (raw) {

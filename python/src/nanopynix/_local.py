@@ -1,9 +1,9 @@
-"""Transport-neutral, thread-confined local Nix resources.
+"""Transport-neutral local Nix resources.
 
-These objects own direct L1 bindings and are intentionally synchronous: they
-must only be used on :class:`NixThreadExecutor`'s one Nix thread.  The public
-``inproc`` API schedules them asynchronously, while the RPC worker places the
-same objects behind opaque remote handles.
+These objects own direct L1 bindings and are intentionally synchronous. The
+public ``inproc`` API may share a ``LocalStore`` across Store-pool threads, but
+each ``LocalEvalState`` and its values remain confined to one evaluator thread.
+The RPC worker places the same objects behind opaque remote handles.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class LocalStore:
-    """One direct store pointer, confined to the Nix thread."""
+    """One direct thread-safe store pointer shared by the Store pool."""
 
     def __init__(self, raw: Any) -> None:
         self.raw: Any = raw
@@ -273,8 +273,20 @@ class LocalRuntime:
     def open_store(self, uri: str) -> LocalStore:
         return LocalStore(self._core.open_store(uri))
 
-    def open_eval_state(self, store: LocalStore, nix_path: Sequence[str]) -> LocalEvalState:
-        return LocalEvalState(self._core.open_eval_state(store.require_raw(), nix_path), store)
+    def open_eval_state(
+        self,
+        store: LocalStore,
+        nix_path: Sequence[str],
+        build_store: LocalStore | None = None,
+    ) -> LocalEvalState:
+        return LocalEvalState(
+            self._core.open_eval_state(
+                store.require_raw(),
+                nix_path,
+                None if build_store is None else build_store.require_raw(),
+            ),
+            store,
+        )
 
     def get_verbosity(self) -> int:
         return self._core.get_verbosity()

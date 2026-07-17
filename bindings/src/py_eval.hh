@@ -20,6 +20,7 @@ struct PyValue;
 
 struct PyEvalState {
     std::shared_ptr<nix::Store> store;
+    std::shared_ptr<nix::Store> build_store;
     bool _readOnlyMode = false;
     nix::fetchers::Settings fetchSettings;
     nix::EvalSettings evalSettings{_readOnlyMode};
@@ -37,14 +38,15 @@ struct PyEvalState {
     }
 
     PyEvalState(std::shared_ptr<nix::Store> s,
-                const std::vector<std::string> &searchPath = {})
-        : store(std::move(s))
+                const std::vector<std::string> &searchPath = {},
+                std::shared_ptr<nix::Store> buildStore = nullptr)
+        : store(std::move(s)), build_store(std::move(buildStore))
     {
         init(searchPath);
     }
 
     PyEvalState(nix::Store &s, const std::vector<std::string> &searchPath = {})
-        : store(s.shared_from_this())
+        : store(s.shared_from_this()), build_store(store)
     {
         init(searchPath);
     }
@@ -97,6 +99,7 @@ private:
             lookupPath,
             nix::ref<nix::Store>(store),
             fetchSettings,
-            evalSettings);
+            evalSettings,
+            build_store ? build_store : store);
     }
 };
