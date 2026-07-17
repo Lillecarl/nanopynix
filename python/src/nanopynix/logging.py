@@ -9,6 +9,7 @@ for the worker subprocess and an async interface for the Nix manager client.
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import TYPE_CHECKING, Any
 
 import janus
@@ -44,6 +45,7 @@ class LogCollector:
         self._maxsize: int = maxsize
         self._queue: janus.Queue[Any] = janus.Queue(maxsize=maxsize)
         self._enqueued: int = 0
+        self._stats_lock = threading.Lock()
 
     # ── callback (thread-safe, called from C++ on any GIL thread) ──
 
@@ -55,16 +57,19 @@ class LogCollector:
         the async side through ``SubscribeLogs``.
         """
         self._queue.sync_q.put((req_id, action, *args))
-        self._enqueued += 1
+        with self._stats_lock:
+            self._enqueued += 1
 
     def stats(self) -> dict[str, int | bool]:
         """Return queue counters for worker signal diagnostics."""
+        with self._stats_lock:
+            enqueued = self._enqueued
         return {
             "maxsize": self._maxsize,
             "qsize": self._queue.sync_q.qsize(),
             "full": self._queue.sync_q.full(),
             "empty": self._queue.sync_q.empty(),
-            "enqueued": self._enqueued,
+            "enqueued": enqueued,
         }
 
     # ── sync drain (for the worker subprocess) ─────────────────────

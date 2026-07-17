@@ -70,9 +70,12 @@ static void enable_experimental_feature(const std::string &name) {
 // PyLogger — custom Nix logger that forwards to a Python callback
 // =========================================================================
 
+// Nix invokes Logger callbacks on the originating Nix thread. A request ID is
+// therefore thread-local operation context, not mutable global logger state.
+static thread_local int64_t logger_request_id = 0;
+
 class PyLogger : public nix::Logger {
     nb::object _cb;
-    int64_t _req_id = 0;
 
 public:
     explicit PyLogger(nb::object cb) : _cb(std::move(cb)) {}
@@ -82,24 +85,21 @@ public:
         _cb = nb::none();
     }
 
-    void set_request_id(int64_t id) { _req_id = id; }
-    int64_t request_id() const { return _req_id; }
-
     void log(nix::Verbosity lvl, std::string_view s) override {
         if (lvl > nix::verbosity) return;
         nb::gil_scoped_acquire gil;
-        _cb(nb::int_(_req_id), "msg", int(lvl), std::string(s));
+        _cb(nb::int_(logger_request_id), "msg", int(lvl), std::string(s));
     }
 
     void logEI(const nix::ErrorInfo & ei) override {
         if (ei.level > nix::verbosity) return;
         nb::gil_scoped_acquire gil;
-        _cb(nb::int_(_req_id), "error", int(ei.level), std::string(ei.msg.str()));
+        _cb(nb::int_(logger_request_id), "error", int(ei.level), std::string(ei.msg.str()));
     }
 
     void warn(const std::string & msg) override {
         nb::gil_scoped_acquire gil;
-        _cb(nb::int_(_req_id), "warn", msg);
+        _cb(nb::int_(logger_request_id), "warn", msg);
     }
 
     void startActivity(nix::ActivityId id, nix::Verbosity lvl,
@@ -115,12 +115,12 @@ public:
             else
                 fl.append(nb::str(f.s.c_str(), f.s.size()));
         }
-        _cb(nb::int_(_req_id), "start", id, int(lvl), int(type), s, std::move(fl), parent);
+        _cb(nb::int_(logger_request_id), "start", id, int(lvl), int(type), s, std::move(fl), parent);
     }
 
     void stopActivity(nix::ActivityId id) override {
         nb::gil_scoped_acquire gil;
-        _cb(nb::int_(_req_id), "stop", id);
+        _cb(nb::int_(logger_request_id), "stop", id);
     }
 
     void result(nix::ActivityId id, nix::ResultType type,
@@ -133,7 +133,7 @@ public:
             else
                 fl.append(nb::str(f.s.c_str(), f.s.size()));
         }
-        _cb(nb::int_(_req_id), "result", id, int(type), std::move(fl));
+        _cb(nb::int_(logger_request_id), "result", id, int(type), std::move(fl));
     }
 };
 
@@ -146,13 +146,11 @@ static void remove_logger() {
 }
 
 static void set_logger_request_id(int64_t id) {
-    auto *pl = dynamic_cast<PyLogger *>(nanopynix::nix_compat::logger());
-    if (pl) pl->set_request_id(id);
+    logger_request_id = id;
 }
 
 static int64_t get_logger_request_id() {
-    auto *pl = dynamic_cast<PyLogger *>(nanopynix::nix_compat::logger());
-    return pl ? pl->request_id() : 0;
+    return logger_request_id;
 }
 
 static void _log_test(const std::string & msg) {
