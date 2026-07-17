@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import sys
+from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
@@ -19,6 +20,8 @@ from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
+from rich.console import Console
+from rich.table import Table
 from tree_sitter import Language, Parser, Query, QueryCursor
 
 import nanopynix
@@ -124,24 +127,42 @@ _REPL_STYLE = Style.from_dict(
         "nix.string": "ansigreen",
     }
 )
-_HELP = """Commands:
-  <expr>                 Evaluate and print an expression
-  <name> = <expr>        Bind an expression to a name
-  :a, :add <expr>        Add an attrset's attributes to scope
-  :b, :build <expr>      Build an evaluated derivation
-  :e, :edit <expr>       Open a package, function, path, or string in $EDITOR
-  :l, :load <path>       Load a Nix file and add its attributes to scope
-  :lf, :load-flake <ref> Load flake outputs into scope
-  :ll, :last-loaded      Show names from the most recent load
-  :p, :print <expr>      Evaluate and print an expression
-  :run <expr>             Build a derivation and run its main program
-  :exec <list>            Realise a Nix argv list and execute it
-  :shell <expr>           Realise a Nix string and execute it with the shell
-  :r, :reload            Reload files and flakes
-  :t, :type <expr>       Show an expression's Nix type
-  :verbosity [level]      Show or set Nix log verbosity (0-7 or a level name)
-  :q, :quit              Exit the REPL
-  :?, :help              Show this help"""
+_HELP_ROWS = (
+    ("<expr>", "Evaluate and print an expression"),
+    ("<name> = <expr>", "Bind an expression to a name"),
+    (":a, :add <expr>", "Add an attrset's attributes to scope"),
+    (":b, :build <expr>", "Build an evaluated derivation"),
+    (":e, :edit <expr>", "Open a package, function, path, or string in $EDITOR"),
+    (":l, :load <path>", "Load a Nix file and add its attributes to scope"),
+    (":lf, :load-flake <ref>", "Load flake outputs into scope"),
+    (":ll, :last-loaded", "Show names from the most recent load"),
+    (":p, :print <expr>", "Evaluate and print an expression"),
+    (":run <expr>", "Build a derivation and run its main program"),
+    (":exec <list>", "Realise a Nix argv list and execute it"),
+    (":shell <expr>", "Realise a Nix string and execute it with the shell"),
+    (":r, :reload", "Reload files and flakes"),
+    (":t, :type <expr>", "Show an expression's Nix type"),
+    (":verbosity [level]", "Show or set Nix log verbosity (0-7 or a level name)"),
+    (":q, :quit", "Exit the REPL"),
+    (":?, :help", "Show this help"),
+)
+
+
+def _render_help() -> str:
+    """Render the REPL help with Rich's terminal-aware column layout."""
+    output = StringIO()
+    console = Console(file=output, color_system=None)
+    table = Table(box=None, show_header=False, pad_edge=False, padding=(0, 1))
+    table.add_column(no_wrap=True)
+    table.add_column()
+    for command, description in _HELP_ROWS:
+        table.add_row(command, description)
+    console.print("Commands:")
+    console.print(table)
+    return "\n".join(line.rstrip() for line in output.getvalue().splitlines())
+
+
+_HELP = _render_help()
 
 
 def _nix_input(text: str) -> tuple[str, int] | None:
