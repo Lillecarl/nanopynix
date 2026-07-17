@@ -17,7 +17,7 @@ from nanopynix_proto.nix.store import GcAction
 
 import nanopynix_expr
 import nanopynix_util
-from nanopynix import Derivation, EvalStateBusyError, GcResult, MissingInfo, inproc
+from nanopynix import Derivation, GcResult, MissingInfo, inproc
 
 
 @pytest.mark.anyio
@@ -55,10 +55,16 @@ async def test_inproc_repl_supports_shared_protocol_operations() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_allows_only_one_live_eval_state() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store):
-        with pytest.raises(EvalStateBusyError):
-            await nix.eval(store).open()
+async def test_inproc_allows_concurrent_eval_states_on_one_store() -> None:
+    """Two independent EvalSessions may be open on the same Store at once."""
+    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as first:
+        second = nix.eval(store)
+        await second.open()
+        try:
+            assert await (await first.string("40 + 2")).as_int() == 42
+            assert await (await second.string("41 + 1")).as_int() == 42
+        finally:
+            await second.close()
 
 
 @pytest.mark.anyio
@@ -519,13 +525,11 @@ async def test_inproc_store_not_open_raises() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_busy_error_message_and_close_idempotent() -> None:
+async def test_inproc_eval_open_and_close_are_idempotent() -> None:
     async with inproc.Session(load_config=False) as nix, nix.store() as store:
         eval = nix.eval(store)
         await eval.open()
         await eval.open()  # already active: no-op, does not re-raise
-        with pytest.raises(EvalStateBusyError):
-            await nix.eval(store).open()
         await eval.close()
         await eval.close()
 

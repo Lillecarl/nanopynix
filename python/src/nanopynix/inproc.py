@@ -656,6 +656,8 @@ class EvalSession:
 
     async def close(self) -> None:
         """Release all values and locked flakes, then destroy this evaluator."""
+        if not self._active:
+            return
         for locked_flake in tuple(self._locked_flakes):
             await locked_flake.release()
         local = self._local
@@ -976,6 +978,8 @@ class Value:
             build_mode: A :data:`BuildMode` value, or ``None`` for normal builds.
         """
         target_store = self._eval_session._store if store is None else store  # type: ignore[reportPrivateUsage] -- evaluator's bound store is default
+        if target_store._session is not self._eval_session._session:  # type: ignore[reportPrivateUsage] -- session ownership guard
+            raise ValueError("Store belongs to a different inproc Session")
         derived_path = await self.get_derived_path()
         results = await target_store.build_paths_with_results(
             [derived_path],
