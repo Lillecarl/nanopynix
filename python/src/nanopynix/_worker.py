@@ -5,8 +5,9 @@ Threading model
 
   * **Event loop thread** — gRPC handlers, H2 transport, WorkerBackchannel,
     log-relay task, primop-dispatcher task.
-  * **Nix thread** — dedicated ``ThreadPoolExecutor(max_workers=1)`` for
-    all Nix C++ operations (EvalState, Store, flake locking, evaluation).
+  * **Evaluator thread** — dedicated ``ThreadPoolExecutor(max_workers=1)``
+    for the thread-confined EvalState and its Values.
+  * **Store threads** — a bounded executor for concurrent Store operations.
 
   The event loop never blocks on Nix — handlers dispatch via
   ``executor.run()`` and the loop stays free for log relaying, primop RPC
@@ -79,10 +80,9 @@ if TYPE_CHECKING:
 # Re-export for the multiprocessing runner in _pool.py
 __all__ = ["main", "run_worker", "worker_service_factory"]
 
-# Keep handler slots for the long-lived primop backchannel, the long-lived
-# SubscribeLogs stream, and the active manager->worker call. EvalSession still
-# serializes all Nix operations at the worker-client boundary.
-_WORKER_MAX_CONCURRENCY = 3
+# Keep handler slots for long-lived streams plus bounded concurrent Store RPCs.
+_WORKER_MAX_CONCURRENCY = 32
+_STORE_WORKERS = 4
 
 # ── Primop registration ──────────────────────────────────────────────
 
@@ -143,11 +143,12 @@ class WorkerState:
     """Shared mutable state held by all three service handlers.
 
     Thread confinement:
-      * ``eval_state`` — Nix thread only (``_worker_nix.NixThreadExecutor``)
+      * ``eval_state`` — evaluator thread only
       * ``collector`` — both threads (already thread-safe via ``janus.Queue``)
       * ``log_task`` — unused compatibility slot; parent consumes SubscribeLogs
       * ``handles`` — both threads (locked ``HandleRegistry``)
-      * ``executor`` — event loop only (owns the Nix thread)
+      * ``executor`` — event loop only (owns the evaluator thread)
+      * ``store_executor`` — event loop only (owns bounded Store threads)
       * ``rpc_bridge`` — Nix thread reads, event loop writes (internal locking)
     """
 
@@ -158,7 +159,9 @@ class WorkerState:
         self.handles: HandleRegistry = HandleRegistry()
         self.runtime = LocalRuntime()
         self.executor: NixThreadExecutor | None = None
+        self.store_executor: NixThreadExecutor | None = None
         self.owns_executor = True
+        self.owns_store_executor = True
         self.rpc_bridge: ThreadedRpcPrimopBridge | None = None
         self.eval_store_handle: int | None = None
         self.nix_path: list[str] = []
@@ -226,8 +229,8 @@ class WorkerServiceHandler(WorkerServiceBase):
         _register_primops(primops_raw, rpc_bridge=self._state.rpc_bridge)
 
     async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
-        assert self._state.executor is not None  # set by worker_service_factory before init
-        store_handle, uri, store_dir = await self._state.executor.run(self._open_store, message.uri)
+        assert self._state.store_executor is not None  # set by worker_service_factory before init
+        store_handle, uri, store_dir = await self._state.store_executor.run(self._open_store, message.uri)
         return OpenStoreResponse(
             store_handle=store_handle,
             uri=uri,
@@ -244,6 +247,8 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
         assert self._state.executor is not None  # set by worker_service_factory before init
+        # A forced close may have to destroy the thread-confined EvalState, so
+        # retain the evaluator lane for this lifecycle operation.
         await self._state.executor.run(self._close_store, message.store_handle, message.force)
         return CloseStoreResponse()
 
@@ -304,6 +309,8 @@ class WorkerServiceHandler(WorkerServiceBase):
             self._state.rpc_bridge.stop()
         if self._state.executor is not None and self._state.owns_executor:
             self._state.executor.shutdown(wait=False)
+        if self._state.store_executor is not None and self._state.owns_store_executor:
+            self._state.store_executor.shutdown(wait=False)
         return ShutdownResponse()
 
 
@@ -314,6 +321,7 @@ def worker_service_factory(
     backchannel: WorkerBackchannel | None = None,
     *,
     executor: NixThreadExecutor | None = None,
+    store_executor: NixThreadExecutor | None = None,
 ) -> list[IServable]:
     """Create service handlers with a shared WorkerState.
 
@@ -323,7 +331,8 @@ def worker_service_factory(
     Sets up:
 
     * ``LogCollector`` + log-relay task (event loop thread)
-    * ``NixThreadExecutor`` (dedicated single-worker thread)
+    * evaluator ``NixThreadExecutor`` (dedicated single-worker thread)
+    * Store ``NixThreadExecutor`` (bounded, concurrent Store work)
     * ``ThreadedRpcPrimopBridge`` (Nix→event-loop primop dispatch)
     """
     collector = LogCollector()
@@ -337,6 +346,12 @@ def worker_service_factory(
 
     state.executor = NixThreadExecutor() if executor is None else executor
     state.owns_executor = executor is None
+    state.store_executor = (
+        NixThreadExecutor(max_workers=_STORE_WORKERS, thread_name_prefix="nix-store")
+        if store_executor is None
+        else store_executor
+    )
+    state.owns_store_executor = store_executor is None
 
     if backchannel is not None:
         loop = asyncio.get_running_loop()

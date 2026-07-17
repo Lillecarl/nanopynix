@@ -96,6 +96,10 @@ def _normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
 class Session:
     """Session runtime — manages a single subprocess worker.
 
+    A Session owns one thread-confined EvalState at a time. Its Store facade is
+    independent of that evaluator: concurrent Store calls are dispatched to a
+    bounded worker-side Store pool and may overlap with evaluator work.
+
     Usage::
 
         async with Session(
@@ -254,7 +258,8 @@ class Session:
 
         Returns an ``EvalSession`` context manager. All exported handles are
         released on exit. Only one EvalSession or ReplSession may be open at a
-        time; Store operations remain available while it is open.
+        time; Store operations remain available and may run concurrently while
+        it is open.
         """
         if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
             raise ValueError("Store belongs to a different session")
