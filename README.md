@@ -1,6 +1,6 @@
 # pynixd
 
-[![Documentation Status](https://readthedocs.org/projects/pynixd/badge/?version=latest)](https://pynixd.readthedocs.io/en/latest/?badge=latest)
+[![Documentation](https://img.shields.io/badge/docs-lillecarl.github.io-blue)](https://lillecarl.github.io/pynixd/)
 
 > Built by me with a bunch of AI models
 
@@ -158,7 +158,7 @@ Versions are managed by nixpkgs:
 - aiosqlite >= 0.21
 - pyinstrument
 
-[Documentation](https://pynixd.readthedocs.io/)
+[Documentation](https://lillecarl.github.io/pynixd/)
 
 ---
 

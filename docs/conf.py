@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -27,6 +28,8 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "furo"
 
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
-}
+smartquotes = False
+
+intersphinx_mapping = (
+    {} if os.environ.get("PYNIXD_DOCS_OFFLINE") else {"python": ("https://docs.python.org/3", None)}
+)

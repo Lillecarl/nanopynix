@@ -17,6 +17,9 @@ let
     pynixd.dependencies
     ++ [
       ps.pytest
+      ps.sphinx
+      ps.myst-parser
+      ps.furo
     ]
   );
 in

@@ -6,17 +6,13 @@
   outputs =
     inputs:
     let
-      eachSys = (
-        inputs.nixpkgs.lib.genAttrs (
-          # system tuplets built by NixOS Hydra
-          builtins.fromJSON (builtins.readFile "${inputs.nixpkgs}/ci/supportedSystems.json")
-        )
-      );
-      eachPkgs = eachSys (system: import inputs.nixpkgs { inherit system; });
-      eachDefNix = eachSys (system: import ./. { pkgs = eachPkgs.${system}; });
+      lib = inputs.nixpkgs.lib;
+      forEachSystem = lib.genAttrs lib.systems.flakeExposed;
+      eachPkgs = forEachSystem (system: import inputs.nixpkgs { inherit system; });
+      eachDefNix = forEachSystem (system: import ./. { pkgs = eachPkgs.${system}; });
     in
     {
-      packages = eachSys (
+      packages = forEachSystem (
         system:
         let
           defNix = eachDefNix.${system};
@@ -25,9 +21,10 @@
           default = defNix.package;
           pynixd = defNix.package;
           libpynixd = defNix.library;
+          pynixd-docs = defNix.pynixd-docs;
         }
       );
-      devShells = eachSys (
+      devShells = forEachSystem (
         system:
         let
           defNix = eachDefNix.${system};
@@ -36,7 +33,7 @@
           default = defNix.shell;
         }
       );
-      legacyPackages = eachSys (system: eachPkgs.${system});
+      legacyPackages = forEachSystem (system: eachPkgs.${system});
       nixosModules.default = ./nix/nixos;
     };
 }

@@ -100,6 +100,8 @@ package
     pkgs
     ;
 
+  pynixd-docs = pkgs.python3Packages.callPackage ./nix/docs.nix { pynixd = library; };
+
   shell = pkgs.callPackage ./nix/shell.nix { pynixd = package; };
   nixosModule = import ./nix/nixos/default.nix;
 
