@@ -22,6 +22,7 @@ from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentiona
     _main_program,
     _NixLexer,
     _print_error,
+    _repl_history,
     _ReplCompleter,
     _run_derivation,
     _run_repl_loop,
@@ -38,6 +39,16 @@ class _Prompt:
 
     async def prompt_async(self, _prompt: str) -> str:
         return self._lines.popleft()
+
+
+def test_repl_history_uses_xdg_state_home(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+    history = _repl_history()
+    history.append_string("pkgs.hello")
+
+    assert (tmp_path / "state" / "pynix" / "repl_history").is_file()
+    assert list(_repl_history().load_history_strings()) == ["pkgs.hello"]
 
 
 class _Value:
