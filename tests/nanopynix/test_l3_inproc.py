@@ -29,7 +29,7 @@ from nanopynix_proto.nix.worker import (
 
 import nanopynix_util
 from nanopynix._manager import ManagerPrimopServiceHandler
-from nanopynix._nix_executor import shared_nix_executor
+from nanopynix._nix_executor import NixThreadExecutor
 from nanopynix._session import EvalSession, ValueReleasedError
 from nanopynix._worker import WorkerServiceHandler, WorkerState, worker_service_factory
 from nanopynix.models import NixType
@@ -107,7 +107,7 @@ class _L3Inproc:
 async def l3_inproc(tmp_path: Path) -> AsyncIterator[_L3Inproc]:
     handlers: list[object] = []
     store_uri = f"local?root={tmp_path / 'store-root'}"
-    executor = shared_nix_executor()
+    executor = NixThreadExecutor()
     previous_verbosity = await executor.run(nanopynix_util.get_verbosity)
 
     def service_factory(backchannel: Any) -> list[Any]:
@@ -137,14 +137,17 @@ async def l3_inproc(tmp_path: Path) -> AsyncIterator[_L3Inproc]:
                 store_uri,
             )
         finally:
-            await session.close()
-            await worker_stub.close_store(CloseStoreRequest(store_handle=store.store_handle))
-            assert worker_state.handles.iter_kind("value") == []
-            assert worker_state.handles.iter_kind("locked_flake") == []
-            assert worker_state.handles.iter_kind("store") == []
-            await worker_stub.shutdown(ShutdownRequest())
-            await executor.run(nanopynix_util.remove_logger)
-            await executor.run(nanopynix_util.set_verbosity, previous_verbosity)
+            try:
+                await session.close()
+                await worker_stub.close_store(CloseStoreRequest(store_handle=store.store_handle))
+                assert worker_state.handles.iter_kind("value") == []
+                assert worker_state.handles.iter_kind("locked_flake") == []
+                assert worker_state.handles.iter_kind("store") == []
+                await worker_stub.shutdown(ShutdownRequest())
+                await executor.run(nanopynix_util.remove_logger)
+                await executor.run(nanopynix_util.set_verbosity, previous_verbosity)
+            finally:
+                executor.shutdown(wait=True)
 
 
 async def test_attrs_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -> None:

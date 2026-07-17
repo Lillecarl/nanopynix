@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,7 +22,7 @@ import nanopynix_store
 import nanopynix_util
 from nanopynix._extract import locked_flake as _locked_flake_proto
 from nanopynix._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
-from nanopynix._nix_executor import shared_nix_executor
+from nanopynix._nix_executor import NixThreadExecutor
 from nanopynix.logging import LogCollector
 from nanopynix.models import Derivation, GcResult, LockedInput, LogEvent, MissingInfo, PathInfo
 from nanopynix.models import StorePath as PublicStorePath
@@ -55,7 +56,41 @@ def _raw_gc_action(action: PublicGcAction) -> Any:
     except KeyError as exc:
         raise ValueError(f"unsupported garbage-collection action: {action!r}") from exc
 
-_initialization_signature: tuple[object, ...] | None = None
+class _InprocProcessGuard:
+    """Reflect the irreducible process-global portion of an in-process Nix runtime.
+
+    Nix library initialization cannot be undone, so its initial configuration
+    remains relevant after an :class:`Session` closes. The Python executor and
+    every direct Nix object remain session-owned.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active_session: Session | None = None
+        self._initialization_signature: tuple[object, ...] | None = None
+
+    def acquire(self, session: Session, signature: tuple[object, ...]) -> None:
+        with self._lock:
+            active = self._active_session
+            if active is not None and active is not session:
+                raise RuntimeError("only one nanopynix.inproc.Session may be open per process")
+            initialized = self._initialization_signature
+            if initialized is not None and signature != initialized:
+                raise RuntimeError("Nix is already initialized in this process with different nanopynix.inproc settings")
+            self._active_session = session
+
+    def mark_initialized(self, signature: tuple[object, ...]) -> None:
+        with self._lock:
+            if self._initialization_signature is None:
+                self._initialization_signature = signature
+
+    def release(self, session: Session) -> None:
+        with self._lock:
+            if self._active_session is session:
+                self._active_session = None
+
+
+_process_guard = _InprocProcessGuard()
 
 
 def _print_store_path(raw_store: Any, raw_path: Any) -> str:
@@ -107,8 +142,6 @@ class Session:
     time. A session likewise owns at most one live :class:`EvalSession`.
     """
 
-    _active_session: Session | None = None
-
     def __init__(
         self,
         *,
@@ -139,7 +172,7 @@ class Session:
         self._runtime = LocalRuntime()
         # Creation is deliberately lazy: merely importing nanopynix.inproc
         # must not start a Nix thread in an L3 manager process.
-        self._executor = shared_nix_executor()
+        self._executor: NixThreadExecutor | None = None
         self._log_callbacks: set[Any] = set()
         self._log_task: asyncio.Task[None] | None = None
         self._opened = False
@@ -162,26 +195,32 @@ class Session:
         await self.close()
 
     async def open(self) -> None:
-        global _initialization_signature
         if self._opened:
             return
-        active = type(self)._active_session
-        if active is not None and active is not self:
-            raise RuntimeError("only one nanopynix.inproc.Session may be open per process")
-        type(self)._active_session = self
+        signature = self._initialization_signature()
+        _process_guard.acquire(self, signature)
+        executor = NixThreadExecutor()
+        self._executor = executor
+        logger_installed = False
         try:
-            signature = self._initialization_signature()
-            self._check_initialization_signature(signature)
             if self._nix_conf is not None:
                 os.environ["NIX_USER_CONF_FILES"] = str(self._nix_conf)
             nanopynix_util.install_logger(self._collector.callback)
-            await self._executor.run(self._init_nix)
-            _initialization_signature = signature
+            logger_installed = True
+            await executor.run(self._init_nix)
+            _process_guard.mark_initialized(signature)
             self._opened = True
             self._log_task = asyncio.create_task(self._forward_logs())
         except BaseException:
-            type(self)._active_session = None
-            nanopynix_util.remove_logger()
+            try:
+                if logger_installed:
+                    await executor.run(nanopynix_util.remove_logger)
+            finally:
+                try:
+                    executor.shutdown(wait=True)
+                finally:
+                    self._executor = None
+                    _process_guard.release(self)
             raise
 
     def _initialization_signature(self) -> tuple[object, ...]:
@@ -196,11 +235,6 @@ class Session:
             tuple(self._allowed_uris),
         )
 
-    @staticmethod
-    def _check_initialization_signature(signature: tuple[object, ...]) -> None:
-        if _initialization_signature is not None and signature != _initialization_signature:
-            raise RuntimeError("Nix is already initialized in this process with different nanopynix.inproc settings")
-
     def _init_nix(self) -> None:
         self._runtime.initialize(
             settings=self._settings.to_worker_settings(),
@@ -214,19 +248,42 @@ class Session:
     async def close(self) -> None:
         if not self._opened:
             return
-        eval_session = self._eval
-        if eval_session is not None:
-            await eval_session.close()
-        for store in tuple(self._stores):
-            await store.close()
-        task = self._log_task
-        self._log_task = None
-        if task is not None:
-            await self._collector.aclose()
-            await task
-        await self._executor.run(nanopynix_util.remove_logger)
-        self._opened = False
-        type(self)._active_session = None
+        executor = self._executor
+        if executor is None:
+            raise RuntimeError("open inproc Session has no Nix executor")
+        errors: list[BaseException] = []
+
+        async def close_resource(operation: Any) -> None:
+            try:
+                await operation
+            except BaseException as exc:
+                errors.append(exc)
+
+        try:
+            eval_session = self._eval
+            if eval_session is not None:
+                await close_resource(eval_session.close())
+            for store in tuple(self._stores):
+                await close_resource(store.close())
+            task = self._log_task
+            self._log_task = None
+            if task is not None:
+                await close_resource(self._collector.aclose())
+                await close_resource(task)
+            await close_resource(executor.run(nanopynix_util.remove_logger))
+        finally:
+            try:
+                executor.shutdown(wait=True)
+            except BaseException as exc:
+                errors.append(exc)
+            self._executor = None
+            self._opened = False
+            _process_guard.release(self)
+
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise BaseExceptionGroup("errors closing inproc Session", errors)
 
     async def _forward_logs(self) -> None:
         async for raw in self._collector.stream():
@@ -242,7 +299,10 @@ class Session:
     async def run(self, func: Any, *args: Any) -> Any:
         """Run one direct-pointer Nix operation on this session's Nix thread."""
         self._check_open()
-        return await self._executor.run(func, *args)
+        executor = self._executor
+        if executor is None:
+            raise RuntimeError("open inproc Session has no Nix executor")
+        return await executor.run(func, *args)
 
     def unsubscribe(self, callback: Any) -> None:
         """Remove one callback previously registered with :meth:`subscribe`."""
