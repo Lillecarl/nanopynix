@@ -16,8 +16,9 @@ from typing import Any, cast
 
 import pytest
 from _git import init_flake_repo
+from grpclib.exceptions import GRPCError
 from grpclib_transports import inproc_worker_with_backchannel
-from nanopynix_proto.nix.eval import EvalServiceStub
+from nanopynix_proto.nix.eval import EvalServiceStub, EvalStringRequest
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
     InitRequest,
@@ -263,7 +264,7 @@ async def test_failed_value_release_retries_at_the_next_rpc_boundary(l3_inproc: 
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind("value")}
 
 
-async def test_session_close_release_all_clears_worker_values(l3_inproc: _L3Inproc) -> None:
+async def test_session_close_closes_eval_state_and_clears_worker_values(l3_inproc: _L3Inproc) -> None:
     eval_ = l3_inproc.eval
     await eval_.open()
     first = await eval_.string("1")
@@ -273,8 +274,30 @@ async def test_session_close_release_all_clears_worker_values(l3_inproc: _L3Inpr
     await eval_.close()
 
     assert l3_inproc.state.handles.iter_kind("value") == []
+    assert l3_inproc.state.eval_state is None
     assert {item[0] for item in l3_inproc.state.handles.iter_kind("store")} == {l3_inproc.initial_store_handle}
     del first, second
+
+
+async def test_eval_rpc_requires_open_eval(l3_inproc: _L3Inproc) -> None:
+    with pytest.raises(GRPCError, match="call OpenEval before evaluating"):
+        await l3_inproc.worker._eval_stub.eval_string(EvalStringRequest(expr="1", source_name="<test>"))
+
+    assert l3_inproc.state.eval_state is None
+
+
+async def test_store_cannot_close_while_its_eval_state_is_open(l3_inproc: _L3Inproc) -> None:
+    await l3_inproc.eval.open()
+
+    with pytest.raises(GRPCError) as error:
+        await l3_inproc.worker_stub.close_store(CloseStoreRequest(store_handle=l3_inproc.initial_store_handle))
+
+    assert "call CloseEval first" in str(error.value)
+    await l3_inproc.worker_stub.close_store(
+        CloseStoreRequest(store_handle=l3_inproc.initial_store_handle, force=True)
+    )
+    assert l3_inproc.state.eval_state is None
+    assert l3_inproc.state.handles.iter_kind("store") == []
 
 
 async def test_locked_flake_explicit_release_removes_exact_worker_handle(
@@ -328,7 +351,7 @@ async def test_locked_flake_finalizer_defers_then_drains_to_worker(l3_inproc: _L
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind("locked_flake")}
 
 
-async def test_session_close_release_all_clears_values_and_locked_flakes(
+async def test_session_close_closes_eval_state_and_clears_values_and_locked_flakes(
     l3_inproc: _L3Inproc, tmp_path: Path
 ) -> None:
     init_flake_repo(tmp_path, "val = 1;")
@@ -343,6 +366,7 @@ async def test_session_close_release_all_clears_values_and_locked_flakes(
 
     assert l3_inproc.state.handles.iter_kind("value") == []
     assert l3_inproc.state.handles.iter_kind("locked_flake") == []
+    assert l3_inproc.state.eval_state is None
     assert {item[0] for item in l3_inproc.state.handles.iter_kind("store")} == {l3_inproc.initial_store_handle}
     del value, locked
 

@@ -305,8 +305,12 @@ class Store:
         if self._local is None:
             self._local = await self._session.run(self._session._runtime.open_store, self._uri)  # type: ignore[reportPrivateUsage] -- session owns local runtime
 
-    async def close(self) -> None:
-        """Close the underlying store."""
+    async def close(self, *, force: bool = False) -> None:
+        """Close the underlying store, optionally closing its evaluator first."""
+        if self._session._eval is not None and self._session._eval._store is self:  # type: ignore[reportPrivateUsage] -- session owns the sole evaluator and this store owns its backing pointer
+            if not force:
+                raise RuntimeError("cannot close a store while its EvalState is open; close the EvalSession first")
+            await self._session._eval.close()  # type: ignore[reportPrivateUsage] -- store force-close owns the dependent evaluator teardown
         local = self._local
         self._local = None
         self._session._stores.discard(self)  # type: ignore[reportPrivateUsage] -- session owns store lifetime tracking

@@ -68,8 +68,8 @@ class AsyncStore(Protocol):
         """Open the underlying store."""
         ...
 
-    async def close(self) -> None:
-        """Close the underlying store."""
+    async def close(self, *, force: bool = False) -> None:
+        """Close the underlying store, optionally closing its evaluator first."""
         ...
 
     async def uri(self) -> str:

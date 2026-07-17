@@ -72,6 +72,8 @@ def _make_eval_stub() -> MagicMock:
     stub = MagicMock()
     stub.eval_file = AsyncMock()
     stub.eval_string = AsyncMock()
+    stub.open_eval = AsyncMock()
+    stub.close_eval = AsyncMock()
     stub.begin_repl = AsyncMock()
     stub.repl_process_line = AsyncMock()
     stub.force = AsyncMock()
@@ -207,6 +209,7 @@ class TestEvalSessionLifecycle:
         result = await session.__aenter__()
         assert result is session
         pool.reserve.assert_awaited_once()
+        rw._eval_stub.open_eval.assert_awaited_once()
 
     async def test_open_close_manual_lifecycle(self):
         pool = _mock_pool()
@@ -223,27 +226,26 @@ class TestEvalSessionLifecycle:
     async def test_exit_releases_worker(self):
         pool = _mock_pool()
         rw = _mock_reserved_worker()
-        rw._eval_stub.release_all.return_value = MagicMock()
         pool.reserve.return_value = rw
 
         session = EvalSession(pool)
         await session.__aenter__()
         await session.__aexit__(None, None, None)
 
-        rw._eval_stub.release_all.assert_awaited_once()
+        rw._eval_stub.close_eval.assert_awaited_once()
         rw.release.assert_awaited_once()
 
-    async def test_exit_releases_worker_even_on_release_all_error(self):
+    async def test_exit_releases_worker_even_on_close_eval_error(self):
         """Worker is always returned to pool even if release_all RPC fails."""
         pool = _mock_pool()
         rw = _mock_reserved_worker()
-        rw._eval_stub.release_all.side_effect = TimeoutError("release_all timed out")
+        rw._eval_stub.close_eval.side_effect = TimeoutError("close_eval timed out")
         pool.reserve.return_value = rw
 
         session = EvalSession(pool)
         await session.__aenter__()
         # Exception propagates, but worker must still be released
-        with pytest.raises(TimeoutError, match="release_all timed out"):
+        with pytest.raises(TimeoutError, match="close_eval timed out"):
             await session.__aexit__(None, None, None)
 
         rw.release.assert_awaited_once()
@@ -272,7 +274,7 @@ class TestEvalSessionLifecycle:
         assert isinstance(root, ValueProxy)
         assert root.handle == 1
         assert root.nix_type == NixType.ATTRS
-        request = rw._eval_stub.eval_file.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        request = rw._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 1
 
     async def test_string_after_enter(self):
@@ -285,7 +287,7 @@ class TestEvalSessionLifecycle:
         await session.__aenter__()
         root = await session.string("42 + 1")
         assert root.nix_type == NixType.INT
-        request = rw._eval_stub.eval_string.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        request = rw._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 99
 
     async def test_timeout_override(self):
@@ -328,8 +330,8 @@ class TestReplSession:
         result = await session.line("x + 1")
 
         rw._eval_stub.begin_repl.assert_awaited_once()
-        begin_request = rw._eval_stub.begin_repl.call_args.args[0]
-        assert begin_request.store_handle == 99
+        open_request = rw._eval_stub.open_eval.call_args.args[0]
+        assert open_request.store_handle == 99
         assert isinstance(result, ValueProxy)
         assert result.handle == 7
 

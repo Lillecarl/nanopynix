@@ -92,6 +92,37 @@ async def test_inproc_eval_close_releases_values_left_open() -> None:
 
 
 @pytest.mark.anyio
+async def test_inproc_eval_state_can_be_closed_and_reopened() -> None:
+    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+        first = nix.eval(store)
+        await first.open()
+        local = first._local  # type: ignore[reportPrivateUsage] -- verifies the L2 evaluator pointer is released on close
+        await first.close()
+
+        if local is None:
+            raise AssertionError("EvalSession did not retain its LocalEvalState")
+        with pytest.raises(RuntimeError, match="local evaluator has been closed"):
+            local.require_raw()
+
+        second = nix.eval(store)
+        await second.open()
+        assert await (await second.string("42")).as_int() == 42
+        await second.close()
+
+
+@pytest.mark.anyio
+async def test_inproc_store_cannot_close_while_its_eval_state_is_open() -> None:
+    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+        eval_ = nix.eval(store)
+        await eval_.open()
+        with pytest.raises(RuntimeError, match="close the EvalSession first"):
+            await store.close()
+        await store.close(force=True)
+        with pytest.raises(inproc.InprocSessionClosedError):
+            await eval_.string("1")
+
+
+@pytest.mark.anyio
 async def test_inproc_locked_flake_facade(tmp_path: Path) -> None:
     init_flake_repo(tmp_path, "value = 42;")
 
