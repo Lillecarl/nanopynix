@@ -45,11 +45,11 @@ def _accept_async_eval_session(eval_session: AsyncEvalSession) -> None:
     del eval_session
 
 
-def _accept_async_repl_session(repl_session: AsyncReplSession[ReplValueT]) -> None:
+def _accept_async_repl_session(repl_session: AsyncReplSession[ReplValueT]) -> None:  # noqa: UP047 -- Python 3.10 compat
     del repl_session
 
 
-def _accept_async_verbosity_controller(controller: AsyncVerbosityController[VerbosityT]) -> None:
+def _accept_async_verbosity_controller(controller: AsyncVerbosityController[VerbosityT]) -> None:  # noqa: UP047 -- Python 3.10 compat
     del controller
 
 

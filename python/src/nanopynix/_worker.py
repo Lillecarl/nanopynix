@@ -302,9 +302,8 @@ class WorkerServiceHandler(WorkerServiceBase):
             collector.close()
         if self._state.rpc_bridge is not None:
             self._state.rpc_bridge.stop()
-        if self._state.executor is not None:
-            if self._state.owns_executor:
-                self._state.executor.shutdown(wait=False)
+        if self._state.executor is not None and self._state.owns_executor:
+            self._state.executor.shutdown(wait=False)
         return ShutdownResponse()
 
 

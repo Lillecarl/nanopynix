@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from sphinx.application import Sphinx
 
 project = "nanopynix"
-copyright = "2025, Carl Andersson"
+copyright = "2025, Carl Andersson"  # noqa: A001 -- Sphinx conf variable, not the Python builtin
 author = "Carl Andersson"
 
 extensions = [

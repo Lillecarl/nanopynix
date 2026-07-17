@@ -10,12 +10,13 @@ implementations, checked against these protocols in
 
 from __future__ import annotations
 
-from typing import Any, Protocol, Self, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 
 from nanopynix_proto.nix.store import GcAction
 
-from nanopynix.models import Derivation, GcResult, MissingInfo, PathInfo, StorePath
-from nanopynix.verbosity import LogLevelInput
+if TYPE_CHECKING:
+    from nanopynix.models import Derivation, GcResult, MissingInfo, PathInfo, StorePath
+    from nanopynix.verbosity import LogLevelInput
 
 ValueT = TypeVar("ValueT", bound="AsyncValue")
 VerbosityT_co = TypeVar("VerbosityT_co", covariant=True)

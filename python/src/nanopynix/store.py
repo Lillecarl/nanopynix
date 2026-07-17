@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from nanopynix_proto.nix.common import PathInfo
 from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddPermRootRequest,
@@ -47,6 +46,7 @@ from nanopynix.models import Derivation, GcResult, MissingInfo, StorePath
 
 if TYPE_CHECKING:
     from betterproto2 import Message
+    from nanopynix_proto.nix.common import PathInfo
 
     from nanopynix._pool import (
         _WorkerClient,  # type: ignore[reportPrivateUsage] -- TYPE_CHECKING import of lifecycle type
