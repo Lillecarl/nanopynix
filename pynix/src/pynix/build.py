@@ -18,9 +18,11 @@ from nanopynix.exceptions import StoreError
 from pynix._util import forward_nix_logs, prepare_sys_path
 from pynix.fod import (
     FodSourceUpdateError,
+    derivation_name_from_path,
     extract_fod_hash_mismatch,
     extract_unique_fod_hash_mismatch,
     find_fod_hash_literal,
+    mismatch_is_target_fod,
     replace_fod_hash,
 )
 from pynix.target import (
@@ -90,7 +92,12 @@ class Build(Command):
                         async with nix.eval(store) as session:
                             logger.info("pynix build evaluating target")
                             outputs, updates = await _build_target(
-                                target, session, nix=nix, update_fod=self.update_fod, dry_run=self.dry_run
+                                target,
+                                session,
+                                nix=nix,
+                                evaluation_store=store,
+                                update_fod=self.update_fod,
+                                dry_run=self.dry_run,
                             )
                         logger.info("pynix build finished")
                 else:
@@ -104,6 +111,7 @@ class Build(Command):
                                 target,
                                 session,
                                 nix=nix,
+                                evaluation_store=eval_store,
                                 build_store=build_store,
                                 update_fod=self.update_fod,
                                 dry_run=self.dry_run,
@@ -132,6 +140,7 @@ async def _build_target(
     session: Any,
     *,
     nix: Any,
+    evaluation_store: Any,
     build_store: Any = None,
     update_fod: bool,
     dry_run: bool,
@@ -146,8 +155,6 @@ async def _build_target(
                 logger.info("pynix build target evaluated")
                 outputs = await (root.build() if build_store is None else root.build(store=build_store))
             except StoreError as exc:
-                if root is not None:
-                    await root.release()
                 mismatch = extract_fod_hash_mismatch(exc.msg)
                 # The daemon's build response only contains a generic failure.
                 # The exact mismatch is emitted first as a Nix log event.
@@ -156,14 +163,29 @@ async def _build_target(
                         event.message_without_ansi for event in logs.events if event.message_without_ansi is not None
                     )
                 if not update_fod or mismatch is None:
+                    if root is not None:
+                        await root.release()
                     raise
+                if mismatch.drv_path is not None:
+                    if root is None or not await mismatch_is_target_fod(evaluation_store, root, mismatch):
+                        if root is not None:
+                            await root.release()
+                        raise BuildTargetError(
+                            "fixed-output hash mismatch was not found in the evaluated target derivation closure"
+                        ) from exc
+                if root is not None:
+                    await root.release()
                 if target.file is None:
                     raise BuildTargetError("--update-fod currently requires --file") from exc
                 if updates >= 10:
                     raise BuildTargetError("stopped after 10 fixed-output hash updates") from exc
                 try:
                     source = target.file.read_text()
-                    literal = find_fod_hash_literal(source, mismatch.specified)
+                    literal = find_fod_hash_literal(
+                        source,
+                        mismatch.specified,
+                        derivation_name=derivation_name_from_path(mismatch.drv_path),
+                    )
                     updated = replace_fod_hash(source, literal, mismatch.got)
                 except (OSError, FodSourceUpdateError) as source_exc:
                     raise BuildTargetError(f"cannot update fixed-output hash: {source_exc}") from source_exc

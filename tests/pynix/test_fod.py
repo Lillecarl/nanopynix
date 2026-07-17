@@ -21,6 +21,7 @@ def test_extracts_only_the_exact_ansi_colored_nix_fod_shape() -> None:
 
     assert mismatch is not None
     assert mismatch.got == "sha256-XG19bBLOoknhsnwV5rVaVGB8DYUiNPMklhyNotZNcD4="
+    assert mismatch.drv_path == "/nix/store/source.drv"
     assert extract_fod_hash_mismatch("hash mismatch in an unrelated format") is None
 
 
@@ -50,3 +51,21 @@ def test_refuses_ambiguous_hash_literals() -> None:
 
     with pytest.raises(FodSourceUpdateError, match="multiple hash literals"):
         find_fod_hash_literal(source, "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+
+
+def test_matches_run_command_output_hash_by_derivation_name() -> None:
+    source = """with import <nixpkgs> {};
+let
+  first = runCommand "first" { outputHash = ""; outputHashAlgo = "sha256"; outputHashMode = "flat"; } "echo first > $out";
+  second = runCommand "second" { outputHash = ""; outputHashAlgo = "sha256"; outputHashMode = "flat"; } "echo second > $out";
+in [ first second ]
+"""
+
+    literal = find_fod_hash_literal(
+        source,
+        "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        derivation_name="second",
+    )
+
+    assert literal.derivation_name == "second"
+    assert replace_fod_hash(source, literal, "sha256-XG19bBLOoknhsnwV5rVaVGB8DYUiNPMklhyNotZNcD4=").count("sha256-") == 1
