@@ -273,6 +273,36 @@ runCommand "payload" {
     assert 'outputHash = "sha256-' in nix_file.read_text()
 
 
+async def test_build_update_fod_rewrites_each_named_run_command_dependency(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    nix_file = tmp_path / "source.nix"
+    nix_file.write_text(
+        """with import <nixpkgs> {};
+let
+  first = runCommand "first" {
+    outputHash = "";
+    outputHashAlgo = "sha256";
+    outputHashMode = "flat";
+  } "printf '%s\\n' first > $out";
+  second = runCommand "second" {
+    outputHash = "";
+    outputHashAlgo = "sha256";
+    outputHashMode = "flat";
+  } "printf '%s\\n' second > $out";
+in runCommand "combined" {} "cat ${first} ${second} > $out"
+"""
+    )
+    cmd = Pynix.parse(["build", "--file", str(nix_file), "--update-fod"])
+
+    await cmd.astart()
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["updatedFods"] == 2
+    assert data["outputs"]["out"]
+    assert nix_file.read_text().count('outputHash = "sha256-') == 2
+
+
 async def test_eval_only_finds_fixed_output_dependencies_in_derivation_closure(tmp_path: Path) -> None:
     """String context hides FOD values, but ``inputDrvs`` retains their identity."""
     nix_file = tmp_path / "source.nix"
