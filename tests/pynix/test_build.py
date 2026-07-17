@@ -7,10 +7,61 @@ import pytest
 from anyio import Path as AnyioPath
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
+import nanopynix
 from pynix import Pynix
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from nanopynix import Store, ValueProxy
+
+
+async def _fixed_output_derivations_in_value(
+    value: ValueProxy,
+    visited: set[int],
+    derivations: set[str],
+) -> None:
+    """Walk values exposed from an evaluated root without resolving strings."""
+    value_type = await value.get_type()
+    if value.handle in visited:
+        return
+    visited.add(value.handle)
+    if value_type == nanopynix.NixType.LIST:
+        for index in range(await value.list_length()):
+            await _fixed_output_derivations_in_value(value.list_get(index), visited, derivations)
+        return
+    if value_type != nanopynix.NixType.ATTRS:
+        return
+    if await value.has_attr("type") and await value.attr("type").force_json() == "derivation":
+        drv_attrs = value.attr("drvAttrs")
+        if await drv_attrs.has_attr("outputHash"):
+            drv_path = await value.attr("drvPath").force_json()
+            if not isinstance(drv_path, str):
+                raise TypeError("derivation drvPath was not a string")
+            derivations.add(drv_path)
+        # A derivation attrset contains Nixpkgs convenience fields such as
+        # ``all`` that can be recursively self-referential. Dependencies are
+        # carried by its serialized inputDrvs, not those fields.
+        return
+    for name in await value.attr_names():
+        await _fixed_output_derivations_in_value(value.attr(name), visited, derivations)
+
+
+async def _fixed_output_derivations_in_closure(store: Store, root_drv_path: str) -> set[str]:
+    """Walk serialized input derivations without building any derivation."""
+    pending = [root_drv_path]
+    visited: set[str] = set()
+    fixed_output: set[str] = set()
+    while pending:
+        drv_path = pending.pop()
+        if drv_path in visited:
+            continue
+        visited.add(drv_path)
+        derivation = await store.read_derivation(drv_path)
+        if any(output.type == "CAFixed" for output in derivation.outputs.values()):
+            fixed_output.add(drv_path)
+        pending.extend(derivation.input_drvs)
+    return fixed_output
 
 
 async def test_build_file_derivation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -220,3 +271,38 @@ runCommand "payload" {
     assert data["updatedFods"] == 1
     assert data["outputs"]["out"]
     assert 'outputHash = "sha256-' in nix_file.read_text()
+
+
+async def test_eval_only_finds_fixed_output_dependencies_in_derivation_closure(tmp_path: Path) -> None:
+    """String context hides FOD values, but ``inputDrvs`` retains their identity."""
+    nix_file = tmp_path / "source.nix"
+    nix_file.write_text(
+        """with import <nixpkgs> {};
+let
+  first = runCommand "first" {
+    outputHash = "";
+    outputHashAlgo = "sha256";
+    outputHashMode = "flat";
+  } "printf '%s\\n' first > $out";
+  second = runCommand "second" {
+    outputHash = "";
+    outputHashAlgo = "sha256";
+    outputHashMode = "flat";
+  } "printf '%s\\n' second > $out";
+in runCommand "combined" {} "cat ${first} ${second} > $out"
+"""
+    )
+
+    async with nanopynix.Session() as nix, nix.store() as store:
+        async with nix.eval(store) as eval_:
+            root = await eval_.file(str(nix_file))
+            fixed_output_values: set[str] = set()
+            await _fixed_output_derivations_in_value(root, set(), fixed_output_values)
+
+            root_drv_path = await root.attr("drvPath").force_json()
+            if not isinstance(root_drv_path, str):
+                raise TypeError("root derivation drvPath was not a string")
+        fixed_output_closure = await _fixed_output_derivations_in_closure(store, root_drv_path)
+
+    assert fixed_output_values == set()
+    assert {"first.drv", "second.drv"} <= {path.rsplit("-", 1)[-1] for path in fixed_output_closure}
