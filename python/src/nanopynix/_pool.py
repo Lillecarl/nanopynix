@@ -1,4 +1,3 @@
-# ruff: noqa: ASYNC109
 """Multiprocessing worker — Nix execution backend via gRPC over pipe transport.
 
 A single forkserver subprocess runs an independent Nix process with its own

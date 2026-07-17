@@ -166,13 +166,14 @@ async def _build_target(
                     if root is not None:
                         await root.release()
                     raise
-                if mismatch.drv_path is not None:
-                    if root is None or not await mismatch_is_target_fod(evaluation_store, root, mismatch):
-                        if root is not None:
-                            await root.release()
-                        raise BuildTargetError(
-                            "fixed-output hash mismatch was not found in the evaluated target derivation closure"
-                        ) from exc
+                if mismatch.drv_path is not None and (
+                    root is None or not await mismatch_is_target_fod(evaluation_store, root, mismatch)
+                ):
+                    if root is not None:
+                        await root.release()
+                    raise BuildTargetError(
+                        "fixed-output hash mismatch was not found in the evaluated target derivation closure"
+                    ) from exc
                 if root is not None:
                     await root.release()
                 if target.file is None:

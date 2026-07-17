@@ -975,16 +975,16 @@ class EvalSession:
         "_active",
         "_ctx",
         "_line_editors",
-        "_owner_session",
         "_owner",
+        "_owner_session",
         "_proxy",
         "_releases",
         "_rpc_timeout",
-        "_worker",
         "_session_id",
         "_store",
         "_store_handle",
         "_timeout",
+        "_worker",
     )
 
     def __init__(

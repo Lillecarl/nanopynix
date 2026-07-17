@@ -323,16 +323,15 @@ in runCommand "combined" {} "cat ${first} ${second} > $out"
 """
     )
 
-    async with nanopynix.Session() as nix, nix.store() as store:
-        async with nix.eval(store) as eval:
-            root = await eval.file(str(nix_file))
-            fixed_output_values: set[str] = set()
-            await _fixed_output_derivations_in_value(root, set(), fixed_output_values)
+    async with nanopynix.Session() as nix, nix.store() as store, nix.eval(store) as eval:
+        root = await eval.file(str(nix_file))
+        fixed_output_values: set[str] = set()
+        await _fixed_output_derivations_in_value(root, set(), fixed_output_values)
 
-            root_drv_path = await root.attr("drvPath").force_json()
-            if not isinstance(root_drv_path, str):
-                raise TypeError("root derivation drvPath was not a string")
-            fixed_output_closure = await _fixed_output_derivations_in_closure(store, root_drv_path)
+        root_drv_path = await root.attr("drvPath").force_json()
+        if not isinstance(root_drv_path, str):
+            raise TypeError("root derivation drvPath was not a string")
+        fixed_output_closure = await _fixed_output_derivations_in_closure(store, root_drv_path)
 
     assert fixed_output_values == set()
     assert {"first.drv", "second.drv"} <= {path.rsplit("-", 1)[-1] for path in fixed_output_closure}
