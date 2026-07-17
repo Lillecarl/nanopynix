@@ -138,7 +138,7 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
     assert state.nix_path == ["nixpkgs=/tmp/nixpkgs"]
 
 
-def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.MonkeyPatch):
+def test_open_eval_binds_eval_state_to_requested_store_handle(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
 
     handles = HandleRegistry()
@@ -153,7 +153,8 @@ def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.Mo
     )
     handler = EvalServiceHandler(state)
 
-    selected = handler._get_es(second_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
+    handler._open_eval(second_handle)  # type: ignore[reportPrivateUsage] -- test verifies worker's Nix-thread lifecycle helper
+    selected = handler._get_es()  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
 
     assert isinstance(selected, LocalEvalState)
     assert isinstance(selected.raw, _FakeEvalState)
@@ -161,10 +162,10 @@ def test_eval_state_binds_to_first_requested_store_handle(monkeypatch: pytest.Mo
     assert selected.raw.nix_path == ["nixpkgs=/tmp/nixpkgs"]
     assert state.eval_store_handle == second_handle
 
-    assert handler._get_es(second_handle) is selected  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
+    assert handler._get_es() is selected  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
 
-    with pytest.raises(RuntimeError, match="already bound to a different store"):
-        handler._get_es(first_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
+    with pytest.raises(RuntimeError, match="already open"):
+        handler._open_eval(first_handle)  # type: ignore[reportPrivateUsage] -- test verifies one-EvalState invariant
 
     assert state.eval_state is selected
     assert state.eval_store_handle == second_handle
