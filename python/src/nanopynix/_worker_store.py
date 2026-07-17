@@ -23,12 +23,12 @@ class StoreServiceHandler(
     rpc_service_base=StoreServiceBase,
     binding_method_names=_store_binding_method_names(),
     method_prefix="store_",
-    nix_executor_attr="_state.executor",
+    nix_executor_attr="_state.store_executor",
 ):
     """gRPC handler backed by proto-shaped nanobind store methods.
 
-    All store operations dispatch to the dedicated Nix thread via
-    ``NixThreadExecutor``, keeping the event loop free.
+    Store operations dispatch to the worker's bounded Store executor, keeping
+    the event loop free while allowing independent Store calls to overlap.
     """
 
     def __init__(self, state: Any) -> None:

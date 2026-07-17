@@ -26,9 +26,10 @@ from nanopynix._worker_nix import (
 
 
 class _FakeEvalState:
-    def __init__(self, store: object, nix_path: list[str]) -> None:
+    def __init__(self, store: object, nix_path: list[str], build_store: object | None = None) -> None:
         self.store = store
         self.nix_path = nix_path
+        self.build_store = build_store
 
 
 class _FakeStore:

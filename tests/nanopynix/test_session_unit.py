@@ -9,6 +9,7 @@ No Nix daemon needed — exercises error paths and edge cases.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import gc
 import json as _json
@@ -275,6 +276,38 @@ class TestEvalSessionLifecycle:
         assert root.nix_type == NixType.INT
         request = pool._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 99
+
+    async def test_eval_proxy_serializes_concurrent_operations(self):
+        """One EvalState never receives overlapping RPCs from its proxies."""
+        pool = _mock_pool()
+        started = asyncio.Event()
+        unblock = asyncio.Event()
+        active = 0
+        peak_active = 0
+
+        async def eval_string(_request: Any, **_kwargs: Any) -> MagicMock:
+            nonlocal active, peak_active
+            active += 1
+            peak_active = max(peak_active, active)
+            started.set()
+            await unblock.wait()
+            active -= 1
+            return _mock_value_handle(active + 1, "int")
+
+        pool._eval_stub.eval_string.side_effect = eval_string
+        session = EvalSession(pool)
+        await session.open()
+        try:
+            first = asyncio.create_task(session.string("1"))
+            await started.wait()
+            second = asyncio.create_task(session.string("2"))
+            await asyncio.sleep(0)
+            assert peak_active == 1
+            unblock.set()
+            await asyncio.gather(first, second)
+            assert peak_active == 1
+        finally:
+            await session.close()
 
     async def test_timeout_override(self):
         pool = _mock_pool()

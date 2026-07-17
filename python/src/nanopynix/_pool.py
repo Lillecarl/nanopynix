@@ -4,7 +4,9 @@ A single forkserver subprocess runs an independent Nix process with its own
 Store, logger, and globals.  Communication is gRPC over a multiprocessing pipe
 pair via grpclib-transports.
 
-Only one Nix operation is in-flight at a time — the worker is single-threaded.
+Evaluator calls remain serial because an ``EvalState`` is thread-confined. Store
+calls may be in flight concurrently: the worker dispatches them to its bounded
+Store executor.
 """
 
 from __future__ import annotations
@@ -44,9 +46,11 @@ logger = logging.getLogger(__name__)
 
 # ────────────────────────────────────────────────────────────────────
 _RPC_TIMEOUT = 300.0
-# Keep one handler slot for each long-lived stream (primop backchannel and
-# SubscribeLogs) plus one for the active manager->worker call.
-_WORKER_MAX_CONCURRENCY = 3
+# Keep space for long-lived streams (the primop backchannel and SubscribeLogs)
+# as well as a bounded number of independent Store calls. Evaluator calls have
+# their own session-local serialization, so this is transport capacity rather
+# than EvalState concurrency.
+_WORKER_MAX_CONCURRENCY = 32
 _OOM_SCORE_ADJ_MIN = -1000
 _OOM_SCORE_ADJ_MAX = 1000
 
@@ -141,10 +145,10 @@ class _Subscription:
 
 
 class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the public Session façade
-    """Own one multiprocessing worker and serialize its Nix operations.
+    """Own one multiprocessing worker and dispatch its RPC operations.
 
     Provides:
-    - ``call()`` — one-at-a-time worker RPC dispatch.
+    - ``call()`` — worker RPC dispatch without cross-service serialization.
     - ``subscribe()`` / ``log_stream()`` — log event access.
     - Direct access to ``_store_stub`` and ``_eval_stub`` for gRPC calls.
     """
@@ -189,7 +193,6 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         self._store_service_stub: StoreServiceStub | None = None
         self._eval_service_stub: EvalServiceStub | None = None
         self._primop_handler: Any = None
-        self._operation_lock = asyncio.Lock()
         self._log_bus: _LogBus = _LogBus()
         self._log_task: asyncio.Task[None] | None = None
         self._stack: contextlib.AsyncExitStack | None = None
@@ -274,12 +277,17 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
     # ── operation dispatch ─────────────────────────────────────────
 
     async def call(self, coro: Any) -> Any:
-        """Run one RPC after prior worker operations have completed."""
+        """Run one RPC.
+
+        EvalProxy serializes operations belonging to its thread-confined
+        EvalState. Store calls intentionally bypass that queue because Nix
+        Store instances support concurrent use and the worker has a bounded
+        Store executor for them.
+        """
         if self._channel is None:
             coro.close()
             raise WorkerDiedError("Worker not started")
-        async with self._operation_lock:
-            return await _grpc_call(coro)
+        return await _grpc_call(coro)
 
     # ── log access ─────────────────────────────────────────────────
 

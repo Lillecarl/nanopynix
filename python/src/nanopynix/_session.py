@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json as _json
 import queue
 import threading
@@ -260,11 +261,12 @@ def _finalize_lease(lease: _Lease, releases: _DeferredReleases) -> None:
 class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase):
     """Auto-generated proxy for all ``EvalService`` gRPC methods.
 
-    Created by ``EvalSession.open()``. Method forwarders dispatch through the
-    owning worker client, which serializes each Nix operation.
+    Created by ``EvalSession.open()``. This proxy serializes its own operations
+    because one EvalState is confined to one evaluator thread; unrelated Store
+    RPCs remain free to run concurrently.
     """
 
-    __slots__ = ("_active", "_draining_releases", "_releases", "_rpc_timeout", "_worker")
+    __slots__ = ("_active", "_draining_releases", "_operation_lock", "_releases", "_rpc_timeout", "_worker")
 
     def __init__(
         self,
@@ -277,6 +279,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
         self._rpc_timeout = rpc_timeout
         self._active = True
         self._draining_releases = False
+        self._operation_lock = asyncio.Lock()
 
     def _check_active(self) -> None:
         if not self._active:
@@ -286,23 +289,33 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
         self._active = False
 
     async def _rpc_proxy_call(self, method_name: str, message: Message) -> Any:
-        self._check_active()
-        if not self._draining_releases:
-            await self.drain_deferred_releases()
-        method = getattr(self._worker._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
-        return await self._worker.call(method(message, timeout=self._rpc_timeout))
+        async with self._operation_lock:
+            self._check_active()
+            if not self._draining_releases:
+                await self._drain_deferred_releases_locked()
+            method = getattr(self._worker._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
+            return await self._worker.call(method(message, timeout=self._rpc_timeout))
 
     async def drain_deferred_releases(self) -> None:
         """Best-effort cleanup at a safe worker-RPC boundary."""
+        async with self._operation_lock:
+            await self._drain_deferred_releases_locked()
+
+    async def _drain_deferred_releases_locked(self) -> None:
+        """Drain finalizer work while :attr:`_operation_lock` is held."""
         if self._draining_releases:
             return
         self._draining_releases = True
         try:
             for ref in self._releases.drain():
                 if ref.kind == "value":
-                    await self.release(ReleaseRequest(handle=ref.handle))
+                    method = self._worker._eval_stub.release  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
+                    await self._worker.call(method(ReleaseRequest(handle=ref.handle), timeout=self._rpc_timeout))
                 elif ref.kind == "locked_flake":
-                    await self.release_locked_flake(ReleaseLockedFlakeRequest(handle=ref.handle))
+                    method = self._worker._eval_stub.release_locked_flake  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
+                    await self._worker.call(
+                        method(ReleaseLockedFlakeRequest(handle=ref.handle), timeout=self._rpc_timeout)
+                    )
                 else:
                     raise RuntimeError(f"unknown deferred lease kind: {ref.kind}")
         finally:
