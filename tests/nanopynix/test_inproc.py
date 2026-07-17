@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -439,6 +440,35 @@ async def test_inproc_session_open_and_close_are_idempotent() -> None:
     await session.open()
     await session.close()
     await session.close()
+
+
+@pytest.mark.anyio
+async def test_inproc_session_owns_and_shuts_down_its_nix_thread() -> None:
+    first = inproc.Session(load_config=False)
+    await first.open()
+    first_executor = first._executor  # type: ignore[reportPrivateUsage] -- verifies Session owns the executor lifecycle
+    first_thread = await first.run(threading.get_ident)
+    await first.close()
+
+    if first_executor is None:
+        raise AssertionError("Session did not create a Nix executor")
+    assert first_executor.closed
+    assert first._executor is None  # type: ignore[reportPrivateUsage] -- verifies close releases Session ownership
+
+    second = inproc.Session(load_config=False)
+    await second.open()
+    second_executor = second._executor  # type: ignore[reportPrivateUsage] -- verifies a later Session gets a fresh executor
+    second_thread = await second.run(threading.get_ident)
+    await second.close()
+
+    if second_executor is None:
+        raise AssertionError("second Session did not create a Nix executor")
+    assert second_executor is not first_executor
+    assert second_executor.closed
+    # Thread identifiers are allowed to be reused by the OS. The distinct
+    # executor instances and their completed shutdowns establish the lifecycle.
+    assert isinstance(first_thread, int)
+    assert isinstance(second_thread, int)
 
 
 @pytest.mark.anyio
