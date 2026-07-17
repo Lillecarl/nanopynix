@@ -366,6 +366,25 @@ PyValue PyValue::call(PyValue arg) {
     return PyValue(result, eval, eval_alive);
 }
 
+std::string PyValue::derived_path() {
+    auto *es = evalState();
+    auto *v = checkedValue();
+
+    std::optional<nix::StorePath> drv_path;
+    {
+        nb::gil_scoped_release release;
+        auto package_info = nix::getDerivation(*es, *v, false);
+        if (!package_info)
+            throw nix::Error("selected value is not a derivation");
+        auto maybe_drv_path = package_info->queryDrvPath();
+        if (!maybe_drv_path)
+            throw nix::Error("selected derivation has no drvPath");
+        drv_path = std::move(*maybe_drv_path);
+    }
+
+    return eval->store->printStorePath(*drv_path);
+}
+
 nb::dict PyValue::build(
         std::shared_ptr<nix::Store> build_store,
         nix::BuildMode build_mode,
@@ -406,6 +425,7 @@ nb::dict PyValue::build(
     };
 
     auto store = build_store ? build_store : eval->store;
+
     std::vector<nix::KeyedBuildResult> results;
     try {
         nb::gil_scoped_release release;
@@ -1156,6 +1176,7 @@ static void bind_value(nb::module_ &m) {
         .def("attr_get", &PyValue::attr_get, "name"_a, nb::keep_alive<0, 1>())
         .def("auto_call", &PyValue::auto_call, nb::keep_alive<0, 1>())
         .def("call", &PyValue::call, "arg"_a, nb::keep_alive<0, 1>())
+        .def("derived_path", &PyValue::derived_path)
         .def("build", [](PyValue &self, nb::object build_store, int build_mode, nb::object eval_store) {
             std::shared_ptr<nix::Store> build_store_ptr = nullptr;
             std::shared_ptr<nix::Store> eval_store_ptr = nullptr;
@@ -1198,6 +1219,7 @@ static void bind_eval_state(nb::module_ &m) {
 // Python owns evaluator threads. Nix enables manual Boehm registration during
 // initGC(), but it does not register embedding-created threads itself.
 static thread_local bool evaluator_thread_registered = false;
+static thread_local bool evaluator_thread_registered_by_nanopynix = false;
 
 static void enter_evaluator_thread() {
     if (evaluator_thread_registered)
@@ -1209,18 +1231,29 @@ static void enter_evaluator_thread() {
         throw std::runtime_error("could not determine evaluator thread stack base for Boehm GC");
 
     auto register_result = GC_register_my_thread(&stack_base);
+    if (register_result == GC_DUPLICATE) {
+        // Some Python runtimes register extension-created threads with the
+        // process collector. That registration is valid, but belongs to the
+        // runtime that created it and must not be undone by nanopynix.
+        evaluator_thread_registered = true;
+        return;
+    }
     if (register_result != GC_SUCCESS)
         throw std::runtime_error("could not register evaluator thread with Boehm GC");
     evaluator_thread_registered = true;
+    evaluator_thread_registered_by_nanopynix = true;
 }
 
 static void exit_evaluator_thread() {
     if (!evaluator_thread_registered)
         throw std::runtime_error("evaluator thread is not registered with Boehm GC");
-    auto unregister_result = GC_unregister_my_thread();
-    if (unregister_result != GC_SUCCESS)
-        throw std::runtime_error("could not unregister evaluator thread from Boehm GC");
+    if (evaluator_thread_registered_by_nanopynix) {
+        auto unregister_result = GC_unregister_my_thread();
+        if (unregister_result != GC_SUCCESS)
+            throw std::runtime_error("could not unregister evaluator thread from Boehm GC");
+    }
     evaluator_thread_registered = false;
+    evaluator_thread_registered_by_nanopynix = false;
 }
 
 // =========================================================================
@@ -1294,7 +1327,6 @@ NB_MODULE(nanopynix_expr, m) {
 
     bind_value(m);
     bind_eval_state(m);
-
     // ── Exception bindings (LIFO: last registered tried first.
     // Register base classes FIRST so specific subclasses are tried before them)
     nb::exception<nix::EvalError> py_eval_err(m, "EvalError", PyExc_RuntimeError);

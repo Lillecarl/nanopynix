@@ -208,6 +208,10 @@ class LocalValue:
             None if eval_store is None else eval_store.require_raw(),
         )
 
+    def derived_path(self) -> str:
+        """Return this derivation's self-contained canonical DerivedPath string."""
+        return self.require_raw().derived_path()
+
 
 class LocalLockedFlake:
     """One in-memory locked flake, confined to its owning Nix thread."""

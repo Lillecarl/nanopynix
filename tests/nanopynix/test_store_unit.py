@@ -292,6 +292,18 @@ class TestPublicStore:
         sent = pool._store_stub.query_missing.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
         assert sent.derived_paths == ["/nix/store/aaa-foo.drv", "/nix/store/bbb-bar"]
 
+    async def test_build_paths_with_results_sends_derived_paths(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.build_paths_with_results.return_value = _mock_build_result_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+            [_mock_build_result(drv_path="/nix/store/aaa-foo.drv", success=True)]
+        )
+
+        results = await public_store.build_paths_with_results(["/nix/store/aaa-foo.drv"])
+
+        assert results[0].success
+        sent = pool._store_stub.build_paths_with_results.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        assert sent.derived_paths == ["/nix/store/aaa-foo.drv"]
+        assert sent.build_mode == 0
+
     async def test_read_derivation_sends_request(self, public_store: PublicStore, pool: MagicMock):
         pool._store_stub.read_derivation.return_value = _mock_derivation(  # type: ignore[reportPrivateUsage] -- test accesses private stub
             name="foo", system="x86_64-linux", builder="/bin/sh"

@@ -58,6 +58,7 @@ struct PyValue {
 
     PyValue auto_call();
     PyValue call(PyValue arg);
+    std::string derived_path();
     nanobind::dict build(
         std::shared_ptr<nix::Store> build_store = nullptr,
         nix::BuildMode build_mode = nix::bmNormal,
