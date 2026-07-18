@@ -4,6 +4,96 @@
 let
   ci = import ../lib.nix;
   inherit (ci) steps mkJob withCond;
+
+  # Statically enumerate the test job matrix at Nix-eval time instead of
+  # discovering it at CI runtime via a `matrix` job running `nix eval --json`.
+  # unsafeDiscardStringContext is defensive: nanopynixVersionNames is just
+  # builtins.attrNames on an attrset (plain, context-free strings already),
+  # but anything pulled out of default.nix's result is one edit away from
+  # becoming a derivation-derived string (e.g. a .version/.name field), and
+  # forcing *that* into YAML text would drag in a build just to render CI
+  # config -- discarding context up front makes that mistake inert rather
+  # than a surprise `nix build` invocation inside `render.py`.
+  nanopynixVersionNames = map builtins.unsafeDiscardStringContext (
+    (import ../../default.nix { }).nanopynixVersionNames
+  );
+
+  installModes = [
+    "single-user"
+    "multi-user"
+  ];
+
+  mkTestJob =
+    { version, installMode }:
+    withCond "vars.RUN_MATRIX_TESTS == 'true'" (mkJob {
+      steps = [
+        (steps.checkout { })
+      ]
+      ++ (
+        if installMode == "single-user" then
+          [ (steps.nixQuickInstall { }) ]
+        else
+          [ (steps.installNixMultiUser { }) ]
+      )
+      ++ [ (steps.cachix { }) ]
+      ++ ci.optional (installMode == "single-user") (steps.configureSingleUserNix { })
+      ++ [
+        {
+          name = "Build nanopynix test runner for Nix ${version}";
+          run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
+        }
+        (steps.verifyClosure { name = "Verify test runner closure after build"; })
+        (steps.enableSandboxNamespaces { })
+        {
+          name = "Test nanopynix against Nix ${version} (DIAGNOSTIC-ONLY, post-mortem core dump on crash, narrowed run)";
+          run = ''
+            set -o pipefail
+            unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage \
+              ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds tests/nanopynix/test_inproc_multithreaded_poc.py \
+              2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log
+            if grep -qE "^[0-9]+ failed|SIGSEGV|SIGABRT|Fatal Python error" ''${{ github.workspace }}/test-gdb-output.log; then
+              echo "::error::test run crashed or failed -- see gdb backtrace above"
+              exit 1
+            fi
+          '';
+        }
+        (steps.uploadArtifact {
+          name = "Upload gdb crash backtrace";
+          artifactName = "gdb-backtrace-${version}";
+          path = "\${{ github.workspace }}/test-gdb-output.log";
+        })
+        (withCond "\${{ !cancelled() }}" {
+          name = "Upload coverage reports to Codecov";
+          uses = "codecov/codecov-action@main";
+          "with" = {
+            token = "\${{ secrets.CODECOV_TOKEN }}";
+            files = "\${{ github.workspace }}/coverage.xml";
+            flags = "${version}-${installMode}";
+          };
+        })
+        (withCond "\${{ !cancelled() }}" {
+          name = "Upload test results to Codecov";
+          uses = "codecov/codecov-action@main";
+          "with" = {
+            token = "\${{ secrets.CODECOV_TOKEN }}";
+            files = "\${{ github.workspace }}/junit.xml";
+            flags = "${version}-${installMode}";
+            report_type = "test_results";
+          };
+        })
+        (steps.verifyClosure { name = "Verify test runner closure after tests"; })
+      ];
+    });
+
+  testJobs = builtins.listToAttrs (
+    builtins.concatMap (
+      version:
+      map (installMode: {
+        name = "test-${version}-${installMode}";
+        value = mkTestJob { inherit version installMode; };
+      }) installModes
+    ) nanopynixVersionNames
+  );
 in
 ci.mkWorkflow {
   name = "CI";
@@ -14,92 +104,7 @@ ci.mkWorkflow {
     workflow_dispatch = null;
   };
 
-  jobs = {
-    # matrix/test temporarily disabled -- iterating on the TSAN diagnostic
-    # job only for now (gated behind an unset repo variable, since
-    # actionlint rejects a literal `if: false`). Re-enable by restoring the
-    # original `if: github.event_name != 'schedule'` condition on both jobs.
-    matrix = withCond "vars.RUN_MATRIX_TESTS == 'true'" (mkJob {
-      outputs = {
-        versions = "\${{ steps.versions.outputs.versions }}";
-      };
-      steps = [
-        (steps.checkout { })
-        (steps.nixQuickInstall { })
-        {
-          id = "versions";
-          name = "Compute Nix version matrix";
-          run = ''
-            echo "versions=$(nix eval --json '.#nanopynixVersionNames.x86_64-linux')" >> "$GITHUB_OUTPUT"'';
-        }
-      ];
-    });
-
-    test = withCond "vars.RUN_MATRIX_TESTS == 'true'" (mkJob {
-      needs = "matrix";
-      strategy = {
-        fail-fast = false;
-        matrix = {
-          version = "\${{ fromJson(needs.matrix.outputs.versions) }}";
-          nix_install = [
-            "single-user"
-            "multi-user"
-          ];
-        };
-      };
-      steps = [
-        (steps.checkout { })
-        (withCond "matrix.nix_install == 'single-user'" (steps.nixQuickInstall { }))
-        (withCond "matrix.nix_install == 'multi-user'" (steps.installNixMultiUser { }))
-        (steps.cachix { })
-        (withCond "matrix.nix_install == 'single-user'" (steps.configureSingleUserNix { }))
-        {
-          name = "Build nanopynix test runner for Nix \${{ matrix.version }}";
-          run = ''nix build ".#nanopynix-tests-''${{ matrix.version }}" --out-link result --print-build-logs --print-out-paths'';
-        }
-        (steps.verifyClosure { name = "Verify test runner closure after build"; })
-        (steps.enableSandboxNamespaces { })
-        {
-          name = "Test nanopynix against Nix \${{ matrix.version }} (DIAGNOSTIC-ONLY, post-mortem core dump on crash, narrowed run)";
-          run = ''
-            set -o pipefail
-            unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage \
-              ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds tests/nanopynix/test_inproc_multithreaded_poc.py \
-              2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log
-            if grep -qE "^[0-9]+ failed|SIGSEGV|SIGABRT|Fatal Python error" ''${{ github.workspace }}/test-gdb-output.log; then
-              echo "::error::test run crashed or failed -- see gdb backtrace above"
-              exit 1
-            fi
-'';
-        }
-        (steps.uploadArtifact {
-          name = "Upload gdb crash backtrace";
-          artifactName = "gdb-backtrace-\${{ matrix.version }}";
-          path = "\${{ github.workspace }}/test-gdb-output.log";
-        })
-        (withCond "\${{ !cancelled() }}" {
-          name = "Upload coverage reports to Codecov";
-          uses = "codecov/codecov-action@main";
-          "with" = {
-            token = "\${{ secrets.CODECOV_TOKEN }}";
-            files = "\${{ github.workspace }}/coverage.xml";
-            flags = "\${{ matrix.version }}-\${{ matrix.nix_install }}";
-          };
-        })
-        (withCond "\${{ !cancelled() }}" {
-          name = "Upload test results to Codecov";
-          uses = "codecov/codecov-action@main";
-          "with" = {
-            token = "\${{ secrets.CODECOV_TOKEN }}";
-            files = "\${{ github.workspace }}/junit.xml";
-            flags = "\${{ matrix.version }}-\${{ matrix.nix_install }}";
-            report_type = "test_results";
-          };
-        })
-        (steps.verifyClosure { name = "Verify test runner closure after tests"; })
-      ];
-    });
-
+  jobs = testJobs // {
     test-tsan = mkJob {
       # Diagnostic-only: ThreadSanitizer build hunting concurrency bugs in
       # the single-user in-process build/eval paths. Single-user only,
@@ -186,7 +191,7 @@ ci.mkWorkflow {
     };
 
     docs-build = withCond "github.event_name != 'schedule' && github.ref == 'refs/heads/develop'" (mkJob {
-      needs = "test";
+      needs = builtins.attrNames testJobs;
       steps = [
         (steps.checkout { })
         (steps.nixQuickInstall { })
