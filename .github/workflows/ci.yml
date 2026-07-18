@@ -61,19 +61,13 @@ jobs:
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
 
       - name: Enable Nix sandbox namespaces
-        if: matrix.nix_install == 'single-user'
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo sysctl -w kernel.unprivileged_userns_clone=1
           unshare --user --map-root-user --mount --pid --fork --mount-proc true
 
-      - name: Test nanopynix against Nix ${{ matrix.version }} (single-user)
-        if: matrix.nix_install == 'single-user'
+      - name: Test nanopynix against Nix ${{ matrix.version }}
         run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --cov --cov-branch --cov-report=xml:${{ github.workspace }}/coverage.xml --junitxml=${{ github.workspace }}/junit.xml -o junit_family=legacy
-
-      - name: Test nanopynix against Nix ${{ matrix.version }} (multi-user)
-        if: matrix.nix_install == 'multi-user'
-        run: env NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --cov --cov-branch --cov-report=xml:${{ github.workspace }}/coverage.xml --junitxml=${{ github.workspace }}/junit.xml -o junit_family=legacy
 
       - name: Upload coverage reports to Codecov
         if: ${{ !cancelled() }}
