@@ -134,7 +134,7 @@ jobs:
           printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
 
       - name: Build TSAN nanopynix test runner (nix_2_35)
-        run: nix build .#nanopynix-tests-tsan-nix_2_35 --out-link result --print-build-logs --print-out-paths
+        run: nix build .#nanopynix-tests-nix_2_35-tsan --out-link result --print-build-logs --print-out-paths
 
       - name: Enable Nix sandbox namespaces
         run: |
