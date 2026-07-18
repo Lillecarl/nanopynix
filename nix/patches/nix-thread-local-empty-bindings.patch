@@ -1,0 +1,43 @@
+Make Bindings::emptyBindings thread_local instead of a plain global static.
+
+nix::EvalMemory::allocBindings (src/libexpr/attr-set.cc) returns this one
+shared singleton for every zero-capacity Bindings request across the whole
+process, as a micro-optimization to avoid allocating for `{}` literals. But
+nix::ExprAttrs::eval (src/libexpr/eval.cc) unconditionally writes
+`bindings.bindings->pos = pos` on whatever Bindings it gets back -- for the
+capacity==0 case that's an unsynchronized write to the shared global from
+every thread that evaluates an empty attribute set, which is extremely
+common in real Nix expressions. Confirmed via ThreadSanitizer against
+nanopynix's concurrent-EvalState test suite: this is by far the dominant
+race (1373 of 1376 total TSAN reports in one run all point at this single
+line), and directly contradicts attr-set.hh's own doc comment on
+emptyBindings ("This object must never be modified.").
+
+thread_local gives each thread its own private empty-Bindings instance,
+preserving the original allocation-avoidance optimization within a thread
+while eliminating the cross-thread sharing that causes the race.
+
+diff -ruN a/src/libexpr/attr-set.cc b/src/libexpr/attr-set.cc
+--- a/src/libexpr/attr-set.cc	2026-07-18 20:24:48.025253282 +0200
++++ b/src/libexpr/attr-set.cc	2026-07-18 20:24:48.033043934 +0200
+@@ -5,7 +5,7 @@
+ 
+ namespace nix {
+ 
+-Bindings Bindings::emptyBindings;
++thread_local Bindings Bindings::emptyBindings;
+ 
+ /* Allocate a new array of attributes for an attribute set with a specific
+    capacity. The space is implicitly reserved after the Bindings
+diff -ruN a/src/libexpr/include/nix/expr/attr-set.hh b/src/libexpr/include/nix/expr/attr-set.hh
+--- a/src/libexpr/include/nix/expr/attr-set.hh	2026-07-18 20:24:48.023253271 +0200
++++ b/src/libexpr/include/nix/expr/attr-set.hh	2026-07-18 20:24:48.030253310 +0200
+@@ -70,7 +70,7 @@
+      * An instance of bindings objects with 0 attributes.
+      * This object must never be modified.
+      */
+-    static Bindings emptyBindings;
++    static thread_local Bindings emptyBindings;
+ 
+ private:
+     /**
