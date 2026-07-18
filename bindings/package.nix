@@ -4,10 +4,17 @@
   pkg-config,
   python,
   nanobind,
-  nix,
+  nix-util,
+  nix-store,
+  nix-expr,
+  nix-cmd,
+  nix-fetchers,
+  nix-flake,
+  nix-main,
   cmake,
   ninja,
   renderPyproject,
+  version,
   enableTsan ? false,
   tsanRuntime ? null,
 }:
@@ -32,7 +39,8 @@ in
 buildPythonPackage (
   attrs
   // {
-
+    version = "${attrs.version}-${version}";
+    
     src = lib.cleanSource ./.;
 
     build-system = attrs.build-system ++ [
@@ -43,6 +51,11 @@ buildPythonPackage (
     nativeBuildInputs = [
       pkg-config
     ];
+    # nix's modular components don't propagatedBuildInputs their own C
+    # library deps (blake3, boost, libarchive, libsodium, ...) to consumers,
+    # so pkg-config can't find e.g. libblake3.pc for nix-util unless it's
+    # walked out of nix-util's own buildInputs here, recursively (a
+    # transitive dep can itself pull in another).
     buildInputs =
       let
         recursivePropagation =
@@ -54,16 +67,17 @@ buildPythonPackage (
             else
               [ ]
           ) derivations;
+        recdep = [
+          nix-util
+          nix-store
+          nix-expr
+          nix-cmd
+          nix-fetchers
+          nix-flake
+          nix-main
+        ];
       in
-      [
-        nanobind2_13
-      ]
-      ++ lib.pipe nix.libs [
-        lib.attrsToList
-        (lib.map ({ value, ... }: value))
-        recursivePropagation
-        lib.unique
-      ];
+      lib.unique ([ nanobind2_13 ] ++ recdep ++ (recursivePropagation recdep));
 
     dontUseCmakeConfigure = true;
 

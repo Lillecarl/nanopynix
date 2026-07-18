@@ -8,12 +8,13 @@
   grpclib-transports,
   python,
   renderPyproject,
+  version,
   enableTsan ? false,
   tsanRuntime ? null,
 }:
 let
   attrs = renderPyproject {
-    projectRoot = ./.;
+    projectRoot = lib.cleanSource ./.;
     inherit python;
     pythonPackages = python.pkgs // {
       "nanopynix-bindings" = nanopynix-bindings;
@@ -25,8 +26,7 @@ in
 buildPythonPackage (
   attrs
   // {
-
-    src = lib.cleanSource ./.;
+    version = "${attrs.version}-${version}";
 
     # pythonImportsCheck dlopen()s nanopynix-bindings transitively into a
     # fresh python process; when bindings were built with TSAN, its runtime

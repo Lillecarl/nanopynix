@@ -2,10 +2,11 @@
   lib,
   writeShellApplication,
   python,
-  nix,
+  nix-cli,
   nixpkgs,
   gdb,
   pynix,
+  version,
   tsanRuntime ? null,
 }:
 let
@@ -14,10 +15,10 @@ let
   );
 in
 writeShellApplication {
-  name = "nanopynix-tests";
+  name = "nanopynix-tests-${version}";
   runtimeInputs = [
     pythonEnv
-    nix
+    nix-cli
     gdb
   ];
   text = ''
@@ -71,5 +72,8 @@ writeShellApplication {
     fi
     exec python -m pytest -p no:cacheprovider "$@"
   '';
-  passthru = { inherit pythonEnv; };
+  passthru = {
+    inherit pythonEnv;
+    addToMatrix = true;
+  };
 }

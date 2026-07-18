@@ -14,7 +14,6 @@
   grpclib-transports,
   clypi,
   renderEditablePyproject,
-  nix,
   sphinx,
   myst-parser,
   furo,
@@ -66,7 +65,6 @@ mkShell {
 
   packages = [
     pythonEnv
-    nix
     pyright
     ruff
     nixfmt

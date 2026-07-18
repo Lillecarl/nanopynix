@@ -55,165 +55,172 @@ let
 
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
   # shared static that ExprAttrs::eval unconditionally writes to -- see the
-  # patch's own commentary) found via ThreadSanitizer (tsanNixPackage
-  # below). thread_local gives each evaluator OS thread its own instance,
-  # fixing the race without any behavior change for single-threaded use.
+  # patch's own commentary) found via ThreadSanitizer (see enableTsan below).
+  # thread_local gives each evaluator OS thread its own instance, fixing the
+  # race without any behavior change for single-threaded use.
   emptyBindingsPatch = ./nix/patches/nix-thread-local-empty-bindings.patch;
 
-  # Applies emptyBindingsPatch to a modular nix component set (the ones
-  # exposing `.appendPatches`/`nix-everything`, i.e. nixComponents_2_31 and
-  # newer) and re-merges it into a single "nix" package, so it can be fed into
-  # nanopynixForNix exactly like an unpatched nixVersions.* entry.
-  patchNixComponents =
-    components: (components.appendPatches [ emptyBindingsPatch ]).nix-everything;
-
-  # Applies ThreadSanitizer instrumentation to a modular nix component set:
-  # nix-store's sqlite input plus every meson-based nix-* library gets
-  # consistent -fsanitize=thread instrumentation (see nix/tsan.nix), then
-  # components are re-merged into one "nix" package via nix-everything so
-  # the result can be fed into nanopynixForNix exactly like any other
-  # nixVersions.* entry. Generalized from a nix_2_35-only build (that's how
-  # the emptyBindings race below was originally found) to every version, so
-  # a race can be confirmed/ruled out on any of them, not just the one it
-  # happened to be found on.
-  tsanNixComponents =
-    components:
-    (components.overrideScope (
-      _final: prev: {
-        nix-store = prev.nix-store.override { sqlite = tsan.sanitizeSqlite pkgs.sqlite; };
-      }
-    )).overrideAllMesonComponents
-      tsan.mesonComponentOverrides;
-
-  # nix-everything normally gate-checks the whole build on nix's own
-  # unit/functional test suites (checkInputs pulls in nix-*-tests.tests.run
-  # derivations regardless of doCheck, since they're still realized inputs).
-  # Those suites weren't written with TSAN's overhead/timing changes in mind
-  # and fail for reasons unrelated to the races being hunted here, so drop
-  # the dependency on them entirely rather than debug nix's own test suite.
-  tsanNixPackage =
-    components:
-    (tsanNixComponents components).nix-everything.overrideAttrs (_old: {
-      checkInputs = [ ];
-      doCheck = false;
-    });
-
-  # The real (non-TSAN) nixVersions entries actually exercised by the CI
-  # matrix (see nix/dedupe-nix-versions.nix / nanopynixTestVersions below).
-  # nix_2_34/nix_2_35/git share attr-set.cc/.hh source context close enough
-  # for the patch to apply unchanged; nix_2_31's surrounding source differs
-  # enough that the hunks don't match (confirmed by trying), and 2.31 is the
-  # lowest-priority supported version, so it's left unpatched rather than
-  # broken -- revisit if/when 2.31 support is reconsidered.
-  #
-  # `-tsan` suffixed entries are the same nix versions rebuilt with
-  # ThreadSanitizer instrumentation (see tsanNixPackage above). They flow
-  # through the exact same nanopynixVersions/dedup/test-exposure pipeline
-  # below as first-class "supported" versions -- no separate scope to keep
-  # in sync with the real ones. nix_2_31-tsan is unpatched like its
-  # non-TSAN counterpart, since emptyBindingsPatch doesn't apply there
-  # either; it's still useful to confirm the same race(s) reproduce on
-  # that version, not to prove they're fixed.
-  patchedNixVersions = pkgs.nixVersions // {
-    nix_2_34 = patchNixComponents pkgs.nixVersions.nixComponents_2_34;
-    nix_2_35 = patchNixComponents pkgs.nixVersions.nixComponents_2_35;
-    git = patchNixComponents pkgs.nixVersions.nixComponents_git;
-
-    nix_2_31-tsan = tsanNixPackage pkgs.nixVersions.nixComponents_2_31;
-    nix_2_34-tsan = tsanNixPackage (pkgs.nixVersions.nixComponents_2_34.appendPatches [ emptyBindingsPatch ]);
-    nix_2_35-tsan = tsanNixPackage (pkgs.nixVersions.nixComponents_2_35.appendPatches [ emptyBindingsPatch ]);
-    git-tsan = tsanNixPackage (pkgs.nixVersions.nixComponents_git.appendPatches [ emptyBindingsPatch ]);
+  # Which patches to apply to a given nix version's modular component set,
+  # keyed by that version's own major.minor (e.g. "2.34"), with `default`
+  # as the fallback for anything without its own entry (git's rolling
+  # pre-release version string, any future point release, ...).
+  nixPatches = {
+    default = [ emptyBindingsPatch ];
+    "2.34" = [ emptyBindingsPatch ];
+    "2.35" = [ emptyBindingsPatch ];
+    # 2.31's surrounding attr-set.cc/.hh source doesn't match
+    # emptyBindingsPatch's hunks (confirmed by trying), and it's the
+    # lowest-priority supported version, so it's left unpatched rather
+    # than broken -- revisit if/when 2.31 support is reconsidered.
+    "2.31" = [ ];
   };
 
-  # `-tsan` suffixed versions need nanopynix's own C++ bindings (not just
-  # nix's libraries) built with matching ThreadSanitizer instrumentation --
-  # see nix/tsan.nix and nanopynixForNixEx's `enableTsan` below -- so it's
-  # derived from the name rather than threaded through as a separate flag
-  # at every call site.
-  nanopynixForNix =
-    name: nix:
-    nanopynixForNixEx {
-      inherit nix;
-      enableTsan = lib.hasSuffix "-tsan" name;
-    };
+  patchesFor = scope: nixPatches.${lib.versions.majorMinor scope.version} or nixPatches.default;
 
-  # `enableTsan` builds nix's own libraries (+ sqlite) and nanopynix's C++
-  # bindings with ThreadSanitizer instrumentation instead of just nanopynix's
-  # own code -- see nix/tsan.nix for which packages get instrumented and why.
-  nanopynixForNixEx =
-    {
-      nix,
-      enableTsan ? false,
-    }:
-    lib.makeScope
-      (
-        extra:
-        lib.callPackageWith (
-          pkgs
-          // python3Packages
-          // {
-            inherit
-              nanopynix-proto
-              grpclib-transports
-              clypi
-              pyproject-nix
-              renderPyproject
-              renderEditablePyproject
-              ;
+  # Builds one full nanopynix scope per modular Nix component set nixpkgs
+  # exposes, optionally with ThreadSanitizer instrumentation applied to nix
+  # itself and to nanopynix's own C++ bindings. Rather than hand-enumerating
+  # nixComponents_2_34/nixComponents_2_35/nixComponents_git, this discovers
+  # every modular component set via isNixScope and extends each with
+  # nanopynix's own packages uniformly (using the scope's own
+  # newScope/callPackage machinery, so e.g. nanopynix-bindings's
+  # nix-store/nix-expr/... args resolve to that version's own components, not
+  # some other pkgs-level one) -- nixpkgs adding a new nixComponents_X is
+  # picked up here without editing this file. No separate dedup step is
+  # needed: isNixScope only matches modular component scopes, never the
+  # "stable"/"latest" plain-derivation aliases that could otherwise collide.
+  nanopynixForNixVersions =
+    { enableTsan }:
+    let
+      isNixScope =
+        _name: v:
+        (builtins.tryEval v).success
+        && !lib.isDerivation v
+        && lib.isAttrs v
+        && lib.hasAttr "appendPatches" v
+        && lib.hasAttr "overrideScope" v
+        && lib.hasAttr "newScope" v
+        && lib.hasAttr "packages" v;
+
+      patchNixScope = scope: scope.appendPatches (patchesFor scope);
+
+      # nix's own components (nix-util, nix-store, ...) keep resolving
+      # through scope.newScope completely unmodified below -- so their own
+      # deps (e.g. nix-util's `brotli`) still come from plain nixpkgs, not
+      # from python3Packages (which has its own, incompatible `brotli`: the
+      # Python bindings, not the C library with a pkg-config .pc file). Our
+      # own packages instead go through callNixPythonPackage, a second
+      # callPackage-like function that also has python3Packages/pkgs/our
+      # extras in scope (mirroring the pre-carlmazing nanopynixForNixEx's
+      # `pkgs // python3Packages // {...} // extra`), plus `final` so they can
+      # still reference nix-store/nix-expr/nanopynix-bindings/etc directly.
+      extendNixScope =
+        scope:
+        lib.makeScope scope.newScope (
+          lib.extends (
+            final: _prev:
+            let
+              tsanRuntime = if enableTsan then tsan.tsanRuntime else null;
+              callNixPythonPackage = lib.callPackageWith (
+                pkgs
+                // python3Packages
+                // {
+                  inherit
+                    grpclib-transports
+                    renderPyproject
+                    renderEditablePyproject
+                    betterproto2
+                    betterproto2-compiler
+                    nanopynix-proto
+                    clypi
+                    pyproject-nix
+                    ;
+                }
+                // final
+              );
+            in
+            {
+              nanopynix-bindings = callNixPythonPackage ./bindings/package.nix {
+                inherit enableTsan tsanRuntime;
+              };
+              nanopynix =
+                callNixPythonPackage ./python/package.nix {
+                  inherit enableTsan tsanRuntime;
+                }
+                // {
+                  test = callNixPythonPackage ./python/tests.nix {
+                    inherit (final.nanopynix) version;
+                    inherit (inputs) nixpkgs;
+                    inherit tsanRuntime;
+                  };
+                };
+              pynix = callNixPythonPackage ./pynix/package.nix { };
+              shell = callNixPythonPackage ./nix/shell.nix { };
+              nanopynix-docs = callNixPythonPackage ./nix/docs.nix { };
+            }
+          ) scope.packages
+        );
+
+      # nix-store's sqlite buildInput + every meson-based nix-* library get
+      # consistent -fsanitize=thread instrumentation (see nix/tsan.nix) --
+      # applied after extendNixScope (rather than on the raw nixComponents_X
+      # scope) since overrideScope/overrideAllMesonComponents both survive
+      # onto the extended scope, so nanopynix-bindings/nanopynix end up built
+      # against the *same* instrumented nix-store/nix-expr/etc via the shared
+      # `final` fixpoint.
+      applyTsanOverrides =
+        scope:
+        (scope.overrideScope (
+          _final: prev: {
+            nix-store = prev.nix-store.override { sqlite = tsan.sanitizeSqlite pkgs.sqlite; };
           }
-          // extra
-        )
-      )
-      (self: {
-        inherit nix;
-        nanopynix-bindings = self.callPackage ./bindings/package.nix {
-          inherit enableTsan;
-          tsanRuntime = if enableTsan then tsan.tsanRuntime else null;
-        };
-        nanopynix = self.callPackage ./python/package.nix {
-          inherit enableTsan;
-          tsanRuntime = if enableTsan then tsan.tsanRuntime else null;
-        };
-        pynix = self.callPackage ./pynix/package.nix { };
-        shell = self.callPackage ./nix/shell.nix { };
-        tests = self.callPackage ./nix/tests.nix {
-          inherit (inputs) nixpkgs;
-          tsanRuntime = if enableTsan then tsan.tsanRuntime else null;
-        };
-        nanopynix-docs = self.callPackage ./nix/docs.nix { };
-      });
+        )).overrideAllMesonComponents
+          tsan.mesonComponentOverrides;
 
-  dedupeVersions = pkgs.callPackage ./nix/dedupe-nix-versions.nix { };
+      # nixComponents_2_34 -> nix_2_34, nixComponents_git -> git (matching
+      # the names the previous hand-written patchedNixVersions used), plus a
+      # "-tsan" suffix for the ThreadSanitizer variant.
+      rename =
+        name: value:
+        let
+          bare = lib.removePrefix "nixComponents_" name;
+          versionName = if bare == "git" then "git" else "nix_${bare}";
+          suffix = if enableTsan then "-tsan" else "";
+        in
+        lib.nameValuePair "${versionName}${suffix}" value;
+    in
+    lib.pipe pkgs.nixVersions (
+      [
+        (lib.filterAttrs isNixScope)
+        (lib.mapAttrs (_: patchNixScope))
+        (lib.mapAttrs (_: extendNixScope))
+      ]
+      ++ lib.optional enableTsan (lib.mapAttrs (_: applyTsanOverrides))
+      ++ [ (lib.mapAttrs' rename) ]
+    );
 
-  nanopynixVersions = lib.pipe patchedNixVersions [
-    (lib.filterAttrs (
-      _: nix:
-      let
-        canEval = builtins.tryEval nix;
-      in
-      canEval.success && lib.isDerivation canEval.value
-    ))
-    (lib.mapAttrs nanopynixForNix)
-  ];
+  nanopynixVersionsInternal =
+    nanopynixForNixVersions { enableTsan = false; } // nanopynixForNixVersions { enableTsan = true; };
 
-  # Deduped view of nanopynixVersions used for test exposure/CI, so aliased
-  # names (e.g. `stable`/`latest`) don't produce redundant test jobs. Note
-  # `nanopynixVersions.stable` below is still the full, non-deduped set.
-  nanopynixTestVersions = dedupeVersions nanopynixVersions;
-
-  nanopynixVersionNames = builtins.attrNames nanopynixTestVersions;
+  nanopynixVersions = nanopynixVersionsInternal // {
+    stable = getByVersion pkgs.nixVersions.stable.version;
+    latest = getByVersion pkgs.nixVersions.latest.version;
+  };
 
   # Per-version test runners, exposed individually as `nanopynix-tests-<name>`
   # flake packages so CI can build/run each Nix version in its own job.
-  nanopynixVersionTests = lib.mapAttrs' (
-    name: value: lib.nameValuePair "nanopynix-tests-${name}" value.tests
-  ) nanopynixTestVersions;
+  tests = lib.mapAttrs' (
+    name: value: lib.nameValuePair "nanopynix-tests-${name}" value.nanopynix.test
+  ) nanopynixVersionsInternal;
 
-  nanopynix-all-tests = pkgs.callPackage ./nix/nix-version-tests.nix {
-    nanopynixVersions = nanopynixTestVersions;
-    inherit (inputs) nixpkgs;
-  };
-
+  getByVersion =
+    version:
+    lib.pipe nanopynixVersionsInternal [
+      lib.attrsToList
+      (lib.map (v: v.value))
+      (lib.filter (v: v.version == version))
+      (lib.head)
+    ];
 in
 {
   inherit (pkgs) lib;
@@ -223,7 +230,6 @@ in
     nanopynix-bindings
     pynix
     shell
-    tests
     nanopynix-docs
     ;
 
@@ -231,13 +237,10 @@ in
     flake
     pkgs
     nanopynixVersions
-    nanopynixVersionNames
-    nanopynix-all-tests
     nanopynix-proto
     clypi
     grpclib-transports
     pyproject-nix
+    tests
     ;
-
 }
-// nanopynixVersionTests
