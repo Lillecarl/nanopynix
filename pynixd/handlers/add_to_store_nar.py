@@ -26,6 +26,7 @@ class AddToStoreNarHandler(Handler):
     op: ClassVar[int] = 39
 
     async def handle(self, ctx: RequestContext) -> AddToStoreNarResponse | None:
+        """Decode AddToStoreNar request, stream framed NAR to daemon, return response."""
         structlog.contextvars.bind_contextvars(operation=type(self).__name__)
         async with ctx.proxy.local_store.transfer_conn() as conn:
             # 1. Read request header from client (serde)

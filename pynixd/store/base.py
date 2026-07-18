@@ -47,6 +47,7 @@ class Store(ABC):
                 cls._executors[method._pynixd_op] = name  # type: ignore[union-attr]
 
     def __init__(self, spec: StoreSpecBase) -> None:
+        """Initialize store identity, feature matrix, signing keys, and path info cache."""
         if spec.store_id is None:
             raise RuntimeError("store_id must be set on the spec before Store construction")
         self.store_id: StoreId = spec.store_id
@@ -153,13 +154,16 @@ class Store(ABC):
     # ── Path info cache ──────────────────────────────────────────────
 
     def add_path_info(self, info: ValidPathInfo) -> None:
+        """Cache a single ValidPathInfo entry."""
         self.path_info_cache[str(info.path)] = info
 
     def add_path_infos(self, infos: Iterable[ValidPathInfo]) -> None:
+        """Cache multiple ValidPathInfo entries."""
         for info in infos:
             self.path_info_cache[str(info.path)] = info
 
     def get_path_info(self, path: object) -> ValidPathInfo | None:
+        """Retrieve a cached ValidPathInfo entry, or None."""
         return self.path_info_cache.get(str(path))
 
     # ── Executor infrastructure ─────────────────────────────────────

@@ -23,6 +23,8 @@ log = structlog.get_logger(__name__)
 
 @dataclass(frozen=True)
 class SubstituteAttempt:
+    """Outcome of a single path substitution attempt."""
+
     found: bool
     result: GoalResult
 
@@ -31,6 +33,7 @@ class SubstitutePathGoal(ExecutionGoal[SubstituteAttempt]):
     """Substitute one store path and its reference closure."""
 
     def __init__(self, engine: GoalEngine, path: StorePath, substituter_ids: tuple[str, ...]) -> None:
+        """Initialize the goal with the path to substitute and eligible substituter IDs."""
         super().__init__(engine)
         self.path = path
         self.substituter_ids = substituter_ids
@@ -112,6 +115,7 @@ class SubstitutePathGoal(ExecutionGoal[SubstituteAttempt]):
 
 
 def substituter_fingerprint(substituter_ids: tuple[str, ...]) -> str:
+    """Return a deterministic hash fingerprint for a set of substituter IDs."""
     payload = "\0".join(substituter_ids).encode()
     return hashlib.sha256(payload).hexdigest()
 

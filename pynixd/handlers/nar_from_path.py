@@ -26,6 +26,7 @@ class NarFromPathHandler(Handler):
     op: ClassVar[int] = 38
 
     async def handle(self, ctx: RequestContext) -> None:
+        """Decode NarFromPath request, query path info, stream unframed NAR bytes from daemon to client."""
         # 1. Read request from client (serde)
         req = await NarFromPathRequest.from_reader(
             ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),

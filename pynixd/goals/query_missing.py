@@ -24,6 +24,8 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class QueryMissingPlan:
+    """Accumulated classification of paths into build/substitute/unknown buckets."""
+
     will_build: set[SerdeStorePath]
     will_substitute: set[SerdeStorePath]
     unknown: set[SerdeStorePath]
@@ -31,6 +33,7 @@ class QueryMissingPlan:
     nar_size: int = 0
 
     def add_substitute(self, path: StorePath, availability: SubstitutionAvailability) -> None:
+        """Record that *path* can be substituted and accumulate its download size."""
         self.will_substitute.add(SerdeStorePath(path=str(path)))
         self.download_size += availability.download_size or 0
         self.nar_size += availability.nar_size or 0

@@ -19,6 +19,7 @@ class AddIndirectRootHandler(Handler):
     op: ClassVar[int] = 12
 
     async def handle(self, ctx: RequestContext) -> object | None:
+        """Decode AddIndirectRoot request, forward to daemon for admin or return no-op for others."""
         if ctx.role == Role.ADMIN:
             req = await AddIndirectRootRequest.from_reader(
                 ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),

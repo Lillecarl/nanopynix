@@ -54,6 +54,7 @@ class ClientConn:
     """
 
     def __init__(self, w: NixWriter) -> None:
+        """Wrap a writer for thread-safe stderr output to a client."""
         self.w = w
         self._write_lock = anyio.Lock()
 
@@ -97,6 +98,14 @@ class Connection:
         conn_id: str,
         store_path: Path | None = None,
     ) -> None:
+        """Wrap a reader/writer pair as a daemon protocol connection.
+
+        Args:
+            r: Reader for incoming daemon traffic.
+            w: Writer for outgoing daemon traffic.
+            conn_id: Unique identifier for this connection (e.g. store name).
+            store_path: Optional store root path for local Nix stores.
+        """
         self.id: str = conn_id
         self.store_path: Path | None = store_path
         self.version: int = wire.PROTOCOL_VERSION
@@ -109,6 +118,7 @@ class Connection:
         self.op_log: list[str] = []
 
     async def __aenter__(self) -> Connection:
+        """Enter async context; no setup required."""
         return self
 
     async def __aexit__(
@@ -223,4 +233,5 @@ class Connection:
         await self.r.drain_stderr()
 
     def __repr__(self) -> str:
+        """String representation showing the connection identifier."""
         return f"Connection(id={self.id!r})"

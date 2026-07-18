@@ -20,17 +20,20 @@ class LocalDBStore(LocalStore):
     db: LocalStoreDB
 
     async def start(self, sync_paths: bool = True) -> None:
+        """Initialise the SQLite database and start the daemon store."""
         await self.ensure_daemon()
         self.db = await LocalStoreDB.open(self.store_path or Path("/"))
         await super().start(sync_paths=sync_paths)
 
     async def close(self) -> None:
+        """Close the SQLite database and the daemon store."""
         await self.db.close()
         await super().close()
 
     # ── Fast-path overrides ────────────────────────────────────────
 
     async def is_valid_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """IsValidPath — fast-path via SQLite lookup."""
         if not self.db.active:
             return None
 
@@ -48,6 +51,7 @@ class LocalDBStore(LocalStore):
         return IsValidPathResponse(valid=False)
 
     async def query_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryPathInfo — fast-path via SQLite, with in-memory cache check."""
         cached = self.get_path_info(request.path)
         if cached is not None:
             from pynixd.serde import QueryPathInfoResponse
@@ -93,6 +97,8 @@ class LocalDBStore(LocalStore):
         return QueryPathInfoResponse(valid=True, info=info)
 
     async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryAllValidPaths — fast-path via SQLite."""
+
         from pynixd.serde import QueryAllValidPathsResponse
         from pynixd.serde import StorePath as SerdeStorePath
 
@@ -104,6 +110,8 @@ class LocalDBStore(LocalStore):
         return QueryAllValidPathsResponse(paths=paths)
 
     async def query_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryValidPaths — fast-path via SQLite."""
+
         import json
 
         from pynixd.serde import QueryValidPathsResponse
@@ -119,6 +127,8 @@ class LocalDBStore(LocalStore):
         return QueryValidPathsResponse(paths=paths)
 
     async def query_path_from_hash_part(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryPathFromHashPart — fast-path via SQLite."""
+
         from pynixd.serde import QueryPathFromHashPartResponse
         from pynixd.serde import StorePath as SerdeStorePath
 
@@ -134,6 +144,8 @@ class LocalDBStore(LocalStore):
         return None  # fall through
 
     async def query_closure(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryClosure — fast-path via SQLite recursive CTE."""
+
         import json
 
         from pynixd.serde import QueryClosureResponse
@@ -148,6 +160,8 @@ class LocalDBStore(LocalStore):
         return QueryClosureResponse(paths=paths)
 
     async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryClosureWithInfo — fast-path via SQLite recursive CTE with full info."""
+
         if not request.paths:
             from pynixd.serde import QueryClosureWithInfoResponse
 
@@ -193,6 +207,8 @@ class LocalDBStore(LocalStore):
         return QueryClosureWithInfoResponse(infos=sorted_infos)
 
     async def query_path_infos(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryPathInfos — batch path info query via SQLite with per-path cache check."""
+
         if not request.paths:
             from pynixd.serde import QueryPathInfosResponse
 
@@ -261,6 +277,8 @@ class LocalDBStore(LocalStore):
     async def query_derivation_output_map_batch(
         self, request: Any, client: Any = None, suppress_last: bool = False
     ) -> Any:
+        """QueryDerivationOutputMapBatch — batch output map via SQLite, fallback to drv parse."""
+
         if not request.drv_paths:
             from pynixd.serde.query_derivation_output_map_batch import DerivationOutputMapBatchResponse
 

@@ -19,6 +19,7 @@ class PynixdCollectGarbageHandler(Handler):
     op: ClassVar[int] = 101
 
     async def handle(self, ctx: RequestContext) -> object | None:
+        """Decode PynixdCollectGarbage request, verify admin auth, execute via daemon, return response."""
         req = await PynixdCollectGarbageRequest.from_reader(
             ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
         )

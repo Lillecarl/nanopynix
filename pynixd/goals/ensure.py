@@ -30,6 +30,8 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
+    """Coordinate the production of a derived path via substitution or build."""
+
     engine: GoalEngine
     derived_path: DerivedPath
     build_mode: int
@@ -38,9 +40,11 @@ class EnsureDerivedPathGoal(GoalHolder[GoalResult]):
     _build_goal: BuildDerivationGoal | None = None
 
     def __post_init__(self) -> None:
+        """Initialize the GoalHolder base with the shared engine."""
         GoalHolder.__init__(self, self.engine)
 
     async def subscribe(self, client: ClientConn | None) -> None:
+        """Register a client for real-time log forwarding from the underlying build goal."""
         if client is None:
             return
         async with self._lock:

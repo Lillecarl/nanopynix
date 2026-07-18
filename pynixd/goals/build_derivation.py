@@ -24,6 +24,8 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class BuildDerivationGoal(ExecutionGoal[GoalResult]):
+    """Execute a single derivation build via the scheduler's build queue."""
+
     engine: GoalEngine
     request: BuildDerivationRequest
     _subscribers: list[ClientConn] = field(default_factory=list)
@@ -32,9 +34,11 @@ class BuildDerivationGoal(ExecutionGoal[GoalResult]):
     _finished: bool = False
 
     def __post_init__(self) -> None:
+        """Initialize the ExecutionGoal base with the shared engine."""
         ExecutionGoal.__init__(self, self.engine)
 
     async def subscribe(self, client: ClientConn | None) -> None:
+        """Register a client for real-time log forwarding during the build."""
         if client is None:
             return
         async with self._lock:

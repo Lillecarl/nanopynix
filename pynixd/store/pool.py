@@ -28,7 +28,11 @@ _nested_conns: ContextVar[dict[str, int]] = ContextVar("_nested_conns")
 
 
 class ConnectionPool:
-    """Manages a pool of connections with dynamic memory gating and idle TTL."""
+    """Manages a pool of reusable daemon connections with concurrency limiting and idle TTL.
+
+    Tracks connection nesting per-task via a ContextVar to detect re-entrant
+    acquisitions and allocate fresh connections to avoid deadlock.
+    """
 
     def __init__(
         self,
@@ -39,6 +43,8 @@ class ConnectionPool:
         max_connections: int = 64,
         on_connection_created: Callable[[Connection], None] | None = None,
     ) -> None:
+        """Configure pool with connection factory, memory gate, and concurrency limits."""
+
         self.store_id = store_id
         self.factory = factory
         self.gate = gate
@@ -53,6 +59,7 @@ class ConnectionPool:
 
     @property
     def in_flight(self) -> int:
+        """Number of currently active connections."""
         return self.active_connections
 
     @property
@@ -61,6 +68,8 @@ class ConnectionPool:
         return f"active={self.active_connections} idle={len(self.idle_conns)} total={len(self.all_conns)}"
 
     def start_sweep(self) -> None:
+        """Start the idle connection sweep task if not already running."""
+
         """Start the idle sweep task if not already running."""
         if self.sweep_task is None or self.sweep_task.done():
             self.sweep_task = asyncio.create_task(self.sweep_idle())
@@ -97,6 +106,8 @@ class ConnectionPool:
                     await conn.close()
 
     async def get_or_create_conn(self) -> Connection:
+        """Return a reusable idle connection, or create a new one."""
+
         """Pop an idle connection or create a new one."""
         now = time.monotonic()
         while self.idle_conns:
@@ -238,13 +249,15 @@ class ConnectionPool:
             self._slots.release()
 
     def build_conn(self) -> AbstractAsyncContextManager[Connection]:
+        """Acquire a connection for build operations."""
         return self.acquire("build")
 
     def transfer_conn(self) -> AbstractAsyncContextManager[Connection]:
+        """Acquire a connection for transfer operations."""
         return self.acquire("transfer")
 
     async def close(self) -> None:
-        """Close all pooled connections and stop sweep task."""
+        """Close all connections and cancel the idle sweep task."""
         if self.sweep_task is not None:
             self.sweep_task.cancel()
             with suppress(BaseException):

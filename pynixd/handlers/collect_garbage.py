@@ -19,6 +19,7 @@ class CollectGarbageHandler(Handler):
     op: ClassVar[int] = 20
 
     async def handle(self, ctx: RequestContext) -> object | None:
+        """Decode CollectGarbage request, verify admin auth, execute via daemon, return response."""
         req = await CollectGarbageRequest.from_reader(
             ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
         )

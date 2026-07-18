@@ -66,6 +66,12 @@ class ResourceMonitor(ABC):
     """Abstract base for system monitoring."""
 
     def __init__(self, gate: ResourceGate, settings: PynixdSettings) -> None:
+        """Initialize a resource monitor.
+
+        Args:
+            gate: Shared gate used to block builds under pressure.
+            settings: Application settings with pressure thresholds.
+        """
         self.gate = gate
         self.settings = settings
         self.running = False
@@ -78,11 +84,13 @@ class ResourceMonitor(ABC):
         ...
 
     def start(self) -> None:
+        """Start the monitor loop as a background task."""
         if not self.running:
             self.running = True
             self.task = asyncio.create_task(self.run())
 
     async def stop(self) -> None:
+        """Stop the monitor loop and cancel its background task."""
         self.running = False
         if self.task:
             self.task.cancel()
@@ -99,10 +107,18 @@ class DummyResourceMonitor(ResourceMonitor):
         settings: PynixdSettings,
         cpu_util: float = 0.0,
     ) -> None:
+        """Initialize a dummy monitor.
+
+        Args:
+            gate: Shared gate (always set to healthy).
+            settings: Application settings.
+            cpu_util: Static CPU utilisation to report.
+        """
         super().__init__(gate, settings)
         self.cpu_util = cpu_util
 
     async def run(self) -> None:
+        """Report static healthy stats once, then idle until stopped."""
         log.info("dummy_resource_monitor_started", cpu_util=self.cpu_util)
         self.health = SystemHealth(
             cpu_util=CpuUtil(utilization=self.cpu_util, cores=1.0, throttled_pct=0.0),
@@ -125,6 +141,14 @@ class GenericResourcePoller(ResourceMonitor):
         read_fn: Callable[[str], Coroutine[None, None, str]],
         exists_fn: Callable[[str], Coroutine[None, None, bool]],
     ) -> None:
+        """Initialize a generic polling monitor.
+
+        Args:
+            gate: Shared gate to toggle under pressure.
+            settings: Application settings with pressure thresholds.
+            read_fn: Async callable to read a file at a given path.
+            exists_fn: Async callable to check whether a path exists.
+        """
         super().__init__(gate, settings)
         self.read_fn = read_fn
         self.exists_fn = exists_fn
@@ -133,6 +157,7 @@ class GenericResourcePoller(ResourceMonitor):
         self.cpu_cores: float | None = None
 
     async def run(self) -> None:
+        """Periodically poll PSI, memory, and CPU stats and update the resource gate."""
         log.info("resource_poller_started")
 
         # 1. Detect CPU cores once

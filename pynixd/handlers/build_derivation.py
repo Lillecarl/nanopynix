@@ -23,6 +23,7 @@ class BuildDerivationHandler(Handler):
     op: ClassVar[int] = 36
 
     async def handle(self, ctx: RequestContext) -> WireResponse | None:
+        """Decode BuildDerivation request, enqueue via scheduler or fallback to daemon, return result."""
         logger.debug("received_op")
 
         self_req = await BuildDerivationRequest.from_reader(ReadContext.from_request(ctx))

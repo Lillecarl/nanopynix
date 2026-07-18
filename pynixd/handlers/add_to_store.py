@@ -25,6 +25,7 @@ class AddToStoreHandler(Handler):
     op: ClassVar[int] = 7
 
     async def handle(self, ctx: RequestContext) -> SerdeAddToStoreResponse | None:
+        """Decode AddToStore request, stream framed NAR to daemon, sign path info, cache result."""
         logger.debug("received_op")
         async with ctx.proxy.local_store.transfer_conn() as conn:
             # 1. Read request header from client (serde)

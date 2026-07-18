@@ -56,6 +56,8 @@ _TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
 
 
 class ProbeState(IntEnum):
+    """Tracks the protocol probing state of a DaemonStore connection."""
+
     NOT_PROBED = 0
     PROBING = 1
     PROBED = 2
@@ -69,6 +71,7 @@ class DaemonStore(Store):
     """
 
     def __init__(self, spec: StoreSpecBase) -> None:
+        """Initialize daemon store with pool, probing state, circuit breaker, and reconnect loop."""
         super().__init__(spec)
         self.store_path = getattr(spec, "store_path", Path("/"))
         self.scheduleable = spec.scheduleable
@@ -117,20 +120,24 @@ class DaemonStore(Store):
 
     @property
     def features(self) -> AbstractSet[str]:
+        """Set of daemon-advertised protocol features."""
         return self._features
 
     @property
     def feature_matrix(self) -> dict[str, set[str]]:
+        """Mapping of system → feature-set probed from the daemon."""
         if self._feature_matrix is not None:
             return self._feature_matrix
         return {}
 
     @feature_matrix.setter
     def feature_matrix(self, value: dict[str, set[str]]) -> None:
+        """Override the probed feature matrix."""
         self._feature_matrix = value
 
     @property
     def systems(self) -> set[str] | None:
+        """Set of systems this store can build for, or None if unrestricted."""
         fm = self._feature_matrix
         if fm is not None:
             return set(fm.keys()) if fm else None
@@ -138,6 +145,7 @@ class DaemonStore(Store):
 
     @systems.setter
     def systems(self, value: set[str] | None) -> None:
+        """Override the set of systems this store can build for."""
         if self._feature_matrix is not None:
             if value is None:
                 self._feature_matrix = {}
@@ -148,6 +156,7 @@ class DaemonStore(Store):
             self._feature_matrix = {s: set() for s in value}
 
     def supports_system(self, system: str) -> bool:
+        """Check if this store can build for the given system."""
         fm = self._feature_matrix
         if fm is None:
             return True
@@ -169,6 +178,7 @@ class DaemonStore(Store):
 
     @property
     def is_lix(self) -> bool:
+        """Whether the connected daemon is a Lix daemon."""
         if self.version != wire.proto(1, 35):
             return False
         return "lix" in self.nix_version.lower()
@@ -191,16 +201,20 @@ class DaemonStore(Store):
 
     @property
     def in_flight(self) -> int:
+        """Number of currently active connections."""
         return self.pool.active_connections
 
     @property
     def pool_stats(self) -> str:
+        """Human-readable pool statistics string."""
         return self.pool.stats
 
     def build_conn(self) -> AbstractAsyncContextManager[Connection]:
+        """Acquire a connection for build operations."""
         return self.pool.acquire("build")
 
     def transfer_conn(self) -> AbstractAsyncContextManager[Connection]:
+        """Acquire a connection for transfer operations."""
         return self.pool.acquire("transfer")
 
     async def _create_conn_with_counter(self) -> Connection:
@@ -211,15 +225,18 @@ class DaemonStore(Store):
 
     @property
     def is_healthy(self) -> bool:
+        """Whether the store is not in cooldown."""
         return time.monotonic() >= self.cooldown_until
 
     def record_success(self) -> None:
+        """Reset circuit breaker after a successful operation."""
         if self.consecutive_failures > 0:
             log.info("store_recovered", store_id=self.store_id, consecutive_failures=self.consecutive_failures)
         self.consecutive_failures = 0
         self.cooldown_until = 0.0
 
     def record_failure(self) -> None:
+        """Record a failure and optionally enter circuit-breaker cooldown."""
         self.consecutive_failures += 1
         if self.consecutive_failures >= _CB_THRESHOLD:
             cooldown = min(30 * 2 ** (self.consecutive_failures - _CB_THRESHOLD), _CB_MAX_COOLDOWN)
@@ -304,6 +321,7 @@ class DaemonStore(Store):
     # ── Execution ───────────────────────────────────────────────────
 
     async def call(self, request, client=None, suppress_last=False, raise_on_error=False, skip_probe=False):
+        """Send a wire request over a pooled connection."""
         if not skip_probe:
             await self.probe()
 
@@ -320,6 +338,7 @@ class DaemonStore(Store):
             raise
 
     async def execute(self, request, client=None, suppress_last=False, skip_probe=False):
+        """Execute an operation, dispatching to a registered executor or falling back to call()."""
         if not skip_probe:
             await self.probe()
 
@@ -365,6 +384,7 @@ class DaemonStore(Store):
                 )
 
     async def probe(self) -> None:
+        """Ensure the store has been probed, performing probing if needed."""
         if self.probe_state == ProbeState.PROBED:
             return
         if self.probe_state == ProbeState.PROBING:
@@ -536,101 +556,134 @@ class DaemonStore(Store):
     # ── Standard operations ──────────────────────────────────────────
 
     async def is_valid_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """IsValidPath (op 1) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_referrers(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryReferrers (op 6) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def add_to_store(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """AddToStore (op 7) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def build_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """BuildPaths (op 9) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def ensure_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """EnsurePath (op 10) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def add_temp_root(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """AddTempRoot (op 11) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def add_indirect_root(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """AddIndirectRoot (op 12) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def find_roots(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """FindRoots (op 14) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def set_options(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """SetOptions (op 19) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def collect_garbage(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """CollectGarbage (op 20) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_all_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryAllValidPaths (op 23) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryPathInfo (op 26) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_path_from_hash_part(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryPathFromHashPart (op 29) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_valid_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryValidPaths (op 31) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_substitutable_paths(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QuerySubstitutablePaths (op 32) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_valid_derivers(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryValidDerivers (op 33) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def optimise_store(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """OptimiseStore (op 34) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def verify_store(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """VerifyStore (op 35) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def build_derivation(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """BuildDerivation (op 36) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def add_signatures(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """AddSignatures (op 37) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def nar_from_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """NarFromPath (op 38) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def add_to_store_nar(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """AddToStoreNar (op 39) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_missing(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryMissing (op 40) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_derivation_output_map(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryDerivationOutputMap (op 41) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def register_drv_output(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """RegisterDrvOutput (op 42) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_realisation(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryRealisation (op 43) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def add_multiple_to_store(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """AddMultipleToStore (op 44) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def add_build_log(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """AddBuildLog (op 45) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def build_paths_with_results(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """BuildPathsWithResults (op 46) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def add_perm_root(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """AddPermRoot (op 47) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     # ── Extension operations ─────────────────────────────────────────
 
     async def pynixd_collect_garbage(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """PynixdCollectGarbage (op 101) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def query_path_infos(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryPathInfos (op 103) — batch path info query, falls back to per-path calls."""
+
         from ..serde import QueryPathInfoRequest, QueryPathInfosResponse
         from ..serde.valid_path_info import ValidPathInfo as SerdeValidPathInfo
 
@@ -650,6 +703,8 @@ class DaemonStore(Store):
         return QueryPathInfosResponse(infos=infos)
 
     async def query_closure(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryClosure (op 104) — closure of store paths, falls back to empty if unsupported."""
+
         if "QueryClosure" in self.features:
             return await self.call(request, client=client, suppress_last=suppress_last)
         from ..serde import QueryClosureResponse
@@ -657,6 +712,8 @@ class DaemonStore(Store):
         return QueryClosureResponse(paths=set())
 
     async def query_closure_with_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """QueryClosureWithInfo (op 105) — closure with full path info, falls back to iterative query."""
+
         from ..serde import QueryClosureWithInfoResponse, QueryPathInfosRequest
 
         if not request.paths:
@@ -711,6 +768,8 @@ class DaemonStore(Store):
     async def query_derivation_output_map_batch(
         self, request: Any, client: Any = None, suppress_last: bool = False
     ) -> Any:
+        """QueryDerivationOutputMapBatch (op 106) — batch output map query, falls back per-drv."""
+
         from ..serde import StorePath as SerdeStorePath
         from ..serde.query_derivation_output_map_batch import DerivationOutputMapBatchResponse
 
@@ -734,6 +793,8 @@ class DaemonStore(Store):
         return DerivationOutputMapBatchResponse(outputs=outputs)
 
     async def sign_path_info(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """SignPathInfo (op 107) — sign with local keys and relay to daemon."""
+
         if "SignPathInfo" in self.features:
             return await self.call(request, client=client, suppress_last=suppress_last)
 
@@ -764,14 +825,18 @@ class DaemonStore(Store):
         return SignPathInfoResponse(info=info)
 
     async def probe_systems(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """ProbeSystems (op 108) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     async def probe_features(self, request: Any, client: Any = None, suppress_last: bool = False) -> Any:
+        """ProbeFeatures (op 109) — delegate to daemon."""
         return await self.call(request, client=client, suppress_last=suppress_last)
 
     # ── Derivation reading ──────────────────────────────────────────
 
     async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        """Fetch and parse a .drv file from the daemon via NAR stream."""
+
         from ..drv_parser import parse_drv
         from ..nar import NarRegular, parse_nar
         from ..serde import IsValidPathRequest, NarFromPathRequest, QueryPathInfoRequest

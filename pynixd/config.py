@@ -19,6 +19,8 @@ from .serde.ids import StoreId
 
 
 class ScheduleMode(StrEnum):
+    """How pynixd assigns builds: auto-detect, proxy-only, or scheduler-only."""
+
     auto = "auto"
     proxy = "proxy"
     scheduler = "scheduler"
@@ -115,6 +117,13 @@ class StoreSpecBase(BaseModel):
 
 
 class LocalSocketStoreSpec(StoreSpecBase):
+    """A local Nix daemon accessed via Unix domain socket.
+
+    Optionally wraps the daemon with a local SQLite database (``use_db``)
+    for fast-path resolution of queries like ``IsValidPath``, ``QueryPathInfo``,
+    and ``QueryReferrers``.
+    """
+
     type: Literal["local-socket"] = "local-socket"
     store_path: Path = Path("/")
     socket_path: Path = Path("nix/var/nix/daemon-socket/pynixd-nix")
@@ -125,6 +134,7 @@ class LocalSocketStoreSpec(StoreSpecBase):
     monitor: bool = True
 
     def to_store(self, store_id: str) -> LocalStore | LocalDBStore:
+        """Build a ``LocalStore`` or ``LocalDBStore`` from this spec."""
         from .store.local_daemon import LocalStore
         from .store.local_db import LocalDBStore
 
@@ -135,6 +145,11 @@ class LocalSocketStoreSpec(StoreSpecBase):
 
 
 class ExternalUnixStoreSpec(StoreSpecBase):
+    """A remote Nix daemon connected via an external Unix socket.
+
+    Used as a substitution source only — builds and GC are disabled.
+    """
+
     type: Literal["external-unix"] = "external-unix"
     store_path: Path = Path("/")
     socket_path: Path = Path("/nix/var/nix/daemon-socket/socket")
@@ -144,6 +159,7 @@ class ExternalUnixStoreSpec(StoreSpecBase):
     gc_enabled: bool = False
 
     def to_store(self, store_id: str) -> ExternalUnixStore:
+        """Build an ``ExternalUnixStore`` from this spec."""
         from .store import ExternalUnixStore
 
         return ExternalUnixStore(
@@ -202,6 +218,11 @@ class ReverseInitiatorSettings(BaseModel):
 
 
 class SSHSubprocessStoreSpec(StoreSpecBase):
+    """A remote Nix daemon accessed via ``ssh <host> nix-daemon --stdio``.
+
+    Spawns a new ``nix-daemon`` process per connection over SSH.
+    """
+
     type: Literal["ssh-subprocess"] = "ssh-subprocess"
     host: str
     port: int = 22
@@ -211,6 +232,7 @@ class SSHSubprocessStoreSpec(StoreSpecBase):
     client_keys: list[Any] = Field(default_factory=list)
 
     def to_store(self, store_id: str) -> SSHSubprocessStore:
+        """Build an ``SSHSubprocessStore`` from this spec."""
         from .store import SSHSubprocessStore
 
         return SSHSubprocessStore(
@@ -219,6 +241,12 @@ class SSHSubprocessStoreSpec(StoreSpecBase):
 
 
 class SSHSocketStoreSpec(StoreSpecBase):
+    """A remote Nix daemon accessed via SSH with Unix socket forwarding.
+
+    Reuses an existing daemon socket on the remote host through an SSH
+    tunnel, avoiding per-connection daemon startup overhead.
+    """
+
     type: Literal["ssh-socket"] = "ssh-socket"
     host: str
     port: int = 22
@@ -228,6 +256,7 @@ class SSHSocketStoreSpec(StoreSpecBase):
     client_keys: list[Any] = Field(default_factory=list)
 
     def to_store(self, store_id: str) -> SSHSocketStore:
+        """Build an ``SSHSocketStore`` from this spec."""
         from .store import SSHSocketStore
 
         return SSHSocketStore(
@@ -236,6 +265,12 @@ class SSHSocketStoreSpec(StoreSpecBase):
 
 
 class HTTPBinaryCacheSpec(StoreSpecBase):
+    """A remote binary cache accessed via HTTP (Nix binary cache protocol).
+
+    Read-only substitution source. Supports health tracking via configurable
+    concurrency limits and failure ratio thresholds.
+    """
+
     type: Literal["http-binary-cache"] = "http-binary-cache"
     url: str
     max_concurrent: int | None = None
@@ -246,6 +281,7 @@ class HTTPBinaryCacheSpec(StoreSpecBase):
     gc_enabled: bool = False
 
     def to_store(self, store_id: str) -> HTTPBinaryCacheStore:
+        """Build an ``HTTPBinaryCacheStore`` from this spec."""
         from .store import HTTPBinaryCacheStore
 
         return HTTPBinaryCacheStore(
@@ -271,9 +307,15 @@ class _ConfigFileSource(PydanticBaseSettingsSource):
         super().__init__(settings_cls)
 
     def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        """Return no value — all fields are loaded in ``__call__``."""
         return None, field_name, False
 
     def __call__(self) -> dict[str, Any]:
+        """Load settings from the JSON file at ``PYNIXD_CONFIG``.
+
+        Returns only fields that exist in the settings model. Returns empty
+        dict if the path is unset or does not exist.
+        """
         config_path = self.settings_cls.model_fields.get("config")
         if config_path is None:
             return {}
@@ -366,7 +408,7 @@ class PynixdSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-
+        """Configure settings source priority: init > env > JSON config file."""
         return (init_settings, env_settings, _ConfigFileSource(settings_cls))
 
     def to_stores(self) -> dict[StoreId, Store]:

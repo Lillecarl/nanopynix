@@ -19,6 +19,7 @@ def _patched_json_default(  # type: ignore[override]
     self: _json.JSONEncoder,
     o: object,
 ) -> object:
+    """Fallback serializer that delegates to ``__json__()`` if available."""
     if hasattr(o, "__json__"):
         return o.__json__()  # type: ignore[no-any-return, attr-defined]
     return _original_json_default(self, o)

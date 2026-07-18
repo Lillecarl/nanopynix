@@ -22,6 +22,7 @@ log = structlog.get_logger(__name__)
 
 
 async def async_daemon_main() -> None:
+    """Async entry point: load settings, create server, and run until shutdown."""
     settings = load_settings()
     stores = settings.to_stores()
 
@@ -47,6 +48,7 @@ async def async_daemon_main() -> None:
 
 
 def daemon_main(_args: argparse.Namespace) -> None:
+    """CLI entry point for ``pynixd daemon`` — sets up logging and runs the async loop."""
     settings = load_settings()
     setup_logging(settings)
 
@@ -54,6 +56,7 @@ def daemon_main(_args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    """Top-level CLI entry point: parse args and dispatch to subcommand handlers."""
     parser = argparse.ArgumentParser(description="pynixd — Nix daemon protocol proxy")
     root_sub = parser.add_subparsers(dest="subcommand", required=True)
 

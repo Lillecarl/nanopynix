@@ -19,6 +19,7 @@ class AddTempRootHandler(Handler):
     op: ClassVar[int] = 11
 
     async def handle(self, ctx: RequestContext) -> object | None:
+        """Decode AddTempRoot request, forward to daemon for admin, return no-op for others."""
         if ctx.role == Role.ADMIN:
             req = await AddTempRootRequest.from_reader(
                 ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),

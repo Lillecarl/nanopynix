@@ -20,6 +20,7 @@ class SetOptionsHandler(Handler):
     op: ClassVar[int] = 19
 
     async def handle(self, ctx: RequestContext) -> object | None:
+        """Decode SetOptions request, log no-op for regular users, forward to daemon for admin."""
         req = await SetOptionsRequest.from_reader(
             ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
         )

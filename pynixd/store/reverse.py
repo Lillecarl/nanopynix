@@ -36,11 +36,13 @@ class ReverseStore(SSHStore):
     """
 
     def __init__(self, spec: ReverseStoreSpec, ssh_conn: asyncssh.SSHClientConnection) -> None:
+        """Wrap an existing reverse SSH connection for daemon operations on the builder."""
         super().__init__(spec)
         self._ssh_conn: asyncssh.SSHClientConnection = ssh_conn
         self.nix_bin = spec.nix_bin
 
     async def create_conn(self) -> Connection:
+        """Spawn nix-daemon --stdio on the builder over the reverse SSH connection."""
         conn_id = f"{self.store_id}-{self.conn_counter}"
         cmd = "nix-daemon --stdio" if self.nix_bin == "nix" else f"{self.nix_bin} daemon --stdio"
         log.debug(

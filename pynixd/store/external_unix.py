@@ -25,12 +25,14 @@ class ExternalUnixStore(DaemonStore):
     """
 
     def __init__(self, spec: ExternalUnixStoreSpec) -> None:
+        """Configure external Unix socket connection."""
         super().__init__(spec)
         self.socket_path = spec.socket_path
         self.monitor_enabled = spec.monitor
         self.monitor = None
 
     async def create_conn(self) -> Connection:
+        """Create a connection by connecting to the external Unix socket."""
         conn_id = f"{self.store_id}-{self.conn_counter}"
         r, w = await asyncio.open_unix_connection(str(self.socket_path))
         conn = Connection(
@@ -43,6 +45,8 @@ class ExternalUnixStore(DaemonStore):
         return conn
 
     async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        """Fast-path: read .drv file directly from the store filesystem."""
+
         sp = StorePath(str(drv_store_path))
         drv_file = self.store_path / "nix" / "store" / str(sp)
         try:

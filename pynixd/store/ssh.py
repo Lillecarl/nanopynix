@@ -62,6 +62,7 @@ class SSHStore(DaemonStore):
         client_keys: list[str | Path | asyncssh.SSHKey] | None = None,
         settings: PynixdSettings | None = None,
     ) -> None:
+        """Initialise SSH connection state, backoff, and resource monitor settings."""
         self.conn = None
         self.ssh_lock = anyio.Lock()
         self._bg_tasks = set()
@@ -79,6 +80,8 @@ class SSHStore(DaemonStore):
         await super().start(sync_paths=sync_paths)
 
     def start_psi_polling(self, sftp: asyncssh.SFTPClient) -> None:
+        """Start resource pressure polling over SFTP using the GenericResourcePoller."""
+
         """Start consolidated resource poller over SFTP."""
         if not self.monitor_enabled:
             # If monitoring is explicitly disabled, use dummy monitor with 0.0 load
@@ -123,6 +126,8 @@ class SSHStore(DaemonStore):
 
     def stop_psi_polling(self) -> None:
         """Cancel the resource polling task."""
+
+        """Cancel the resource polling task."""
         if self.monitor is not None:
             task = asyncio.create_task(self.monitor.stop())
             self._bg_tasks.add(task)
@@ -158,6 +163,7 @@ class SSHStore(DaemonStore):
         return self.monitor.health.cpu_util if self.monitor else None
 
     async def ensure_ssh(self) -> asyncssh.SSHClientConnection:
+        """Establish or return the existing SSH connection, with backoff."""
         if self.conn is not None:
             return self.conn
 
@@ -212,6 +218,8 @@ class SSHStore(DaemonStore):
                 return self.conn
 
     def invalidate_ssh(self) -> None:
+        """Mark SSH connection as dead, triggering reconnect on next use."""
+
         """Mark SSH connection as dead so next ensure_ssh reconnects."""
         if self.conn is not None:
             with contextlib.suppress(Exception):
@@ -220,6 +228,8 @@ class SSHStore(DaemonStore):
         self._schedule_reconnect()
 
     async def close_ssh(self) -> None:
+        """Stop resource polling and close the SSH connection."""
+
         self.stop_psi_polling()
         if self.conn is not None:
             self.conn.close()
@@ -238,6 +248,7 @@ class SSHSubprocessStore(SSHStore):
     """
 
     def __init__(self, spec: SSHSubprocessStoreSpec) -> None:
+        """Configure SSH subprocess with host, port, and client key settings."""
         super().__init__(spec)
         self.host = spec.host
         self.port = spec.port
@@ -251,6 +262,7 @@ class SSHSubprocessStore(SSHStore):
         self.ssh_processes: list[asyncssh.SSHClientProcess] = []
 
     async def create_conn(self) -> Connection:
+        """Spawn a nix-daemon --stdio subprocess over the SSH connection."""
         ssh_conn = await self.ensure_ssh()
         conn_id = f"{self.store_id}-{self.conn_counter}"
         if self.store_path and self.store_path != Path("/"):
@@ -284,7 +296,7 @@ class SSHSubprocessStore(SSHStore):
         return conn
 
     async def close(self) -> None:
-        """Close stores, SSH processes, and SSH connection."""
+        """Close daemon store, terminate subprocess channels, and close SSH connection."""
         await super().close()
         for proc in self.ssh_processes:
             with contextlib.suppress(Exception):
@@ -301,6 +313,7 @@ class SSHSocketStore(SSHStore):
     """Persistent SSH connection, tunnels to remote Unix socket."""
 
     def __init__(self, spec: SSHSocketStoreSpec) -> None:
+        """Configure SSH socket tunnel store with host, port, and remote socket path."""
         super().__init__(spec)
         self.host = spec.host
         self.port = spec.port
@@ -313,6 +326,7 @@ class SSHSocketStore(SSHStore):
         )
 
     async def create_conn(self) -> Connection:
+        """Open a Unix socket tunnel over the SSH connection."""
         ssh_conn = await self.ensure_ssh()
         conn_id = f"{self.store_id}-{self.conn_counter}"
         log.debug(
@@ -334,6 +348,6 @@ class SSHSocketStore(SSHStore):
         return conn
 
     async def close(self) -> None:
-        """Close stores and SSH connection."""
+        """Close daemon store and close the SSH connection."""
         await super().close()
         await self.close_ssh()

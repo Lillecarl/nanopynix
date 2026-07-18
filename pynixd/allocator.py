@@ -1,3 +1,5 @@
+"""Store ranking and build allocation for distributed builds."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -24,12 +26,16 @@ TINY_BUILD_THRESHOLD_MS = 2500
 
 @dataclass
 class RankedStore:
+    """A store with its allocation score."""
+
     store_id: StoreId
     score: float
     store: DaemonStore
 
 
 class RankedStores:
+    """Ordered collection of ranked stores."""
+
     def __init__(self, stores: list[RankedStore]) -> None:
         self._stores = stores
 
@@ -43,6 +49,7 @@ class RankedStores:
         return bool(self._stores)
 
     def sort(self) -> RankedStores:
+        """Return a new instance sorted by score descending."""
         return RankedStores(sorted(self._stores, key=lambda s: s.score, reverse=True))
 
 
@@ -74,6 +81,7 @@ class TelemetryStoreRanker(StoreRanker):
         assigned_this_pass: Mapping[StoreId, int],
         override_in_flight: Mapping[StoreId, int] | None = None,
     ) -> RankedStores:
+        """Score stores by CPU, pressure, concurrency, and herd penalties."""
         ranked = []
         for store in stores:
             score = 0.0

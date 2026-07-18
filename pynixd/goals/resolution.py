@@ -42,12 +42,14 @@ STORE_DIR = "/nix/store"
 
 
 def _output_path_name(drv_name: str, output_name: str) -> str:
+    """Return the store path basename for a derivation output."""
     if output_name == "out":
         return drv_name
     return f"{drv_name}-{output_name}"
 
 
 def _nix_store_path_name(store_path_str: str) -> str:
+    """Extract the name portion (after the first dash) from a store path."""
     basename = store_path_str.rsplit("/", 1)[-1]
     first_dash = basename.find("-")
     if first_dash == -1:
@@ -56,6 +58,7 @@ def _nix_store_path_name(store_path_str: str) -> str:
 
 
 def _nix_drv_name(drv_path: StorePath) -> str:
+    """Return the derivation name without the .drv extension."""
     name_with_ext = _nix_store_path_name(str(drv_path))
     if name_with_ext.endswith(".drv"):
         return name_with_ext[:-4]
@@ -63,6 +66,7 @@ def _nix_drv_name(drv_path: StorePath) -> str:
 
 
 def downstream_placeholder(drv_path: StorePath, output_name: str) -> str:
+    """Compute the DownstreamPlaceholder hash for a given derivation output."""
     hash_part = str(drv_path).rsplit("/", 1)[-1].split("-", 1)[0]
     drv_name = _nix_drv_name(drv_path)
     clear_text = f"nix-upstream-output:{hash_part}:{_output_path_name(drv_name, output_name)}"
@@ -101,6 +105,7 @@ def downstream_placeholder_unknown_derivation_raw(
 
 
 def _compress_hash(data: bytes, new_size: int) -> bytes:
+    """XOR-fold *data* down to *new_size* bytes (Nix hash compression)."""
     result = bytearray(new_size)
     for i in range(len(data)):
         result[i % new_size] ^= data[i]
@@ -113,6 +118,7 @@ def _make_store_path(
     name: str,
     store_dir: str = STORE_DIR,
 ) -> str:
+    """Build a store path string from a type prefix, content hash, and name (Nix makeStorePath)."""
     hash_str = "sha256:" + hash_modulo.hex()
     s = f"{type_str}:{hash_str}:{store_dir}:{name}"
     digest = hashlib.sha256(s.encode()).digest()
@@ -126,11 +132,13 @@ def _make_output_path(
     drv_name: str,
     store_dir: str = STORE_DIR,
 ) -> str:
+    """Derive an output store path for a given output ID (Nix makeOutputPath)."""
     name = _output_path_name(drv_name, output_id)
     return _make_store_path(f"output:{output_id}", hash_modulo, name, store_dir)
 
 
 def _unparse_basic_derivation(drv: BasicDerivation, mask_outputs: bool = True) -> str:
+    """Serialize a BasicDerivation to ATerm format, optionally masking output paths."""
     parts: list[str] = ["Derive("]
 
     out_parts: list[str] = []
@@ -219,6 +227,7 @@ def _hash_derivation_modulo(
     drv: BasicDerivation,
     mask_outputs: bool = True,
 ) -> dict[str, bytes]:
+    """Compute the hashDerivationModulo for a BasicDerivation (one hash per output)."""
     aterm = _unparse_basic_derivation(drv, mask_outputs=mask_outputs)
     h = hashlib.sha256(aterm.encode()).digest()
     return dict.fromkeys(drv.outputs, h)
@@ -255,6 +264,7 @@ def _resolve_deferred_outputs(
 
 
 def _rewrite_strings(s: str, rewrites: dict[str, str]) -> str:
+    """Apply a placeholder-to-actual rewrite map to a string."""
     for old, new in rewrites.items():
         if old == new:
             continue

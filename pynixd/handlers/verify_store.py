@@ -19,6 +19,7 @@ class VerifyStoreHandler(Handler):
     op: ClassVar[int] = 35
 
     async def handle(self, ctx: RequestContext) -> object | None:
+        """Decode VerifyStore request, verify admin auth, execute via daemon, return response."""
         req = await VerifyStoreRequest.from_reader(
             ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),
         )

@@ -22,6 +22,7 @@ DEFAULT_SOCKET = Path("/run/pynixd/pynixd.sock")
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
+    """Register the ``gc`` subcommand on the root argument parser."""
     parser = subparsers.add_parser("gc", help="Trigger garbage collection on stores")
     parser.add_argument(
         "--store",
@@ -37,6 +38,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def gc_main(args: argparse.Namespace) -> None:
+    """Entry point for ``pynixd gc`` — connect to daemon and issue a GC request."""
     anyio.run(_gc_main, args)
 
 

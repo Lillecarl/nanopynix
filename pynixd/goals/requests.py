@@ -18,15 +18,24 @@ if TYPE_CHECKING:
 
 @dataclass
 class BuildPathsWithResultsGoal(ExecutionGoal[BuildPathsWithResultsResponse]):
+    """Root goal for BuildPathsWithResults daemon requests.
+
+    Translates each derived path into an EnsureDerivedPathGoal,
+    subscribes the client for real-time log forwarding, and collects
+    results into a BuildPathsWithResultsResponse.
+    """
+
     engine: GoalEngine
     request: BuildPathsWithResultsRequest
     client: ClientConn | None = None
     _root_goals: list[tuple[SerdeDerivedPath, EnsureDerivedPathGoal]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        """Initialize the ExecutionGoal base with the shared engine."""
         ExecutionGoal.__init__(self, self.engine)
 
     async def _run(self) -> BuildPathsWithResultsResponse:
+        """Fan out to one EnsureDerivedPathGoal per derived path and collect results."""
         substituter_ids = self.engine.substituter_ids()
         for serde_path in sorted(self.request.derived_paths, key=str):
             path = DerivedPath(str(serde_path))

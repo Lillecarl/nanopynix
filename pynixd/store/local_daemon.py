@@ -47,6 +47,7 @@ class LocalStore(DaemonStore):
     """
 
     def __init__(self, spec: LocalSocketStoreSpec) -> None:
+        """Configure local daemon paths, socket management, and monitor."""
         super().__init__(spec)
 
         socket_path = spec.socket_path or Path("nix/var/nix/daemon-socket/pynixd-nix")
@@ -265,6 +266,7 @@ class LocalStore(DaemonStore):
         return True
 
     async def create_conn(self) -> Connection:
+        """Connect to the (managed or system) Nix daemon via Unix socket."""
         await self.ensure_daemon()
         conn_id = f"{self.store_id}-{self.conn_counter}"
         log.debug(

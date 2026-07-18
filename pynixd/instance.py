@@ -37,6 +37,8 @@ log = structlog.get_logger(__name__)
 
 
 class NixImplementation(Enum):
+    """Known Nix implementations for ssh-ng URI generation."""
+
     NIX = auto()
     LIX = auto()
 
@@ -184,18 +186,22 @@ class Server:
 
     @property
     def local_store(self) -> LocalStore:
+        """The primary local Nix daemon store."""
         return self.ctx.local_store
 
     @property
     def stores(self) -> Mapping[StoreId, Store]:
+        """Read-only view of all connected stores (including local)."""
         return self.ctx.stores
 
     @property
     def settings(self) -> PynixdSettings:
+        """The server's configuration settings."""
         return self.ctx.settings
 
     @property
     def scheduler(self) -> Scheduler | None:
+        """The build scheduler, or ``None`` if scheduling is disabled."""
         return self.ctx.scheduler
 
     async def add_store(self, store: Store, dynamic: bool = False) -> None:
@@ -272,16 +278,19 @@ class Server:
 
     @property
     def host(self) -> str:
+        """SSH bind host for remote connections."""
         return self.settings.ssh_host
 
     @property
     def port(self) -> int:
+        """Bound SSH port, or the configured port if the server is not yet listening."""
         if self.ssh_server and self.ssh_server.sockets:
             return self.ssh_server.sockets[0].getsockname()[1]
         return self.settings.ssh_port or 0
 
     @property
     def username(self) -> str:
+        """Current OS user for ssh-ng URI generation."""
         return os.environ.get("USER", "root")
 
     def uri(self, implementation: NixImplementation = NixImplementation.NIX) -> str:

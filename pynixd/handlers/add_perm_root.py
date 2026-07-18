@@ -21,6 +21,7 @@ class AddPermRootHandler(Handler):
     op: ClassVar[int] = 47
 
     async def handle(self, ctx: RequestContext) -> object | None:
+        """Decode AddPermRoot request, forward to daemon for admin, log no-op for others."""
         if ctx.role == Role.ADMIN:
             req = await AddPermRootRequest.from_reader(
                 ReadContext(reader=ctx.proxy.r, version=ctx.proxy.version),

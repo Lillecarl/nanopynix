@@ -49,6 +49,8 @@ _HTTP_CHUNK_SIZE = 1024 * 256
 
 @dataclass(frozen=True)
 class HTTPNarInfo:
+    """Parsed .narinfo metadata from an HTTP binary cache."""
+
     path: StorePath
     url: str
     compression: str
@@ -65,6 +67,7 @@ class HTTPBinaryCacheStore(Store):
     """Read-only Store backed by the Nix HTTP binary cache protocol."""
 
     def __init__(self, spec: HTTPBinaryCacheSpec) -> None:
+        """Configure HTTP binary cache from spec, normalising the base URL."""
         super().__init__(spec)
         self.url = _normalise_base_url(spec.url)
         self.max_concurrent = spec.max_concurrent
@@ -76,6 +79,7 @@ class HTTPBinaryCacheStore(Store):
         self._recent_results: deque[bool] = deque(maxlen=spec.health_window)
 
     async def start(self, sync_paths: bool = True) -> None:
+        """Initialise HTTP session, load nix-cache-info, and configure concurrency."""
         if self._started:
             return
         self._session = aiohttp.ClientSession(
@@ -90,12 +94,14 @@ class HTTPBinaryCacheStore(Store):
         self._started = True
 
     async def close(self) -> None:
+        """Close the HTTP session."""
         if self._session is not None:
             await self._session.close()
             self._session = None
         self._started = False
 
     async def create_conn(self) -> Connection:
+        """Not supported — HTTP binary caches do not use wire connections."""
         raise OpNotImplementedError("HTTPBinaryCacheStore does not use daemon wire connections")
 
     async def call(
@@ -106,6 +112,7 @@ class HTTPBinaryCacheStore(Store):
         raise_on_error: bool = False,
         skip_probe: bool = False,
     ) -> Any:
+        """Not supported — HTTP binary caches cannot forward arbitrary wire requests."""
         raise OpNotImplementedError(f"HTTPBinaryCacheStore cannot call {type(request).__name__}")
 
     async def execute(
@@ -115,6 +122,8 @@ class HTTPBinaryCacheStore(Store):
         suppress_last: bool = False,
         skip_probe: bool = False,
     ) -> Any:
+        """Execute a supported operation via the HTTP cache protocol."""
+
         if isinstance(request, IsValidPathRequest):
             return await self.is_valid_path(request, client=client, suppress_last=suppress_last)
         if isinstance(request, QueryPathInfoRequest):
@@ -126,10 +135,12 @@ class HTTPBinaryCacheStore(Store):
         raise OpNotImplementedError(f"HTTPBinaryCacheStore does not support {type(request).__name__}")
 
     async def read_derivation(self, drv_store_path: StorePath | str) -> Derivation | None:
+        """Not supported — HTTP binary caches do not provide derivation parsing."""
         return None
 
     @property
     def is_healthy(self) -> bool:
+        """Whether the recent failure rate is within the configured max_fail_ratio."""
         if not self._recent_results:
             return True
         failures = sum(1 for result in self._recent_results if not result)
@@ -138,12 +149,15 @@ class HTTPBinaryCacheStore(Store):
     async def is_valid_path(
         self, request: IsValidPathRequest, client: Any = None, suppress_last: bool = False
     ) -> IsValidPathResponse:
+        """IsValidPath — check existence via .narinfo lookup."""
         narinfo = await self.get_narinfo(StorePath(str(request.path)))
         return IsValidPathResponse(valid=narinfo is not None)
 
     async def query_path_info(
         self, request: QueryPathInfoRequest, client: Any = None, suppress_last: bool = False
     ) -> QueryPathInfoResponse:
+        """QueryPathInfo — fetch path info from cache or remote .narinfo."""
+
         cached = self.get_path_info(request.path)
         if cached is not None:
             return QueryPathInfoResponse(valid=True, info=cached.info)
@@ -157,6 +171,8 @@ class HTTPBinaryCacheStore(Store):
     async def query_path_from_hash_part(
         self, request: QueryPathFromHashPartRequest, client: Any = None, suppress_last: bool = False
     ) -> QueryPathFromHashPartResponse | None:
+        """QueryPathFromHashPart — resolve hash prefix via .narinfo lookup."""
+
         narinfo = await self.get_narinfo_by_hash_part(request.path)
         if narinfo is None:
             return None
@@ -165,6 +181,8 @@ class HTTPBinaryCacheStore(Store):
     async def query_valid_paths(
         self, request: QueryValidPathsRequest, client: Any = None, suppress_last: bool = False
     ) -> QueryValidPathsResponse:
+        """QueryValidPaths — check each path individually via .narinfo."""
+
         valid: set[SerdeStorePath] = set()
         for path in sorted(request.paths, key=str):
             if await self.get_narinfo(StorePath(str(path))) is not None:
@@ -172,9 +190,12 @@ class HTTPBinaryCacheStore(Store):
         return QueryValidPathsResponse(paths=valid)
 
     async def nar_from_path(self, request: Any, client: Any = None, suppress_last: bool = False) -> NarFromPathResponse:
+        """Not supported directly — use stream_nar() for NAR streaming."""
         raise OpNotImplementedError("HTTPBinaryCacheStore streams NARs through stream_nar()")
 
     async def get_narinfo(self, path: StorePath) -> HTTPNarInfo | None:
+        """Fetch .narinfo for a store path, consulting the path-info cache first."""
+
         cached = self.get_path_info(path)
         hash_part = path.hash_part()
         if cached is not None:
@@ -187,12 +208,16 @@ class HTTPBinaryCacheStore(Store):
     async def get_narinfo_by_hash_part(
         self, hash_part: str, expected_path: StorePath | None = None
     ) -> HTTPNarInfo | None:
+        """Fetch .narinfo by hash prefix, optionally verifying the expected path."""
+
         raw = await self._get_narinfo_raw(hash_part)
         if raw is None:
             return None
         return _parse_narinfo(raw, expected_path=expected_path)
 
     async def stream_nar(self, narinfo: HTTPNarInfo) -> AsyncIterator[bytes]:
+        """Stream a decompressed NAR from the cache as an async byte iterator."""
+
         session = self._require_session()
         nar_url = urljoin(self.url, narinfo.url)
         async with session.get(

@@ -91,10 +91,12 @@ class MemInfo:
 
     @property
     def available_mb(self) -> int:
+        """Available memory in MiB (``MemAvailable`` / 1024)."""
         return self.mem_available // 1024
 
     @property
     def total_mb(self) -> int:
+        """Total memory in MiB (``MemTotal`` / 1024)."""
         return self.mem_total // 1024
 
 

@@ -68,6 +68,19 @@ class PynixdHttpServer:
         priority: int = 30,
         upload_dir: str | Path | None = None,
     ) -> None:
+        """Initialize the HTTP server and register route handlers.
+
+        Args:
+            local_store: Backing store for path resolution and NAR streaming.
+            enable_cache: Whether to serve binary cache endpoints.
+            enable_metrics: Whether to expose a Prometheus ``/metrics`` endpoint.
+            metrics_no_auth: Allow unauthenticated access to ``/metrics``.
+            username: Basic auth username (or ``None`` to disable auth).
+            password: Basic auth password.
+            htpasswd_path: Path to an htpasswd file (overrides username/password).
+            priority: Cache priority advertised in ``/nix-cache-info``.
+            upload_dir: Directory for staging NAR uploads (``None`` disables uploads).
+        """
         self.store = local_store
         self.enable_cache = enable_cache
         self.enable_metrics = enable_metrics
@@ -109,6 +122,7 @@ class PynixdHttpServer:
         request: web.Request,
         handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
     ) -> web.StreamResponse:
+        """Enforce HTTP Basic Auth on all endpoints except healthz and optionally metrics."""
         # Health checks and metrics bypass auth
         if request.path == "/healthz":
             return await handler(request)
@@ -163,6 +177,7 @@ class PynixdHttpServer:
         return web.Response(body=body, content_type=content_type_only)
 
     async def handle_cache_info(self, request: web.Request) -> web.Response:
+        """Serve the ``/nix-cache-info`` endpoint with store metadata."""
         lines = [
             "StoreDir: /nix/store",
             "WantMassQuery: 1",
@@ -171,6 +186,7 @@ class PynixdHttpServer:
         return web.Response(text="\n".join(lines) + "\n")
 
     async def handle_narinfo(self, request: web.Request) -> web.Response:
+        """Serve a ``.narinfo`` file for a given store path hash."""
         hash_part = request.match_info["hash"]
 
         # Resolve hash → full path
@@ -190,6 +206,7 @@ class PynixdHttpServer:
         )
 
     async def handle_nar(self, request: web.Request) -> web.StreamResponse:
+        """Stream raw NAR data for a given store path."""
         filename = request.match_info["filename"]
         # Standard format is /nar/<hash>.nar[.comp]
         hash_part = filename.split(".", 1)[0]

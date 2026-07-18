@@ -82,6 +82,15 @@ class QueuedBuild:
         expected_duration: int | None = None,
         scheduler_request_ids: set[RequestId] | None = None,
     ) -> None:
+        """Track a single derivation build through its lifecycle.
+
+        Args:
+            build_id: Unique build identifier.
+            request: The build request (drv, build mode, etc.).
+            future: Resolved when the build completes or fails.
+            expected_duration: Hint from the scheduler for store assignment.
+            scheduler_request_ids: Request IDs this build belongs to (dedup).
+        """
         self.build_id = build_id
         self.request = request
         self.future = future
@@ -124,14 +133,17 @@ class QueuedBuild:
 
     @property
     def is_building(self) -> bool:
+        """Whether a build task is currently running."""
         return self.build_task is not None and not self.build_task.done()
 
     @property
     def is_done(self) -> bool:
+        """Whether the build future has been resolved (success or failure)."""
         return self.future.done()
 
     @property
     def is_pending(self) -> bool:
+        """Whether the build is queued but not yet assigned or running."""
         return not self.is_building and not self.is_done
 
     def is_blacklisted(self, store_id: StoreId) -> bool:
@@ -279,6 +291,7 @@ class BuildQueue:
     """Global queue for build operations with deduplication."""
 
     def __init__(self) -> None:
+        """Initialize an empty build queue with deduplication indices."""
         self._queue: list[QueuedBuild] = []
         self._by_path: dict[str, QueuedBuild] = {}  # drv_path -> build for dedup
         self._by_id: dict[BuildId, QueuedBuild] = {}  # For DAG lookups

@@ -28,6 +28,7 @@ class AddMultipleToStoreHandler(Handler):
     op: ClassVar[int] = 44
 
     async def handle(self, ctx: RequestContext) -> AddMultipleToStoreResponse | None:
+        """Decode AddMultipleToStore request, stream framed NAR payloads to daemon, cache path infos, return response."""
         async with ctx.proxy.local_store.transfer_conn() as conn:
             # 1. Read request header from client (serde)
             req = await AddMultipleToStoreRequest.from_reader(

@@ -187,21 +187,33 @@ class NixConfig(BaseModel):
             yield key, rendered
 
     def to_nix_conf(self) -> str:
+        """Render options as a ``nix.conf``-compatible string (``key = value``)."""
         return "\n".join(f"{key} = {value}" for key, value in self._iter_set())
 
     def to_env(self) -> dict[str, str]:
+        """Return as a ``NIX_CONFIG`` environment variable."""
         return {"NIX_CONFIG": self.to_nix_conf()}
 
     def to_nix_config_env(self) -> str:
+        """Render with ``extra-`` prefix for settings like ``experimental-features``.
+
+        This format is used when passing config to ``nix`` commands that
+        should augment rather than replace the user's global config.
+        """
         return "\n".join(f"{key} = {value}" for key, value in self._iter_set(use_extra_prefix=True))
 
     def to_extra_args(self) -> list[str]:
+        """Render as ``--option key value`` pairs for CLI invocation."""
         args: list[str] = []
         for key, value in self._iter_set():
             args.extend(["--option", key, value])
         return args
 
     def to_daemon_args(self) -> list[str]:
+        """Render only daemon-relevant options as ``--option`` pairs.
+
+        Currently only ``require-sigs`` is forwarded to the daemon.
+        """
         args: list[str] = []
         for key, value in self._iter_set():
             if key == "require-sigs":
@@ -209,10 +221,20 @@ class NixConfig(BaseModel):
         return args
 
     def merge_builder_frontend(self, unix_path: Path) -> NixConfig:
+        """Merge this config with the default builder frontend config.
+
+        Sets ``max_jobs`` to 0 and configures ``builders`` to point at
+        the local pynixd Unix socket.
+        """
         return merge_builder_frontend(self, unix_path)
 
 
 def builder_frontend_config(unix_path: Path) -> NixConfig:
+    """Create a default builder-frontend config pointing at ``unix_path``.
+
+    Sets ``max_jobs = 0`` (delegate all builds to pynixd) and configures
+    a single builder entry referencing the pynixd Unix socket.
+    """
     return NixConfig(
         max_jobs=0,
         builders=[BUILDER_FRONTEND_SPEC.format(unix_path=unix_path)],

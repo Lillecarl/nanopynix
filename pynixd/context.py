@@ -35,6 +35,7 @@ class PynixdContext:
 
     @property
     def local_store(self) -> LocalStore:
+        """The primary local Nix daemon store for this context."""
         return self._stores[StoreId("local")]  # type: ignore[return-value]
 
     @property

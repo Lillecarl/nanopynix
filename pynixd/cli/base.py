@@ -180,4 +180,5 @@ def setup_logging(settings: PynixdSettings) -> None:
 
 
 def load_settings() -> PynixdSettings:
+    """Load and return pynixd settings from config files and environment variables."""
     return PynixdSettings()

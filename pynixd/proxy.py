@@ -84,26 +84,32 @@ class DaemonProxy:
 
     @property
     def local_store(self) -> LocalStore:
+        """The local Nix store for direct store operations."""
         return self.ctx.local_store
 
     @property
     def scheduler(self) -> Scheduler | None:
+        """Build scheduler instance, or None if no remote stores."""
         return self.ctx.scheduler
 
     @property
     def build_queue(self) -> BuildQueue | None:
+        """Build queue from the scheduler, or None if unconfigured."""
         return self.scheduler.queue if self.scheduler else None
 
     @property
     def goal_engine(self) -> GoalEngine:
+        """Goal engine for client-facing build operations."""
         return GoalEngine(self.ctx)
 
     @property
     def scheduler_trigger(self) -> Callable[[], None] | None:
+        """Callback to wake the scheduler, or None if unconfigured."""
         return self.scheduler.trigger if self.scheduler else None
 
     @property
     def stores(self) -> Mapping[StoreId, Store]:
+        """All configured stores by store ID."""
         return self.ctx.stores
 
     @property
@@ -325,6 +331,7 @@ class DaemonProxy:
         return None
 
     def store_for_output_path(self, path: str) -> DaemonStore | None:
+        """Look up the DaemonStore that produced a given output path."""
         store_id = self.ctx.output_locations.get(path)
         if store_id is None:
             return None

@@ -53,18 +53,21 @@ class GoalEngine:
         self.substitution_import_limiter = anyio.Semaphore(4)
 
     async def subscribe_build(self, build_id: BuildId, client: ClientConn) -> bool:
+        """Subscribe *client* to real-time log output for the given *build_id*."""
         scheduler = self.ctx.scheduler
         if scheduler is None:
             return False
         return await scheduler.queue.subscribe(build_id, client, cancel_on_unsubscribe=True)
 
     async def unsubscribe_build(self, build_id: BuildId, client: ClientConn) -> None:
+        """Unsubscribe *client* from real-time log output for the given *build_id*."""
         scheduler = self.ctx.scheduler
         if scheduler is None:
             return
         await scheduler.queue.unsubscribe(build_id, client)
 
     async def build_paths(self, request: BuildPathsRequest, client: ClientConn | None = None) -> BuildPathsResponse:
+        """Execute a BuildPaths request, returning a simple success/failure response."""
         _require_normal_build_mode(request.build_mode)
         response = await self.build_paths_with_results(
             BuildPathsWithResultsRequest(
@@ -80,10 +83,12 @@ class GoalEngine:
         request: BuildPathsWithResultsRequest,
         client: ClientConn | None = None,
     ):
+        """Execute a BuildPathsWithResults request, returning per-path results."""
         _require_normal_build_mode(request.build_mode)
         return await BuildPathsWithResultsGoal(self, request, client).result()
 
     async def query_missing(self, request: QueryMissingRequest) -> QueryMissingResponse:
+        """Execute a read-only QueryMissing request, classifying paths as build/substitute/unknown."""
         return await QueryMissingPlanGoal(self, request).result()
 
     async def get_ensure_derived_path_goal(
@@ -92,6 +97,7 @@ class GoalEngine:
         build_mode: int,
         substituter_ids: tuple[str, ...],
     ) -> EnsureDerivedPathGoal:
+        """Return a deduplicated EnsureDerivedPathGoal for the given derived path."""
         key = EnsureDerivedPathKey(str(path), substituter_fingerprint(substituter_ids))
         async with self._lock:
             goal = self._goals.get(key)
@@ -103,6 +109,7 @@ class GoalEngine:
             return goal
 
     async def get_build_derivation_goal(self, request: BuildDerivationRequest) -> BuildDerivationGoal:
+        """Return a deduplicated BuildDerivationGoal for the given build request."""
         key = BuildDerivationKey(str(request.drv_path), _derivation_fingerprint(request))
         async with self._lock:
             goal = self._goals.get(key)
@@ -118,6 +125,7 @@ class GoalEngine:
         path: StorePath,
         substituter_ids: tuple[str, ...],
     ) -> SubstitutePathGoal:
+        """Return a deduplicated SubstitutePathGoal for the given store path."""
         key = SubstitutePathKey(str(path), substituter_fingerprint(substituter_ids))
         async with self._lock:
             goal = self._goals.get(key)
@@ -129,6 +137,7 @@ class GoalEngine:
             return goal
 
     def substituter_ids(self) -> tuple[str, ...]:
+        """Return the store IDs of all configured substituter stores (skipping local)."""
         return tuple(
             str(store_id)
             for store_id, store in self.ctx.stores.items()
@@ -136,6 +145,7 @@ class GoalEngine:
         )
 
     def substituter_stores(self) -> Iterable[Store]:
+        """Yield healthy substituter stores, ordered by store ID."""
         local_id = "local"
         ids = set(self.substituter_ids())
         return (

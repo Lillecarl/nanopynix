@@ -44,6 +44,7 @@ class OutputsAll:
     """Represents ``*`` — all outputs of a derivation."""
 
     def to_string(self) -> str:
+        """Return ``*`` to indicate all outputs."""
         return "*"
 
 
@@ -54,6 +55,7 @@ class OutputsNames:
     names: frozenset[str]
 
     def to_string(self) -> str:
+        """Return a comma-separated string of output names, sorted."""
         return ",".join(sorted(self.names))
 
 
@@ -232,6 +234,7 @@ class DerivedPath:
         return "!".join(parts)
 
     def __format__(self, format_spec: str) -> str:
+        """Format the wire-protocol string with the given format spec."""
         return format(str(self), format_spec)
 
     def base_store_path(self) -> StorePath:
