@@ -29,11 +29,17 @@
 let
   inherit (pkgs) lib;
 
+  daemon-protocol = pkgs.python3Packages.callPackage ./nix/nix-daemon-protocol.nix {
+    pythonBuilder = pkgs.python3Packages.buildPythonPackage;
+  };
+
   package = pkgs.python3Packages.callPackage ./nix/pynixd.nix {
     pythonBuilder = pkgs.python3Packages.buildPythonApplication;
+    nix-daemon-protocol = daemon-protocol;
   };
   library = pkgs.python3Packages.callPackage ./nix/pynixd.nix {
     pythonBuilder = pkgs.python3Packages.buildPythonPackage;
+    nix-daemon-protocol = daemon-protocol;
   };
 
   mkTests =
@@ -95,6 +101,7 @@ package
   inherit
     package
     library
+    daemon-protocol
     specifictest
     lint
     pkgs

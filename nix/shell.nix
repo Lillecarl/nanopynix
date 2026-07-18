@@ -33,7 +33,7 @@ mkShell {
     sqlite
   ];
   shellHook = ''
-    export PYTHONPATH="$PWD:${python}/${python.sitePackages}:$PYTHONPATH"
+    export PYTHONPATH="$PWD:$PWD/nix-daemon-protocol/src:${python}/${python.sitePackages}:$PYTHONPATH"
     export LIX_BIN=${lib.getExe lix}
     export NIX_BIN=${lib.getExe nix}
   '';

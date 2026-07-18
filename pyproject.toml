@@ -19,6 +19,7 @@ dependencies = [
     "prometheus_client",
     "uvloop",
     "anyio",
+    "nix-daemon-protocol>=0.1.0",
 ]
 
 [project.optional-dependencies]
