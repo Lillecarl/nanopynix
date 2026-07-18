@@ -55,7 +55,7 @@ let
 
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
   # shared static that ExprAttrs::eval unconditionally writes to -- see the
-  # patch's own commentary) found via ThreadSanitizer (nanopynixTsanNixComponents
+  # patch's own commentary) found via ThreadSanitizer (tsanNixPackage
   # below). thread_local gives each evaluator OS thread its own instance,
   # fixing the race without any behavior change for single-threaded use.
   emptyBindingsPatch = ./nix/patches/nix-thread-local-empty-bindings.patch;
@@ -67,6 +67,37 @@ let
   patchNixComponents =
     components: (components.appendPatches [ emptyBindingsPatch ]).nix-everything;
 
+  # Applies ThreadSanitizer instrumentation to a modular nix component set:
+  # nix-store's sqlite input plus every meson-based nix-* library gets
+  # consistent -fsanitize=thread instrumentation (see nix/tsan.nix), then
+  # components are re-merged into one "nix" package via nix-everything so
+  # the result can be fed into nanopynixForNix exactly like any other
+  # nixVersions.* entry. Generalized from a nix_2_35-only build (that's how
+  # the emptyBindings race below was originally found) to every version, so
+  # a race can be confirmed/ruled out on any of them, not just the one it
+  # happened to be found on.
+  tsanNixComponents =
+    components:
+    (components.overrideScope (
+      _final: prev: {
+        nix-store = prev.nix-store.override { sqlite = tsan.sanitizeSqlite pkgs.sqlite; };
+      }
+    )).overrideAllMesonComponents
+      tsan.mesonComponentOverrides;
+
+  # nix-everything normally gate-checks the whole build on nix's own
+  # unit/functional test suites (checkInputs pulls in nix-*-tests.tests.run
+  # derivations regardless of doCheck, since they're still realized inputs).
+  # Those suites weren't written with TSAN's overhead/timing changes in mind
+  # and fail for reasons unrelated to the races being hunted here, so drop
+  # the dependency on them entirely rather than debug nix's own test suite.
+  tsanNixPackage =
+    components:
+    (tsanNixComponents components).nix-everything.overrideAttrs (_old: {
+      checkInputs = [ ];
+      doCheck = false;
+    });
+
   # The real (non-TSAN) nixVersions entries actually exercised by the CI
   # matrix (see nix/dedupe-nix-versions.nix / nanopynixTestVersions below).
   # nix_2_34/nix_2_35/git share attr-set.cc/.hh source context close enough
@@ -74,13 +105,37 @@ let
   # enough that the hunks don't match (confirmed by trying), and 2.31 is the
   # lowest-priority supported version, so it's left unpatched rather than
   # broken -- revisit if/when 2.31 support is reconsidered.
+  #
+  # `-tsan` suffixed entries are the same nix versions rebuilt with
+  # ThreadSanitizer instrumentation (see tsanNixPackage above). They flow
+  # through the exact same nanopynixVersions/dedup/test-exposure pipeline
+  # below as first-class "supported" versions -- no separate scope to keep
+  # in sync with the real ones. nix_2_31-tsan is unpatched like its
+  # non-TSAN counterpart, since emptyBindingsPatch doesn't apply there
+  # either; it's still useful to confirm the same race(s) reproduce on
+  # that version, not to prove they're fixed.
   patchedNixVersions = pkgs.nixVersions // {
     nix_2_34 = patchNixComponents pkgs.nixVersions.nixComponents_2_34;
     nix_2_35 = patchNixComponents pkgs.nixVersions.nixComponents_2_35;
     git = patchNixComponents pkgs.nixVersions.nixComponents_git;
+
+    nix_2_31-tsan = tsanNixPackage pkgs.nixVersions.nixComponents_2_31;
+    nix_2_34-tsan = tsanNixPackage (pkgs.nixVersions.nixComponents_2_34.appendPatches [ emptyBindingsPatch ]);
+    nix_2_35-tsan = tsanNixPackage (pkgs.nixVersions.nixComponents_2_35.appendPatches [ emptyBindingsPatch ]);
+    git-tsan = tsanNixPackage (pkgs.nixVersions.nixComponents_git.appendPatches [ emptyBindingsPatch ]);
   };
 
-  nanopynixForNix = nix: nanopynixForNixEx { inherit nix; };
+  # `-tsan` suffixed versions need nanopynix's own C++ bindings (not just
+  # nix's libraries) built with matching ThreadSanitizer instrumentation --
+  # see nix/tsan.nix and nanopynixForNixEx's `enableTsan` below -- so it's
+  # derived from the name rather than threaded through as a separate flag
+  # at every call site.
+  nanopynixForNix =
+    name: nix:
+    nanopynixForNixEx {
+      inherit nix;
+      enableTsan = lib.hasSuffix "-tsan" name;
+    };
 
   # `enableTsan` builds nix's own libraries (+ sqlite) and nanopynix's C++
   # bindings with ThreadSanitizer instrumentation instead of just nanopynix's
@@ -128,42 +183,6 @@ let
         nanopynix-docs = self.callPackage ./nix/docs.nix { };
       });
 
-  # TSAN'd nix_2_35 component set: nix-store's sqlite input plus every
-  # meson-based nix-* library get consistent -fsanitize=thread instrumentation
-  # (see nix/tsan.nix), then re-merged into one "nix" package via
-  # nix-everything so nanopynixForNixEx can consume it exactly like a normal
-  # nixVersions.nix_2_35.
-  #
-  # Also carries emptyBindingsPatch, found via this exact TSAN build and now
-  # applied to the real (non-diagnostic) nixVersions too -- see
-  # patchedNixVersions above.
-  nanopynixTsanNixComponents =
-    let
-      patched = pkgs.nixVersions.nixComponents_2_35.appendPatches [ emptyBindingsPatch ];
-      withSqlite = patched.overrideScope (
-        _final: prev: {
-          nix-store = prev.nix-store.override { sqlite = tsan.sanitizeSqlite pkgs.sqlite; };
-        }
-      );
-    in
-    withSqlite.overrideAllMesonComponents tsan.mesonComponentOverrides;
-
-  # nix-everything normally gate-checks the whole build on nix's own
-  # unit/functional test suites (checkInputs pulls in nix-*-tests.tests.run
-  # derivations regardless of doCheck, since they're still realized inputs).
-  # Those suites weren't written with TSAN's overhead/timing changes in mind
-  # and fail for reasons unrelated to the race we're hunting here, so drop
-  # the dependency on them entirely rather than debug nix's own test suite.
-  nanopynixTsanNix = nanopynixTsanNixComponents.nix-everything.overrideAttrs (_old: {
-    checkInputs = [ ];
-    doCheck = false;
-  });
-
-  nanopynix-tsan-nix_2_35 = nanopynixForNixEx {
-    nix = nanopynixTsanNix;
-    enableTsan = true;
-  };
-
   dedupeVersions = pkgs.callPackage ./nix/dedupe-nix-versions.nix { };
 
   nanopynixVersions = lib.pipe patchedNixVersions [
@@ -174,7 +193,7 @@ let
       in
       canEval.success && lib.isDerivation canEval.value
     ))
-    (lib.mapAttrs (_: nix: nanopynixForNix nix))
+    (lib.mapAttrs nanopynixForNix)
   ];
 
   # Deduped view of nanopynixVersions used for test exposure/CI, so aliased
@@ -220,9 +239,5 @@ in
     pyproject-nix
     ;
 
-  # Diagnostic-only: ThreadSanitizer build for hunting the single-user
-  # in-process concurrent-build SIGBUS (see test_inproc_multithreaded_poc.py).
-  # Not part of the normal CI version matrix.
-  nanopynix-tests-tsan-nix_2_35 = nanopynix-tsan-nix_2_35.tests;
 }
 // nanopynixVersionTests
