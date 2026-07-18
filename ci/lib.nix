@@ -63,10 +63,11 @@ rec {
 
     configureSingleUserNix = { }: {
       name = "Configure single-user Nix builds";
-      run = ''
-        sudo install -d -m 0755 /etc/nix
-        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-      '';
+      run = # bash
+        ''
+          sudo install -d -m 0755 /etc/nix
+          printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
+        '';
     };
 
     enableSandboxNamespaces =
