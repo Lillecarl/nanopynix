@@ -19,6 +19,11 @@ pkg_check_modules(NIX_UTIL REQUIRED nix-util)
 pkg_check_modules(NIX_STORE REQUIRED nix-store)
 pkg_check_modules(NIX_EXPR REQUIRED nix-expr)
 pkg_check_modules(NIX_CMD REQUIRED nix-cmd)
+# nix-flake, so builtins.getFlake is registered on every EvalState this
+# module constructs (see nix_expr.cpp's evalSettingsConfigurators call) --
+# pkg-config resolves nix-flake's own transitive Requires (nix-fetchers, ...)
+# automatically, so NIX_FLAKE_LIBRARIES/_INCLUDE_DIRS already cover them.
+pkg_check_modules(NIX_FLAKE REQUIRED nix-flake)
 
 # Nix's C++ bindings are a release stream, not an independent feature matrix.
 # Compatibility uses ordered release bands: < 2.32, < 2.35, then the latest
@@ -73,9 +78,11 @@ endif()
 if(BUILD_EXPR)
   nanobind_add_module(nanopynix_expr src/nix_expr.cpp)
   target_include_directories(nanopynix_expr PRIVATE
-    ${NIX_CMD_INCLUDE_DIRS} ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
+    ${NIX_CMD_INCLUDE_DIRS} ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS}
+    ${NIX_FLAKE_INCLUDE_DIRS})
   target_link_libraries(nanopynix_expr PRIVATE
-    ${NIX_CMD_LIBRARIES} ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
+    ${NIX_CMD_LIBRARIES} ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES}
+    ${NIX_FLAKE_LIBRARIES})
   # nix-expr propagates bdw-gc. Its public thread-registration declarations
   # are intentionally visible only to consumers defining GC_THREADS.
   target_compile_definitions(nanopynix_expr PRIVATE GC_THREADS)

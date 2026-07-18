@@ -28,6 +28,7 @@
 #include <nix/expr/primops.hh>
 #include <nix/expr/value-to-json.hh>
 #include <nix/cmd/common-eval-args.hh>
+#include <nix/flake/settings.hh>
 #include <nix/store/build-result.hh>
 #include <nix/store/derived-path.hh>
 #include <nix/util/experimental-features.hh>
@@ -1332,6 +1333,18 @@ static void exit_evaluator_thread() {
 
 NB_MODULE(nanopynix_expr, m) {
     m.doc() = "nanopynix: Nix expr bindings (EvalState, Value)";
+
+    // Register builtins.getFlake on every EvalState constructed through this
+    // module by configuring its EvalSettings with flake primops -- mirrors
+    // nix_flake.cpp's own registration. PyEvalState::evalSettingsConfigurators()
+    // is a function-local static, so each nanobind module (.so) that includes
+    // py_eval.hh gets its own copy; nix_flake.cpp's registration alone doesn't
+    // reach EvalStates built via this module, hence the duplicate call here.
+    PyEvalState::evalSettingsConfigurators().push_back(
+        [](nix::EvalSettings &es) {
+            static nix::flake::Settings flakeSettings;
+            flakeSettings.configureEvalSettings(es);
+        });
 
     m.def("init_libexpr", []() {
         nix::initGC();
