@@ -77,8 +77,8 @@ cat "${summary_files[@]}" | fabric --pattern combine_ci_job_summaries >"$final_s
 echo "final summary: $final_summary" >&2
 cat "$final_summary"
 
-if [[ -n ${TMUX:-} ]]; then
-    tmux send-keys "gh run $run_id fully processed: $final_summary" || true
-    sleep 1
-    tmux send-keys enter || true
-fi
+#if [[ -n ${TMUX:-} ]]; then
+#    tmux send-keys "gh run $run_id fully processed: $final_summary" || true
+#    sleep 1
+#    tmux send-keys enter || true
+#fi
