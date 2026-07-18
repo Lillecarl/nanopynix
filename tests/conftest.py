@@ -102,15 +102,48 @@ def pytest_runtest_setup(item: pytest.Item):
     pytest.skip("destructive live GC test; pass --run-live-gc or NANOPYNIX_RUN_LIVE_GC=1 to run")
 
 
+_store_mode_cache: str | None = None
+
+
+def detected_store_mode() -> str:
+    """Return how "auto" resolved a Nix store in this test process.
+
+    "local" means a direct in-process ``LocalStore`` (Nix's own
+    ``resolveStoreConfig`` picked this when the Nix state dir is writable by
+    the current user — e.g. single-user Nix installs). "daemon" means Nix
+    connected to a running ``nix-daemon`` over its Unix socket instead (e.g.
+    multi-user Nix installs where the state dir isn't directly writable).
+    Building/evaluating in "daemon" mode happens largely inside the separate
+    daemon process, not this one, which changes the concurrency/GC exposure
+    of in-process tests.
+    """
+    if _store_mode_cache is None:
+        raise RuntimeError("store mode not yet detected; the _init fixture has not run")
+    return _store_mode_cache
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _init():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Initialize libstore, enable flakes (needed by fetchers/flake tests)."""
-    # Tests intentionally avoid host nix.conf.  Configure local builds for the
-    # single-user CI installation before libstore receives its default nixbld
-    # build-users-group setting.
+    # These settings only affect a LocalStore constructed in this process; if
+    # "auto" resolves to a daemon store instead (see detected_store_mode()),
+    # the real build-users-group/sandboxing config lives in the daemon's own
+    # nix.conf and these calls have no effect on it.
     nanopynix_util.set_setting("build-users-group", "")
     nanopynix_util.set_setting("require-drop-supplementary-groups", "false")
     nanopynix.init_libstore(load_config=False)
+
+    global _store_mode_cache
+    probe_store: Any = nanopynix.open_store()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+    _store_mode_cache = "daemon" if probe_store.get_uri() == "daemon" else "local"
+    os.environ["NANOPYNIX_STORE_MODE"] = _store_mode_cache
+    print(f"\n[nanopynix] auto store resolved to: {_store_mode_cache}")  # noqa: T201 -- CI visibility: which Nix store backend resolved is otherwise invisible in test output
+
+
+@pytest.fixture(scope="session")
+def store_mode(_init: None) -> str:
+    """'local' if "auto" resolved to a direct LocalStore, 'daemon' if via nix-daemon."""
+    return detected_store_mode()
 
 
 @pytest.fixture(scope="session")
