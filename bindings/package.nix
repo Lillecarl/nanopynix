@@ -8,6 +8,8 @@
   cmake,
   ninja,
   renderPyproject,
+  enableTsan ? false,
+  tsanRuntime ? null,
 }:
 
 let
@@ -68,7 +70,30 @@ buildPythonPackage (
     cmakeFlags = [
       "-Dnanobind_ROOT=${nanobind2_13}/${python.sitePackages}/nanobind/cmake"
       "-DPython_EXECUTABLE=${python}/bin/python"
+    ]
+    ++ lib.optionals enableTsan [
+      # Each cmakeFlags entry becomes its own -Ccmake.args= token; a single
+      # entry with embedded spaces gets re-split upstream into bare (invalid)
+      # CMake arguments, so keep every flag space-free. RelWithDebInfo already
+      # implies -g; frame-pointer retention isn't essential for TSAN's
+      # DWARF-based unwinding.
+      "-DCMAKE_CXX_FLAGS=-fsanitize=thread"
+      "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread"
+      "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread"
+      "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
     ];
+
+    dontStrip = enableTsan;
+
+    # postInstall's stubgen and the pythonImportsCheck phase both dlopen()
+    # these .so's into a fresh, plain python process; TSAN's runtime must be
+    # preloaded before that process does anything else, or its static-TLS
+    # setup fails ("cannot allocate memory in static TLS block") since a
+    # late dlopen() can't grow the TLS block CPython already sized at
+    # startup. Setting it derivation-wide covers both phases uniformly.
+    env = lib.optionalAttrs (enableTsan && tsanRuntime != null) {
+      LD_PRELOAD = tsanRuntime;
+    };
 
     postInstall = ''
       _site="$out/${python.sitePackages}"

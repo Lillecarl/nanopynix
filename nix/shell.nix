@@ -18,6 +18,7 @@
   sphinx,
   myst-parser,
   furo,
+  cachix,
 }:
 let
   nanopynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
@@ -73,5 +74,6 @@ mkShell {
     taplo
     treefmt
     actionlint
+    cachix
   ];
 }
