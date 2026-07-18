@@ -663,14 +663,27 @@ class EvalSession:
         rendered_eval = self._eval_settings.to_worker_settings() if self._eval_settings is not None else {}
         rendered_eval.pop("nix-path", None)  # applied via nix_path/searchPath, not the generic settings map
         rendered_fetch = self._fetch_settings.to_worker_settings() if self._fetch_settings is not None else {}
-        self._local = await self.run(
-            self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime
-            self._store._require_local(),
-            nix_path,
-            None if self._build_store is None else self._build_store._require_local(),
-            rendered_eval,
-            rendered_fetch,
-        )
+        try:
+            self._local = await self.run(
+                self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime
+                self._store._require_local(),
+                nix_path,
+                None if self._build_store is None else self._build_store._require_local(),
+                rendered_eval,
+                rendered_fetch,
+            )
+        except BaseException:
+            # By this point the executor's dedicated thread has already run
+            # its thread_initializer (GC_register_my_thread) as a side effect
+            # of submitting the open_eval_state call above. Without this
+            # shutdown, a failure here would abandon that thread still
+            # registered with Boehm GC -- it would eventually be torn down by
+            # Python's own ThreadPoolExecutor atexit/weakref machinery, which
+            # has no knowledge of our thread_finalizer, leaving a
+            # GC-registered-but-dead thread that a later, unrelated
+            # collection cycle can crash on (pthread_kill on a dead tid).
+            self._executor.shutdown(wait=True)
+            raise
         self._session._evals.add(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking
         self._active = True
 
@@ -701,9 +714,15 @@ class EvalSession:
         self._local = None
         self._active = False
         self._session._evals.discard(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking
-        if local is not None:
-            await self._run_closing(local.close)
-        self._executor.shutdown(wait=True)
+        try:
+            if local is not None:
+                await self._run_closing(local.close)
+        finally:
+            # Must run even if local.close() raised -- otherwise the
+            # executor's thread stays GC-registered but is never handed to
+            # our thread_finalizer, only to Python's own ThreadPoolExecutor
+            # teardown machinery, which skips it (see open()'s matching note).
+            self._executor.shutdown(wait=True)
 
     def _begin_close(self, *, force: bool) -> None:
         self._executor.begin_close(force=force)
