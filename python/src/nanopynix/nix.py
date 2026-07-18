@@ -145,7 +145,7 @@ class Session:
             nix_conf=nix_conf,
             load_config=load_config,
             settings=worker_settings,
-            experimental_features=[],
+            experimental_features=list(nix_settings.experimental_features or []),
             verbosity=normalize_log_level(verbosity) if verbosity is not None else None,
             nix_path=_normalize_nix_path(nix_path),
             primops=_to_primop_specs(primops),
