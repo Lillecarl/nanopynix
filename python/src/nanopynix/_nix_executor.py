@@ -42,6 +42,7 @@ class NixThreadExecutor:
         self._futures: set[concurrent.futures.Future[Any]] = set()
         self._accepting = True
         self._closed = False
+        self._shutdown_started = False
 
     def _initialize_thread(self) -> None:
         initializer = self._thread_initializer
@@ -122,14 +123,29 @@ class NixThreadExecutor:
             raise TimeoutError("timed out waiting for Nix executor work to finish")
 
     def shutdown(self, wait: bool = True) -> None:
+        """Idempotent: a second call while shutdown is in progress or done is a no-op.
+
+        A duplicate invocation (e.g. two racing close() calls on the owning
+        EvalSession) must not submit the thread finalizer twice -- the second
+        run would find the thread already unregistered from Boehm GC and
+        raise, and without this guard that exception would propagate out of
+        shutdown() before self._pool.shutdown() ever ran, leaking the
+        underlying OS thread as still-registered-but-never-torn-down.
+        """
+        with self._lock:
+            if self._shutdown_started:
+                return
+            self._shutdown_started = True
         self.begin_close()
-        finalizer = self._thread_finalizer
-        if finalizer is not None and self._thread_started.is_set():
-            # Evaluator executors have one worker. Drain before shutdown, then
-            # execute the matching GC teardown on that same owning thread.
-            self._pool.submit(finalizer).result()
-        self._pool.shutdown(wait=wait)
-        self._closed = True
+        try:
+            finalizer = self._thread_finalizer
+            if finalizer is not None and self._thread_started.is_set():
+                # Evaluator executors have one worker. Drain before shutdown, then
+                # execute the matching GC teardown on that same owning thread.
+                self._pool.submit(finalizer).result()
+        finally:
+            self._pool.shutdown(wait=wait)
+            self._closed = True
 
     @property
     def closed(self) -> bool:
