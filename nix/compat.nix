@@ -7,7 +7,7 @@ flake-compatish {
   source = ../.;
   overrides = {
     self = ../.;
-    nixpkgs = <nixpkgs>;
+    # nixpkgs = <nixpkgs>;
     grpclib-transports = ../../grpclab;
   };
   nixpkgsArgs = system: {

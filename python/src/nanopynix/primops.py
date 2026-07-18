@@ -140,14 +140,43 @@ def from_yaml11_stream(source: str) -> list[JsonValue]:
         raise ValueError(f"fromYAML11Stream: failed to parse YAML 1.1 stream: {_parse_error_message(exc)}") from exc
 
 
+class _BlockStyleDumper(yaml.SafeDumper):
+    """SafeDumper that renders multi-line strings as literal blocks (``|``).
+
+    A plain SafeDumper falls back to an escaped double-quoted scalar for any
+    string PyYAML doesn't consider "simple" (e.g. containing '${{ ... }}'
+    literals), which is valid YAML but unreadable for multi-line shell
+    scripts. Scoped to a Dumper subclass rather than mutating
+    yaml.SafeDumper globally, since other code in this process may still
+    want PyYAML's default string style.
+    """
+
+
+def _represent_str(dumper: _BlockStyleDumper, data: str) -> yaml.Node:
+    style = "|" if "\n" in data else None
+    return dumper.represent_scalar(  # type: ignore[reportUnknownMemberType] -- PyYAML stubs don't type represent_scalar's return precisely
+        "tag:yaml.org,2002:str", data, style=style
+    )
+
+
+_BlockStyleDumper.add_representer(str, _represent_str)
+
+
 def to_yaml(value: JsonValue) -> str:
     """Render JSON-like Nix/Python values as Kubernetes-compatible YAML."""
 
     value = _validate_document(value, "toYAML")
     try:
         if isinstance(value, list):
-            return yaml.safe_dump_all(value, explicit_start=True, sort_keys=False)
-        return yaml.safe_dump(value, sort_keys=False)
+            rendered = yaml.dump_all(  # type: ignore[reportUnknownVariableType] -- PyYAML's dump_all overloads don't narrow the return type for a custom Dumper
+                value, explicit_start=True, sort_keys=False, Dumper=_BlockStyleDumper
+            )
+        else:
+            rendered = yaml.dump(  # type: ignore[reportUnknownVariableType] -- PyYAML's dump overloads don't narrow the return type for a custom Dumper
+                value, sort_keys=False, Dumper=_BlockStyleDumper
+            )
+        result: str = rendered
+        return result
     except yaml.YAMLError as exc:
         raise ValueError(f"toYAML: failed to render YAML: {_parse_error_message(exc)}") from exc
 
