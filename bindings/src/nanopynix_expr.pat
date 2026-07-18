@@ -1,14 +1,8 @@
 nanopynix_expr.__prefix__:
     type ValueType = int | float | bool | str | None | list[ValueType] | dict[str, ValueType]
     \from collections.abc import Callable, Sequence
+    \from typing import overload
     \from nanopynix_store import Store
-
-nanopynix_expr._set_pure_eval:
-    def _set_pure_eval(pure: bool) -> None: ...
-nanopynix_expr._set_restrict_eval:
-    def _set_restrict_eval(restrict: bool) -> None: ...
-nanopynix_expr._set_allowed_uris:
-    def _set_allowed_uris(uris: list[str]) -> None: ...
 
 nanopynix_expr.register_primop:
     def register_primop(
@@ -32,4 +26,26 @@ nanopynix_expr.Value.build:
     def build(self, build_store: Store | None = None, build_mode: int = 0, eval_store: Store | None = None) -> dict[str, object]: ...
 
 nanopynix_expr.EvalState.__init__:
-    def __init__(self, store: Store, search_path: Sequence[str] = []) -> None: ...
+    @overload
+    def __init__(
+        self,
+        store: Store,
+        search_path: Sequence[str] = [],
+        eval_settings: dict[str, str] = {},
+        fetch_settings: dict[str, str] = {},
+    ) -> None: ...
+    @overload
+    def __init__(
+        self,
+        store: Store,
+        search_path: Sequence[str] = [],
+        build_store: Store | None = None,
+        eval_settings: dict[str, str] = {},
+        fetch_settings: dict[str, str] = {},
+    ) -> None: ...
+    def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+nanopynix_expr.EvalState.set_eval_setting:
+    def set_eval_setting(self, name: str, value: str) -> None: ...
+nanopynix_expr.EvalState.set_fetch_setting:
+    def set_fetch_setting(self, name: str, value: str) -> None: ...

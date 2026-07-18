@@ -6,6 +6,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from nanopynix_proto.nix.eval import OpenEvalRequest
 
 import nanopynix._nix_core as nix_core  # type: ignore[reportPrivateUsage] -- test patches direct-pointer core boundary
 import nanopynix._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
@@ -19,17 +20,29 @@ from nanopynix._worker import (  # type: ignore[reportPrivateUsage] -- test impo
     WorkerServiceHandler,
     WorkerState,
 )
-from nanopynix._worker_eval import EvalServiceHandler  # type: ignore[reportPrivateUsage] -- test imports private module
+from nanopynix._worker_eval import (  # type: ignore[reportPrivateUsage] -- test imports private module
+    EvalServiceHandler,
+    close_eval_state,
+)
 from nanopynix._worker_nix import (
     NixThreadExecutor,  # type: ignore[reportPrivateUsage] -- test verifies thread confinement
 )
 
 
 class _FakeEvalState:
-    def __init__(self, store: object, nix_path: list[str], build_store: object | None = None) -> None:
+    def __init__(
+        self,
+        store: object,
+        nix_path: list[str],
+        build_store: object | None = None,
+        eval_settings: dict[str, str] | None = None,
+        fetch_settings: dict[str, str] | None = None,
+    ) -> None:
         self.store = store
         self.nix_path = nix_path
         self.build_store = build_store
+        self.eval_settings = eval_settings
+        self.fetch_settings = fetch_settings
 
 
 class _FakeStore:
@@ -106,9 +119,6 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
     monkeypatch.setattr(worker.nanopynix_util, "init_libstore", record)
     monkeypatch.setattr(worker.nanopynix_util, "set_verbosity", record)
     monkeypatch.setattr(nix_core.nanopynix_expr, "init_libexpr", record)
-    monkeypatch.setattr(nix_core.nanopynix_expr, "_set_pure_eval", record)
-    monkeypatch.setattr(nix_core.nanopynix_expr, "_set_restrict_eval", record)
-    monkeypatch.setattr(nix_core.nanopynix_expr, "_set_allowed_uris", record)
     monkeypatch.setattr(worker, "_register_primops", record)
 
     state = WorkerState()
@@ -121,9 +131,6 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
         experimental_features=["flakes"],
         load_config=False,
         verbosity=None,
-        pure_eval=True,
-        restrict_eval=True,
-        allowed_uris=["https://example.test"],
         nix_path=["nixpkgs=/tmp/nixpkgs"],
         primops=[],
     )
@@ -139,37 +146,44 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
     assert state.nix_path == ["nixpkgs=/tmp/nixpkgs"]
 
 
-def test_open_eval_binds_eval_state_to_requested_store_handle(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.anyio
+async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.MonkeyPatch, init_expr: object) -> None:
+    # `init_expr` forces real Boehm GC initialization: this test's open_eval
+    # spins up real NixThreadExecutor instances with the real
+    # _enter_evaluator_thread/_exit_evaluator_thread GC registration hooks,
+    # which require nix::initGC() to have already run once in this process.
+    del init_expr
     monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
 
     handles = HandleRegistry()
     second_handle = handles.allocate(LocalStore("second-store"), "store")
     first_handle = handles.allocate(LocalStore("first-store"), "store")
     state = SimpleNamespace(
-        eval_state=None,
-        eval_store_handle=None,
         handles=handles,
         runtime=LocalRuntime(),
         nix_path=["nixpkgs=/tmp/nixpkgs"],
     )
     handler = EvalServiceHandler(state)
 
-    handler._open_eval(second_handle)  # type: ignore[reportPrivateUsage] -- test verifies worker's Nix-thread lifecycle helper
-    selected = handler._get_es()  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
+    response = await handler.open_eval(OpenEvalRequest(store_handle=second_handle))
+    selected = handler._get_es(response.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
 
     assert isinstance(selected, LocalEvalState)
     assert isinstance(selected.raw, _FakeEvalState)
     assert selected.raw.store == "second-store"
     assert selected.raw.nix_path == ["nixpkgs=/tmp/nixpkgs"]
-    assert state.eval_store_handle == second_handle
 
-    assert handler._get_es() is selected  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
+    assert handler._get_es(response.eval_handle) is selected  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
 
-    with pytest.raises(RuntimeError, match="already open"):
-        handler._open_eval(first_handle)  # type: ignore[reportPrivateUsage] -- test verifies one-EvalState invariant
+    # A second, concurrently open EvalState is now allowed rather than rejected.
+    second_response = await handler.open_eval(OpenEvalRequest(store_handle=first_handle))
+    assert second_response.eval_handle != response.eval_handle
+    second_selected = handler._get_es(second_response.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
+    assert second_selected.raw.store == "first-store"
+    assert second_selected is not selected
 
-    assert state.eval_state is selected
-    assert state.eval_store_handle == second_handle
+    close_eval_state(state, response.eval_handle)
+    close_eval_state(state, second_response.eval_handle)
 
 
 def test_releasing_remote_value_closes_local_value() -> None:

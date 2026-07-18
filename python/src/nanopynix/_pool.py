@@ -165,9 +165,6 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         nix_path: Sequence[str] | None = None,
         primops: list[PrimOpSpec] | None = None,
         primop_callables: dict[str, Callable[..., Any]] | None = None,
-        pure_eval: bool | None = None,
-        restrict_eval: bool | None = None,
-        allowed_uris: Sequence[str] | None = None,
         worker_oom_score_adj: int | None = None,
         rpc_timeout: float = _RPC_TIMEOUT,
         shutdown_timeout: float = 5.0,
@@ -181,9 +178,6 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         self._nix_path = list(nix_path) if nix_path else []
         self._primops = primops or []
         self._primop_callables = primop_callables or {}
-        self._pure_eval = pure_eval
-        self._restrict_eval = restrict_eval
-        self._allowed_uris = list(allowed_uris) if allowed_uris else []
         self._worker_oom_score_adj = worker_oom_score_adj
         self.rpc_timeout = rpc_timeout
         self._shutdown_timeout = shutdown_timeout
@@ -243,9 +237,6 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
                 settings=self._settings,
                 experimental_features=self._features,
                 primops=proto_primops,
-                pure_eval=self._pure_eval,
-                restrict_eval=self._restrict_eval,
-                allowed_uris=self._allowed_uris,
                 verbosity=self._verbosity,
                 nix_path=self._nix_path,
             ),

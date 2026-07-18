@@ -15,14 +15,13 @@ service WorkerService {
 }
 
 message InitRequest {
+  reserved 6, 7, 8; // formerly pure_eval, restrict_eval, allowed_uris — now per-EvalState, see OpenEvalRequest
+  reserved "pure_eval", "restrict_eval", "allowed_uris";
   string store_uri = 1;
   optional string nix_conf = 2;
   map<string, string> settings = 3;
   repeated string experimental_features = 4;
   repeated nix.common.PrimOpSpec primops = 5;
-  optional bool pure_eval = 6;
-  optional bool restrict_eval = 7;
-  repeated string allowed_uris = 8;
   optional nix.common.LogLevel verbosity = 9;
   repeated string nix_path = 10;
   bool load_config = 11;

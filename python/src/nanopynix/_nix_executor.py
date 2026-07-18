@@ -53,6 +53,20 @@ class NixThreadExecutor:
     async def run(self, func: Callable[..., _T], *args: Any) -> _T:
         return await self._submit(func, args, allow_when_closing=False)
 
+    def run_sync(self, func: Callable[..., _T], *args: Any) -> _T:
+        """Run ``func`` on this executor's thread and block until it finishes.
+
+        For use from a worker thread that has no running event loop (e.g. one
+        ``NixThreadExecutor``'s thread orchestrating a call into another's).
+        """
+        with self._lock:
+            if not self._accepting:
+                raise RuntimeError("Nix executor is closing")
+            future = self._pool.submit(func, *args)
+            self._futures.add(future)
+        future.add_done_callback(self._discard_future)
+        return future.result()
+
     async def run_closing(self, func: Callable[..., _T], *args: Any) -> _T:
         """Run internal teardown work after :meth:`begin_close`."""
         return await self._submit(func, args, allow_when_closing=True)

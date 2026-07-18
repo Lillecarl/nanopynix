@@ -20,6 +20,7 @@ nanopynix_flake.lock_flake:
         flake_ref: FlakeRef,
         update_inputs: bool | list[str] = False,
         write_lock_file: bool = True,
+        flake_settings: dict[str, str] = {},
     ) -> LockedFlake:
         """
         Lock a flake reference, returning a LockedFlake with description and inputs
@@ -34,5 +35,11 @@ nanopynix_flake.call_flake:
         """Call a locked flake's outputs function, returning a Value"""
 
 nanopynix_flake.eval_flake:
-    def eval_flake(state: EvalState, ref: str, write_lock_file: bool = True) -> Value:
+    def eval_flake(
+        state: EvalState, ref: str, write_lock_file: bool = True, flake_settings: dict[str, str] = {}
+    ) -> Value:
         """Lock and evaluate a flake, returning its outputs as a Value"""
+
+nanopynix_flake.parse_flake_ref:
+    def parse_flake_ref(url: str, fetch_settings: dict[str, str] = {}) -> FlakeRef:
+        """Parse a flake reference string (e.g. 'github:NixOS/nixpkgs')"""

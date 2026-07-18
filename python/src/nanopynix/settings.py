@@ -79,14 +79,42 @@ class SettingsDrift(BaseModel):
         return not self.missing and not self.extra
 
 
-class NixSettings(BaseModel):
-    """Nix settings rendered as nix.conf-compatible key/value pairs."""
+class _NixConfigModel(BaseModel):
+    """Shared base for Nix settings models: renders set fields as nix.conf key/value pairs."""
 
     model_config = ConfigDict(
         alias_generator=_alias,
         populate_by_name=True,
         extra="forbid",
     )
+
+    def _iter_set(self) -> Iterator[tuple[str, str]]:
+        for name, field in type(self).model_fields.items():
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if not _field_is_supported(field):
+                extra: Any = field.json_schema_extra
+                minimum = extra["nix_version_min"]
+                build_info_result: Any = nanopynix_util.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+                version = build_info_result["nix_version"]
+                raise ValueError(f"{_alias(name)} requires Nix {minimum} or newer (running {version})")
+            rendered = _render_value(value)
+            if rendered == "" and not isinstance(value, str):
+                continue
+            yield _alias(name), rendered
+
+    def to_nix_config(self) -> str:
+        """Render the set fields as ``nix.conf`` text (``key = value`` lines)."""
+        return "\n".join(f"{key} = {value}" for key, value in self._iter_set())
+
+    def to_worker_settings(self) -> dict[str, str]:
+        """Render the set fields as a ``{nix-conf-key: rendered-value}`` mapping."""
+        return dict(self._iter_set())
+
+
+class NixSettings(_NixConfigModel):
+    """Nix settings rendered as nix.conf-compatible key/value pairs."""
 
     allow_new_privileges: bool | None = None
     allow_symlinked_store: bool | None = None
@@ -221,39 +249,9 @@ class NixSettings(BaseModel):
                 merged.append(feature)
         return self.model_copy(update={"experimental_features": merged})
 
-    def _iter_set(self) -> Iterator[tuple[str, str]]:
-        for name, field in type(self).model_fields.items():
-            value = getattr(self, name)
-            if value is None:
-                continue
-            if not _field_is_supported(field):
-                extra: Any = field.json_schema_extra
-                minimum = extra["nix_version_min"]
-                build_info_result: Any = nanopynix_util.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
-                version = build_info_result["nix_version"]
-                raise ValueError(f"{_alias(name)} requires Nix {minimum} or newer (running {version})")
-            rendered = _render_value(value)
-            if rendered == "" and not isinstance(value, str):
-                continue
-            yield _alias(name), rendered
 
-    def to_nix_config(self) -> str:
-        """Render the set fields as ``nix.conf`` text (``key = value`` lines)."""
-        return "\n".join(f"{key} = {value}" for key, value in self._iter_set())
-
-    def to_worker_settings(self) -> dict[str, str]:
-        """Render the set fields as a ``{nix-conf-key: rendered-value}`` mapping."""
-        return dict(self._iter_set())
-
-
-class NixEvalSettings(BaseModel):
-    """Eval-specific Nix settings not applied through the global store settings path."""
-
-    model_config = ConfigDict(
-        alias_generator=_alias,
-        populate_by_name=True,
-        extra="forbid",
-    )
+class NixEvalSettings(_NixConfigModel):
+    """Eval-specific Nix settings, applied per-``EvalState``."""
 
     allow_import_from_derivation: bool | None = None
     allow_unsafe_native_code_during_evaluation: bool | None = None
@@ -281,14 +279,8 @@ class NixEvalSettings(BaseModel):
     warn_short_path_literals: bool | None = None
 
 
-class NixFetchSettings(BaseModel):
+class NixFetchSettings(_NixConfigModel):
     """Fetcher-specific Nix settings."""
-
-    model_config = ConfigDict(
-        alias_generator=_alias,
-        populate_by_name=True,
-        extra="forbid",
-    )
 
     access_tokens: dict[str, str] | None = None
     allow_dirty: bool | None = None
@@ -299,14 +291,8 @@ class NixFetchSettings(BaseModel):
     warn_dirty: bool | None = None
 
 
-class NixFlakeSettings(BaseModel):
-    """Flake-specific Nix settings."""
-
-    model_config = ConfigDict(
-        alias_generator=_alias,
-        populate_by_name=True,
-        extra="forbid",
-    )
+class NixFlakeSettings(_NixConfigModel):
+    """Flake-specific Nix settings, applied per flake operation."""
 
     accept_flake_config: bool | None = None
     commit_lock_file_summary: str | None = None

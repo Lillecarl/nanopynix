@@ -61,7 +61,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
     :attr:`Store.rpc` for operations which do not yet have an ergonomic method.
     """
 
-    __slots__ = ("_active", "_dependent_eval", "_pool", "_rpc_timeout", "_session_id", "_store_handle", "_uri")
+    __slots__ = ("_active", "_dependent_evals", "_pool", "_rpc_timeout", "_session_id", "_store_handle", "_uri")
 
     def __init__(
         self,
@@ -76,7 +76,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         self._session_id = session_id
         self._store_handle: int = 0
         self._active = False
-        self._dependent_eval: Any = None
+        self._dependent_evals: set[Any] = set()
 
     async def open(self) -> None:
         """Open a store on the worker and activate the handle."""
@@ -89,12 +89,12 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         self._active = True
 
     async def close(self, *, force: bool = False) -> None:
-        """Close the store, optionally closing its dependent evaluator first."""
+        """Close the store, optionally closing its dependent evaluators first."""
         if not self._active:
             return
-        dependent_eval = self._dependent_eval
-        if force and dependent_eval is not None:
-            await dependent_eval.close()
+        if force:
+            for dependent_eval in tuple(self._dependent_evals):
+                await dependent_eval.close()
         try:
             await self._pool.call(
                 self._pool._worker_stub.close_store(  # type: ignore[reportPrivateUsage] -- cross-class access
@@ -111,13 +111,10 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
             self._store_handle = 0
 
     def _register_dependent_eval(self, eval_session: Any) -> None:
-        if self._dependent_eval is not None and self._dependent_eval is not eval_session:
-            raise RuntimeError("store already has a live EvalSession")
-        self._dependent_eval = eval_session
+        self._dependent_evals.add(eval_session)
 
     def _unregister_dependent_eval(self, eval_session: Any) -> None:
-        if self._dependent_eval is eval_session:
-            self._dependent_eval = None
+        self._dependent_evals.discard(eval_session)
 
     async def __aenter__(self) -> StoreHandle:
         await self.open()

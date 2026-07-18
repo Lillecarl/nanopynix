@@ -27,7 +27,7 @@ from nanopynix._nix_executor import NixThreadExecutor
 from nanopynix.logging import LogCollector
 from nanopynix.models import BuildResult, Derivation, GcResult, LockedInput, LogEvent, MissingInfo, PathInfo
 from nanopynix.models import StorePath as PublicStorePath
-from nanopynix.settings import NixSettings, normalize_nix_settings
+from nanopynix.settings import NixEvalSettings, NixFetchSettings, NixFlakeSettings, NixSettings, normalize_nix_settings
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 if TYPE_CHECKING:
@@ -158,9 +158,6 @@ class Session:
         experimental_features: Sequence[str] | None = None,
         verbosity: LogLevelInput | None = None,
         nix_path: str | Sequence[str] | None = None,
-        pure_eval: bool | None = None,
-        restrict_eval: bool | None = None,
-        allowed_uris: Sequence[str] | None = None,
         store_workers: int = 4,
     ) -> None:
         if nix_conf is not None:
@@ -173,9 +170,6 @@ class Session:
         self._settings = normalize_nix_settings(settings).with_experimental_features(list(experimental_features or []))
         self._verbosity = normalize_log_level(verbosity) if verbosity is not None else None
         self._nix_path = self._normalize_nix_path(nix_path)
-        self._pure_eval = pure_eval
-        self._restrict_eval = restrict_eval
-        self._allowed_uris = list(allowed_uris or [])
         if store_workers < 1:
             raise ValueError("store_workers must be at least 1")
         self._store_workers = store_workers
@@ -242,9 +236,6 @@ class Session:
             tuple(sorted(self._settings.to_worker_settings().items())),
             self._verbosity,
             tuple(self._nix_path),
-            self._pure_eval,
-            self._restrict_eval,
-            tuple(self._allowed_uris),
         )
 
     def _init_nix(self) -> None:
@@ -252,9 +243,6 @@ class Session:
             settings=self._settings.to_worker_settings(),
             load_config=self._load_config,
             verbosity=None if self._verbosity is None else int(self._verbosity),
-            pure_eval=self._pure_eval,
-            restrict_eval=self._restrict_eval,
-            allowed_uris=self._allowed_uris,
         )
 
     async def close(
@@ -357,13 +345,25 @@ class Session:
         self._stores.add(store)
         return store
 
-    def eval(self, store: Store, *, build_store: Store | None = None) -> EvalSession:
-        """Return a pointer-backed evaluator with its own dedicated Nix thread."""
+    def eval(
+        self,
+        store: Store,
+        *,
+        build_store: Store | None = None,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+    ) -> EvalSession:
+        """Return a pointer-backed evaluator with its own dedicated Nix thread.
+
+        ``eval_settings``/``fetch_settings`` configure this evaluator alone —
+        each :class:`EvalSession` owns an independent Nix evaluator, so
+        concurrently open sessions may use different settings.
+        """
         if store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary
             raise ValueError("Store belongs to a different inproc Session")
         if build_store is not None and build_store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary
             raise ValueError("build_store belongs to a different inproc Session")
-        return EvalSession(self, store, build_store)
+        return EvalSession(self, store, build_store, eval_settings=eval_settings, fetch_settings=fetch_settings)
 
     async def get_verbosity(self) -> int:
         """Return the current Nix log verbosity."""
@@ -615,10 +615,20 @@ class Store:
 class EvalSession:
     """Own one thread-confined direct ``EvalState`` pointer."""
 
-    def __init__(self, session: Session, store: Store, build_store: Store | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        store: Store,
+        build_store: Store | None = None,
+        *,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+    ) -> None:
         self._session = session
         self._store = store
         self._build_store = build_store
+        self._eval_settings = eval_settings
+        self._fetch_settings = fetch_settings
         self._local: LocalEvalState | None = None
         self._active = False
         self._locked_flakes: set[LockedFlake] = set()
@@ -645,14 +655,41 @@ class EvalSession:
                 thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
                 thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
             )
+        nix_path = (
+            self._eval_settings.nix_path
+            if self._eval_settings is not None and self._eval_settings.nix_path is not None
+            else self._session._nix_path  # type: ignore[reportPrivateUsage] -- Session owns evaluator configuration
+        )
+        rendered_eval = self._eval_settings.to_worker_settings() if self._eval_settings is not None else {}
+        rendered_eval.pop("nix-path", None)  # applied via nix_path/searchPath, not the generic settings map
+        rendered_fetch = self._fetch_settings.to_worker_settings() if self._fetch_settings is not None else {}
         self._local = await self.run(
             self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime
             self._store._require_local(),
-            self._session._nix_path,  # type: ignore[reportPrivateUsage] -- Session owns evaluator configuration
+            nix_path,
             None if self._build_store is None else self._build_store._require_local(),
+            rendered_eval,
+            rendered_fetch,
         )
         self._session._evals.add(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking
         self._active = True
+
+    async def configure(
+        self,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+    ) -> None:
+        """Apply live-mutable eval/fetch settings to this already-open evaluator.
+
+        Only settings Nix reads fresh on every access take effect this way
+        (e.g. ``max_call_depth``, ``allowed_uris``, lint settings) —
+        construction-time-snapshotted ones (``nix_path``, ``pure_eval``,
+        ``restrict_eval``) require a new :class:`EvalSession`.
+        """
+        rendered_eval = eval_settings.to_worker_settings() if eval_settings is not None else {}
+        rendered_eval.pop("nix-path", None)
+        rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
+        await self.run(self._require_local().configure, rendered_eval, rendered_fetch)
 
     async def close(self) -> None:
         """Release all values and locked flakes, then destroy this evaluator."""
@@ -737,6 +774,7 @@ class EvalSession:
         *,
         update_inputs: bool | list[str] = False,
         write_lock_file: bool = True,
+        flake_settings: NixFlakeSettings | None = None,
     ) -> LockedFlake:
         """Lock a flake, optionally retaining the lock only in memory."""
         local = await self.run(
@@ -745,6 +783,7 @@ class EvalSession:
                 ref,
                 update_inputs=update_inputs,
                 write_lock_file=write_lock_file,
+                flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else None,
             )
         )
         proto = await self.run(_locked_flake_proto, local.require_raw())
@@ -752,10 +791,17 @@ class EvalSession:
         self._locked_flakes.add(locked_flake)
         return locked_flake
 
-    async def eval_flake(self, ref: str, *, write_lock_file: bool = True) -> Value:
+    async def eval_flake(
+        self, ref: str, *, write_lock_file: bool = True, flake_settings: NixFlakeSettings | None = None
+    ) -> Value:
         """Lock and evaluate a flake in one step."""
         local = await self.run(
-            partial(self._require_local().eval_flake, ref, write_lock_file=write_lock_file)
+            partial(
+                self._require_local().eval_flake,
+                ref,
+                write_lock_file=write_lock_file,
+                flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else None,
+            )
         )
         return self._track_value(local)
 

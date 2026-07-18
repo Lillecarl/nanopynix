@@ -98,12 +98,14 @@ class LocalEvalState:
         *,
         update_inputs: bool | list[str],
         write_lock_file: bool,
+        flake_settings: Mapping[str, str] | None = None,
     ) -> LocalLockedFlake:
         raw = nanopynix_flake.lock_flake(
             self.require_raw(),
             nanopynix_flake.parse_flake_ref(ref),
             update_inputs=update_inputs,
             write_lock_file=write_lock_file,
+            flake_settings=dict(flake_settings) if flake_settings else {},
         )
         locked_flake = LocalLockedFlake(self, raw)
         self._locked_flakes.add(locked_flake)
@@ -112,8 +114,24 @@ class LocalEvalState:
     def call_locked_flake(self, locked_flake: LocalLockedFlake) -> LocalValue:
         return self.wrap_value(nanopynix_flake.call_flake(self.require_raw(), locked_flake.require_raw()))
 
-    def eval_flake(self, ref: str, *, write_lock_file: bool) -> LocalValue:
-        return self.wrap_value(nanopynix_flake.eval_flake(self.require_raw(), ref, write_lock_file))
+    def eval_flake(
+        self, ref: str, *, write_lock_file: bool, flake_settings: Mapping[str, str] | None = None
+    ) -> LocalValue:
+        return self.wrap_value(
+            nanopynix_flake.eval_flake(
+                self.require_raw(), ref, write_lock_file, dict(flake_settings) if flake_settings else {}
+            )
+        )
+
+    def configure(
+        self, eval_settings: Mapping[str, str] | None = None, fetch_settings: Mapping[str, str] | None = None
+    ) -> None:
+        """Apply live-mutable eval/fetch settings to this already-open evaluator."""
+        raw = self.require_raw()
+        for name, value in (eval_settings or {}).items():
+            raw.set_eval_setting(name, value)
+        for name, value in (fetch_settings or {}).items():
+            raw.set_fetch_setting(name, value)
 
     def discard_locked_flake(self, locked_flake: LocalLockedFlake) -> None:
         self._locked_flakes.discard(locked_flake)
@@ -261,17 +279,11 @@ class LocalRuntime:
         settings: Mapping[str, str],
         load_config: bool,
         verbosity: int | None,
-        pure_eval: bool | None,
-        restrict_eval: bool | None,
-        allowed_uris: Sequence[str],
     ) -> None:
         self._core.initialize(
             settings=settings,
             load_config=load_config,
             verbosity=verbosity,
-            pure_eval=pure_eval,
-            restrict_eval=restrict_eval,
-            allowed_uris=allowed_uris,
         )
 
     def open_store(self, uri: str) -> LocalStore:
@@ -282,12 +294,16 @@ class LocalRuntime:
         store: LocalStore,
         nix_path: Sequence[str],
         build_store: LocalStore | None = None,
+        eval_settings: Mapping[str, str] | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
     ) -> LocalEvalState:
         return LocalEvalState(
             self._core.open_eval_state(
                 store.require_raw(),
                 nix_path,
                 None if build_store is None else build_store.require_raw(),
+                eval_settings,
+                fetch_settings,
             ),
             store,
         )

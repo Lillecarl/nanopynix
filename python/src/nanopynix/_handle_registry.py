@@ -16,15 +16,17 @@ from typing import Any
 
 @dataclass
 class HandleRegistry:
-    _resources: dict[int, tuple[str, Any]] = field(default_factory=dict[int, tuple[str, Any]])
+    _resources: dict[int, tuple[str, Any, int | None]] = field(
+        default_factory=dict[int, tuple[str, Any, "int | None"]]
+    )
     _next: int = 1
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def allocate(self, resource: Any, kind: str) -> int:
+    def allocate(self, resource: Any, kind: str, owner: int | None = None) -> int:
         with self._lock:
             handle = self._next
             self._next += 1
-            self._resources[handle] = (kind, resource)
+            self._resources[handle] = (kind, resource, owner)
             return handle
 
     def get(self, handle: int) -> tuple[str, Any]:
@@ -32,7 +34,8 @@ class HandleRegistry:
             entry = self._resources.get(handle)
             if entry is None:
                 raise KeyError(f"handle {handle} not found")
-            return entry
+            kind, resource, _owner = entry
+            return kind, resource
 
     def get_typed(self, handle: int, expected_kind: str) -> Any:
         kind, resource = self.get(handle)
@@ -42,7 +45,16 @@ class HandleRegistry:
 
     def iter_kind(self, kind: str) -> list[tuple[int, Any]]:
         with self._lock:
-            return [(handle, resource) for handle, (k, resource) in self._resources.items() if k == kind]
+            return [(handle, resource) for handle, (k, resource, _owner) in self._resources.items() if k == kind]
+
+    def iter_owned(self, owner: int, kind: str | None = None) -> list[tuple[int, Any]]:
+        """Return ``(handle, resource)`` pairs allocated with ``owner``, optionally filtered by ``kind``."""
+        with self._lock:
+            return [
+                (handle, resource)
+                for handle, (k, resource, resource_owner) in self._resources.items()
+                if resource_owner == owner and (kind is None or k == kind)
+            ]
 
     def release(self, handle: int) -> None:
         with self._lock:

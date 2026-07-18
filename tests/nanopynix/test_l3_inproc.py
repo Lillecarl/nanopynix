@@ -274,7 +274,7 @@ async def test_session_close_closes_eval_state_and_clears_worker_values(l3_inpro
     await eval.close()
 
     assert l3_inproc.state.handles.iter_kind("value") == []
-    assert l3_inproc.state.eval_state is None
+    assert l3_inproc.state.handles.iter_kind("eval") == []
     assert {item[0] for item in l3_inproc.state.handles.iter_kind("store")} == {l3_inproc.initial_store_handle}
     del first, second
 
@@ -283,7 +283,7 @@ async def test_eval_rpc_requires_open_eval(l3_inproc: _L3Inproc) -> None:
     with pytest.raises(GRPCError, match="call OpenEval before evaluating"):
         await l3_inproc.worker._eval_stub.eval_string(EvalStringRequest(expr="1", source_name="<test>"))
 
-    assert l3_inproc.state.eval_state is None
+    assert l3_inproc.state.handles.iter_kind("eval") == []
 
 
 async def test_store_cannot_close_while_its_eval_state_is_open(l3_inproc: _L3Inproc) -> None:
@@ -296,7 +296,7 @@ async def test_store_cannot_close_while_its_eval_state_is_open(l3_inproc: _L3Inp
     await l3_inproc.worker_stub.close_store(
         CloseStoreRequest(store_handle=l3_inproc.initial_store_handle, force=True)
     )
-    assert l3_inproc.state.eval_state is None
+    assert l3_inproc.state.handles.iter_kind("eval") == []
     assert l3_inproc.state.handles.iter_kind("store") == []
 
 
@@ -366,7 +366,7 @@ async def test_session_close_closes_eval_state_and_clears_values_and_locked_flak
 
     assert l3_inproc.state.handles.iter_kind("value") == []
     assert l3_inproc.state.handles.iter_kind("locked_flake") == []
-    assert l3_inproc.state.eval_state is None
+    assert l3_inproc.state.handles.iter_kind("eval") == []
     assert {item[0] for item in l3_inproc.state.handles.iter_kind("store")} == {l3_inproc.initial_store_handle}
     del value, locked
 
