@@ -1,16 +1,38 @@
 """Shared fixtures for nanopynix tests."""
 
 import atexit
+import functools
+import inspect
 import os
 import re
+import sys
+from collections.abc import Awaitable, Callable, Generator
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+import anyio
 import pytest
 
 import nanopynix
 import nanopynix_expr
 import nanopynix_util
+
+# Async tests can hang indefinitely on a wedged subprocess/pipe instead of
+# failing (e.g. a Nix worker that stops responding never raises an error, it
+# just never wakes the awaiting task up). Every async test gets wrapped in
+# this deadline so a hang becomes a clear TimeoutError on that one test
+# instead of the whole pytest run — and therefore the whole CI job — never
+# returning. Override via NANOPYNIX_TEST_TIMEOUT for slower environments.
+_ASYNC_TEST_TIMEOUT = float(os.environ.get("NANOPYNIX_TEST_TIMEOUT", "120"))
+
+
+def _with_test_timeout(func: Callable[..., Awaitable[None]]) -> Callable[..., Awaitable[None]]:
+    @functools.wraps(func)
+    async def wrapper(*args: object, **kwargs: object) -> None:
+        with anyio.fail_after(_ASYNC_TEST_TIMEOUT):
+            await func(*args, **kwargs)
+
+    return wrapper
 
 _COVERAGE_SITECUSTOMIZE_DIR = str(Path(__file__).resolve().parent / "_coverage_subprocess")
 
@@ -92,6 +114,36 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.skip(reason=f"requires Nix >= {minimum}"))
         if maximum is not None and _version_at_least(actual, _nix_version_tuple(maximum)):
             item.add_marker(pytest.mark.skip(reason=f"requires Nix < {maximum}"))
+
+    for item in items:
+        if isinstance(item, pytest.Function) and inspect.iscoroutinefunction(item.obj):
+            item.obj = _with_test_timeout(item.obj)
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_sessionfinish(exitstatus: int | pytest.ExitCode) -> Generator[None, None, None]:  # noqa: ARG001 -- exitstatus captured via closure below
+    """Force-exit once every other sessionfinish hook has run, terminal
+    summary included.
+
+    CPython's normal shutdown joins every non-daemon thread before the
+    process can exit. A worker-pool executor thread or subprocess-handling
+    thread that isn't perfectly torn down at session end otherwise leaves the
+    whole pytest process (and therefore the CI job) hanging forever even
+    though every test already finished and every report (coverage, junitxml,
+    the terminal "N passed/failed" line) is already written.
+
+    Coverage's own reporting runs earlier still, inside pytest_runtestloop.
+    The terminal reporter's final summary line is printed from *its own*
+    ``pytest_sessionfinish`` wrapper hook, after its ``yield``. Wrapper hooks
+    nest like context managers: ``tryfirst=True`` makes ours the outermost
+    one, so our ``yield`` runs first (deferring to every other hookimpl,
+    wrapper or not) and our code after ``yield`` runs dead last, once
+    everything else -- including the terminal summary -- has finished.
+    """
+    yield
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(int(exitstatus))
 
 
 def pytest_runtest_setup(item: pytest.Item):
