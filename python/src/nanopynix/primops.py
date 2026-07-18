@@ -175,10 +175,10 @@ def to_yaml(value: JsonValue) -> str:
             rendered = yaml.dump(  # type: ignore[reportUnknownVariableType] -- PyYAML's dump overloads don't narrow the return type for a custom Dumper
                 value, sort_keys=False, Dumper=_BlockStyleDumper
             )
-        result: str = rendered
-        return result
     except yaml.YAMLError as exc:
         raise ValueError(f"toYAML: failed to render YAML: {_parse_error_message(exc)}") from exc
+    result: str = rendered
+    return result
 
 
 def yaml_primops() -> list[PrimOpSpec]:
