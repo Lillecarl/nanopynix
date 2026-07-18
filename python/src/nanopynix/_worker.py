@@ -59,7 +59,7 @@ from nanopynix._grpc_util import wrap_service_handlers
 from nanopynix._handle_registry import HandleRegistry
 from nanopynix._local import LocalRuntime
 from nanopynix._process_title import set_process_title, set_worker_title
-from nanopynix._worker_eval import EvalServiceHandler, close_eval_state
+from nanopynix._worker_eval import EvalServiceHandler, close_eval_state, find_evals_by_store
 from nanopynix._worker_nix import NixThreadExecutor
 from nanopynix._worker_primop import ThreadedRpcPrimopBridge
 from nanopynix._worker_primop import (
@@ -143,17 +143,20 @@ class WorkerState:
     """Shared mutable state held by all three service handlers.
 
     Thread confinement:
-      * ``eval_state`` — evaluator thread only
       * ``collector`` — both threads (already thread-safe via ``janus.Queue``)
       * ``log_task`` — unused compatibility slot; parent consumes SubscribeLogs
-      * ``handles`` — both threads (locked ``HandleRegistry``)
-      * ``executor`` — event loop only (owns the evaluator thread)
+      * ``handles`` — both threads (locked ``HandleRegistry``); each open
+        evaluator lives here as an ``EvalEntry`` (kind ``"eval"``), owning its
+        own dedicated Nix thread — see ``_worker_eval.py``.
+      * ``executor`` — event loop only. Process-global Nix operations only
+        (``Init``, ``GetVerbosity``/``SetVerbosity``, the store-close
+        bookkeeping in ``_close_store``) — evaluator work runs on each
+        evaluator's own executor instead.
       * ``store_executor`` — event loop only (owns bounded Store threads)
       * ``rpc_bridge`` — Nix thread reads, event loop writes (internal locking)
     """
 
     def __init__(self) -> None:
-        self.eval_state: Any = None
         self.collector: LogCollector | None = None
         self.log_task: asyncio.Task[None] | None = None
         self.handles: HandleRegistry = HandleRegistry()
@@ -163,7 +166,6 @@ class WorkerState:
         self.owns_executor = True
         self.owns_store_executor = True
         self.rpc_bridge: ThreadedRpcPrimopBridge | None = None
-        self.eval_store_handle: int | None = None
         self.nix_path: list[str] = []
         self.worker_subname: str = "worker"
         self.named_store_uris: dict[int, str] = {}
@@ -208,9 +210,6 @@ class WorkerServiceHandler(WorkerServiceBase):
             settings=settings,
             load_config=message.load_config,
             verbosity=int(LogLevel.NOTICE) if message.verbosity is None else int(message.verbosity),
-            pure_eval=message.pure_eval,
-            restrict_eval=message.restrict_eval,
-            allowed_uris=message.allowed_uris,
         )
         self._state.nix_path = list(message.nix_path)
 
@@ -253,10 +252,12 @@ class WorkerServiceHandler(WorkerServiceBase):
         return CloseStoreResponse()
 
     def _close_store(self, store_handle: int, force: bool = False) -> None:
-        if self._state.eval_store_handle == store_handle:
+        eval_handles = find_evals_by_store(self._state, store_handle)
+        if eval_handles:
             if not force:
                 raise RuntimeError("cannot close a store while its EvalState is open; call CloseEval first")
-            close_eval_state(self._state)
+            for eval_handle in eval_handles:
+                close_eval_state(self._state, eval_handle)
         self._state.handles.release(store_handle)
         if self._state.named_store_uris.pop(store_handle, None) is not None:
             self._update_store_title()

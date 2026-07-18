@@ -32,6 +32,7 @@ from nanopynix_proto.nix.eval import (
     CallLockedFlakeRequest,
     CallRequest,
     CloseEvalRequest,
+    ConfigureEvalRequest,
     EditLocationRequest,
     EvalFileRequest,
     EvalFlakeRequest,
@@ -72,7 +73,7 @@ from nanopynix.exceptions import (
     WrongNixTypeError,
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
-from nanopynix.settings import DEFAULT_LINE_EDITORS
+from nanopynix.settings import DEFAULT_LINE_EDITORS, NixEvalSettings, NixFetchSettings, NixFlakeSettings
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 from nanopynix_store import BuildMode
 
@@ -266,7 +267,15 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
     RPCs remain free to run concurrently.
     """
 
-    __slots__ = ("_active", "_draining_releases", "_operation_lock", "_releases", "_rpc_timeout", "_worker")
+    __slots__ = (
+        "_active",
+        "_draining_releases",
+        "_eval_handle",
+        "_operation_lock",
+        "_releases",
+        "_rpc_timeout",
+        "_worker",
+    )
 
     def __init__(
         self,
@@ -280,6 +289,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
         self._active = True
         self._draining_releases = False
         self._operation_lock = asyncio.Lock()
+        self._eval_handle = 0
 
     def _check_active(self) -> None:
         if not self._active:
@@ -293,6 +303,8 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
             self._check_active()
             if not self._draining_releases:
                 await self._drain_deferred_releases_locked()
+            if method_name != "open_eval":
+                message.eval_handle = self._eval_handle  # type: ignore[attr-defined] -- every non-OpenEval EvalService request carries eval_handle=100
             method = getattr(self._worker._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
             return await self._worker.call(method(message, timeout=self._rpc_timeout))
 
@@ -310,11 +322,19 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
             for ref in self._releases.drain():
                 if ref.kind == "value":
                     method = self._worker._eval_stub.release  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
-                    await self._worker.call(method(ReleaseRequest(handle=ref.handle), timeout=self._rpc_timeout))
+                    await self._worker.call(
+                        method(
+                            ReleaseRequest(handle=ref.handle, eval_handle=self._eval_handle),
+                            timeout=self._rpc_timeout,
+                        )
+                    )
                 elif ref.kind == "locked_flake":
                     method = self._worker._eval_stub.release_locked_flake  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
                     await self._worker.call(
-                        method(ReleaseLockedFlakeRequest(handle=ref.handle), timeout=self._rpc_timeout)
+                        method(
+                            ReleaseLockedFlakeRequest(handle=ref.handle, eval_handle=self._eval_handle),
+                            timeout=self._rpc_timeout,
+                        )
                     )
                 else:
                     raise RuntimeError(f"unknown deferred lease kind: {ref.kind}")
@@ -987,6 +1007,8 @@ class EvalSession:
     __slots__ = (
         "_active",
         "_ctx",
+        "_eval_settings",
+        "_fetch_settings",
         "_line_editors",
         "_owner",
         "_owner_session",
@@ -1010,6 +1032,8 @@ class EvalSession:
         rpc_timeout: float = _RPC_TIMEOUT,
         line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
         store: Store | None = None,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
     ) -> None:
         self._worker = worker
         self._owner_session = owner_session
@@ -1020,6 +1044,8 @@ class EvalSession:
         self._timeout = timeout
         self._rpc_timeout = rpc_timeout
         self._line_editors = tuple(line_editors)
+        self._eval_settings = eval_settings
+        self._fetch_settings = fetch_settings
         self._active: list[bool] = [False]
         self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
         self._ctx: _EvalProxyContext | None = None
@@ -1040,8 +1066,18 @@ class EvalSession:
             self._owner_session.claim_eval(self)
         releases = _DeferredReleases()
         proxy = EvalProxy(self._worker, releases, self._rpc_timeout)
+        rendered_eval = self._eval_settings.to_worker_settings() if self._eval_settings is not None else {}
+        rendered_eval.pop("nix-path", None)  # this worker applies nix_path session-wide, not per-eval
+        rendered_fetch = self._fetch_settings.to_worker_settings() if self._fetch_settings is not None else {}
         try:
-            await proxy.open_eval(OpenEvalRequest(store_handle=self._store_handle))
+            response = await proxy.open_eval(
+                OpenEvalRequest(
+                    store_handle=self._store_handle,
+                    eval_settings=rendered_eval,
+                    fetch_settings=rendered_fetch,
+                )
+            )
+            proxy._eval_handle = response.eval_handle  # type: ignore[reportPrivateUsage] -- EvalSession owns its proxy's eval_handle assignment
         except BaseException:
             proxy.deactivate()
             releases.close()
@@ -1065,6 +1101,25 @@ class EvalSession:
         """Update Nix log verbosity while retaining this eval session's scope."""
         self._ensure_proxy()
         return await self._worker.set_verbosity(normalize_log_level(verbosity))
+
+    async def configure(
+        self,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+    ) -> None:
+        """Apply live-mutable eval/fetch settings to this already-open evaluator.
+
+        Only settings Nix reads fresh on every access take effect this way
+        (e.g. ``max_call_depth``, ``allowed_uris``, lint settings) —
+        construction-time-snapshotted ones (``nix_path``, ``pure_eval``,
+        ``restrict_eval``) require a new :class:`EvalSession`.
+        """
+        rendered_eval = eval_settings.to_worker_settings() if eval_settings is not None else {}
+        rendered_eval.pop("nix-path", None)
+        rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
+        await self._ensure_proxy().configure_eval(
+            ConfigureEvalRequest(eval_settings=rendered_eval, fetch_settings=rendered_fetch)
+        )
 
     async def close(self) -> None:
         """Release all values and close this session's EvalState.
@@ -1135,6 +1190,7 @@ class EvalSession:
         *,
         update_inputs: bool | list[str] = False,
         write_lock_file: bool = True,
+        flake_settings: NixFlakeSettings | None = None,
         timeout: float | None = None,
     ) -> LockedFlakeHandle:
         """Lock a flake, optionally updating inputs.
@@ -1149,12 +1205,14 @@ class EvalSession:
         ``await locked.write_lock_file()`` later to persist it.
         """
         proxy = self._ensure_proxy()
+        rendered_flake = flake_settings.to_worker_settings() if flake_settings is not None else {}
         if update_inputs is True:
             locked = await proxy.lock_flake(
                 LockFlakeRequest(
                     ref=ref,
                     update_all=True,
                     write_lock_file=write_lock_file,
+                    flake_settings=rendered_flake,
                 )
             )
         elif isinstance(update_inputs, list):
@@ -1163,6 +1221,7 @@ class EvalSession:
                     ref=ref,
                     update_inputs_list=UpdateInputsList(inputs=update_inputs),
                     write_lock_file=write_lock_file,
+                    flake_settings=rendered_flake,
                 )
             )
         else:
@@ -1170,6 +1229,7 @@ class EvalSession:
                 LockFlakeRequest(
                     ref=ref,
                     write_lock_file=write_lock_file,
+                    flake_settings=rendered_flake,
                 )
             )
         return self._locked_flake_handle(locked)
@@ -1217,6 +1277,7 @@ class EvalSession:
         ref: str,
         *,
         write_lock_file: bool = True,
+        flake_settings: NixFlakeSettings | None = None,
         timeout: float | None = None,
     ) -> ValueProxy:
         """Lock and evaluate a flake in one step, returning its outputs as a ``ValueProxy``.
@@ -1232,6 +1293,7 @@ class EvalSession:
             EvalFlakeRequest(
                 ref=ref,
                 write_lock_file=write_lock_file,
+                flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else {},
             )
         )
         return self._proxy_context().value(handle.handle, handle.type)

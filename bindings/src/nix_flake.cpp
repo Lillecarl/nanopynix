@@ -13,6 +13,7 @@
 #include <nix/flake/settings.hh>
 #include <nix/fetchers/fetchers.hh>
 #include <nix/store/store-api.hh>
+#include <nix/util/configuration.hh>
 
 #include <nlohmann/json.hpp>
 
@@ -86,9 +87,16 @@ struct PyLockedFlake {
 // Free functions
 // =========================================================================
 
-static PyFlakeRef parse_flake_ref(const std::string &url) {
-    nix::flake::Settings flakeSettings;
+static void apply_settings_overrides(nix::Config &config, const std::map<std::string, std::string> &overrides) {
+    for (auto &[name, value] : overrides)
+        if (!config.set(name, value))
+            throw std::runtime_error("unknown setting: " + name);
+}
+
+static PyFlakeRef parse_flake_ref(const std::string &url,
+                                   const std::map<std::string, std::string> &fetch_settings = {}) {
     nix::fetchers::Settings fetchSettings;
+    apply_settings_overrides(fetchSettings, fetch_settings);
     std::optional<nix::FlakeRef> ref;
     {
         nb::gil_scoped_release release;
@@ -101,9 +109,11 @@ static PyLockedFlake lock_flake(
     PyEvalState &es,
     PyFlakeRef &flakeRef,
     nb::object update_inputs = nb::bool_(false),
-    bool write_lock_file = true)
+    bool write_lock_file = true,
+    const std::map<std::string, std::string> &flake_settings = {})
 {
     nix::flake::Settings flakeSettings;
+    apply_settings_overrides(flakeSettings, flake_settings);
     nix::flake::LockFlags lockFlags;
     lockFlags.writeLockFile = write_lock_file;
 
@@ -184,8 +194,10 @@ static PyValue call_flake(PyEvalState &es, PyLockedFlake &lf) {
 }
 
 static PyValue eval_flake(PyEvalState &es, const std::string &ref,
-                           bool write_lock_file = true) {
+                           bool write_lock_file = true,
+                           const std::map<std::string, std::string> &flake_settings = {}) {
     nix::flake::Settings flakeSettings;
+    apply_settings_overrides(flakeSettings, flake_settings);
     nix::flake::LockFlags lockFlags;
     lockFlags.writeLockFile = write_lock_file;
     nix::Value *v;
@@ -242,11 +254,13 @@ NB_MODULE(nanopynix_flake, m) {
         });
 
     m.def("parse_flake_ref", &parse_flake_ref, "url"_a,
+          "fetch_settings"_a = std::map<std::string, std::string>{},
           "Parse a flake reference string (e.g. 'github:NixOS/nixpkgs')");
     m.def("lock_flake", &lock_flake,
           "state"_a, "flake_ref"_a,
           "update_inputs"_a = nb::bool_(false),
           "write_lock_file"_a = true,
+          "flake_settings"_a = std::map<std::string, std::string>{},
           "Lock a flake reference, returning a LockedFlake with description and inputs");
     m.def("get_flake", &get_flake,
           "state"_a, "flake_ref"_a, "use_registries"_a = true,
@@ -258,6 +272,7 @@ NB_MODULE(nanopynix_flake, m) {
     m.def("eval_flake", &eval_flake,
           "state"_a, "ref"_a,
           "write_lock_file"_a = true,
+          "flake_settings"_a = std::map<std::string, std::string>{},
           nb::keep_alive<0, 1>(),
           "Lock and evaluate a flake, returning its outputs as a Value");
     m.def("list_flake_settings_metadata_json", []() {

@@ -7,7 +7,7 @@ import contextlib
 
 import pytest
 
-from nanopynix import EvalStateBusyError, LogEvent, Nix, StoreError, WorkerDiedError
+from nanopynix import LogEvent, Nix, NixType, StoreError, WorkerDiedError
 
 
 async def test_single_worker_basics():
@@ -33,17 +33,22 @@ async def test_store_operation_runs_while_eval_session_is_open():
         assert isinstance(await store.uri(), str)
 
 
-async def test_session_allows_only_one_live_eval_state():
+async def test_session_allows_concurrent_eval_states():
+    """N EvalSession/ReplSession instances may be open at once, each independent."""
     async with Nix() as nix, nix.store() as store:
         first = nix.eval(store)
         second = nix.repl(store)
         await first.open()
+        await second.open()
 
-        with pytest.raises(EvalStateBusyError, match="live EvalState"):
-            await second.open()
+        first_value = await first.string("1 + 1")
+        second_value = await second.line("2 + 2")
+
+        assert second_value is not None
+        assert await first_value.force_as(NixType.INT) == 2
+        assert await second_value.force_as(NixType.INT) == 4
 
         await first.close()
-        await second.open()
         await second.close()
 
 

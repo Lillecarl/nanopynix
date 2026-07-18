@@ -2,8 +2,10 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,8 @@
 struct PyValue;
 
 struct PyEvalState {
+    using SettingsMap = std::map<std::string, std::string>;
+
     std::shared_ptr<nix::Store> store;
     std::shared_ptr<nix::Store> build_store;
     bool _readOnlyMode = false;
@@ -39,21 +43,40 @@ struct PyEvalState {
 
     PyEvalState(std::shared_ptr<nix::Store> s,
                 const std::vector<std::string> &searchPath = {},
-                std::shared_ptr<nix::Store> buildStore = nullptr)
+                std::shared_ptr<nix::Store> buildStore = nullptr,
+                const SettingsMap &evalSettingsOverrides = {},
+                const SettingsMap &fetchSettingsOverrides = {})
         : store(std::move(s)), build_store(std::move(buildStore))
     {
-        init(searchPath);
+        init(searchPath, evalSettingsOverrides, fetchSettingsOverrides);
     }
 
-    PyEvalState(nix::Store &s, const std::vector<std::string> &searchPath = {})
+    PyEvalState(nix::Store &s, const std::vector<std::string> &searchPath = {},
+                const SettingsMap &evalSettingsOverrides = {},
+                const SettingsMap &fetchSettingsOverrides = {})
         : store(s.shared_from_this()), build_store(store)
     {
-        init(searchPath);
+        init(searchPath, evalSettingsOverrides, fetchSettingsOverrides);
     }
 
     ~PyEvalState() {
         if (alive)
             *alive = false;
+    }
+
+    /// Apply one registered eval setting to this instance's own EvalSettings.
+    /// Construction-time-snapshotted settings (nix-path, pure-eval,
+    /// restrict-eval, the profiler settings) only take effect when passed to
+    /// the constructor; the rest may be changed at any time.
+    void set_eval_setting(const std::string &name, const std::string &value) {
+        if (!evalSettings.set(name, value))
+            throw std::runtime_error("unknown eval setting: " + name);
+    }
+
+    /// Apply one registered fetch setting to this instance's own fetchers::Settings.
+    void set_fetch_setting(const std::string &name, const std::string &value) {
+        if (!fetchSettings.set(name, value))
+            throw std::runtime_error("unknown fetch setting: " + name);
     }
 
     PyValue eval_string(const std::string &expr, const std::string &path = "<string>");
@@ -73,9 +96,16 @@ struct PyEvalState {
     PyValue value_from_python(nanobind::object obj);
 
 private:
-    void init(const std::vector<std::string> &searchPath) {
+    void init(const std::vector<std::string> &searchPath,
+              const SettingsMap &evalSettingsOverrides,
+              const SettingsMap &fetchSettingsOverrides) {
         for (auto &cfg : evalSettingsConfigurators())
             cfg(evalSettings);
+
+        for (auto &[name, value] : evalSettingsOverrides)
+            set_eval_setting(name, value);
+        for (auto &[name, value] : fetchSettingsOverrides)
+            set_fetch_setting(name, value);
 
         nix::LookupPath lookupPath;
         for (auto &entry : searchPath) {

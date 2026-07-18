@@ -1194,10 +1194,20 @@ static void bind_value(nb::module_ &m) {
 
 static void bind_eval_state(nb::module_ &m) {
     nb::class_<PyEvalState>(m, "EvalState")
-        .def(nb::init<nix::Store &, const std::vector<std::string> &>(),
-             "store"_a, "search_path"_a = std::vector<std::string>{})
-        .def(nb::init<std::shared_ptr<nix::Store>, const std::vector<std::string> &, std::shared_ptr<nix::Store>>(),
-             "store"_a, "search_path"_a = std::vector<std::string>{}, "build_store"_a = nullptr)
+        .def(nb::init<nix::Store &, const std::vector<std::string> &,
+                      const PyEvalState::SettingsMap &, const PyEvalState::SettingsMap &>(),
+             "store"_a, "search_path"_a = std::vector<std::string>{},
+             "eval_settings"_a = PyEvalState::SettingsMap{}, "fetch_settings"_a = PyEvalState::SettingsMap{})
+        .def(nb::init<std::shared_ptr<nix::Store>, const std::vector<std::string> &, std::shared_ptr<nix::Store>,
+                      const PyEvalState::SettingsMap &, const PyEvalState::SettingsMap &>(),
+             "store"_a, "search_path"_a = std::vector<std::string>{}, "build_store"_a = nullptr,
+             "eval_settings"_a = PyEvalState::SettingsMap{}, "fetch_settings"_a = PyEvalState::SettingsMap{})
+        .def("set_eval_setting", &PyEvalState::set_eval_setting, "name"_a, "value"_a,
+             "Apply one registered eval setting to this EvalState's own EvalSettings. "
+             "Only affects the live-mutable subset once construction has already happened "
+             "(nix-path/pure-eval/restrict-eval etc. must be passed to the constructor).")
+        .def("set_fetch_setting", &PyEvalState::set_fetch_setting, "name"_a, "value"_a,
+             "Apply one registered fetch setting to this EvalState's own fetchers::Settings.")
         .def("eval_string", &PyEvalState::eval_string,
              "expr"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
         .def("eval_file", &PyEvalState::eval_file, "path"_a, nb::keep_alive<0, 1>())
@@ -1294,31 +1304,6 @@ NB_MODULE(nanopynix_expr, m) {
           "name"_a, "arity"_a, "arg_names"_a, "doc"_a, "callback"_a,
           "Register a Python function as a Nix builtin. "
           "The callback receives Python-primitive arguments and must return a Python primitive.");
-
-    m.def("_set_pure_eval", [](bool pure) {
-        PyEvalState::evalSettingsConfigurators().push_back(
-            [=](nix::EvalSettings &es) { es.pureEval = pure; }
-        );
-    });
-
-    m.def("_set_restrict_eval", [](bool restrict_) {
-        PyEvalState::evalSettingsConfigurators().push_back(
-            [=](nix::EvalSettings &es) { es.restrictEval = restrict_; }
-        );
-    });
-
-    m.def("_set_allowed_uris", [](const std::vector<std::string> &uris) {
-        static std::vector<std::string> desired;
-        desired = uris;
-        PyEvalState::evalSettingsConfigurators().push_back(
-            [](nix::EvalSettings &es) {
-                auto &s = es.allowedUris;
-                s.set("", false);  // clear
-                for (auto &u : desired)
-                    s.set(u, true);
-            }
-        );
-    });
 
     m.def("_cleanup_primop_registry", [] {
         if (Py_IsInitialized())

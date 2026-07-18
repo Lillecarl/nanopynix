@@ -7,6 +7,7 @@ import "common.proto";
 service EvalService {
   rpc OpenEval(OpenEvalRequest) returns (OpenEvalResponse);
   rpc CloseEval(CloseEvalRequest) returns (CloseEvalResponse);
+  rpc ConfigureEval(ConfigureEvalRequest) returns (ConfigureEvalResponse);
   rpc EvalFile(EvalFileRequest) returns (nix.common.ValueHandle);
   rpc EvalString(EvalStringRequest) returns (nix.common.ValueHandle);
   rpc BeginRepl(BeginReplRequest) returns (BeginReplResponse);
@@ -42,31 +43,50 @@ service EvalService {
 
 message OpenEvalRequest {
   int64 store_handle = 1;
+  map<string, string> eval_settings = 2;
+  map<string, string> fetch_settings = 3;
 }
-message OpenEvalResponse {}
+message OpenEvalResponse {
+  int64 eval_handle = 1;
+}
 
-message CloseEvalRequest {}
+message CloseEvalRequest {
+  int64 eval_handle = 100;
+}
 message CloseEvalResponse {}
+
+message ConfigureEvalRequest {
+  map<string, string> eval_settings = 1;
+  map<string, string> fetch_settings = 2;
+  int64 eval_handle = 100;
+}
+message ConfigureEvalResponse {}
 
 message EvalFileRequest {
   string path = 1;
+  int64 eval_handle = 100;
 }
 
 message EvalStringRequest {
   string expr = 1;
   string source_name = 2;
+  int64 eval_handle = 100;
 }
 
-message BeginReplRequest {}
+message BeginReplRequest {
+  int64 eval_handle = 100;
+}
 message BeginReplResponse {}
 
 message ReplLoadFileRequest {
   string path = 1;
+  int64 eval_handle = 100;
 }
 
 message ReplProcessLineRequest {
   string line = 1;
   string source_name = 2;
+  int64 eval_handle = 100;
 }
 message ReplProcessLineResponse {
   bool is_binding = 1;
@@ -75,30 +95,38 @@ message ReplProcessLineResponse {
 
 message ReplAddAttrsRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message ReplAddAttrsResponse {
   repeated string names = 1;
 }
 
-message ReplScopeNamesRequest {}
+message ReplScopeNamesRequest {
+  int64 eval_handle = 100;
+}
 message ReplScopeNamesResponse {
   repeated string names = 1;
 }
 
-message ResetFileCacheRequest {}
+message ResetFileCacheRequest {
+  int64 eval_handle = 100;
+}
 message ResetFileCacheResponse {}
 
 message ForceRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 
 message ForceDeepRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 
 message ForceJsonRequest {
   int64 handle = 1;
   bool copy_to_store = 2;
+  int64 eval_handle = 100;
 }
 message ForceJsonResponse {
   string json = 1;
@@ -106,6 +134,7 @@ message ForceJsonResponse {
 
 message RealiseStringRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message RealiseStringResponse {
   string value = 1;
@@ -113,6 +142,7 @@ message RealiseStringResponse {
 
 message RealiseArgvRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message RealiseArgvResponse {
   repeated string argv = 1;
@@ -120,6 +150,7 @@ message RealiseArgvResponse {
 
 message EditLocationRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message EditLocationResponse {
   string path = 1;
@@ -129,15 +160,18 @@ message EditLocationResponse {
 message AttrRequest {
   int64 handle = 1;
   string name = 2;
+  int64 eval_handle = 100;
 }
 
 message ListGetRequest {
   int64 handle = 1;
   int32 index = 2;
+  int64 eval_handle = 100;
 }
 
 message ListLengthRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message ListLengthResponse {
   int32 length = 1;
@@ -145,6 +179,7 @@ message ListLengthResponse {
 
 message AttrNamesRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message AttrNamesResponse {
   repeated string names = 1;
@@ -153,6 +188,7 @@ message AttrNamesResponse {
 message HasAttrRequest {
   int64 handle = 1;
   string name = 2;
+  int64 eval_handle = 100;
 }
 message HasAttrResponse {
   bool has = 1;
@@ -160,6 +196,7 @@ message HasAttrResponse {
 
 message TypeNameRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message TypeNameResponse {
   nix.common.NixType type = 1;
@@ -167,17 +204,20 @@ message TypeNameResponse {
 
 message AutoCallRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 
 message CallRequest {
   int64 handle = 1;
   repeated nix.common.CallArg args = 2;
+  int64 eval_handle = 100;
 }
 
 message BuildRequest {
   int64 handle = 1;
   int32 build_mode = 2;
   int64 build_store_handle = 3;
+  int64 eval_handle = 100;
 }
 message BuildResponse {
   string drv_path = 1;
@@ -192,6 +232,8 @@ message LockFlakeRequest {
     UpdateInputsList update_inputs_list = 3;
   }
   bool write_lock_file = 4;
+  map<string, string> flake_settings = 5;
+  int64 eval_handle = 100;
 }
 
 message UpdateInputsList {
@@ -200,31 +242,40 @@ message UpdateInputsList {
 
 message CallLockedFlakeRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 
 message WriteLockFileRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message WriteLockFileResponse {}
 
 message ReleaseLockedFlakeRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message ReleaseLockedFlakeResponse {}
 
 message EvalFlakeRequest {
   string ref = 1;
   bool write_lock_file = 2;
+  map<string, string> flake_settings = 3;
+  int64 eval_handle = 100;
 }
 
 message GetFlakeRequest {
   string ref = 1;
+  int64 eval_handle = 100;
 }
 
 message ReleaseRequest {
   int64 handle = 1;
+  int64 eval_handle = 100;
 }
 message ReleaseResponse {}
 
-message ReleaseAllRequest {}
+message ReleaseAllRequest {
+  int64 eval_handle = 100;
+}
 message ReleaseAllResponse {}

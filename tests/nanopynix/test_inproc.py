@@ -18,6 +18,7 @@ from nanopynix_proto.nix.store import GcAction
 import nanopynix_expr
 import nanopynix_util
 from nanopynix import Derivation, GcResult, MissingInfo, inproc
+from nanopynix.settings import NixEvalSettings
 
 
 @pytest.mark.anyio
@@ -65,6 +66,26 @@ async def test_inproc_allows_concurrent_eval_states_on_one_store() -> None:
             assert await (await second.string("41 + 1")).as_int() == 42
         finally:
             await second.close()
+
+
+async def test_inproc_concurrent_eval_sessions_have_independent_pure_eval() -> None:
+    """Concurrently open EvalSessions may disagree on pure_eval.
+
+    Each EvalSession owns its own EvalState, constructed with its own
+    NixEvalSettings — settings are not applied through shared process state.
+    """
+    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+        pure = nix.eval(store, eval_settings=NixEvalSettings(pure_eval=True))
+        impure = nix.eval(store, eval_settings=NixEvalSettings(pure_eval=False))
+        await pure.open()
+        await impure.open()
+        try:
+            with pytest.raises(nanopynix_expr.EvalError, match="currentTime"):
+                await pure.string("builtins.currentTime")
+            assert await (await impure.string("builtins.currentTime")).as_int() > 0
+        finally:
+            await pure.close()
+            await impure.close()
 
 
 @pytest.mark.anyio

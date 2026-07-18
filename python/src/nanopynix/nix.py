@@ -28,9 +28,14 @@ import nanopynix_expr
 from nanopynix._pool import _WorkerClient  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
 from nanopynix._process_title import set_manager_title
 from nanopynix._session import EvalSession, ReplSession
-from nanopynix.exceptions import EvalStateBusyError
 from nanopynix.models import LogEvent, PrimOpSpec
-from nanopynix.settings import NanopynixSettings, NixSettings, normalize_nix_settings
+from nanopynix.settings import (
+    NanopynixSettings,
+    NixEvalSettings,
+    NixFetchSettings,
+    NixSettings,
+    normalize_nix_settings,
+)
 from nanopynix.store import Store, StoreHandle
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
@@ -122,9 +127,6 @@ class Session:
         nix_path: str | Sequence[str] | None = None,
         primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
         primop_callables: Mapping[str, Callable[..., Any]] | None = None,
-        pure_eval: bool | None = None,
-        restrict_eval: bool | None = None,
-        allowed_uris: Sequence[str] | None = None,
         worker_oom_score_adj: int | None = None,
         runtime_settings: NanopynixSettings | None = None,
     ) -> None:
@@ -148,15 +150,12 @@ class Session:
             nix_path=_normalize_nix_path(nix_path),
             primops=_to_primop_specs(primops),
             primop_callables=dict(primop_callables) if primop_callables is not None else None,
-            pure_eval=pure_eval,
-            restrict_eval=restrict_eval,
-            allowed_uris=allowed_uris,
             worker_oom_score_adj=worker_oom_score_adj,
             rpc_timeout=nanopynix_settings.rpc_timeout,
             shutdown_timeout=nanopynix_settings.shutdown_timeout,
         )
         self._session_id = uuid.uuid4().hex
-        self._active_eval: EvalSession | None = None
+        self._evals: set[EvalSession] = set()
 
     def store(self, uri: str = "auto") -> Store:
         """Create an ergonomic Store facade for store operations.
@@ -190,9 +189,8 @@ class Session:
         """Shut down the worker."""
         try:
             async with asyncio.timeout(60):
-                active_eval = self._active_eval
-                if active_eval is not None:
-                    await active_eval.close()
+                for eval_session in tuple(self._evals):
+                    await eval_session.close()
                 await self._manager.close()
         except TimeoutError:
             logger.warning("nanopynix: timed out closing worker")
@@ -243,8 +241,14 @@ class Session:
         """
         return self._manager.subscribe(callback)
 
-    def eval(self, store: Store) -> EvalSession:
-        """Create this session's one permitted eval-session context manager.
+    def eval(
+        self,
+        store: Store,
+        *,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+    ) -> EvalSession:
+        """Create an eval-session context manager over this session's worker.
 
         Usage::
 
@@ -255,11 +259,16 @@ class Session:
         Args:
             store: Open Store to use for this eval state. If it belongs to
                    a different session, raises ValueError.
+            eval_settings: Construction-time evaluator settings for this
+                   ``EvalSession`` alone (e.g. ``pure_eval``, ``nix_path``).
+            fetch_settings: Construction-time fetcher settings for this
+                   ``EvalSession`` alone.
 
         Returns an ``EvalSession`` context manager. All exported handles are
-        released on exit. Only one EvalSession or ReplSession may be open at a
-        time; Store operations remain available and may run concurrently while
-        it is open.
+        released on exit. Any number of ``EvalSession``/``ReplSession``
+        instances may be open concurrently — each gets its own dedicated Nix
+        thread in the worker. Store operations remain available and may run
+        concurrently alongside them.
         """
         if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
             raise ValueError("Store belongs to a different session")
@@ -270,6 +279,8 @@ class Session:
             session_id=self._session_id,
             rpc_timeout=self._manager.rpc_timeout,
             store=store,
+            eval_settings=eval_settings,
+            fetch_settings=fetch_settings,
         )
 
     def repl(self, store: Store) -> ReplSession:
@@ -291,14 +302,10 @@ class Session:
         )
 
     def claim_eval(self, eval_session: EvalSession) -> None:
-        active_eval = self._active_eval
-        if active_eval is not None and active_eval is not eval_session:
-            raise EvalStateBusyError("Session already has a live EvalState")
-        self._active_eval = eval_session
+        self._evals.add(eval_session)
 
     def release_eval(self, eval_session: EvalSession) -> None:
-        if self._active_eval is eval_session:
-            self._active_eval = None
+        self._evals.discard(eval_session)
 
 
 # Backward-compatible alias

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from _git import commit_files, init_flake_repo, init_repo
 
 import nanopynix
@@ -55,6 +56,21 @@ class TestLockFlake:
         locked = nanopynix.lock_flake(eval_state, ref)
         r = repr(locked)
         assert r.startswith("LockedFlake(")
+
+    def test_lock_flake_accepts_flake_settings(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+        """flake_settings reaches Nix's flake::Settings via Config::set, not silently dropped."""
+        _init_git_flake(tmp_path)
+        ref = nanopynix.parse_flake_ref(str(tmp_path))
+        locked = nanopynix.lock_flake(eval_state, ref, flake_settings={"use-registries": "false"})
+        assert isinstance(locked.description(), str)
+
+    def test_lock_flake_rejects_unknown_flake_setting(
+        self, eval_state: nanopynix.EvalState, tmp_path: Path
+    ) -> None:
+        _init_git_flake(tmp_path)
+        ref = nanopynix.parse_flake_ref(str(tmp_path))
+        with pytest.raises(RuntimeError, match="unknown setting"):
+            nanopynix.lock_flake(eval_state, ref, flake_settings={"not-a-real-setting": "1"})
 
 
 class TestGetFlake:

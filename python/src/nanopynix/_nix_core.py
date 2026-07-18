@@ -26,9 +26,6 @@ class NixCore:
         settings: Mapping[str, str],
         load_config: bool,
         verbosity: int | None,
-        pure_eval: bool | None,
-        restrict_eval: bool | None,
-        allowed_uris: Sequence[str],
     ) -> None:
         for name, value in settings.items():
             nanopynix_util.set_setting(name, value)
@@ -36,18 +33,37 @@ class NixCore:
         if verbosity is not None:
             nanopynix_util.set_verbosity(verbosity)
         nanopynix_expr.init_libexpr()
-        if pure_eval is not None:
-            nanopynix_expr._set_pure_eval(pure_eval)  # type: ignore[reportPrivateUsage] -- evaluator configuration binding
-        if restrict_eval is not None:
-            nanopynix_expr._set_restrict_eval(restrict_eval)  # type: ignore[reportPrivateUsage] -- evaluator configuration binding
-        if allowed_uris:
-            nanopynix_expr._set_allowed_uris(list(allowed_uris))  # type: ignore[reportPrivateUsage] -- evaluator configuration binding
 
     def open_store(self, uri: str) -> Any:
         return nanopynix_store.open_store(uri)
 
-    def open_eval_state(self, store: Any, nix_path: Sequence[str], build_store: Any | None = None) -> Any:
-        return nanopynix_expr.EvalState(store, list(nix_path), build_store)
+    def open_eval_state(
+        self,
+        store: Any,
+        nix_path: Sequence[str],
+        build_store: Any | None = None,
+        eval_settings: Mapping[str, str] | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> Any:
+        return nanopynix_expr.EvalState(
+            store,
+            list(nix_path),
+            build_store,
+            dict(eval_settings) if eval_settings else {},
+            dict(fetch_settings) if fetch_settings else {},
+        )
+
+    def configure_eval_state(
+        self,
+        eval_state: Any,
+        eval_settings: Mapping[str, str] | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> None:
+        """Apply live-mutable eval/fetch settings to an already-open ``EvalState``."""
+        for name, value in (eval_settings or {}).items():
+            eval_state.set_eval_setting(name, value)
+        for name, value in (fetch_settings or {}).items():
+            eval_state.set_fetch_setting(name, value)
 
     def get_verbosity(self) -> int:
         return nanopynix_util.get_verbosity()
