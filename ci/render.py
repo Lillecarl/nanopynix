@@ -31,7 +31,10 @@ async def render_workflow(eval_: EvalSession, nix_file: Path) -> str:
 
 async def main() -> None:
     async with (
-        Session(primops=yaml_primops()) as session,
+        Session(
+            primops=yaml_primops(),
+            experimental_features=["nix-command", "flakes"],
+        ) as session,
         session.store() as store,
         session.eval(store) as eval_,
     ):
