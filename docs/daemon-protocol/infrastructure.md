@@ -11,7 +11,7 @@ Base classes, serde contexts, protocol enums, and type aliases that underpin the
 The abstract Pydantic base class that auto-generates `to_writer()` and `from_reader()` from type annotations.
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.wire_message
+.. automodule:: nix_daemon_protocol.wire_message
    :members: WireField, WireModel
 ```
 
@@ -20,7 +20,7 @@ The abstract Pydantic base class that auto-generates `to_writer()` and `from_rea
 Abstract base for types that are a single length-prefixed UTF-8 string on the wire.
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.wire_string
+.. automodule:: nix_daemon_protocol.wire_string
    :members:
 ```
 
@@ -29,7 +29,7 @@ Abstract base for types that are a single length-prefixed UTF-8 string on the wi
 Operation base classes. `WireRequest` auto-registers each op in `WIRE_REGISTRY`.
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.wire_ops
+.. automodule:: nix_daemon_protocol.wire_ops
    :members:
 ```
 
@@ -40,7 +40,7 @@ Operation base classes. `WireRequest` auto-registers each op in `WIRE_REGISTRY`.
 Context dataclasses passed through the serialization/deserialization pipeline.
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.context
+.. automodule:: nix_daemon_protocol.context
    :members:
 ```
 
@@ -49,7 +49,7 @@ Context dataclasses passed through the serialization/deserialization pipeline.
 ## Protocol Enums
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.protocol
+.. automodule:: nix_daemon_protocol.protocol
    :members:
 ```
 
@@ -58,7 +58,7 @@ Context dataclasses passed through the serialization/deserialization pipeline.
 ## Auth
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.auth
+.. automodule:: nix_daemon_protocol.auth
    :members:
 ```
 
@@ -67,7 +67,7 @@ Context dataclasses passed through the serialization/deserialization pipeline.
 ## IDs
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.ids
+.. automodule:: nix_daemon_protocol.ids
    :members:
 ```
 
@@ -76,6 +76,6 @@ Context dataclasses passed through the serialization/deserialization pipeline.
 ## Type Aliases
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.aliases
+.. automodule:: nix_daemon_protocol.aliases
    :members:
 ```

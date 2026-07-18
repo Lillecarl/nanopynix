@@ -2,7 +2,7 @@
 
 All Nix daemon protocol operations, organized by op code. Each operation module defines a `*Request` (subclass of `WireRequest`) and a `*Response` (subclass of `WireResponse`).
 
-Operations marked with `forward = False` are intercepted by pynixd's build DAG and never forwarded to the upstream daemon. Extensions (`is_extension = True`) are pynixd-specific additions beyond the standard Nix daemon protocol.
+The standard operations below live in `nix_daemon_protocol`. Operations in the `pynixd.daemon_extensions` namespace are private pynixd additions beyond the standard Nix daemon protocol. Forwarding and extension fallback are pynixd daemon-dispatch policy, not codec behavior.
 
 ---
 
@@ -11,7 +11,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 1 — IsValidPath
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.is_valid_path
+.. automodule:: nix_daemon_protocol.is_valid_path
    :members:
 ```
 
@@ -20,7 +20,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 6 — QueryReferrers
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_referrers
+.. automodule:: nix_daemon_protocol.query_referrers
    :members:
 ```
 
@@ -29,7 +29,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 7 — AddToStore (streaming request)
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.add_to_store
+.. automodule:: nix_daemon_protocol.add_to_store
    :members:
 ```
 
@@ -40,7 +40,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 `forward = False`
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.build_paths
+.. automodule:: nix_daemon_protocol.build_paths
    :members:
 ```
 
@@ -49,7 +49,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 10 — EnsurePath
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.ensure_path
+.. automodule:: nix_daemon_protocol.ensure_path
    :members:
 ```
 
@@ -58,7 +58,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 11 — AddTempRoot
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.add_temp_root
+.. automodule:: nix_daemon_protocol.add_temp_root
    :members:
 ```
 
@@ -67,7 +67,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 12 — AddIndirectRoot
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.add_indirect_root
+.. automodule:: nix_daemon_protocol.add_indirect_root
    :members:
 ```
 
@@ -76,7 +76,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 14 — FindRoots
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.find_roots
+.. automodule:: nix_daemon_protocol.find_roots
    :members:
 ```
 
@@ -85,7 +85,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 19 — SetOptions
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.set_options
+.. automodule:: nix_daemon_protocol.set_options
    :members:
 ```
 
@@ -94,7 +94,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 20 — CollectGarbage
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.collect_garbage
+.. automodule:: nix_daemon_protocol.collect_garbage
    :members:
 ```
 
@@ -103,7 +103,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 23 — QueryAllValidPaths
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_all_valid_paths
+.. automodule:: nix_daemon_protocol.query_all_valid_paths
    :members:
 ```
 
@@ -112,7 +112,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 26 — QueryPathInfo
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_path_info
+.. automodule:: nix_daemon_protocol.query_path_info
    :members:
 ```
 
@@ -121,7 +121,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 29 — QueryPathFromHashPart
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_path_from_hash_part
+.. automodule:: nix_daemon_protocol.query_path_from_hash_part
    :members:
 ```
 
@@ -130,7 +130,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 31 — QueryValidPaths
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_valid_paths
+.. automodule:: nix_daemon_protocol.query_valid_paths
    :members:
 ```
 
@@ -139,7 +139,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 32 — QuerySubstitutablePaths
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_substitutable_paths
+.. automodule:: nix_daemon_protocol.query_substitutable_paths
    :members:
 ```
 
@@ -148,7 +148,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 33 — QueryValidDerivers
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_valid_derivers
+.. automodule:: nix_daemon_protocol.query_valid_derivers
    :members:
 ```
 
@@ -157,7 +157,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 34 — OptimiseStore
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.optimise_store
+.. automodule:: nix_daemon_protocol.optimise_store
    :members:
 ```
 
@@ -166,7 +166,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 35 — VerifyStore
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.verify_store
+.. automodule:: nix_daemon_protocol.verify_store
    :members:
 ```
 
@@ -177,7 +177,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 `forward = False`
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.build_derivation
+.. automodule:: nix_daemon_protocol.build_derivation
    :members:
 ```
 
@@ -186,7 +186,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 37 — AddSignatures
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.add_signatures
+.. automodule:: nix_daemon_protocol.add_signatures
    :members:
 ```
 
@@ -195,7 +195,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 38 — NarFromPath (streaming response)
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.nar_from_path
+.. automodule:: nix_daemon_protocol.nar_from_path
    :members:
 ```
 
@@ -204,7 +204,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 39 — AddToStoreNar (streaming request)
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.add_to_store_nar
+.. automodule:: nix_daemon_protocol.add_to_store_nar
    :members:
 ```
 
@@ -213,7 +213,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 40 — QueryMissing
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_missing
+.. automodule:: nix_daemon_protocol.query_missing
    :members:
 ```
 
@@ -222,7 +222,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 41 — QueryDerivationOutputMap
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_derivation_output_map
+.. automodule:: nix_daemon_protocol.query_derivation_output_map
    :members:
 ```
 
@@ -231,7 +231,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 42 — RegisterDrvOutput
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.register_drv_output
+.. automodule:: nix_daemon_protocol.register_drv_output
    :members:
 ```
 
@@ -240,7 +240,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 43 — QueryRealisation
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_realisation
+.. automodule:: nix_daemon_protocol.query_realisation
    :members:
 ```
 
@@ -249,7 +249,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 44 — AddMultipleToStore (streaming request)
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.add_multiple_to_store
+.. automodule:: nix_daemon_protocol.add_multiple_to_store
    :members:
 ```
 
@@ -258,7 +258,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 45 — AddBuildLog
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.add_build_log
+.. automodule:: nix_daemon_protocol.add_build_log
    :members:
 ```
 
@@ -269,7 +269,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 `forward = False`
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.build_paths_with_results
+.. automodule:: nix_daemon_protocol.build_paths_with_results
    :members:
 ```
 
@@ -278,7 +278,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 47 — AddPermRoot
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.add_perm_root
+.. automodule:: nix_daemon_protocol.add_perm_root
    :members:
 ```
 
@@ -289,7 +289,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 101 — PynixdCollectGarbage
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.pynixd_collect_garbage
+.. automodule:: pynixd.daemon_extensions.pynixd_collect_garbage
    :members:
 ```
 
@@ -298,7 +298,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 103 — QueryPathInfos
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_path_infos
+.. automodule:: pynixd.daemon_extensions.query_path_infos
    :members:
 ```
 
@@ -307,7 +307,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 104 — QueryClosure
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_closure
+.. automodule:: pynixd.daemon_extensions.query_closure
    :members:
 ```
 
@@ -316,7 +316,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 105 — QueryClosureWithInfo
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_closure_with_info
+.. automodule:: pynixd.daemon_extensions.query_closure_with_info
    :members:
 ```
 
@@ -325,7 +325,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 106 — QueryDerivationOutputMapBatch
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.query_derivation_output_map_batch
+.. automodule:: pynixd.daemon_extensions.query_derivation_output_map_batch
    :members:
 ```
 
@@ -334,7 +334,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 107 — SignPathInfo
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.sign_path_info
+.. automodule:: pynixd.daemon_extensions.sign_path_info
    :members:
 ```
 
@@ -343,7 +343,7 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 108 — ProbeSystems
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.probe_systems
+.. automodule:: pynixd.daemon_extensions.probe_systems
    :members:
 ```
 
@@ -352,6 +352,6 @@ Operations marked with `forward = False` are intercepted by pynixd's build DAG a
 ### Op 109 — ProbeFeatures
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.probe_features
+.. automodule:: pynixd.daemon_extensions.probe_features
    :members:
 ```

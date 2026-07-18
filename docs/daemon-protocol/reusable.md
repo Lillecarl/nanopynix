@@ -11,42 +11,42 @@ Single length-prefixed UTF-8 strings on the wire.
 ### StorePath
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.store_path
+.. automodule:: nix_daemon_protocol.store_path
    :members:
 ```
 
 ### DerivedPath
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.derived_path
+.. automodule:: nix_daemon_protocol.derived_path
    :members:
 ```
 
 ### DrvOutput
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.drv_output
+.. automodule:: nix_daemon_protocol.drv_output
    :members:
 ```
 
 ### ContentAddress
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.content_address
+.. automodule:: nix_daemon_protocol.content_address
    :members:
 ```
 
 ### NARHash
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.nar_hash
+.. automodule:: nix_daemon_protocol.nar_hash
    :members:
 ```
 
 ### Signature
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.signature
+.. automodule:: nix_daemon_protocol.signature
    :members:
 ```
 
@@ -57,63 +57,63 @@ Single length-prefixed UTF-8 strings on the wire.
 ### BasicDerivation
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.basic_derivation
+.. automodule:: nix_daemon_protocol.basic_derivation
    :members:
 ```
 
 ### DerivationOutput
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.derivation_output
+.. automodule:: nix_daemon_protocol.derivation_output
    :members:
 ```
 
 ### UnkeyedValidPathInfo
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.path_info
+.. automodule:: nix_daemon_protocol.path_info
    :members:
 ```
 
 ### ValidPathInfo
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.valid_path_info
+.. automodule:: nix_daemon_protocol.valid_path_info
    :members:
 ```
 
 ### BuildResult
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.build_result
+.. automodule:: nix_daemon_protocol.build_result
    :members:
 ```
 
 ### KeyedBuildResult
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.keyed_build_result
+.. automodule:: nix_daemon_protocol.keyed_build_result
    :members:
 ```
 
 ### OptMicroseconds
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.opt_microseconds
+.. automodule:: nix_daemon_protocol.opt_microseconds
    :members:
 ```
 
 ### Realisation
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.realisation
+.. automodule:: nix_daemon_protocol.realisation
    :members:
 ```
 
 ### Time
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.wire_time
+.. automodule:: nix_daemon_protocol.wire_time
    :members:
 ```
 
@@ -124,6 +124,6 @@ Single length-prefixed UTF-8 strings on the wire.
 The Nix daemon stderr stream uses a tagged-union wire format: `[uint64 code][message body]...[uint64 STDERR_LAST]`.
 
 ```{eval-rst}
-.. automodule:: pynixd.serde.logs
+.. automodule:: nix_daemon_protocol.logs
    :members:
 ```
