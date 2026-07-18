@@ -7,8 +7,14 @@
 
 #include <atomic>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include <locale>
+#include <mutex>
 #include <stdexcept>
+
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include <gc/gc.h>
 
@@ -1231,7 +1237,59 @@ static void bind_eval_state(nb::module_ &m) {
 static thread_local bool evaluator_thread_registered = false;
 static thread_local bool evaluator_thread_registered_by_nanopynix = false;
 
+// DIAGNOSTIC (temporary): logs every GC register/unregister call with its OS
+// thread id, gated behind NANOPYNIX_GC_THREAD_DEBUG=1, to correlate against a
+// crashing thread's LWP in a post-mortem gdb backtrace and determine whether
+// GC_suspend_all's "pthread_kill failed at suspend" abort is hitting a thread
+// that was already unregistered (or never registered) by the time it fires.
+static bool gc_thread_debug_enabled() {
+    static const bool enabled = std::getenv("NANOPYNIX_GC_THREAD_DEBUG") != nullptr;
+    return enabled;
+}
+
+static void gc_thread_debug_log(const char *event) {
+    if (!gc_thread_debug_enabled())
+        return;
+    std::fprintf(stderr, "[nanopynix-gc-thread-debug] tid=%ld event=%s\n",
+                 static_cast<long>(syscall(SYS_gettid)), event);
+    std::fflush(stderr);
+}
+
+// libstdc++'s classic std::ctype<char> facet caches narrow()/widen()
+// results lazily, unguarded by any lock (it's a plain anonymous-namespace
+// global, not a function-local "magic static"). Confirmed via
+// ThreadSanitizer in two different call paths that both reach the same
+// global 'ctype_c' object: boost::format (via nix::HintFmt, used for
+// error/trace messages) and std::regex construction (via
+// nix::make_ref<regex>, used by nix's own regex-based helpers). Per
+// bits/locale_facets.h:
+//   - narrow(char_type, char) writes _M_narrow[(unsigned char)c] directly,
+//     per byte value, on every call where that slot is still zero -- there
+//     is no guard flag for this overload at all, so *every distinct byte
+//     value* has its own independent race window on first use. A one-shot
+//     warm-up of a single character (e.g. 'a') only pre-populates that one
+//     slot and does nothing for the other 255.
+//   - widen(char) is gated by the _M_widen_ok flag (checked-then-set
+//     without synchronization, so still technically racy on the very first
+//     concurrent call, but at least a single shared flag rather than 256
+//     independent unguarded slots).
+// Populating every possible byte value for narrow(), and calling widen()
+// once, single-threaded and before any evaluator thread can reach either
+// path concurrently, permanently avoids both races without touching
+// libstdc++ itself.
+static void warm_up_ctype_facet() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        const auto &facet = std::use_facet<std::ctype<char>>(std::locale::classic());
+        for (int c = 0; c <= 0xff; ++c)
+            facet.narrow(static_cast<char>(c), '\0');
+        facet.widen('a');
+    });
+}
+
 static void enter_evaluator_thread() {
+    gc_thread_debug_log("enter_evaluator_thread:begin");
+    warm_up_ctype_facet();
     if (evaluator_thread_registered)
         throw std::runtime_error("evaluator thread is already registered with Boehm GC");
 
@@ -1246,15 +1304,18 @@ static void enter_evaluator_thread() {
         // process collector. That registration is valid, but belongs to the
         // runtime that created it and must not be undone by nanopynix.
         evaluator_thread_registered = true;
+        gc_thread_debug_log("enter_evaluator_thread:duplicate");
         return;
     }
     if (register_result != GC_SUCCESS)
         throw std::runtime_error("could not register evaluator thread with Boehm GC");
     evaluator_thread_registered = true;
     evaluator_thread_registered_by_nanopynix = true;
+    gc_thread_debug_log("enter_evaluator_thread:registered");
 }
 
 static void exit_evaluator_thread() {
+    gc_thread_debug_log("exit_evaluator_thread:begin");
     if (!evaluator_thread_registered)
         throw std::runtime_error("evaluator thread is not registered with Boehm GC");
     if (evaluator_thread_registered_by_nanopynix) {
@@ -1264,6 +1325,7 @@ static void exit_evaluator_thread() {
     }
     evaluator_thread_registered = false;
     evaluator_thread_registered_by_nanopynix = false;
+    gc_thread_debug_log("exit_evaluator_thread:unregistered");
 }
 
 // =========================================================================
