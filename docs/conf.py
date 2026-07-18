@@ -28,8 +28,16 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "furo"
 
+autodoc_member_order = "bysource"
+autodoc_typehints = "description"
+autodoc_default_options = {
+    "member-order": "bysource",
+}
+
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
+napoleon_use_rtype = False
+
 smartquotes = False
 
-intersphinx_mapping = (
-    {} if os.environ.get("PYNIXD_DOCS_OFFLINE") else {"python": ("https://docs.python.org/3", None)}
-)
+intersphinx_mapping = {} if os.environ.get("PYNIXD_DOCS_OFFLINE") else {"python": ("https://docs.python.org/3", None)}

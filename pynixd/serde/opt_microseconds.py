@@ -1,3 +1,5 @@
+"""OptMicroseconds — tagged-optional uint64 for microseconds."""
+
 from __future__ import annotations
 
 from .wire_message import WireField, WireModel

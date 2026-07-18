@@ -1,3 +1,5 @@
+"""Realisation — JSON-encoded derivation realisation on the Nix daemon wire."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

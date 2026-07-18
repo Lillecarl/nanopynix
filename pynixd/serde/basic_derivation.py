@@ -1,3 +1,5 @@
+"""BasicDerivation — wire mirror of a Nix derivation."""
+
 from __future__ import annotations
 
 import json

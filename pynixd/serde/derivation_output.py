@@ -1,3 +1,5 @@
+"""DerivationOutput — wire representation of a single derivation output."""
+
 from __future__ import annotations
 
 from enum import Enum, auto

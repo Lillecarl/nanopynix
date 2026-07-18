@@ -1,3 +1,5 @@
+"""UnkeyedValidPathInfo — store path metadata without the path key."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

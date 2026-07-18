@@ -1,3 +1,5 @@
+"""NARHash — base16-encoded NAR SHA256 hash as a WireString."""
+
 from .wire_string import WireString
 
 

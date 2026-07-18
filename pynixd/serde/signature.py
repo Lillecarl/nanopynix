@@ -1,3 +1,5 @@
+"""Signature — a Nix cryptographic signature as a WireString."""
+
 from .wire_string import WireString
 
 

@@ -1,3 +1,5 @@
+"""StorePath — a Nix store path as a WireString."""
+
 from __future__ import annotations
 
 from pathlib import Path

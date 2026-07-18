@@ -1,3 +1,5 @@
+"""BuildResult and related types — build outcome on the Nix daemon wire."""
+
 from __future__ import annotations
 
 import json
