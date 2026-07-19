@@ -215,7 +215,11 @@ class WorkerServiceHandler(WorkerServiceBase):
             if message.nix_conf is not None:
                 os.environ["NIX_USER_CONF_FILES"] = message.nix_conf
             if settings:
-                os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
+                rendered_settings = "\n".join(f"{key} = {value}" for key, value in settings.items())
+                inherited_settings = os.environ.get("NIX_CONFIG")
+                os.environ["NIX_CONFIG"] = (
+                    f"{inherited_settings}\n{rendered_settings}" if inherited_settings else rendered_settings
+                )
 
             if self._state.executor is None:
                 raise RuntimeError("worker executor is unavailable")  # noqa: TRY301 -- guard clause intentionally caught by except block which prints traceback and re-raises
