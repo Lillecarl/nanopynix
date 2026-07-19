@@ -62,4 +62,38 @@ in
       doCheck = false;
       doInstallCheck = false;
     });
+
+  # boehmgc is a plain buildInput of nix-expr (pkgs.boehmgc, resolved by
+  # nixpkgs' own libexpr/package.nix callPackage, same as sqlite above), not
+  # one of the meson components above. Instrumenting it alone (NIX_CFLAGS_
+  # COMPILE below) did NOT fix or change the "pthread_kill failed at
+  # suspend: errcode=22" abort observed under a broad multithreaded TSAN
+  # pass -- confirmed by inspecting the actual TSAN nix-expr derivation's
+  # propagated boehmgc buildInput (it did carry -fsanitize=thread) while
+  # the crash stayed byte-identical. That's expected: this isn't a data
+  # race in boehmgc's own compiled code that -fsanitize=thread could ever
+  # catch -- it's boehm's own stop-the-world signaling a thread that has
+  # already exited, a race undefined by POSIX (see
+  # ./patches/boehmgc-tolerate-suspend-thread-exit-race.patch for the
+  # actual fix). Keeping the instrumentation here anyway is still correct
+  # in general: a genuine data race straddling boehmgc and nix-expr's own
+  # code would otherwise be invisible to TSAN, same reasoning as sqlite.
+  sanitizeBoehmGC =
+    boehmgc:
+    boehmgc.overrideAttrs (old: {
+      env = (old.env or { }) // {
+        NIX_CFLAGS_COMPILE = toString [
+          (old.env.NIX_CFLAGS_COMPILE or "")
+          tsanFlagsStr
+        ];
+      };
+      patches = (old.patches or [ ]) ++ [ ./patches/boehmgc-tolerate-suspend-thread-exit-race.patch ];
+      dontStrip = true;
+      # gctest is boehmgc's own heavily multithreaded self-test -- exactly
+      # the kind of workload that hits the stop-the-world suspend issue
+      # we're chasing, so it can crash the *build* itself rather than
+      # nanopynix's own test suite. Skip it here; nanopynix's own tests are
+      # what we actually want to observe under TSAN.
+      doCheck = false;
+    });
 }

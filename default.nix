@@ -173,6 +173,21 @@ let
         (scope.overrideScope (
           _final: prev: {
             nix-store = prev.nix-store.override { sqlite = tsan.sanitizeSqlite pkgs.sqlite; };
+            # pkgs.nixDependencies.boehmgc, not prev.boehmgc or pkgs.boehmgc:
+            # nixComponents_X's own scope never contains a `boehmgc` attribute
+            # at all -- nixpkgs builds each nixComponents_X via a *separate*
+            # `nixDependencies` scope (`nixDependencies.callPackage
+            # ./modular/packages.nix {...}` in nix/default.nix), and that
+            # nixDependencies scope (packaging/dependencies.nix in nix's own
+            # source) is where boehmgc's enableLargeConfig + 1MiB initial
+            # mark stack tuning actually lives -- confirmed by `prev.boehmgc`
+            # failing eval with "attribute 'boehmgc' missing". Sanitizing a
+            # fresh pkgs.boehmgc would silently drop that tuning -- exactly
+            # the kind of undersized-mark-stack condition its own comment
+            # warns about, right where we're chasing a GC crash.
+            nix-expr = prev.nix-expr.override {
+              boehmgc = tsan.sanitizeBoehmGC pkgs.nixDependencies.boehmgc;
+            };
           }
         )).overrideAllMesonComponents
           tsan.mesonComponentOverrides;
@@ -192,6 +207,18 @@ let
     lib.pipe pkgs.nixVersions (
       [
         (lib.filterAttrs isNixScope)
+      ]
+      # 2.31 predates the "make emptyBindings a global constant" refactor
+      # (nix commit 4df1a3ca7, first in 2.32.0) and still carries its own
+      # nrExprs++ as a plain unsigned long (fixed upstream by counter.hh's
+      # atomic Counter type, also post-2.31) -- both are known, unfixed
+      # races on this version alone, so TSAN just reports/aborts on
+      # long-since-fixed bugs rather than anything actionable. Skip building
+      # a TSAN variant for it entirely instead of chasing that noise.
+      ++ lib.optional enableTsan (
+        lib.filterAttrs (_: scope: lib.versions.majorMinor scope.version != "2.31")
+      )
+      ++ [
         (lib.mapAttrs (_: patchNixScope))
         (lib.mapAttrs (_: extendNixScope))
       ]
