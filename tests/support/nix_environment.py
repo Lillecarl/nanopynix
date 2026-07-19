@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import os
 import shutil
+import signal
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +21,9 @@ from nanopynix.models import StorePath
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
+    RpcSessionFactory = Callable[..., nanopynix.Session]
+    InprocSessionFactory = Callable[..., nanopynix.inproc.Session]
+
 
 @dataclass
 class _Daemon:
@@ -27,11 +32,15 @@ class _Daemon:
 
     async def close(self) -> None:
         if self.process.returncode is None:
-            self.process.terminate()
+            # ``nix daemon`` forks a connection worker. It shares this
+            # dedicated process group, so closing the fixture cannot leave a
+            # worker holding files in the private store. This never targets
+            # the system daemon's process group.
+            os.killpg(self.process.pid, signal.SIGTERM)
             try:
                 await asyncio.wait_for(self.process.wait(), timeout=10)
             except TimeoutError:
-                self.process.kill()
+                os.killpg(self.process.pid, signal.SIGKILL)
                 await self.process.wait()
 
 
@@ -70,17 +79,30 @@ class NixTestEnvironment:
         return ["--store", self.store_uri]
 
 
-def _force_rmtree(path: Path) -> None:
+async def _force_rmtree(path: Path) -> None:
     """Remove a closed test root even if Nix made entries read-only."""
 
     def onexc(function: Callable[..., object], raw_path: str, _exc: BaseException) -> None:
         failed_path = Path(raw_path)
-        with contextlib.suppress(FileNotFoundError):
-            failed_path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        for path_to_fix in (failed_path, failed_path.parent):
+            with contextlib.suppress(FileNotFoundError):
+                path_to_fix.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
         function(raw_path)
 
-    if path.exists():
-        shutil.rmtree(path, onexc=onexc)
+    for attempt in range(20):
+        if not path.exists():
+            return
+        try:
+            shutil.rmtree(path, onexc=onexc)
+        except OSError as error:
+            if error.errno != errno.ENOTEMPTY or attempt == 19:
+                raise
+            # A Nix worker can finish releasing a store entry just after its
+            # RPC shutdown acknowledgement. Retry its one filesystem race
+            # rather than leaving pytest's managed temporary root behind.
+            await asyncio.sleep(0.05)
+        else:
+            return
 
 
 async def _start_daemon(root: Path) -> _Daemon:
@@ -100,6 +122,7 @@ async def _start_daemon(root: Path) -> _Daemon:
         "require-drop-supplementary-groups",
         "false",
         env=daemon_environment,
+        start_new_session=True,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
@@ -145,23 +168,39 @@ async def shared_nix_environment(
     finally:
         if daemon is not None:
             await daemon.close()
-        _force_rmtree(root)
+        await _force_rmtree(root)
 
 
 @pytest.fixture
 async def isolated_nix_environment(
     nix_backend: str,
-    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> AsyncIterator[NixTestEnvironment]:
     """A fresh root for one test, including a separate daemon when requested."""
-    root = tmp_path / f"nix-{nix_backend}"
+    # Do not put this beneath a test's ``tmp_path``. Tests frequently evaluate
+    # that entire directory as a path flake, and Nix rejects the daemon socket
+    # as an unsupported source file type. ``tmp_path_factory`` still gives
+    # pytest ownership of this distinct per-test root.
+    root = tmp_path_factory.mktemp(f"nix-{nix_backend}")
     environment, daemon = await _environment(nix_backend, root)
     try:
         yield environment
     finally:
         if daemon is not None:
             await daemon.close()
-        _force_rmtree(root)
+        await _force_rmtree(root)
+
+
+@pytest.fixture
+def rpc_session(isolated_nix_environment: NixTestEnvironment) -> RpcSessionFactory:
+    """Create RPC sessions against this test's isolated Store."""
+    return isolated_nix_environment.rpc_session
+
+
+@pytest.fixture
+def inproc_session(isolated_nix_environment: NixTestEnvironment) -> InprocSessionFactory:
+    """Create in-process sessions against this test's isolated Store."""
+    return isolated_nix_environment.inproc_session
 
 
 @pytest.fixture
