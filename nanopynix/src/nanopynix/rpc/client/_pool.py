@@ -272,7 +272,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
 
     # ── operation dispatch ─────────────────────────────────────────
 
-    async def invoke(self, method: Callable[..., Any], request: Any, *, timeout: float) -> Any:
+    async def invoke(self, method: Callable[..., Any], request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- timeout passed to grpclib stub method which accepts a timeout parameter
         """Assign a worker-local operation ID and dispatch one unary RPC."""
         if self._channel is None:
             raise WorkerDiedError("Worker not started")

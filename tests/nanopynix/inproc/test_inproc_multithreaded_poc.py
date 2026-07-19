@@ -14,13 +14,13 @@ from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
 
 from nanopynix import inproc
-from nanopynix.models import BuildResult, LogEvent, StorePath
-
 
 pytestmark = pytest.mark.concurrency
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
+    from nanopynix.models import BuildResult, LogEvent, StorePath
 
 
 def _raw_session(*, store_workers: int = 4) -> inproc.Session:
@@ -299,8 +299,7 @@ async def test_inproc_close_wait_false_preserves_running_store_work() -> None:
     started = threading.Event()
     release = threading.Event()
     work = asyncio.create_task(session.run(_block_until_released, started, release))
-    while not started.is_set():
-        await asyncio.sleep(0)
+    await asyncio.to_thread(started.wait)
     with pytest.raises(RuntimeError, match="outstanding"):
         await session.close(wait=False)
     release.set()

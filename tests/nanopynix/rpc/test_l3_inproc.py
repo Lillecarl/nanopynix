@@ -49,7 +49,7 @@ class _InprocWorkerClient:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _next_request_id: int = 3
 
-    async def invoke(self, method: Any, request: Any, *, timeout: float) -> Any:
+    async def invoke(self, method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke interface
         del timeout
         async with self._lock:
             request.request_id = self._next_request_id
@@ -67,7 +67,7 @@ class _InprocManager:
         self.reserve_count += 1
         return self._worker
 
-    async def invoke(self, method: Any, request: Any, *, timeout: float) -> Any:
+    async def invoke(self, method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- timeout forwarded to InprocWorkerClient.invoke matching grpclib interface
         return await self._worker.invoke(method, request, timeout=timeout)
 
 

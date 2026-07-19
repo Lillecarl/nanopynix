@@ -121,7 +121,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
-def pytest_sessionfinish(exitstatus: int | pytest.ExitCode) -> Generator[None, None, None]:  # noqa: ARG001 -- exitstatus captured via closure below
+def pytest_sessionfinish(exitstatus: int | pytest.ExitCode) -> Generator[None]:
     """Force-exit once every other sessionfinish hook has run, terminal
     summary included.
 
