@@ -14,8 +14,8 @@ let
     _: pynix.dependencies ++ pynix.optional-dependencies.test ++ [ pynix ]
   );
 in
-writeShellApplication {
-  name = "nanopynix-tests-${version}";
+(writeShellApplication {
+  name = "nanopynix-tests";
   runtimeInputs = [
     pythonEnv
     nix-cli
@@ -76,4 +76,7 @@ writeShellApplication {
     inherit pythonEnv;
     addToMatrix = true;
   };
-}
+}).overrideAttrs
+  {
+    inherit version;
+  }
