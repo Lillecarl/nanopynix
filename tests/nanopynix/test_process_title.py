@@ -64,10 +64,11 @@ async def test_store_session_opens_store_with_its_uri() -> None:
     pool = MagicMock()
     pool._worker_stub.open_store = AsyncMock(return_value=SimpleNamespace(store_handle=42))
 
-    async def call(coro: object) -> object:
-        return await coro  # type: ignore[misc] -- test double receives the generated RPC coroutine
+    async def invoke(method: object, request: object, *, timeout: float) -> object:
+        del timeout
+        return await method(request)  # type: ignore[operator] -- test double receives a generated RPC method
 
-    pool.call = call
+    pool.invoke = invoke
     store = StoreHandle(pool, "local?root=/tmp/test-store", "session-id")
 
     await store.open()

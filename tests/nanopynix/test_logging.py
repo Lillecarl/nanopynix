@@ -25,9 +25,9 @@ class _LogTestModule(Protocol):
 _log_test: Callable[[str], None] = cast("_LogTestModule", nanopynix_util)._log_test  # type: ignore[reportPrivateUsage] -- test imports private helper
 
 
-async def _collect(collector: LogCollector, count: int, timeout: float = 2.0) -> list[tuple[int, str, int, str]]:  # noqa: ASYNC109
+async def _collect(collector: LogCollector, count: int, timeout: float = 2.0) -> list[tuple[str, int, str, int, str]]:  # noqa: ASYNC109
     """Collect `count` events from the async stream."""
-    events: list[tuple[int, str, int, str]] = []
+    events: list[tuple[str, int, str, int, str]] = []
     stream = collector.stream()
     try:
         for _ in range(count):
@@ -53,10 +53,11 @@ async def test_log_stream_basic():
         assert len(events) == 3, f"Expected 3 events, got {len(events)}: {events}"
         for e in events:
             assert isinstance(e, tuple)
-            assert e[0] == 0, f"Expected req_id=0, got {e[0]}"
-            assert e[1] == "msg", f"Expected 'msg' action, got {e[1]}"
-            assert isinstance(e[2], int), f"level should be int, got {type(e[2])}"
-            assert isinstance(e[3], str), f"msg should be str, got {type(e[3])}"
+            assert e[0] == "nix"
+            assert e[1] == 0, f"Expected req_id=0, got {e[1]}"
+            assert e[2] == "msg", f"Expected 'msg' action, got {e[2]}"
+            assert isinstance(e[3], int), f"level should be int, got {type(e[3])}"
+            assert isinstance(e[4], str), f"msg should be str, got {type(e[4])}"
 
     finally:
         nanopynix_util.remove_logger()
@@ -76,8 +77,8 @@ async def test_log_stream_actions():
     nanopynix_util.remove_logger()
     await c.aclose()
 
-    assert event[1] == "msg"
-    assert event[3] == "action test"
+    assert event[2] == "msg"
+    assert event[4] == "action test"
 
 
 async def test_log_stream_remove_logger_stops():
@@ -88,7 +89,7 @@ async def test_log_stream_remove_logger_stops():
     _log_test("before remove")
     stream = c.stream()
     event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
-    assert event[3] == "before remove"
+    assert event[4] == "before remove"
 
     nanopynix_util.remove_logger()
     await c.aclose()
@@ -111,7 +112,7 @@ async def test_log_stream_shutdown_clean():
     c.send_sentinel()
     stream = c.stream()
     items = [e async for e in stream]
-    assert [i[3] for i in items] == ["msg1", "msg2"]
+    assert [i[4] for i in items] == ["msg1", "msg2"]
 
     await c.aclose()
 
@@ -133,7 +134,7 @@ async def test_verbosity_filters_low_levels():
 
         stream = c.stream()
         items = [e async for e in stream]
-        assert items == [], f"Expected no events at Error verbosity, got {[i[3] for i in items]}"
+        assert items == [], f"Expected no events at Error verbosity, got {[i[4] for i in items]}"
     finally:
         nanopynix_util.set_verbosity(old)
         with contextlib.suppress(Exception):
@@ -153,13 +154,13 @@ async def test_request_id_in_events():
 
         stream = c.stream()
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
-        assert event[0] == 42, f"Expected req_id=42, got {event[0]}"
-        assert event[3] == "tagged"
+        assert event[1] == 42, f"Expected req_id=42, got {event[1]}"
+        assert event[4] == "tagged"
 
         # Unset should produce req_id=0
         _log_test("untagged")
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
-        assert event[0] == 0
+        assert event[1] == 0
     finally:
         nanopynix_util.remove_logger()
         await c.aclose()
@@ -173,8 +174,8 @@ async def test_sync_drain():
 
     events = c.drain()
     assert len(events) == 2
-    assert events[0] == (1, "msg", 3, "hello")
-    assert events[1] == (2, "msg", 3, "world")
+    assert events[0] == ("nix", 1, "msg", 3, "hello")
+    assert events[1] == ("nix", 2, "msg", 3, "world")
 
     # Second drain should be empty (events already consumed)
     assert c.drain() == []

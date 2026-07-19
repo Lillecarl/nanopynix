@@ -47,10 +47,14 @@ class _InprocWorkerClient:
     _eval_stub: Any
     _store_stub: Any
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _next_request_id: int = 3
 
-    async def call(self, coro: Any) -> Any:
+    async def invoke(self, method: Any, request: Any, *, timeout: float) -> Any:
+        del timeout
         async with self._lock:
-            return await coro
+            request.request_id = self._next_request_id
+            self._next_request_id += 1
+            return await method(request)
 
 class _InprocManager:
     def __init__(self, worker: _InprocWorkerClient) -> None:
@@ -63,8 +67,8 @@ class _InprocManager:
         self.reserve_count += 1
         return self._worker
 
-    async def call(self, coro: Any) -> Any:
-        return await self._worker.call(coro)
+    async def invoke(self, method: Any, request: Any, *, timeout: float) -> Any:
+        return await self._worker.invoke(method, request, timeout=timeout)
 
 
 class _FailFirstRpc:
@@ -115,8 +119,8 @@ async def l3_inproc(tmp_path: Path) -> AsyncIterator[_L3Inproc]:
     async with inproc_worker_with_backchannel(service_factory, [ManagerPrimopServiceHandler()]) as channel:
         worker_stub = WorkerServiceStub(channel)
         eval_stub = EvalServiceStub(channel)
-        await worker_stub.init(InitRequest(store_uri=store_uri, load_config=False, experimental_features=["flakes"]))
-        store = await worker_stub.open_store(OpenStoreRequest(uri=store_uri))
+        await worker_stub.init(InitRequest(request_id=1, store_uri=store_uri, load_config=False, experimental_features=["flakes"]))
+        store = await worker_stub.open_store(OpenStoreRequest(request_id=2, uri=store_uri))
         worker = _InprocWorkerClient(eval_stub, worker_stub)
         manager = _InprocManager(worker)
         session = EvalSession(cast("Any", worker), store_handle=store.store_handle)
@@ -136,11 +140,11 @@ async def l3_inproc(tmp_path: Path) -> AsyncIterator[_L3Inproc]:
         finally:
             try:
                 await session.close()
-                await worker_stub.close_store(CloseStoreRequest(store_handle=store.store_handle))
+                await worker_stub.close_store(CloseStoreRequest(request_id=1_000_000, store_handle=store.store_handle))
                 assert worker_state.handles.iter_kind("value") == []
                 assert worker_state.handles.iter_kind("locked_flake") == []
                 assert worker_state.handles.iter_kind("store") == []
-                await worker_stub.shutdown(ShutdownRequest())
+                await worker_stub.shutdown(ShutdownRequest(request_id=1_000_001))
                 await executor.run(nanopynix_util.remove_logger)
                 await executor.run(nanopynix_util.set_verbosity, previous_verbosity)
             finally:
@@ -290,11 +294,13 @@ async def test_store_cannot_close_while_its_eval_state_is_open(l3_inproc: _L3Inp
     await l3_inproc.eval.open()
 
     with pytest.raises(GRPCError) as error:
-        await l3_inproc.worker_stub.close_store(CloseStoreRequest(store_handle=l3_inproc.initial_store_handle))
+        await l3_inproc.worker_stub.close_store(
+            CloseStoreRequest(request_id=1_000_002, store_handle=l3_inproc.initial_store_handle)
+        )
 
     assert "call CloseEval first" in str(error.value)
     await l3_inproc.worker_stub.close_store(
-        CloseStoreRequest(store_handle=l3_inproc.initial_store_handle, force=True)
+        CloseStoreRequest(request_id=1_000_003, store_handle=l3_inproc.initial_store_handle, force=True)
     )
     assert l3_inproc.state.handles.iter_kind("eval") == []
     assert l3_inproc.state.handles.iter_kind("store") == []

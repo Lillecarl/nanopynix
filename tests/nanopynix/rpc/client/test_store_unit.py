@@ -98,10 +98,11 @@ def pool() -> MagicMock:
     p: MagicMock = MagicMock()
     p._store_stub = _make_stub_mock()  # type: ignore[reportPrivateUsage] -- test fixture sets private stub
 
-    async def _passthrough(coro: Any) -> Any:
-        return await coro
+    async def _passthrough(method: Any, request: Any, *, timeout: float) -> Any:
+        del timeout
+        return await method(request)
 
-    p.call = _passthrough
+    p.invoke = _passthrough
     return p
 
 

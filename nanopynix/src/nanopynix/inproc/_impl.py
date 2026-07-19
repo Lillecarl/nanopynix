@@ -307,7 +307,10 @@ class Session:
 
     async def _forward_logs(self) -> None:
         async for raw in self._collector.stream():
-            request_id, action, *args = raw
+            kind, request_id, *payload = raw
+            if kind != "nix":
+                continue
+            action, *args = payload
             event = LogEvent(request_id=request_id, action=action, args=args)
             for callback in tuple(self._log_callbacks):
                 callback(event)
