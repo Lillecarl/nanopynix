@@ -124,7 +124,7 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Run TSAN-instrumented crashing test (repeated)
+    - name: Run TSAN-instrumented stress tests (repeated)
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-${{ matrix.version }}-single-user.log"
@@ -134,7 +134,7 @@ jobs:
           status=0
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
             ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
-            "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
+            -m tsan_stress \
             2>&1 | tee -a "$LOGFILE" || status=$?
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
           if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -157,8 +157,15 @@ jobs:
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}-single-user.log"
         status=0
+        tsan_version="${{ matrix.version }}"
+        tsan_version="${tsan_version%-tsan}"
+        tsan_concurrency_selection="concurrency"
+        if [ "single-user" = single-user ] && { [ "$tsan_version" = nix_2_34 ] || [ "$tsan_version" = nix_2_35 ]; }; then
+          # Nix master no longer crashes this LocalStore workload under TSAN.
+          tsan_concurrency_selection="concurrency and not known_nix_tsan_localstore_bug"
+        fi
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m "$tsan_concurrency_selection" \
           2>&1 | tee -a "$LOGFILE" || status=$?
         echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
         if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -211,7 +218,7 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Run TSAN-instrumented crashing test (repeated)
+    - name: Run TSAN-instrumented stress tests (repeated)
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-${{ matrix.version }}-multi-user.log"
@@ -221,7 +228,7 @@ jobs:
           status=0
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
             ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
-            "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
+            -m tsan_stress \
             2>&1 | tee -a "$LOGFILE" || status=$?
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
           if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -244,8 +251,15 @@ jobs:
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}-multi-user.log"
         status=0
+        tsan_version="${{ matrix.version }}"
+        tsan_version="${tsan_version%-tsan}"
+        tsan_concurrency_selection="concurrency"
+        if [ "multi-user" = single-user ] && { [ "$tsan_version" = nix_2_34 ] || [ "$tsan_version" = nix_2_35 ]; }; then
+          # Nix master no longer crashes this LocalStore workload under TSAN.
+          tsan_concurrency_selection="concurrency and not known_nix_tsan_localstore_bug"
+        fi
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m "$tsan_concurrency_selection" \
           2>&1 | tee -a "$LOGFILE" || status=$?
         echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
         if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -302,18 +316,18 @@ jobs:
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix ${{ matrix.version }} (full suite)
-      run: |2
-                set -o pipefail
-                paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
-                rm -f "$paths_to_delete"
-                status=0
-                unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
-                  2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
-                if [ -s "$paths_to_delete" ]; then
-        nix store delete --stdin < "$paths_to_delete" || true
-                fi
-                exit "$status"
+      run: |
+        set -o pipefail
+        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
+        rm -f "$paths_to_delete"
+        status=0
+        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        if [ -s "$paths_to_delete" ]; then
+          nix store delete --stdin < "$paths_to_delete" || true
+        fi
+        exit "$status"
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
@@ -373,18 +387,18 @@ jobs:
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix ${{ matrix.version }} (full suite)
-      run: |2
-                set -o pipefail
-                paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
-                rm -f "$paths_to_delete"
-                status=0
-                unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
-                  2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
-                if [ -s "$paths_to_delete" ]; then
-        nix store delete --stdin < "$paths_to_delete" || true
-                fi
-                exit "$status"
+      run: |
+        set -o pipefail
+        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
+        rm -f "$paths_to_delete"
+        status=0
+        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        if [ -s "$paths_to_delete" ]; then
+          nix store delete --stdin < "$paths_to_delete" || true
+        fi
+        exit "$status"
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:

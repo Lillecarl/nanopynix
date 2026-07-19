@@ -122,7 +122,7 @@ let
           }
           (steps.enableSandboxNamespaces { })
           {
-            name = "Run TSAN-instrumented crashing test (repeated)";
+            name = "Run TSAN-instrumented stress tests (repeated)";
             run = # bash
               ''
                 set -o pipefail
@@ -133,7 +133,7 @@ let
                   status=0
                   unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
                     ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
-                    "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
+                    -m tsan_stress \
                     2>&1 | tee -a "$LOGFILE" || status=$?
                   echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
                   if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -160,8 +160,15 @@ let
                 set -o pipefail
                 LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}-${installMode}.log"
                 status=0
+                tsan_version="${version}"
+                tsan_version="''${tsan_version%-tsan}"
+                tsan_concurrency_selection="concurrency"
+                if [ "${installMode}" = single-user ] && { [ "$tsan_version" = nix_2_34 ] || [ "$tsan_version" = nix_2_35 ]; }; then
+                  # Nix master no longer crashes this LocalStore workload under TSAN.
+                  tsan_concurrency_selection="concurrency and not known_nix_tsan_localstore_bug"
+                fi
                 unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
+                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m "$tsan_concurrency_selection" \
                   2>&1 | tee -a "$LOGFILE" || status=$?
                 echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
                 if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
