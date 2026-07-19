@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 import pytest
 
-import nanopynix
 from pynix import Pynix
 
+if TYPE_CHECKING:
+    from nanopynix.models import StorePath
+    from tests.support.nix_environment import NixTestEnvironment
 
-async def test_path_info(capsys: pytest.CaptureFixture[str]):
-    # A literal hash-pinned store path (e.g. a specific bash build) isn't
-    # guaranteed to be valid in every store — it depends on exactly which
-    # nixpkgs revision built the current environment's closure. Query a path
-    # that is actually valid in *this* store instead.
-    async with nanopynix.Session() as nix, nix.store() as store:
-        valid_paths = await store.query_all_valid_paths()
-    path = str(valid_paths[0])
 
-    cmd = Pynix.parse(["path-info", path, "--store", "auto"])
+async def test_path_info(
+    isolated_nix_environment: NixTestEnvironment,
+    seeded_store_path: StorePath,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = str(seeded_store_path)
+
+    cmd = Pynix.parse(["path-info", path, *isolated_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
@@ -28,8 +30,12 @@ async def test_path_info(capsys: pytest.CaptureFixture[str]):
     assert isinstance(result["references"], list)
 
 
-async def test_path_info_nonexistent(capsys: pytest.CaptureFixture[str]):
-    cmd = Pynix.parse(["path-info", "/nix/store/deadbeef-nonexistent"])
+async def test_path_info_nonexistent(
+    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cmd = Pynix.parse(
+        ["path-info", "/nix/store/deadbeef-nonexistent", *isolated_nix_environment.pynix_store_args()]
+    )
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()

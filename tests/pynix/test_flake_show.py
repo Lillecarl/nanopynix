@@ -10,28 +10,36 @@ if TYPE_CHECKING:
 
     import pytest
 
+    from tests.support.nix_environment import NixTestEnvironment
 
-async def test_flake_show_root(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
-    cmd = Pynix.parse(["flake", "show", str(git_flake), "--store", "auto"])
+
+async def test_flake_show_root(
+    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+) -> None:
+    cmd = Pynix.parse(["flake", "show", str(git_flake), *isolated_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     assert "hello" in captured.out
     assert "greeting" in captured.out
 
 
-async def test_flake_show_with_hash_attrpath(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
-    cmd = Pynix.parse(["flake", "show", f"{git_flake}#hello"])
+async def test_flake_show_with_hash_attrpath(
+    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+) -> None:
+    cmd = Pynix.parse(["flake", "show", f"{git_flake}#hello", *isolated_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     assert "hello" in captured.out
     assert "greeting" not in captured.out
 
 
-async def test_flake_metadata_json_does_not_write_lock_file(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
+async def test_flake_metadata_json_does_not_write_lock_file(
+    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+) -> None:
     lock_file = git_flake / "flake.lock"
     assert not lock_file.exists()
 
-    cmd = Pynix.parse(["flake", "metadata", str(git_flake), "--store", "auto"])
+    cmd = Pynix.parse(["flake", "metadata", str(git_flake), *isolated_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -41,8 +49,10 @@ async def test_flake_metadata_json_does_not_write_lock_file(capsys: pytest.Captu
     assert not lock_file.exists()
 
 
-async def test_flake_info_aliases_metadata(capsys: pytest.CaptureFixture[str], git_flake: Path) -> None:
-    cmd = Pynix.parse(["flake", "info", str(git_flake), "--store", "auto"])
+async def test_flake_info_aliases_metadata(
+    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+) -> None:
+    cmd = Pynix.parse(["flake", "info", str(git_flake), *isolated_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
