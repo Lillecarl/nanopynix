@@ -3,7 +3,9 @@
 
 name: On commit
 'on':
-  push: null
+  push:
+    branches-ignore:
+    - ci-develop
   workflow_dispatch: null
 jobs:
   docs-build:
