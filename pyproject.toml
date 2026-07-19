@@ -1,7 +1,7 @@
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-extraPaths = [".", "nanopynix/src", "pynix/src", "pytest-agent/src", "tests", "tests/pynix", "docs"]
+extraPaths = [".", "nanopynix/src", "nanopynix-helpers/src", "pynix/src", "pytest-agent/src", "tests", "tests/pynix", "docs"]
 exclude = ["**/result*"]
 
 [[tool.pyright.executionEnvironments]]
@@ -14,7 +14,7 @@ extraPaths = ["pytest-agent/tests"]
 reportPrivateUsage = "none"
 
 [tool.coverage.run]
-source_pkgs = ["nanopynix", "pynix"]
+source_pkgs = ["nanopynix", "nanopynix_helpers", "pynix"]
 branch = true
 # The Nix worker runs in a process forked from a `multiprocessing` forkserver
 # helper, not a plain subprocess. `concurrency = multiprocessing` plus
@@ -29,6 +29,7 @@ sigterm = true
 
 [tool.coverage.paths]
 nanopynix = ["nanopynix/src/nanopynix", "*/site-packages/nanopynix"]
+nanopynix_helpers = ["nanopynix-helpers/src/nanopynix_helpers", "*/site-packages/nanopynix_helpers"]
 pynix = ["pynix/src/pynix", "*/site-packages/pynix"]
 
 [tool.coverage.report]

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from nanopynix_proto.nix.common import Derivation, DerivationOutput, DerivationOutputs
-from pynix.fod import (
+from nanopynix_helpers.fod import (
     FodHashMismatch,
     FodSourceUpdateError,
     derivation_name_from_path,
@@ -17,6 +16,7 @@ from pynix.fod import (
     mismatch_is_target_fod,
     replace_fod_hash,
 )
+from nanopynix_proto.nix.common import Derivation, DerivationOutput, DerivationOutputs
 
 
 def test_extracts_only_the_exact_ansi_colored_nix_fod_shape() -> None:
