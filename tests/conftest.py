@@ -26,6 +26,8 @@ pytest_plugins = (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from tests.support.nix_environment import NixTestEnvironment
+
 # Async tests can hang indefinitely on a wedged subprocess/pipe instead of
 # failing (e.g. a Nix worker that stops responding never raises an error, it
 # just never wakes the awaiting task up). Every async test gets wrapped in
@@ -189,15 +191,33 @@ def _configure_worker_local_stores(_init: None) -> Iterator[None]:  # type: igno
 
 
 @pytest.fixture(scope="session")
-def init_store() -> None:
-    """Initialize libstore (once per session) without loading nix.conf."""
-    nanopynix.init_libstore(load_config=False)
+def store(l1_nix_environment: NixTestEnvironment) -> Iterator[Any]:
+    """Open this run's isolated local/native-daemon Store.
+
+    Backed by ``l1_nix_environment`` (see tests/support/nix_environment.py),
+    never the host Nix installation's own store. Sync tests cannot depend on
+    the async ``shared_nix_environment``, hence the dedicated sync fixture.
+    """
+    opened = nanopynix.open_store(l1_nix_environment.store_uri)
+    try:
+        yield opened
+    finally:
+        opened.close()
 
 
 @pytest.fixture(scope="session")
-def store(init_store: object) -> object:  # noqa: ARG001
-    """Open the default Nix store (session-scoped)."""
-    return nanopynix.open_store()
+def store_seeded_path(store: Any, l1_nix_environment: NixTestEnvironment) -> Any:
+    """A StorePath added directly into this session's isolated Store.
+
+    Store-backed tests must not derive fixture paths from the host Nix
+    installation (see TODO.md); this gives them a known-valid path instead.
+    """
+    source = l1_nix_environment.root.parent / "l1-store-fixture.txt"
+    source.write_text("nanopynix L1 binding fixture\n", encoding="utf-8")
+    result = store.store_add_to_store(
+        {"path": str(source), "name": "nanopynix-l1-fixture", "method": "flat", "hash_algo": "sha256"}
+    )
+    return store.parse_store_path(result["path"])
 
 
 @pytest.fixture(scope="session")

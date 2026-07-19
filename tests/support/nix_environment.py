@@ -19,7 +19,7 @@ import nanopynix
 from nanopynix.models import StorePath
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Iterator
 
     RpcSessionFactory = Callable[..., nanopynix.Session]
     InprocSessionFactory = Callable[..., nanopynix.inproc.Session]
@@ -169,6 +169,31 @@ async def shared_nix_environment(
         if daemon is not None:
             await daemon.close()
         await _force_rmtree(root)
+
+
+@pytest.fixture(scope="session")
+def l1_nix_environment(
+    nix_backend: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[NixTestEnvironment]:
+    """Sync counterpart of ``shared_nix_environment`` for plain (non-async) L1
+    binding tests, which cannot depend on an async fixture. Bridges via
+    ``asyncio.run`` only because starting the native daemon subprocess must
+    stay async; nothing below actually needs a running event loop.
+    """
+    root = tmp_path_factory.mktemp(f"nix-{nix_backend}-l1")
+    # A subprocess transport stays bound to the loop that created it, so
+    # setup/teardown must share one loop rather than a fresh asyncio.run()
+    # each time (an ``asyncio.run(daemon.close())`` on its own loop rejects
+    # the ``process.wait()`` future as belonging to a different loop).
+    with asyncio.Runner() as runner:
+        environment, daemon = runner.run(_environment(nix_backend, root))
+        try:
+            yield environment
+        finally:
+            if daemon is not None:
+                runner.run(daemon.close())
+            runner.run(_force_rmtree(root))
 
 
 @pytest.fixture

@@ -62,7 +62,7 @@ def test_store_path_wrapper_accepts_empty_basename():
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_path_info_from_real_path(store: Any):
+def test_path_info_from_real_path(store: Any, store_seeded_path: object) -> None:  # noqa: ARG001 -- store_seeded_path guarantees a non-empty store
     """C++ query_path_info now returns a dict directly — validate shape."""
     path_strs = store.query_all_valid_paths()
     if not path_strs:
@@ -84,7 +84,7 @@ def test_path_info_from_real_path(store: Any):
         assert isinstance(ref, str)
 
 
-def test_path_info_deriver_none(store: Any):
+def test_path_info_deriver_none(store: Any, store_seeded_path: object) -> None:  # noqa: ARG001 -- store_seeded_path guarantees a non-empty store
     """A non-derivation path should have deriver=None."""
     path_strs = store.query_all_valid_paths()
     for d in path_strs:

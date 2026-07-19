@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from shutil import which
 from typing import Any
 
 import pytest
@@ -17,14 +16,6 @@ NIX_GC_ROOTS_BUG = pytest.mark.nix_version(
     exclude=("2.31", "2.34"),
     reason="findRoots/collectGarbage crash on nonnumeric temproots filenames; https://github.com/NixOS/nix/issues/16138",
 )
-
-def _nix_sp() -> nanopynix_store.StorePath:
-    """Return a StorePath for the system bash binary.  Requires NixOS."""
-    nix_bin = which("nix")
-    assert isinstance(nix_bin, str)
-    nix = Path(nix_bin).resolve()
-    nix_basename = str(nix).split("/nix/store/")[1].split("/")[0]
-    return nanopynix_store.StorePath(nix_basename)
 
 
 class TestStorePath:
@@ -70,9 +61,8 @@ class TestStore:
         assert isinstance(uri, str)
         assert len(uri) > 0
 
-    def test_is_valid_path_valid(self, store: Any):
-        sp = _nix_sp()
-        assert store.is_valid_path(sp)
+    def test_is_valid_path_valid(self, store: Any, store_seeded_path: Any):
+        assert store.is_valid_path(store_seeded_path)
 
     def test_is_valid_path_invalid(self, store: Any):
         sp = nanopynix_store.StorePath("00000000000000000000000000000000-bogus")
@@ -82,9 +72,8 @@ class TestStore:
         sp = store.parse_store_path("/nix/store/00000000000000000000000000000000-bogus")
         assert sp.name() == "bogus"
 
-    def test_build_paths_with_results_already_valid(self, store: Any):
-        sp = _nix_sp()
-        results = store.build_paths_with_results([sp])
+    def test_build_paths_with_results_already_valid(self, store: Any, store_seeded_path: Any):
+        results = store.build_paths_with_results([store_seeded_path])
         assert len(results) == 1
         assert results[0]["success"]
         assert results[0]["status"] == "already-valid"
@@ -96,25 +85,22 @@ class TestStore:
         assert not results[0]["success"]
         assert results[0]["status"] != "already-valid"
 
-    def test_query_path_info(self, store: Any):
-        sp = _nix_sp()
-        info = store.query_path_info(sp)
+    def test_query_path_info(self, store: Any, store_seeded_path: Any):
+        info = store.query_path_info(store_seeded_path)
         assert isinstance(info["nar_hash"], str)
         assert len(info["nar_hash"]) > 0
         refs = info["references"]
         assert isinstance(refs, list)
-        assert info["path"] == f"{store.get_store_dir()}/{sp.to_string()}"
+        assert info["path"] == f"{store.get_store_dir()}/{store_seeded_path.to_string()}"
         assert info["nar_size"] > 0
 
-    def test_query_path_from_hash_part(self, store: Any):
-        sp = _nix_sp()
-        hash_part = sp.hash_part()
+    def test_query_path_from_hash_part(self, store: Any, store_seeded_path: Any):
+        hash_part = store_seeded_path.hash_part()
         result = store.query_path_from_hash_part(hash_part)
         assert result is not None
 
-    def test_compute_fs_closure(self, store: Any):
-        sp = _nix_sp()
-        closure = store.compute_fs_closure(sp)
+    def test_compute_fs_closure(self, store: Any, store_seeded_path: Any):
+        closure = store.compute_fs_closure(store_seeded_path)
         assert isinstance(closure, list)
         assert len(closure) > 0  # type: ignore[reportUnknownArgumentType] -- store method returns Any
 
@@ -126,14 +112,12 @@ class TestStore:
         assert isinstance(paths, list)
         assert len(paths) > 0  # type: ignore[reportUnknownArgumentType] -- store method returns Any
 
-    def test_query_referrers(self, store: Any):
-        sp = _nix_sp()
-        referrers = store.query_referrers(sp)
+    def test_query_referrers(self, store: Any, store_seeded_path: Any):
+        referrers = store.query_referrers(store_seeded_path)
         assert isinstance(referrers, list)
 
-    def test_add_temp_root(self, store: Any):
-        sp = _nix_sp()
-        store.add_temp_root(sp)
+    def test_add_temp_root(self, store: Any, store_seeded_path: Any):
+        store.add_temp_root(store_seeded_path)
         # Should not raise
 
     @NIX_GC_ROOTS_BUG
@@ -152,16 +136,15 @@ class TestStore:
         assert isinstance(result["paths"], list)
         assert result["bytes_freed"] == 0
 
-    def test_add_perm_root_and_indirect_root(self, store: Any, tmp_path: Path):
-        sp = _nix_sp()
+    def test_add_perm_root_and_indirect_root(self, store: Any, store_seeded_path: Any, tmp_path: Path):
         root = tmp_path / "nanopynix-gc-root"
-        result = store.add_perm_root(sp, str(root))
+        result = store.add_perm_root(store_seeded_path, str(root))
         assert result == str(root)
         assert root.is_symlink()
         store.add_indirect_root(str(root))
 
-    def test_ensure_path(self, store: Any):
-        store.ensure_path(_nix_sp())
+    def test_ensure_path(self, store: Any, store_seeded_path: Any):
+        store.ensure_path(store_seeded_path)
 
     def test_optimise_store_empty_local_store(self, tmp_path: Path):
         store = nanopynix_store.open_store(f"local?root={tmp_path}")
@@ -173,32 +156,28 @@ class TestStore:
 
 
 class TestBuildResult:
-    def test_success_repr(self, store: Any):
-        sp = _nix_sp()
-        results = store.build_paths_with_results([sp])
+    def test_success_repr(self, store: Any, store_seeded_path: Any):
+        results = store.build_paths_with_results([store_seeded_path])
         r = results[0]
         assert r["success"]
         assert r["drv_path"]  # non-empty string
 
 
 class TestPathInfo:
-    def test_repr(self, store: Any):
-        sp = _nix_sp()
-        info = store.query_path_info(sp)
+    def test_repr(self, store: Any, store_seeded_path: Any):
+        info = store.query_path_info(store_seeded_path)
         assert isinstance(info, dict)
         assert "nar_hash" in info
 
-    def test_registration_time(self, store: Any):
-        sp = _nix_sp()
-        info = store.query_path_info(sp)
+    def test_registration_time(self, store: Any, store_seeded_path: Any):
+        info = store.query_path_info(store_seeded_path)
         rt = info["registration_time"]
         if rt is not None:
             assert rt > 0
 
-    def test_deriver(self, store: Any):
-        sp = _nix_sp()
-        info = store.query_path_info(sp)
-        # deriver may be None for non-derivation outputs
+    def test_deriver(self, store: Any, store_seeded_path: Any):
+        info = store.query_path_info(store_seeded_path)
+        # deriver is None: this path was seeded directly, not built by a derivation
         deriver = info["deriver"]
         assert deriver is None or isinstance(deriver, str)
 
