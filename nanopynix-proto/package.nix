@@ -50,7 +50,8 @@ buildPythonPackage (
         store.proto \
         eval.proto \
         worker.proto \
-        manager.proto
+        manager.proto \
+        daemon.proto
     '';
 
     meta = attrs.meta // {

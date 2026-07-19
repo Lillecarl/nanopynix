@@ -8,7 +8,7 @@ from nanopynix_bindings.expr import EvalState, Value, eval_file, init_libexpr, r
 from nanopynix_bindings.fetchers import input_from_attrs, input_from_url
 from nanopynix_bindings.flake import get_flake, lock_flake, parse_flake_ref
 from nanopynix_bindings.main import init_nix, init_plugins
-from nanopynix_bindings.store import BuildMode, open_store
+from nanopynix_bindings.store import BuildMode, open_store, process_connection
 from nanopynix_bindings.util import (
     build_info,  # type: ignore[reportUnknownVariableType] -- C++ extension without type stubs
     current_system,
@@ -191,6 +191,7 @@ __all__ = [
     "normalize_log_level",
     "open_store",
     "parse_flake_ref",
+    "process_connection",
     "register_primop",
     "remove_logger",
     "set_manager_title",
