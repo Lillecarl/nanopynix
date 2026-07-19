@@ -13,6 +13,11 @@ let
   pythonEnv = python.withPackages (
     _: pynix.dependencies ++ pynix.optional-dependencies.test ++ [ pynix ]
   );
+  # Interpolating this path literal copies it into the store and substitutes
+  # the resulting store path below -- see nix/tsan-suppressions.txt for why
+  # this specific, narrowly-scoped suppression is safe (a known-permanent
+  # upstream Nix design choice, not a bug we're hiding).
+  tsanSuppressions = ../nix/tsan-suppressions.txt;
 in
 (writeShellApplication {
   name = "nanopynix-tests";
@@ -36,7 +41,11 @@ in
     # halt_on_error=1: without it, a race hit deep in a loop (e.g. every
     # empty-attrset evaluation) gets re-reported on every single occurrence
     # instead of just the first, producing multi-million-line, unusable logs.
-    export TSAN_OPTIONS="halt_on_error=1 history_size=7 second_deadlock_stack=1"
+    # suppressions=...: silences the curlFileTransfer worker-thread "leak"
+    # (nix/tsan-suppressions.txt) -- a permanent upstream design choice
+    # (leaked-on-purpose singleton), not a bug, that otherwise shows up in
+    # every TSAN run touching an HTTP fetch path.
+    export TSAN_OPTIONS="halt_on_error=1 history_size=7 second_deadlock_stack=1 suppressions=${tsanSuppressions}"
   ''
   + ''
     if [ -n "''${NANOPYNIX_CORE_DEBUG:-}" ]; then
