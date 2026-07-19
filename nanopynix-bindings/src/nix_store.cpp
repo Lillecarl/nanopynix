@@ -265,9 +265,16 @@ static std::shared_ptr<nix::Store> open_store_default() {
 }
 
 static void close_store(nix::Store &store) {
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+    // Nix 2.31 has no RemoteStore::shutdownConnections(). The Python owner
+    // drops its final shared_ptr immediately after this call, so the
+    // RemoteStore destructor closes the pooled daemon connections via RAII.
+    (void) store;
+#else
     if (auto *remote_store = dynamic_cast<nix::RemoteStore *>(&store)) {
         remote_store->shutdownConnections();
     }
+#endif
 }
 
 static void process_connection(std::shared_ptr<nix::Store> store, int fd, bool trusted, bool recursive) {
