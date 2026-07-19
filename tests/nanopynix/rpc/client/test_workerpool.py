@@ -27,12 +27,14 @@ async def test_two_workers_sequential():
             assert isinstance(uri, str)
 
 
+@pytest.mark.concurrency
 async def test_store_operation_runs_while_eval_session_is_open():
     """An EvalState owns evaluator state, not the worker's Store API."""
     async with Nix() as nix, nix.store() as store, nix.eval(store):
         assert isinstance(await store.uri(), str)
 
 
+@pytest.mark.concurrency
 async def test_session_allows_concurrent_eval_states():
     """N EvalSession/ReplSession instances may be open at once, each independent."""
     async with Nix() as nix, nix.store() as store:
@@ -52,6 +54,7 @@ async def test_session_allows_concurrent_eval_states():
         await second.close()
 
 
+@pytest.mark.concurrency
 async def test_concurrent_log_stream():
     """log_stream can be iterated concurrently with store operations.
 

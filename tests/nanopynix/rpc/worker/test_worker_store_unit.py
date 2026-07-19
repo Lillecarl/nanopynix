@@ -6,6 +6,7 @@ import asyncio
 import threading
 from typing import Any, cast
 
+import pytest
 from nanopynix_proto.nix.store import GetUriRequest
 
 from nanopynix._core._nix_executor import NixThreadExecutor
@@ -13,6 +14,7 @@ from nanopynix.rpc.worker._worker import WorkerState
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
 
 
+@pytest.mark.concurrency
 async def test_store_handler_runs_independent_calls_on_multiple_store_threads() -> None:
     """The L3 Store handler must not serialize unrelated Store calls."""
     state = WorkerState()

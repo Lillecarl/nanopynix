@@ -15,6 +15,9 @@ from nanopynix_proto.nix.store import GcAction
 
 from nanopynix import inproc
 
+
+pytestmark = pytest.mark.concurrency
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
