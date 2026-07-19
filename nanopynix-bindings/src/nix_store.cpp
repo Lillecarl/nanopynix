@@ -1196,9 +1196,11 @@ NB_MODULE(store, m) {
 
     m.def("open_store", &open_store_uri, "uri"_a);
     m.def("open_store", &open_store_default);
-    m.def("process_connection", &process_connection, nb::call_guard<nb::gil_scoped_release>(),
-          "store"_a, "fd"_a, "trusted"_a = true, "recursive"_a = false,
-          "Handle a single daemon client connection on the given fd.");
+    m.def(
+        "process_connection", &process_connection, nb::call_guard<nb::gil_scoped_release>(),
+        "store"_a, "fd"_a, "trusted"_a, "recursive"_a = false,
+        "Handle one Nix daemon-protocol connection on fd. The caller owns fd and must explicitly "
+        "decide whether its peer is trusted.");
     m.def("register_store_implementation", &register_python_store,
           "name"_a, "doc"_a, "schemes"_a, "factory"_a,
           "Register a Python-backed store implementation.");
