@@ -100,43 +100,6 @@ async def _output_paths(store: inproc.Store, drv_paths: list[str]) -> list[str]:
     ]
 
 
-async def _delete_one_path(store: inproc.Store, path: str) -> None:
-    """Force-delete a single store path, tolerating one specific daemon limitation.
-
-    ``ignore_liveness=True`` is required: Nix holds a "temp root" on every
-    path this process has referenced for the process's entire lifetime, not
-    the lifetime of any Store/EvalSession -- a plain delete right after
-    closing everything still reports the path "still alive". Only a direct,
-    non-daemon LocalStore honors ignore_liveness though; the daemon RPC path
-    unconditionally rejects the flag for any client, trusted or not
-    (src/libstore/daemon.cc's CollectGarbage handler). CI's single-user jobs
-    talk directly to a LocalStore and delete cleanly; a daemon-connected
-    local dev store can never force this, so that one specific rejection is
-    swallowed here rather than failing the test over an environment
-    difference the test can't control.
-    """
-    try:
-        await store.collect_garbage(GcAction.DELETE_SPECIFIC, ignore_liveness=True, paths_to_delete=[path])
-    except RuntimeError as exc:
-        if "not allowed to ignore liveness" not in str(exc):
-            raise
-
-
-async def _delete_paths(store: inproc.Store, paths: list[str]) -> None:
-    """Delete each store path with its own collect_garbage call, in parallel.
-
-    These sleep-derivation outputs exist only to exercise concurrency and are
-    otherwise worthless -- leaving them in the store means every CI run's
-    cachix push re-uploads hundreds of throwaway paths. One collect_garbage
-    call per path (instead of one batched call for all of them) also
-    exercises collect_garbage's own behavior under concurrent Store workers,
-    not just its single-call behavior.
-    """
-    if not paths:
-        return
-    await asyncio.gather(*(_delete_one_path(store, path) for path in paths))
-
-
 # nix::ActivityType::actBuild (src/libutil/include/nix/util/logging.hh) -- the
 # activity type Nix's own build scheduler reports a "start"/"stop" event under
 # for each derivation it builds.
@@ -362,90 +325,104 @@ async def test_inproc_forced_store_close_invalidates_dependent_evaluator() -> No
 @pytest.mark.anyio
 async def test_inproc_independent_builds_overlap_without_cpu_pressure() -> None:
     """Separate Store build calls run sleeping builders concurrently."""
-    async with _session(store_workers=2) as nix, nix.store() as store:
-        seconds = 2
-        first_eval = nix.eval(store)
-        second_eval = nix.eval(store)
-        await asyncio.gather(first_eval.open(), second_eval.open())
-        drv_paths: list[str] = []
+    drv_paths: list[str] = []
+    paths_to_delete: list[str] = []
+    async with _session(store_workers=2) as nix:
         try:
-            first_function, second_function = await asyncio.gather(
-                first_eval.string(_SLEEP_DERIVATION),
-                second_eval.string(_SLEEP_DERIVATION),
-            )
-            first_seconds, second_seconds = await asyncio.gather(
-                first_function.call(seconds), second_function.call(seconds)
-            )
-            first, second = await asyncio.gather(
-                first_seconds.call(uuid.uuid4().hex), second_seconds.call(uuid.uuid4().hex)
-            )
-            first_path, second_path = await asyncio.gather(first.get_derived_path(), second.get_derived_path())
-            drv_paths = [first_path, second_path]
-            async with _measuring_build_dispatch(nix) as starts:
-                first_result, second_result = await asyncio.gather(
-                    store.build_paths_with_results([first_path]),
-                    store.build_paths_with_results([second_path]),
-                )
-            assert first_result[0].success
-            assert second_result[0].success
-            assert len(starts) == 2, f"expected 2 build-start activities, saw {len(starts)}: {starts}"
-            spread = _dispatch_spread(starts)
-            # With only 2 builds there's just one gap to measure, and real
-            # TSAN-instrumented dispatch overhead for the second build has
-            # been observed at ~5.0-5.03s in CI (vs <0.25s natively) -- not
-            # because the builds are serialized, but because Nix's own
-            # client-side code leading up to each build's "start" activity
-            # is itself instrumented and slower. 6x the sleep duration stays
-            # a wide margin above that observed noise while still catching
-            # genuine full serialization (which would track the sleep
-            # duration itself, not a fixed per-build dispatch cost).
-            assert spread < seconds * 6, (
-                f"independent builds were not dispatched concurrently (start spread {spread:.3f}s)"
-            )
+            async with nix.store() as store:
+                seconds = 2
+                first_eval = nix.eval(store)
+                second_eval = nix.eval(store)
+                await asyncio.gather(first_eval.open(), second_eval.open())
+                try:
+                    first_function, second_function = await asyncio.gather(
+                        first_eval.string(_SLEEP_DERIVATION),
+                        second_eval.string(_SLEEP_DERIVATION),
+                    )
+                    first_seconds, second_seconds = await asyncio.gather(
+                        first_function.call(seconds), second_function.call(seconds)
+                    )
+                    first, second = await asyncio.gather(
+                        first_seconds.call(uuid.uuid4().hex), second_seconds.call(uuid.uuid4().hex)
+                    )
+                    first_path, second_path = await asyncio.gather(first.get_derived_path(), second.get_derived_path())
+                    drv_paths.extend([first_path, second_path])
+                    async with _measuring_build_dispatch(nix) as starts:
+                        first_result, second_result = await asyncio.gather(
+                            store.build_paths_with_results([first_path]),
+                            store.build_paths_with_results([second_path]),
+                        )
+                    assert first_result[0].success
+                    assert second_result[0].success
+                    assert len(starts) == 2, f"expected 2 build-start activities, saw {len(starts)}: {starts}"
+                    spread = _dispatch_spread(starts)
+                    # With only 2 builds there's just one gap to measure, and real
+                    # TSAN-instrumented dispatch overhead for the second build has
+                    # been observed at ~5.0-5.03s in CI (vs <0.25s natively) -- not
+                    # because the builds are serialized, but because Nix's own
+                    # client-side code leading up to each build's "start" activity
+                    # is itself instrumented and slower. 6x the sleep duration stays
+                    # a wide margin above that observed noise while still catching
+                    # genuine full serialization (which would track the sleep
+                    # duration itself, not a fixed per-build dispatch cost).
+                    assert spread < seconds * 6, (
+                        f"independent builds were not dispatched concurrently (start spread {spread:.3f}s)"
+                    )
+                finally:
+                    await asyncio.gather(first_eval.close(), second_eval.close())
+                    paths_to_delete = await _output_paths(store, drv_paths)
         finally:
-            await asyncio.gather(first_eval.close(), second_eval.close())
-            await _delete_paths(store, await _output_paths(store, drv_paths))
+            if paths_to_delete:
+                async with nix.store() as gc_store:
+                    await gc_store.collect_garbage(GcAction.RETURN_DEAD)
+                    await gc_store.collect_garbage(GcAction.DELETE_SPECIFIC, paths_to_delete=paths_to_delete)
 
 
 @pytest.mark.anyio
 async def test_inproc_one_evaluator_extracts_and_builds_fifty_derivations() -> None:
     """One EvalState hands 50 DerivedPath strings to one max-jobs-limited build request."""
-    async with _session(store_workers=1) as nix, nix.store() as store, nix.eval(store) as evaluator:
-        seconds = 2
-        values = await _sleep_derivations(evaluator, count=50, seconds=seconds)
-        drv_paths: list[str] = []
+    drv_paths: list[str] = []
+    async with _session(store_workers=1) as nix, nix.store() as store:
         try:
-            drv_paths = await _derived_paths(values)
-            async with _measuring_build_dispatch(nix) as starts:
-                results = await store.build_paths_with_results(drv_paths)
-            assert len(results) == 50
-            assert all(result.success for result in results)
-            assert len(starts) == 50, f"expected 50 build-start activities, saw {len(starts)}: {starts}"
-            # max-jobs=25 permits (at least) 25 of these to be dispatched as
-            # one concurrent wave -- check the tightest cluster of 25 sorted
-            # start times directly, rather than inferring concurrency from
-            # total elapsed wall-clock time (see _measuring_build_dispatch
-            # for why that's fragile: real fork/sandbox-setup overhead for
-            # 50 builds is nontrivial even when genuinely concurrent, and
-            # this assumed a fixed total-duration budget instead of checking
-            # dispatch concurrency directly).
-            sorted_starts = sorted(starts)
-            first_wave_spread = sorted_starts[24] - sorted_starts[0]
-            assert first_wave_spread < seconds * 4, (
-                f"fewer than 25 builds were dispatched concurrently (first-wave spread {first_wave_spread:.3f}s)"
-            )
+            async with nix.eval(store) as evaluator:
+                seconds = 2
+                values = await _sleep_derivations(evaluator, count=50, seconds=seconds)
+                try:
+                    drv_paths.extend(await _derived_paths(values))
+                    async with _measuring_build_dispatch(nix) as starts:
+                        results = await store.build_paths_with_results(drv_paths)
+                    assert len(results) == 50
+                    assert all(result.success for result in results)
+                    assert len(starts) == 50, f"expected 50 build-start activities, saw {len(starts)}: {starts}"
+                    # max-jobs=25 permits (at least) 25 of these to be dispatched as
+                    # one concurrent wave -- check the tightest cluster of 25 sorted
+                    # start times directly, rather than inferring concurrency from
+                    # total elapsed wall-clock time (see _measuring_build_dispatch
+                    # for why that's fragile: real fork/sandbox-setup overhead for
+                    # 50 builds is nontrivial even when genuinely concurrent, and
+                    # this assumed a fixed total-duration budget instead of checking
+                    # dispatch concurrency directly).
+                    sorted_starts = sorted(starts)
+                    first_wave_spread = sorted_starts[24] - sorted_starts[0]
+                    assert first_wave_spread < seconds * 4, (
+                        f"fewer than 25 builds were dispatched concurrently (first-wave spread {first_wave_spread:.3f}s)"
+                    )
+                finally:
+                    await _release_all(values)
         finally:
-            await _release_all(values)
-            await _delete_paths(store, await _output_paths(store, drv_paths))
+            paths_to_delete = await _output_paths(store, drv_paths)
+            await store.close()
+            await store.open()
+            await store.collect_garbage(GcAction.DELETE_SPECIFIC, paths_to_delete=paths_to_delete)
 
 
 @pytest.mark.anyio
 async def test_inproc_parallel_batch_builds_use_multiple_store_workers() -> None:
     """Several evaluator lanes can prepare independently and build concurrently."""
+    derived_path_groups: list[list[str]] = []
     async with _session(store_workers=4) as nix, nix.store() as store:
         evaluators = [nix.eval(store) for _ in range(4)]
         values: list[list[inproc.Value]] = []
-        derived_path_groups: list[list[str]] = []
         seconds = 2
         try:
             await asyncio.gather(*(evaluator.open() for evaluator in evaluators))
@@ -474,19 +451,23 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers() -> None
         finally:
             await asyncio.gather(*(_release_all(group) for group in values))
             await asyncio.gather(*(evaluator.close() for evaluator in evaluators))
-            all_drv_paths = [path for group in derived_path_groups for path in group]
-            await _delete_paths(store, await _output_paths(store, all_drv_paths))
+            paths_to_delete = await _output_paths(
+                store, [path for group in derived_path_groups for path in group]
+            )
+            await store.close()
+            await store.open()
+            await store.collect_garbage(GcAction.DELETE_SPECIFIC, paths_to_delete=paths_to_delete)
 
 
 @pytest.mark.anyio
 async def test_inproc_mixed_evaluation_build_and_store_workloads() -> None:
     """Evaluation, builds, and cache-miss Store queries make progress together."""
+    build_paths: list[list[str]] = []
     async with _session(store_workers=4) as nix, nix.store() as store:
         build_evaluators = [nix.eval(store) for _ in range(2)]
         query_evaluators = [nix.eval(store) for _ in range(2)]
         evaluators = [*build_evaluators, *query_evaluators]
         build_values: list[list[inproc.Value]] = []
-        build_paths: list[list[str]] = []
         try:
             await asyncio.gather(*(evaluator.open() for evaluator in evaluators))
             build_values = await asyncio.gather(
@@ -519,8 +500,10 @@ async def test_inproc_mixed_evaluation_build_and_store_workloads() -> None:
         finally:
             await asyncio.gather(*(_release_all(group) for group in build_values))
             await asyncio.gather(*(evaluator.close() for evaluator in evaluators))
-            all_drv_paths = [path for group in build_paths for path in group]
-            await _delete_paths(store, await _output_paths(store, all_drv_paths))
+            paths_to_delete = await _output_paths(store, [path for group in build_paths for path in group])
+            await store.close()
+            await store.open()
+            await store.collect_garbage(GcAction.DELETE_SPECIFIC, paths_to_delete=paths_to_delete)
 
 
 @pytest.mark.anyio
