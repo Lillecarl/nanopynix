@@ -7,21 +7,20 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
 
 from nanopynix import inproc
+from nanopynix.models import BuildResult, LogEvent, StorePath
 
 
 pytestmark = pytest.mark.concurrency
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-
-    from nanopynix.models import LogEvent
 
 
 def _raw_session(*, store_workers: int = 4) -> inproc.Session:
@@ -57,7 +56,7 @@ def _wait_for_peer(barrier: threading.Barrier) -> int:
 
 def _emit_log(message: str, barrier: threading.Barrier) -> int:
     barrier.wait(timeout=5)
-    nanopynix_util._log_test(message)
+    nanopynix_util._log_test(message)  # type: ignore[reportPrivateUsage] -- test imports private helper
     return threading.get_ident()
 
 
@@ -269,7 +268,7 @@ async def test_inproc_store_metadata_and_closure_queries_run_concurrently() -> N
 async def test_inproc_logs_keep_operation_ids_isolated_between_store_threads() -> None:
     """Logger request context is thread-local and restored after each job."""
     async with _session(store_workers=2) as nix:
-        events: asyncio.Queue[object] = asyncio.Queue()
+        events: asyncio.Queue[LogEvent] = asyncio.Queue()
         subscription = nix.subscribe(events.put_nowait)
         try:
             barrier = threading.Barrier(2)
@@ -489,9 +488,9 @@ async def test_inproc_mixed_evaluation_build_and_store_workloads() -> None:
                 for path in selected
             ]
             results = await asyncio.gather(*build_tasks, *evaluation_tasks, *query_tasks)
-            built = results[: len(build_tasks)]
-            evaluated = results[len(build_tasks) : len(build_tasks) + len(evaluation_tasks)]
-            closures = results[len(build_tasks) + len(evaluation_tasks) :]
+            built = cast("list[list[BuildResult]]", results[: len(build_tasks)])
+            evaluated = cast("list[inproc.Value]", results[len(build_tasks) : len(build_tasks) + len(evaluation_tasks)])
+            closures = cast("list[list[StorePath]]", results[len(build_tasks) + len(evaluation_tasks) :])
             assert [len(group) for group in built] == [5] * 2
             assert all(result.success for group in built for result in group)
             assert await asyncio.gather(*(value.as_int() for value in evaluated)) == [49_995_000] * len(evaluated)

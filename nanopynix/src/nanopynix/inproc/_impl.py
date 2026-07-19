@@ -669,9 +669,9 @@ class EvalSession:
         try:
             self._local = await self.run(
                 self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime
-                self._store._require_local(),
-                nix_path,
-                None if self._build_store is None else self._build_store._require_local(),
+            self._store._require_local(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling
+            nix_path,
+            None if self._build_store is None else self._build_store._require_local(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling
                 rendered_eval,
                 rendered_fetch,
             )
@@ -844,26 +844,26 @@ class ReplSession:
         A binding such as ``x = 1`` returns ``None``. An expression returns a
         session-bound :class:`Value`.
         """
-        local = await self._eval_session.run(self._eval_session._require_local().repl_process_line, text, path)
+        local = await self._eval_session.run(self._eval_session._require_local().repl_process_line, text, path)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
         return None if local is None else self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def load_file(self, path: str) -> Value:
         """Load a Nix expression file as ``nix repl :load`` does."""
-        local = await self._eval_session.run(self._eval_session._require_local().repl_load_file, path)
+        local = await self._eval_session.run(self._eval_session._require_local().repl_load_file, path)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
         return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
 
     async def add_attrs(self, value: Value) -> list[str]:
         """Add all attributes from ``value`` to this REPL's lexical scope."""
         local_value = value._local_for(self._eval_session)  # type: ignore[reportPrivateUsage] -- same-evaluator guard
-        return await self._eval_session.run(self._eval_session._require_local().repl_add_attrs, local_value)
+        return await self._eval_session.run(self._eval_session._require_local().repl_add_attrs, local_value)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
 
     async def scope_names(self) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
-        return await self._eval_session.run(self._eval_session._require_raw().repl_scope_names)
+        return await self._eval_session.run(self._eval_session._require_raw().repl_scope_names)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
 
     async def reset_file_cache(self) -> None:
         """Discard parsed file cache entries before reloading REPL sources."""
-        await self._eval_session.run(self._eval_session._require_raw().reset_file_cache)
+        await self._eval_session.run(self._eval_session._require_raw().reset_file_cache)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
 
 
 class LockedFlake:
@@ -1035,7 +1035,7 @@ class Value:
     async def _argument_local(self, argument: Value | Any) -> LocalValue:
         if isinstance(argument, Value):
             return argument._local_for(self._eval_session)
-        return await self._eval_session.run(self._eval_session._require_local().value_from_python, argument)
+        return await self._eval_session.run(self._eval_session._require_local().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→Value coupling
 
     async def build(self, *, store: Store | None = None, build_mode: Any = None) -> dict[str, str]:
         """Build the derivation represented by this evaluated value.
