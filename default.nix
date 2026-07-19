@@ -175,6 +175,7 @@ let
                     inherit tsanRuntime;
                   };
                 };
+              nanopynix-helpers = callNixPythonPackage ./nanopynix-helpers/package.nix { };
               pynix = callNixPythonPackage ./pynix/package.nix { };
               shell = callNixPythonPackage ./nix/shell.nix { };
               nanopynix-docs = callNixPythonPackage ./nix/docs.nix { };
@@ -276,6 +277,7 @@ in
   inherit (nanopynixVersions.stable)
     nanopynix
     nanopynix-bindings
+    nanopynix-helpers
     pynix
     shell
     nanopynix-docs

@@ -35,14 +35,26 @@ let
     };
   });
 
+  treeSitterNix = import ./tree-sitter-nix.nix { inherit python treeSitterCli nixpkgsPath; };
+
+  nanopynix-helpers = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
+    projectRoot = ../nanopynix-helpers;
+    root = "$GIT_ROOT/nanopynix-helpers/src";
+    inherit python;
+    pythonPackages = python.pkgs // {
+      inherit nanopynix;
+      "tree-sitter-nix" = treeSitterNix;
+    };
+  });
+
   pynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
     projectRoot = ../pynix;
     root = "$GIT_ROOT/pynix/src";
     inherit python;
     extras = [ "test" ];
     pythonPackages = python.pkgs // {
-      inherit nanopynix clypi;
-      "tree-sitter-nix" = import ./tree-sitter-nix.nix { inherit python treeSitterCli nixpkgsPath; };
+      inherit nanopynix nanopynix-helpers clypi;
+      "tree-sitter-nix" = treeSitterNix;
     };
   });
 
@@ -55,10 +67,12 @@ let
   pythonEnv = python.withPackages (
     pp:
     nanopynix.dependencies
+    ++ nanopynix-helpers.dependencies
     ++ pynix.dependencies
     ++ pytest-agent.dependencies
     ++ [
       nanopynix
+      nanopynix-helpers
       pynix
       pytest-agent
       sphinx

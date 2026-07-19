@@ -2,6 +2,7 @@
   lib,
   buildPythonApplication,
   nanopynix,
+  nanopynix-helpers,
   clypi,
   python,
   renderPyproject,
@@ -14,7 +15,7 @@ let
     projectRoot = ./.;
     inherit python;
     pythonPackages = python.pkgs // {
-      inherit nanopynix clypi;
+      inherit nanopynix nanopynix-helpers clypi;
       "tree-sitter-nix" = import ../nix/tree-sitter-nix.nix { inherit python treeSitterCli nixpkgsPath; };
     };
   };
