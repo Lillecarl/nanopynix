@@ -195,9 +195,12 @@ class TestOpenStore:
         assert store.get_uri().startswith("local")
 
     def test_open_store_uri_with_params(self, tmp_path: Path):
+        """get_uri renders via Nix's StoreReference::render, which always
+        includes the "://" scheme separator -- switched to from a renderer
+        that silently dropped URI params."""
         store = nanopynix_store.open_store(f"local?root={tmp_path}")
-        assert store.get_uri() == "local"
-        assert store.get_uri(with_params=True) == f"local?root={tmp_path}"
+        assert store.get_uri() == "local://"
+        assert store.get_uri(with_params=True) == f"local://?root={tmp_path}"
 
     @pytest.mark.skipif(os.environ.get("GITHUB_ACTIONS") == "true", reason="local store layout differs in GHA")
     def test_open_store_uri_local_initializes_store_layout(self, tmp_path: Path):
