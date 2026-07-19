@@ -6,7 +6,7 @@ import inspect
 import os
 import re
 import sys
-from collections.abc import Awaitable, Callable, Generator
+from collections.abc import Awaitable, Callable, Generator, Iterator
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -190,6 +190,29 @@ def _init():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wi
     _store_mode_cache = "daemon" if probe_store.get_uri() == "daemon" else "local"
     os.environ["NANOPYNIX_STORE_MODE"] = _store_mode_cache
     print(f"\n[nanopynix] auto store resolved to: {_store_mode_cache}")  # noqa: T201 -- CI visibility: which Nix store backend resolved is otherwise invisible in test output
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _configure_worker_local_stores(_init: None) -> Iterator[None]:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
+    """Keep worker-owned ``local?root`` test stores independent of nixbld.
+
+    The parent process's direct libstore initialization above already sets
+    these values. RPC workers initialize libstore separately, however, and a
+    multi-user installation otherwise makes their explicit temporary local
+    stores chown pytest-owned directories to the nixbld group. ``NIX_CONFIG``
+    is inherited when each worker starts, while the daemon remains configured
+    as a real multi-user daemon.
+    """
+    original = os.environ.get("NIX_CONFIG")
+    worker_settings = "build-users-group =\nrequire-drop-supplementary-groups = false"
+    os.environ["NIX_CONFIG"] = f"{original}\n{worker_settings}" if original else worker_settings
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop("NIX_CONFIG", None)
+        else:
+            os.environ["NIX_CONFIG"] = original
 
 
 @pytest.fixture(scope="session")
