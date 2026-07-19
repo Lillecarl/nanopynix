@@ -52,7 +52,8 @@ def _wait_for_peer(barrier: threading.Barrier) -> int:
     return threading.get_ident()
 
 
-def _emit_log(message: str) -> int:
+def _emit_log(message: str, barrier: threading.Barrier) -> int:
+    barrier.wait(timeout=5)
     nanopynix_util._log_test(message)
     return threading.get_ident()
 
@@ -305,9 +306,10 @@ async def test_inproc_logs_keep_operation_ids_isolated_between_store_threads() -
         events: asyncio.Queue[object] = asyncio.Queue()
         subscription = nix.subscribe(events.put_nowait)
         try:
+            barrier = threading.Barrier(2)
             first_thread, second_thread = await asyncio.gather(
-                nix.run(_emit_log, "first concurrent operation"),
-                nix.run(_emit_log, "second concurrent operation"),
+                nix.run(_emit_log, "first concurrent operation", barrier),
+                nix.run(_emit_log, "second concurrent operation", barrier),
             )
             assert first_thread != second_thread
 
