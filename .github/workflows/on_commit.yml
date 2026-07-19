@@ -6,7 +6,13 @@ name: On commit
   push:
     branches-ignore:
     - ci-develop
-  workflow_dispatch: null
+  workflow_dispatch:
+    inputs:
+      jobs:
+        type: string
+        description: Comma-separated job IDs to run; leave empty for the full matrix
+        required: false
+        default: ''
 jobs:
   docs-build:
     needs:
@@ -139,6 +145,8 @@ jobs:
           ${{ github.workspace }}/tsan-output-broad-git-single-user.log
       if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-tsan-git-single-user,')
   test-tsan-git-multi-user:
     steps:
     - uses: actions/checkout@main
@@ -215,6 +223,8 @@ jobs:
           ${{ github.workspace }}/tsan-output-broad-git-multi-user.log
       if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-tsan-git-multi-user,')
   test-tsan-nix_2_34-single-user:
     steps:
     - uses: actions/checkout@main
@@ -292,6 +302,8 @@ jobs:
           ${{ github.workspace }}/tsan-output-broad-nix_2_34-single-user.log
       if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-tsan-nix_2_34-single-user,')
   test-tsan-nix_2_34-multi-user:
     steps:
     - uses: actions/checkout@main
@@ -368,6 +380,8 @@ jobs:
           ${{ github.workspace }}/tsan-output-broad-nix_2_34-multi-user.log
       if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-tsan-nix_2_34-multi-user,')
   test-tsan-nix_2_35-single-user:
     steps:
     - uses: actions/checkout@main
@@ -445,6 +459,8 @@ jobs:
           ${{ github.workspace }}/tsan-output-broad-nix_2_35-single-user.log
       if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-tsan-nix_2_35-single-user,')
   test-tsan-nix_2_35-multi-user:
     steps:
     - uses: actions/checkout@main
@@ -521,6 +537,8 @@ jobs:
           ${{ github.workspace }}/tsan-output-broad-nix_2_35-multi-user.log
       if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-tsan-nix_2_35-multi-user,')
   test-git-single-user:
     steps:
     - uses: actions/checkout@main
@@ -582,6 +600,8 @@ jobs:
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-git-single-user,')
   test-git-multi-user:
     steps:
     - uses: actions/checkout@main
@@ -642,6 +662,8 @@ jobs:
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-git-multi-user,')
   test-nix_2_31-single-user:
     steps:
     - uses: actions/checkout@main
@@ -703,6 +725,8 @@ jobs:
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nix_2_31-single-user,')
   test-nix_2_31-multi-user:
     steps:
     - uses: actions/checkout@main
@@ -763,6 +787,8 @@ jobs:
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nix_2_31-multi-user,')
   test-nix_2_34-single-user:
     steps:
     - uses: actions/checkout@main
@@ -824,6 +850,8 @@ jobs:
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nix_2_34-single-user,')
   test-nix_2_34-multi-user:
     steps:
     - uses: actions/checkout@main
@@ -884,6 +912,8 @@ jobs:
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nix_2_34-multi-user,')
   test-nix_2_35-single-user:
     steps:
     - uses: actions/checkout@main
@@ -945,6 +975,8 @@ jobs:
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nix_2_35-single-user,')
   test-nix_2_35-multi-user:
     steps:
     - uses: actions/checkout@main
@@ -1005,3 +1037,5 @@ jobs:
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nix_2_35-multi-user,')
