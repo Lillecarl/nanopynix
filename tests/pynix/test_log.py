@@ -12,15 +12,19 @@ import pynix.log as log_module
 import pytest
 from nanopynix_proto.nix.store import GetBuildLogRequest
 
-import nanopynix
 from pynix import Pynix
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
+    from tests.support.nix_environment import NixTestEnvironment
 
-async def test_nanopynix_store_get_build_log_from_populated_store(populated_store: dict[str, str]):
-    async with nanopynix.Session() as nix, nix.store(populated_store["store_url"]) as store:
+
+async def test_nanopynix_store_get_build_log_from_populated_store(
+    populated_store: dict[str, str],
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    async with shared_nix_environment.rpc_session() as nix, nix.store() as store:
         response = await store.rpc.get_build_log(GetBuildLogRequest(path=populated_store["log_path"]))
 
     assert response.log is not None
@@ -34,13 +38,16 @@ async def test_pynix_log_prints_build_log_from_populated_store(populated_store: 
     assert "pynix-log-line" in captured.out
 
 
-async def test_pynix_log_errors_when_build_log_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_pynix_log_errors_when_build_log_unavailable(
+    isolated_nix_environment: NixTestEnvironment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path = "/nix/store/00000000000000000000000000000000-no-log"
     monkeypatch.setattr(log_module, "prepare_sys_path", lambda: None)
     monkeypatch.setattr(log_module, "forward_nix_logs", _noop_forward_nix_logs)
     monkeypatch.setattr(log_module, "nanopynix", SimpleNamespace(Session=_FakeSession))
 
-    cmd = Pynix.parse(["log", path, "--store", "auto"])
+    cmd = Pynix.parse(["log", path, *isolated_nix_environment.pynix_store_args()])
     with pytest.raises(SystemExit, match=r"build log of .* is not available"):
         await cmd.astart()
 

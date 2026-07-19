@@ -9,6 +9,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
     from pathlib import Path
 
+    from tests.support.nix_environment import NixTestEnvironment
+
 import pynix.store as store_module
 import pytest
 
@@ -17,6 +19,10 @@ from pynix import Pynix
 
 def _store_path_basename(path: str) -> str:
     return path.split("/nix/store/", 1)[1]
+
+
+def _with_nixpkgs(source: str, nixpkgs_path: str) -> str:
+    return source.replace("<nixpkgs>", nixpkgs_path)
 
 
 async def test_print_roots(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
@@ -129,9 +135,14 @@ async def test_query_missing(populated_store: dict[str, str], capsys: pytest.Cap
     assert isinstance(data["narSize"], int)
 
 
-async def test_query_derivation_outputs(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+async def test_query_derivation_outputs(
+    isolated_nix_environment: NixTestEnvironment,
+    nixpkgs_path: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     nix_file = tmp_path / "test.nix"
-    nix_file.write_text("""
+    nix_file.write_text(_with_nixpkgs("""
     let
       pkgs = import <nixpkgs> {};
     in
@@ -143,13 +154,15 @@ async def test_query_derivation_outputs(tmp_path: Path, capsys: pytest.CaptureFi
         echo hi > "$out"
       '';
     }
-    """)
-    show = Pynix.parse(["derivation", "show", "--file", str(nix_file)])
+    """, nixpkgs_path))
+    show = Pynix.parse(["derivation", "show", "--file", str(nix_file), *isolated_nix_environment.pynix_store_args()])
     await show.astart()
     captured = capsys.readouterr()
     drv_path = next(iter(json.loads(captured.out)))
 
-    cmd = Pynix.parse(["store", "query-derivation-outputs", drv_path, "--store", "auto"])
+    cmd = Pynix.parse(
+        ["store", "query-derivation-outputs", drv_path, *isolated_nix_environment.pynix_store_args()]
+    )
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -259,7 +272,7 @@ async def test_store_ls_lists_populated_store_path(populated_store: dict[str, st
 
 async def test_store_cat_local_path_mapping_unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
     store_root = tmp_path / "store-root"
-    store_url = f"local?root={store_root}"
+    store_url = "test://store"
     out_path = "/nix/store/00000000000000000000000000000000-pynix-store-cat-test"
     output_file = store_root / out_path.removeprefix("/") / "share" / "message"
     output_file.parent.mkdir(parents=True)
@@ -274,7 +287,7 @@ async def test_store_cat_local_path_mapping_unit(tmp_path: Path, monkeypatch: py
 
 async def test_store_ls_local_path_mapping_unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
     store_root = tmp_path / "store-root"
-    store_url = f"local?root={store_root}"
+    store_url = "test://store"
     out_path = "/nix/store/00000000000000000000000000000000-pynix-store-ls-test"
     store_path = store_root / out_path.removeprefix("/")
     (store_path / "bin").mkdir(parents=True)
@@ -320,7 +333,7 @@ async def test_store_diff_closures_reports_added_removed_and_size_delta(tmp_path
         },
     )
 
-    cmd = Pynix.parse(["store", "diff-closures", before_path, after_path])
+    cmd = Pynix.parse(["store", "diff-closures", before_path, after_path, "--store", "test://store"])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -335,16 +348,22 @@ async def test_store_diff_closures_reports_added_removed_and_size_delta(tmp_path
     }
 
 
-async def test_optimise_empty_local_store(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
-    cmd = Pynix.parse(["store", "optimise", "--store", f"local?root={tmp_path}"])
+async def test_optimise_empty_store(
+    isolated_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cmd = Pynix.parse(["store", "optimise", *isolated_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert data == {"optimised": True}
 
 
-async def test_verify_empty_local_store(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
-    cmd = Pynix.parse(["store", "verify", "--store", f"local?root={tmp_path}"])
+async def test_verify_empty_store(
+    isolated_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cmd = Pynix.parse(["store", "verify", *isolated_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
