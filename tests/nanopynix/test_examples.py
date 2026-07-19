@@ -17,7 +17,7 @@ _EXAMPLE_FILES = sorted(_EXAMPLES.glob("*_example.py"))
 
 # Dynamic primop registration (including the built-in YAML primops) is broken
 # on Nix 2.31 and isn't expected to be fixed there — see nanopynix.primops.
-_requires_dynamic_primops = pytest.mark.required_nix_version("2.32", None)
+_requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
 _EXAMPLE_PARAMS = [
     pytest.param(path, marks=_requires_dynamic_primops) if path.name == "primops_example.py" else path
     for path in _EXAMPLE_FILES

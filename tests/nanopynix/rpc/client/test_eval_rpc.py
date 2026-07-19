@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from _git import init_flake_repo
+from tests.support.git import init_flake_repo
 from anyio import Path as AnyioPath
 
 from nanopynix import (
@@ -26,7 +26,7 @@ from nanopynix import (
     yaml_primops,
 )
 
-requires_dynamic_primops = pytest.mark.required_nix_version("2.32", None)
+requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
 
 
 async def test_force_closing_store_closes_dependent_eval_state() -> None:

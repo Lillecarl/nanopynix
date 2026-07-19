@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from _git import init_flake_repo
+from tests.support.git import init_flake_repo
 from nanopynix_bindings import fetchers as nanopynix_fetchers  # L1 Input
 from nanopynix_bindings import flake as nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
 from nanopynix_bindings import store as nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo

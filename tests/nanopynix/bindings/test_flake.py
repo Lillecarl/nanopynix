@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from _git import commit_files, init_flake_repo, init_repo
+from tests.support.git import commit_files, init_flake_repo, init_repo
 from nanopynix_bindings import flake as nanopynix_flake
 
 import nanopynix

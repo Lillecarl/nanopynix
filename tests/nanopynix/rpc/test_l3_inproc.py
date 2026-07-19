@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from _git import init_flake_repo
+from tests.support.git import init_flake_repo
 from grpclib.exceptions import GRPCError
 from grpclib_transports import inproc_worker_with_backchannel
 from nanopynix_bindings import util as nanopynix_util

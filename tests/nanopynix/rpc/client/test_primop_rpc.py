@@ -10,7 +10,7 @@ import pytest
 from nanopynix.models import PrimOpSpec
 from nanopynix.rpc.client.session import Session
 
-pytestmark = pytest.mark.required_nix_version("2.32", None)
+pytestmark = pytest.mark.nix_version(minimum="2.32")
 
 
 def _rpc_double(x: int) -> int:

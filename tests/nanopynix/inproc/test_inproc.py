@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from _git import init_flake_repo
+from tests.support.git import init_flake_repo
 from anyio import Path as AnyioPath
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import util as nanopynix_util

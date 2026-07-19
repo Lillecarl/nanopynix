@@ -158,6 +158,7 @@ class Session:
         experimental_features: Sequence[str] | None = None,
         verbosity: LogLevelInput | None = None,
         nix_path: str | Sequence[str] | None = None,
+        store_uri: str = "auto",
         store_workers: int = 4,
     ) -> None:
         if nix_conf is not None:
@@ -170,6 +171,7 @@ class Session:
         self._settings = normalize_nix_settings(settings).with_experimental_features(list(experimental_features or []))
         self._verbosity = normalize_log_level(verbosity) if verbosity is not None else None
         self._nix_path = self._normalize_nix_path(nix_path)
+        self._store_uri = store_uri
         if store_workers < 1:
             raise ValueError("store_workers must be at least 1")
         self._store_workers = store_workers
@@ -342,9 +344,9 @@ class Session:
         """Remove one callback previously registered with :meth:`subscribe`."""
         self._log_callbacks.discard(callback)
 
-    def store(self, uri: str = "auto") -> Store:
+    def store(self, uri: str | None = None) -> Store:
         """Return a direct-pointer store context manager."""
-        store = Store(self, uri)
+        store = Store(self, self._store_uri if uri is None else uri)
         self._stores.add(store)
         return store
 

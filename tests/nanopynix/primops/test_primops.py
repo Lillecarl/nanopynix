@@ -12,7 +12,7 @@ import pytest
 if TYPE_CHECKING:
     import nanopynix
 
-pytestmark = pytest.mark.required_nix_version("2.32", None)
+pytestmark = pytest.mark.nix_version(minimum="2.32")
 
 
 class TestRegisterPrimop:

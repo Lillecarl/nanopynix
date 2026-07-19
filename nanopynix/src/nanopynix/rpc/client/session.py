@@ -194,6 +194,7 @@ class Session:
         nix_settings = normalize_nix_settings(settings).with_experimental_features(experimental_features)
         nanopynix_settings = runtime_settings or NanopynixSettings()
         self.runtime_settings = nanopynix_settings
+        self._store_uri = store_uri
         worker_settings = nix_settings.to_worker_settings()
         self._manager = _WorkerClient(
             store_uri=store_uri,
@@ -212,7 +213,7 @@ class Session:
         self._session_id = uuid.uuid4().hex
         self._evals: set[EvalSession] = set()
 
-    def store(self, uri: str = "auto") -> Store:
+    def store(self, uri: str | None = None) -> Store:
         """Create an ergonomic Store facade for store operations.
 
         Usage::
@@ -227,10 +228,11 @@ class Session:
         ``Eval`` from a different session raises ``ValueError``. Opening the
         handle adds its URI to the worker's process title.
         """
+        selected_uri = self._store_uri if uri is None else uri
         return Store(
             StoreHandle(
                 self._manager,
-                uri,
+                selected_uri,
                 self._session_id,
                 self._manager.rpc_timeout,
             )

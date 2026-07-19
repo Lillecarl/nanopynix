@@ -6,7 +6,6 @@ import atexit
 import functools
 import inspect
 import os
-import re
 import sys
 from collections.abc import Awaitable, Callable, Generator, Iterator
 from pathlib import Path
@@ -18,6 +17,11 @@ from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import util as nanopynix_util
 
 import nanopynix
+
+pytest_plugins = (
+    "tests.support.nix_environment",
+    "tests.support.nix_runtime",
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -77,49 +81,11 @@ def pytest_configure(config: pytest.Config):
         "markers",
         "live_gc: test performs destructive live Nix garbage collection",
     )
-    config.addinivalue_line(
-        "markers",
-        "required_nix_version(min, max): require linked Nix in [min, max); use None for no bound",
-    )
     if os.environ.get("COVERAGE_PROCESS_START"):
         _enable_subprocess_coverage()
 
 
-def _nix_version_tuple(value: str) -> tuple[int, ...]:
-    match = re.match(r"(\d+(?:\.\d+)*)", value)
-    if match is None:
-        raise ValueError(f"cannot parse linked Nix version: {value!r}")
-    return tuple(int(part) for part in match.group(1).split("."))
-
-
-def _version_at_least(actual: tuple[int, ...], required: tuple[int, ...]) -> bool:
-    width = max(len(actual), len(required))
-    return actual + (0,) * (width - len(actual)) >= required + (0,) * (width - len(required))
-
-
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: ARG001 -- hookspec signature requires config arg
-    build_info: Any = nanopynix.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
-    actual = _nix_version_tuple(build_info["nix_version"])
-    for item in items:
-        marker = item.get_closest_marker("required_nix_version")
-        if marker is None:
-            continue
-        if marker.kwargs or len(marker.args) != 2:
-            raise pytest.UsageError(
-                "required_nix_version requires exactly two positional arguments: min, max"
-            )
-
-        minimum, maximum = marker.args
-        if minimum is not None and not isinstance(minimum, str):
-            raise pytest.UsageError("required_nix_version min must be a string or None")
-        if maximum is not None and not isinstance(maximum, str):
-            raise pytest.UsageError("required_nix_version max must be a string or None")
-
-        if minimum is not None and not _version_at_least(actual, _nix_version_tuple(minimum)):
-            item.add_marker(pytest.mark.skip(reason=f"requires Nix >= {minimum}"))
-        if maximum is not None and _version_at_least(actual, _nix_version_tuple(maximum)):
-            item.add_marker(pytest.mark.skip(reason=f"requires Nix < {maximum}"))
-
     for item in items:
         if isinstance(item, pytest.Function) and inspect.iscoroutinefunction(item.obj):
             item.obj = _with_test_timeout(item.obj)
@@ -159,9 +125,6 @@ def pytest_runtest_setup(item: pytest.Item):
     pytest.skip("destructive live GC test; pass --run-live-gc or NANOPYNIX_RUN_LIVE_GC=1 to run")
 
 
-_store_mode_cache: str | None = None
-
-
 class StorePathRecorder:
     """Persist default-store paths for deletion after pytest has exited."""
 
@@ -194,39 +157,12 @@ def store_path_recorder() -> StorePathRecorder:
     return StorePathRecorder(path)
 
 
-def detected_store_mode() -> str:
-    """Return how "auto" resolved a Nix store in this test process.
-
-    "local" means a direct in-process ``LocalStore`` (Nix's own
-    ``resolveStoreConfig`` picked this when the Nix state dir is writable by
-    the current user — e.g. single-user Nix installs). "daemon" means Nix
-    connected to a running ``nix-daemon`` over its Unix socket instead (e.g.
-    multi-user Nix installs where the state dir isn't directly writable).
-    Building/evaluating in "daemon" mode happens largely inside the separate
-    daemon process, not this one, which changes the concurrency/GC exposure
-    of in-process tests.
-    """
-    if _store_mode_cache is None:
-        raise RuntimeError("store mode not yet detected; the _init fixture has not run")
-    return _store_mode_cache
-
-
 @pytest.fixture(scope="session", autouse=True)
 def _init():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
-    """Initialize libstore, enable flakes (needed by fetchers/flake tests)."""
-    # These settings only affect a LocalStore constructed in this process; if
-    # "auto" resolves to a daemon store instead (see detected_store_mode()),
-    # the real build-users-group/sandboxing config lives in the daemon's own
-    # nix.conf and these calls have no effect on it.
+    """Initialize libstore without opening a host-selected store."""
     nanopynix_util.set_setting("build-users-group", "")
     nanopynix_util.set_setting("require-drop-supplementary-groups", "false")
     nanopynix.init_libstore(load_config=False)
-
-    global _store_mode_cache
-    probe_store: Any = nanopynix.open_store()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
-    _store_mode_cache = "daemon" if probe_store.get_uri() == "daemon" else "local"
-    os.environ["NANOPYNIX_STORE_MODE"] = _store_mode_cache
-    print(f"\n[nanopynix] auto store resolved to: {_store_mode_cache}")  # noqa: T201 -- CI visibility: which Nix store backend resolved is otherwise invisible in test output
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -250,12 +186,6 @@ def _configure_worker_local_stores(_init: None) -> Iterator[None]:  # type: igno
             os.environ.pop("NIX_CONFIG", None)
         else:
             os.environ["NIX_CONFIG"] = original
-
-
-@pytest.fixture(scope="session")
-def store_mode(_init: None) -> str:
-    """'local' if "auto" resolved to a direct LocalStore, 'daemon' if via nix-daemon."""
-    return detected_store_mode()
 
 
 @pytest.fixture(scope="session")
