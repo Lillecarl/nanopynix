@@ -38,6 +38,7 @@ service StoreService {
 }
 
 message GetUriRequest {
+  bool with_params = 1;
   int64 request_id = 1000;
   int64 store_handle = 100;
 }

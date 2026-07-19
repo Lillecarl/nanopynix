@@ -734,9 +734,13 @@ static nb::dict build_derivation(nix::Store &s, const nix::StorePath &drvPath,
     return build_result_from_br(result);
 }
 
-static nb::dict store_get_uri(nix::Store &s, const nb::dict &) {
+static std::string store_uri(nix::Store &s, bool with_params) {
+    return with_params ? s.config.getReference().render() : s.config.getHumanReadableURI();
+}
+
+static nb::dict store_get_uri(nix::Store &s, const nb::dict &request) {
     nb::dict d;
-    d["uri"] = s.config.getHumanReadableURI();
+    d["uri"] = store_uri(s, request_bool(request, "with_params"));
     return d;
 }
 
@@ -1053,7 +1057,8 @@ static void bind_store(nb::module_ &m) {
              [](nix::Store &s) -> std::string { return s.config.storeDir_; })
         .def("get_store_dirs", &store_get_store_dirs_direct)
         .def("get_uri",
-             [](nix::Store &s) -> std::string { return s.config.getHumanReadableURI(); })
+             &store_uri,
+             "with_params"_a = false)
         .def("is_valid_path", [](nix::Store &s, const nix::StorePath &p) { return s.isValidPath(p); },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
         .def("parse_store_path", [](nix::Store &s, const std::string &p) { return s.parseStorePath(p); },

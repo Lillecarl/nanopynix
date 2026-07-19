@@ -13,8 +13,6 @@ from typing import Any
 import pytest
 from nanopynix_bindings import store as nanopynix_store
 
-import nanopynix
-
 NIX_GC_ROOTS_BUG = pytest.mark.nix_version(
     exclude=("2.31", "2.34"),
     reason="findRoots/collectGarbage crash on nonnumeric temproots filenames; https://github.com/NixOS/nix/issues/16138",
@@ -216,6 +214,11 @@ class TestOpenStore:
         store = nanopynix_store.open_store(f"local?root={tmp_path}")
         assert isinstance(store, nanopynix_store.Store)
         assert store.get_uri().startswith("local")
+
+    def test_open_store_uri_with_params(self, tmp_path: Path):
+        store = nanopynix_store.open_store(f"local?root={tmp_path}")
+        assert store.get_uri() == "local"
+        assert store.get_uri(with_params=True) == f"local?root={tmp_path}"
 
     @pytest.mark.skipif(os.environ.get("GITHUB_ACTIONS") == "true", reason="local store layout differs in GHA")
     def test_open_store_uri_local_initializes_store_layout(self, tmp_path: Path):
