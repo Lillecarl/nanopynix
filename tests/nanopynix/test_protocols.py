@@ -70,8 +70,8 @@ def test_protocol_static_conformance() -> None:
         locked_flake = cast("LockedFlakeHandle", None)
         _accept_async_value(value_proxy)
         _accept_async_value(inproc_value)
-        _accept_async_store(rpc_store)
-        _accept_async_store(inproc_store)
+        _accept_async_store(rpc_store)  # type: ignore[reportArgumentType] -- eval_store parameter narrows protocol type to concrete Store
+        _accept_async_store(inproc_store)  # type: ignore[reportArgumentType] -- eval_store parameter narrows protocol type to concrete Store
         _accept_async_eval_session(rpc_eval_session)
         _accept_async_eval_session(inproc_eval_session)
         _accept_async_repl_session(rpc_repl_session)
