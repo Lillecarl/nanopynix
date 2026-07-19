@@ -38,7 +38,14 @@ async def main() -> None:
         session.store() as store,
         session.eval(store) as eval_,
     ):
-        for nix_file in sorted(WORKFLOWS_DIR.glob("*.nix")):
+        workflow_sources = sorted(WORKFLOWS_DIR.glob("on_*.nix"))
+        generated_paths = {OUTPUT_DIR / f"{nix_file.stem}.yml" for nix_file in workflow_sources}
+        for out_path in sorted(OUTPUT_DIR.glob("*.yml")):
+            if out_path not in generated_paths and out_path.read_text().startswith("# GENERATED FILE --"):
+                out_path.unlink()
+                print(f"removed stale {out_path}")
+
+        for nix_file in workflow_sources:
             body = await render_workflow(eval_, nix_file)
             out_path = OUTPUT_DIR / f"{nix_file.stem}.yml"
             out_path.write_text(HEADER.format(name=nix_file.stem) + body)

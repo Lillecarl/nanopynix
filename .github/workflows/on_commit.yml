@@ -1,14 +1,27 @@
 # GENERATED FILE -- do not edit by hand.
-# Edit ci/workflows/ci.nix and run `direnv exec . python ci/render.py`.
+# Edit ci/workflows/on_commit.nix and run `direnv exec . python ci/render.py`.
 
-name: CI
+name: On commit
 'on':
   push: null
-  schedule:
-  - cron: 17 3 * * *
   workflow_dispatch: null
 jobs:
   docs-build:
+    needs:
+    - test-git-multi-user
+    - test-git-single-user
+    - test-nix_2_31-multi-user
+    - test-nix_2_31-single-user
+    - test-nix_2_34-multi-user
+    - test-nix_2_34-single-user
+    - test-nix_2_35-multi-user
+    - test-nix_2_35-single-user
+    - test-tsan-git-multi-user
+    - test-tsan-git-single-user
+    - test-tsan-nix_2_34-multi-user
+    - test-tsan-nix_2_34-single-user
+    - test-tsan-nix_2_35-multi-user
+    - test-tsan-nix_2_35-single-user
     steps:
     - uses: actions/checkout@main
     - uses: nixbuild/nix-quick-install-action@master
@@ -28,24 +41,14 @@ jobs:
     - uses: actions/upload-pages-artifact@main
       with:
         path: public
-    if: github.event_name != 'schedule' && github.ref == 'refs/heads/develop'
-    needs:
-    - test-git-multi-user
-    - test-git-single-user
-    - test-nix_2_31-multi-user
-    - test-nix_2_31-single-user
-    - test-nix_2_34-multi-user
-    - test-nix_2_34-single-user
-    - test-nix_2_35-multi-user
-    - test-nix_2_35-single-user
     runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/develop'
   docs-deploy:
+    needs: docs-build
     steps:
     - name: Deploy to GitHub Pages
       uses: actions/deploy-pages@main
       id: deployment
-    if: github.event_name != 'schedule' && github.ref == 'refs/heads/develop'
-    needs: docs-build
     permissions:
       pages: write
       id-token: write
@@ -56,90 +59,7 @@ jobs:
       group: pages
       cancel-in-progress: false
     runs-on: ubuntu-24.04
-  update-lockfile-prep:
-    outputs:
-      versions: ${{ steps.versions.outputs.versions }}
-    steps:
-    - uses: actions/checkout@main
-      with:
-        ref: main
-    - uses: nixbuild/nix-quick-install-action@master
-    - uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Update flake inputs
-      run: nix flake update
-    - name: Compute Nix version matrix
-      run: 'echo "versions=$(nix eval --json ''.#packages.x86_64-linux'' --apply ''pkgs:
-        map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n:
-        builtins.match "nanopynix-tests-.*" n != null) (builtins.attrNames pkgs))'')"
-        >> "$GITHUB_OUTPUT"'
-      id: versions
-    - uses: actions/upload-artifact@main
-      with:
-        name: flake-lock
-        path: flake.lock
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-24.04
-  update-lockfile-test:
-    steps:
-    - uses: actions/checkout@main
-      with:
-        ref: main
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - uses: nixbuild/nix-quick-install-action@master
-    - uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Configure single-user Nix builds
-      run: |
-        sudo install -d -m 0755 /etc/nix
-        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-    - name: Build nanopynix test runner for Nix ${{ matrix.version }}
-      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
-        --print-out-paths
-    - name: Verify test runner closure after build
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    - name: Enable Nix sandbox namespaces
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix ${{ matrix.version }}
-      run: unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_RPC_TIMEOUT=30
-        PYTHONDONTWRITEBYTECODE=1 ./result/bin/nanopynix-tests --verbose --tb=short
-        -rsxXfE --run-temp-store-builds
-    - name: Verify test runner closure after tests
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    if: github.event_name == 'schedule'
-    needs: update-lockfile-prep
-    strategy:
-      fail-fast: false
-      matrix:
-        version: ${{ fromJson(needs.update-lockfile-prep.outputs.versions) }}
-    runs-on: ubuntu-24.04
-  update-lockfile-commit:
-    steps:
-    - uses: actions/checkout@main
-      with:
-        ref: main
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - uses: step-security/git-auto-commit-action@main
-      with:
-        commit_message: nix flake update
-    if: github.event_name == 'schedule'
-    needs: update-lockfile-test
-    permissions:
-      contents: write
-    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/develop'
   test-tsan-git-single-user:
     steps:
     - uses: actions/checkout@main
@@ -170,25 +90,11 @@ jobs:
         for i in $(seq 1 5); do
           echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
           status=0
-          # --capture=no: pytest normally captures a test's stdout/stderr into
-          # its own buffer and only replays it on a *normal* test completion.
-          # TSAN's halt_on_error aborts the process mid-test, so pytest never
-          # gets to replay that buffer -- the race report was being silently
-          # lost in exactly that captured-but-never-flushed buffer. Disabling
-          # capture lets TSAN's direct fd writes reach our log in real time.
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
             ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
             "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
             2>&1 | tee -a "$LOGFILE" || status=$?
-          # pytest's inline PASSED/FAILED marker can land on a non-newline-terminated
-          # line that GH Actions' log API sometimes drops at a step boundary --
-          # print an explicit, unambiguous exit code so pass/fail is never in doubt.
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-          # Only a genuine data race stops the loop early -- a "thread leak"
-          # finding (nix's own libcurl worker thread not joined at exit) is
-          # a separate, benign category that still triggers halt_on_error
-          # (ending that one run early) but shouldn't prevent the remaining
-          # iterations from re-checking for an actual race.
           if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
             echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
             race_found=1
@@ -199,17 +105,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # TSAN's halt_on_error=1 can make the whole process exit nonzero
-        # purely from the known-benign libcurl "thread leak" atexit
-        # finding (nix's own file-transfer worker thread, never joined
-        # by design) -- that fires *after* pytest's own summary is
-        # already recorded, so trust pytest's own reported outcome (its
-        # test's timing assertion is xfail(strict=True)-marked under
-        # TSAN; see _running_under_tsan in test_inproc_multithreaded_poc.py)
-        # rather than the raw process exit code. A real "N failed"/"N
-        # error" tally, an XPASS(strict) turning into "N failed" once
-        # the underlying issue is actually fixed, or a hard crash
-        # signature are all genuine findings worth failing on.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -220,10 +115,6 @@ jobs:
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-git-single-user.log"
         status=0
-        # The marker is the explicit TSAN contract. It includes every
-        # test that intentionally overlaps operations; non-concurrency
-        # tests stay in the ordinary full-suite jobs. This remains a
-        # single pass: halt_on_error=1 stops at the first finding.
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
           2>&1 | tee -a "$LOGFILE" || status=$?
@@ -232,10 +123,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # See the repeated-run step above for why the raw process exit
-        # code isn't trustworthy here: TSAN's halt_on_error=1 can fire
-        # on the known-benign libcurl "thread leak" atexit finding
-        # after pytest's own summary is already recorded clean.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -249,7 +136,6 @@ jobs:
           ${{ github.workspace }}/tsan-output-git-single-user.log
           ${{ github.workspace }}/tsan-output-broad-git-single-user.log
       if: ${{ !cancelled() }}
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
   test-tsan-git-multi-user:
     steps:
@@ -280,25 +166,11 @@ jobs:
         for i in $(seq 1 5); do
           echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
           status=0
-          # --capture=no: pytest normally captures a test's stdout/stderr into
-          # its own buffer and only replays it on a *normal* test completion.
-          # TSAN's halt_on_error aborts the process mid-test, so pytest never
-          # gets to replay that buffer -- the race report was being silently
-          # lost in exactly that captured-but-never-flushed buffer. Disabling
-          # capture lets TSAN's direct fd writes reach our log in real time.
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
             ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
             "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
             2>&1 | tee -a "$LOGFILE" || status=$?
-          # pytest's inline PASSED/FAILED marker can land on a non-newline-terminated
-          # line that GH Actions' log API sometimes drops at a step boundary --
-          # print an explicit, unambiguous exit code so pass/fail is never in doubt.
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-          # Only a genuine data race stops the loop early -- a "thread leak"
-          # finding (nix's own libcurl worker thread not joined at exit) is
-          # a separate, benign category that still triggers halt_on_error
-          # (ending that one run early) but shouldn't prevent the remaining
-          # iterations from re-checking for an actual race.
           if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
             echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
             race_found=1
@@ -309,17 +181,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # TSAN's halt_on_error=1 can make the whole process exit nonzero
-        # purely from the known-benign libcurl "thread leak" atexit
-        # finding (nix's own file-transfer worker thread, never joined
-        # by design) -- that fires *after* pytest's own summary is
-        # already recorded, so trust pytest's own reported outcome (its
-        # test's timing assertion is xfail(strict=True)-marked under
-        # TSAN; see _running_under_tsan in test_inproc_multithreaded_poc.py)
-        # rather than the raw process exit code. A real "N failed"/"N
-        # error" tally, an XPASS(strict) turning into "N failed" once
-        # the underlying issue is actually fixed, or a hard crash
-        # signature are all genuine findings worth failing on.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -330,10 +191,6 @@ jobs:
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-git-multi-user.log"
         status=0
-        # The marker is the explicit TSAN contract. It includes every
-        # test that intentionally overlaps operations; non-concurrency
-        # tests stay in the ordinary full-suite jobs. This remains a
-        # single pass: halt_on_error=1 stops at the first finding.
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
           2>&1 | tee -a "$LOGFILE" || status=$?
@@ -342,10 +199,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # See the repeated-run step above for why the raw process exit
-        # code isn't trustworthy here: TSAN's halt_on_error=1 can fire
-        # on the known-benign libcurl "thread leak" atexit finding
-        # after pytest's own summary is already recorded clean.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -359,7 +212,6 @@ jobs:
           ${{ github.workspace }}/tsan-output-git-multi-user.log
           ${{ github.workspace }}/tsan-output-broad-git-multi-user.log
       if: ${{ !cancelled() }}
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
   test-tsan-nix_2_34-single-user:
     steps:
@@ -391,25 +243,11 @@ jobs:
         for i in $(seq 1 5); do
           echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
           status=0
-          # --capture=no: pytest normally captures a test's stdout/stderr into
-          # its own buffer and only replays it on a *normal* test completion.
-          # TSAN's halt_on_error aborts the process mid-test, so pytest never
-          # gets to replay that buffer -- the race report was being silently
-          # lost in exactly that captured-but-never-flushed buffer. Disabling
-          # capture lets TSAN's direct fd writes reach our log in real time.
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
             ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
             "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
             2>&1 | tee -a "$LOGFILE" || status=$?
-          # pytest's inline PASSED/FAILED marker can land on a non-newline-terminated
-          # line that GH Actions' log API sometimes drops at a step boundary --
-          # print an explicit, unambiguous exit code so pass/fail is never in doubt.
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-          # Only a genuine data race stops the loop early -- a "thread leak"
-          # finding (nix's own libcurl worker thread not joined at exit) is
-          # a separate, benign category that still triggers halt_on_error
-          # (ending that one run early) but shouldn't prevent the remaining
-          # iterations from re-checking for an actual race.
           if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
             echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
             race_found=1
@@ -420,17 +258,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # TSAN's halt_on_error=1 can make the whole process exit nonzero
-        # purely from the known-benign libcurl "thread leak" atexit
-        # finding (nix's own file-transfer worker thread, never joined
-        # by design) -- that fires *after* pytest's own summary is
-        # already recorded, so trust pytest's own reported outcome (its
-        # test's timing assertion is xfail(strict=True)-marked under
-        # TSAN; see _running_under_tsan in test_inproc_multithreaded_poc.py)
-        # rather than the raw process exit code. A real "N failed"/"N
-        # error" tally, an XPASS(strict) turning into "N failed" once
-        # the underlying issue is actually fixed, or a hard crash
-        # signature are all genuine findings worth failing on.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -441,10 +268,6 @@ jobs:
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_34-single-user.log"
         status=0
-        # The marker is the explicit TSAN contract. It includes every
-        # test that intentionally overlaps operations; non-concurrency
-        # tests stay in the ordinary full-suite jobs. This remains a
-        # single pass: halt_on_error=1 stops at the first finding.
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
           2>&1 | tee -a "$LOGFILE" || status=$?
@@ -453,10 +276,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # See the repeated-run step above for why the raw process exit
-        # code isn't trustworthy here: TSAN's halt_on_error=1 can fire
-        # on the known-benign libcurl "thread leak" atexit finding
-        # after pytest's own summary is already recorded clean.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -470,7 +289,6 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_34-single-user.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_34-single-user.log
       if: ${{ !cancelled() }}
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
   test-tsan-nix_2_34-multi-user:
     steps:
@@ -501,25 +319,11 @@ jobs:
         for i in $(seq 1 5); do
           echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
           status=0
-          # --capture=no: pytest normally captures a test's stdout/stderr into
-          # its own buffer and only replays it on a *normal* test completion.
-          # TSAN's halt_on_error aborts the process mid-test, so pytest never
-          # gets to replay that buffer -- the race report was being silently
-          # lost in exactly that captured-but-never-flushed buffer. Disabling
-          # capture lets TSAN's direct fd writes reach our log in real time.
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
             ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
             "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
             2>&1 | tee -a "$LOGFILE" || status=$?
-          # pytest's inline PASSED/FAILED marker can land on a non-newline-terminated
-          # line that GH Actions' log API sometimes drops at a step boundary --
-          # print an explicit, unambiguous exit code so pass/fail is never in doubt.
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-          # Only a genuine data race stops the loop early -- a "thread leak"
-          # finding (nix's own libcurl worker thread not joined at exit) is
-          # a separate, benign category that still triggers halt_on_error
-          # (ending that one run early) but shouldn't prevent the remaining
-          # iterations from re-checking for an actual race.
           if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
             echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
             race_found=1
@@ -530,17 +334,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # TSAN's halt_on_error=1 can make the whole process exit nonzero
-        # purely from the known-benign libcurl "thread leak" atexit
-        # finding (nix's own file-transfer worker thread, never joined
-        # by design) -- that fires *after* pytest's own summary is
-        # already recorded, so trust pytest's own reported outcome (its
-        # test's timing assertion is xfail(strict=True)-marked under
-        # TSAN; see _running_under_tsan in test_inproc_multithreaded_poc.py)
-        # rather than the raw process exit code. A real "N failed"/"N
-        # error" tally, an XPASS(strict) turning into "N failed" once
-        # the underlying issue is actually fixed, or a hard crash
-        # signature are all genuine findings worth failing on.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -551,10 +344,6 @@ jobs:
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_34-multi-user.log"
         status=0
-        # The marker is the explicit TSAN contract. It includes every
-        # test that intentionally overlaps operations; non-concurrency
-        # tests stay in the ordinary full-suite jobs. This remains a
-        # single pass: halt_on_error=1 stops at the first finding.
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
           2>&1 | tee -a "$LOGFILE" || status=$?
@@ -563,10 +352,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # See the repeated-run step above for why the raw process exit
-        # code isn't trustworthy here: TSAN's halt_on_error=1 can fire
-        # on the known-benign libcurl "thread leak" atexit finding
-        # after pytest's own summary is already recorded clean.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -580,7 +365,6 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_34-multi-user.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_34-multi-user.log
       if: ${{ !cancelled() }}
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
   test-tsan-nix_2_35-single-user:
     steps:
@@ -612,25 +396,11 @@ jobs:
         for i in $(seq 1 5); do
           echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
           status=0
-          # --capture=no: pytest normally captures a test's stdout/stderr into
-          # its own buffer and only replays it on a *normal* test completion.
-          # TSAN's halt_on_error aborts the process mid-test, so pytest never
-          # gets to replay that buffer -- the race report was being silently
-          # lost in exactly that captured-but-never-flushed buffer. Disabling
-          # capture lets TSAN's direct fd writes reach our log in real time.
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
             ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
             "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
             2>&1 | tee -a "$LOGFILE" || status=$?
-          # pytest's inline PASSED/FAILED marker can land on a non-newline-terminated
-          # line that GH Actions' log API sometimes drops at a step boundary --
-          # print an explicit, unambiguous exit code so pass/fail is never in doubt.
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-          # Only a genuine data race stops the loop early -- a "thread leak"
-          # finding (nix's own libcurl worker thread not joined at exit) is
-          # a separate, benign category that still triggers halt_on_error
-          # (ending that one run early) but shouldn't prevent the remaining
-          # iterations from re-checking for an actual race.
           if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
             echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
             race_found=1
@@ -641,17 +411,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # TSAN's halt_on_error=1 can make the whole process exit nonzero
-        # purely from the known-benign libcurl "thread leak" atexit
-        # finding (nix's own file-transfer worker thread, never joined
-        # by design) -- that fires *after* pytest's own summary is
-        # already recorded, so trust pytest's own reported outcome (its
-        # test's timing assertion is xfail(strict=True)-marked under
-        # TSAN; see _running_under_tsan in test_inproc_multithreaded_poc.py)
-        # rather than the raw process exit code. A real "N failed"/"N
-        # error" tally, an XPASS(strict) turning into "N failed" once
-        # the underlying issue is actually fixed, or a hard crash
-        # signature are all genuine findings worth failing on.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -662,10 +421,6 @@ jobs:
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_35-single-user.log"
         status=0
-        # The marker is the explicit TSAN contract. It includes every
-        # test that intentionally overlaps operations; non-concurrency
-        # tests stay in the ordinary full-suite jobs. This remains a
-        # single pass: halt_on_error=1 stops at the first finding.
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
           2>&1 | tee -a "$LOGFILE" || status=$?
@@ -674,10 +429,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # See the repeated-run step above for why the raw process exit
-        # code isn't trustworthy here: TSAN's halt_on_error=1 can fire
-        # on the known-benign libcurl "thread leak" atexit finding
-        # after pytest's own summary is already recorded clean.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -691,7 +442,6 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_35-single-user.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_35-single-user.log
       if: ${{ !cancelled() }}
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
   test-tsan-nix_2_35-multi-user:
     steps:
@@ -722,25 +472,11 @@ jobs:
         for i in $(seq 1 5); do
           echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
           status=0
-          # --capture=no: pytest normally captures a test's stdout/stderr into
-          # its own buffer and only replays it on a *normal* test completion.
-          # TSAN's halt_on_error aborts the process mid-test, so pytest never
-          # gets to replay that buffer -- the race report was being silently
-          # lost in exactly that captured-but-never-flushed buffer. Disabling
-          # capture lets TSAN's direct fd writes reach our log in real time.
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
             ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
             "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
             2>&1 | tee -a "$LOGFILE" || status=$?
-          # pytest's inline PASSED/FAILED marker can land on a non-newline-terminated
-          # line that GH Actions' log API sometimes drops at a step boundary --
-          # print an explicit, unambiguous exit code so pass/fail is never in doubt.
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-          # Only a genuine data race stops the loop early -- a "thread leak"
-          # finding (nix's own libcurl worker thread not joined at exit) is
-          # a separate, benign category that still triggers halt_on_error
-          # (ending that one run early) but shouldn't prevent the remaining
-          # iterations from re-checking for an actual race.
           if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
             echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
             race_found=1
@@ -751,17 +487,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # TSAN's halt_on_error=1 can make the whole process exit nonzero
-        # purely from the known-benign libcurl "thread leak" atexit
-        # finding (nix's own file-transfer worker thread, never joined
-        # by design) -- that fires *after* pytest's own summary is
-        # already recorded, so trust pytest's own reported outcome (its
-        # test's timing assertion is xfail(strict=True)-marked under
-        # TSAN; see _running_under_tsan in test_inproc_multithreaded_poc.py)
-        # rather than the raw process exit code. A real "N failed"/"N
-        # error" tally, an XPASS(strict) turning into "N failed" once
-        # the underlying issue is actually fixed, or a hard crash
-        # signature are all genuine findings worth failing on.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -772,10 +497,6 @@ jobs:
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_35-multi-user.log"
         status=0
-        # The marker is the explicit TSAN contract. It includes every
-        # test that intentionally overlaps operations; non-concurrency
-        # tests stay in the ordinary full-suite jobs. This remains a
-        # single pass: halt_on_error=1 stops at the first finding.
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
           2>&1 | tee -a "$LOGFILE" || status=$?
@@ -784,10 +505,6 @@ jobs:
           echo "::error::genuine ThreadSanitizer data race detected -- see log above"
           exit 1
         fi
-        # See the repeated-run step above for why the raw process exit
-        # code isn't trustworthy here: TSAN's halt_on_error=1 can fire
-        # on the known-benign libcurl "thread leak" atexit finding
-        # after pytest's own summary is already recorded clean.
         if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
           echo "::error::pytest reported a real failure, or the process crashed -- see log above"
           exit 1
@@ -801,7 +518,6 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_35-multi-user.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_35-multi-user.log
       if: ${{ !cancelled() }}
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
   test-git-single-user:
     steps:
@@ -833,10 +549,10 @@ jobs:
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
-    - name: Upload gdb crash backtrace
+    - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: gdb-backtrace-git
+        name: test-output-git-single-user
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -886,10 +602,10 @@ jobs:
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
-    - name: Upload gdb crash backtrace
+    - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: gdb-backtrace-git
+        name: test-output-git-multi-user
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -940,10 +656,10 @@ jobs:
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
-    - name: Upload gdb crash backtrace
+    - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: gdb-backtrace-nix_2_31
+        name: test-output-nix_2_31-single-user
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -993,10 +709,10 @@ jobs:
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
-    - name: Upload gdb crash backtrace
+    - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: gdb-backtrace-nix_2_31
+        name: test-output-nix_2_31-multi-user
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -1047,10 +763,10 @@ jobs:
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
-    - name: Upload gdb crash backtrace
+    - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: gdb-backtrace-nix_2_34
+        name: test-output-nix_2_34-single-user
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -1100,10 +816,10 @@ jobs:
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
-    - name: Upload gdb crash backtrace
+    - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: gdb-backtrace-nix_2_34
+        name: test-output-nix_2_34-multi-user
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -1154,10 +870,10 @@ jobs:
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
-    - name: Upload gdb crash backtrace
+    - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: gdb-backtrace-nix_2_35
+        name: test-output-nix_2_35-single-user
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -1207,10 +923,10 @@ jobs:
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
-    - name: Upload gdb crash backtrace
+    - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: gdb-backtrace-nix_2_35
+        name: test-output-nix_2_35-multi-user
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
