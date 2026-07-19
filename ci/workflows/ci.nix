@@ -117,10 +117,17 @@ let
     ) regularVersionNames
   );
 
-  # Diagnostic-only: ThreadSanitizer build hunting concurrency bugs in the
-  # single-user in-process build/eval paths. Single-user only, since
-  # that's the only mode the crashes reproduce in; not part of the normal
-  # version/install-mode matrix and never blocks it.
+  # ThreadSanitizer build hunting concurrency bugs in the single-user
+  # in-process build/eval paths. Single-user only, since that's the only
+  # mode the crashes reproduce in; not part of the normal version/
+  # install-mode matrix, but DOES block on its own: a genuine new
+  # ThreadSanitizer data race, or any test failure other than the two
+  # known TSAN-timing-sensitive assertions (xfail-marked in
+  # test_inproc_multithreaded_poc.py; see _running_under_tsan there),
+  # fails these jobs. The known upstream boehmgc/glibc pthread_kill-vs-
+  # thread-exit race (see
+  # ../../nix/patches/boehmgc-tolerate-suspend-thread-exit-race.patch) is
+  # patched, not tolerated here -- if it regresses, these jobs should fail.
   #
   # One job per tsanVersionNames entry (nix_2_31-tsan/nix_2_34-tsan/
   # nix_2_35-tsan/git-tsan, see default.nix's patchedNixVersions) instead
@@ -147,13 +154,14 @@ let
         }
         (steps.enableSandboxNamespaces { })
         {
-          name = "Run TSAN-instrumented crashing test (DIAGNOSTIC-ONLY, repeated)";
-          continue-on-error = true;
+          name = "Run TSAN-instrumented crashing test (repeated)";
           run = # bash
             ''
               set -o pipefail
+              LOGFILE="''${{ github.workspace }}/tsan-output-${bareVersion}.log"
+              race_found=0
               for i in $(seq 1 5); do
-                echo "=== TSAN run $i ===" | tee -a "''${{ github.workspace }}/tsan-output-${bareVersion}.log"
+                echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
                 status=0
                 # --capture=no: pytest normally captures a test's stdout/stderr into
                 # its own buffer and only replays it on a *normal* test completion.
@@ -164,29 +172,50 @@ let
                 unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
                   ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
                   "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
-                  2>&1 | tee -a "''${{ github.workspace }}/tsan-output-${bareVersion}.log" || status=$?
+                  2>&1 | tee -a "$LOGFILE" || status=$?
                 # pytest's inline PASSED/FAILED marker can land on a non-newline-terminated
                 # line that GH Actions' log API sometimes drops at a step boundary --
                 # print an explicit, unambiguous exit code so pass/fail is never in doubt.
-                echo "=== TSAN run $i exit status: $status ===" | tee -a "''${{ github.workspace }}/tsan-output-${bareVersion}.log"
+                echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
                 # Only a genuine data race stops the loop early -- a "thread leak"
                 # finding (nix's own libcurl worker thread not joined at exit) is
                 # a separate, benign category that still triggers halt_on_error
                 # (ending that one run early) but shouldn't prevent the remaining
                 # iterations from re-checking for an actual race.
-                if grep -q "ThreadSanitizer: data race" "''${{ github.workspace }}/tsan-output-${bareVersion}.log"; then
-                  echo "TSAN data race detected on run $i -- stopping early" | tee -a "''${{ github.workspace }}/tsan-output-${bareVersion}.log"
+                if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
+                  echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
+                  race_found=1
                   break
                 fi
               done
+              if [ "$race_found" -eq 1 ]; then
+                echo "::error::genuine ThreadSanitizer data race detected -- see log above"
+                exit 1
+              fi
+              # TSAN's halt_on_error=1 can make the whole process exit nonzero
+              # purely from the known-benign libcurl "thread leak" atexit
+              # finding (nix's own file-transfer worker thread, never joined
+              # by design) -- that fires *after* pytest's own summary is
+              # already recorded, so trust pytest's own reported outcome (its
+              # test's timing assertion is xfail(strict=True)-marked under
+              # TSAN; see _running_under_tsan in test_inproc_multithreaded_poc.py)
+              # rather than the raw process exit code. A real "N failed"/"N
+              # error" tally, an XPASS(strict) turning into "N failed" once
+              # the underlying issue is actually fixed, or a hard crash
+              # signature are all genuine findings worth failing on.
+              if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
+                echo "::error::pytest reported a real failure, or the process crashed -- see log above"
+                exit 1
+              fi
+              exit 0
             '';
         }
         {
-          name = "Run TSAN-instrumented concurrency-relevant test files (DIAGNOSTIC-ONLY, single pass)";
-          continue-on-error = true;
+          name = "Run TSAN-instrumented concurrency-relevant test files (single pass)";
           run = # bash
             ''
               set -o pipefail
+              LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}.log"
               status=0
               # Broader (but not exhaustive) coverage pass: every test file that
               # touches NixThreadExecutor/threading/concurrent.futures, not just
@@ -205,8 +234,21 @@ let
                 tests/nanopynix/test_eval_rpc.py \
                 tests/nanopynix/test_l3_inproc.py \
                 tests/nanopynix/test_worker_eval_unit.py \
-                2>&1 | tee -a "''${{ github.workspace }}/tsan-output-broad-${bareVersion}.log" || status=$?
-              echo "=== TSAN broad pass exit status: $status ===" | tee -a "''${{ github.workspace }}/tsan-output-broad-${bareVersion}.log"
+                2>&1 | tee -a "$LOGFILE" || status=$?
+              echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
+              if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
+                echo "::error::genuine ThreadSanitizer data race detected -- see log above"
+                exit 1
+              fi
+              # See the repeated-run step above for why the raw process exit
+              # code isn't trustworthy here: TSAN's halt_on_error=1 can fire
+              # on the known-benign libcurl "thread leak" atexit finding
+              # after pytest's own summary is already recorded clean.
+              if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
+                echo "::error::pytest reported a real failure, or the process crashed -- see log above"
+                exit 1
+              fi
+              exit 0
             '';
         }
         (steps.uploadArtifact {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 import uuid
@@ -16,6 +17,18 @@ from nanopynix import inproc
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
+
+def _running_under_tsan() -> bool:
+    """Detect the LD_PRELOAD ``nix/tsan.nix``'s test wrapper sets for TSAN runs.
+
+    ThreadSanitizer's own runtime overhead (commonly 5-15x) breaks these
+    tests' wall-clock concurrency-overlap assumptions -- builds that
+    comfortably overlap at native speed can serialize past the threshold
+    once every memory access is instrumented, with no actual regression in
+    concurrency.
+    """
+    return "libtsan" in os.environ.get("LD_PRELOAD", "")
 
 
 def _raw_session(*, store_workers: int = 4) -> inproc.Session:
@@ -258,6 +271,11 @@ async def test_inproc_forced_store_close_invalidates_dependent_evaluator() -> No
 
 
 @pytest.mark.anyio
+@pytest.mark.xfail(
+    condition=_running_under_tsan(),
+    reason="TSAN's runtime overhead breaks this test's wall-clock overlap assumption, not a concurrency regression",
+    strict=True,
+)
 async def test_inproc_independent_builds_overlap_without_cpu_pressure() -> None:
     """Separate Store build calls run sleeping builders concurrently."""
     async with _session(store_workers=2) as nix, nix.store() as store:
@@ -309,6 +327,11 @@ async def test_inproc_one_evaluator_extracts_and_builds_fifty_derivations() -> N
 
 
 @pytest.mark.anyio
+@pytest.mark.xfail(
+    condition=_running_under_tsan(),
+    reason="TSAN's runtime overhead breaks this test's wall-clock overlap assumption, not a concurrency regression",
+    strict=True,
+)
 async def test_inproc_parallel_batch_builds_use_multiple_store_workers() -> None:
     """Several evaluator lanes can prepare independently and build concurrently."""
     async with _session(store_workers=4) as nix, nix.store() as store:
