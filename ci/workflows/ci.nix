@@ -46,7 +46,7 @@ let
 
   mkTestJob =
     { version, installMode }:
-    withCond "vars.RUN_MATRIX_TESTS == 'true'" (mkJob {
+    mkJob {
       steps = [
         (steps.checkout { })
       ]
@@ -101,7 +101,7 @@ let
         })
         (steps.verifyClosure { name = "Verify test runner closure after tests"; })
       ];
-    });
+    };
 
   testJobs = builtins.listToAttrs (
     builtins.concatMap (

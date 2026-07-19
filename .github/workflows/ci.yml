@@ -856,7 +856,6 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    if: vars.RUN_MATRIX_TESTS == 'true'
     runs-on: ubuntu-24.04
   test-git-multi-user:
     steps:
@@ -910,7 +909,6 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    if: vars.RUN_MATRIX_TESTS == 'true'
     runs-on: ubuntu-24.04
   test-nix_2_31-single-user:
     steps:
@@ -965,7 +963,6 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    if: vars.RUN_MATRIX_TESTS == 'true'
     runs-on: ubuntu-24.04
   test-nix_2_31-multi-user:
     steps:
@@ -1019,7 +1016,6 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    if: vars.RUN_MATRIX_TESTS == 'true'
     runs-on: ubuntu-24.04
   test-nix_2_34-single-user:
     steps:
@@ -1074,7 +1070,6 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    if: vars.RUN_MATRIX_TESTS == 'true'
     runs-on: ubuntu-24.04
   test-nix_2_34-multi-user:
     steps:
@@ -1128,7 +1123,6 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    if: vars.RUN_MATRIX_TESTS == 'true'
     runs-on: ubuntu-24.04
   test-nix_2_35-single-user:
     steps:
@@ -1183,7 +1177,6 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    if: vars.RUN_MATRIX_TESTS == 'true'
     runs-on: ubuntu-24.04
   test-nix_2_35-multi-user:
     steps:
@@ -1237,5 +1230,4 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    if: vars.RUN_MATRIX_TESTS == 'true'
     runs-on: ubuntu-24.04
