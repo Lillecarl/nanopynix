@@ -1,0 +1,401 @@
+# GENERATED FILE -- do not edit by hand.
+# Edit ci/workflows/on_schedule.nix and run `direnv exec . python ci/render.py`.
+
+name: On schedule
+'on':
+  workflow_dispatch: null
+  schedule:
+  - cron: 17 3 * * *
+jobs:
+  docs-build:
+    needs:
+    - test-regular-multi-user
+    - test-regular-single-user
+    - test-tsan-multi-user
+    - test-tsan-single-user
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: develop
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - uses: nixbuild/nix-quick-install-action@master
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build documentation
+      run: nix build .#nanopynix-docs --out-link result --print-build-logs --print-out-paths
+    - name: Verify docs closure
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    - name: Prepare Pages artifact
+      run: |
+        mkdir -p public
+        cp -r --no-preserve=mode,ownership result/. public/
+    - uses: actions/upload-pages-artifact@main
+      with:
+        path: public
+    runs-on: ubuntu-24.04
+  docs-deploy:
+    needs: docs-build
+    steps:
+    - name: Deploy to GitHub Pages
+      uses: actions/deploy-pages@main
+      id: deployment
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+  update-lockfile:
+    outputs:
+      regular_versions: ${{ steps.versions.outputs.regular_versions }}
+      tsan_versions: ${{ steps.versions.outputs.tsan_versions }}
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: develop
+    - uses: nixbuild/nix-quick-install-action@master
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Update flake inputs
+      run: nix flake update
+    - name: Compute Nix version matrices
+      run: |
+        echo "regular_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-tsan" n == null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
+        echo "tsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match ".*-tsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
+      id: versions
+    - uses: actions/upload-artifact@main
+      with:
+        name: flake-lock
+        path: flake.lock
+    runs-on: ubuntu-24.04
+  update-lockfile-commit:
+    needs: docs-deploy
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: develop
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - uses: step-security/git-auto-commit-action@main
+      with:
+        commit_message: nix flake update
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+  test-tsan-single-user:
+    needs:
+    - update-lockfile
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: develop
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - uses: nixbuild/nix-quick-install-action@master
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Configure single-user Nix builds
+      run: |
+        sudo install -d -m 0755 /etc/nix
+        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
+    - name: Build TSAN nanopynix test runner (${{ matrix.version }}, single-user)
+      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Enable Nix sandbox namespaces
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Run TSAN-instrumented crashing test (repeated)
+      run: |
+        set -o pipefail
+        LOGFILE="${{ github.workspace }}/tsan-output-${{ matrix.version }}-single-user.log"
+        race_found=0
+        for i in $(seq 1 5); do
+          echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
+          status=0
+          unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
+            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
+            "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
+            2>&1 | tee -a "$LOGFILE" || status=$?
+          echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
+          if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
+            echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
+            race_found=1
+            break
+          fi
+        done
+        if [ "$race_found" -eq 1 ]; then
+          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
+          exit 1
+        fi
+        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
+          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
+          exit 1
+        fi
+        exit 0
+    - name: Run TSAN-instrumented concurrency tests (single pass)
+      run: |
+        set -o pipefail
+        LOGFILE="${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}-single-user.log"
+        status=0
+        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
+          2>&1 | tee -a "$LOGFILE" || status=$?
+        echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
+        if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
+          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
+          exit 1
+        fi
+        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
+          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
+          exit 1
+        fi
+        exit 0
+    - name: Upload TSAN output (${{ matrix.version }}, single-user)
+      uses: actions/upload-artifact@main
+      with:
+        name: tsan-race-report-${{ matrix.version }}-single-user
+        path: |
+          ${{ github.workspace }}/tsan-output-${{ matrix.version }}-single-user.log
+          ${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}-single-user.log
+      if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.update-lockfile.outputs.tsan_versions) }}
+  test-tsan-multi-user:
+    needs:
+    - update-lockfile
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: develop
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build TSAN nanopynix test runner (${{ matrix.version }}, multi-user)
+      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Enable Nix sandbox namespaces
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Run TSAN-instrumented crashing test (repeated)
+      run: |
+        set -o pipefail
+        LOGFILE="${{ github.workspace }}/tsan-output-${{ matrix.version }}-multi-user.log"
+        race_found=0
+        for i in $(seq 1 5); do
+          echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
+          status=0
+          unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
+            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
+            "tests/nanopynix/test_inproc_multithreaded_poc.py::test_inproc_parallel_batch_builds_use_multiple_store_workers" \
+            2>&1 | tee -a "$LOGFILE" || status=$?
+          echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
+          if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
+            echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
+            race_found=1
+            break
+          fi
+        done
+        if [ "$race_found" -eq 1 ]; then
+          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
+          exit 1
+        fi
+        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
+          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
+          exit 1
+        fi
+        exit 0
+    - name: Run TSAN-instrumented concurrency tests (single pass)
+      run: |
+        set -o pipefail
+        LOGFILE="${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}-multi-user.log"
+        status=0
+        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
+          2>&1 | tee -a "$LOGFILE" || status=$?
+        echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
+        if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
+          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
+          exit 1
+        fi
+        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
+          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
+          exit 1
+        fi
+        exit 0
+    - name: Upload TSAN output (${{ matrix.version }}, multi-user)
+      uses: actions/upload-artifact@main
+      with:
+        name: tsan-race-report-${{ matrix.version }}-multi-user
+        path: |
+          ${{ github.workspace }}/tsan-output-${{ matrix.version }}-multi-user.log
+          ${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}-multi-user.log
+      if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.update-lockfile.outputs.tsan_versions) }}
+  test-regular-single-user:
+    needs:
+    - update-lockfile
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: develop
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - uses: nixbuild/nix-quick-install-action@master
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Configure single-user Nix builds
+      run: |
+        sudo install -d -m 0755 /etc/nix
+        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
+    - name: Build nanopynix test runner for Nix ${{ matrix.version }}
+      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Verify test runner closure after build
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    - name: Enable Nix sandbox namespaces
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Test nanopynix against Nix ${{ matrix.version }} (full suite)
+      run: |
+        set -o pipefail
+        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
+    - name: Upload test output
+      uses: actions/upload-artifact@main
+      with:
+        name: test-output-${{ matrix.version }}-single-user
+        path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/coverage.xml
+        flags: ${{ matrix.version }}-single-user
+      if: ${{ !cancelled() }}
+    - name: Upload test results to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/junit.xml
+        flags: ${{ matrix.version }}-single-user
+        report_type: test_results
+      if: ${{ !cancelled() }}
+    - name: Verify test runner closure after tests
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.update-lockfile.outputs.regular_versions) }}
+  test-regular-multi-user:
+    needs:
+    - update-lockfile
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: develop
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build nanopynix test runner for Nix ${{ matrix.version }}
+      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Verify test runner closure after build
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    - name: Enable Nix sandbox namespaces
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Test nanopynix against Nix ${{ matrix.version }} (full suite)
+      run: |
+        set -o pipefail
+        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log
+    - name: Upload test output
+      uses: actions/upload-artifact@main
+      with:
+        name: test-output-${{ matrix.version }}-multi-user
+        path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/coverage.xml
+        flags: ${{ matrix.version }}-multi-user
+      if: ${{ !cancelled() }}
+    - name: Upload test results to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/junit.xml
+        flags: ${{ matrix.version }}-multi-user
+        report_type: test_results
+      if: ${{ !cancelled() }}
+    - name: Verify test runner closure after tests
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.update-lockfile.outputs.regular_versions) }}
