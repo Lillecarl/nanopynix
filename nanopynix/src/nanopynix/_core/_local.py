@@ -25,7 +25,10 @@ class LocalStore:
         self.raw: Any = raw
 
     def close(self) -> None:
+        raw = self.raw
         self.raw = None
+        if raw is not None:
+            raw.close()
 
     def require_raw(self) -> Any:
         if self.raw is None:

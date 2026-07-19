@@ -89,6 +89,18 @@ logging abstraction with OS-level stderr.
 
 # Test Failure Discipline
 
+## Pytest exclusivity
+
+**Never run more than one pytest instance on this machine at a time.** The
+suite uses shared Nix-store/session resources and concurrent pytest invocations
+are invalid, even when they target different test files.
+
+Before starting pytest, check for every common pytest process form, including
+`pytest`, `py.test`, and `python -m pytest`. If any instance is live, do not
+start another one. Do not rely on a narrow process-name check alone. When the
+user has started or may be starting a test run, wait for their confirmation
+that it has finished before running pytest yourself.
+
 Do not assume failing tests are unrelated, flaky, or pre-existing.
 
 When a test fails after your changes, your default assumption must be:

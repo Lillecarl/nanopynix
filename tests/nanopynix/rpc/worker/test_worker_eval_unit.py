@@ -83,6 +83,7 @@ def test_worker_factory_sets_worker_title(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> None:
     titles: list[str] = []
+    closed: list[str] = []
     monkeypatch.setattr(worker, "set_process_title", lambda title, **_kwargs: titles.append(title))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
 
     class Store:
@@ -95,6 +96,9 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
         def get_store_dir(self) -> str:
             return "/nix/store"
 
+        def close(self) -> None:
+            closed.append(self.uri)
+
     monkeypatch.setattr(nix_core.nanopynix_store, "open_store", lambda uri: Store(uri))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
     state = WorkerState()
     state.worker_subname = "quiet-otter"
@@ -106,6 +110,7 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
     handler._close_store(second)  # type: ignore[reportPrivateUsage] -- test verifies worker store tracking
 
     assert titles == ["local", "local daemon", "daemon", "quiet-otter"]
+    assert closed == ["local", "daemon"]
 
 
 @pytest.mark.anyio

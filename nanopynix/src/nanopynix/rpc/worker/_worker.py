@@ -280,12 +280,19 @@ class WorkerServiceHandler(WorkerServiceBase):
         return CloseStoreResponse()
 
     def _close_store(self, store_handle: int, force: bool = False) -> None:
+        try:
+            store = self._state.handles.get_typed(store_handle, "store")
+        except KeyError:
+            # Store close is idempotent: a client or session teardown may
+            # repeat a successful forced close.
+            return
         eval_handles = find_evals_by_store(self._state, store_handle)
         if eval_handles:
             if not force:
                 raise RuntimeError("cannot close a store while its EvalState is open; call CloseEval first")
             for eval_handle in eval_handles:
                 close_eval_state(self._state, eval_handle)
+        store.close()
         self._state.handles.release(store_handle)
         if self._state.named_store_uris.pop(store_handle, None) is not None:
             self._update_store_title()

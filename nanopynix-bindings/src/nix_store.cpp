@@ -22,6 +22,7 @@
 #include <nix/store/daemon.hh>
 #include <nix/store/path-info.hh>
 #include <nix/store/derivations.hh>
+#include <nix/store/remote-store.hh>
 #include <nix/store/content-address.hh>
 #include <nlohmann/json.hpp>
 #include <nix/util/hash.hh>
@@ -261,6 +262,12 @@ static std::shared_ptr<nix::Store> open_store_uri(const std::string &uri) {
 static std::shared_ptr<nix::Store> open_store_default() {
     nb::gil_scoped_release release;
     return nix::openStore().get_ptr();
+}
+
+static void close_store(nix::Store &store) {
+    if (auto *remote_store = dynamic_cast<nix::RemoteStore *>(&store)) {
+        remote_store->shutdownConnections();
+    }
 }
 
 static void process_connection(std::shared_ptr<nix::Store> store, int fd, bool trusted, bool recursive) {
@@ -1033,6 +1040,7 @@ static nb::dict store_compute_store_path(nix::Store &s, const nb::dict &request)
 
 static void bind_store(nb::module_ &m) {
     nb::class_<nix::Store>(m, "Store")
+        .def("close", &close_store, nb::call_guard<nb::gil_scoped_release>())
         // Query
         .def("get_store_dir",
              [](nix::Store &s) -> std::string { return s.config.storeDir_; })
