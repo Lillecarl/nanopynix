@@ -8,23 +8,26 @@ from __future__ import annotations
 import asyncio
 import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from tests.support.git import init_flake_repo
 from anyio import Path as AnyioPath
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
 
-from nanopynix import Derivation, GcResult, MissingInfo, inproc
+from nanopynix import Derivation, GcResult, MissingInfo, StorePath, inproc
 from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import NixEvalSettings
+from tests.support.git import init_flake_repo
+
+if TYPE_CHECKING:
+    from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_value_navigation() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_eval_value_navigation(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         root = await eval.string('{ greeting = "hello"; numbers = [ 1 2 3 ]; }')
         assert await (await root.attr("greeting")).force() == "hello"
         numbers = await root.attr("numbers")
@@ -35,8 +38,8 @@ async def test_inproc_eval_value_navigation() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_autocall_and_realise_argv() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_value_autocall_and_realise_argv(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         function = await eval.string("x: x + 1")
         assert await (await function.call(41)).as_int() == 42
         argv = await eval.string('[ "echo" "hello" ]')
@@ -44,8 +47,8 @@ async def test_inproc_value_autocall_and_realise_argv() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_repl_supports_shared_protocol_operations() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_repl_supports_shared_protocol_operations(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         repl = await eval.repl()
         assert await repl.line("answer = 42") is None
         value = await repl.line("answer")
@@ -58,9 +61,9 @@ async def test_inproc_repl_supports_shared_protocol_operations() -> None:
 
 @pytest.mark.anyio
 @pytest.mark.concurrency
-async def test_inproc_allows_concurrent_eval_states_on_one_store() -> None:
+async def test_inproc_allows_concurrent_eval_states_on_one_store(inproc_session: InprocSessionFactory) -> None:
     """Two independent EvalSessions may be open on the same Store at once."""
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as first:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as first:
         second = nix.eval(store)
         await second.open()
         try:
@@ -71,13 +74,15 @@ async def test_inproc_allows_concurrent_eval_states_on_one_store() -> None:
 
 
 @pytest.mark.concurrency
-async def test_inproc_concurrent_eval_sessions_have_independent_pure_eval() -> None:
+async def test_inproc_concurrent_eval_sessions_have_independent_pure_eval(
+    inproc_session: InprocSessionFactory,
+) -> None:
     """Concurrently open EvalSessions may disagree on pure_eval.
 
     Each EvalSession owns its own EvalState, constructed with its own
     NixEvalSettings — settings are not applied through shared process state.
     """
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+    async with inproc_session() as nix, nix.store() as store:
         pure = nix.eval(store, eval_settings=NixEvalSettings(pure_eval=True))
         impure = nix.eval(store, eval_settings=NixEvalSettings(pure_eval=False))
         await pure.open()
@@ -92,8 +97,8 @@ async def test_inproc_concurrent_eval_sessions_have_independent_pure_eval() -> N
 
 
 @pytest.mark.anyio
-async def test_inproc_value_rejects_use_after_eval_close() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_value_rejects_use_after_eval_close(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         eval = nix.eval(store)
         await eval.open()
         value = await eval.string("1")
@@ -103,8 +108,8 @@ async def test_inproc_value_rejects_use_after_eval_close() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_context_manager_releases_rooted_value() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_value_context_manager_releases_rooted_value(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         async with await eval.string("{ answer = 42; }") as root:
             assert await (await root.attr("answer")).as_int() == 42
         with pytest.raises(inproc.InprocValueReleasedError):
@@ -112,8 +117,8 @@ async def test_inproc_value_context_manager_releases_rooted_value() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_close_releases_values_left_open() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_eval_close_releases_values_left_open(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         eval = nix.eval(store)
         await eval.open()
         value = await eval.string("1")
@@ -123,8 +128,8 @@ async def test_inproc_eval_close_releases_values_left_open() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_state_can_be_closed_and_reopened() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_eval_state_can_be_closed_and_reopened(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         first = nix.eval(store)
         await first.open()
         local = first._local  # type: ignore[reportPrivateUsage] -- verifies the L2 evaluator pointer is released on close
@@ -142,8 +147,8 @@ async def test_inproc_eval_state_can_be_closed_and_reopened() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_store_cannot_close_while_its_eval_state_is_open() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_store_cannot_close_while_its_eval_state_is_open(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         eval = nix.eval(store)
         await eval.open()
         with pytest.raises(RuntimeError, match="close the EvalSession first"):
@@ -154,10 +159,10 @@ async def test_inproc_store_cannot_close_while_its_eval_state_is_open() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_locked_flake_facade(tmp_path: Path) -> None:
+async def test_inproc_locked_flake_facade(tmp_path: Path, inproc_session: InprocSessionFactory) -> None:
     init_flake_repo(tmp_path, "value = 42;")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
         assert not (tmp_path / "flake.lock").exists()
         assert isinstance(locked.description, str)
@@ -173,8 +178,8 @@ async def test_inproc_locked_flake_facade(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_store_query_missing() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_store_query_missing(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         mi = await store.query_missing(
             ["/nix/store/00000000000000000000000000000000-nonexistent-1.0"]
         )
@@ -185,68 +190,68 @@ async def test_inproc_store_query_missing() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_store_read_derivation() -> None:
+async def test_inproc_store_read_derivation(inproc_session: InprocSessionFactory) -> None:
     """read_derivation via direct string argument."""
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        paths = await store.query_all_valid_paths()
-        drv = next((p for p in paths if p.is_derivation), None)
-        if drv is not None:
-            d = await store.read_derivation(str(drv))
-            assert isinstance(d, Derivation)
-            assert d.name
-            assert d.system
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
+        drv_value = await eval.string(
+            '(builtins.derivation { name = "inproc-read-derivation"; system = builtins.currentSystem; builder = "/bin/sh"; }).drvPath'
+        )
+        drv = StorePath(await drv_value.as_string())
+        d = await store.read_derivation(str(drv))
+        assert isinstance(d, Derivation)
+        assert d.name == "inproc-read-derivation"
+        assert d.system
 
 
 @pytest.mark.anyio
-async def test_inproc_store_collect_garbage_return_dead(tmp_path: Path) -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store(f"local?root={tmp_path}") as store:
+async def test_inproc_store_collect_garbage_return_dead(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         result = await store.collect_garbage(GcAction.RETURN_DEAD)
         assert isinstance(result, GcResult)
         assert isinstance(result.paths, list)
         assert result.bytes_freed == 0
 
 
-# ── Store query methods against the real system store ──────────────────
+# ── Store query methods against a seeded hermetic store ─────────────────
 
 
 @pytest.mark.anyio
-async def test_inproc_store_uri_and_store_dir() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_store_uri_and_store_dir(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         uri = await store.uri()
         assert isinstance(uri, str)
         assert await store.store_dir() == "/nix/store"
 
 
 @pytest.mark.anyio
-async def test_inproc_store_parse_and_is_valid_path() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        paths = await store.query_all_valid_paths()
-        if not paths:
-            pytest.skip("store has no valid paths")
-        path = paths[0]
-        parsed = await store.parse_store_path(str(path))
-        assert str(parsed) == str(path)
+async def test_inproc_store_parse_and_is_valid_path(
+    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+) -> None:
+    async with inproc_session() as nix, nix.store() as store:
+        parsed = await store.parse_store_path(str(seeded_store_path))
+        assert str(parsed) == str(seeded_store_path)
         assert await store.is_valid_path(parsed)
 
 
 @pytest.mark.anyio
-async def test_inproc_store_compute_fs_closure() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        paths = await store.query_all_valid_paths()
-        if not paths:
-            pytest.skip("store has no valid paths")
-        closure = await store.compute_fs_closure(paths[0])
+async def test_inproc_store_compute_fs_closure(
+    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+) -> None:
+    async with inproc_session() as nix, nix.store() as store:
+        closure = await store.compute_fs_closure(seeded_store_path)
         assert isinstance(closure, list)
-        assert str(paths[0]) in {str(p) for p in closure}
+        assert str(seeded_store_path) in {str(p) for p in closure}
 
 
 @pytest.mark.anyio
-async def test_inproc_store_query_derivation_outputs_and_valid_derivers() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        paths = await store.query_all_valid_paths()
-        drv = next((p for p in paths if p.is_derivation), None)
-        if drv is None:
-            pytest.skip("store has no derivations")
+async def test_inproc_store_query_derivation_outputs_and_valid_derivers(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
+        drv_value = await eval.string(
+            '(builtins.derivation { name = "inproc-derivation-outputs"; system = builtins.currentSystem; builder = "/bin/sh"; }).drvPath'
+        )
+        drv = StorePath(await drv_value.as_string())
         outputs = await store.query_derivation_outputs(drv)
         assert isinstance(outputs, list)
         for output in outputs:
@@ -255,25 +260,22 @@ async def test_inproc_store_query_derivation_outputs_and_valid_derivers() -> Non
 
 
 @pytest.mark.anyio
-async def test_inproc_store_query_referrers_and_substitutable_paths() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        paths = await store.query_all_valid_paths()
-        if not paths:
-            pytest.skip("store has no valid paths")
-        path = paths[0]
-        referrers = await store.query_referrers(path)
+async def test_inproc_store_query_referrers_and_substitutable_paths(
+    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+) -> None:
+    async with inproc_session() as nix, nix.store() as store:
+        referrers = await store.query_referrers(seeded_store_path)
         assert isinstance(referrers, list)
-        substitutable = await store.query_substitutable_paths([path])
+        substitutable = await store.query_substitutable_paths([seeded_store_path])
         assert isinstance(substitutable, list)
 
 
 @pytest.mark.anyio
-async def test_inproc_store_follow_links_to_store_path(tmp_path: Path) -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        paths = await store.query_all_valid_paths()
-        if not paths:
-            pytest.skip("store has no valid paths")
-        target = str(paths[0])
+async def test_inproc_store_follow_links_to_store_path(
+    tmp_path: Path, inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+) -> None:
+    async with inproc_session() as nix, nix.store() as store:
+        target = str(seeded_store_path)
         link = tmp_path / "store-path"
         link.symlink_to(target)
         resolved = await store.follow_links_to_store_path(str(link))
@@ -281,24 +283,23 @@ async def test_inproc_store_follow_links_to_store_path(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_store_query_path_from_hash_part() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        paths = await store.query_all_valid_paths()
-        if not paths:
-            pytest.skip("store has no valid paths")
-        hash_part = str(paths[0]).removeprefix("/nix/store/").split("-", 1)[0]
+async def test_inproc_store_query_path_from_hash_part(
+    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+) -> None:
+    async with inproc_session() as nix, nix.store() as store:
+        hash_part = seeded_store_path.hash_part
 
         resolved = await store.query_path_from_hash_part(hash_part)
         assert resolved is not None
-        assert str(resolved) == str(paths[0])
+        assert str(resolved) == str(seeded_store_path)
 
         missing = await store.query_path_from_hash_part("0" * 32)
         assert missing is None
 
 
 @pytest.mark.anyio
-async def test_inproc_store_call_generic_l1_method() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_store_call_generic_l1_method(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         uri = await store.call("get_uri")
         assert isinstance(uri, str)
 
@@ -307,20 +308,20 @@ async def test_inproc_store_call_generic_l1_method() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_file(tmp_path: Path) -> None:
+async def test_inproc_eval_file(tmp_path: Path, inproc_session: InprocSessionFactory) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ a = 1; b = "hello"; }')
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         root = await eval.file(str(nix_file))
         assert await root.force() == {"a": 1, "b": "hello"}
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_flake(tmp_path: Path) -> None:
+async def test_inproc_eval_flake(tmp_path: Path, inproc_session: InprocSessionFactory) -> None:
     init_flake_repo(tmp_path, 'greeting = "hello"; count = 42;')
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         outputs = await eval.eval_flake(str(tmp_path), write_lock_file=False)
         assert await (await outputs.attr("greeting")).as_string() == "hello"
         assert await (await outputs.attr("count")).as_int() == 42
@@ -328,10 +329,12 @@ async def test_inproc_eval_flake(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_lock_flake_update_inputs_variants(tmp_path: Path) -> None:
+async def test_inproc_lock_flake_update_inputs_variants(
+    tmp_path: Path, inproc_session: InprocSessionFactory
+) -> None:
     init_flake_repo(tmp_path, "x = 1;")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         locked_all = await eval.lock_flake(str(tmp_path), update_inputs=True, write_lock_file=False)
         assert isinstance(locked_all.description, str)
         await locked_all.release()
@@ -347,11 +350,11 @@ async def test_inproc_lock_flake_update_inputs_variants(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_repl_load_file_and_add_attrs(tmp_path: Path) -> None:
+async def test_inproc_repl_load_file_and_add_attrs(tmp_path: Path, inproc_session: InprocSessionFactory) -> None:
     nix_file = tmp_path / "scope.nix"
     nix_file.write_text("{ answer = 42; }")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         repl = await eval.repl()
         loaded = await repl.load_file(str(nix_file))
         assert await repl.add_attrs(loaded) == ["answer"]
@@ -365,8 +368,8 @@ async def test_inproc_repl_load_file_and_add_attrs(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_scalar_conversions() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_value_scalar_conversions(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         assert await (await eval.string("42")).type() == "int"
         assert await (await eval.string("3.5")).as_float() == 3.5
         assert await (await eval.string("true")).as_bool() is True
@@ -375,8 +378,8 @@ async def test_inproc_value_scalar_conversions() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_force_deep_and_json() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_value_force_deep_and_json(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         deep = await eval.string("{ a = { b = 1; }; }")
         assert await deep.force_deep() == {"a": {"b": 1}}
 
@@ -386,11 +389,11 @@ async def test_inproc_value_force_deep_and_json() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_edit_location(tmp_path: Path) -> None:
+async def test_inproc_value_edit_location(tmp_path: Path, inproc_session: InprocSessionFactory) -> None:
     nix_file = tmp_path / "function.nix"
     nix_file.write_text("argument: argument\n")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         value = await eval.file(str(nix_file))
         path, line = await value.edit_location()
         assert Path(path) == nix_file
@@ -398,27 +401,30 @@ async def test_inproc_value_edit_location(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_auto_call() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_value_auto_call(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         function = await eval.string("{ x ? 1 }: x + 1")
         result = await function.auto_call()
         assert await result.as_int() == 2
 
 
 @pytest.mark.anyio
-async def test_inproc_value_build_and_release() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
-        drv = await eval.string("""
-            let pkgs = import <nixpkgs> {}; in
-            pkgs.stdenvNoCC.mkDerivation {
-              pname = "inproc-value-build-test";
-              version = "1";
-              dontUnpack = true;
-              installPhase = ''echo built-via-inproc > "$out"'';
+async def test_inproc_value_build_and_release(
+    inproc_session: InprocSessionFactory, isolated_nix_environment: NixTestEnvironment
+) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
+        drv = await eval.string('''
+            builtins.derivation {
+              name = "inproc-value-build-test";
+              system = builtins.currentSystem;
+              builder = "/bin/sh";
+              args = [ "-c" "echo built-via-inproc > $out" ];
             }
-        """)
+        ''')
         outputs = await drv.build()
-        out_path = AnyioPath(outputs["out"])
+        # Nix reports the logical StorePath. The fixture's LocalStore maps it
+        # beneath its private root rather than the host's /nix/store mount.
+        out_path = AnyioPath(isolated_nix_environment.root / "nix" / "store" / Path(outputs["out"]).name)
         assert await out_path.read_text() == "built-via-inproc\n"
 
         await drv.release()
@@ -427,8 +433,8 @@ async def test_inproc_value_build_and_release() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_close_is_idempotent() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_value_close_is_idempotent(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         value = await eval.string("1")
         await value.close()
         await value.close()
@@ -449,24 +455,24 @@ def test_inproc_session_nix_conf_must_exist(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 @pytest.mark.concurrency
-async def test_inproc_session_rejects_second_concurrent_session() -> None:
-    async with inproc.Session(load_config=False):
+async def test_inproc_session_rejects_second_concurrent_session(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session():
         with pytest.raises(RuntimeError, match="only one"):
-            await inproc.Session(load_config=False).open()
+            await inproc_session().open()
 
 
 @pytest.mark.anyio
-async def test_inproc_session_rejects_mismatched_reinitialization() -> None:
-    async with inproc.Session(load_config=False):
+async def test_inproc_session_rejects_mismatched_reinitialization(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session():
         pass
     with pytest.raises(RuntimeError, match="already initialized"):
-        async with inproc.Session(load_config=False, verbosity="debug"):
+        async with inproc_session(verbosity="debug"):
             pass
 
 
 @pytest.mark.anyio
-async def test_inproc_session_open_and_close_are_idempotent() -> None:
-    session = inproc.Session(load_config=False)
+async def test_inproc_session_open_and_close_are_idempotent(inproc_session: InprocSessionFactory) -> None:
+    session = inproc_session()
     await session.open()
     await session.open()
     await session.close()
@@ -474,8 +480,8 @@ async def test_inproc_session_open_and_close_are_idempotent() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_session_owns_and_shuts_down_its_nix_thread() -> None:
-    first = inproc.Session(load_config=False)
+async def test_inproc_session_owns_and_shuts_down_its_nix_thread(inproc_session: InprocSessionFactory) -> None:
+    first = inproc_session()
     await first.open()
     first_executor = first._executor  # type: ignore[reportPrivateUsage] -- verifies Session owns the executor lifecycle
     first_thread = await first.run(threading.get_ident)
@@ -486,7 +492,7 @@ async def test_inproc_session_owns_and_shuts_down_its_nix_thread() -> None:
     assert first_executor.closed
     assert first._executor is None  # type: ignore[reportPrivateUsage] -- verifies close releases Session ownership
 
-    second = inproc.Session(load_config=False)
+    second = inproc_session()
     await second.open()
     second_executor = second._executor  # type: ignore[reportPrivateUsage] -- verifies a later Session gets a fresh executor
     second_thread = await second.run(threading.get_ident)
@@ -503,8 +509,8 @@ async def test_inproc_session_owns_and_shuts_down_its_nix_thread() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_session_verbosity_roundtrip() -> None:
-    async with inproc.Session(load_config=False) as nix:
+async def test_inproc_session_verbosity_roundtrip(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix:
         original = await nix.get_verbosity()
         try:
             new_level = 3 if original != 3 else 4
@@ -516,8 +522,8 @@ async def test_inproc_session_verbosity_roundtrip() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_session_subscribe_receives_log_events() -> None:
-    async with inproc.Session(load_config=False) as nix:
+async def test_inproc_session_subscribe_receives_log_events(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix:
         events: list[Any] = []
         subscription = nix.subscribe(events.append)
         try:
@@ -532,8 +538,8 @@ async def test_inproc_session_subscribe_receives_log_events() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_session_log_stream_yields_events() -> None:
-    async with inproc.Session(load_config=False) as nix:
+async def test_inproc_session_log_stream_yields_events(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix:
         stream = nix.log_stream()
         nanopynix_util._log_test("inproc log_stream test")  # type: ignore[reportPrivateUsage] -- test imports private helper
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
@@ -542,16 +548,16 @@ async def test_inproc_session_log_stream_yields_events() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_store_not_open_raises() -> None:
-    async with inproc.Session(load_config=False) as nix:
+async def test_inproc_store_not_open_raises(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix:
         store = nix.store()
         with pytest.raises(inproc.InprocSessionClosedError):
             await store.uri()
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_open_and_close_are_idempotent() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_eval_open_and_close_are_idempotent(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         eval = nix.eval(store)
         await eval.open()
         await eval.open()  # already active: no-op, does not re-raise
@@ -585,28 +591,26 @@ def test_inproc_normalize_nix_path_str_and_list_variants() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_store_query_path_info() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        paths = await store.query_all_valid_paths()
-        if not paths:
-            pytest.skip("store has no valid paths")
-        info = await store.query_path_info(paths[0])
-        assert info.path == str(paths[0])
+async def test_inproc_store_query_path_info(
+    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+) -> None:
+    async with inproc_session() as nix, nix.store() as store:
+        info = await store.query_path_info(seeded_store_path)
+        assert info.path == str(seeded_store_path)
 
 
 @pytest.mark.anyio
-async def test_inproc_store_get_build_log() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
-        paths = await store.query_all_valid_paths()
-        if not paths:
-            pytest.skip("store has no valid paths")
-        log = await store.get_build_log(paths[0])
+async def test_inproc_store_get_build_log(
+    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+) -> None:
+    async with inproc_session() as nix, nix.store() as store:
+        log = await store.get_build_log(seeded_store_path)
         assert log is None or isinstance(log, str)
 
 
 @pytest.mark.anyio
-async def test_inproc_store_open_is_idempotent() -> None:
-    async with inproc.Session(load_config=False) as nix:
+async def test_inproc_store_open_is_idempotent(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix:
         store = nix.store()
         await store.open()
         await store.open()
@@ -621,32 +625,32 @@ async def test_inproc_session_run_before_open_raises() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_rejects_store_from_different_session() -> None:
+async def test_inproc_eval_rejects_store_from_different_session(inproc_session: InprocSessionFactory) -> None:
     other_session = inproc.Session(load_config=False)
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+    async with inproc_session() as nix, nix.store() as store:
         with pytest.raises(ValueError, match="different inproc Session"):
             other_session.eval(store)
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_open_requires_open_store() -> None:
-    async with inproc.Session(load_config=False) as nix:
+async def test_inproc_eval_open_requires_open_store(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix:
         store = nix.store()
         with pytest.raises(inproc.InprocSessionClosedError):
             await nix.eval(store).open()
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_repl_requires_open_eval() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_eval_repl_requires_open_eval(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         eval = nix.eval(store)
         with pytest.raises(inproc.InprocSessionClosedError):
             await eval.repl()
 
 
 @pytest.mark.anyio
-async def test_inproc_session_close_auto_closes_open_eval() -> None:
-    session = inproc.Session(load_config=False)
+async def test_inproc_session_close_auto_closes_open_eval(inproc_session: InprocSessionFactory) -> None:
+    session = inproc_session()
     await session.open()
     store = session.store()
     await store.open()
@@ -661,10 +665,12 @@ async def test_inproc_session_close_auto_closes_open_eval() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_close_releases_leftover_locked_flakes(tmp_path: Path) -> None:
+async def test_inproc_eval_close_releases_leftover_locked_flakes(
+    tmp_path: Path, inproc_session: InprocSessionFactory
+) -> None:
     init_flake_repo(tmp_path, "val = 1;")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+    async with inproc_session() as nix, nix.store() as store:
         eval = nix.eval(store)
         await eval.open()
         locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
@@ -676,25 +682,27 @@ async def test_inproc_eval_close_releases_leftover_locked_flakes(tmp_path: Path)
 
 
 @pytest.mark.anyio
-async def test_inproc_locked_flake_release_is_idempotent(tmp_path: Path) -> None:
+async def test_inproc_locked_flake_release_is_idempotent(
+    tmp_path: Path, inproc_session: InprocSessionFactory
+) -> None:
     init_flake_repo(tmp_path, "val = 1;")
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
         await locked.release()
         await locked.release()
 
 
 @pytest.mark.anyio
-async def test_inproc_value_attr_names() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_value_attr_names(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         root = await eval.string("{ a = 1; b = 2; }")
         assert set(await root.attr_names()) == {"a", "b"}
 
 
 @pytest.mark.anyio
-async def test_inproc_value_call_accepts_value_argument() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+async def test_inproc_value_call_accepts_value_argument(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         function = await eval.string("x: x + 1")
         argument = await eval.string("41")
         result = await function.call(argument)
@@ -702,8 +710,8 @@ async def test_inproc_value_call_accepts_value_argument() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_rejects_use_from_different_eval_session() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store:
+async def test_inproc_value_rejects_use_from_different_eval_session(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store:
         eval1 = nix.eval(store)
         await eval1.open()
         value = await eval1.string("1")
@@ -716,27 +724,28 @@ async def test_inproc_value_rejects_use_from_different_eval_session() -> None:
 
 
 @pytest.mark.anyio
-async def test_inproc_value_build_rejects_store_from_different_session() -> None:
+async def test_inproc_value_build_rejects_store_from_different_session(
+    inproc_session: InprocSessionFactory,
+) -> None:
     other_session = inproc.Session(load_config=False)
     foreign_store = other_session.store()
 
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         drv = await eval.string("1")
         with pytest.raises(ValueError, match="different inproc Session"):
             await drv.build(store=foreign_store)
 
 
 @pytest.mark.anyio
-async def test_inproc_value_build_raises_on_build_failure() -> None:
-    async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as eval:
-        drv = await eval.string("""
-            let pkgs = import <nixpkgs> {}; in
-            pkgs.stdenvNoCC.mkDerivation {
-              pname = "inproc-value-build-fail-test";
-              version = "1";
-              dontUnpack = true;
-              installPhase = "exit 1";
+async def test_inproc_value_build_raises_on_build_failure(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
+        drv = await eval.string('''
+            builtins.derivation {
+              name = "inproc-value-build-fail-test";
+              system = builtins.currentSystem;
+              builder = "/bin/sh";
+              args = [ "-c" "exit 1" ];
             }
-        """)
+        ''')
         with pytest.raises(RuntimeError):
             await drv.build()
