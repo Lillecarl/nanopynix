@@ -4,7 +4,6 @@
 - direnv exec . pyright
 - direnv exec . ruff check --fix
 - direnv exec . ruff check --config ruff-strict.toml --fix
-- jj st &>/dev/null && nix build .#nanopynix-nixVersions-tests --no-link --print-out-paths --print-build-logs # jj st tracks all files in Git which is required when doing flake builds.
 
 # Version control
 
@@ -13,6 +12,12 @@ for status, diffs, history, and commit/change inspection. Do not assume a Git
 workflow or run Git porcelain commands such as `git status`, `git diff`,
 `git commit`, `git checkout`, or `git reset` unless the user explicitly asks for
 Git or a tool requires Git-specific plumbing.
+
+`pynix` is nanopynix's dogfooding consumer. It should depend on public
+`nanopynix` APIs. If it needs a generally useful library capability, expose it
+from nanopynix rather than importing a private implementation module. A narrow
+private dependency is acceptable only when a redesign is not justified, and
+must be explicitly documented at the import site.
 
 Run pytest commands so the complete output is preserved. Do not pipe pytest
 directly into `tail`, `head`, `grep`, or similar filters. If you need a short

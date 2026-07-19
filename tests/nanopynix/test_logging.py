@@ -10,7 +10,8 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Protocol, cast
 
-import nanopynix_util
+from nanopynix_bindings import util as nanopynix_util
+
 from nanopynix import LogCollector
 
 if TYPE_CHECKING:

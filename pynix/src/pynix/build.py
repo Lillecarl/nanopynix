@@ -11,7 +11,7 @@ from clypi import Command, arg
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from nanopynix._session import ValueProxy
+    from nanopynix.rpc.client import ValueProxy
 
 import nanopynix
 from nanopynix.exceptions import StoreError

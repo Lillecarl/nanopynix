@@ -12,10 +12,10 @@ from typing import Any, Protocol, cast
 
 import anyio
 import pytest
+from nanopynix_bindings import expr as nanopynix_expr
+from nanopynix_bindings import util as nanopynix_util
 
 import nanopynix
-import nanopynix_expr
-import nanopynix_util
 
 # Async tests can hang indefinitely on a wedged subprocess/pipe instead of
 # failing (e.g. a Nix worker that stops responding never raises an error, it

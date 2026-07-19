@@ -21,8 +21,8 @@
 }:
 let
   nanopynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../python;
-    root = "$GIT_ROOT/python/src";
+    projectRoot = ../nanopynix;
+    root = "$GIT_ROOT/nanopynix/src";
     inherit python;
     pythonPackages = python.pkgs // {
       "nanopynix-bindings" = nanopynix-bindings;

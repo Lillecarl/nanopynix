@@ -10,7 +10,7 @@ from clypi import arg
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nanopynix._session import EvalSession, ReplSession, ValueProxy
+    from nanopynix.rpc.client import EvalSession, ReplSession, ValueProxy
 
 
 class EvaluationTargetError(RuntimeError):

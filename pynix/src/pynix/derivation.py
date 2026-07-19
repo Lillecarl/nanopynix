@@ -10,7 +10,7 @@ from clypi import Command, arg
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from nanopynix._session import ValueProxy
+    from nanopynix.rpc.client import ValueProxy
 
 import nanopynix
 from pynix._util import forward_nix_logs, prepare_sys_path
