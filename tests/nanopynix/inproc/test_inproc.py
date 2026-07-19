@@ -57,6 +57,7 @@ async def test_inproc_repl_supports_shared_protocol_operations() -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.concurrency
 async def test_inproc_allows_concurrent_eval_states_on_one_store() -> None:
     """Two independent EvalSessions may be open on the same Store at once."""
     async with inproc.Session(load_config=False) as nix, nix.store() as store, nix.eval(store) as first:
@@ -69,6 +70,7 @@ async def test_inproc_allows_concurrent_eval_states_on_one_store() -> None:
             await second.close()
 
 
+@pytest.mark.concurrency
 async def test_inproc_concurrent_eval_sessions_have_independent_pure_eval() -> None:
     """Concurrently open EvalSessions may disagree on pure_eval.
 
@@ -446,6 +448,7 @@ def test_inproc_session_nix_conf_must_exist(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.concurrency
 async def test_inproc_session_rejects_second_concurrent_session() -> None:
     async with inproc.Session(load_config=False):
         with pytest.raises(RuntimeError, match="only one"):

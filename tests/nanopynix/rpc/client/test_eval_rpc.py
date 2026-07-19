@@ -693,6 +693,7 @@ async def test_worker_to_yaml_rejects_functions():
         assert "Python primop" not in message
 
 
+@pytest.mark.concurrency
 async def test_eval_concurrent_sessions(tmp_path: Path):
     """Two concurrent eval sessions — each in its own Session."""
     f1 = tmp_path / "a.nix"

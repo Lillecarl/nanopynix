@@ -149,6 +149,7 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
 
 
 @pytest.mark.anyio
+@pytest.mark.concurrency
 async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.MonkeyPatch, init_expr: object) -> None:
     # `init_expr` forces real Boehm GC initialization: this test's open_eval
     # spins up real NixThreadExecutor instances with the real

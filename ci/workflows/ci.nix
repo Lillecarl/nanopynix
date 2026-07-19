@@ -66,17 +66,13 @@ let
         (steps.verifyClosure { name = "Verify test runner closure after build"; })
         (steps.enableSandboxNamespaces { })
         {
-          name = "Test nanopynix against Nix ${version} (DIAGNOSTIC-ONLY, post-mortem core dump on crash, narrowed run)";
+          name = "Test nanopynix against Nix ${version} (full suite)";
           run = # bash
             ''
               set -o pipefail
               unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage \
-                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds tests/nanopynix/test_inproc_multithreaded_poc.py \
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
                 2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log
-              if grep -qE "^[0-9]+ failed|SIGSEGV|SIGABRT|Fatal Python error" ''${{ github.workspace }}/test-gdb-output.log; then
-                echo "::error::test run crashed or failed -- see gdb backtrace above"
-                exit 1
-              fi
             '';
         }
         (steps.uploadArtifact {
@@ -117,10 +113,9 @@ let
     ) regularVersionNames
   );
 
-  # ThreadSanitizer build hunting concurrency bugs in the single-user
-  # in-process build/eval paths. Single-user only, since that's the only
-  # mode the crashes reproduce in; not part of the normal version/
-  # install-mode matrix, but DOES block on its own: a genuine new
+  # ThreadSanitizer builds hunt concurrency bugs in the in-process build/eval
+  # paths under both supported Nix installation modes. They are not part of
+  # the normal version/install-mode matrix, but DO block on their own: a genuine new
   # ThreadSanitizer data race, or any test failure other than the two
   # known TSAN-timing-sensitive assertions (xfail-marked in
   # test_inproc_multithreaded_poc.py; see _running_under_tsan there),
@@ -137,19 +132,24 @@ let
   # "nix_2_35-tsan"); `bareVersion` strips "-tsan" for human-readable
   # names/artifact names.
   mkTsanTestJob =
-    { version }:
+    { version, installMode }:
     let
       bareVersion = lib.removeSuffix "-tsan" version;
     in
     mkJob {
       "if" = "github.event_name != 'schedule'";
-      steps = [
-        (steps.checkout { })
-        (steps.nixQuickInstall { })
-        (steps.cachix { })
-        (steps.configureSingleUserNix { })
+      steps = [ (steps.checkout { }) ]
+      ++ (
+        if installMode == "single-user" then
+          [ (steps.nixQuickInstall { }) ]
+        else
+          [ (steps.installNixMultiUser { }) ]
+      )
+      ++ [ (steps.cachix { }) ]
+      ++ ciLib.optional (installMode == "single-user") (steps.configureSingleUserNix { })
+      ++ [
         {
-          name = "Build TSAN nanopynix test runner (${bareVersion})";
+          name = "Build TSAN nanopynix test runner (${bareVersion}, ${installMode})";
           run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
         }
         (steps.enableSandboxNamespaces { })
@@ -158,7 +158,7 @@ let
           run = # bash
             ''
               set -o pipefail
-              LOGFILE="''${{ github.workspace }}/tsan-output-${bareVersion}.log"
+              LOGFILE="''${{ github.workspace }}/tsan-output-${bareVersion}-${installMode}.log"
               race_found=0
               for i in $(seq 1 5); do
                 echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
@@ -211,29 +211,18 @@ let
             '';
         }
         {
-          name = "Run TSAN-instrumented concurrency-relevant test files (single pass)";
+          name = "Run TSAN-instrumented concurrency tests (single pass)";
           run = # bash
             ''
               set -o pipefail
-              LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}.log"
+              LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}-${installMode}.log"
               status=0
-              # Broader (but not exhaustive) coverage pass: every test file that
-              # touches NixThreadExecutor/threading/concurrent.futures, not just
-              # the one test known to hit the now-fixed races. Single pass only
-              # (not repeated like the targeted run above) -- halt_on_error=1
-              # stops the whole run at the first finding anywhere, so repeating
-              # wouldn't add coverage, only cost. The other ~39 test files are
-              # single-threaded and wouldn't exercise any new race, so they're
-              # intentionally excluded to keep this pass cheap.
+              # The marker is the explicit TSAN contract. It includes every
+              # test that intentionally overlaps operations; non-concurrency
+              # tests stay in the ordinary full-suite jobs. This remains a
+              # single pass: halt_on_error=1 stops at the first finding.
               unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
-                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
-                tests/nanopynix/test_inproc.py \
-                tests/nanopynix/test_worker_store_unit.py \
-                tests/nanopynix/test_inproc_multithreaded_poc.py \
-                tests/nanopynix/test_session_unit.py \
-                tests/nanopynix/test_eval_rpc.py \
-                tests/nanopynix/test_l3_inproc.py \
-                tests/nanopynix/test_worker_eval_unit.py \
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
                 2>&1 | tee -a "$LOGFILE" || status=$?
               echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
               if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -252,18 +241,21 @@ let
             '';
         }
         (steps.uploadArtifact {
-          name = "Upload TSAN output (${bareVersion})";
-          artifactName = "tsan-race-report-${bareVersion}";
-          path = "\${{ github.workspace }}/tsan-output-${bareVersion}.log\n\${{ github.workspace }}/tsan-output-broad-${bareVersion}.log\n";
+          name = "Upload TSAN output (${bareVersion}, ${installMode})";
+          artifactName = "tsan-race-report-${bareVersion}-${installMode}";
+          path = "\${{ github.workspace }}/tsan-output-${bareVersion}-${installMode}.log\n\${{ github.workspace }}/tsan-output-broad-${bareVersion}-${installMode}.log\n";
         })
       ];
     };
 
   tsanTestJobs = builtins.listToAttrs (
-    map (version: {
-      name = "test-tsan-${lib.removeSuffix "-tsan" version}";
-      value = mkTsanTestJob { inherit version; };
-    }) tsanVersionNames
+    builtins.concatMap (
+      version:
+      map (installMode: {
+        name = "test-tsan-${lib.removeSuffix "-tsan" version}-${installMode}";
+        value = mkTsanTestJob { inherit version installMode; };
+      }) installModes
+    ) tsanVersionNames
   );
 in
 ciLib.mkWorkflow {

@@ -95,6 +95,7 @@ async def test_allowed_uris_is_exposed():
 
 
 @pytest.mark.anyio
+@pytest.mark.concurrency
 async def test_concurrent_eval_sessions_have_independent_pure_eval():
     """Two concurrently open EvalSessions may have different pure_eval values.
 

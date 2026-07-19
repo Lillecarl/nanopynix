@@ -277,6 +277,7 @@ class TestEvalSessionLifecycle:
         request = pool._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 99
 
+    @pytest.mark.concurrency
     async def test_eval_proxy_serializes_concurrent_operations(self):
         """One EvalState never receives overlapping RPCs from its proxies."""
         pool = _mock_pool()
