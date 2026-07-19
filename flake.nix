@@ -27,7 +27,13 @@
     {
       packages = forAllSystems (
         system:
-        lib.filterAttrs (_: v: lib.isDerivation v) (eachDefNix.${system} // eachDefNix.${system}.tests)
+        lib.filterAttrs (_: v: lib.isDerivation v) (
+          eachDefNix.${system}
+          // eachDefNix.${system}.tests
+          // lib.mapAttrs' (
+            n: v: lib.nameValuePair "nanopynix-${n}" v.nanopynix
+          ) eachDefNix.${system}.nanopynixVersions
+        )
       );
       devShells = forAllSystems (system: {
         default = eachDefNix.${system}.shell;
