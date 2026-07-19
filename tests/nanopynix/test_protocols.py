@@ -17,16 +17,16 @@ ReplValueT = TypeVar("ReplValueT", bound=AsyncValue)
 VerbosityT = TypeVar("VerbosityT")
 
 if TYPE_CHECKING:
-    from nanopynix._session import EvalSession as RpcEvalSession
-    from nanopynix._session import LockedFlakeHandle, ValueProxy
-    from nanopynix._session import ReplSession as RpcReplSession
     from nanopynix.inproc import EvalSession as InprocEvalSession
     from nanopynix.inproc import LockedFlake, Value
     from nanopynix.inproc import ReplSession as InprocReplSession
     from nanopynix.inproc import Session as InprocSession
     from nanopynix.inproc import Store as InprocStore
-    from nanopynix.nix import Session as RpcSession
-    from nanopynix.store import Store as RpcStore
+    from nanopynix.rpc.client._session import EvalSession as RpcEvalSession
+    from nanopynix.rpc.client._session import LockedFlakeHandle, ValueProxy
+    from nanopynix.rpc.client._session import ReplSession as RpcReplSession
+    from nanopynix.rpc.client.session import Session as RpcSession
+    from nanopynix.rpc.client.store import Store as RpcStore
 
 
 def _accept_async_value(value: AsyncValue) -> None:

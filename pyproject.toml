@@ -1,7 +1,7 @@
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-extraPaths = ["python/src", "pynix/src", "tests/pynix", "docs"]
+extraPaths = ["nanopynix/src", "pynix/src", "tests/pynix", "docs"]
 exclude = ["**/result*"]
 
 [[tool.pyright.executionEnvironments]]
@@ -23,7 +23,7 @@ parallel = true
 sigterm = true
 
 [tool.coverage.paths]
-nanopynix = ["python/src/nanopynix", "*/site-packages/nanopynix"]
+nanopynix = ["nanopynix/src/nanopynix", "*/site-packages/nanopynix"]
 pynix = ["pynix/src/pynix", "*/site-packages/pynix"]
 
 [tool.coverage.report]

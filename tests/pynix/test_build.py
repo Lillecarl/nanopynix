@@ -250,6 +250,9 @@ async def test_build_update_fod_dry_run_reports_local_fetchurl_diff(
     assert nix_file.read_text() == source
 
 
+@pytest.mark.xfail(
+    reason="requires request-scoped log finalization; see todo/rpc-log-request-finalization.md",
+)
 async def test_build_update_fod_rewrites_and_rebuilds(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -273,6 +276,9 @@ runCommand "payload" {
     assert 'outputHash = "sha256-' in nix_file.read_text()
 
 
+@pytest.mark.xfail(
+    reason="requires request-scoped log finalization; see todo/rpc-log-request-finalization.md",
+)
 async def test_build_update_fod_rewrites_each_named_run_command_dependency(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

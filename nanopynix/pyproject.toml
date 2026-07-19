@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nanopynix"
+version = "0.1.0"
+description = "nanobind-based Python bindings for Nix"
+authors = [{ name = "nanopynix contributors" }]
+requires-python = ">=3.10"
+dependencies = [
+  "nanopynix-bindings",
+  "nanopynix-proto",
+  "grpclib-transports",
+  "coolname",
+  "janus",
+  "pydantic",
+  "pydantic-settings",
+  "pyyaml",
+  "strip-ansi",
+  "setproctitle",
+]
+
+classifiers = [
+  "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
+  "Programming Language :: Python :: 3",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-dependency", "pytest-cov", "anyio", "pygit2"]
+
+[project.scripts]
+nanopynix-worker = "nanopynix.rpc.worker._worker:main"
+
+[project.urls]
+Homepage = "https://github.com/lillecarl/nanopynix"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nanopynix"]

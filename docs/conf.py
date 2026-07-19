@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 _DOCS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_DOCS_DIR))
-sys.path.insert(0, str(_DOCS_DIR.parent / "python" / "src"))
+sys.path.insert(0, str(_DOCS_DIR.parent / "nanopynix" / "src"))
 sys.path.insert(0, str(_DOCS_DIR.parent / "pynix" / "src"))
 
 from _generate_pynix_reference import generate as _generate_pynix_reference  # noqa: E402, I001 -- sys.path must be extended first, and this import cannot be merged into the block above it

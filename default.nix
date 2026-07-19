@@ -45,7 +45,7 @@ let
     betterproto2-compiler
     ;
 
-  nanopynix-proto = python3Packages.callPackage ./proto/package.nix {
+  nanopynix-proto = python3Packages.callPackage ./nanopynix-proto/package.nix {
     inherit betterproto2 betterproto2-compiler renderPyproject;
   };
 
@@ -140,15 +140,15 @@ let
               );
             in
             {
-              nanopynix-bindings = callNixPythonPackage ./bindings/package.nix {
+              nanopynix-bindings = callNixPythonPackage ./nanopynix-bindings/package.nix {
                 inherit enableTsan tsanRuntime;
               };
               nanopynix =
-                callNixPythonPackage ./python/package.nix {
+                callNixPythonPackage ./nanopynix/package.nix {
                   inherit enableTsan tsanRuntime;
                 }
                 // {
-                  test = callNixPythonPackage ./python/tests.nix {
+                  test = callNixPythonPackage ./nanopynix/tests.nix {
                     inherit (final.nanopynix) version;
                     inherit (inputs) nixpkgs;
                     inherit tsanRuntime;

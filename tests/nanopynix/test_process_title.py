@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import nanopynix._process_title as process_title
-import nanopynix.nix as nix_module
-from nanopynix.nix import Session
-from nanopynix.store import StoreHandle
+import nanopynix.rpc.client.session as nix_module
+from nanopynix.rpc.client.session import Session
+from nanopynix.rpc.client.store import StoreHandle
 
 
 def test_manager_title_uses_current_project(monkeypatch: pytest.MonkeyPatch) -> None:

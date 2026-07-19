@@ -19,7 +19,7 @@ from pynix._util import forward_nix_logs, prepare_sys_path
 
 if TYPE_CHECKING:
 
-    from nanopynix._session import ValueProxy
+    from nanopynix.rpc.client import ValueProxy
 
 logger = structlog.get_logger(__name__)
 console = Console()
