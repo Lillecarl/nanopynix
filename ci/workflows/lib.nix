@@ -60,9 +60,16 @@ let
             run = # bash
               ''
                 set -o pipefail
-                unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage \
+                paths_to_delete="''${{ github.workspace }}/nanopynix-test-store-paths.txt"
+                rm -f "$paths_to_delete"
+                status=0
+                unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
                   ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
-                  2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log
+                  2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log || status=$?
+                if [ -s "$paths_to_delete" ]; then
+                  nix store delete --stdin < "$paths_to_delete" || true
+                fi
+                exit "$status"
               '';
           }
           (steps.uploadArtifact {
