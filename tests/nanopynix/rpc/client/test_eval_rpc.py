@@ -1,6 +1,6 @@
 """Tests for eval over RPC — EvalSession + ValueProxy."""
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportMissingParameterType=false
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportMissingParameterType=false, reportUnknownArgumentType=false
 # Session / nanopynix are C++ nanobind extensions without type stubs.
 # Variable types and nested function parameter types are unresolvable.
 
@@ -8,29 +8,31 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from tests.support.git import init_flake_repo
 from anyio import Path as AnyioPath
 
 from nanopynix import (
     EvalSessionClosedError,
     NixCoercionError,
     NixType,
-    Session,
     ValueProxy,
     ValueReleasedError,
     WrongNixTypeError,
     strip_ansi,
     yaml_primops,
 )
+from tests.support.git import init_flake_repo
+
+if TYPE_CHECKING:
+    from tests.support.nix_environment import RpcSessionFactory
 
 requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
 
 
-async def test_force_closing_store_closes_dependent_eval_state() -> None:
-    async with Session() as nix:
+async def test_force_closing_store_closes_dependent_eval_state(rpc_session: RpcSessionFactory) -> None:
+    async with rpc_session() as nix:
         store = nix.store()
         await store.open()
         eval = nix.eval(store)
@@ -43,13 +45,13 @@ async def test_force_closing_store_closes_dependent_eval_state() -> None:
             await value.force()
 
 
-async def test_eval_file_simple(tmp_path: Path):
+async def test_eval_file_simple(rpc_session: RpcSessionFactory, tmp_path: Path):
     """session.file returns a ValueProxy, force_deep() resolves to Python dict."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ a = 1; b = "hello"; c = true; }')
 
     async with (
-        Session() as nix,
+        rpc_session() as nix,
         nix.store() as store,
         nix.eval(store) as eval,
     ):
@@ -59,39 +61,39 @@ async def test_eval_file_simple(tmp_path: Path):
         assert result == {"a": 1, "b": "hello", "c": True}
 
 
-async def test_eval_file_directory_loads_default_nix(tmp_path: Path):
+async def test_eval_file_directory_loads_default_nix(rpc_session: RpcSessionFactory, tmp_path: Path):
     """A directory expression path resolves to its default.nix."""
     (tmp_path / "default.nix").write_text("42")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
         assert await (await eval.file(str(tmp_path))).force() == 42
 
 
-async def test_eval_file_uses_nix_lookup_path(tmp_path: Path):
+async def test_eval_file_uses_nix_lookup_path(rpc_session: RpcSessionFactory, tmp_path: Path):
     """Expression paths use Nix's ``lookupFileArg`` search-path resolver."""
     expressions = tmp_path / "expressions"
     expressions.mkdir()
     (expressions / "default.nix").write_text("42")
 
     async with (
-        Session(nix_path=[f"example={expressions}"]) as session,
+        rpc_session(nix_path=[f"example={expressions}"]) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
         assert await (await eval.file("<example>")).force() == 42
 
 
-async def test_eval_attr_navigation(tmp_path: Path):
+async def test_eval_attr_navigation(rpc_session: RpcSessionFactory, tmp_path: Path):
     """Navigate into an attrset via .attr(), then force."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ inner = { x = 42; y = "hi"; }; }')
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -103,13 +105,13 @@ async def test_eval_attr_navigation(tmp_path: Path):
         assert await x.force_as(NixType.INT) == 42
 
 
-async def test_eval_list(tmp_path: Path):
+async def test_eval_list(rpc_session: RpcSessionFactory, tmp_path: Path):
     """session.file a list, navigate by index, force."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("[ 1 2 3 ]")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -121,10 +123,10 @@ async def test_eval_list(tmp_path: Path):
         assert await first.force() == 1
 
 
-async def test_eval_string():
+async def test_eval_string(rpc_session: RpcSessionFactory):
     """session.string evaluates an inline expression."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -133,10 +135,10 @@ async def test_eval_string():
         assert await root.force() == 43
 
 
-async def test_forced_attrs_borrow_the_parent_value_handle():
+async def test_forced_attrs_borrow_the_parent_value_handle(rpc_session: RpcSessionFactory):
     """Attrs are views: only their parent owns and releases the worker handle."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -150,10 +152,10 @@ async def test_forced_attrs_borrow_the_parent_value_handle():
             await child.force()
 
 
-async def test_eval_realise_command_values_preserves_string_context():
+async def test_eval_realise_command_values_preserves_string_context(rpc_session: RpcSessionFactory):
     """Realising strings and argv uses Nix's context-aware coercion path."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -167,13 +169,13 @@ async def test_eval_realise_command_values_preserves_string_context():
         assert await AnyioPath(argv[1]).read_text() == "argument"
 
 
-async def test_repl_session_persists_bindings(tmp_path: Path):
+async def test_repl_session_persists_bindings(rpc_session: RpcSessionFactory, tmp_path: Path):
     """ReplSession evaluates expressions and files in one persistent Nix scope."""
     nix_file = tmp_path / "uses-binding.nix"
     nix_file.write_text("x + 1")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.repl(store) as repl,
     ):
@@ -182,10 +184,10 @@ async def test_repl_session_persists_bindings(tmp_path: Path):
         assert await (await repl.file(str(nix_file))).force() == 42
 
 
-async def test_repl_session_scope_names_include_bindings_and_base_scope():
+async def test_repl_session_scope_names_include_bindings_and_base_scope(rpc_session: RpcSessionFactory):
     """Completion can discover both REPL bindings and Nix's base identifiers."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.repl(store) as repl,
     ):
@@ -196,14 +198,14 @@ async def test_repl_session_scope_names_include_bindings_and_base_scope():
     assert "builtins" in names
 
 
-async def test_repl_session_file_uses_nix_lookup_path(tmp_path: Path):
+async def test_repl_session_file_uses_nix_lookup_path(rpc_session: RpcSessionFactory, tmp_path: Path):
     """REPL file evaluation uses the same Nix path resolver as ``:load``."""
     expressions = tmp_path / "expressions"
     expressions.mkdir()
     (expressions / "default.nix").write_text("x + 1")
 
     async with (
-        Session(nix_path=[f"example={expressions}"]) as session,
+        rpc_session(nix_path=[f"example={expressions}"]) as session,
         session.store() as store,
         session.repl(store) as repl,
     ):
@@ -211,12 +213,12 @@ async def test_repl_session_file_uses_nix_lookup_path(tmp_path: Path):
         assert await (await repl.file("<example>")).force() == 42
 
 
-async def test_repl_session_load_file_autocalls_top_level_function(tmp_path: Path):
+async def test_repl_session_load_file_autocalls_top_level_function(rpc_session: RpcSessionFactory, tmp_path: Path):
     """``load_file`` matches ``nix repl :load`` top-level auto-calling."""
     (tmp_path / "default.nix").write_text("{ value ? 41 }: { answer = value + 1; }")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.repl(store) as repl,
     ):
@@ -226,13 +228,13 @@ async def test_repl_session_load_file_autocalls_top_level_function(tmp_path: Pat
         assert await (await repl.string("answer")).force() == 42
 
 
-async def test_repl_session_edit_location_uses_function_source(tmp_path: Path):
+async def test_repl_session_edit_location_uses_function_source(rpc_session: RpcSessionFactory, tmp_path: Path):
     """edit_location() resolves a lambda to its physical source file and line."""
     nix_file = tmp_path / "function.nix"
     nix_file.write_text("argument: argument\n")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.repl(store) as repl,
     ):
@@ -243,10 +245,10 @@ async def test_repl_session_edit_location_uses_function_source(tmp_path: Path):
     assert line == 1
 
 
-async def test_repl_session_adds_attrs_to_scope():
+async def test_repl_session_adds_attrs_to_scope(rpc_session: RpcSessionFactory):
     """ReplSession can merge an evaluated attrset into its lexical scope."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.repl(store) as repl,
     ):
@@ -255,13 +257,13 @@ async def test_repl_session_adds_attrs_to_scope():
         assert await (await repl.string("answer")).force() == 42
 
 
-async def test_eval_attr_names(tmp_path: Path):
+async def test_eval_attr_names(rpc_session: RpcSessionFactory, tmp_path: Path):
     """attr_names() returns keys of an attrset (insertion order)."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ z = 1; a = 2; m = 3; }")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -270,13 +272,13 @@ async def test_eval_attr_names(tmp_path: Path):
         assert set(names) == {"a", "m", "z"}
 
 
-async def test_eval_has_attr(tmp_path: Path):
+async def test_eval_has_attr(rpc_session: RpcSessionFactory, tmp_path: Path):
     """has_attr() checks for key existence."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ foo = 1; }")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -285,13 +287,13 @@ async def test_eval_has_attr(tmp_path: Path):
         assert await root.has_attr("bar") is False
 
 
-async def test_eval_force_does_not_consume(tmp_path: Path):
+async def test_eval_force_does_not_consume(rpc_session: RpcSessionFactory, tmp_path: Path):
     """force_deep() does NOT release the handle — we can force again."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; }")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -301,12 +303,12 @@ async def test_eval_force_does_not_consume(tmp_path: Path):
         assert r1 == r2 == {"a": 1}
 
 
-async def test_eval_session_cleanup(tmp_path: Path):
+async def test_eval_session_cleanup(rpc_session: RpcSessionFactory, tmp_path: Path):
     """Handles are released when the eval session exits."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; }")
 
-    async with Session() as session, session.store() as store:
+    async with rpc_session() as session, session.store() as store:
         async with session.eval(store) as eval:
             root = await eval.file(str(nix_file))
             await root.force()
@@ -315,13 +317,13 @@ async def test_eval_session_cleanup(tmp_path: Path):
         assert isinstance(uri, str)
 
 
-async def test_eval_thunk(tmp_path: Path):
+async def test_eval_thunk(rpc_session: RpcSessionFactory, tmp_path: Path):
     """session.file on a file with a thunk (lazy value)."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("let x = 1 + 2; in { inherit x; }")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -332,13 +334,13 @@ async def test_eval_thunk(tmp_path: Path):
         assert result == 3
 
 
-async def test_eval_nested_navigation(tmp_path: Path):
+async def test_eval_nested_navigation(rpc_session: RpcSessionFactory, tmp_path: Path):
     """Deep navigation: a.b.c"""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = { b = { c = 99; }; }; }")
 
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -349,10 +351,10 @@ async def test_eval_nested_navigation(tmp_path: Path):
         assert await c.force() == 99
 
 
-async def test_eval_call_function():
+async def test_eval_call_function(rpc_session: RpcSessionFactory):
     """ValueProxy.call passes JSON-compatible Python args to a Nix function."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -362,10 +364,10 @@ async def test_eval_call_function():
         assert await result.force() == 42
 
 
-async def test_eval_call_function_with_value_proxy_arg():
+async def test_eval_call_function_with_value_proxy_arg(rpc_session: RpcSessionFactory):
     """ValueProxy.call can pass an existing same-session Nix value by handle."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -375,10 +377,10 @@ async def test_eval_call_function_with_value_proxy_arg():
         assert await result.force_as(NixType.INT) == 42
 
 
-async def test_eval_reused_function_can_call_separately_evaluated_value():
+async def test_eval_reused_function_can_call_separately_evaluated_value(rpc_session: RpcSessionFactory):
     """A function proxy can be reused with other values evaluated in the same session."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -392,10 +394,10 @@ async def test_eval_reused_function_can_call_separately_evaluated_value():
         assert await result.force_as(NixType.INT) == 42
 
 
-async def test_eval_call_function_with_nested_value_proxy_arg():
+async def test_eval_call_function_with_nested_value_proxy_arg(rpc_session: RpcSessionFactory):
     """ValueProxy.call can pass same-session Nix values inside copied containers."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -405,10 +407,10 @@ async def test_eval_call_function_with_nested_value_proxy_arg():
         assert await result.force_as(NixType.INT) == 42
 
 
-async def test_eval_callable_function_proxy():
+async def test_eval_callable_function_proxy(rpc_session: RpcSessionFactory):
     """ValueProxy is directly callable when it contains a Nix function."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -417,10 +419,10 @@ async def test_eval_callable_function_proxy():
         assert await result.force_as(NixType.STRING) == "demo"
 
 
-async def test_eval_auto_call_function_with_default_attrset_args():
+async def test_eval_auto_call_function_with_default_attrset_args(rpc_session: RpcSessionFactory):
     """auto_call applies Nix top-level call semantics for all-default attrset lambdas."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -431,10 +433,10 @@ async def test_eval_auto_call_function_with_default_attrset_args():
         assert await result.has_attr("pkgs")
 
 
-async def test_eval_call_non_function_raises():
+async def test_eval_call_non_function_raises(rpc_session: RpcSessionFactory):
     """Calling a non-function checks the remote type before issuing call RPC."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -443,10 +445,10 @@ async def test_eval_call_non_function_raises():
             await value(1)
 
 
-async def test_eval_force_as_and_coerce_helpers():
+async def test_eval_force_as_and_coerce_helpers(rpc_session: RpcSessionFactory):
     """force_as checks remote type; coerce_* applies explicit scalar conversions."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -467,10 +469,10 @@ async def test_eval_force_as_and_coerce_helpers():
             await attrs.coerce_str()
 
 
-async def test_force_deep_preserves_nested_functions():
+async def test_force_deep_preserves_nested_functions(rpc_session: RpcSessionFactory):
     """force_deep recursively forces data but leaves functions callable."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -493,10 +495,10 @@ async def test_force_deep_preserves_nested_functions():
         assert await g_result.force_as(NixType.STRING) == "deep"
 
 
-async def test_evaluated_derivation_can_build_while_eval_session_is_active():
+async def test_evaluated_derivation_can_build_while_eval_session_is_active(rpc_session: RpcSessionFactory):
     """ValueProxy.build builds the evaluated derivation through the eval store handle."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -524,10 +526,10 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active():
         assert await AnyioPath(outputs["out"]).read_text() == "hello\n"
 
 
-async def test_evaluated_derivation_can_build_with_explicit_build_store():
+async def test_evaluated_derivation_can_build_with_explicit_build_store(rpc_session: RpcSessionFactory):
     """ValueProxy.build(store=...) uses that store for building, keeping the eval store as context."""
     async with (
-        Session() as session,
+        rpc_session() as session,
         session.store() as eval_store,
         session.store() as build_store,
         session.eval(eval_store) as eval,
@@ -557,10 +559,10 @@ async def test_evaluated_derivation_can_build_with_explicit_build_store():
 
 
 @requires_dynamic_primops
-async def test_worker_yaml_primops():
+async def test_worker_yaml_primops(rpc_session: RpcSessionFactory):
     """Importable worker primops parse and render YAML during eval."""
     async with (
-        Session(primops=yaml_primops()) as session,
+        rpc_session(primops=yaml_primops()) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -581,10 +583,10 @@ async def test_worker_yaml_primops():
 
 
 @requires_dynamic_primops
-async def test_worker_yaml_primops_parse_yaml12_modes():
+async def test_worker_yaml_primops_parse_yaml12_modes(rpc_session: RpcSessionFactory):
     """fromYAML uses modern YAML mode syntax instead of YAML 1.1 octal literals."""
     async with (
-        Session(primops=yaml_primops()) as session,
+        rpc_session(primops=yaml_primops()) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -597,10 +599,10 @@ async def test_worker_yaml_primops_parse_yaml12_modes():
 
 
 @requires_dynamic_primops
-async def test_worker_yaml_primops_parse_yaml11_modes():
+async def test_worker_yaml_primops_parse_yaml11_modes(rpc_session: RpcSessionFactory):
     """fromYAML11 keeps legacy YAML 1.1 octal parsing for old manifests."""
     async with (
-        Session(primops=yaml_primops()) as session,
+        rpc_session(primops=yaml_primops()) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -609,10 +611,10 @@ async def test_worker_yaml_primops_parse_yaml11_modes():
 
 
 @requires_dynamic_primops
-async def test_worker_from_yaml_root_list_is_single_document():
+async def test_worker_from_yaml_root_list_is_single_document(rpc_session: RpcSessionFactory):
     """A root list is still one YAML document, not a document stream."""
     async with (
-        Session(primops=yaml_primops()) as session,
+        rpc_session(primops=yaml_primops()) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -621,10 +623,10 @@ async def test_worker_from_yaml_root_list_is_single_document():
 
 
 @requires_dynamic_primops
-async def test_worker_from_yaml_rejects_document_stream():
+async def test_worker_from_yaml_rejects_document_stream(rpc_session: RpcSessionFactory):
     """fromYAML requires exactly one document; streams use fromYAMLStream."""
     async with (
-        Session(primops=yaml_primops()) as session,
+        rpc_session(primops=yaml_primops()) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -637,10 +639,10 @@ async def test_worker_from_yaml_rejects_document_stream():
 
 
 @requires_dynamic_primops
-async def test_worker_from_yaml_parse_error_is_descriptive():
+async def test_worker_from_yaml_parse_error_is_descriptive(rpc_session: RpcSessionFactory):
     """YAML parse failures include builtin and source location context."""
     async with (
-        Session(primops=yaml_primops()) as session,
+        rpc_session(primops=yaml_primops()) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -653,10 +655,10 @@ async def test_worker_from_yaml_parse_error_is_descriptive():
 
 
 @requires_dynamic_primops
-async def test_worker_yaml_stream_primops():
+async def test_worker_yaml_stream_primops(rpc_session: RpcSessionFactory):
     """YAML stream helpers handle Kubernetes multi-document manifests."""
     async with (
-        Session(primops=yaml_primops()) as session,
+        rpc_session(primops=yaml_primops()) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -678,10 +680,10 @@ async def test_worker_yaml_stream_primops():
 
 
 @requires_dynamic_primops
-async def test_worker_to_yaml_rejects_functions():
+async def test_worker_to_yaml_rejects_functions(rpc_session: RpcSessionFactory):
     """toYAML is JSON-compatible data only; nested functions must not stringify."""
     async with (
-        Session(primops=yaml_primops()) as session,
+        rpc_session(primops=yaml_primops()) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -694,7 +696,7 @@ async def test_worker_to_yaml_rejects_functions():
 
 
 @pytest.mark.concurrency
-async def test_eval_concurrent_sessions(tmp_path: Path):
+async def test_eval_concurrent_sessions(rpc_session: RpcSessionFactory, tmp_path: Path):
     """Two concurrent eval sessions — each in its own Session."""
     f1 = tmp_path / "a.nix"
     f2 = tmp_path / "b.nix"
@@ -703,7 +705,7 @@ async def test_eval_concurrent_sessions(tmp_path: Path):
 
     async def eval_one(path: str) -> Any:
         async with (
-            Session() as nix,
+            rpc_session() as nix,
             nix.store() as store,
             nix.eval(store) as session,
         ):
@@ -723,12 +725,12 @@ def _init_git_flake(tmp_path: Path, outputs_body: str):
     init_flake_repo(tmp_path, outputs_body)
 
 
-async def test_eval_flake(tmp_path: Path):
+async def test_eval_flake(rpc_session: RpcSessionFactory, tmp_path: Path):
     """eval_flake locks and evaluates a flake, returns navigable outputs."""
     _init_git_flake(tmp_path, 'greeting = "hello"; count = 42;')
 
     async with (
-        Session(experimental_features=["flakes"]) as session,
+        rpc_session(experimental_features=["flakes"]) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -740,12 +742,12 @@ async def test_eval_flake(tmp_path: Path):
         assert await count.force() == 42
 
 
-async def test_eval_flake_force_json(tmp_path: Path):
+async def test_eval_flake_force_json(rpc_session: RpcSessionFactory, tmp_path: Path):
     """eval_flake + force_json on a sub-attrset serializes it to JSON."""
     _init_git_flake(tmp_path, 'lib = { name = "test"; nested = { x = 1; y = [ "a" "b" ]; }; };')
 
     async with (
-        Session(experimental_features=["flakes"]) as session,
+        rpc_session(experimental_features=["flakes"]) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -760,12 +762,12 @@ async def test_eval_flake_force_json(tmp_path: Path):
         assert nested["y"] == ["a", "b"]
 
 
-async def test_lock_flake_and_eval_locked(tmp_path: Path):
+async def test_lock_flake_and_eval_locked(rpc_session: RpcSessionFactory, tmp_path: Path):
     """lock_flake + eval_locked_flake: in-memory lock, evaluate without writing."""
     _init_git_flake(tmp_path, "val = 99;")
 
     async with (
-        Session(experimental_features=["flakes"]) as session,
+        rpc_session(experimental_features=["flakes"]) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -778,12 +780,12 @@ async def test_lock_flake_and_eval_locked(tmp_path: Path):
         assert await val.force() == 99
 
 
-async def test_locked_flake_release_invalidates_handle(tmp_path: Path):
+async def test_locked_flake_release_invalidates_handle(rpc_session: RpcSessionFactory, tmp_path: Path):
     """release_locked_flake marks the local handle unusable."""
     _init_git_flake(tmp_path, "val = 99;")
 
     async with (
-        Session(experimental_features=["flakes"]) as session,
+        rpc_session(experimental_features=["flakes"]) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -795,12 +797,12 @@ async def test_locked_flake_release_invalidates_handle(tmp_path: Path):
             await locked.eval()
 
 
-async def test_lock_flake_write_lock_file(tmp_path: Path):
+async def test_lock_flake_write_lock_file(rpc_session: RpcSessionFactory, tmp_path: Path):
     """lock_flake with write_lock_file=False, then write_lock_file() persists."""
     _init_git_flake(tmp_path, "val = 1;")
 
     async with (
-        Session(experimental_features=["flakes"]) as session,
+        rpc_session(experimental_features=["flakes"]) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -811,12 +813,12 @@ async def test_lock_flake_write_lock_file(tmp_path: Path):
         assert (tmp_path / "flake.lock").exists()
 
 
-async def test_lock_flake_no_write_does_not_leak(tmp_path: Path):
+async def test_lock_flake_no_write_does_not_leak(rpc_session: RpcSessionFactory, tmp_path: Path):
     """lock_flake with write_lock_file=False must NOT create flake.lock."""
     _init_git_flake(tmp_path, "val = 1;")
 
     async with (
-        Session(experimental_features=["flakes"]) as session,
+        rpc_session(experimental_features=["flakes"]) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -824,12 +826,12 @@ async def test_lock_flake_no_write_does_not_leak(tmp_path: Path):
         assert not (tmp_path / "flake.lock").exists()
 
 
-async def test_lock_flake_update_all(tmp_path: Path):
+async def test_lock_flake_update_all(rpc_session: RpcSessionFactory, tmp_path: Path):
     """lock_flake with update_inputs=True re-resolves all inputs."""
     _init_git_flake(tmp_path, "x = 1;")
 
     async with (
-        Session(experimental_features=["flakes"]) as session,
+        rpc_session(experimental_features=["flakes"]) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -841,12 +843,12 @@ async def test_lock_flake_update_all(tmp_path: Path):
         assert locked.handle > 0
 
 
-async def test_lock_flake_update_specific_input(tmp_path: Path):
+async def test_lock_flake_update_specific_input(rpc_session: RpcSessionFactory, tmp_path: Path):
     """lock_flake with update_inputs=list re-resolves only specified inputs."""
     _init_git_flake(tmp_path, "x = 1;")
 
     async with (
-        Session(experimental_features=["flakes"]) as session,
+        rpc_session(experimental_features=["flakes"]) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
