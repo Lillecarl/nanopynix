@@ -131,7 +131,7 @@ let
                 for i in $(seq 1 5); do
                   echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
                   status=0
-                  unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
+                  unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
                     ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
                     -m tsan_stress \
                     2>&1 | tee -a "$LOGFILE" || status=$?
@@ -160,15 +160,8 @@ let
                 set -o pipefail
                 LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}-${installMode}.log"
                 status=0
-                tsan_version="${version}"
-                tsan_version="''${tsan_version%-tsan}"
-                tsan_concurrency_selection="concurrency"
-                if [ "${installMode}" = single-user ] && { [ "$tsan_version" = nix_2_34 ] || [ "$tsan_version" = nix_2_35 ]; }; then
-                  # Nix master no longer crashes this LocalStore workload under TSAN.
-                  tsan_concurrency_selection="concurrency and not known_nix_tsan_localstore_bug"
-                fi
-                unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m "$tsan_concurrency_selection" \
+                unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
+                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
                   2>&1 | tee -a "$LOGFILE" || status=$?
                 echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
                 if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then

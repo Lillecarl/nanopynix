@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from nanopynix.rpc.client._session import NixDeepValue
 
 
-pytestmark = pytest.mark.required_nix_version("2.32", None)
+pytestmark = pytest.mark.nix_version(minimum="2.32")
 
 
 def _as_dict(v: NixDeepValue) -> dict[str, NixDeepValue]:

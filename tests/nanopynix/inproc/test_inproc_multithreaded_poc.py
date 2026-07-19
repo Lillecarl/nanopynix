@@ -468,7 +468,11 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
 
 
 @pytest.mark.anyio
-@pytest.mark.known_nix_tsan_localstore_bug
+@pytest.mark.nix_known_issue(
+    exclude=("2.34", "2.35"),
+    sanitizer="tsan",
+    reason="LocalStore crashes under TSAN in released Nix; fixed on Nix master",
+)
 async def test_inproc_mixed_evaluation_build_and_store_workloads(
     store_path_recorder: StorePathRecorder,
 ) -> None:
