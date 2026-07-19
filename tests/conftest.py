@@ -1,5 +1,7 @@
 """Shared fixtures for nanopynix tests."""
 
+from __future__ import annotations
+
 import atexit
 import functools
 import inspect
@@ -8,7 +10,7 @@ import re
 import sys
 from collections.abc import Awaitable, Callable, Generator, Iterator
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import anyio
 import pytest
@@ -16,6 +18,9 @@ from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import util as nanopynix_util
 
 import nanopynix
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 # Async tests can hang indefinitely on a wedged subprocess/pipe instead of
 # failing (e.g. a Nix worker that stops responding never raises an error, it
@@ -155,6 +160,38 @@ def pytest_runtest_setup(item: pytest.Item):
 
 
 _store_mode_cache: str | None = None
+
+
+class StorePathRecorder:
+    """Persist default-store paths for deletion after pytest has exited."""
+
+    def __init__(self, path: Path | None) -> None:
+        self._path = path
+
+    def add(self, paths: Iterable[object]) -> None:
+        """Append paths immediately so ``os._exit`` cannot lose them."""
+        path = self._path
+        if path is None:
+            return
+        entries = "".join(f"{store_path}\n" for store_path in paths)
+        if not entries:
+            return
+        with path.open("a", encoding="utf-8") as file:
+            file.write(entries)
+            file.flush()
+            os.fsync(file.fileno())
+
+
+@pytest.fixture(scope="session")
+def store_path_recorder() -> StorePathRecorder:
+    """Record test outputs for the CI shell's post-pytest ``nix store delete``."""
+    configured_path = os.environ.get("NANOPYNIX_TEST_DELETE_PATHS_FILE")
+    if configured_path is None:
+        return StorePathRecorder(None)
+    path = Path(configured_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
+    return StorePathRecorder(path)
 
 
 def detected_store_mode() -> str:
