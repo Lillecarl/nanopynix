@@ -120,7 +120,7 @@ async def _environment(backend: str, root: Path) -> tuple[NixTestEnvironment, _D
     if backend == "daemon":
         daemon = await _start_daemon(root)
         return (
-            NixTestEnvironment(backend=backend, root=root, store_uri=f"unix://{daemon.socket_path}"),
+            NixTestEnvironment(backend=backend, root=root, store_uri=f"unix://{daemon.socket_path}?root={root}"),
             daemon,
         )
     raise ValueError(f"unknown Nix test backend: {backend!r}")
@@ -168,7 +168,7 @@ async def isolated_nix_environment(
 async def seeded_store_path(isolated_nix_environment: NixTestEnvironment) -> StorePath:
     """A known-valid content-addressed path, never borrowed from the host store."""
     environment = isolated_nix_environment
-    source = environment.root / "fixture.txt"
+    source = environment.root.parent / "fixture.txt"
     source.write_text("nanopynix hermetic fixture\n", encoding="utf-8")
     async with environment.rpc_session() as nix, nix.store() as store:
         return await store.add_to_store(str(source), name="nanopynix-test-fixture", method="flat")

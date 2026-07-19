@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from nanopynix import NixType, Session
+from nanopynix import NixType
+from tests.support.nix_environment import NixTestEnvironment
 
 
 @pytest.mark.anyio
-async def test_fetchtree_with_builtins_prefix():
+async def test_fetchtree_with_builtins_prefix(
+    isolated_nix_environment: NixTestEnvironment,
+) -> None:
     """builtins.fetchTree is registered when the fetch-tree experimental feature is enabled."""
     async with (
-        Session() as session,
+        isolated_nix_environment.rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -20,10 +23,12 @@ async def test_fetchtree_with_builtins_prefix():
 
 
 @pytest.mark.anyio
-async def test_fetchtree_without_builtins_prefix():
+async def test_fetchtree_without_builtins_prefix(
+    isolated_nix_environment: NixTestEnvironment,
+) -> None:
     """fetchTree is also available at top-level scope (without builtins. prefix)."""
     async with (
-        Session() as session,
+        isolated_nix_environment.rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
