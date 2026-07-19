@@ -73,12 +73,17 @@ async def test_path_from_hash_part(populated_store: dict[str, str], capsys: pyte
     assert data["path"] == f"/nix/store/{store_path}"
 
 
-async def test_store_info(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
+async def test_store_info(
+    populated_store: dict[str, str],
+    nix_backend: str,
+    capsys: pytest.CaptureFixture[str],
+):
     cmd = Pynix.parse(["store", "info", "--store", populated_store["store_url"]])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
-    assert data["uri"] == "local://"
+    expected_uri_prefix = "local://" if nix_backend == "local" else "unix://"
+    assert data["uri"].startswith(expected_uri_prefix)
     assert data["storeDir"] == "/nix/store"
 
 
@@ -413,8 +418,8 @@ class _FakeStore:
     async def __aexit__(self, *args: object) -> None:
         return None
 
-    async def store_dir(self) -> str:
-        return "/nix/store"
+    async def store_dirs(self) -> SimpleNamespace:
+        return SimpleNamespace(store_dir="/nix/store", real_store_dir=str(self._store_root / "nix" / "store"))
 
     async def query_path_info(self, path: str) -> SimpleNamespace:
         if path in self._nar_sizes:

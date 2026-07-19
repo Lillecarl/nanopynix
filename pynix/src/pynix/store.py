@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, override
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-from urllib.parse import parse_qs, urlparse
 
 import structlog
 from clypi import Command, Positional, arg
@@ -355,7 +354,7 @@ class Cat(Command):
         prepare_sys_path()
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
-            resolved = await _resolve_local_store_path(store, self.store, self.path)
+            resolved = await _resolve_local_store_path(store, self.path)
 
         if not resolved.is_file():
             raise SystemExit(f"{self.path} is not a regular file")
@@ -375,7 +374,7 @@ class Ls(Command):
         prepare_sys_path()
 
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
-            resolved = await _resolve_local_store_path(store, self.store, self.path)
+            resolved = await _resolve_local_store_path(store, self.path)
 
         if resolved.is_dir():
             entries = sorted(resolved.iterdir(), key=lambda path: path.name)
@@ -596,13 +595,15 @@ async def _add_to_store(
         _print_json({"path": result_path})
 
 
-async def _resolve_local_store_path(store: Any, store_uri: str, path: str) -> Path:
-    store_dir = (await store.store_dir()).rstrip("/")
+async def _resolve_local_store_path(store: Any, path: str) -> Path:
+    dirs = await store.store_dirs()
+    store_dir = dirs.store_dir.rstrip("/")
     store_path, suffix = _split_store_path(path, store_dir)
     await store.query_path_info(store_path)
 
-    physical_store_dir = _physical_store_dir(store_uri, store_dir)
-    return physical_store_dir / store_path.removeprefix(f"{store_dir}/") / suffix
+    if dirs.real_store_dir is None:
+        raise SystemExit("store does not expose a local filesystem path")
+    return Path(dirs.real_store_dir) / store_path.removeprefix(f"{store_dir}/") / suffix
 
 
 def _split_store_path(path: str, store_dir: str) -> tuple[str, Path]:
@@ -617,20 +618,6 @@ def _split_store_path(path: str, store_dir: str) -> tuple[str, Path]:
     if suffix_path.is_absolute() or ".." in suffix_path.parts:
         raise SystemExit(f"{path} escapes {store_dir}/{base_name}")
     return f"{store_dir}/{base_name}", suffix_path
-
-
-def _physical_store_dir(store_uri: str, store_dir: str) -> Path:
-    if store_uri == _DEFAULT_STORE:
-        return Path(store_dir)
-    parsed = urlparse(store_uri)
-    if parsed.scheme in {"", "local"}:
-        query = parse_qs(parsed.query)
-        root_values = query.get("root")
-        if root_values:
-            return Path(root_values[-1]) / store_dir.removeprefix("/")
-        if parsed.scheme == "local" and parsed.netloc == "":
-            return Path(store_dir)
-    raise SystemExit(f"store {store_uri!r} is not a local filesystem store")
 
 
 def _directory_entry_to_json(path: Path) -> dict[str, object]:
