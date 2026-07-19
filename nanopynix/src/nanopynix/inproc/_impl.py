@@ -439,9 +439,9 @@ class Store:
             raise InprocSessionClosedError("Store is not open — use async with")
         return self._local
 
-    async def uri(self) -> str:
-        """Return the canonical URI of this store."""
-        return await self._session.run(self._require_raw().get_uri)
+    async def uri(self, *, with_params: bool = False) -> str:
+        """Return this store's URI, optionally including configuration parameters."""
+        return await self._session.run(self._require_raw().get_uri, with_params)
 
     async def store_dir(self) -> str:
         """Return this store's logical store directory."""

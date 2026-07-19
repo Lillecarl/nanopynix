@@ -185,9 +185,9 @@ class Store:
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
-    async def uri(self) -> str:
-        """Return the canonical URI of this store."""
-        return (await self.rpc.get_uri(GetUriRequest())).uri
+    async def uri(self, *, with_params: bool = False) -> str:
+        """Return this store's URI, optionally including configuration parameters."""
+        return (await self.rpc.get_uri(GetUriRequest(with_params=with_params))).uri
 
     async def store_dir(self) -> str:
         """Return this store's logical store directory."""

@@ -205,6 +205,13 @@ class TestIdentity:
         assert result.uri == "daemon"
         pool._store_stub.get_uri.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
 
+    async def test_get_uri_with_params(self, store: Store, pool: MagicMock):
+        pool._store_stub.get_uri.return_value = MagicMock(uri="unix:///private/socket?root=/private/root")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        result = await store.get_uri(GetUriRequest(with_params=True))
+        assert result.uri == "unix:///private/socket?root=/private/root"
+        request = pool._store_stub.get_uri.await_args.args[0]  # type: ignore[reportPrivateUsage, reportUnknownVariableType] -- test inspects generated request
+        assert request.with_params is True
+
     async def test_get_store_dir(self, store: Store, pool: MagicMock):
         pool._store_stub.get_store_dir.return_value = MagicMock(dir="/nix/store")  # type: ignore[reportPrivateUsage] -- test accesses private stub
         result = await store.get_store_dir(GetStoreDirRequest())
@@ -252,6 +259,13 @@ class TestPublicStore:
 
         assert await public_store.uri() == "daemon"
         pool._store_stub.get_uri.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+
+    async def test_uri_with_params_unwraps_response(self, public_store: PublicStore, pool: MagicMock):
+        pool._store_stub.get_uri.return_value = MagicMock(uri="unix:///private/socket?root=/private/root")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+
+        assert await public_store.uri(with_params=True) == "unix:///private/socket?root=/private/root"
+        request = pool._store_stub.get_uri.await_args.args[0]  # type: ignore[reportPrivateUsage, reportUnknownVariableType] -- test inspects generated request
+        assert request.with_params is True
 
     async def test_store_dir_unwraps_response(self, public_store: PublicStore, pool: MagicMock):
         pool._store_stub.get_store_dir.return_value = MagicMock(dir="/nix/store")  # type: ignore[reportPrivateUsage] -- test accesses private stub

@@ -16,11 +16,11 @@ async def test_isolated_environment_uses_its_configured_store(
 ) -> None:
     environment = isolated_nix_environment
     async with environment.rpc_session() as nix, nix.store() as store:
-        uri = await store.uri()
+        uri = await store.uri(with_params=True)
     if environment.backend == "local":
         assert uri.startswith("local")
     else:
-        assert uri == environment.store_uri.partition("?")[0]
+        assert uri == environment.store_uri
 
 
 @pytest.mark.anyio
@@ -38,8 +38,8 @@ async def test_inproc_session_uses_its_configured_store(
 ) -> None:
     environment = isolated_nix_environment
     async with environment.inproc_session() as nix, nix.store() as store:
-        uri = await store.uri()
+        uri = await store.uri(with_params=True)
     if environment.backend == "local":
         assert uri.startswith("local")
     else:
-        assert uri == environment.store_uri.partition("?")[0]
+        assert uri == environment.store_uri
