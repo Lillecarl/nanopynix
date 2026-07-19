@@ -1,0 +1,11 @@
+# curlFileTransfer's process-lifetime HTTP-fetch singleton
+# (src/libstore/filetransfer.cc's `static auto * const _fileTransfer = new
+# Sync<std::shared_ptr<curlFileTransfer>>`) is deliberately never destructed
+# -- a classic C++ "leak the singleton on purpose" idiom that avoids static-
+# destruction-order issues at process exit. curlFileTransfer's destructor
+# (which correctly stops and joins its worker thread) therefore never runs
+# on any normal process exit, TSAN-instrumented or not; the OS just reclaims
+# the thread along with everything else when the process dies. Not a bug in
+# Nix or in nanopynix -- suppress the report instead of it drowning out
+# genuine findings in every TSAN run that ever touches an HTTP fetch path.
+thread:Curl_thread_create
