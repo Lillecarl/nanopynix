@@ -1,0 +1,74 @@
+Tolerate EINVAL, not just ESRCH, when pthread_kill fails signaling a
+GC-registered thread during stop-the-world suspend or restart.
+
+GC_suspend_all (pthread_stop_world.c) signals every registered-but-not-yet-
+suspended thread to pause it for a collection cycle; GC_start_world signals
+every suspended thread to resume it afterward. If the target thread exits
+between GC discovering it in GC_threads and this pthread_kill call, the
+result is undefined by POSIX: depending on glibc/kernel version, the kernel
+may return the "textbook" ESRCH (which both switches already tolerate,
+decrementing n_live_threads and moving on) -- or it may instead return
+EINVAL, which both switches treat as a hard, unconditional abort() via
+ABORT_ARG1.
+
+Confirmed via nanopynix's own multithreaded EvalState test suite under
+ThreadSanitizer (which slows execution enough to make this race land
+reliably): every observed abort here reports errcode=22 (EINVAL), never
+ESRCH, immediately following legitimate GC allocation/collection activity
+with no other explanation. First observed at suspend time
+("pthread_kill failed at suspend"); after patching that site alone, the
+same race reappeared at the symmetric restart site
+("pthread_kill failed at resume"), confirming this is one race reachable
+from both of GC's stop-the-world signal paths, not something specific to
+suspension.
+
+GC_sig_suspend and GC_sig_thr_restart are both fixed, valid signal numbers
+for the entire lifetime of the process (computed once at GC_thr_init), so
+EINVAL from pthread_kill on either cannot mean "invalid signal number" in
+this codebase -- the only realistic cause is the same already-tolerated
+already-gone-thread race, just surfacing under a different errno on this
+glibc/kernel combination. This exact race (pthread_kill vs. thread
+teardown, undefined by POSIX) is a known, previously-discussed bdwgc/glibc
+issue upstream; treating EINVAL the same as ESRCH here is the same
+tolerance both switches already apply, just widened to the errno this
+environment actually produces.
+
+diff -ruN a/pthread_stop_world.c b/pthread_stop_world.c
+--- a/pthread_stop_world.c
++++ b/pthread_stop_world.c
+@@ -983,7 +983,17 @@
+               result = raise_signal(p, GC_sig_suspend);
+               switch(result) {
+                 case ESRCH:
++                case EINVAL:
+                     /* Not really there anymore.  Possible? */
++                    /* EINVAL can also reach here: pthread_kill()/tgkill()
++                       on a thread id whose underlying OS resources the
++                       kernel has already reclaimed is undefined by POSIX,
++                       and depending on glibc/kernel version may surface
++                       as EINVAL rather than ESRCH. GC_sig_suspend is a
++                       fixed, valid signal number for the process's whole
++                       lifetime, so EINVAL here cannot mean "bad signal
++                       number" -- treat it the same as "thread already
++                       gone". */
+                     n_live_threads--;
+                     break;
+                 case 0:
+@@ -1327,7 +1337,17 @@
+             result = raise_signal(p, GC_sig_thr_restart);
+             switch(result) {
+             case ESRCH:
++            case EINVAL:
+               /* Not really there anymore.  Possible?   */
++              /* EINVAL can also reach here: pthread_kill()/tgkill()
++                 on a thread id whose underlying OS resources the
++                 kernel has already reclaimed is undefined by POSIX,
++                 and depending on glibc/kernel version may surface
++                 as EINVAL rather than ESRCH. GC_sig_thr_restart is a
++                 fixed, valid signal number for the process's whole
++                 lifetime, so EINVAL here cannot mean "bad signal
++                 number" -- treat it the same as "thread already
++                 gone". */
+               n_live_threads--;
+               break;
+             case 0:
