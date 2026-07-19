@@ -14,7 +14,6 @@ import json
 import os
 import shutil
 import signal
-import stat
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from contextvars import ContextVar
@@ -27,19 +26,17 @@ import pytest
 import structlog
 from structlog.exceptions import DropEvent
 
-import nanopynix
 import pynix
 from pynix import Pynix
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Generator, Iterator
+    from collections.abc import AsyncIterator, Generator, Iterator
 
     from structlog.typing import EventDict, WrappedLogger
 
+    from tests.support.nix_environment import NixTestEnvironment
+
 _CURRENT_PYNIX_TEST: ContextVar[str] = ContextVar("_CURRENT_PYNIX_TEST", default="unknown")
-_DEFAULT_TEST_NIX_VERBOSITY = 5
-
-
 @dataclass
 class PynixLiveLog:
     path: Path
@@ -69,7 +66,7 @@ class PynixLiveLog:
 @dataclass
 class PynixStoreScenario:
     store_url: str
-    store_root: Path
+    environment: NixTestEnvironment
     work_root: Path
     repo_root: Path
     nixpkgs_path: str
@@ -87,6 +84,10 @@ class PynixStoreScenario:
     flake_hello_path: str | None = None
 
     @property
+    def store_root(self) -> Path:
+        return self.environment.root
+
+    @property
     def log_path(self) -> Path:
         return self.live_log.path
 
@@ -98,7 +99,6 @@ class PynixStoreScenario:
         with (
             _patched_environ({"NIX_PATH": f"nixpkgs={self.nixpkgs_path}"}),
             _pynix_configure_logging_noop(),
-            _nanopynix_isolated_store(self.store_root),
             _pynix_test_context(test_name),
             redirect_stdout(stdout),
             redirect_stderr(stderr),
@@ -141,14 +141,21 @@ class PynixStoreScenario:
             "stateDir": str(self.store_root / "nix" / "var" / "nix"),
             "logDir": str(self.store_root / "nix" / "var" / "log" / "nix"),
             "realStoreDir": str(self.store_root / "nix" / "store"),
-            "buildDir": str(self.store_root / "nix" / "var" / "nix" / "builds"),
+            # A native daemon owns builds in its connection process, so its
+            # RemoteStore does not expose a local build directory.
+            "buildDir": (
+                str(self.store_root / "nix" / "var" / "nix" / "builds")
+                if self.environment.backend == "local"
+                else None
+            ),
         }
         for key, value in expected.items():
             if dirs.get(key) != value:
                 raise AssertionError(f"expected store dir {key}={value!r}, got {dirs.get(key)!r}; all dirs={dirs!r}")
         uri = dirs.get("uri")
-        if not isinstance(uri, str) or "local" not in uri:
-            raise AssertionError(f"expected local store uri, got {uri!r}; all dirs={dirs!r}")
+        expected_scheme = "local" if self.environment.backend == "local" else "unix"
+        if not isinstance(uri, str) or not uri.startswith(expected_scheme):
+            raise AssertionError(f"expected {expected_scheme} store uri, got {uri!r}; all dirs={dirs!r}")
         return dirs
 
     async def add_text_file(self, contents: str = "temporary-store-message\n", *, test_name: str = "unknown") -> str:
@@ -309,7 +316,7 @@ class PynixStoreScenario:
         return _require_present(self.flake_hello_path, "flake_hello_path")
 
     def physical_path(self, store_path: str) -> Path:
-        return self.store_root / store_path.removeprefix("/")
+        return self.environment.root / store_path.removeprefix("/")
 
     def _append_log_record(self, record: dict[str, object]) -> None:
         self.live_log.append(record)
@@ -352,12 +359,10 @@ def _capture_pynix_test_structlog(  # type: ignore[reportUnusedFunction] -- pyte
     pynix_live_log: PynixLiveLog,
 ) -> Iterator[None]:
     test_name = request.node.nodeid
-    marker = request.node.get_closest_marker("pynix_verbosity")
-    verbosity = marker.args[0] if marker is not None else _DEFAULT_TEST_NIX_VERBOSITY
     old_config = structlog.get_config()
     token = _CURRENT_PYNIX_TEST.set(test_name)
     pynix_live_log.append({"event": "pytest test start", "test": test_name})
-    with _pynix_configure_logging_noop(), _nanopynix_default_verbosity(verbosity):
+    with _pynix_configure_logging_noop():
         structlog.configure(processors=[pynix_live_log.capture])
         try:
             yield
@@ -379,15 +384,13 @@ async def pynix_store_scenario(
     repo_root: Path,
     nixpkgs_path: str,
     pynix_live_log: PynixLiveLog,
+    shared_nix_environment: NixTestEnvironment,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> AsyncIterator[PynixStoreScenario]:
-    if not request.config.getoption("--run-temp-store-builds"):
-        pytest.skip("requires --run-temp-store-builds")
-    store_root = tmp_path_factory.mktemp("pynix-store")
     work_root = tmp_path_factory.mktemp("pynix-work")
     scenario = PynixStoreScenario(
-        store_url=f"local?root={store_root}",
-        store_root=store_root,
+        store_url=shared_nix_environment.store_uri,
+        environment=shared_nix_environment,
         work_root=work_root,
         repo_root=repo_root,
         nixpkgs_path=nixpkgs_path,
@@ -399,8 +402,7 @@ async def pynix_store_scenario(
     try:
         yield scenario
     finally:
-        _rmtree_force(store_root)
-        _rmtree_force(work_root)
+        shutil.rmtree(work_root)
 
 
 @pytest.fixture(scope="module")
@@ -421,15 +423,11 @@ async def populated_store(pynix_store_scenario: PynixStoreScenario) -> dict[str,
 
 
 @pytest.fixture
-async def empty_store(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[dict[str, Path | str]]:
-    if not request.config.getoption("--run-temp-store-builds"):
-        pytest.skip("requires --run-temp-store-builds")
-    store_root = tmp_path / "store-root"
-    try:
-        yield {"store_url": f"local?root={store_root}", "store_root": store_root}
-    finally:
-        if store_root.exists():
-            _rmtree_force(store_root)
+async def empty_store(isolated_nix_environment: NixTestEnvironment) -> AsyncIterator[dict[str, Path | str]]:
+    yield {
+        "store_url": isolated_nix_environment.store_uri,
+        "store_root": isolated_nix_environment.root,
+    }
 
 
 @pytest.fixture
@@ -517,58 +515,6 @@ def _pynix_configure_logging_noop() -> Generator[None]:
 
 
 @contextlib.contextmanager
-def _nanopynix_default_verbosity(verbosity: int) -> Generator[None]:
-    old_session = nanopynix.Session
-
-    class VerboseSession(old_session):
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            kwargs.setdefault("verbosity", verbosity)
-            super().__init__(*args, **kwargs)
-
-    nanopynix.Session = VerboseSession
-    try:
-        yield
-    finally:
-        nanopynix.Session = old_session
-
-
-@contextlib.contextmanager
-def _nanopynix_isolated_store(store_root: Path) -> Generator[None]:
-    old_session = nanopynix.Session
-    build_dir = store_root / "nix" / "var" / "nix" / "builds"
-
-    class IsolatedStoreSession(old_session):
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            kwargs.setdefault("load_config", False)
-            settings = kwargs.get("settings")
-            if isinstance(settings, nanopynix.NixSettings):
-                kwargs["settings"] = settings.model_copy(
-                    update={
-                        "build_dir": str(build_dir),
-                        "build_users_group": "",
-                        "require_drop_supplementary_groups": False,
-                        "sandbox": "true",
-                        "sandbox_fallback": False,
-                    }
-                )
-            elif settings is None:
-                kwargs["settings"] = nanopynix.NixSettings(
-                    build_dir=str(build_dir),
-                    build_users_group="",
-                    require_drop_supplementary_groups=False,
-                    sandbox="true",
-                    sandbox_fallback=False,
-                )
-            super().__init__(*args, **kwargs)
-
-    nanopynix.Session = IsolatedStoreSession
-    try:
-        yield
-    finally:
-        nanopynix.Session = old_session
-
-
-@contextlib.contextmanager
 def _pynix_test_context(test_name: str) -> Generator[None]:
     token = _CURRENT_PYNIX_TEST.set(test_name)
     try:
@@ -606,33 +552,3 @@ def _require_present(value: str | None, field_name: str) -> str:
     if value is None:
         raise AssertionError(f"scenario field {field_name} was not populated by its dependency")
     return value
-
-
-def _rmtree_force(path: Path) -> None:
-    def _chmod_force(p: Path, mode: int) -> None:
-        with contextlib.suppress(FileNotFoundError):
-            p.chmod(mode)
-
-    def onexc(function: Callable[..., object], exc_path_str: str, _excinfo: BaseException) -> None:
-        exc_path = Path(exc_path_str)
-        try:
-            parent = exc_path.parent
-            if str(parent) != ".":
-                parent.chmod(stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
-            exc_path.chmod(stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
-            function(exc_path)
-        except FileNotFoundError:
-            pass
-
-    for root_str, dirs, files in os.walk(path):
-        root = Path(root_str)
-        for name in dirs:
-            child = root / name
-            if not child.is_symlink():
-                _chmod_force(child, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
-        for name in files:
-            child = root / name
-            if not child.is_symlink():
-                _chmod_force(child, stat.S_IWUSR | stat.S_IREAD)
-        _chmod_force(root, stat.S_IWUSR | stat.S_IREAD | stat.S_IEXEC)
-    shutil.rmtree(path, ignore_errors=False, onexc=onexc)

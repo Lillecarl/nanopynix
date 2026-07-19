@@ -27,7 +27,7 @@ pytestmark = pytest.mark.dependency(scope="module")
 async def test_scenario_starts_with_empty_temporary_store(pynix_store_scenario: PynixStoreScenario):
     scenario = pynix_store_scenario
 
-    assert scenario.store_url.startswith("local?root=")
+    assert scenario.store_url == scenario.environment.store_uri
     assert scenario.store_root.exists()
     assert scenario.hello_path is None
     assert scenario.text_path is None
