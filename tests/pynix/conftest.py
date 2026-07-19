@@ -421,15 +421,6 @@ async def populated_store(pynix_store_scenario: PynixStoreScenario) -> dict[str,
         "log_path": scenario.require_local_log_path(),
     }
 
-
-@pytest.fixture
-async def empty_store(isolated_nix_environment: NixTestEnvironment) -> AsyncIterator[dict[str, Path | str]]:
-    yield {
-        "store_url": isolated_nix_environment.store_uri,
-        "store_root": isolated_nix_environment.root,
-    }
-
-
 @pytest.fixture
 async def git_flake(nixpkgs_path: str) -> AsyncIterator[Path]:
     with tempfile.TemporaryDirectory() as d:

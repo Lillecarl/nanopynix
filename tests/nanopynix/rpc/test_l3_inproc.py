@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from tests.support.git import init_flake_repo
 from grpclib.exceptions import GRPCError
 from grpclib_transports import inproc_worker_with_backchannel
 from nanopynix_bindings import util as nanopynix_util
@@ -32,10 +31,13 @@ from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
 from nanopynix.rpc.client._session import EvalSession, ValueReleasedError
 from nanopynix.rpc.client.store import StoreHandle
 from nanopynix.rpc.worker._worker import WorkerServiceHandler, WorkerState, worker_service_factory
+from tests.support.git import init_flake_repo
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
+
+    from tests.support.nix_environment import NixTestEnvironment
 
 pytestmark = pytest.mark.l3_inproc
 
@@ -105,9 +107,9 @@ class _L3Inproc:
 
 
 @pytest.fixture
-async def l3_inproc(tmp_path: Path) -> AsyncIterator[_L3Inproc]:
+async def l3_inproc(isolated_nix_environment: NixTestEnvironment) -> AsyncIterator[_L3Inproc]:
     handlers: list[object] = []
-    store_uri = f"local?root={tmp_path / 'store-root'}"
+    store_uri = isolated_nix_environment.store_uri
     executor = NixThreadExecutor()
     previous_verbosity = await executor.run(nanopynix_util.get_verbosity)
 
@@ -119,7 +121,15 @@ async def l3_inproc(tmp_path: Path) -> AsyncIterator[_L3Inproc]:
     async with inproc_worker_with_backchannel(service_factory, [ManagerPrimopServiceHandler()]) as channel:
         worker_stub = WorkerServiceStub(channel)
         eval_stub = EvalServiceStub(channel)
-        await worker_stub.init(InitRequest(request_id=1, store_uri=store_uri, load_config=False, experimental_features=["flakes"]))
+        await worker_stub.init(
+            InitRequest(
+                request_id=1,
+                store_uri=store_uri,
+                load_config=False,
+                settings=isolated_nix_environment.settings.to_worker_settings(),
+                experimental_features=["flakes"],
+            )
+        )
         store = await worker_stub.open_store(OpenStoreRequest(request_id=2, uri=store_uri))
         worker = _InprocWorkerClient(eval_stub, worker_stub)
         manager = _InprocManager(worker)
