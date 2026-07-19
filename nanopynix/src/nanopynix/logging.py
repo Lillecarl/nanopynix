@@ -56,7 +56,13 @@ class LogCollector:
         logger callback instead of dropping events. The worker event loop drains
         the async side through ``SubscribeLogs``.
         """
-        self._queue.sync_q.put((req_id, action, *args))
+        self._queue.sync_q.put(("nix", req_id, action, *args))
+        with self._stats_lock:
+            self._enqueued += 1
+
+    def request_finalized(self, request_id: int) -> None:
+        """Enqueue the typed operation boundary after its Nix work finishes."""
+        self._queue.sync_q.put(("finalized", request_id))
         with self._stats_lock:
             self._enqueued += 1
 

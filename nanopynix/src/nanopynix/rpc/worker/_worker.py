@@ -37,7 +37,7 @@ from grpclib_transports.protocol import DEFAULT_TUNING
 from grpclib_transports.stdio import serve_stdio
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import util as nanopynix_util
-from nanopynix_proto.nix.common import LogEvent, LogLevel
+from nanopynix_proto.nix.common import LogEvent, LogLevel, NixLogEvent, RequestFinalized
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
     CloseStoreResponse,
@@ -170,6 +170,31 @@ class WorkerState:
         self.worker_subname: str = "worker"
         self.named_store_uris: dict[int, str] = {}
 
+    async def run_request(self, *, request_id: int, executor: NixThreadExecutor, operation: Callable[..., Any], args: tuple[Any, ...] = ()) -> Any:
+        """Run a unary operation with its request-local logger context installed."""
+        collector = self.collector
+        if request_id <= 0:
+            if collector is not None:
+                collector.request_finalized(request_id)
+            raise ValueError("request_id must be positive")
+
+        def _run() -> Any:
+            previous = nanopynix_util.get_logger_request_id()
+            nanopynix_util.set_logger_request_id(request_id)
+            try:
+                return operation(*args)
+            finally:
+                if collector is not None:
+                    collector.request_finalized(request_id)
+                nanopynix_util.set_logger_request_id(previous)
+
+        return await executor.run(_run)
+
+    def log(self, action: str, *args: object) -> None:
+        """Emit a diagnostic in the current executor thread's request context."""
+        if self.collector is not None:
+            self.collector.callback(nanopynix_util.get_logger_request_id(), action, *args)
+
 
 # ── WorkerService handler ────────────────────────────────────────────
 
@@ -192,8 +217,9 @@ class WorkerServiceHandler(WorkerServiceBase):
             if settings:
                 os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
 
-            assert self._state.executor is not None  # set by worker_service_factory before init
-            await self._state.executor.run(self._init_nix, message, settings)
+            if self._state.executor is None:
+                raise RuntimeError("worker executor is unavailable")
+            await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._init_nix, args=(message, settings))
 
             return InitResponse(status="ok")
 
@@ -228,8 +254,9 @@ class WorkerServiceHandler(WorkerServiceBase):
         _register_primops(primops_raw, rpc_bridge=self._state.rpc_bridge)
 
     async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
-        assert self._state.store_executor is not None  # set by worker_service_factory before init
-        store_handle, uri, store_dir = await self._state.store_executor.run(self._open_store, message.uri)
+        if self._state.store_executor is None:
+            raise RuntimeError("worker store executor is unavailable")
+        store_handle, uri, store_dir = await self._state.run_request(request_id=message.request_id, executor=self._state.store_executor, operation=self._open_store, args=(message.uri,))
         return OpenStoreResponse(
             store_handle=store_handle,
             uri=uri,
@@ -245,10 +272,11 @@ class WorkerServiceHandler(WorkerServiceBase):
         return handle, store_uri, store.get_store_dir()
 
     async def close_store(self, message: CloseStoreRequest) -> CloseStoreResponse:
-        assert self._state.executor is not None  # set by worker_service_factory before init
+        if self._state.executor is None:
+            raise RuntimeError("worker executor is unavailable")
         # A forced close may have to destroy the thread-confined EvalState, so
         # retain the evaluator lane for this lifecycle operation.
-        await self._state.executor.run(self._close_store, message.store_handle, message.force)
+        await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._close_store, args=(message.store_handle, message.force))
         return CloseStoreResponse()
 
     def _close_store(self, store_handle: int, force: bool = False) -> None:
@@ -264,15 +292,16 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     async def get_verbosity(self, message: GetVerbosityRequest) -> GetVerbosityResponse:
         """Return the worker's current Nix logger verbosity."""
-        del message
-        assert self._state.executor is not None  # set by worker_service_factory before init
-        verbosity = await self._state.executor.run(self._state.runtime.get_verbosity)
+        if self._state.executor is None:
+            raise RuntimeError("worker executor is unavailable")
+        verbosity = await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._state.runtime.get_verbosity)
         return GetVerbosityResponse(verbosity=LogLevel(verbosity))
 
     async def set_verbosity(self, message: SetVerbosityRequest) -> SetVerbosityResponse:
         """Update Nix logger verbosity on the Nix thread."""
-        assert self._state.executor is not None  # set by worker_service_factory before init
-        verbosity = await self._state.executor.run(self._state.runtime.set_verbosity, int(message.verbosity))
+        if self._state.executor is None:
+            raise RuntimeError("worker executor is unavailable")
+        verbosity = await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._state.runtime.set_verbosity, args=(int(message.verbosity),))
         return SetVerbosityResponse(verbosity=LogLevel(verbosity))
 
     def _update_store_title(self) -> None:
@@ -289,12 +318,12 @@ class WorkerServiceHandler(WorkerServiceBase):
             async for event in collector.stream():
                 if event is None:
                     break
-                req_id, action, *args = event  # type: ignore[reportUnknownVariableType] -- collector.stream() yields Any, destructuring on unknown items
-                yield LogEvent(
-                    request_id=req_id,
-                    action=action,
-                    args_json=json.dumps(list(args), default=str),
-                )
+                kind, request_id, *payload = event
+                if kind == "nix":
+                    action, *args = payload
+                    yield LogEvent(request_id=request_id, nix_log=NixLogEvent(action=action, args_json=json.dumps(args, default=str)))
+                elif kind == "finalized":
+                    yield LogEvent(request_id=request_id, request_finalized=RequestFinalized())
         except asyncio.CancelledError:
             pass
 
@@ -303,12 +332,12 @@ class WorkerServiceHandler(WorkerServiceBase):
 
         The actual process exit happens when the transport / pipe closes.
         """
-        collector = self._state.collector
-        if collector is not None:
-            collector.close()
+        if self._state.executor is None:
+            raise RuntimeError("worker executor is unavailable")
+        await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=lambda: None)
         if self._state.rpc_bridge is not None:
             self._state.rpc_bridge.stop()
-        if self._state.executor is not None and self._state.owns_executor:
+        if self._state.owns_executor:
             self._state.executor.shutdown(wait=False)
         if self._state.store_executor is not None and self._state.owns_store_executor:
             self._state.store_executor.shutdown(wait=False)

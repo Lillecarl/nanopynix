@@ -199,6 +199,15 @@ class EvalServiceHandler(EvalServiceBase):
     def _get_executor(self, eval_handle: int) -> NixThreadExecutor:
         return self._get_entry(eval_handle).executor
 
+    async def _run(self, message: Any, operation: Any, *, executor: NixThreadExecutor | None = None) -> Any:
+        selected_executor = executor or self._get_executor(message.eval_handle)
+        return await self._state.run_request(
+            request_id=message.request_id,
+            executor=selected_executor,
+            operation=operation,
+            args=(message,),
+        )
+
     async def open_eval(self, message: OpenEvalRequest) -> OpenEvalResponse:
         store = self._state.handles.get_typed(message.store_handle, "store")
         executor = NixThreadExecutor(
@@ -206,20 +215,18 @@ class EvalServiceHandler(EvalServiceBase):
             thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
             thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
         )
-        eval_state = await executor.run(
-            self._state.runtime.open_eval_state,
-            store,
-            self._state.nix_path,
-            None,
-            dict(message.eval_settings),
-            dict(message.fetch_settings),
+        eval_state = await self._state.run_request(
+            request_id=message.request_id,
+            executor=executor,
+            operation=self._state.runtime.open_eval_state,
+            args=(store, self._state.nix_path, None, dict(message.eval_settings), dict(message.fetch_settings)),
         )
         entry = EvalEntry(eval_state=eval_state, executor=executor, store_handle=message.store_handle)
         eval_handle = self._state.handles.allocate(entry, "eval")
         return OpenEvalResponse(eval_handle=eval_handle)
 
     async def configure_eval(self, message: ConfigureEvalRequest) -> ConfigureEvalResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_configure_eval, message)
+        return await self._run(message, self._do_configure_eval)
 
     def _do_configure_eval(self, message: ConfigureEvalRequest) -> ConfigureEvalResponse:
         self._get_es(message.eval_handle).configure(dict(message.eval_settings), dict(message.fetch_settings))
@@ -227,7 +234,9 @@ class EvalServiceHandler(EvalServiceBase):
 
     async def close_eval(self, message: CloseEvalRequest) -> CloseEvalResponse:
         assert self._state.executor is not None  # set by worker_service_factory before init
-        return await self._state.executor.run(self._do_close_eval, message)
+        if self._state.executor is None:
+            raise RuntimeError("worker executor is unavailable")
+        return await self._run(message, self._do_close_eval, executor=self._state.executor)
 
     def _do_close_eval(self, message: CloseEvalRequest) -> CloseEvalResponse:
         close_eval_state(self._state, message.eval_handle)
@@ -298,7 +307,7 @@ class EvalServiceHandler(EvalServiceBase):
     # ── eval methods ──────────────────────────────────────────────
 
     async def eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
-        return await self._get_executor(message.eval_handle).run(self._do_eval_file, message)
+        return await self._run(message, self._do_eval_file)
 
     def _do_eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
@@ -306,13 +315,13 @@ class EvalServiceHandler(EvalServiceBase):
         return self._export(value, message.eval_handle)
 
     async def repl_load_file(self, message: ReplLoadFileRequest) -> common_pb.ValueHandle:
-        return await self._get_executor(message.eval_handle).run(self._do_repl_load_file, message)
+        return await self._run(message, self._do_repl_load_file)
 
     def _do_repl_load_file(self, message: ReplLoadFileRequest) -> common_pb.ValueHandle:
         return self._export(self._get_es(message.eval_handle).repl_load_file(message.path), message.eval_handle)
 
     async def eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
-        return await self._get_executor(message.eval_handle).run(self._do_eval_string, message)
+        return await self._run(message, self._do_eval_string)
 
     def _do_eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
@@ -322,14 +331,14 @@ class EvalServiceHandler(EvalServiceBase):
         return self._export(value, message.eval_handle)
 
     async def begin_repl(self, message: BeginReplRequest) -> BeginReplResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_begin_repl, message)
+        return await self._run(message, self._do_begin_repl)
 
     def _do_begin_repl(self, message: BeginReplRequest) -> BeginReplResponse:
         self._get_es(message.eval_handle).begin_repl()
         return BeginReplResponse()
 
     async def repl_process_line(self, message: ReplProcessLineRequest) -> ReplProcessLineResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_repl_process_line, message)
+        return await self._run(message, self._do_repl_process_line)
 
     def _do_repl_process_line(self, message: ReplProcessLineRequest) -> ReplProcessLineResponse:
         value = self._get_es(message.eval_handle).repl_process_line(message.line, message.source_name)
@@ -338,33 +347,33 @@ class EvalServiceHandler(EvalServiceBase):
         return ReplProcessLineResponse(is_binding=False, value=self._export(value, message.eval_handle))
 
     async def repl_add_attrs(self, message: ReplAddAttrsRequest) -> ReplAddAttrsResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_repl_add_attrs, message)
+        return await self._run(message, self._do_repl_add_attrs)
 
     def _do_repl_add_attrs(self, message: ReplAddAttrsRequest) -> ReplAddAttrsResponse:
         es = self._get_es(message.eval_handle)
         return ReplAddAttrsResponse(names=es.repl_add_attrs(self._resolve(message.handle)))
 
     async def repl_scope_names(self, message: ReplScopeNamesRequest) -> ReplScopeNamesResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_repl_scope_names, message)
+        return await self._run(message, self._do_repl_scope_names)
 
     def _do_repl_scope_names(self, message: ReplScopeNamesRequest) -> ReplScopeNamesResponse:
         return ReplScopeNamesResponse(names=self._get_es(message.eval_handle).repl_scope_names())
 
     async def reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_reset_file_cache, message)
+        return await self._run(message, self._do_reset_file_cache)
 
     def _do_reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
         self._get_es(message.eval_handle).reset_file_cache()
         return ResetFileCacheResponse()
 
     async def force(self, message: ForceRequest) -> common_pb.ForceValue:
-        return await self._get_executor(message.eval_handle).run(self._do_force, message)
+        return await self._run(message, self._do_force)
 
     def _do_force(self, message: ForceRequest) -> common_pb.ForceValue:
         return self._force_handle(message.handle, message.eval_handle)
 
     async def force_deep(self, message: ForceDeepRequest) -> common_pb.DeepValue:
-        return await self._get_executor(message.eval_handle).run(self._do_force_deep, message)
+        return await self._run(message, self._do_force_deep)
 
     def _do_force_deep(self, message: ForceDeepRequest) -> common_pb.DeepValue:
         value = self._resolve(message.handle)
@@ -372,39 +381,39 @@ class EvalServiceHandler(EvalServiceBase):
         return self._deep_value(value, message.eval_handle)
 
     async def force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_force_json, message)
+        return await self._run(message, self._do_force_json)
 
     def _do_force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
         value = self._resolve(message.handle)
         return ForceJsonResponse(json=_json.dumps(value.to_json(copy_to_store=message.copy_to_store)))
 
     async def realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_realise_string, message)
+        return await self._run(message, self._do_realise_string)
 
     def _do_realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
         return RealiseStringResponse(value=self._resolve(message.handle).realise_string())
 
     async def realise_argv(self, message: RealiseArgvRequest) -> RealiseArgvResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_realise_argv, message)
+        return await self._run(message, self._do_realise_argv)
 
     def _do_realise_argv(self, message: RealiseArgvRequest) -> RealiseArgvResponse:
         return RealiseArgvResponse(argv=self._resolve(message.handle).realise_argv())
 
     async def edit_location(self, message: EditLocationRequest) -> EditLocationResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_edit_location, message)
+        return await self._run(message, self._do_edit_location)
 
     def _do_edit_location(self, message: EditLocationRequest) -> EditLocationResponse:
         location = self._resolve(message.handle).edit_location()
         return EditLocationResponse(path=location["path"], line=location["line"])
 
     async def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
-        return await self._get_executor(message.eval_handle).run(self._do_attr, message)
+        return await self._run(message, self._do_attr)
 
     def _do_attr(self, message: AttrRequest) -> common_pb.ValueHandle:
         return self._export(self._resolve(message.handle).attr_get(message.name), message.eval_handle)
 
     async def list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
-        return await self._get_executor(message.eval_handle).run(self._do_list_get, message)
+        return await self._run(message, self._do_list_get)
 
     def _do_list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
         pv = self._resolve(message.handle)
@@ -416,25 +425,25 @@ class EvalServiceHandler(EvalServiceBase):
         return self._export(pv.list_get(idx), message.eval_handle)
 
     async def list_length(self, message: ListLengthRequest) -> ListLengthResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_list_length, message)
+        return await self._run(message, self._do_list_length)
 
     def _do_list_length(self, message: ListLengthRequest) -> ListLengthResponse:
         return ListLengthResponse(length=self._resolve(message.handle).list_length())
 
     async def attr_names(self, message: AttrNamesRequest) -> AttrNamesResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_attr_names, message)
+        return await self._run(message, self._do_attr_names)
 
     def _do_attr_names(self, message: AttrNamesRequest) -> AttrNamesResponse:
         return AttrNamesResponse(names=self._resolve(message.handle).attr_names())
 
     async def has_attr(self, message: HasAttrRequest) -> HasAttrResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_has_attr, message)
+        return await self._run(message, self._do_has_attr)
 
     def _do_has_attr(self, message: HasAttrRequest) -> HasAttrResponse:
         return HasAttrResponse(has=self._resolve(message.handle).has_attr(message.name))
 
     async def type_name(self, message: TypeNameRequest) -> TypeNameResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_type_name, message)
+        return await self._run(message, self._do_type_name)
 
     def _do_type_name(self, message: TypeNameRequest) -> TypeNameResponse:
         value = self._resolve(message.handle)
@@ -444,13 +453,13 @@ class EvalServiceHandler(EvalServiceBase):
         return TypeNameResponse(type=nix_type)
 
     async def auto_call(self, message: AutoCallRequest) -> common_pb.ValueHandle:
-        return await self._get_executor(message.eval_handle).run(self._do_auto_call, message)
+        return await self._run(message, self._do_auto_call)
 
     def _do_auto_call(self, message: AutoCallRequest) -> common_pb.ValueHandle:
         return self._export(self._resolve(message.handle).auto_call(), message.eval_handle)
 
     async def call(self, message: CallRequest) -> common_pb.ValueHandle:
-        return await self._get_executor(message.eval_handle).run(self._do_call, message)
+        return await self._run(message, self._do_call)
 
     def _do_call(self, message: CallRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
@@ -463,7 +472,7 @@ class EvalServiceHandler(EvalServiceBase):
         return self._export(result, message.eval_handle)
 
     async def build(self, message: BuildRequest) -> BuildResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_build, message)
+        return await self._run(message, self._do_build)
 
     def _do_build(self, message: BuildRequest) -> BuildResponse:
         entry = self._get_entry(message.eval_handle)
@@ -473,8 +482,7 @@ class EvalServiceHandler(EvalServiceBase):
         if build_store is not None and entry.store_handle != message.build_store_handle:
             eval_store = self._get_store(entry.store_handle)
         if self._state.collector is not None:
-            self._state.collector.callback(
-                0,
+            self._state.log(
                 "msg",
                 int(common_pb.LogLevel.DEBUG),
                 "eval build start "
@@ -488,8 +496,7 @@ class EvalServiceHandler(EvalServiceBase):
         )
         if self._state.collector is not None:
             shaped = _proto_shape(raw)
-            self._state.collector.callback(
-                0,
+            self._state.log(
                 "msg",
                 int(common_pb.LogLevel.DEBUG),
                 f"eval build finish drv_path={shaped.get('drv_path', '')} outputs={sorted(shaped.get('outputs', {}))}",
@@ -500,11 +507,11 @@ class EvalServiceHandler(EvalServiceBase):
     # ── flake methods ─────────────────────────────────────────────
 
     async def lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
-        return await self._get_executor(message.eval_handle).run(self._do_lock_flake, message)
+        return await self._run(message, self._do_lock_flake)
 
     def _do_lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
         if self._state.collector is not None:
-            self._state.collector.callback(0, "msg", 3, f"lock_flake: parsing ref '{message.ref}'")
+            self._state.log("msg", 3, f"lock_flake: parsing ref '{message.ref}'")
         es = self._get_es(message.eval_handle)
 
         if message.update_all is not None:
@@ -515,8 +522,8 @@ class EvalServiceHandler(EvalServiceBase):
             update_inputs = False
 
         if self._state.collector is not None:
-            self._state.collector.callback(
-                0, "msg", 3, f"lock_flake: calling C++ lock_flake write_lock_file={message.write_lock_file}"
+            self._state.log(
+                "msg", 3, f"lock_flake: calling C++ lock_flake write_lock_file={message.write_lock_file}"
             )
         lf = es.lock_flake(
             message.ref,
@@ -525,7 +532,7 @@ class EvalServiceHandler(EvalServiceBase):
             flake_settings=dict(message.flake_settings),
         )
         if self._state.collector is not None:
-            self._state.collector.callback(0, "msg", 3, "lock_flake: C++ lock_flake returned")
+            self._state.log("msg", 3, "lock_flake: C++ lock_flake returned")
         handle = self._state.handles.allocate(lf, "locked_flake", owner=message.eval_handle)
 
         lf_pb = _locked_flake(lf.require_raw())
@@ -533,7 +540,7 @@ class EvalServiceHandler(EvalServiceBase):
         return lf_pb
 
     async def call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
-        return await self._get_executor(message.eval_handle).run(self._do_call_locked_flake, message)
+        return await self._run(message, self._do_call_locked_flake)
 
     def _do_call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
         lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
@@ -541,7 +548,7 @@ class EvalServiceHandler(EvalServiceBase):
         return self._export(es.call_locked_flake(lf), message.eval_handle)
 
     async def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_write_lock_file, message)
+        return await self._run(message, self._do_write_lock_file)
 
     def _do_write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
         lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
@@ -549,7 +556,7 @@ class EvalServiceHandler(EvalServiceBase):
         return WriteLockFileResponse()
 
     async def release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_release_locked_flake, message)
+        return await self._run(message, self._do_release_locked_flake)
 
     def _do_release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
         try:
@@ -561,7 +568,7 @@ class EvalServiceHandler(EvalServiceBase):
         return ReleaseLockedFlakeResponse()
 
     async def eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
-        return await self._get_executor(message.eval_handle).run(self._do_eval_flake, message)
+        return await self._run(message, self._do_eval_flake)
 
     def _do_eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
@@ -571,7 +578,7 @@ class EvalServiceHandler(EvalServiceBase):
         return self._export(value, message.eval_handle)
 
     async def get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
-        return await self._get_executor(message.eval_handle).run(self._do_get_flake, message)
+        return await self._run(message, self._do_get_flake)
 
     def _do_get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
         ref = nanopynix_flake.parse_flake_ref(message.ref)
@@ -579,7 +586,7 @@ class EvalServiceHandler(EvalServiceBase):
         return common_pb.FlakeRef(attrs=_flake_ref_attrs(fr))
 
     async def release(self, message: ReleaseRequest) -> ReleaseResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_release, message)
+        return await self._run(message, self._do_release)
 
     def _do_release(self, message: ReleaseRequest) -> ReleaseResponse:
         try:
@@ -591,7 +598,7 @@ class EvalServiceHandler(EvalServiceBase):
         return ReleaseResponse()
 
     async def release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:
-        return await self._get_executor(message.eval_handle).run(self._do_release_all, message)
+        return await self._run(message, self._do_release_all)
 
     def _do_release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:
         release_eval_resources(self._state, message.eval_handle)

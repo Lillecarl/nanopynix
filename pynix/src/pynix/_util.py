@@ -56,6 +56,10 @@ async def forward_nix_logs(
 async def _forward_nix_logs(session: Any, *, print_build_logs: bool) -> None:
     logger = structlog.get_logger("pynix.nix")
     async for event in session.log_stream():
+        if event.is_request_finalized:
+            continue
+        if not event.is_nix_log:
+            continue
         message = event.message_without_ansi
         result_type, result_message = _result_event(event)
         if event.action == "stop" or (event.action == "result" and result_message is None):

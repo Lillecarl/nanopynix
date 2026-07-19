@@ -9,6 +9,7 @@ service ManagerPrimopService {
 }
 
 message CallPrimopRequest {
+  int64 request_id = 1000;
   string name = 1;
   repeated nix.common.ScalarValue args = 2;
 }

@@ -28,6 +28,7 @@ from nanopynix_proto.nix.common import LogLevel
 from nanopynix._process_title import set_manager_title
 from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.rpc.client._pool import (
+    _ACTIVE_LOG_CAPTURES,  # type: ignore[reportPrivateUsage] -- dispatch-owned task-local capture stack
     _WorkerClient,  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
 )
 from nanopynix.rpc.client._session import EvalSession, ReplSession
@@ -64,21 +65,73 @@ class LogCapture:
         self._manager = manager
         self._sub: _Subscription | None = None
         self.events: list[LogEvent] = []
+        self._request_ids: set[int] = set()
+        self._finalized: set[int] = set()
+        self._waiters: dict[int, asyncio.Event] = {}
+        self._active = False
+        self._token: object | None = None
+
+    @property
+    def request_ids(self) -> frozenset[int]:
+        """Snapshot of operation IDs started inside this capture's scope."""
+        return frozenset(self._request_ids)
+
+    def _register_request(self, request_id: int) -> None:
+        if self._active:
+            self._request_ids.add(request_id)
+            self._waiters.setdefault(request_id, asyncio.Event())
+
+    async def wait_for_request(self, request_id: int) -> None:
+        if request_id not in self._request_ids:
+            raise ValueError(f"request {request_id} is not registered with this log capture")
+        if request_id in self._finalized:
+            return
+        await self._waiters[request_id].wait()
+
+    async def wait(self) -> None:
+        request_ids = tuple(self._request_ids)
+        await asyncio.gather(*(self.wait_for_request(request_id) for request_id in request_ids))
 
     async def __aenter__(self) -> LogCapture:
         def _append(raw: object) -> None:
             if raw is None:
                 return
             if isinstance(raw, LogEventProto):
-                self.events.append(_raw_log_event(raw))
+                event = _raw_log_event(raw)
+                if event.is_nix_log:
+                    self.events.append(event)
+                elif event.is_request_finalized:
+                    self._finalized.add(event.request_id)
+                    waiter = self._waiters.get(event.request_id)
+                    if waiter is not None:
+                        waiter.set()
 
         self._sub = self._manager.subscribe(_append)
+        self._active = True
+        self._token = _ACTIVE_LOG_CAPTURES.set((*_ACTIVE_LOG_CAPTURES.get(), self))
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        if self._sub is not None:
-            self._sub.unsubscribe()
-            self._sub = None
+        self._active = False
+        if self._token is not None:
+            _ACTIVE_LOG_CAPTURES.reset(self._token)  # type: ignore[arg-type] -- ContextVar token is opaque
+            self._token = None
+        drain = asyncio.create_task(self.wait(), name="nanopynix-log-capture-drain")
+        cancelled = False
+        try:
+            while not drain.done():
+                try:
+                    await asyncio.shield(drain)
+                except asyncio.CancelledError:
+                    cancelled = True
+                    continue
+            await drain
+        finally:
+            if self._sub is not None:
+                self._sub.unsubscribe()
+                self._sub = None
+        if cancelled:
+            raise asyncio.CancelledError
 
 
 def _to_primop_specs(specs: Sequence[PrimOpSpec | Mapping[str, Any]] | None) -> list[PrimOpSpec]:

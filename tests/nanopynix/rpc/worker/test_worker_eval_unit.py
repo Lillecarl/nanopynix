@@ -12,7 +12,6 @@ import nanopynix._core._nix_core as nix_core  # type: ignore[reportPrivateUsage]
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix._core._local import (  # type: ignore[reportPrivateUsage] -- test constructs worker's local runtime
     LocalEvalState,
-    LocalRuntime,
     LocalStore,
 )
 from nanopynix.rpc.worker._handle_registry import (
@@ -135,6 +134,7 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
         verbosity=None,
         nix_path=["nixpkgs=/tmp/nixpkgs"],
         primops=[],
+        request_id=1,
     )
 
     try:
@@ -157,17 +157,13 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     del init_expr
     monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
 
-    handles = HandleRegistry()
-    second_handle = handles.allocate(LocalStore("second-store"), "store")
-    first_handle = handles.allocate(LocalStore("first-store"), "store")
-    state = SimpleNamespace(
-        handles=handles,
-        runtime=LocalRuntime(),
-        nix_path=["nixpkgs=/tmp/nixpkgs"],
-    )
+    state = WorkerState()
+    second_handle = state.handles.allocate(LocalStore("second-store"), "store")
+    first_handle = state.handles.allocate(LocalStore("first-store"), "store")
+    state.nix_path = ["nixpkgs=/tmp/nixpkgs"]
     handler = EvalServiceHandler(state)
 
-    response = await handler.open_eval(OpenEvalRequest(store_handle=second_handle))
+    response = await handler.open_eval(OpenEvalRequest(store_handle=second_handle, request_id=1))
     selected = handler._get_es(response.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
 
     assert isinstance(selected, LocalEvalState)
@@ -178,7 +174,7 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     assert handler._get_es(response.eval_handle) is selected  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
 
     # A second, concurrently open EvalState is now allowed rather than rejected.
-    second_response = await handler.open_eval(OpenEvalRequest(store_handle=first_handle))
+    second_response = await handler.open_eval(OpenEvalRequest(store_handle=first_handle, request_id=2))
     assert second_response.eval_handle != response.eval_handle
     second_selected = handler._get_es(second_response.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
     assert second_selected.raw.store == "first-store"

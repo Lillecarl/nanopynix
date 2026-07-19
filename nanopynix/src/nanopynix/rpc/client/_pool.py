@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +54,8 @@ _RPC_TIMEOUT = 300.0
 _WORKER_MAX_CONCURRENCY = 32
 _OOM_SCORE_ADJ_MIN = -1000
 _OOM_SCORE_ADJ_MAX = 1000
+
+_ACTIVE_LOG_CAPTURES: ContextVar[tuple[Any, ...]] = ContextVar("nanopynix_active_log_captures", default=())
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -190,6 +193,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         self._log_bus: _LogBus = _LogBus()
         self._log_task: asyncio.Task[None] | None = None
         self._stack: contextlib.AsyncExitStack | None = None
+        self._next_request_id = 1
 
     # ── lifecycle ──────────────────────────────────────────────────
 
@@ -229,7 +233,8 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         ]
 
         # Initialize Nix in the worker
-        init_response = await self._worker_stub.init(
+        init_response = await self.invoke(
+            self._worker_stub.init,
             InitRequest(
                 store_uri=self._store_uri,
                 nix_conf=str(self._nix_conf) if self._nix_conf is not None else None,
@@ -250,8 +255,8 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         try:
             if self._worker_service_stub is not None:
                 try:
-                    await self._worker_stub.shutdown(ShutdownRequest(), timeout=self._shutdown_timeout)
-                except (TimeoutError, GRPCError, StreamTerminatedError, ConnectionError, asyncio.CancelledError):
+                    await self.invoke(self._worker_stub.shutdown, ShutdownRequest(), timeout=self._shutdown_timeout)
+                except (TimeoutError, GRPCError, StreamTerminatedError, ConnectionError, WorkerDiedError, asyncio.CancelledError):
                     logger.debug("worker shutdown failed (expected during teardown)", exc_info=True)
         finally:
             if self._log_task is not None:
@@ -267,18 +272,16 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
 
     # ── operation dispatch ─────────────────────────────────────────
 
-    async def call(self, coro: Any) -> Any:
-        """Run one RPC.
-
-        EvalProxy serializes operations belonging to its thread-confined
-        EvalState. Store calls intentionally bypass that queue because Nix
-        Store instances support concurrent use and the worker has a bounded
-        Store executor for them.
-        """
+    async def invoke(self, method: Callable[..., Any], request: Any, *, timeout: float) -> Any:
+        """Assign a worker-local operation ID and dispatch one unary RPC."""
         if self._channel is None:
-            coro.close()
             raise WorkerDiedError("Worker not started")
-        return await _grpc_call(coro)
+        request_id = self._next_request_id
+        self._next_request_id += 1
+        request.request_id = request_id
+        for capture in _ACTIVE_LOG_CAPTURES.get():
+            capture._register_request(request_id)  # type: ignore[reportPrivateUsage] -- capture registration is the dispatch contract
+        return await _grpc_call(method(request, timeout=timeout))
 
     # ── log access ─────────────────────────────────────────────────
 
@@ -333,15 +336,13 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
 
     async def get_verbosity(self) -> LogLevel:
         """Return the current worker-side Nix log verbosity."""
-        response = await self.call(self._worker_stub.get_verbosity(GetVerbosityRequest(), timeout=self.rpc_timeout))
+        response = await self.invoke(self._worker_stub.get_verbosity, GetVerbosityRequest(), timeout=self.rpc_timeout)
         self._verbosity = response.verbosity
         return response.verbosity
 
     async def set_verbosity(self, verbosity: LogLevel) -> LogLevel:
         """Set the worker-side Nix log verbosity."""
-        response = await self.call(
-            self._worker_stub.set_verbosity(SetVerbosityRequest(verbosity=verbosity), timeout=self.rpc_timeout)
-        )
+        response = await self.invoke(self._worker_stub.set_verbosity, SetVerbosityRequest(verbosity=verbosity), timeout=self.rpc_timeout)
         self._verbosity = response.verbosity
         return response.verbosity
 

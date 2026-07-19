@@ -15,6 +15,7 @@ service WorkerService {
 }
 
 message InitRequest {
+  int64 request_id = 1000;
   reserved 6, 7, 8; // formerly pure_eval, restrict_eval, allowed_uris — now per-EvalState, see OpenEvalRequest
   reserved "pure_eval", "restrict_eval", "allowed_uris";
   string store_uri = 1;
@@ -31,11 +32,10 @@ message InitResponse {
   string status = 1;
 }
 
-message SubscribeLogsRequest {
-  int64 request_id = 1;
-}
+message SubscribeLogsRequest {}
 
 message OpenStoreRequest {
+  int64 request_id = 1000;
   string uri = 1;
 }
 message OpenStoreResponse {
@@ -45,22 +45,24 @@ message OpenStoreResponse {
 }
 
 message CloseStoreRequest {
+  int64 request_id = 1000;
   int64 store_handle = 1;
   bool force = 2;
 }
 message CloseStoreResponse {}
 
-message GetVerbosityRequest {}
+message GetVerbosityRequest { int64 request_id = 1000; }
 message GetVerbosityResponse {
   nix.common.LogLevel verbosity = 1;
 }
 
 message SetVerbosityRequest {
+  int64 request_id = 1000;
   nix.common.LogLevel verbosity = 1;
 }
 message SetVerbosityResponse {
   nix.common.LogLevel verbosity = 1;
 }
 
-message ShutdownRequest {}
+message ShutdownRequest { int64 request_id = 1000; }
 message ShutdownResponse {}

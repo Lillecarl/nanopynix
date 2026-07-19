@@ -82,10 +82,10 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
     async def open(self) -> None:
         """Open a store on the worker and activate the handle."""
-        resp = await self._pool.call(
-            self._pool._worker_stub.open_store(  # type: ignore[reportPrivateUsage] -- cross-class access
-                OpenStoreRequest(uri=self._uri), timeout=self._rpc_timeout
-            )
+        resp = await self._pool.invoke(
+            self._pool._worker_stub.open_store,  # type: ignore[reportPrivateUsage] -- cross-class access
+            OpenStoreRequest(uri=self._uri),
+            timeout=self._rpc_timeout,
         )
         self._store_handle = resp.store_handle
         self._active = True
@@ -98,11 +98,10 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
             for dependent_eval in tuple(self._dependent_evals):
                 await dependent_eval.close()
         try:
-            await self._pool.call(
-                self._pool._worker_stub.close_store(  # type: ignore[reportPrivateUsage] -- cross-class access
-                    CloseStoreRequest(store_handle=self._store_handle, force=force),
-                    timeout=self._rpc_timeout,
-                )
+            await self._pool.invoke(
+                self._pool._worker_stub.close_store,  # type: ignore[reportPrivateUsage] -- cross-class access
+                CloseStoreRequest(store_handle=self._store_handle, force=force),
+                timeout=self._rpc_timeout,
             )
         except WorkerDiedError:
             # The remote handle disappeared with its worker, so no close RPC
@@ -135,17 +134,13 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         self._check_active()
         return self._store_handle
 
-    async def _store_call(self, coro: Any) -> Any:
-        """Acquire the worker lock, execute a gRPC call, and handle errors."""
-        return await self._pool.call(coro)
-
     async def _rpc_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
         if self._store_handle:
             message_any = cast("Any", message)
             message_any.store_handle = self._store_handle
         method = getattr(self._pool._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
-        return await self._store_call(method(message, timeout=self._rpc_timeout))
+        return await self._pool.invoke(method, message, timeout=self._rpc_timeout)
 
 
 class Store:

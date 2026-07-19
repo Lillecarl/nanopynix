@@ -189,11 +189,21 @@ message PrimOpSpec {
 
 // ── Log event ──────────────────────────────────────
 
+message NixLogEvent {
+  string action = 1;
+  string args_json = 2;
+  optional ResultType result_type = 3;
+}
+
+message RequestFinalized {}
+
 message LogEvent {
   int64 request_id = 1;
-  string action = 2;
-  string args_json = 3;
-  optional ResultType result_type = 4;
+
+  oneof payload {
+    NixLogEvent nix_log = 2;
+    RequestFinalized request_finalized = 3;
+  }
 }
 
 // ── Derivation ─────────────────────────────────────
