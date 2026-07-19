@@ -249,7 +249,7 @@ class Session:
         self,
         *,
         wait: bool = True,
-        timeout: float | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 -- timeout passed to executor.drain → asyncio.wait which accepts a timeout parameter
         force: bool = False,
     ) -> None:
         if not self._opened:
@@ -730,7 +730,7 @@ class EvalSession:
     def _begin_close(self, *, force: bool) -> None:
         self._executor.begin_close(force=force)
 
-    async def _drain(self, *, timeout: float | None) -> None:
+    async def _drain(self, *, timeout: float | None) -> None:  # noqa: ASYNC109 -- timeout passed to executor.drain → asyncio.wait which accepts a timeout parameter
         await self._executor.drain(timeout=timeout)
 
     def _resume(self) -> None:

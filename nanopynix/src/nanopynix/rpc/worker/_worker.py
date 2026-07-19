@@ -218,7 +218,7 @@ class WorkerServiceHandler(WorkerServiceBase):
                 os.environ["NIX_CONFIG"] = "\n".join(f"{k} = {v}" for k, v in settings.items())
 
             if self._state.executor is None:
-                raise RuntimeError("worker executor is unavailable")
+                raise RuntimeError("worker executor is unavailable")  # noqa: TRY301 -- guard clause intentionally caught by except block which prints traceback and re-raises
             await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._init_nix, args=(message, settings))
 
             return InitResponse(status="ok")

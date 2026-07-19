@@ -64,7 +64,7 @@ async def test_store_session_opens_store_with_its_uri() -> None:
     pool = MagicMock()
     pool._worker_stub.open_store = AsyncMock(return_value=SimpleNamespace(store_handle=42))
 
-    async def invoke(method: object, request: object, *, timeout: float) -> object:
+    async def invoke(method: object, request: object, *, timeout: float) -> object:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke interface
         del timeout
         return await method(request)  # type: ignore[operator] -- test double receives a generated RPC method
 

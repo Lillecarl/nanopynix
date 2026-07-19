@@ -98,7 +98,7 @@ def pool() -> MagicMock:
     p: MagicMock = MagicMock()
     p._store_stub = _make_stub_mock()  # type: ignore[reportPrivateUsage] -- test fixture sets private stub
 
-    async def _passthrough(method: Any, request: Any, *, timeout: float) -> Any:
+    async def _passthrough(method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke interface
         del timeout
         return await method(request)
 

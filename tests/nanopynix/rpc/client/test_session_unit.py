@@ -172,7 +172,7 @@ def _mock_pool():
     pool._eval_stub = _make_eval_stub()
     pool._store_stub = MagicMock()
 
-    async def _invoke(method: Any, request: Any, *, timeout: float) -> Any:
+    async def _invoke(method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke; timeout passed to grpclib stub
         return await method(request, timeout=timeout)
 
     pool.invoke = _invoke
@@ -190,7 +190,7 @@ def _mock_worker_client():
     rw._store_stub.read_derivation = AsyncMock()
     rw.release = AsyncMock()
 
-    async def _invoke(method: Any, request: Any, *, timeout: float) -> Any:
+    async def _invoke(method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke; timeout passed to grpclib stub
         return await method(request, timeout=timeout)
 
     rw.invoke = _invoke

@@ -111,7 +111,7 @@ class NixThreadExecutor:
         with self._lock:
             return any(not future.done() for future in self._futures)
 
-    async def drain(self, *, timeout: float | None = None) -> None:
+    async def drain(self, *, timeout: float | None = None) -> None:  # noqa: ASYNC109 -- timeout passed to asyncio.wait which accepts a timeout parameter
         """Wait until all submitted work has finished without cancelling it."""
         with self._lock:
             futures = tuple(future for future in self._futures if not future.done())
