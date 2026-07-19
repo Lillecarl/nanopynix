@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nanopynix_proto.nix.common import DeepAttrs, DeepValue, ScalarValue
+from nanopynix_proto.nix.common import DeepAttrs, DeepValue, NixLogEvent, ResultType, ScalarValue
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
 import nanopynix.rpc.client._pool as pool_module
@@ -172,10 +172,10 @@ def _mock_pool():
     pool._eval_stub = _make_eval_stub()
     pool._store_stub = MagicMock()
 
-    async def _call(coro: Any) -> Any:
-        return await coro
+    async def _invoke(method: Any, request: Any, *, timeout: float) -> Any:
+        return await method(request, timeout=timeout)
 
-    pool.call = _call
+    pool.invoke = _invoke
     return pool
 
 
@@ -190,10 +190,10 @@ def _mock_worker_client():
     rw._store_stub.read_derivation = AsyncMock()
     rw.release = AsyncMock()
 
-    async def _call(coro: Any) -> Any:
-        return await coro
+    async def _invoke(method: Any, request: Any, *, timeout: float) -> Any:
+        return await method(request, timeout=timeout)
 
-    rw.call = _call
+    rw.invoke = _invoke
     return rw
 
 
@@ -1022,12 +1022,10 @@ class TestLogStreamRequestId:
 
     @staticmethod
     def _proto_log_event(request_id: int, action: str, args: list[Any], result_type: int | None = None) -> LogEventProto:
-        le = MagicMock(spec=LogEventProto)
-        le.request_id = request_id
-        le.action = action
-        le.args_json = _json.dumps(args)
-        le.result_type = result_type
-        return le
+        return LogEventProto(
+            request_id=request_id,
+            nix_log=NixLogEvent(action=action, args_json=_json.dumps(args), result_type=ResultType(result_type) if result_type is not None else None),
+        )
 
     async def test_worker_request_id_mapped_correctly(self):
         """Worker emits LogEvent proto — log_stream produces valid LogEvent."""
@@ -1111,9 +1109,7 @@ class TestLogCapture:
 
     @staticmethod
     def _proto_log_event(request_id: int, action: str, args: list[Any], result_type: int | None = None) -> LogEventProto:
-        le = MagicMock(spec=LogEventProto)
-        le.request_id = request_id
-        le.action = action
-        le.args_json = _json.dumps(args)
-        le.result_type = result_type
-        return le
+        return LogEventProto(
+            request_id=request_id,
+            nix_log=NixLogEvent(action=action, args_json=_json.dumps(args), result_type=ResultType(result_type) if result_type is not None else None),
+        )

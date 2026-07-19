@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from nanopynix_proto.nix.store import GetUriRequest
 
 from nanopynix._core._nix_executor import NixThreadExecutor
-from nanopynix.rpc.worker._handle_registry import HandleRegistry
+from nanopynix.rpc.worker._worker import WorkerState
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
 
 
 async def test_store_handler_runs_independent_calls_on_multiple_store_threads() -> None:
     """The L3 Store handler must not serialize unrelated Store calls."""
-    handles = HandleRegistry()
+    state = WorkerState()
+    handles = state.handles
     barrier = threading.Barrier(2, timeout=2)
     active_lock = threading.Lock()
     active = 0
@@ -37,15 +37,20 @@ async def test_store_handler_runs_independent_calls_on_multiple_store_threads() 
 
     handle = handles.allocate(SlowStore(), "store")
     store_executor = NixThreadExecutor(max_workers=2, thread_name_prefix="test-store")
-    handler = StoreServiceHandler(SimpleNamespace(handles=handles, store_executor=store_executor))
+    state.store_executor = store_executor
+    handler = StoreServiceHandler(state)
     try:
-        first, second = await asyncio.gather(
-            handler.get_uri(GetUriRequest(store_handle=handle)),
-            handler.get_uri(GetUriRequest(store_handle=handle)),
+        responses = cast(
+            "tuple[Any, Any]",
+            await asyncio.gather(
+                handler.get_uri(GetUriRequest(store_handle=handle, request_id=1)),
+                handler.get_uri(GetUriRequest(store_handle=handle, request_id=2)),
+            ),
         )
     finally:
         store_executor.shutdown(wait=True)
 
+    first, second = responses
     assert first.uri == "fake://store"
     assert second.uri == "fake://store"
     assert peak_active == 2

@@ -62,6 +62,9 @@ from nanopynix_proto.nix.common import (
     MissingInfo as MissingInfo,
 )
 from nanopynix_proto.nix.common import (
+    NixLogEvent as NixLogEvent,
+)
+from nanopynix_proto.nix.common import (
     NixType as NixType,
 )
 from nanopynix_proto.nix.common import (
@@ -134,24 +137,53 @@ class GcResult:
 
 
 class LogEventExt(_LogEventProto):
-    """Extension of proto LogEvent with ``message``, ``message_without_ansi``, and ``args``."""
+    """Typed worker log event with Nix-log convenience accessors."""
 
     _ = _LogEventProto._betterproto
     _betterproto_meta = _LogEventProto._betterproto_meta
 
     def __init__(self, **kwargs: Any) -> None:
         if "args" in kwargs:
-            kwargs["args_json"] = json.dumps(kwargs.pop("args"))
-        if "result_type" in kwargs:
-            rtype = kwargs["result_type"]
+            args = kwargs.pop("args")
+            nix_log = kwargs.get("nix_log") or NixLogEvent()
+            kwargs["nix_log"] = NixLogEvent(
+                action=kwargs.pop("action", nix_log.action),
+                args_json=json.dumps(args),
+                result_type=kwargs.pop("result_type", nix_log.result_type),
+            )
+        elif "action" in kwargs or "args_json" in kwargs or "result_type" in kwargs:
+            rtype = kwargs.pop("result_type", None)
             if isinstance(rtype, int):
-                kwargs["result_type"] = ResultType(rtype)
+                rtype = ResultType(rtype)
+            kwargs["nix_log"] = NixLogEvent(
+                action=kwargs.pop("action", ""),
+                args_json=kwargs.pop("args_json", ""),
+                result_type=rtype,
+            )
         super().__init__(**kwargs)
+
+    @property
+    def is_nix_log(self) -> bool:
+        return self.nix_log is not None
+
+    @property
+    def is_request_finalized(self) -> bool:
+        return self.request_finalized is not None
+
+    @property
+    def action(self) -> str | None:
+        return None if self.nix_log is None else self.nix_log.action
+
+    @property
+    def result_type(self) -> ResultType | None:
+        return None if self.nix_log is None else self.nix_log.result_type
 
     @property
     def args(self) -> list[Any]:
         """Parsed args from the JSON ``args_json`` field."""
-        return json.loads(self.args_json) if self.args_json else []
+        if self.nix_log is None:
+            return []
+        return json.loads(self.nix_log.args_json) if self.nix_log.args_json else []
 
     @property
     def message(self) -> str | None:
@@ -170,21 +202,17 @@ class LogEventExt(_LogEventProto):
     def without_ansi(self) -> LogEventExt:
         """Return a new LogEventExt with ANSI escapes removed from string args."""
         cleaned = [_strip_ansi(a) if isinstance(a, str) else a for a in self.args]
-        return LogEventExt(
-            request_id=self.request_id,
-            action=self.action,
-            args_json=json.dumps(cleaned),
-            result_type=self.result_type,
-        )
+        if self.nix_log is None:
+            return self
+        return LogEventExt(request_id=self.request_id, action=self.action, args=cleaned, result_type=self.result_type)
 
     @classmethod
     def from_proto(cls, proto_event: _LogEventProto) -> LogEventExt:
         """Construct a LogEventExt from a proto LogEvent message."""
         return cls(
             request_id=proto_event.request_id,
-            action=proto_event.action,
-            args_json=proto_event.args_json,
-            result_type=proto_event.result_type,
+            nix_log=proto_event.nix_log,
+            request_finalized=proto_event.request_finalized,
         )
 
 

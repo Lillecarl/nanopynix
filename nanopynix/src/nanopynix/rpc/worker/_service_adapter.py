@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, get_type_hints
+from typing import TYPE_CHECKING, Any, cast, get_type_hints
 
 if TYPE_CHECKING:
     from betterproto2 import Message
@@ -90,7 +90,14 @@ def _make_service_forwarder(
 
         async def _forward_nix(self: GeneratedServiceAdapterMixin, message: Message) -> Message:
             executor: Any = _resolve_attr(self, nix_executor_attr)
-            raw = await executor.run(lambda: self._nanobind_rpc_call(binding_method_name, message))
+            state = _resolve_attr(self, "_state")
+            request = cast("Any", message)
+            raw = await state.run_request(
+                request_id=request.request_id,
+                executor=executor,
+                operation=self._nanobind_rpc_call,
+                args=(binding_method_name, message),
+            )
             if isinstance(raw, response_type):
                 return raw
             if isinstance(raw, Mapping):

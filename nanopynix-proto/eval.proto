@@ -42,6 +42,7 @@ service EvalService {
 }
 
 message OpenEvalRequest {
+  int64 request_id = 1000;
   int64 store_handle = 1;
   map<string, string> eval_settings = 2;
   map<string, string> fetch_settings = 3;
@@ -51,11 +52,13 @@ message OpenEvalResponse {
 }
 
 message CloseEvalRequest {
+  int64 request_id = 1000;
   int64 eval_handle = 100;
 }
 message CloseEvalResponse {}
 
 message ConfigureEvalRequest {
+  int64 request_id = 1000;
   map<string, string> eval_settings = 1;
   map<string, string> fetch_settings = 2;
   int64 eval_handle = 100;
@@ -63,27 +66,32 @@ message ConfigureEvalRequest {
 message ConfigureEvalResponse {}
 
 message EvalFileRequest {
+  int64 request_id = 1000;
   string path = 1;
   int64 eval_handle = 100;
 }
 
 message EvalStringRequest {
+  int64 request_id = 1000;
   string expr = 1;
   string source_name = 2;
   int64 eval_handle = 100;
 }
 
 message BeginReplRequest {
+  int64 request_id = 1000;
   int64 eval_handle = 100;
 }
 message BeginReplResponse {}
 
 message ReplLoadFileRequest {
+  int64 request_id = 1000;
   string path = 1;
   int64 eval_handle = 100;
 }
 
 message ReplProcessLineRequest {
+  int64 request_id = 1000;
   string line = 1;
   string source_name = 2;
   int64 eval_handle = 100;
@@ -94,6 +102,7 @@ message ReplProcessLineResponse {
 }
 
 message ReplAddAttrsRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
@@ -102,6 +111,7 @@ message ReplAddAttrsResponse {
 }
 
 message ReplScopeNamesRequest {
+  int64 request_id = 1000;
   int64 eval_handle = 100;
 }
 message ReplScopeNamesResponse {
@@ -109,21 +119,25 @@ message ReplScopeNamesResponse {
 }
 
 message ResetFileCacheRequest {
+  int64 request_id = 1000;
   int64 eval_handle = 100;
 }
 message ResetFileCacheResponse {}
 
 message ForceRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
 
 message ForceDeepRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
 
 message ForceJsonRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   bool copy_to_store = 2;
   int64 eval_handle = 100;
@@ -133,6 +147,7 @@ message ForceJsonResponse {
 }
 
 message RealiseStringRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
@@ -141,6 +156,7 @@ message RealiseStringResponse {
 }
 
 message RealiseArgvRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
@@ -149,6 +165,7 @@ message RealiseArgvResponse {
 }
 
 message EditLocationRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
@@ -158,18 +175,21 @@ message EditLocationResponse {
 }
 
 message AttrRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   string name = 2;
   int64 eval_handle = 100;
 }
 
 message ListGetRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int32 index = 2;
   int64 eval_handle = 100;
 }
 
 message ListLengthRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
@@ -178,6 +198,7 @@ message ListLengthResponse {
 }
 
 message AttrNamesRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
@@ -186,6 +207,7 @@ message AttrNamesResponse {
 }
 
 message HasAttrRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   string name = 2;
   int64 eval_handle = 100;
@@ -195,6 +217,7 @@ message HasAttrResponse {
 }
 
 message TypeNameRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
@@ -203,17 +226,20 @@ message TypeNameResponse {
 }
 
 message AutoCallRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
 
 message CallRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   repeated nix.common.CallArg args = 2;
   int64 eval_handle = 100;
 }
 
 message BuildRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int32 build_mode = 2;
   int64 build_store_handle = 3;
@@ -226,6 +252,7 @@ message BuildResponse {
 }
 
 message LockFlakeRequest {
+  int64 request_id = 1000;
   string ref = 1;
   oneof update_inputs {
     bool update_all = 2;
@@ -241,23 +268,27 @@ message UpdateInputsList {
 }
 
 message CallLockedFlakeRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
 
 message WriteLockFileRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
 message WriteLockFileResponse {}
 
 message ReleaseLockedFlakeRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
 message ReleaseLockedFlakeResponse {}
 
 message EvalFlakeRequest {
+  int64 request_id = 1000;
   string ref = 1;
   bool write_lock_file = 2;
   map<string, string> flake_settings = 3;
@@ -265,17 +296,20 @@ message EvalFlakeRequest {
 }
 
 message GetFlakeRequest {
+  int64 request_id = 1000;
   string ref = 1;
   int64 eval_handle = 100;
 }
 
 message ReleaseRequest {
+  int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;
 }
 message ReleaseResponse {}
 
 message ReleaseAllRequest {
+  int64 request_id = 1000;
   int64 eval_handle = 100;
 }
 message ReleaseAllResponse {}

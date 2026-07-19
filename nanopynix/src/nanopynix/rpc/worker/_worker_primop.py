@@ -20,6 +20,7 @@ import concurrent.futures
 from typing import TYPE_CHECKING, Any
 
 from betterproto2 import which_one_of
+from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.common import NullValue, ScalarValue
 from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
@@ -86,6 +87,7 @@ class ThreadedRpcPrimopBridge:
                 request = CallPrimopRequest(
                     name=name,
                     args=[_python_to_scalar_value(a) for a in args],
+                    request_id=nanopynix_util.get_logger_request_id(),
                 )
                 response: CallPrimopResponse = await self._backchannel.call_unary(
                     _CALL_ROUTE, request, CallPrimopResponse

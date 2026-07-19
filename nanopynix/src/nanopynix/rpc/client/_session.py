@@ -306,7 +306,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
             if method_name != "open_eval":
                 message.eval_handle = self._eval_handle  # type: ignore[attr-defined] -- every non-OpenEval EvalService request carries eval_handle=100
             method = getattr(self._worker._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
-            return await self._worker.call(method(message, timeout=self._rpc_timeout))
+            return await self._worker.invoke(method, message, timeout=self._rpc_timeout)
 
     async def drain_deferred_releases(self) -> None:
         """Best-effort cleanup at a safe worker-RPC boundary."""
@@ -322,19 +322,17 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
             for ref in self._releases.drain():
                 if ref.kind == "value":
                     method = self._worker._eval_stub.release  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
-                    await self._worker.call(
-                        method(
-                            ReleaseRequest(handle=ref.handle, eval_handle=self._eval_handle),
-                            timeout=self._rpc_timeout,
-                        )
+                    await self._worker.invoke(
+                        method,
+                        ReleaseRequest(handle=ref.handle, eval_handle=self._eval_handle),
+                        timeout=self._rpc_timeout,
                     )
                 elif ref.kind == "locked_flake":
                     method = self._worker._eval_stub.release_locked_flake  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
-                    await self._worker.call(
-                        method(
-                            ReleaseLockedFlakeRequest(handle=ref.handle, eval_handle=self._eval_handle),
-                            timeout=self._rpc_timeout,
-                        )
+                    await self._worker.invoke(
+                        method,
+                        ReleaseLockedFlakeRequest(handle=ref.handle, eval_handle=self._eval_handle),
+                        timeout=self._rpc_timeout,
                     )
                 else:
                     raise RuntimeError(f"unknown deferred lease kind: {ref.kind}")
@@ -344,7 +342,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
     async def _store_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
         method = getattr(self._worker._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
-        return await self._worker.call(method(message, timeout=self._rpc_timeout))
+        return await self._worker.invoke(method, message, timeout=self._rpc_timeout)
 
 
 @dataclass(frozen=True)
