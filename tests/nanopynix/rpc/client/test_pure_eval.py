@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import pytest
 
-from nanopynix import NixEvalSettings, NixType, Session, current_system
+from nanopynix import NixEvalSettings, NixType, current_system
 from nanopynix.exceptions import EvalError
+from tests.support.nix_environment import NixTestEnvironment
 
 
 @pytest.mark.anyio
-async def test_pure_eval_blocks_impure_builtins():
+async def test_pure_eval_blocks_impure_builtins(
+    isolated_nix_environment: NixTestEnvironment,
+) -> None:
     """pure_eval=True removes impure constants from the base environment."""
     async with (
-        Session() as session,
+        isolated_nix_environment.rpc_session() as session,
         session.store() as store,
         session.eval(store, eval_settings=NixEvalSettings(pure_eval=True)) as eval,
     ):
@@ -29,10 +32,12 @@ async def test_pure_eval_blocks_impure_builtins():
 
 
 @pytest.mark.anyio
-async def test_impure_allows_impure_builtins():
+async def test_impure_allows_impure_builtins(
+    isolated_nix_environment: NixTestEnvironment,
+) -> None:
     """pure_eval=False (default) allows currentTime and currentSystem."""
     async with (
-        Session() as session,
+        isolated_nix_environment.rpc_session() as session,
         session.store() as store,
         session.eval(store, eval_settings=NixEvalSettings(pure_eval=False)) as eval,
     ):
@@ -43,9 +48,11 @@ async def test_impure_allows_impure_builtins():
         assert isinstance(await system.force(), str)
 
 
-async def test_current_system_binding_matches_builtin_default():
+async def test_current_system_binding_matches_builtin_default(
+    isolated_nix_environment: NixTestEnvironment,
+) -> None:
     async with (
-        Session() as session,
+        isolated_nix_environment.rpc_session() as session,
         session.store() as store,
         session.eval(store, eval_settings=NixEvalSettings(pure_eval=False)) as eval,
     ):
@@ -54,17 +61,19 @@ async def test_current_system_binding_matches_builtin_default():
 
 
 @pytest.mark.anyio
-async def test_default_is_impure():
+async def test_default_is_impure(isolated_nix_environment: NixTestEnvironment) -> None:
     """Omitting eval_settings defaults to impure (pure_eval=False)."""
-    async with Session() as session, session.store() as store, session.eval(store) as eval:
+    async with isolated_nix_environment.rpc_session() as session, session.store() as store, session.eval(store) as eval:
         v = await eval.string("builtins.currentTime")
         assert await v.force_as(NixType.INT) > 0
 
 
 @pytest.mark.anyio
-async def test_restrict_eval_blocks_absolute_paths():
+async def test_restrict_eval_blocks_absolute_paths(
+    isolated_nix_environment: NixTestEnvironment,
+) -> None:
     """restrict_eval=True blocks readFile of paths outside the Nix store."""
-    async with Session() as session, session.store() as store:
+    async with isolated_nix_environment.rpc_session() as session, session.store() as store:
         eval_settings = NixEvalSettings(pure_eval=True, restrict_eval=True)
         async with session.eval(store, eval_settings=eval_settings) as eval:
             # Any absolute path outside the store is forbidden.
@@ -73,9 +82,11 @@ async def test_restrict_eval_blocks_absolute_paths():
 
 
 @pytest.mark.anyio
-async def test_restrict_eval_allows_pure_attrs():
+async def test_restrict_eval_allows_pure_attrs(
+    isolated_nix_environment: NixTestEnvironment,
+) -> None:
     """restrict_eval=True still allows ordinary pure evaluation."""
-    async with Session() as session, session.store() as store:
+    async with isolated_nix_environment.rpc_session() as session, session.store() as store:
         eval_settings = NixEvalSettings(pure_eval=True, restrict_eval=True)
         async with session.eval(store, eval_settings=eval_settings) as eval:
             v = await eval.string('{ name = "pure-test"; }')
@@ -84,9 +95,9 @@ async def test_restrict_eval_allows_pure_attrs():
 
 
 @pytest.mark.anyio
-async def test_allowed_uris_is_exposed():
+async def test_allowed_uris_is_exposed(isolated_nix_environment: NixTestEnvironment) -> None:
     """allowed_uris param reaches the worker without error."""
-    async with Session() as session, session.store() as store:
+    async with isolated_nix_environment.rpc_session() as session, session.store() as store:
         eval_settings = NixEvalSettings(pure_eval=True, allowed_uris=["https://github.com"])
         async with session.eval(store, eval_settings=eval_settings) as eval:
             # Just smoke-test: eval should work with allowed_uris set.
@@ -96,7 +107,9 @@ async def test_allowed_uris_is_exposed():
 
 @pytest.mark.anyio
 @pytest.mark.concurrency
-async def test_concurrent_eval_sessions_have_independent_pure_eval():
+async def test_concurrent_eval_sessions_have_independent_pure_eval(
+    isolated_nix_environment: NixTestEnvironment,
+) -> None:
     """Two concurrently open EvalSessions may have different pure_eval values.
 
     Regression test: eval settings used to be applied through a process-wide
@@ -104,7 +117,7 @@ async def test_concurrent_eval_sessions_have_independent_pure_eval():
     could not disagree on pure_eval. Each EvalSession now owns its own
     EvalState with its own settings.
     """
-    async with Session() as session, session.store() as store:
+    async with isolated_nix_environment.rpc_session() as session, session.store() as store:
         pure = session.eval(store, eval_settings=NixEvalSettings(pure_eval=True))
         impure = session.eval(store, eval_settings=NixEvalSettings(pure_eval=False))
         await pure.open()

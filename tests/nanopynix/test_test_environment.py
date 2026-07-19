@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from support.nix_environment import NixTestEnvironment
+    from tests.support.nix_environment import NixTestEnvironment
 
 
 @pytest.mark.anyio
@@ -20,7 +20,7 @@ async def test_isolated_environment_uses_its_configured_store(
     if environment.backend == "local":
         assert uri.startswith("local")
     else:
-        assert uri == environment.store_uri
+        assert uri == environment.store_uri.partition("?")[0]
 
 
 @pytest.mark.anyio
@@ -42,4 +42,4 @@ async def test_inproc_session_uses_its_configured_store(
     if environment.backend == "local":
         assert uri.startswith("local")
     else:
-        assert uri == environment.store_uri
+        assert uri == environment.store_uri.partition("?")[0]
