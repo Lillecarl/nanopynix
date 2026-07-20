@@ -24,6 +24,7 @@ _EXAMPLE_PARAMS = [
 ]
 
 
+@pytest.mark.forked
 @pytest.mark.parametrize("path", _EXAMPLE_PARAMS, ids=lambda p: p.name)
 def test_example_runs(path: Path) -> None:
     loop = asyncio.new_event_loop()
