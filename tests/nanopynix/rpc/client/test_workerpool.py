@@ -89,8 +89,18 @@ async def test_error_propagation():
             )
 
 
+@pytest.mark.forked
 async def test_worker_death_detection():
-    """Channel failure raises WorkerDiedError or connection error on the next call."""
+    """Channel failure raises WorkerDiedError or connection error on the next call.
+
+    Force-closing a live channel leaves its background reader task to hit a
+    StreamTerminatedError asynchronously. anyio's shared runner surfaces that
+    as a failure on whichever *other* test happens to be running when it
+    finally errors (confirmed: forking the first victim just moved the
+    failure to the next async test in the queue). Forking this test instead
+    means the leaked task dies with the child process and can never bleed
+    into the shared runner used by every other test.
+    """
     async with Nix() as nix, nix.store() as store:
         # First call works normally
         uri = await store.uri()

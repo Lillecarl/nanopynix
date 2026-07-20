@@ -15,6 +15,7 @@ import os
 import shutil
 import signal
 import tempfile
+import uuid
 from contextlib import redirect_stderr, redirect_stdout
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -201,20 +202,26 @@ class PynixStoreScenario:
         return self.hello_path
 
     async def build_local_log_derivation(self, *, test_name: str = "unknown") -> str:
+        # Nonce keeps this derivation's store path unique per call. The shared
+        # session-scoped store means an earlier test/fixture may have already
+        # realized an identical derivation, which would make this build a
+        # cache hit with no build log to assert on.
+        nonce = uuid.uuid4().hex
         log_nix_file = self.work_root / "log-test.nix"
-        log_nix_file.write_text("""
+        log_nix_file.write_text(f"""
         let
-          pkgs = import <nixpkgs> {};
+          pkgs = import <nixpkgs> {{}};
         in
-        pkgs.stdenvNoCC.mkDerivation {
+        pkgs.stdenvNoCC.mkDerivation {{
           pname = "pynix-log-test";
           version = "1";
           dontUnpack = true;
+          NANOPYNIX_TEST_NONCE = "{nonce}";
           installPhase = ''
             echo pynix-log-line >&2
             echo log-output > "$out"
           '';
-        }
+        }}
         """)
         data = await self.run_pynix_json(
             [
