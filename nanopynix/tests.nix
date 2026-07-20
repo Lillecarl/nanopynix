@@ -45,7 +45,12 @@ in
     # (nix/tsan-suppressions.txt) -- a permanent upstream design choice
     # (leaked-on-purpose singleton), not a bug, that otherwise shows up in
     # every TSAN run touching an HTTP fetch path.
-    export TSAN_OPTIONS="halt_on_error=1 history_size=7 second_deadlock_stack=1 suppressions=${tsanSuppressions}"
+    # die_after_fork=0: `nix daemon` forks a handler process per connection
+    # and that child spawns its own worker threads -- exactly the pattern
+    # TSAN's default die_after_fork=1 refuses ("starting new threads after
+    # multi-threaded fork is not supported"). This is normal daemon behavior,
+    # not a bug, so tell TSAN to tolerate it instead of aborting the child.
+    export TSAN_OPTIONS="halt_on_error=1 history_size=7 second_deadlock_stack=1 die_after_fork=0 suppressions=${tsanSuppressions}"
   ''
   + ''
     if [ -n "''${NANOPYNIX_CORE_DEBUG:-}" ]; then

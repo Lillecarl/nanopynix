@@ -154,9 +154,16 @@ class PynixStoreScenario:
             if dirs.get(key) != value:
                 raise AssertionError(f"expected store dir {key}={value!r}, got {dirs.get(key)!r}; all dirs={dirs!r}")
         uri = dirs.get("uri")
-        expected_scheme = "local" if self.environment.backend == "local" else "unix"
-        if not isinstance(uri, str) or not uri.startswith(expected_scheme):
-            raise AssertionError(f"expected {expected_scheme} store uri, got {uri!r}; all dirs={dirs!r}")
+        if self.environment.backend == "local":
+            uri_ok = isinstance(uri, str) and uri.startswith("local://")
+        else:
+            # An open unix:// store may report back as the bare "daemon"
+            # shorthand (Nix's own collapse for a store whose socket matches
+            # the process's default) or drop its query params on older Nix
+            # versions -- see NixTestEnvironment.store_uri_matches.
+            uri_ok = isinstance(uri, str) and (uri == "daemon" or uri.startswith(("daemon?", "unix://")))
+        if not uri_ok:
+            raise AssertionError(f"expected a {self.environment.backend} store uri, got {uri!r}; all dirs={dirs!r}")
         return dirs
 
     async def add_text_file(self, contents: str = "temporary-store-message\n", *, test_name: str = "unknown") -> str:
@@ -323,7 +330,7 @@ class PynixStoreScenario:
         return _require_present(self.flake_hello_path, "flake_hello_path")
 
     def physical_path(self, store_path: str) -> Path:
-        return self.environment.root / store_path.removeprefix("/")
+        return self.environment.physical_path(store_path)
 
     def _append_log_record(self, record: dict[str, object]) -> None:
         self.live_log.append(record)

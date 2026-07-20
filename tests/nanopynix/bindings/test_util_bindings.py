@@ -167,3 +167,70 @@ class TestStoreUtilities:
     def test_check_name_empty(self):
         with pytest.raises(RuntimeError, match="must not be empty"):
             nanopynix_store.check_name("")
+
+
+class TestParseStoreReference:
+    def test_auto(self):
+        result: Any = nanopynix_store.parse_store_reference("auto")  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+        assert result["type"] == "Auto"
+        assert result["scheme"] is None
+        assert result["authority"] is None
+        assert result["params"] == {}
+        assert result["render"] == "auto"
+
+    def test_daemon_shorthand(self):
+        result: Any = nanopynix_store.parse_store_reference("daemon")  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+        assert result["type"] == "Daemon"
+        assert result["render"] == "daemon"
+        assert result["render_without_params"] == "daemon"
+
+    def test_unix_socket_is_not_collapsed_to_daemon(self):
+        """Parsing a raw string never applies the "daemon" shorthand.
+
+        That collapsing is a property of an *open* store's ``getReference()``,
+        which compares its resolved socket path against Nix's live default
+        (``settings.nixDaemonSocketFile``) -- see ``Store.get_uri()``. Parsing
+        a "unix://" string in isolation has no store to compare against, so it
+        always stays "Specified", even if the path happens to match the
+        default daemon socket.
+        """
+        result: Any = nanopynix_store.parse_store_reference(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+            "unix:///tmp/foo/socket?root=/tmp/foo"
+        )
+        assert result["type"] == "Specified"
+        assert result["scheme"] == "unix"
+        assert result["authority"] == "/tmp/foo/socket"
+        assert result["params"] == {"root": "/tmp/foo"}
+        assert result["render"] == "unix:///tmp/foo/socket?root=/tmp/foo"
+        assert result["render_without_params"] == "unix:///tmp/foo/socket"
+
+    def test_local_with_params(self):
+        result: Any = nanopynix_store.parse_store_reference("local?root=/tmp/x")  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+        assert result["type"] == "Specified"
+        assert result["scheme"] == "local"
+        assert result["params"] == {"root": "/tmp/x"}
+
+    def test_bare_path(self):
+        result: Any = nanopynix_store.parse_store_reference("/tmp/some/path")  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+        assert result["type"] == "Specified"
+        assert result["scheme"] == "local"
+        assert result["authority"] == "/tmp/some/path"
+
+
+class TestRenderStoreReference:
+    def test_round_trips_daemon(self):
+        assert nanopynix_store.render_store_reference("daemon") == "daemon"
+
+    def test_round_trips_unix_socket_with_params(self):
+        uri = "unix:///tmp/foo/socket?root=/tmp/foo"
+        assert nanopynix_store.render_store_reference(uri) == uri
+
+    def test_without_params_drops_query_string(self):
+        uri = "unix:///tmp/foo/socket?root=/tmp/foo"
+        assert (
+            nanopynix_store.render_store_reference(uri, with_params=False)
+            == "unix:///tmp/foo/socket"
+        )
+
+    def test_round_trips_auto(self):
+        assert nanopynix_store.render_store_reference("auto") == "auto"

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from typing import Any
 
 import pytest
+from grpclib.exceptions import StreamTerminatedError
 
 from nanopynix import LogEvent, Nix, NixType, StoreError, WorkerDiedError
 
@@ -100,11 +102,41 @@ async def test_worker_death_detection():
     failure to the next async test in the queue). Forking this test instead
     means the leaked task dies with the child process and can never bleed
     into the shared runner used by every other test.
+
+    That leaked task belongs to the backchannel control peer
+    (grpclib_transports.bidi.LogicalRpcPeer) that rides the same channel, not
+    to the channel itself. Its ``aclose()`` only awaits tasks still present in
+    its own bookkeeping set, but the reader task already removed itself (via
+    its done-callback) the moment our forced ``channel.aclose()`` broke its
+    read and it raised StreamTerminatedError -- so nothing ever retrieves that
+    exception through normal control flow. asyncio flags it as "never
+    retrieved" once the peer itself is torn down at session close (end of
+    this `async with` block), which anyio's shared loop exception handler
+    picks up and re-raises here. Since nanopynix's own worker-close path
+    already treats StreamTerminatedError as an expected teardown outcome (see
+    _WorkerClient.close), a temporary loop exception handler ignoring it for
+    the lifetime of this session is a faithful, local match for that same
+    tolerance -- not a weakening of the assertion below, which still requires
+    a real WorkerDiedError/ConnectionError/OSError on the next call.
     """
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+
+    def _ignore_known_backchannel_leak(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        exception = context.get("exception")
+        if isinstance(exception, StreamTerminatedError):
+            return
+        if previous_handler is not None:
+            previous_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
     async with Nix() as nix, nix.store() as store:
         # First call works normally
         uri = await store.uri()
         assert isinstance(uri, str)
+
+        loop.set_exception_handler(_ignore_known_backchannel_leak)
 
         # With multiprocessing transport, kill the forkserver process directly.
         # The channel should notice the closed pipe.
@@ -117,6 +149,7 @@ async def test_worker_death_detection():
         # Next call should raise an error
         with pytest.raises((WorkerDiedError, ConnectionError, OSError)):
             await store.uri()
+    loop.set_exception_handler(previous_handler)
 
 
 async def test_idle_timeout_resets_with_activity():

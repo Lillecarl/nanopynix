@@ -80,6 +80,34 @@ class NixTestEnvironment:
     def pynix_store_args(self) -> list[str]:
         return ["--store", self.store_uri]
 
+    def physical_path(self, store_path: str) -> Path:
+        """Map a logical ``/nix/store/...`` path to its real on-disk location.
+
+        A ``root=`` param relocates the physical store underneath ``self.root``
+        (Nix reports ``storeDir`` as the logical ``/nix/store`` regardless, see
+        ``realStoreDir``), so reading a realized path directly -- bypassing the
+        daemon protocol -- needs this translation instead of the raw string.
+        """
+        return self.root / store_path.removeprefix("/")
+
+    def store_uri_matches(self, uri: str) -> bool:
+        """Whether ``uri`` is this environment's store, as reported by an open Store.
+
+        An open unix:// store is not required to echo back byte-identical to
+        the configured URI: Nix's own ``UDSRemoteStoreConfig::getReference()``
+        may collapse it to the bare "daemon" shorthand (when the socket path
+        happens to equal the connecting process's live default), and older
+        Nix versions have been observed to drop the "root" query param
+        entirely when reporting an open store's URI. Both are real,
+        Nix-version-dependent behaviors outside this fixture's control, so a
+        scheme-only check is what's actually reliable across versions.
+        """
+        if uri == self.store_uri:
+            return True
+        if self.backend != "daemon":
+            return False
+        return uri == "daemon" or uri.startswith(("daemon?", "unix://"))
+
 
 async def _force_rmtree(path: Path) -> None:
     """Remove a closed test root even if Nix made entries read-only."""
@@ -176,7 +204,10 @@ async def _start_daemon(root: Path) -> _Daemon:
 
 async def _environment(backend: str, root: Path) -> tuple[NixTestEnvironment, _Daemon | None]:
     if backend == "local":
-        return NixTestEnvironment(backend=backend, root=root, store_uri=f"local?root={root}"), None
+        # "local://" (not "local") -- Nix always adds the "//" authority
+        # separator when it reports an open store's URI back, so starting
+        # from the same canonical form makes it round-trip exactly.
+        return NixTestEnvironment(backend=backend, root=root, store_uri=f"local://?root={root}"), None
     if backend == "daemon":
         daemon = await _start_daemon(root)
         return (

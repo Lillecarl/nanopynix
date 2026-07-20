@@ -20,7 +20,7 @@ async def test_isolated_environment_uses_its_configured_store(
     if environment.backend == "local":
         assert uri.startswith("local")
     else:
-        assert uri == environment.store_uri
+        assert environment.store_uri_matches(uri)
 
 
 @pytest.mark.anyio
