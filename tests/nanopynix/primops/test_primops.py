@@ -6,9 +6,10 @@ Primops are registered in conftest.py before the session EvalState is created.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from nanopynix_bindings import store as nanopynix_store
 
 if TYPE_CHECKING:
     import nanopynix
@@ -108,6 +109,45 @@ class TestRegisterPrimop:
         result = v.as_string()
         assert result.endswith("primop-string-context-test")
         assert Path(result).exists()
+
+    def test_string_return_value_carries_context_from_arg(
+        self, eval_state: nanopynix.EvalState, store: Any
+    ):
+        """The string context of a context-bearing argument -- e.g.
+        "${someDerivation}" -- must survive on the primop's *return* value
+        too, not just get realised for the primop's own use.
+
+        test_identity_string returns its argument unchanged, so if the
+        returned value has no context, embedding it in a brand new
+        derivation (as ordinary Nix string interpolation, not through a
+        primop) won't record the original derivation as an input, and
+        Nix's build-time reference scanner only checks a derivation's own
+        *declared* inputs -- it doesn't scan the entire store for any
+        substring match. A context-free result would build fine (the
+        literal path text is still there) but silently drop the
+        dependency from the built output's closure, which is exactly the
+        kind of thing that breaks `nix copy`/GC-safety without ever
+        raising an error.
+        """
+        v = eval_state.eval_string("""
+          let
+            leaf = derivation {
+              name = "primop-context-propagation-leaf";
+              system = builtins.currentSystem;
+              builder = "/bin/sh";
+              args = [ "-c" "echo hi > $out" ];
+            };
+          in derivation {
+            name = "primop-context-propagation-consumer";
+            system = builtins.currentSystem;
+            builder = "/bin/sh";
+            args = [ "-c" "echo ${test_identity_string "${leaf}"} > $out" ];
+          }
+        """)
+        outputs = cast("dict[str, str]", v.build()["outputs"])
+        out = outputs["out"]
+        info = store.query_path_info(nanopynix_store.StorePath(Path(out).name))
+        assert any("primop-context-propagation-leaf" in ref for ref in info["references"])
 
 
 class TestCallableToNixFunction:
