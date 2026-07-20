@@ -24,6 +24,7 @@
 #include <nix/store/derivations.hh>
 #include <nix/store/remote-store.hh>
 #include <nix/store/content-address.hh>
+#include <nix/store/store-reference.hh>
 #include <nlohmann/json.hpp>
 #include <nix/util/hash.hh>
 #include <nix/util/serialise.hh>
@@ -1223,6 +1224,62 @@ NB_MODULE(store, m) {
           },
           "name"_a,
           "Validate a store path name component. Returns True or raises BadStorePath.");
+    m.def("parse_store_reference", [](const std::string &uri) {
+            auto ref = nix::StoreReference::parse(uri);
+            nb::dict d;
+            std::visit(nix::overloaded{
+                [&](const nix::StoreReference::Auto &) {
+                    d["type"] = "Auto";
+                    d["scheme"] = nb::none();
+                    d["authority"] = nb::none();
+                },
+                [&](const nix::StoreReference::Daemon &) {
+                    d["type"] = "Daemon";
+                    d["scheme"] = "unix";
+                    d["authority"] = "";
+                },
+                [&](const nix::StoreReference::Local &) {
+                    d["type"] = "Local";
+                    d["scheme"] = "local";
+                    d["authority"] = "";
+                },
+                [&](const nix::StoreReference::Specified &s) {
+                    d["type"] = "Specified";
+                    d["scheme"] = s.scheme;
+                    d["authority"] = s.authority;
+                },
+            }, ref.variant);
+            nb::dict params;
+            for (auto &[key, value] : ref.params) params[key.c_str()] = value;
+            d["params"] = params;
+            d["render"] = ref.render(true);
+            d["render_without_params"] = ref.render(false);
+            return d;
+          },
+          "uri"_a,
+          "Parse a Nix store URI into its components (nix::StoreReference::parse), without "
+          "opening a store. Returns a dict with 'type' (one of 'Auto', 'Specified', 'Daemon', "
+          "'Local'), 'scheme'/'authority' (None for Auto), 'params', and both 'render' "
+          "(with params) and 'render_without_params'.\n\n"
+          "This is pure string parsing and does NOT reproduce Store.get_uri()'s collapsing: "
+          "parsing only resolves to Daemon/Local when the input literally says 'daemon'/'local'. "
+          "An already-open store's get_uri() instead compares its live socket path against Nix's "
+          "*current* default daemon socket (settings.nixDaemonSocketFile) and collapses a "
+          "unix://<path> URI to the bare 'daemon' shorthand whenever they match -- deliberately, "
+          "per nix::UDSRemoteStoreConfig::getReference()'s own comment, for compatibility with "
+          "older tooling that chokes on 'unix://'. So the same connection can render differently "
+          "depending on the process-wide default socket path at the time it was opened, "
+          "independent of the URI string originally used to connect it.");
+    m.def("render_store_reference", [](const std::string &uri, bool with_params) {
+            return nix::StoreReference::parse(uri).render(with_params);
+          },
+          "uri"_a,
+          "with_params"_a = true,
+          "Parse and re-render a Nix store URI (nix::StoreReference::parse(uri).render()). "
+          "String in, string out -- a normalization/round-trip, not a structural parse. Use "
+          "parse_store_reference() for the individual components. Like parse_store_reference, "
+          "this never applies the open-store 'daemon' shorthand collapsing that Store.get_uri() "
+          "can apply -- see that function's docstring for why.");
 
     // ── Exception bindings ──────────────────────────────────────
     nb::exception<nix::InvalidPath> py_invalid_path(m, "InvalidPath", PyExc_RuntimeError);

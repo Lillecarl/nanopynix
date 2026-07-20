@@ -11,11 +11,17 @@ from __future__ import annotations
 
 import asyncio
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
+import pygit2
+
 from nanopynix import NixType, Session
+
+# A fixed signature keeps this example hermetic: a machine without a global
+# git user.name/user.email configured (e.g. a fresh CI runner) would otherwise
+# fail to commit.
+_SIGNATURE = pygit2.Signature("nanopynix-example", "nanopynix-example@example.invalid")
 
 
 def _init_flake(flake_dir: Path) -> None:
@@ -33,9 +39,12 @@ def _init_flake(flake_dir: Path) -> None:
       };
     }
     """)
-    subprocess.run(["git", "init"], cwd=flake_dir, check=True, capture_output=True)
-    subprocess.run(["git", "add", "flake.nix"], cwd=flake_dir, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=flake_dir, check=True, capture_output=True)
+    repo = pygit2.init_repository(str(flake_dir))
+    index = repo.index
+    index.add("flake.nix")
+    index.write()
+    tree = index.write_tree()
+    repo.create_commit("HEAD", _SIGNATURE, _SIGNATURE, "init", tree, [])
 
 
 async def main() -> None:

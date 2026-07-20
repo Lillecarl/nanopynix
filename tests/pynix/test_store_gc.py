@@ -88,8 +88,13 @@ async def test_store_info(
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
-    expected_uri_prefix = "local://" if nix_backend == "local" else "unix://"
-    assert data["uri"].startswith(expected_uri_prefix)
+    if nix_backend == "local":
+        assert data["uri"].startswith("local://")
+    else:
+        # An open unix:// store may report back as the bare "daemon"
+        # shorthand (Nix's own collapse for a store whose socket matches the
+        # process's default) or drop its query params on older Nix versions.
+        assert data["uri"] == "daemon" or data["uri"].startswith(("daemon?", "unix://"))
     assert data["storeDir"] == "/nix/store"
 
 

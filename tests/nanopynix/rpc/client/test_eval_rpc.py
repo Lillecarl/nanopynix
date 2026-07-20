@@ -26,7 +26,7 @@ from nanopynix import (
 from tests.support.git import init_flake_repo
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import RpcSessionFactory
+    from tests.support.nix_environment import NixTestEnvironment, RpcSessionFactory
 
 requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
 
@@ -152,7 +152,9 @@ async def test_forced_attrs_borrow_the_parent_value_handle(rpc_session: RpcSessi
             await child.force()
 
 
-async def test_eval_realise_command_values_preserves_string_context(rpc_session: RpcSessionFactory):
+async def test_eval_realise_command_values_preserves_string_context(
+    rpc_session: RpcSessionFactory, shared_nix_environment: NixTestEnvironment
+):
     """Realising strings and argv uses Nix's context-aware coercion path."""
     async with (
         rpc_session() as session,
@@ -161,12 +163,12 @@ async def test_eval_realise_command_values_preserves_string_context(rpc_session:
     ):
         string = await eval.string('builtins.toFile "nanopynix-realise-string" "contents"')
         realised_path = await string.realise_string()
-        assert await AnyioPath(realised_path).read_text() == "contents"
+        assert await AnyioPath(shared_nix_environment.physical_path(realised_path)).read_text() == "contents"
 
         argv_value = await eval.string('[ "echo" (builtins.toFile "nanopynix-realise-argv" "argument") ]')
         argv = await argv_value.realise_argv()
         assert argv[0] == "echo"
-        assert await AnyioPath(argv[1]).read_text() == "argument"
+        assert await AnyioPath(shared_nix_environment.physical_path(argv[1])).read_text() == "argument"
 
 
 async def test_repl_session_persists_bindings(rpc_session: RpcSessionFactory, tmp_path: Path):
@@ -495,7 +497,9 @@ async def test_force_deep_preserves_nested_functions(rpc_session: RpcSessionFact
         assert await g_result.force_as(NixType.STRING) == "deep"
 
 
-async def test_evaluated_derivation_can_build_while_eval_session_is_active(rpc_session: RpcSessionFactory):
+async def test_evaluated_derivation_can_build_while_eval_session_is_active(
+    rpc_session: RpcSessionFactory, shared_nix_environment: NixTestEnvironment
+):
     """ValueProxy.build builds the evaluated derivation through the eval store handle."""
     async with (
         rpc_session() as session,
@@ -523,10 +527,12 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active(rpc_s
         assert set(outputs) == {"out"}
         assert outputs["out"].startswith("/nix/store/")
         assert "nanopynix-build-value-test" in outputs["out"]
-        assert await AnyioPath(outputs["out"]).read_text() == "hello\n"
+        assert await AnyioPath(shared_nix_environment.physical_path(outputs["out"])).read_text() == "hello\n"
 
 
-async def test_evaluated_derivation_can_build_with_explicit_build_store(rpc_session: RpcSessionFactory):
+async def test_evaluated_derivation_can_build_with_explicit_build_store(
+    rpc_session: RpcSessionFactory, shared_nix_environment: NixTestEnvironment
+):
     """ValueProxy.build(store=...) uses that store for building, keeping the eval store as context."""
     async with (
         rpc_session() as session,
@@ -555,7 +561,7 @@ async def test_evaluated_derivation_can_build_with_explicit_build_store(rpc_sess
         assert set(outputs) == {"out"}
         assert outputs["out"].startswith("/nix/store/")
         assert "nanopynix-build-value-explicit-store-test" in outputs["out"]
-        assert await AnyioPath(outputs["out"]).read_text() == "explicit\n"
+        assert await AnyioPath(shared_nix_environment.physical_path(outputs["out"])).read_text() == "explicit\n"
 
 
 @requires_dynamic_primops
