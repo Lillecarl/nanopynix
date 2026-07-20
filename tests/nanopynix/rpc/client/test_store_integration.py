@@ -5,8 +5,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from nanopynix_proto.nix.store import (
@@ -30,7 +29,11 @@ from nanopynix_proto.nix.store import (
 )
 
 from nanopynix import Derivation, GcResult, MissingInfo, PathInfo, StorePath
-from tests.support.nix_environment import NixTestEnvironment
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tests.support.nix_environment import NixTestEnvironment
 
 NIX_GC_ROOTS_BUG = pytest.mark.nix_version(
     exclude=("2.31", "2.34"),
@@ -40,7 +43,7 @@ NIX_GC_ROOTS_BUG = pytest.mark.nix_version(
 
 async def _create_derivation(eval: Any) -> StorePath:
     path_value = await eval.string(
-        '''
+        """
           builtins.unsafeDiscardStringContext (
             (derivation {
               name = "nanopynix-test-derivation";
@@ -48,11 +51,11 @@ async def _create_derivation(eval: Any) -> StorePath:
               builder = "/not-used-by-this-test";
             }).drvPath
           )
-        '''
+        """
     )
     result = await path_value.force()
     if not isinstance(result, str):
-        raise RuntimeError(f"test derivation did not evaluate to a store path: {result!r}")
+        raise TypeError(f"test derivation did not evaluate to a store path: {result!r}")
     path = StorePath(result)
     if not path.is_derivation:
         raise RuntimeError(f"test derivation is not a .drv path: {path}")

@@ -7,7 +7,6 @@ import functools
 import inspect
 import os
 import sys
-from collections.abc import Awaitable, Callable, Generator, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -24,7 +23,7 @@ pytest_plugins = (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Awaitable, Callable, Generator, Iterable, Iterator
 
     from tests.support.nix_environment import NixTestEnvironment
 

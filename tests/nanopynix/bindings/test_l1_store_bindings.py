@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from nanopynix_bindings import store as nanopynix_store
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 NIX_GC_ROOTS_BUG = pytest.mark.nix_version(
     exclude=("2.31", "2.34"),

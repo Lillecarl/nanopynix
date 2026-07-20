@@ -5,10 +5,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from nanopynix.models import PrimOpSpec
-from tests.support.nix_environment import NixTestEnvironment
+
+if TYPE_CHECKING:
+    from tests.support.nix_environment import NixTestEnvironment
 
 pytestmark = pytest.mark.nix_version(minimum="2.32")
 

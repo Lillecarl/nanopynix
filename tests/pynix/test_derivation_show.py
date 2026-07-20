@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -10,6 +9,8 @@ import pytest
 from pynix import Pynix
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from tests.support.nix_environment import NixTestEnvironment
 
 

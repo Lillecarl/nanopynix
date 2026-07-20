@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from nanopynix_proto.nix.store import AddToStoreRequest, ComputeStorePathRequest
@@ -9,6 +8,8 @@ from nanopynix_proto.nix.store import AddToStoreRequest, ComputeStorePathRequest
 from pynix import Pynix
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pytest
 
     from tests.support.nix_environment import NixTestEnvironment

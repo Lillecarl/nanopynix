@@ -53,10 +53,10 @@ def linked_nix_runtime() -> NixRuntime:
     info: Any = nanopynix.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- extension lacks stubs
     version_text = info["nix_version"]
     if not isinstance(version_text, str):
-        raise RuntimeError(f"build_info nix_version is not a string: {version_text!r}")
+        raise TypeError(f"build_info nix_version is not a string: {version_text!r}")
     capabilities_raw = info["capabilities"]
     if not isinstance(capabilities_raw, dict):
-        raise RuntimeError("build_info capabilities is not a mapping")
+        raise TypeError("build_info capabilities is not a mapping")
     capabilities = cast("dict[str, bool]", capabilities_raw)
     return NixRuntime(
         version=NixVersion.parse(version_text),
@@ -119,7 +119,7 @@ def _version_in_exclusions(version: NixVersion, values: Iterable[object]) -> str
     return None
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: ARG001 -- pytest hook signature
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     runtime = linked_nix_runtime()
     sanitizer = config.getoption("--nix-sanitizer", default=None)
     for item in items:

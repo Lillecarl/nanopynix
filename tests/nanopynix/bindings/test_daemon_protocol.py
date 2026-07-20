@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import socket
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 import nanopynix
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 async def _serve_one_connection(listener: socket.socket, store: Any) -> None:
