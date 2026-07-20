@@ -61,6 +61,25 @@ def _yaml12_loader() -> type[Any]:
     return Loader
 
 
+def _yaml11_loader() -> type[Any]:
+    class Loader(yaml.SafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
+        pass
+
+    # YAML 1.1's core schema resolves a bare, unquoted `=` scalar to the
+    # special "value" type (historically a mapping's "default key" marker),
+    # but PyYAML's SafeConstructor never registers a constructor for it --
+    # only the non-safe Constructor does. Real-world YAML 1.1 producers (Helm
+    # charts, generated CRDs -- e.g. prometheus-operator's Alertmanager CRD
+    # enumerates `=` as a literal matcher operator) emit bare `=` as plain
+    # string content and expect it to round-trip as such, so treat it the
+    # same way `construct_yaml_str` does instead of raising.
+    Loader.add_constructor(
+        "tag:yaml.org,2002:value",
+        yaml.SafeLoader.construct_yaml_str,  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType] -- yaml.Loader methods may not have complete stubs
+    )
+    return Loader
+
+
 def _construct_yaml12_int(loader: Any, node: Any) -> int:
     value = loader.construct_scalar(node).replace("_", "")
     sign = -1 if value.startswith("-") else 1
@@ -117,7 +136,9 @@ def from_yaml11(source: str) -> JsonValue:
     """Parse legacy YAML 1.1 input into JSON-like Python values."""
 
     try:
-        return _single_document(yaml.safe_load_all(source), "fromYAML11", "fromYAML11Stream")
+        return _single_document(
+            yaml.load_all(source, Loader=_yaml11_loader()), "fromYAML11", "fromYAML11Stream"
+        )
     except yaml.YAMLError as exc:
         raise ValueError(f"fromYAML11: failed to parse YAML 1.1 document: {_parse_error_message(exc)}") from exc
 
@@ -135,7 +156,9 @@ def from_yaml11_stream(source: str) -> list[JsonValue]:
     """Parse a legacy YAML 1.1 document stream into JSON-like Python values."""
 
     try:
-        return _validate_documents(yaml.safe_load_all(source), "fromYAML11Stream")
+        return _validate_documents(
+            yaml.load_all(source, Loader=_yaml11_loader()), "fromYAML11Stream"
+        )
     except yaml.YAMLError as exc:
         raise ValueError(f"fromYAML11Stream: failed to parse YAML 1.1 stream: {_parse_error_message(exc)}") from exc
 
