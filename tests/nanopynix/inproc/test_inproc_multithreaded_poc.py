@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from nanopynix_bindings import util as nanopynix_util
 
-from nanopynix import inproc
+from nanopynix import NixSettings, inproc
 
 pytestmark = pytest.mark.concurrency
 
@@ -23,17 +23,18 @@ if TYPE_CHECKING:
 
     from nanopynix.models import BuildResult, LogEvent, StorePath
 
+# Must match tests/support/nix_environment.py's NixTestEnvironment.settings --
+# nanopynix.inproc.Session settings are process-global and cannot be
+# reinitialized differently within one interpreter (see
+# ``_InprocProcessGuard`` in ``nanopynix.inproc``), and that fixture's
+# inproc_session is now the suite-wide default every other inproc test file
+# establishes first.
+_SUITE_SETTINGS = NixSettings(build_users_group="", require_drop_supplementary_groups=False)
+
 
 def _raw_session(*, store_workers: int = 4) -> inproc.Session:
-    """Build a Session with the suite-wide default settings.
-
-    nanopynix.inproc.Session settings are process-global and cannot be
-    reinitialized differently within one interpreter (see
-    ``_InprocProcessGuard`` in ``nanopynix.inproc``), so this must match the
-    plain ``inproc.Session(load_config=False)`` signature every other inproc
-    test file establishes first.
-    """
-    return inproc.Session(load_config=False, store_workers=store_workers)
+    """Build a Session with the suite-wide default settings."""
+    return inproc.Session(load_config=False, settings=_SUITE_SETTINGS, store_workers=store_workers)
 
 
 @asynccontextmanager
