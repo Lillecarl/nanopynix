@@ -41,9 +41,7 @@ rec {
       { ref ? null }:
       { uses = "actions/checkout@main"; } // optionalAttrs (ref != null) { "with" = { inherit ref; }; };
 
-    nixQuickInstall = { }: { uses = "nixbuild/nix-quick-install-action@master"; };
-
-    installNixMultiUser = { }: {
+    installNix = { }: {
       uses = "cachix/install-nix-action@master";
       "with" = {
         extra_nix_config = "experimental-features = nix-command flakes\n";
@@ -60,15 +58,6 @@ rec {
           useDaemon = false;
         };
       };
-
-    configureSingleUserNix = { }: {
-      name = "Configure single-user Nix builds";
-      run = # bash
-        ''
-          sudo install -d -m 0755 /etc/nix
-          printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-        '';
-    };
 
     enableSandboxNamespaces =
       { corePattern ? true }:

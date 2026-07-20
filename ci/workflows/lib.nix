@@ -18,29 +18,28 @@ let
   nanopynixVersionNames = map (lib.removePrefix "nanopynix-tests-") flakeTestOutputs;
   regularVersionNames = builtins.filter (name: !lib.hasSuffix "-tsan" name) nanopynixVersionNames;
   tsanVersionNames = builtins.filter (lib.hasSuffix "-tsan") nanopynixVersionNames;
-  installModes = [ "single-user" "multi-user" ];
 
+  # A single cachix/install-nix-action (multi-user) install suffices for every
+  # job now: the test suite owns its own daemon and local store paths
+  # entirely (see tests/support/nix_environment.py), so the CI runner's own
+  # Nix install mode no longer affects what gets exercised. The remaining
+  # local/daemon axis lives in `--nix-test-backends`, not in how Nix itself
+  # was installed.
   mkTestSetup =
     {
-      installMode,
       ref ? null,
       lockArtifact ? null,
     }:
     [ (steps.checkout { inherit ref; }) ]
     ++ ciLib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
-    ++ (
-      if installMode == "single-user" then
-        [ (steps.nixQuickInstall { }) ]
-      else
-        [ (steps.installNixMultiUser { }) ]
-    )
-    ++ [ (steps.cachix { }) ]
-    ++ ciLib.optional (installMode == "single-user") (steps.configureSingleUserNix { });
+    ++ [
+      (steps.installNix { })
+      (steps.cachix { })
+    ];
 
   mkRegularTestJob =
     {
       version,
-      installMode,
       ref ? null,
       lockArtifact ? null,
       needs ? [ ],
@@ -48,7 +47,7 @@ let
     mkJob (
       ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
-        steps = mkTestSetup { inherit installMode ref lockArtifact; } ++ [
+        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
           {
             name = "Build nanopynix test runner for Nix ${version}";
             run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
@@ -56,7 +55,7 @@ let
           (steps.verifyClosure { name = "Verify test runner closure after build"; })
           (steps.enableSandboxNamespaces { })
           {
-            name = "Test nanopynix against Nix ${version} (full suite)";
+            name = "Test nanopynix against Nix ${version} (full suite, daemon backend)";
             run = # bash
               ''
                 set -o pipefail
@@ -64,7 +63,7 @@ let
                 rm -f "$paths_to_delete"
                 status=0
                 unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
                   2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log || status=$?
                 if [ -s "$paths_to_delete" ]; then
                   nix store delete --stdin < "$paths_to_delete" || true
@@ -74,7 +73,7 @@ let
           }
           (steps.uploadArtifact {
             name = "Upload test output";
-            artifactName = "test-output-${version}-${installMode}";
+            artifactName = "test-output-${version}";
             path = "\${{ github.workspace }}/test-gdb-output.log";
           })
           (withCond "\${{ !cancelled() }}" {
@@ -83,7 +82,7 @@ let
             "with" = {
               token = "\${{ secrets.CODECOV_TOKEN }}";
               files = "\${{ github.workspace }}/coverage.xml";
-              flags = "${version}-${installMode}";
+              flags = version;
             };
           })
           (withCond "\${{ !cancelled() }}" {
@@ -92,7 +91,7 @@ let
             "with" = {
               token = "\${{ secrets.CODECOV_TOKEN }}";
               files = "\${{ github.workspace }}/junit.xml";
-              flags = "${version}-${installMode}";
+              flags = version;
               report_type = "test_results";
             };
           })
@@ -104,7 +103,6 @@ let
   mkTsanTestJob =
     {
       version,
-      installMode,
       ref ? null,
       lockArtifact ? null,
       needs ? [ ],
@@ -115,24 +113,24 @@ let
     mkJob (
       ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
-        steps = mkTestSetup { inherit installMode ref lockArtifact; } ++ [
+        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
           {
-            name = "Build TSAN nanopynix test runner (${bareVersion}, ${installMode})";
+            name = "Build TSAN nanopynix test runner (${bareVersion})";
             run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
           }
           (steps.enableSandboxNamespaces { })
           {
-            name = "Run TSAN-instrumented stress tests (repeated)";
+            name = "Run TSAN-instrumented stress tests (repeated, local+daemon backends)";
             run = # bash
               ''
                 set -o pipefail
-                LOGFILE="''${{ github.workspace }}/tsan-output-${bareVersion}-${installMode}.log"
+                LOGFILE="''${{ github.workspace }}/tsan-output-${bareVersion}.log"
                 race_found=0
                 for i in $(seq 1 5); do
                   echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
                   status=0
                   unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-                    ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
+                    ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
                     -m tsan_stress \
                     2>&1 | tee -a "$LOGFILE" || status=$?
                   echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
@@ -154,14 +152,14 @@ let
               '';
           }
           {
-            name = "Run TSAN-instrumented concurrency tests (single pass)";
+            name = "Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)";
             run = # bash
               ''
                 set -o pipefail
-                LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}-${installMode}.log"
+                LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}.log"
                 status=0
                 unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
+                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon -m concurrency \
                   2>&1 | tee -a "$LOGFILE" || status=$?
                 echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
                 if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -176,9 +174,9 @@ let
               '';
           }
           (steps.uploadArtifact {
-            name = "Upload TSAN output (${bareVersion}, ${installMode})";
-            artifactName = "tsan-race-report-${bareVersion}-${installMode}";
-            path = "\${{ github.workspace }}/tsan-output-${bareVersion}-${installMode}.log\n\${{ github.workspace }}/tsan-output-broad-${bareVersion}-${installMode}.log\n";
+            name = "Upload TSAN output (${bareVersion})";
+            artifactName = "tsan-race-report-${bareVersion}";
+            path = "\${{ github.workspace }}/tsan-output-${bareVersion}.log\n\${{ github.workspace }}/tsan-output-broad-${bareVersion}.log\n";
           })
         ];
       }
@@ -196,7 +194,7 @@ let
         [ (steps.checkout { inherit ref; }) ]
         ++ ciLib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
         ++ [
-          (steps.nixQuickInstall { })
+          (steps.installNix { })
           (steps.cachix { })
           {
             name = "Build documentation";
@@ -245,7 +243,6 @@ in
 {
   inherit
     ciLib
-    installModes
     regularVersionNames
     tsanVersionNames
     mkRegularTestJob
@@ -261,13 +258,10 @@ in
       needs ? [ ],
     }:
     builtins.listToAttrs (
-      builtins.concatMap (
-        version:
-        map (installMode: {
-          name = "test-${version}-${installMode}";
-          value = mkRegularTestJob { inherit version installMode ref lockArtifact needs; };
-        }) installModes
-      ) regularVersionNames
+      map (version: {
+        name = "test-${version}";
+        value = mkRegularTestJob { inherit version ref lockArtifact needs; };
+      }) regularVersionNames
     );
 
   mkStaticTsanTestJobs =
@@ -277,12 +271,9 @@ in
       needs ? [ ],
     }:
     builtins.listToAttrs (
-      builtins.concatMap (
-        version:
-        map (installMode: {
-          name = "test-tsan-${lib.removeSuffix "-tsan" version}-${installMode}";
-          value = mkTsanTestJob { inherit version installMode ref lockArtifact needs; };
-        }) installModes
-      ) tsanVersionNames
+      map (version: {
+        name = "test-tsan-${lib.removeSuffix "-tsan" version}";
+        value = mkTsanTestJob { inherit version ref lockArtifact needs; };
+      }) tsanVersionNames
     );
 }
