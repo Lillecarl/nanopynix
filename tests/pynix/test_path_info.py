@@ -13,13 +13,13 @@ if TYPE_CHECKING:
 
 
 async def test_path_info(
-    isolated_nix_environment: NixTestEnvironment,
+    shared_nix_environment: NixTestEnvironment,
     seeded_store_path: StorePath,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = str(seeded_store_path)
 
-    cmd = Pynix.parse(["path-info", path, *isolated_nix_environment.pynix_store_args()])
+    cmd = Pynix.parse(["path-info", path, *shared_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     result = json.loads(captured.out)

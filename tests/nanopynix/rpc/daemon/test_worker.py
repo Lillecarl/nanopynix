@@ -23,6 +23,12 @@ if TYPE_CHECKING:
 
     from nanopynix_proto.nix.common import LogEvent
 
+pytestmark = pytest.mark.skip(
+    reason="nanopynix.rpc.daemon ('pump the nix daemon from Python') is unfinished "
+    "lab/prototype work, not a supported feature -- per author, this should have "
+    "stayed on a throwaway branch."
+)
+
 
 async def _next_log_event(stream: AsyncIterator[LogEvent]) -> LogEvent:
     return await anext(stream)

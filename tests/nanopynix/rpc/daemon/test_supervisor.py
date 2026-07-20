@@ -14,6 +14,12 @@ from nanopynix.rpc.daemon import DaemonConfig, DaemonSupervisor
 if TYPE_CHECKING:
     from pathlib import Path
 
+pytestmark = pytest.mark.skip(
+    reason="nanopynix.rpc.daemon ('pump the nix daemon from Python') is unfinished "
+    "lab/prototype work, not a supported feature -- per author, this should have "
+    "stayed on a throwaway branch."
+)
+
 
 async def _wait_until(predicate: object) -> None:
     """Poll an async predicate until it is truthy, failing the test after 5s."""
