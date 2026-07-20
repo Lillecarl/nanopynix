@@ -5,21 +5,24 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from nanopynix.rpc.daemon import DaemonConfig, DaemonSupervisor
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-async def _wait_until(predicate: object, *, timeout: float = 5.0) -> None:
-    """Poll an async predicate until it is truthy, failing the test on timeout."""
-    deadline = asyncio.get_running_loop().time() + timeout
-    while asyncio.get_running_loop().time() < deadline:
-        if await predicate():  # type: ignore[operator] -- predicate is always an async callable
-            return
-        await asyncio.sleep(0.05)
-    pytest.fail("condition was not met before timeout")
+
+async def _wait_until(predicate: object) -> None:
+    """Poll an async predicate until it is truthy, failing the test after 5s."""
+    try:
+        async with asyncio.timeout(5.0):
+            while not await predicate():  # type: ignore[operator] -- predicate is always an async callable  # noqa: ASYNC110 -- polls an arbitrary caller-supplied predicate; no asyncio.Event exists to wait on instead
+                await asyncio.sleep(0.05)
+    except TimeoutError:
+        pytest.fail("condition was not met before timeout")
 
 
 @pytest.mark.anyio

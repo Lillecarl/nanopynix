@@ -13,13 +13,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import pytest
 
 import nanopynix
-from nanopynix.models import StorePath
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
+
+    from nanopynix.models import StorePath
 
     RpcSessionFactory = Callable[..., nanopynix.Session]
     InprocSessionFactory = Callable[..., nanopynix.inproc.Session]
@@ -90,7 +92,7 @@ async def _force_rmtree(path: Path) -> None:
         function(raw_path)
 
     for attempt in range(20):
-        if not path.exists():
+        if not await anyio.Path(path).exists():
             return
         try:
             shutil.rmtree(path, onexc=onexc)

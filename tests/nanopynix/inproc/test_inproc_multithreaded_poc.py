@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from nanopynix_bindings import util as nanopynix_util
-from nanopynix_proto.nix.store import GcAction
 
 from nanopynix import inproc
 
@@ -21,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from conftest import StorePathRecorder
+
     from nanopynix.models import BuildResult, LogEvent, StorePath
 
 

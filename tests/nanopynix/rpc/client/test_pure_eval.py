@@ -6,11 +6,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from nanopynix import NixEvalSettings, NixType, current_system
 from nanopynix.exceptions import EvalError
-from tests.support.nix_environment import NixTestEnvironment
+
+if TYPE_CHECKING:
+    from tests.support.nix_environment import NixTestEnvironment
 
 
 @pytest.mark.anyio

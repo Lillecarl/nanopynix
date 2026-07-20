@@ -9,11 +9,13 @@ import os
 import signal
 import socket
 import sys
-from pathlib import Path
-from types import TracebackType
+from typing import TYPE_CHECKING
 
-from nanopynix.rpc.daemon._config import DaemonConfig
+if TYPE_CHECKING:
+    from pathlib import Path
+    from types import TracebackType
 
+    from nanopynix.rpc.daemon._config import DaemonConfig
 
 logger = logging.getLogger(__name__)
 

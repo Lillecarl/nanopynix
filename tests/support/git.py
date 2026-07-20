@@ -26,7 +26,7 @@ def commit_files(repo: pygit2.Repository, *paths: Path, message: str = "init") -
     tree = index.write_tree()
     head_target = repo.references["HEAD"].target
     if not isinstance(head_target, str):
-        raise RuntimeError("test repository HEAD does not name a reference")
+        raise TypeError("test repository HEAD does not name a reference")
     parents: list[pygit2.Oid] = []
     with suppress(KeyError):
         parents = [repo.references[head_target].peel(pygit2.Commit).id]

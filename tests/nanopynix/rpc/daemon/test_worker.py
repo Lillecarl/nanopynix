@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,6 +19,7 @@ from nanopynix.rpc.daemon._worker import daemon_service_factory
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
 
     from nanopynix_proto.nix.common import LogEvent
 

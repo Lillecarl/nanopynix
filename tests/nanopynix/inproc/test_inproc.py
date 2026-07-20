@@ -413,14 +413,14 @@ async def test_inproc_value_build_and_release(
     inproc_session: InprocSessionFactory, isolated_nix_environment: NixTestEnvironment
 ) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
-        drv = await eval.string('''
+        drv = await eval.string("""
             builtins.derivation {
               name = "inproc-value-build-test";
               system = builtins.currentSystem;
               builder = "/bin/sh";
               args = [ "-c" "echo built-via-inproc > $out" ];
             }
-        ''')
+        """)
         outputs = await drv.build()
         # Nix reports the logical StorePath. The fixture's LocalStore maps it
         # beneath its private root rather than the host's /nix/store mount.
@@ -739,13 +739,13 @@ async def test_inproc_value_build_rejects_store_from_different_session(
 @pytest.mark.anyio
 async def test_inproc_value_build_raises_on_build_failure(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
-        drv = await eval.string('''
+        drv = await eval.string("""
             builtins.derivation {
               name = "inproc-value-build-fail-test";
               system = builtins.currentSystem;
               builder = "/bin/sh";
               args = [ "-c" "exit 1" ];
             }
-        ''')
+        """)
         with pytest.raises(RuntimeError):
             await drv.build()
