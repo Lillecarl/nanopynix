@@ -112,31 +112,66 @@ async def _start_daemon(root: Path) -> _Daemon:
     socket_path.parent.mkdir(parents=True, exist_ok=True)
     daemon_environment = os.environ.copy()
     daemon_environment["NIX_DAEMON_SOCKET_PATH"] = str(socket_path)
-    process = await asyncio.create_subprocess_exec(
+    # Captured (rather than discarded) so a lazy-init failure below has the
+    # daemon's own account of what it did, not just the client-side symptom.
+    daemon_log_path = root / "nix-daemon.log"
+    daemon_log = daemon_log_path.open("wb")
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "nix",
+            "daemon",
+            "--store",
+            f"local://{root}",
+            "--option",
+            "build-users-group",
+            "",
+            "--option",
+            "require-drop-supplementary-groups",
+            "false",
+            env=daemon_environment,
+            start_new_session=True,
+            stdout=daemon_log,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+    finally:
+        daemon_log.close()
+    for _ in range(100):
+        if socket_path.is_socket():
+            break
+        if process.returncode is not None:
+            raise RuntimeError(
+                f"temporary nix daemon exited with status {process.returncode}; "
+                f"log:\n{daemon_log_path.read_text(errors='replace')}"
+            )
+        await asyncio.sleep(0.05)
+    else:
+        process.terminate()
+        await process.wait()
+        raise RuntimeError(f"temporary nix daemon did not create {socket_path}")
+
+    # The socket accepts connections before the daemon has laid out the store
+    # directory on disk (nix/store, var/nix/db, ...) -- that only happens
+    # lazily, on the first real store operation. Some client code paths (seen
+    # in CI only, never locally) read store-local files directly rather than
+    # going through the daemon protocol, so they never trigger that lazy
+    # init and see a bare ENOENT instead. Force it here, via an operation
+    # confirmed to reliably trigger it, before any test can race it.
+    warmup = await asyncio.create_subprocess_exec(
         "nix",
-        "daemon",
+        "store",
+        "info",
         "--store",
-        f"local://{root}",
-        "--option",
-        "build-users-group",
-        "",
-        "--option",
-        "require-drop-supplementary-groups",
-        "false",
-        env=daemon_environment,
-        start_new_session=True,
+        f"unix://{socket_path}?root={root}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
-    for _ in range(100):
-        if socket_path.is_socket():
-            return _Daemon(process, socket_path)
-        if process.returncode is not None:
-            raise RuntimeError(f"temporary nix daemon exited with status {process.returncode}")
-        await asyncio.sleep(0.05)
-    process.terminate()
-    await process.wait()
-    raise RuntimeError(f"temporary nix daemon did not create {socket_path}")
+    warmup_status = await warmup.wait()
+    if warmup_status != 0 or not (root / "nix" / "store").is_dir():
+        raise RuntimeError(
+            f"temporary nix daemon warmup (nix store info) exited {warmup_status} "
+            f"without creating {root / 'nix' / 'store'}; log:\n{daemon_log_path.read_text(errors='replace')}"
+        )
+    return _Daemon(process, socket_path)
 
 
 async def _environment(backend: str, root: Path) -> tuple[NixTestEnvironment, _Daemon | None]:
