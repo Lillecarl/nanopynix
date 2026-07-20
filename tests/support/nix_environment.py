@@ -219,21 +219,32 @@ async def isolated_nix_environment(
 
 
 @pytest.fixture
-def rpc_session(isolated_nix_environment: NixTestEnvironment) -> RpcSessionFactory:
-    """Create RPC sessions against this test's isolated Store."""
-    return isolated_nix_environment.rpc_session
+def rpc_session(shared_nix_environment: NixTestEnvironment) -> RpcSessionFactory:
+    """Create RPC sessions against this backend's shared Store.
+
+    Most tests only need a Store to exist, not one exclusive to them; sharing
+    one daemon per backend keeps the suite from paying a fresh ``nix daemon``
+    spin-up per test. Tests that mutate shared state (destructive GC, daemon
+    lifecycle) should depend on ``isolated_nix_environment`` directly instead.
+    """
+    return shared_nix_environment.rpc_session
 
 
 @pytest.fixture
-def inproc_session(isolated_nix_environment: NixTestEnvironment) -> InprocSessionFactory:
-    """Create in-process sessions against this test's isolated Store."""
-    return isolated_nix_environment.inproc_session
+def inproc_session(shared_nix_environment: NixTestEnvironment) -> InprocSessionFactory:
+    """Create in-process sessions against this backend's shared Store. See ``rpc_session``."""
+    return shared_nix_environment.inproc_session
 
 
 @pytest.fixture
-async def seeded_store_path(isolated_nix_environment: NixTestEnvironment) -> StorePath:
-    """A known-valid content-addressed path, never borrowed from the host store."""
-    environment = isolated_nix_environment
+async def seeded_store_path(shared_nix_environment: NixTestEnvironment) -> StorePath:
+    """A known-valid content-addressed path, never borrowed from the host store.
+
+    Depends on ``shared_nix_environment`` to match the store ``rpc_session``/
+    ``inproc_session`` connect to by default; adding this fixed content is
+    idempotent, so many tests requesting it concurrently is safe.
+    """
+    environment = shared_nix_environment
     source = environment.root.parent / "fixture.txt"
     source.write_text("nanopynix hermetic fixture\n", encoding="utf-8")
     async with environment.rpc_session() as nix, nix.store() as store:
