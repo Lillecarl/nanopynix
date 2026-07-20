@@ -91,6 +91,18 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         if isinstance(item, pytest.Function) and inspect.iscoroutinefunction(item.obj):
             item.obj = _with_test_timeout(item.obj)
 
+    # pytest-forked's fork() only keeps the calling thread; any lock another
+    # thread held at fork time stays locked forever in the child. By the time
+    # any other test has touched Nix (L1 init, an inproc.Session's thread
+    # executor, an L3 worker/daemon subprocess, pynix's live-log manager
+    # thread), the pytest process is "multithreading-dirty" and forking it is
+    # a deadlock risk, not just slow. Run every @pytest.mark.forked test
+    # first, before anything else has a chance to spawn those threads.
+    forked = [item for item in items if item.get_closest_marker("forked") is not None]
+    if forked:
+        rest = [item for item in items if item.get_closest_marker("forked") is None]
+        items[:] = forked + rest
+
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_sessionfinish(exitstatus: int | pytest.ExitCode) -> Generator[None]:

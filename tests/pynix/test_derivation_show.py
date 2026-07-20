@@ -5,6 +5,7 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from pynix import Pynix
 
@@ -174,7 +175,7 @@ async def test_show_file_missing_attr_errors(
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "attribute 'missing' not found" in captured.out
+    assert "attribute 'missing' not found" in strip_ansi(captured.out)
 
 
 async def test_show_file_wrong_type_attr_errors(

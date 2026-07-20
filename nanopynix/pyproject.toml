@@ -27,7 +27,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-dependency", "pytest-cov", "anyio", "pygit2"]
+test = ["pytest", "pytest-dependency", "pytest-cov", "pytest-forked", "anyio", "pygit2"]
 
 [project.scripts]
 nanopynix-worker = "nanopynix.rpc.worker._worker:main"
