@@ -11,9 +11,9 @@ service ManagerPrimopService {
 message CallPrimopRequest {
   int64 request_id = 1000;
   string name = 1;
-  repeated nix.common.ScalarValue args = 2;
+  repeated nix.common.DeepValue args = 2;
 }
 
 message CallPrimopResponse {
-  nix.common.ScalarValue value = 1;
+  nix.common.DeepValue value = 1;
 }
