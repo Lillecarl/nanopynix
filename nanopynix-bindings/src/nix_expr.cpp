@@ -852,10 +852,18 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v, cons
         case nix::nFloat:  return nb::float_(v->fpoint());
         case nix::nBool:   return nb::bool_(v->boolean());
         case nix::nString: {
+            // realiseString (not forceStringNoCtx) so a string carrying
+            // string context -- e.g. "${someDerivation}" -- builds that
+            // derivation and substitutes the real store path instead of
+            // throwing "is not allowed to refer to a store path". Custom
+            // primops run at eval time, not inside a derivation build, so
+            // this is the only way for them to accept such strings; callers
+            // would otherwise have to force realization themselves via
+            // builtins.pathExists + unsafeDiscardStringContext before calling in.
             std::string string;
             {
                 nb::gil_scoped_release release;
-                string = state.forceStringNoCtx(*v, nix::noPos, "");
+                string = state.realiseString(*v, nullptr, true, nix::noPos);
             }
             return nb::str(string.c_str());
         }
