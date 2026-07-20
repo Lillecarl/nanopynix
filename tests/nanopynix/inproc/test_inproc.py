@@ -410,7 +410,7 @@ async def test_inproc_value_auto_call(inproc_session: InprocSessionFactory) -> N
 
 @pytest.mark.anyio
 async def test_inproc_value_build_and_release(
-    inproc_session: InprocSessionFactory, isolated_nix_environment: NixTestEnvironment
+    inproc_session: InprocSessionFactory, shared_nix_environment: NixTestEnvironment
 ) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         drv = await eval.string("""
@@ -424,7 +424,7 @@ async def test_inproc_value_build_and_release(
         outputs = await drv.build()
         # Nix reports the logical StorePath. The fixture's LocalStore maps it
         # beneath its private root rather than the host's /nix/store mount.
-        out_path = AnyioPath(isolated_nix_environment.root / "nix" / "store" / Path(outputs["out"]).name)
+        out_path = AnyioPath(shared_nix_environment.root / "nix" / "store" / Path(outputs["out"]).name)
         assert await out_path.read_text() == "built-via-inproc\n"
 
         await drv.release()

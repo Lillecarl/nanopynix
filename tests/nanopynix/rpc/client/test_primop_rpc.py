@@ -29,7 +29,7 @@ def _rpc_add(a: int, b: int) -> int:
     return a + b
 
 
-async def test_manager_rpc_primop_double(isolated_nix_environment: NixTestEnvironment) -> None:
+async def test_manager_rpc_primop_double(shared_nix_environment: NixTestEnvironment) -> None:
     spec = PrimOpSpec(
         name="managerDouble",
         arity=1,
@@ -38,7 +38,7 @@ async def test_manager_rpc_primop_double(isolated_nix_environment: NixTestEnviro
         rpc=True,
     )
     async with (
-        isolated_nix_environment.rpc_session(primops=[spec], primop_callables={"managerDouble": _rpc_double}) as session,
+        shared_nix_environment.rpc_session(primops=[spec], primop_callables={"managerDouble": _rpc_double}) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -46,7 +46,7 @@ async def test_manager_rpc_primop_double(isolated_nix_environment: NixTestEnviro
         assert await result.force() == 42
 
 
-async def test_manager_rpc_primop_greet(isolated_nix_environment: NixTestEnvironment) -> None:
+async def test_manager_rpc_primop_greet(shared_nix_environment: NixTestEnvironment) -> None:
     spec = PrimOpSpec(
         name="managerGreet",
         arity=1,
@@ -55,7 +55,7 @@ async def test_manager_rpc_primop_greet(isolated_nix_environment: NixTestEnviron
         rpc=True,
     )
     async with (
-        isolated_nix_environment.rpc_session(primops=[spec], primop_callables={"managerGreet": _rpc_greet}) as session,
+        shared_nix_environment.rpc_session(primops=[spec], primop_callables={"managerGreet": _rpc_greet}) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -63,7 +63,7 @@ async def test_manager_rpc_primop_greet(isolated_nix_environment: NixTestEnviron
         assert await result.force() == "Hello from manager, World!"
 
 
-async def test_manager_rpc_primop_add(isolated_nix_environment: NixTestEnvironment) -> None:
+async def test_manager_rpc_primop_add(shared_nix_environment: NixTestEnvironment) -> None:
     spec = PrimOpSpec(
         name="managerAdd",
         arity=2,
@@ -72,7 +72,7 @@ async def test_manager_rpc_primop_add(isolated_nix_environment: NixTestEnvironme
         rpc=True,
     )
     async with (
-        isolated_nix_environment.rpc_session(primops=[spec], primop_callables={"managerAdd": _rpc_add}) as session,
+        shared_nix_environment.rpc_session(primops=[spec], primop_callables={"managerAdd": _rpc_add}) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -80,7 +80,7 @@ async def test_manager_rpc_primop_add(isolated_nix_environment: NixTestEnvironme
         assert await result.force() == 10
 
 
-async def test_manager_rpc_primop_lambda(isolated_nix_environment: NixTestEnvironment) -> None:
+async def test_manager_rpc_primop_lambda(shared_nix_environment: NixTestEnvironment) -> None:
     """Inlined lambdas work — no import path needed."""
     spec = PrimOpSpec(
         name="managerTriple",
@@ -90,7 +90,7 @@ async def test_manager_rpc_primop_lambda(isolated_nix_environment: NixTestEnviro
         rpc=True,
     )
     async with (
-        isolated_nix_environment.rpc_session(primops=[spec], primop_callables={"managerTriple": lambda x: x * 3}) as session,  # type: ignore[reportUnknownLambdaType] -- lambda within dict value has no type context
+        shared_nix_environment.rpc_session(primops=[spec], primop_callables={"managerTriple": lambda x: x * 3}) as session,  # type: ignore[reportUnknownLambdaType] -- lambda within dict value has no type context
         session.store() as store,
         session.eval(store) as eval,
     ):
