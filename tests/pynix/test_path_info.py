@@ -31,10 +31,10 @@ async def test_path_info(
 
 
 async def test_path_info_nonexistent(
-    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str]
+    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cmd = Pynix.parse(
-        ["path-info", "/nix/store/deadbeef-nonexistent", *isolated_nix_environment.pynix_store_args()]
+        ["path-info", "/nix/store/deadbeef-nonexistent", *shared_nix_environment.pynix_store_args()]
     )
     with pytest.raises(SystemExit):
         await cmd.astart()

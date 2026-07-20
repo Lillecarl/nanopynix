@@ -39,7 +39,7 @@ async def test_pynix_log_prints_build_log_from_populated_store(populated_store: 
 
 
 async def test_pynix_log_errors_when_build_log_unavailable(
-    isolated_nix_environment: NixTestEnvironment,
+    shared_nix_environment: NixTestEnvironment,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = "/nix/store/00000000000000000000000000000000-no-log"
@@ -47,7 +47,7 @@ async def test_pynix_log_errors_when_build_log_unavailable(
     monkeypatch.setattr(log_module, "forward_nix_logs", _noop_forward_nix_logs)
     monkeypatch.setattr(log_module, "nanopynix", SimpleNamespace(Session=_FakeSession))
 
-    cmd = Pynix.parse(["log", path, *isolated_nix_environment.pynix_store_args()])
+    cmd = Pynix.parse(["log", path, *shared_nix_environment.pynix_store_args()])
     with pytest.raises(SystemExit, match=r"build log of .* is not available"):
         await cmd.astart()
 

@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 
 
 async def test_flake_show_root(
-    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
 ) -> None:
-    cmd = Pynix.parse(["flake", "show", str(git_flake), *isolated_nix_environment.pynix_store_args()])
+    cmd = Pynix.parse(["flake", "show", str(git_flake), *shared_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     assert "hello" in captured.out
@@ -24,9 +24,9 @@ async def test_flake_show_root(
 
 
 async def test_flake_show_with_hash_attrpath(
-    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
 ) -> None:
-    cmd = Pynix.parse(["flake", "show", f"{git_flake}#hello", *isolated_nix_environment.pynix_store_args()])
+    cmd = Pynix.parse(["flake", "show", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     assert "hello" in captured.out
@@ -34,12 +34,12 @@ async def test_flake_show_with_hash_attrpath(
 
 
 async def test_flake_metadata_json_does_not_write_lock_file(
-    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
 ) -> None:
     lock_file = git_flake / "flake.lock"
     assert not lock_file.exists()
 
-    cmd = Pynix.parse(["flake", "metadata", str(git_flake), *isolated_nix_environment.pynix_store_args()])
+    cmd = Pynix.parse(["flake", "metadata", str(git_flake), *shared_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -50,9 +50,9 @@ async def test_flake_metadata_json_does_not_write_lock_file(
 
 
 async def test_flake_info_aliases_metadata(
-    isolated_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
 ) -> None:
-    cmd = Pynix.parse(["flake", "info", str(git_flake), *isolated_nix_environment.pynix_store_args()])
+    cmd = Pynix.parse(["flake", "info", str(git_flake), *shared_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)

@@ -15,14 +15,11 @@ import pynix.store as store_module
 import pytest
 
 from pynix import Pynix
+from tests.support.nix_environment import with_nixpkgs
 
 
 def _store_path_basename(path: str) -> str:
     return path.split("/nix/store/", 1)[1]
-
-
-def _with_nixpkgs(source: str, nixpkgs_path: str) -> str:
-    return source.replace("<nixpkgs>", nixpkgs_path)
 
 
 async def test_print_roots(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
@@ -141,13 +138,13 @@ async def test_query_missing(populated_store: dict[str, str], capsys: pytest.Cap
 
 
 async def test_query_derivation_outputs(
-    isolated_nix_environment: NixTestEnvironment,
+    shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "test.nix"
-    nix_file.write_text(_with_nixpkgs("""
+    nix_file.write_text(with_nixpkgs("""
     let
       pkgs = import <nixpkgs> {};
     in
@@ -160,13 +157,13 @@ async def test_query_derivation_outputs(
       '';
     }
     """, nixpkgs_path))
-    show = Pynix.parse(["derivation", "show", "--file", str(nix_file), *isolated_nix_environment.pynix_store_args()])
+    show = Pynix.parse(["derivation", "show", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
     await show.astart()
     captured = capsys.readouterr()
     drv_path = next(iter(json.loads(captured.out)))
 
     cmd = Pynix.parse(
-        ["store", "query-derivation-outputs", drv_path, *isolated_nix_environment.pynix_store_args()]
+        ["store", "query-derivation-outputs", drv_path, *shared_nix_environment.pynix_store_args()]
     )
     await cmd.astart()
     captured = capsys.readouterr()
