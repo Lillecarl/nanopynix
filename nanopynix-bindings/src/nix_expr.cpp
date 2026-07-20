@@ -844,7 +844,23 @@ static PyValue eval_file_impl(PyEvalState &es, const std::string &path) {
 // =========================================================================
 
 // Convert a nix::Value* (already forced) to a Python object, recursively.
-static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v, const std::string &primop_name) {
+// `context` accumulates the NixStringContext of every string encountered
+// anywhere in the argument tree (one shared outparam, unioned across the
+// whole call) -- py_primop_bridge re-attaches it to whatever the primop
+// returns, so e.g. a derivation reference embedded three attrsets deep
+// still keeps the resulting output's closure correct. This is a
+// deliberate over-approximation: a primop's return value gets the context
+// of its *entire* input, not just the parts it actually used, but
+// under-attaching is a real closure/`nix copy` correctness bug (silently
+// missing a runtime dependency) while over-attaching just keeps something
+// alive slightly longer than strictly necessary -- L2 (this in-process
+// bridge) is exactly the layer that can afford to always do this since it
+// already has live C++ Value access; a caller that explicitly wants to
+// drop context can still reach for builtins.unsafeDiscardStringContext.
+static nb::object value_to_python_arg(
+    nix::EvalState &state, nix::Value *v, const std::string &primop_name,
+    nix::NixStringContext &context
+) {
     if (!v) return nb::none();
     switch (v->type()) {
         case nix::nNull:   return nb::none();
@@ -852,18 +868,28 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v, cons
         case nix::nFloat:  return nb::float_(v->fpoint());
         case nix::nBool:   return nb::bool_(v->boolean());
         case nix::nString: {
-            // realiseString (not forceStringNoCtx) so a string carrying
-            // string context -- e.g. "${someDerivation}" -- builds that
-            // derivation and substitutes the real store path instead of
-            // throwing "is not allowed to refer to a store path". Custom
-            // primops run at eval time, not inside a derivation build, so
-            // this is the only way for them to accept such strings; callers
-            // would otherwise have to force realization themselves via
-            // builtins.pathExists + unsafeDiscardStringContext before calling in.
+            // coerceToString (not forceStringNoCtx/realiseString) so a
+            // string carrying string context -- e.g. "${someDerivation}"
+            // -- still yields the real, final store path text (ordinary
+            // input-addressed derivations have a path computable without
+            // building) while accumulating the touched context into
+            // `context` instead of discarding it. realiseContext then
+            // builds whatever was referenced and resolves any
+            // content-addressed placeholder to its concrete path -- same
+            // build-and-substitute guarantee the old realiseString call
+            // gave (see test_string_arg_with_context_is_realised: Python
+            // primop implementations may read the referenced path's
+            // content, so it must already exist on disk), just without
+            // throwing away what was realised.
             std::string string;
             {
                 nb::gil_scoped_release release;
-                string = state.realiseString(*v, nullptr, true, nix::noPos);
+                string = std::string(state.coerceToString(
+                    nix::noPos, *v, context,
+                    "while evaluating a string passed to a Python primop",
+                    false, false).toOwned());
+                auto rewrites = state.realiseContext(context);
+                string = nix::rewriteStrings(string, rewrites);
             }
             return nb::str(string.c_str());
         }
@@ -885,7 +911,7 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v, cons
                     nb::gil_scoped_release release;
                     state.forceValue(*lv[i], nix::noPos);
                 }
-                list.append(value_to_python_arg(state, lv[i], primop_name));
+                list.append(value_to_python_arg(state, lv[i], primop_name, context));
             }
             return list;
         }
@@ -898,7 +924,7 @@ static nb::object value_to_python_arg(nix::EvalState &state, nix::Value *v, cons
                         state.forceValue(*attr.value, nix::noPos);
                     }
                     dict[nb::str(std::string(state.symbols[attr.name]).c_str())] =
-                        value_to_python_arg(state, attr.value, primop_name);
+                        value_to_python_arg(state, attr.value, primop_name, context);
                 }
             }
             return dict;
@@ -954,9 +980,19 @@ static nb::object &primop_error_type() {
 }
 
 // Set the content of a nix::Value from a Python object, recursively.
+// `context`, when non-empty, is attached to every Nix string this
+// constructs (see value_to_python_arg's comment for why: it's the
+// accumulated context of a primop's whole input, re-attached to its whole
+// output since we don't know which output string, if any, "belongs" to
+// which input string). Defaults to empty for call sites that aren't
+// bridging a primop's return value (e.g. value_from_python converting an
+// arbitrary caller-supplied Python object, or a zero-arg callable that
+// took no Nix input to begin with) -- there's no context to (correctly)
+// invent there.
 static void python_to_value(
     nix::EvalState &state, nb::object obj, nix::Value &v,
-    const std::string *primop_name = nullptr)
+    const std::string *primop_name = nullptr,
+    const nix::NixStringContext &context = {})
 {
     if (nb::isinstance<PyValue>(obj)) {
         auto pyv = nb::cast<PyValue>(obj);
@@ -980,14 +1016,18 @@ static void python_to_value(
 #if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
         v.mkString(s);
 #else
-        v.mkString(s, state.mem);
+        if (context.empty()) {
+            v.mkString(s, state.mem);
+        } else {
+            v.mkString(s, context, state.mem);
+        }
 #endif
     } else if (nb::isinstance<nb::list>(obj)) {
         auto pyList = nb::cast<nb::list>(obj);
         auto builder = state.buildList(pyList.size());
         for (size_t i = 0; i < pyList.size(); i++) {
             auto *elem = state.allocValue();
-            python_to_value(state, pyList[i], *elem, primop_name);
+            python_to_value(state, pyList[i], *elem, primop_name, context);
             builder[i] = elem;
         }
         v.mkList(builder);
@@ -998,7 +1038,7 @@ static void python_to_value(
             auto key = nb::cast<std::string>(nb::str(item.first));
             auto sym = state.symbols.create(key);
             auto *val = state.allocValue();
-            python_to_value(state, nb::cast<nb::object>(item.second), *val, primop_name);
+            python_to_value(state, nb::cast<nb::object>(item.second), *val, primop_name, context);
             bindings.insert(sym, val);
         }
         v.mkAttrs(bindings);
@@ -1095,6 +1135,11 @@ static void py_primop_bridge(
 
     nb::gil_scoped_acquire gil;
 
+    // Accumulates the string context of every argument (see
+    // value_to_python_arg's comment) so it can be re-attached to
+    // whatever this primop returns.
+    nix::NixStringContext context;
+
     // Build Python args list
     nb::list py_args;
     for (int i = 0; i < arity; i++) {
@@ -1102,7 +1147,7 @@ static void py_primop_bridge(
             nb::gil_scoped_release release;
             state.forceValue(*args[i], nix::noPos);
         }
-        py_args.append(value_to_python_arg(state, args[i], name));
+        py_args.append(value_to_python_arg(state, args[i], name, context));
     }
 
     // Call Python function
@@ -1145,8 +1190,9 @@ static void py_primop_bridge(
         state.error<nix::EvalError>("%s", detail).debugThrow();
     }
 
-    // Convert result to nix::Value
-    python_to_value(state, result, ret, &name);
+    // Convert result to nix::Value, re-attaching the accumulated input
+    // context to every string in the result.
+    python_to_value(state, result, ret, &name, context);
 }
 
 static void register_primop(
