@@ -16,42 +16,42 @@ if TYPE_CHECKING:
 
 
 async def test_nanopynix_add_to_store_imports_file(
-    isolated_nix_environment: NixTestEnvironment,
+    shared_nix_environment: NixTestEnvironment,
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "message.txt"
     source.write_text("nanopynix-add-file\n")
 
-    async with isolated_nix_environment.rpc_session() as nix, nix.store() as store:
+    async with shared_nix_environment.rpc_session() as nix, nix.store() as store:
         computed = await store.rpc.compute_store_path(
             ComputeStorePathRequest(path=str(source), method="flat", hash_algo="sha256")
         )
         added = await store.rpc.add_to_store(AddToStoreRequest(path=str(source), method="flat", hash_algo="sha256"))
 
     assert added.path == computed.path
-    physical_path = _physical_store_path(isolated_nix_environment, added.path)
+    physical_path = shared_nix_environment.physical_path(added.path)
     assert physical_path.read_text() == "nanopynix-add-file\n"
 
 
 async def test_pynix_store_add_file_imports_and_can_be_read(
-    isolated_nix_environment: NixTestEnvironment,
+    shared_nix_environment: NixTestEnvironment,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ):
     source = tmp_path / "message.txt"
     source.write_text("pynix-add-file\n")
 
-    cmd = Pynix.parse(["store", "add-file", str(source), *isolated_nix_environment.pynix_store_args()])
+    cmd = Pynix.parse(["store", "add-file", str(source), *shared_nix_environment.pynix_store_args()])
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
 
     assert data["path"].startswith("/nix/store/")
-    assert _physical_store_path(isolated_nix_environment, data["path"]).read_text() == "pynix-add-file\n"
+    assert shared_nix_environment.physical_path(data["path"]).read_text() == "pynix-add-file\n"
 
 
 async def test_pynix_store_add_path_imports_directory(
-    isolated_nix_environment: NixTestEnvironment,
+    shared_nix_environment: NixTestEnvironment,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -60,7 +60,7 @@ async def test_pynix_store_add_path_imports_directory(
     (source / "share" / "message").write_text("pynix-add-path\n")
 
     cmd = Pynix.parse(
-        ["store", "add-path", str(source), "--name", "custom-dir", *isolated_nix_environment.pynix_store_args()]
+        ["store", "add-path", str(source), "--name", "custom-dir", *shared_nix_environment.pynix_store_args()]
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -68,12 +68,12 @@ async def test_pynix_store_add_path_imports_directory(
 
     assert data["path"].endswith("-custom-dir")
     assert (
-        _physical_store_path(isolated_nix_environment, data["path"]) / "share" / "message"
+        shared_nix_environment.physical_path(data["path"]) / "share" / "message"
     ).read_text() == "pynix-add-path\n"
 
 
 async def test_pynix_store_add_dry_run_does_not_import(
-    isolated_nix_environment: NixTestEnvironment,
+    shared_nix_environment: NixTestEnvironment,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -88,7 +88,7 @@ async def test_pynix_store_add_dry_run_does_not_import(
             "--mode",
             "flat",
             "--dry-run",
-            *isolated_nix_environment.pynix_store_args(),
+            *shared_nix_environment.pynix_store_args(),
         ]
     )
     await cmd.astart()
@@ -96,8 +96,4 @@ async def test_pynix_store_add_dry_run_does_not_import(
     data = json.loads(captured.out)
 
     assert data["path"].startswith("/nix/store/")
-    assert not _physical_store_path(isolated_nix_environment, data["path"]).exists()
-
-
-def _physical_store_path(environment: NixTestEnvironment, store_path: str) -> Path:
-    return environment.root / store_path.removeprefix("/")
+    assert not shared_nix_environment.physical_path(data["path"]).exists()

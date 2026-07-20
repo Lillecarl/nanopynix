@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ctypes
 import errno
 import os
 import shutil
@@ -109,6 +110,11 @@ class NixTestEnvironment:
         return uri == "daemon" or uri.startswith(("daemon?", "unix://"))
 
 
+def with_nixpkgs(source: str, nixpkgs_path: str) -> str:
+    """Substitute a literal ``<nixpkgs>`` in a Nix expression for a hermetic path."""
+    return source.replace("<nixpkgs>", nixpkgs_path)
+
+
 async def _force_rmtree(path: Path) -> None:
     """Remove a closed test root even if Nix made entries read-only."""
 
@@ -135,6 +141,23 @@ async def _force_rmtree(path: Path) -> None:
             return
 
 
+_PR_SET_PDEATHSIG = 1
+
+
+def _die_with_parent() -> None:
+    """Ask the kernel to SIGKILL this process the instant pytest's process dies.
+
+    ``_Daemon.close`` only runs when pytest's own fixture teardown chain gets
+    to execute. A hard kill, crash, or external interrupt of the pytest
+    process skips that entirely, and this ``start_new_session=True`` child
+    lives in its own process group precisely so pytest's teardown can
+    ``killpg`` its connection workers -- which also means signals sent to a
+    dying pytest never reach it on their own. ``PR_SET_PDEATHSIG`` closes that
+    gap unconditionally, regardless of how the parent goes away.
+    """
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(_PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+
+
 async def _start_daemon(root: Path) -> _Daemon:
     socket_path = root / "nix" / "var" / "nix" / "daemon-socket" / "socket"
     socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,6 +181,7 @@ async def _start_daemon(root: Path) -> _Daemon:
             "false",
             env=daemon_environment,
             start_new_session=True,
+            preexec_fn=_die_with_parent,
             stdout=daemon_log,
             stderr=asyncio.subprocess.STDOUT,
         )
